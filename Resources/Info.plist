@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Nirux</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.xikimay.nirux</string>
+    <key>CFBundleVersion</key>
+    <string>__BUILD_NUMBER__</string>
+    <key>CFBundleShortVersionString</key>
+    <string>__VERSION__</string>
+    <key>CFBundleExecutable</key>
+    <string>Nirux</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>SUFeedURL</key>
+    <string>https://github.com/xikimay/nirux/releases/download/nightly/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>7PhLqqTXGKq7h4TMOfi4bocIshhvQaMT/3hue8fVBP0=</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.xikimay.nirux</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>nirux</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

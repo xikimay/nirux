@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Nirux Editor</title>
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; background: #1a1b26; overflow: hidden; }
+      #editor, #diff-editor, #pierre-diff { position: absolute; inset: 0; }
+      #diff-editor, #pierre-diff { display: none; }
+      #pierre-diff {
+        background: #1a1b26;
+        overflow: auto;
+      }
+      .nirux-pierre-host {
+        display: block;
+        min-height: 120px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+      }
+      .nirux-pierre-host.nirux-pierre-collapsed {
+        display: none;
+      }
+      .nirux-pierre-stack {
+        min-height: 100%;
+        padding-bottom: 48px;
+      }
+      .nirux-pierre-summary {
+        position: sticky;
+        top: 0;
+        z-index: 4;
+        min-height: 34px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 12px;
+        color: #c0caf5;
+        background: #161720;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .nirux-pierre-summary-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 600;
+      }
+      .nirux-pierre-summary-count {
+        flex: none;
+        color: rgba(192, 202, 245, 0.62);
+      }
+      .nirux-pierre-file-header {
+        position: sticky;
+        top: 34px;
+        z-index: 3;
+        width: 100%;
+        min-height: 30px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 0 12px;
+        border: 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+        color: rgba(224, 230, 255, 0.88);
+        background: #1b1c27;
+        font: 12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        text-align: left;
+        cursor: default;
+      }
+      .nirux-pierre-file-header:hover {
+        background: #202231;
+      }
+      .nirux-pierre-file-header.collapsed {
+        color: rgba(224, 230, 255, 0.68);
+      }
+      .nirux-pierre-file-chevron {
+        flex: none;
+        width: 12px;
+        color: rgba(192, 202, 245, 0.7);
+      }
+      .nirux-pierre-file-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      #status {
+        position: absolute; inset: 0;
+        display: flex; align-items: center; justify-content: center;
+        color: #8a8db5; font: 13px -apple-system, system-ui, sans-serif;
+        background: #1a1b26;
+        pointer-events: none;
+        transition: opacity 200ms ease-out;
+      }
+      #status.hidden { opacity: 0; }
+    </style>
+    <link rel="stylesheet" data-name="vs/editor/editor.main" href="vs/editor/editor.main.css" />
+    <style>
+      .monaco-diff-editor .line-insert,
+      .monaco-editor .line-insert {
+        background-color: rgba(34, 197, 94, 0.20) !important;
+        border-left: 3px solid #45d987 !important;
+      }
+      .monaco-diff-editor .line-delete,
+      .monaco-editor .line-delete {
+        background-color: rgba(239, 68, 68, 0.22) !important;
+        border-left: 3px solid #ff6b7d !important;
+      }
+      .monaco-diff-editor .char-insert,
+      .monaco-editor .char-insert {
+        background-color: rgba(69, 217, 135, 0.34) !important;
+        outline: 1px solid rgba(69, 217, 135, 0.45) !important;
+      }
+      .monaco-diff-editor .char-delete,
+      .monaco-editor .char-delete,
+      .monaco-editor .inline-deleted-text {
+        background-color: rgba(255, 107, 125, 0.34) !important;
+        outline: 1px solid rgba(255, 107, 125, 0.45) !important;
+      }
+      .monaco-diff-editor .gutter-insert,
+      .monaco-editor .gutter-insert,
+      .monaco-editor .inline-added-margin-view-zone {
+        background-color: rgba(69, 217, 135, 0.7) !important;
+      }
+      .monaco-diff-editor .gutter-delete,
+      .monaco-editor .gutter-delete,
+      .monaco-editor .inline-deleted-margin-view-zone {
+        background-color: rgba(255, 107, 125, 0.7) !important;
+      }
+      .monaco-diff-editor .insert-sign,
+      .monaco-editor .insert-sign {
+        color: #45d987 !important;
+        opacity: 1 !important;
+      }
+      .monaco-diff-editor .delete-sign,
+      .monaco-editor .delete-sign {
+        color: #ff6b7d !important;
+        opacity: 1 !important;
+      }
+      .monaco-diff-editor .view-overlays .current-line,
+      .monaco-diff-editor .margin-view-overlays .current-line,
+      .monaco-diff-editor .margin-view-overlays .current-line-margin,
+      .monaco-diff-editor .view-overlays .current-line-exact {
+        background-color: transparent !important;
+        border-color: transparent !important;
+      }
+      .monaco-editor .nirux-diff-line-insert,
+      .monaco-editor .view-overlays .nirux-diff-line-insert {
+        background-color: rgba(34, 197, 94, 0.18) !important;
+        box-shadow: inset 4px 0 0 #45d987 !important;
+      }
+      .monaco-editor .nirux-diff-line-delete,
+      .monaco-editor .view-overlays .nirux-diff-line-delete {
+        background-color: rgba(239, 68, 68, 0.20) !important;
+        box-shadow: inset 4px 0 0 #ff6b7d !important;
+      }
+      .monaco-editor .nirux-diff-gutter-insert,
+      .monaco-editor .nirux-diff-margin-insert,
+      .monaco-editor .nirux-diff-line-number-insert {
+        background-color: rgba(69, 217, 135, 0.58) !important;
+        color: #eafff3 !important;
+      }
+      .monaco-editor .nirux-diff-gutter-delete,
+      .monaco-editor .nirux-diff-margin-delete,
+      .monaco-editor .nirux-diff-line-number-delete {
+        background-color: rgba(255, 107, 125, 0.58) !important;
+        color: #fff0f2 !important;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="editor"></div>
+    <div id="diff-editor"></div>
+    <div id="pierre-diff"></div>
+    <div id="status">Loading editor…</div>
+
+    <script>
+      // Local Monaco — bundled in app resources, no network required.
+      var require = { paths: { vs: "vs" } };
+
+      // WKWebView blocks Web Workers loaded from file:// URLs, and our lite
+      // Monaco build doesn't include language services that need them. Stub
+      // out getWorker so Monaco runs single-threaded without errors.
+      window.MonacoEnvironment = {
+        getWorker: function () {
+          return {
+            postMessage: function () {},
+            addEventListener: function () {},
+            removeEventListener: function () {},
+            terminate: function () {}
+          };
+        }
+      };
+    </script>
+    <script src="vs/loader.js"></script>
+    <script src="pierre-diff.bundle.js"></script>
+    <script src="bridge.js"></script>
+  </body>
+</html>

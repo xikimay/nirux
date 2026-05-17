@@ -1,0 +1,166 @@
+name: Nightly Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-release
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Validate signing and notarization secrets
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          APPLE_DEVELOPER_ID_APPLICATION: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=0
+          for name in \
+            SPARKLE_PRIVATE_KEY \
+            APPLE_DEVELOPER_ID_APPLICATION \
+            APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 \
+            APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD \
+            APPLE_ID \
+            APPLE_APP_SPECIFIC_PASSWORD \
+            APPLE_TEAM_ID
+          do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing GitHub Actions secret: $name"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Import Developer ID certificate
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_DEVELOPER_ID_APPLICATION: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/developer-id-application.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/nirux-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "NIRUX_SIGNING_KEYCHAIN=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+          printf '%s' "$APPLE_DEVELOPER_ID_CERTIFICATE_BASE64" | base64 -D > "$CERTIFICATE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -P "$APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD" \
+            -A \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH" \
+            -T /usr/bin/codesign
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+          if ! security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -F "$APPLE_DEVELOPER_ID_APPLICATION"; then
+            echo "::error::Developer ID signing identity not found: $APPLE_DEVELOPER_ID_APPLICATION"
+            exit 1
+          fi
+      - name: Extract version info
+        run: |
+          VERSION="nightly-$(date +%Y.%m.%d)"
+          BUILD_NUMBER=$(date +%Y%m%d%H%M)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
+          echo "Building $VERSION (build $BUILD_NUMBER)"
+
+      - name: Build release
+        run: swift build -c release
+
+      - name: Bundle .app
+        env:
+          NIRUX_CODESIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+        run: ./scripts/bundle.sh "$VERSION" "$BUILD_NUMBER"
+
+      - name: Notarize and staple app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcrun notarytool submit Nirux.app.zip \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --wait
+
+          xcrun stapler staple Nirux.app
+          xcrun stapler validate Nirux.app
+          spctl --assess --type execute --verbose=4 Nirux.app
+
+          rm -f Nirux.app.zip
+          ditto -c -k --keepParent Nirux.app Nirux.app.zip
+
+      - name: Sign and generate appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          # Sign the zip with Sparkle's EdDSA key (pass private key via stdin)
+          SIGN_OUTPUT=$(echo "$SPARKLE_PRIVATE_KEY" | .build/artifacts/sparkle/Sparkle/bin/sign_update --ed-key-file - Nirux.app.zip)
+          # sign_update outputs: sparkle:edSignature="..." length="..."
+          SIGNATURE=$(echo "$SIGN_OUTPUT" | sed -n 's/.*sparkle:edSignature="\([^"]*\)".*/\1/p')
+          LENGTH=$(echo "$SIGN_OUTPUT" | sed -n 's/.*length="\([^"]*\)".*/\1/p')
+
+          if [[ -z "$SIGNATURE" || -z "$LENGTH" ]]; then
+            echo "Error: Failed to parse sign_update output: $SIGN_OUTPUT"
+            exit 1
+          fi
+
+          echo "Signature: $SIGNATURE"
+          echo "Length: $LENGTH"
+
+          ./scripts/generate-appcast.sh "$VERSION" "$BUILD_NUMBER" "$SIGNATURE" "$LENGTH"
+
+      - name: Update nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Delete existing nightly release if it exists
+          gh release delete nightly --yes 2>/dev/null || true
+          git tag -d nightly 2>/dev/null || true
+          git push origin :refs/tags/nightly 2>/dev/null || true
+
+          # Create new nightly release
+          gh release create nightly \
+            --title "Nightly ($VERSION)" \
+            --notes "Automated nightly build from main branch.
+
+          **Version:** $VERSION
+          **Build:** $BUILD_NUMBER
+          **Commit:** $(git rev-parse --short HEAD)
+
+          This build is Developer ID signed, notarized by Apple, and signed for Sparkle updates.
+
+          Download \`Nirux.app.zip\`, unzip, and move \`Nirux.app\` to /Applications." \
+            --prerelease \
+            Nirux.app.zip \
+            appcast.xml
+
+      - name: Clean up signing keychain
+        if: always()
+        run: |
+          if [[ -n "${NIRUX_SIGNING_KEYCHAIN:-}" && -f "$NIRUX_SIGNING_KEYCHAIN" ]]; then
+            security delete-keychain "$NIRUX_SIGNING_KEYCHAIN" || true
+          fi

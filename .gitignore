@@ -1,0 +1,17 @@
+.build/
+.claude/
+.desloppify/
+Nirux.app/
+Nirux.app.zip
+appcast.xml
+.swiftpm/
+*.xcodeproj/
+xcuserdata/
+.DS_Store
+scorecard.png
+.env
+.env.*
+*.p12
+*.mobileprovision
+*.xcarchive/
+DerivedData/
