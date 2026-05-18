@@ -263,6 +263,7 @@ final class PtySession: @unchecked Sendable {
     /// Uses tcgetpgrp() to target the entire group (zsh + codex/claude/vim etc.)
     func forceRedraw() {
         guard state.ptyFd >= 0, state.childPid > 0 else { return }
+        state.markTerminalRedraw()
         state.lastCols = 0
         state.lastRows = 0
         // Send to the foreground process group of the terminal
@@ -393,6 +394,10 @@ private final class PtyState: @unchecked Sendable {
     var lastForegroundName: String?
     var foregroundSince: Date?
     var lastInteractionTime: Date?  // last write or resize (echo/redraw follows)
+    var burstDetectionSuppressedUntil: Date?
+
+    private static let writeEchoSuppressionInterval: TimeInterval = 0.3
+    private static let displayRefreshSuppressionInterval: TimeInterval = 1.5
 
     func foregroundProcessName(snapshot: ProcessSnapshot) -> String? {
         guard childPid > 0 else { return nil }
@@ -423,7 +428,7 @@ private final class PtyState: @unchecked Sendable {
     }
 
     func writeToPty(_ data: Data) {
-        lastInteractionTime = Date()
+        markInteraction(suppressBurstDetectionFor: Self.writeEchoSuppressionInterval)
         guard ptyFd >= 0 else { return }
         data.withUnsafeBytes { buf in
             guard let ptr = buf.baseAddress else { return }
@@ -437,13 +442,25 @@ private final class PtyState: @unchecked Sendable {
     func resize(cols: Int, rows: Int) {
         // Debounce: only send SIGWINCH if dimensions actually changed
         guard ptyFd >= 0, cols != lastCols || rows != lastRows else { return }
-        lastInteractionTime = Date()
+        markInteraction(suppressBurstDetectionFor: Self.displayRefreshSuppressionInterval)
         lastCols = cols
         lastRows = rows
         var ws = winsize()
         ws.ws_col = UInt16(cols)
         ws.ws_row = UInt16(rows)
         _ = ioctl(ptyFd, TIOCSWINSZ, &ws)
+    }
+
+    func markTerminalRedraw() {
+        markInteraction(suppressBurstDetectionFor: Self.displayRefreshSuppressionInterval)
+    }
+
+    private func markInteraction(suppressBurstDetectionFor interval: TimeInterval) {
+        let now = Date()
+        lastInteractionTime = now
+        burstDetectionSuppressedUntil = now.addingTimeInterval(interval)
+        windowStart = now
+        readCountInWindow = 0
     }
 
     func readFromPty(into session: InMemoryTerminalSession) {
@@ -467,7 +484,16 @@ private final class PtyState: @unchecked Sendable {
     /// Skips reads that are echo from typing or redraw from resize.
     private func updateBurstDetection() {
         let now = Date()
-        let isEcho = lastInteractionTime != nil && now.timeIntervalSince(lastInteractionTime!) < 0.3
+        if let suppressedUntil = burstDetectionSuppressedUntil {
+            if now < suppressedUntil {
+                windowStart = now
+                readCountInWindow = 0
+                return
+            }
+            burstDetectionSuppressedUntil = nil
+        }
+        let isEcho = lastInteractionTime != nil
+            && now.timeIntervalSince(lastInteractionTime!) < Self.writeEchoSuppressionInterval
         guard !isEcho else { return }
         if now.timeIntervalSince(windowStart) > 2.0 {
             windowStart = now
