@@ -39,6 +39,14 @@ extension NiruxApp {
         shell?.focusWorkspace(.down)
     }
 
+    @objc func previousSpace(_ sender: Any?) {
+        shell?.focusSpace(.previous)
+    }
+
+    @objc func nextSpace(_ sender: Any?) {
+        shell?.focusSpace(.next)
+    }
+
     @objc func moveColumnLeft(_ sender: Any?) {
         shell?.moveColumn(.left)
     }
@@ -167,6 +175,18 @@ extension NiruxApp {
         workspaceDownItem.keyEquivalent = "\u{F701}"
         workspaceDownItem.keyEquivalentModifierMask = .command
         workspacesMenu.addItem(workspaceDownItem)
+
+        workspacesMenu.addItem(NSMenuItem.separator())
+
+        let previousSpaceItem = NSMenuItem(title: "Previous Space", action: #selector(previousSpace(_:)), keyEquivalent: "")
+        previousSpaceItem.keyEquivalent = "\u{F702}"
+        previousSpaceItem.keyEquivalentModifierMask = NSEvent.ModifierFlags([.command, .option])
+        workspacesMenu.addItem(previousSpaceItem)
+
+        let nextSpaceItem = NSMenuItem(title: "Next Space", action: #selector(nextSpace(_:)), keyEquivalent: "")
+        nextSpaceItem.keyEquivalent = "\u{F703}"
+        nextSpaceItem.keyEquivalentModifierMask = NSEvent.ModifierFlags([.command, .option])
+        workspacesMenu.addItem(nextSpaceItem)
 
         let workspacesItem = NSMenuItem()
         workspacesItem.submenu = workspacesMenu

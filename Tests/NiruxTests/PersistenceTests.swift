@@ -11,6 +11,7 @@ final class PersistedStateCodingTests: XCTestCase {
         let original = PersistedState(
             workspaces: [
                 PersistedWorkspace(
+                    id: "workspace-main",
                     title: "main",
                     cwd: "/tmp/project",
                     columns: [
@@ -38,13 +39,15 @@ final class PersistedStateCodingTests: XCTestCase {
                 claudeLaunchMode: .acceptEdits,
                 claudeNoFlicker: false,
                 codexLaunchMode: .readOnly
-            )
+            ),
+            activeWorkspaceID: "workspace-main"
         )
 
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(PersistedState.self, from: data)
 
         XCTAssertEqual(decoded.workspaces.count, 1)
+        XCTAssertEqual(decoded.workspaces[0].id, "workspace-main")
         XCTAssertEqual(decoded.workspaces[0].title, "main")
         XCTAssertEqual(decoded.workspaces[0].focusedColumnIndex, 1)
         XCTAssertEqual(decoded.workspaces[0].columns.count, 3)
@@ -54,6 +57,122 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(decoded.settings?.claudeLaunchMode, .acceptEdits)
         XCTAssertEqual(decoded.settings?.codexLaunchMode, .readOnly)
         XCTAssertEqual(decoded.settings?.claudeNoFlicker, false)
+        XCTAssertEqual(decoded.activeWorkspaceID, "workspace-main")
+    }
+
+    func testWorkspaceProfileStateRoundTripsThroughJSON() throws {
+        let profile = WorkspaceProfile(id: "repo-a", name: "repo-a", colorHex: "#9ECE6A")
+        let original = PersistedState(
+            workspaces: [
+                PersistedWorkspace(
+                    id: "workspace-feature",
+                    title: "feature",
+                    cwd: "/tmp/repo-a",
+                    columns: [
+                        PersistedColumn(
+                            widthPreset: 0.5, cwd: "/tmp/repo-a",
+                            columnType: .terminal, webViewURL: nil,
+                            claudeLaunchMode: nil, codexLaunchMode: nil
+                        )
+                    ],
+                    focusedColumnIndex: 0,
+                    profileID: profile.id,
+                    isInactive: true
+                )
+            ],
+            activeWorkspaceIndex: 0,
+            settings: nil,
+            workspaceProfiles: [WorkspaceProfile.defaultProfile, profile],
+            activeProfileID: profile.id,
+            activeWorkspaceID: "workspace-feature"
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(PersistedState.self, from: data)
+
+        XCTAssertEqual(decoded.workspaceProfiles, [WorkspaceProfile.defaultProfile, profile])
+        XCTAssertEqual(decoded.activeProfileID, profile.id)
+        XCTAssertEqual(decoded.activeWorkspaceID, "workspace-feature")
+        XCTAssertEqual(decoded.workspaces[0].id, "workspace-feature")
+        XCTAssertEqual(decoded.workspaces[0].profileID, profile.id)
+        XCTAssertEqual(decoded.workspaces[0].isInactive, true)
+    }
+
+    func testLegacyWorkspaceWithoutProfileFieldsDecodesAsActiveDefaultProfile() throws {
+        let json = Data("""
+        {
+          "title": "main",
+          "cwd": "/tmp/project",
+          "columns": [
+            {
+              "widthPreset": 0.5,
+              "cwd": "/tmp/project",
+              "columnType": "terminal",
+              "webViewURL": null
+            }
+          ],
+          "focusedColumnIndex": 0
+        }
+        """.utf8)
+
+        let decoded = try JSONDecoder().decode(PersistedWorkspace.self, from: json)
+
+        XCTAssertNil(decoded.id)
+        XCTAssertNil(decoded.profileID)
+        XCTAssertEqual(decoded.isInactive, false)
+    }
+
+
+    @MainActor
+    func testWorkspaceStoreKeepsActiveWorkspaceByIDWhenReordered() {
+        let store = WorkspaceStore()
+        let first = WorkspaceState(id: "first", title: "first", cwd: "/tmp/first")
+        let second = WorkspaceState(id: "second", title: "second", cwd: "/tmp/second")
+
+        store.appendWorkspace(first)
+        store.appendWorkspace(second)
+        XCTAssertEqual(store.activeWorkspace?.id, "second")
+
+        XCTAssertTrue(store.moveWorkspace(at: 1, delta: -1))
+
+        XCTAssertEqual(store.activeWorkspace?.id, "second")
+        XCTAssertEqual(store.activeWorkspaceIndex, 0)
+    }
+
+    @MainActor
+    func testWorkspaceStoreGroupsActiveBeforeInactiveWithinProfile() {
+        let store = WorkspaceStore()
+        let profile = WorkspaceProfile(id: "repo", name: "repo", colorHex: "#9ECE6A")
+        store.replaceProfiles([WorkspaceProfile.defaultProfile, profile], activeProfileID: profile.id)
+
+        let active = WorkspaceState(id: "active", title: "active", cwd: "/tmp/active")
+        active.profileID = profile.id
+        let inactive = WorkspaceState(id: "inactive", title: "inactive", cwd: "/tmp/inactive")
+        inactive.profileID = profile.id
+        inactive.isInactive = true
+
+        store.appendWorkspace(inactive, activate: false)
+        store.appendWorkspace(active, activate: false)
+        store.selectProfile(profile.id)
+
+        XCTAssertEqual(store.visibleWorkspaceIndices.map { store.workspaces[$0].id }, ["active", "inactive"])
+    }
+
+
+    @MainActor
+    func testWorkspaceStoreDoesNotNavigateToEmptyProfiles() {
+        let store = WorkspaceStore()
+        let empty = WorkspaceProfile(id: "empty", name: "empty", colorHex: "#E0AF68")
+        store.replaceProfiles([WorkspaceProfile.defaultProfile, empty], activeProfileID: empty.id)
+
+        let workspace = WorkspaceState(id: "main", title: "main", cwd: "/tmp/main")
+        workspace.profileID = WorkspaceProfile.defaultID
+        store.appendWorkspace(workspace)
+
+        XCTAssertEqual(store.navigableProfiles.map(\.id), [WorkspaceProfile.defaultID])
+        XCTAssertFalse(store.selectProfile(empty.id))
+        XCTAssertEqual(store.activeProfileID, WorkspaceProfile.defaultID)
+        XCTAssertEqual(store.visibleWorkspaceIndices.map { store.workspaces[$0].id }, ["main"])
     }
 
     func testResolvedTypeFallsBackToTerminalWhenNil() {

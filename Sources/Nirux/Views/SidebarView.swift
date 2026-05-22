@@ -1,45 +1,5 @@
 import AppKit
 
-struct ColumnInfo {
-    let index: Int
-    let processName: String?
-    let abbreviatedCwd: String?
-    let isFocused: Bool
-    let isWebView: Bool
-    let webTitle: String?
-    let terminalTitle: String?
-    let agentStatus: AgentStatus
-    let isEditor: Bool
-    let editorFileName: String?
-}
-
-struct PRInfo {
-    let number: Int
-    let state: String
-    let isDraft: Bool
-    let ciStatus: String?
-    let failedCheckUrl: String?
-    let reviewDecision: String?
-    let mergeable: String?
-    let url: String
-    let additions: Int?
-    let deletions: Int?
-    let changedFiles: Int?
-}
-
-struct WorkspaceInfo {
-    let index: Int
-    let title: String
-    let columnCount: Int
-    let focusedColumn: Int
-    let gitBranch: String?
-    let hasNotification: Bool
-    let isActive: Bool
-    let columns: [ColumnInfo]
-    let prInfo: PRInfo?
-    let diffStats: String?
-}
-
 /// Sidebar: minimal dots in normal mode, expanded detail panel (pilot-style) in expanded mode.
 /// Dragging on empty sidebar area moves the window.
 final class SidebarView: NSView {
@@ -47,6 +7,9 @@ final class SidebarView: NSView {
     var onWorkspaceClicked: ((Int) -> Void)?
     var onColumnClicked: ((Int, Int) -> Void)?  // (workspaceIndex, columnIndex)
     var onDiffStatsClicked: ((Int) -> Void)?
+    var onWorkspaceAction: ((WorkspaceSidebarAction, Int) -> Void)?
+    var onProfileClicked: ((String) -> Void)?
+    var onCreateProfile: (() -> Void)?
     var isExpanded: Bool = false {
         didSet {
             // Clear dot pulse layers when switching modes
@@ -64,7 +27,9 @@ final class SidebarView: NSView {
     }
 
     var lastInfos: [WorkspaceInfo] = []
+    var lastProfiles: [ProfileInfo] = []
     var expandedViews: [NSView] = []
+    var profileIndicatorView: SidebarDotIndicatorView?
     var clickableAreas: [(frame: NSRect, url: String, label: NSTextField)] = []
     var columnClickAreas: [(frame: NSRect, wsIndex: Int, colIndex: Int)] = []
     var workspaceClickAreas: [(frame: NSRect, wsIndex: Int)] = []
@@ -119,7 +84,8 @@ final class SidebarView: NSView {
         if isExpanded { rebuildContent() } else { setNeedsDisplay(bounds) }
     }
 
-    func update(workspaces: [WorkspaceInfo]) {
+    func update(profiles: [ProfileInfo], workspaces: [WorkspaceInfo]) {
+        lastProfiles = profiles
         lastInfos = workspaces
         if isExpanded { rebuildContent() } else { setNeedsDisplay(bounds) }
     }
@@ -182,11 +148,12 @@ final class SidebarView: NSView {
 
         let dotDiameter = Self.dotSize
         let gap = Self.dotGap
-        let totalHeight = CGFloat(lastInfos.count) * dotDiameter + CGFloat(lastInfos.count - 1) * gap
+        let displayInfos = displayedWorkspaceInfos
+        let totalHeight = CGFloat(displayInfos.count) * dotDiameter + CGFloat(displayInfos.count - 1) * gap
         let startY = bounds.midY + totalHeight / 2
 
-        for workspace in lastInfos {
-            let dotY = startY - CGFloat(workspace.index) * (dotDiameter + gap) - dotDiameter
+        for (position, workspace) in displayInfos.enumerated() {
+            let dotY = startY - CGFloat(position) * (dotDiameter + gap) - dotDiameter
             let isFocused = workspace.isActive
             let dotWidth = isFocused ? dotDiameter + 2 : dotDiameter
             let dotX = (bounds.width - dotWidth) / 2
@@ -235,6 +202,10 @@ final class SidebarView: NSView {
         PilotSidebarRenderer.attributedColumn(column, fontSize: 11)
     }
 
+    var displayedWorkspaceInfos: [WorkspaceInfo] {
+        lastInfos.filter { !$0.isInactive } + lastInfos.filter { $0.isInactive }
+    }
+
     // MARK: - Click handling
 
     override func mouseDown(with event: NSEvent) {
@@ -273,11 +244,12 @@ final class SidebarView: NSView {
         let clickLocation = convert(event.locationInWindow, from: nil)
         let dotDiameter = Self.dotSize
         let gap = Self.dotGap
-        let totalHeight = CGFloat(lastInfos.count) * dotDiameter + CGFloat(lastInfos.count - 1) * gap
+        let displayInfos = displayedWorkspaceInfos
+        let totalHeight = CGFloat(displayInfos.count) * dotDiameter + CGFloat(displayInfos.count - 1) * gap
         let startY = bounds.midY + totalHeight / 2
 
-        for workspace in lastInfos {
-            let dotY = startY - CGFloat(workspace.index) * (dotDiameter + gap) - dotDiameter
+        for (position, workspace) in displayInfos.enumerated() {
+            let dotY = startY - CGFloat(position) * (dotDiameter + gap) - dotDiameter
             let hitRect = NSRect(x: 0, y: dotY - 4, width: bounds.width, height: dotDiameter + 8)
             if hitRect.contains(clickLocation) {
                 onWorkspaceClicked?(workspace.index)
@@ -330,6 +302,58 @@ final class SidebarView: NSView {
             return
         }
         NSCursor.arrow.set()
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let workspaceIndex = workspaceIndex(at: event)
+        guard let workspaceIndex else { return super.menu(for: event) }
+        let workspace = lastInfos.first { $0.index == workspaceIndex }
+
+        let menu = NSMenu()
+        menu.addClosureItem(title: "Move Up") { [weak self] in
+            self?.onWorkspaceAction?(.moveUp, workspaceIndex)
+        }
+        menu.addClosureItem(title: "Move Down") { [weak self] in
+            self?.onWorkspaceAction?(.moveDown, workspaceIndex)
+        }
+        menu.addItem(.separator())
+        if workspace?.isInactive == true {
+            menu.addClosureItem(title: "Move to Active") { [weak self] in
+                self?.onWorkspaceAction?(.markActive, workspaceIndex)
+            }
+        } else {
+            menu.addClosureItem(title: "Move to Inactive") { [weak self] in
+                self?.onWorkspaceAction?(.markInactive, workspaceIndex)
+            }
+        }
+        return menu
+    }
+
+    private func workspaceIndex(at event: NSEvent) -> Int? {
+        if isExpanded {
+            let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
+            if let area = columnClickAreas.first(where: { $0.frame.contains(docLocation) }) {
+                return area.wsIndex
+            }
+            if let area = workspaceClickAreas.first(where: { $0.frame.contains(docLocation) }) {
+                return area.wsIndex
+            }
+            return nil
+        }
+
+        let clickLocation = convert(event.locationInWindow, from: nil)
+        let dotDiameter = Self.dotSize
+        let gap = Self.dotGap
+        let displayInfos = displayedWorkspaceInfos
+        let totalHeight = CGFloat(displayInfos.count) * dotDiameter + CGFloat(displayInfos.count - 1) * gap
+        let startY = bounds.midY + totalHeight / 2
+
+        for (position, workspace) in displayInfos.enumerated() {
+            let dotY = startY - CGFloat(position) * (dotDiameter + gap) - dotDiameter
+            let hitRect = NSRect(x: 0, y: dotY - 4, width: bounds.width, height: dotDiameter + 8)
+            if hitRect.contains(clickLocation) { return workspace.index }
+        }
+        return nil
     }
 
     override func mouseExited(with event: NSEvent) {

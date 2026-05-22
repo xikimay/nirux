@@ -5,7 +5,9 @@ import AppKit
 extension NiruxShellView {
     func updateSidebar(snapshot: ProcessSnapshot? = nil) {
         let snapshot = snapshot ?? ProcessSnapshot()
-        let infos = workspaces.enumerated().map { index, workspace in
+        let visibleIndices = visibleWorkspaceIndices
+        let infos = visibleIndices.map { index in
+            let workspace = workspaces[index]
             let isActive = index == activeWSIndex
             let colInfos = workspace.columns.enumerated().map { colIndex, col in
                 // In pilot mode the user sees every workspace's focused column
@@ -35,22 +37,37 @@ extension NiruxShellView {
                     editorFileName: editorFile
                 )
             }
-            return WorkspaceInfo(index: index, title: workspace.title, columnCount: workspace.columns.count,
+            return WorkspaceInfo(index: index, title: workspace.title, profileID: workspace.profileID, isInactive: workspace.isInactive,
+                          columnCount: workspace.columns.count,
                           focusedColumn: workspace.focusedIndex,
                           gitBranch: workspace.gitBranch, hasNotification: workspace.hasNotification, isActive: index == activeWSIndex,
                           columns: colInfos, prInfo: workspace.prInfo, diffStats: workspace.diffStats)
         }
-        sidebar.update(workspaces: infos)
+        let profileInfos = workspaceStore.navigableProfiles.map { profile in
+            let profileWorkspaces = workspaces.filter { $0.profileID == profile.id }
+            let hasAttention = profileWorkspaces.contains { workspace in
+                workspace.hasNotification || workspace.columns.contains { $0.pty?.cachedAgentState == .needsAttention }
+            }
+            return ProfileInfo(
+                id: profile.id,
+                name: profile.name,
+                colorHex: profile.colorHex,
+                isActive: profile.id == activeProfileID,
+                workspaceCount: profileWorkspaces.count,
+                hasAttention: hasAttention
+            )
+        }
+        sidebar.update(profiles: profileInfos, workspaces: infos)
 
         // Update per-workspace pilot panels
         if isPilotMode {
-            for (index, workspace) in workspaces.enumerated() {
-                workspace.updatePilotPanel(info: infos[index])
+            for info in infos {
+                workspaces[info.index].updatePilotPanel(info: info)
             }
         }
 
-        if let workspace = activeWorkspace {
-            let wsInfo = infos[activeWSIndex]
+        if let workspace = activeWorkspace,
+           let wsInfo = infos.first(where: { $0.index == activeWSIndex }) {
             let statuses = wsInfo.columns.map { $0.agentStatus }
             columnIndicator.update(columnCount: workspace.columns.count, focusedIndex: workspace.focusedIndex, columnStatuses: statuses)
 
@@ -66,11 +83,12 @@ extension NiruxShellView {
         }
 
         // Vertical edge glow: workspace above/below active has agent needing attention
-        let hasAbove = infos.enumerated().contains { idx, wsInfo in
-            idx < activeWSIndex && wsInfo.columns.contains { $0.agentStatus == .needsAttention }
+        let activePosition = infos.firstIndex { $0.index == activeWSIndex } ?? 0
+        let hasAbove = infos.enumerated().contains { position, wsInfo in
+            position < activePosition && wsInfo.columns.contains { $0.agentStatus == .needsAttention }
         }
-        let hasBelow = infos.enumerated().contains { idx, wsInfo in
-            idx > activeWSIndex && wsInfo.columns.contains { $0.agentStatus == .needsAttention }
+        let hasBelow = infos.enumerated().contains { position, wsInfo in
+            position > activePosition && wsInfo.columns.contains { $0.agentStatus == .needsAttention }
         }
         edgeGlowTop.setVisible(hasAbove)
         edgeGlowBottom.setVisible(hasBelow)
@@ -81,9 +99,10 @@ extension NiruxShellView {
     /// Pulsing orange border on columns with agent needing attention.
     private func updateAttentionBorders(infos: [WorkspaceInfo]) {
         let orangeBorder = NSColor.systemOrange.cgColor
+        let infoByIndex = Dictionary(uniqueKeysWithValues: infos.map { ($0.index, $0) })
         for (wsIndex, workspace) in workspaces.enumerated() {
             for (colIndex, col) in workspace.columns.enumerated() {
-                let needsAttention = infos[wsIndex].columns[safe: colIndex]?.agentStatus == .needsAttention
+                let needsAttention = infoByIndex[wsIndex]?.columns[safe: colIndex]?.agentStatus == .needsAttention
                 let colLayer = col.view.layer
                 if needsAttention {
                     colLayer?.cornerRadius = 6
