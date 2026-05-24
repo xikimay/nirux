@@ -22,8 +22,23 @@ final class NiruxShellView: NSView {
     let edgeGlowTop = EdgeGlowView(edge: .top)
     let edgeGlowBottom = EdgeGlowView(edge: .bottom)
 
-    var workspaces: [WorkspaceState] = []
-    var activeWSIndex = 0
+    let workspaceStore = WorkspaceStore()
+    var workspaces: [WorkspaceState] {
+        get { workspaceStore.workspaces }
+        set { workspaceStore.replaceWorkspaces(newValue) }
+    }
+    var activeWSIndex: Int {
+        get { workspaceStore.activeWorkspaceIndex }
+        set { workspaceStore.selectWorkspace(at: newValue) }
+    }
+    var profiles: [WorkspaceProfile] {
+        get { workspaceStore.profiles }
+        set { workspaceStore.replaceProfiles(newValue, activeProfileID: activeProfileID) }
+    }
+    var activeProfileID: String {
+        get { workspaceStore.activeProfileID }
+        set { workspaceStore.selectProfile(newValue) }
+    }
     var isPilotMode = false
     var pilotRefreshTimer: Timer?
     static let pilotMaxRows = 3
@@ -79,6 +94,9 @@ final class NiruxShellView: NSView {
         workspaces.append(workspace)
         verticalStrip.addSubview(workspace.containerView)
         sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index) }
+        sidebar.onWorkspaceAction = { [weak self] action, index in self?.handleWorkspaceSidebarAction(action, workspaceIndex: index) }
+        sidebar.onProfileClicked = { [weak self] profileID in self?.selectProfile(profileID) }
+        sidebar.onCreateProfile = { [weak self] in self?.createProfileFromActiveContext() }
         sidebar.onDiffStatsClicked = { [weak self] index in self?.openDiffInEditor(workspaceIndex: index) }
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
@@ -166,23 +184,25 @@ final class NiruxShellView: NSView {
         let rowH: CGFloat
         if isPilotMode {
             // Always show at least 2 rows so even 1 workspace visibly shrinks
-            let displayRows = CGFloat(max(2, min(workspaces.count, Self.pilotMaxRows)))
+            let displayRows = CGFloat(max(2, min(visibleWorkspaceIndices.count, Self.pilotMaxRows)))
             rowH = (viewportH - gap * (displayRows - 1)) / displayRows
         } else {
             rowH = viewportH
         }
 
-        let wsCount = CGFloat(workspaces.count)
+        let visibleIndices = visibleWorkspaceIndices
+        let wsCount = CGFloat(visibleIndices.count)
         let totalH = rowH * wsCount + gap * max(wsCount - 1, 0)
 
         // Position the strip so the active workspace is visible
         let targetY: CGFloat
+        let activePosition = activeVisibleWorkspacePosition ?? 0
         if totalH <= viewportH {
             targetY = viewportH - totalH
         } else if !isPilotMode {
-            targetY = -(totalH - CGFloat(activeWSIndex + 1) * rowH)
+            targetY = -(totalH - CGFloat(activePosition + 1) * rowH)
         } else {
-            let wsCenter = totalH - (CGFloat(activeWSIndex) + 0.5) * rowH - CGFloat(activeWSIndex) * gap
+            let wsCenter = totalH - (CGFloat(activePosition) + 0.5) * rowH - CGFloat(activePosition) * gap
             let raw = viewportH / 2 - wsCenter
             targetY = max(viewportH - totalH, min(0, raw))
         }
@@ -207,7 +227,8 @@ final class NiruxShellView: NSView {
     /// active one is.
     private func syncTerminalOcclusion() {
         for (index, workspace) in workspaces.enumerated() {
-            let visible = isPilotMode || index == activeWSIndex
+            let isInActiveProfile = workspace.profileID == activeProfileID
+            let visible = isInActiveProfile && (isPilotMode || index == activeWSIndex)
             for col in workspace.columns {
                 col.terminalView?.setSurfaceVisible(visible)
             }
@@ -218,7 +239,9 @@ final class NiruxShellView: NSView {
 
     func refreshTitleBarLabels(snapshot: ProcessSnapshot? = nil) {
         let snap = snapshot ?? ProcessSnapshot()
-        let visibleWorkspaces = isPilotMode ? workspaces : (activeWorkspace.map { [$0] } ?? [])
+        let visibleWorkspaces = isPilotMode
+            ? visibleWorkspaceIndices.compactMap { workspaces[safe: $0] }
+            : (activeWorkspace.map { [$0] } ?? [])
         for workspace in visibleWorkspaces {
             for col in workspace.columns {
                 col.updateTitleBarLabel(snapshot: snap)
@@ -600,7 +623,7 @@ final class NiruxShellView: NSView {
         focusActiveTerminal(in: window)
     }
 
-    var activeWorkspace: WorkspaceState? { workspaces[safe: activeWSIndex] }
+    var activeWorkspace: WorkspaceState? { workspaceStore.activeWorkspace }
     var activeWorkspaceForKeyIntercept: WorkspaceState? { activeWorkspace }
 
     var isOverlayActive: Bool {

@@ -7,8 +7,22 @@ extension NiruxShellView {
         guard let state = Persistence.load(), !state.workspaces.isEmpty else { return }
         for workspace in workspaces { workspace.containerView.removeFromSuperview() }
         workspaces.removeAll()
+
+        let restoredProfiles = state.workspaceProfiles?.isEmpty == false
+            ? state.workspaceProfiles!
+            : [WorkspaceProfile.defaultProfile]
+        workspaceStore.replaceProfiles(restoredProfiles, activeProfileID: state.activeProfileID)
+        let validProfileIDs = Set(profiles.map { $0.id })
+
         for persistedWS in state.workspaces {
-            let workspace = WorkspaceState(title: persistedWS.title, cwd: persistedWS.cwd)
+            let workspace = WorkspaceState(
+                id: persistedWS.id ?? UUID().uuidString,
+                title: persistedWS.title,
+                cwd: persistedWS.cwd
+            )
+            let profileID = persistedWS.profileID ?? WorkspaceProfile.defaultID
+            workspace.profileID = validProfileIDs.contains(profileID) ? profileID : WorkspaceProfile.defaultID
+            workspace.isInactive = persistedWS.isInactive
             workspace.onMetadataChanged = { [weak self] in self?.updateSidebar(); self?.refreshTitleBarLabels() }
             workspace.onDiffStatsClicked = { [weak self, weak workspace] in
                 guard let workspace else { return }
@@ -53,7 +67,12 @@ extension NiruxShellView {
             workspaces.append(workspace)
             verticalStrip.addSubview(workspace.containerView)
         }
-        activeWSIndex = min(state.activeWorkspaceIndex, max(workspaces.count - 1, 0))
+        if let activeWorkspaceID = state.activeWorkspaceID,
+           workspaceStore.selectWorkspace(id: activeWorkspaceID) {
+            // Restored by stable identity.
+        } else {
+            activeWSIndex = min(state.activeWorkspaceIndex, max(workspaces.count - 1, 0))
+        }
         relayout(animated: false)
         updateSidebar()
     }
@@ -63,7 +82,7 @@ extension NiruxShellView {
         let existingSettings = Persistence.load()?.settings
         Persistence.save(PersistedState(
             workspaces: workspaces.map { workspace in
-                PersistedWorkspace(title: workspace.title, cwd: workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.cwd,
+                PersistedWorkspace(id: workspace.id, title: workspace.title, cwd: workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.cwd,
                     columns: workspace.columns.map { col -> PersistedColumn in
                         let kind: ColumnKind
                         let webURL: String?
@@ -105,8 +124,16 @@ extension NiruxShellView {
                             codexLaunchMode: codexMode
                         )
                     },
-                    focusedColumnIndex: workspace.focusedIndex)
-            }, activeWorkspaceIndex: activeWSIndex, settings: existingSettings))
+                    focusedColumnIndex: workspace.focusedIndex,
+                    profileID: workspace.profileID,
+                    isInactive: workspace.isInactive)
+            },
+            activeWorkspaceIndex: activeWSIndex,
+            settings: existingSettings,
+            workspaceProfiles: workspaceStore.navigableProfiles,
+            activeProfileID: activeProfileID,
+            activeWorkspaceID: activeWorkspace?.id
+        ))
     }
 
     /// Map a running `claude` process's argv flags back to the launch mode it

@@ -40,7 +40,11 @@ struct PersistedState: Codable {
     var workspaces: [PersistedWorkspace]
     var activeWorkspaceIndex: Int
     var settings: PersistedSettings?
+    var workspaceProfiles: [WorkspaceProfile]? = nil
+    var activeProfileID: String? = nil
+    var activeWorkspaceID: String? = nil
 }
+
 
 /// Mirrors Claude Code's `--permission-mode` values plus the legacy
 /// `--dangerously-skip-permissions` shortcut. `bypassPermissions` and
@@ -169,10 +173,46 @@ struct PersistedSettings: Codable {
 }
 
 struct PersistedWorkspace: Codable {
+    var id: String?
     var title: String
     var cwd: String
     var columns: [PersistedColumn]
     var focusedColumnIndex: Int
+    var profileID: String?
+    var isInactive: Bool
+
+    init(
+        id: String? = nil,
+        title: String,
+        cwd: String,
+        columns: [PersistedColumn],
+        focusedColumnIndex: Int,
+        profileID: String? = nil,
+        isInactive: Bool = false
+    ) {
+        self.id = id
+        self.title = title
+        self.cwd = cwd
+        self.columns = columns
+        self.focusedColumnIndex = focusedColumnIndex
+        self.profileID = profileID
+        self.isInactive = isInactive
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(String.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        cwd = try c.decode(String.self, forKey: .cwd)
+        columns = try c.decode([PersistedColumn].self, forKey: .columns)
+        focusedColumnIndex = try c.decode(Int.self, forKey: .focusedColumnIndex)
+        profileID = try c.decodeIfPresent(String.self, forKey: .profileID)
+        isInactive = try c.decodeIfPresent(Bool.self, forKey: .isInactive) ?? false
+    }
 }
 
 struct PersistedColumn: Codable {

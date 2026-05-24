@@ -4,6 +4,13 @@ import AppKit
 
 extension NiruxShellView {
     enum VDir { case up, down }
+    enum SpaceDir { case previous, next }
+
+    var visibleWorkspaceIndices: [Int] { workspaceStore.visibleWorkspaceIndices }
+
+    var activeVisibleWorkspacePosition: Int? { workspaceStore.activeVisibleWorkspacePosition }
+
+    private var activeProfile: WorkspaceProfile { workspaceStore.activeProfile }
 
     func addWorkspace(title: String? = nil, cwd: String? = nil, agent: NiruxApp.WorkspaceAgent? = nil) {
         let snapshot: NSImageView? = {
@@ -21,15 +28,15 @@ extension NiruxShellView {
         let wsTitle = title ?? "ws \(workspaces.count + 1)"
         let wsCwd = cwd ?? NSHomeDirectory()
         let workspace = WorkspaceState(title: wsTitle, cwd: wsCwd)
+        workspace.profileID = activeProfileID
         workspace.onMetadataChanged = { [weak self] in self?.updateSidebar(); self?.refreshTitleBarLabels() }
         workspace.onDiffStatsClicked = { [weak self, weak workspace] in
             guard let workspace else { return }
             self?.openDiffInEditor(for: workspace)
         }
-        workspaces.append(workspace)
+        workspaceStore.appendWorkspace(workspace)
         verticalStrip.addSubview(workspace.containerView)
         if isPilotMode { workspace.createPilotPanel() }
-        activeWSIndex = workspaces.count - 1
         relayout(animated: false)
         updateSidebar()
         focusActiveTerminal(in: window)
@@ -112,17 +119,20 @@ extension NiruxShellView {
     }
 
     func focusWorkspace(_ dir: VDir) {
-        switch dir {
-        case .up: if activeWSIndex > 0 { switchToWorkspace(activeWSIndex - 1) }
-        case .down: if activeWSIndex < workspaces.count - 1 { switchToWorkspace(activeWSIndex + 1) }
-        }
+        let delta = dir == .up ? -1 : 1
+        guard workspaceStore.selectAdjacentWorkspace(delta: delta) != nil else { return }
+        refreshAfterWorkspaceSelection(animated: true)
     }
 
     func switchToWorkspace(_ index: Int) {
-        guard workspaces.indices.contains(index) else { return }
-        activeWSIndex = index
-        workspaces[index].hasNotification = false
-        relayout(animated: true)
+        guard workspaceStore.selectWorkspace(at: index) else { return }
+        refreshAfterWorkspaceSelection(animated: true)
+    }
+
+    private func refreshAfterWorkspaceSelection(animated: Bool) {
+        guard workspaces.indices.contains(activeWSIndex) else { return }
+        workspaces[activeWSIndex].hasNotification = false
+        relayout(animated: animated)
         workspaces[activeWSIndex].detectGitBranch()
         updateSidebar()
         focusActiveTerminal(in: window)
@@ -132,16 +142,16 @@ extension NiruxShellView {
         guard workspaces.count > 1 else { return }
 
         let wsToRemove = workspaces[index]
-        let target = index > 0 ? index - 1 : 1
-        activeWSIndex = target
+        if let target = workspaceStore.fallbackIndexAfterClosingWorkspace(at: index) {
+            workspaceStore.selectWorkspace(at: target)
+        }
         relayout(animated: true)
         updateSidebar()
         focusActiveTerminal(in: window)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-            guard let self, let idx = self.workspaces.firstIndex(where: { $0 === wsToRemove }) else { return }
-            let removed = self.workspaces.remove(at: idx)
-            if self.activeWSIndex >= idx { self.activeWSIndex = max(0, self.activeWSIndex - 1) }
+            guard let self else { return }
+            guard let removed = self.workspaceStore.removeWorkspace(wsToRemove) else { return }
 
             if self.isPilotMode {
                 NSAnimationContext.runAnimationGroup({ ctx in
@@ -149,7 +159,9 @@ extension NiruxShellView {
                     ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                     removed.containerView.animator().alphaValue = 0
                 }, completionHandler: {
-                    removed.containerView.removeFromSuperview()
+                    DispatchQueue.main.async {
+                        removed.containerView.removeFromSuperview()
+                    }
                 })
                 self.relayout(animated: true)
             } else {
@@ -159,6 +171,110 @@ extension NiruxShellView {
             self.updateSidebar()
         }
     }
+
+    func selectProfile(_ profileID: String) {
+        activateProfile(profileID, slideOutDirection: nil)
+    }
+
+    func focusSpace(_ dir: SpaceDir) {
+        let slideOutDirection: CGFloat
+        let delta: Int
+        switch dir {
+        case .previous:
+            delta = -1
+            slideOutDirection = 1
+        case .next:
+            delta = 1
+            slideOutDirection = -1
+        }
+        guard let profile = workspaceStore.selectAdjacentProfile(delta: delta) else { return }
+        activateProfile(profile.id, slideOutDirection: slideOutDirection, profileAlreadySelected: true)
+    }
+
+    private func activateProfile(_ profileID: String, slideOutDirection: CGFloat?, profileAlreadySelected: Bool = false) {
+        let previousProfileID = activeProfileID
+        let snapshot = slideOutDirection.flatMap { _ in viewportSnapshot() }
+        guard profileAlreadySelected || workspaceStore.selectProfile(profileID) else { return }
+        guard profileAlreadySelected || previousProfileID != activeProfileID else { return }
+
+        if activeWorkspace != nil {
+            refreshAfterWorkspaceSelection(animated: false)
+        } else {
+            addWorkspace(title: activeProfile.name, cwd: NSHomeDirectory())
+        }
+        saveState()
+
+        if let snapshot, let slideOutDirection {
+            animateSpaceSnapshot(snapshot, slideOutDirection: slideOutDirection)
+        }
+    }
+
+    private func viewportSnapshot() -> NSImageView? {
+        guard viewport.bounds.width > 0, viewport.bounds.height > 0,
+              let rep = viewport.bitmapImageRepForCachingDisplay(in: viewport.bounds) else { return nil }
+        viewport.cacheDisplay(in: viewport.bounds, to: rep)
+        let image = NSImage(size: viewport.bounds.size)
+        image.addRepresentation(rep)
+        let imageView = NSImageView(frame: viewport.bounds)
+        imageView.image = image
+        imageView.imageScaling = .scaleNone
+        imageView.wantsLayer = true
+        return imageView
+    }
+
+    private func animateSpaceSnapshot(_ snapshot: NSImageView, slideOutDirection: CGFloat) {
+        viewport.addSubview(snapshot)
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.22
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            snapshot.animator().frame.origin.x += slideOutDirection * viewport.bounds.width * 0.35
+            snapshot.animator().alphaValue = 0
+        }, completionHandler: {
+            DispatchQueue.main.async { snapshot.removeFromSuperview() }
+        })
+    }
+
+    func createProfileFromActiveContext() {
+        let sourceWorkspace = activeWorkspace
+        let baseName = sourceWorkspace.flatMap { profileName(for: $0) } ?? "profile"
+        let cwd = sourceWorkspace.flatMap { workspace in
+            workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd
+                ?? workspace.columns.first?.pty?.childCwd
+                ?? workspace.cwd
+        } ?? NSHomeDirectory()
+        let profile = workspaceStore.createProfile(named: baseName)
+        addWorkspace(title: profile.name, cwd: cwd)
+        saveState()
+    }
+
+    func handleWorkspaceSidebarAction(_ action: WorkspaceSidebarAction, workspaceIndex: Int) {
+        guard workspaces.indices.contains(workspaceIndex) else { return }
+        let didChange: Bool
+        switch action {
+        case .moveUp:
+            didChange = workspaceStore.moveWorkspace(at: workspaceIndex, delta: -1)
+        case .moveDown:
+            didChange = workspaceStore.moveWorkspace(at: workspaceIndex, delta: 1)
+        case .markActive:
+            didChange = workspaceStore.setWorkspaceInactive(at: workspaceIndex, false)
+            if didChange { workspaceStore.selectWorkspace(at: workspaceIndex) }
+        case .markInactive:
+            didChange = workspaceStore.setWorkspaceInactive(at: workspaceIndex, true)
+        }
+        guard didChange else { return }
+        relayout(animated: true)
+        updateSidebar()
+        focusActiveTerminal(in: window)
+        saveState()
+    }
+
+    private func profileName(for workspace: WorkspaceState) -> String {
+        if let cwd = workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.columns.first?.pty?.childCwd {
+            return (cwd as NSString).lastPathComponent
+        }
+        return workspace.title
+    }
+
 
     // MARK: - Sidebar toggle
 
@@ -235,8 +351,14 @@ extension NiruxShellView {
         } else {
             verticalStrip.frame = stripFrame
         }
+        let visible = visibleWorkspaceIndices
+        let visibleSet = Set(visible)
         for (index, workspace) in workspaces.enumerated() {
-            let wsY = layout.totalH - CGFloat(index + 1) * layout.rowH - CGFloat(index) * layout.gap
+            workspace.containerView.isHidden = !visibleSet.contains(index)
+        }
+        for (position, index) in visible.enumerated() {
+            let workspace = workspaces[index]
+            let wsY = layout.totalH - CGFloat(position + 1) * layout.rowH - CGFloat(position) * layout.gap
             let wsFrame = NSRect(x: 0, y: wsY, width: layout.viewportW, height: layout.rowH)
             if useAnimator {
                 workspace.containerView.animator().frame = wsFrame
@@ -261,15 +383,15 @@ extension NiruxShellView {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
                 guard let self else { return }
-                for workspace in self.workspaces {
-                    workspace.layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: true, pilotMode: self.isPilotMode)
+                for index in self.visibleWorkspaceIndices {
+                    self.workspaces[index].layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: true, pilotMode: self.isPilotMode)
                 }
             }
         } else {
             let oldY = verticalStrip.frame.origin.y
             applyWorkspaceFrames(layout, useAnimator: false)
-            for workspace in workspaces {
-                workspace.layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: animated, pilotMode: isPilotMode)
+            for index in visibleWorkspaceIndices {
+                workspaces[index].layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: animated, pilotMode: isPilotMode)
             }
             // Normal-mode animated path: add a vertical slide over the direct frame change.
             if animated, let layer = verticalStrip.layer, oldY != targetY {
@@ -383,7 +505,9 @@ extension NiruxShellView {
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 snapshot.animator().alphaValue = 0
             } completionHandler: {
-                snapshot.removeFromSuperview()
+                DispatchQueue.main.async {
+                    snapshot.removeFromSuperview()
+                }
             }
         }
     }
@@ -415,12 +539,13 @@ extension NiruxShellView {
         guard viewport.bounds.contains(vpLoc) else { return event }
 
         // 1. Check pilot panel clickable areas (PR links, etc.)
-        for workspace in workspaces where workspace.handlePilotPanelClick(windowPoint: windowLoc) {
+        for index in visibleWorkspaceIndices where workspaces[index].handlePilotPanelClick(windowPoint: windowLoc) {
             return nil
         }
 
         // 2. Check pilot panel column clicks (window title granularity)
-        for (index, workspace) in workspaces.enumerated() {
+        for index in visibleWorkspaceIndices {
+            let workspace = workspaces[index]
             if let colIndex = workspace.handlePilotColumnClick(windowPoint: windowLoc) {
                 if index != activeWSIndex {
                     workspace.focusedIndex = colIndex
@@ -436,7 +561,8 @@ extension NiruxShellView {
         }
 
         // 3. Check for clicks on non-active workspace containers
-        for (index, workspace) in workspaces.enumerated() where index != activeWSIndex {
+        for index in visibleWorkspaceIndices where index != activeWSIndex {
+            let workspace = workspaces[index]
             let containerLoc = workspace.containerView.convert(windowLoc, from: nil)
             guard workspace.containerView.bounds.contains(containerLoc) else { continue }
 
@@ -456,7 +582,7 @@ extension NiruxShellView {
     func handlePilotHover(_ event: NSEvent) {
         guard isPilotMode else { return }
         let windowLoc = event.locationInWindow
-        for workspace in workspaces where workspace.handlePilotPanelHover(windowPoint: windowLoc) {
+        for index in visibleWorkspaceIndices where workspaces[index].handlePilotPanelHover(windowPoint: windowLoc) {
             NSCursor.pointingHand.set()
             return
         }
@@ -480,7 +606,8 @@ extension NiruxShellView {
         }
 
         // Active workspace highlight — persistent view with animated position
-        let wsY = totalH - CGFloat(activeWSIndex + 1) * rowH - CGFloat(activeWSIndex) * gap
+        let activePosition = activeVisibleWorkspacePosition ?? 0
+        let wsY = totalH - CGFloat(activePosition + 1) * rowH - CGFloat(activePosition) * gap
         let targetFrame = NSRect(x: 0, y: wsY, width: vpW, height: rowH)
 
         if let highlight = pilotActiveHighlight {

@@ -1,5 +1,54 @@
 import AppKit
 
+private enum SidebarExpandedMetrics {
+    static let padding: CGFloat = 20
+    static let verticalPadding: CGFloat = 20
+    static let bottomReserve: CGFloat = 40
+    static let sectionGap: CGFloat = 18
+    static let headerHeight: CGFloat = 12
+    static let headerAdvance: CGFloat = 18
+    static let titleHeight: CGFloat = 18
+    static let titleAdvance: CGFloat = 22
+    static let branchHeight: CGFloat = 14
+    static let branchAdvance: CGFloat = 18
+    static let columnGap: CGFloat = 16
+    static let columnRowHeight: CGFloat = 14
+    static let columnRowAdvance: CGFloat = 24
+    static let diffTopGap: CGFloat = 4
+    static let diffHeight: CGFloat = 12
+    static let diffAdvance: CGFloat = 16
+    static let prStateHeight: CGFloat = 12
+    static let prStateAdvance: CGFloat = 14
+    static let prDetailHeight: CGFloat = 10
+    static let prDetailAdvance: CGFloat = 12
+    static let separatorTopGap: CGFloat = 6
+    static let separatorAdvance: CGFloat = 8
+
+    static func groupHeight(for infos: [WorkspaceInfo]) -> CGFloat {
+        infos.enumerated().reduce(CGFloat(0)) { total, item in
+            total + workspaceHeight(for: item.element, isLast: item.offset == infos.count - 1)
+        }
+    }
+
+    private static func workspaceHeight(for workspace: WorkspaceInfo, isLast: Bool) -> CGFloat {
+        var height = titleAdvance
+        if let branch = workspace.gitBranch, branch != workspace.title { height += branchAdvance }
+        height += columnGap
+        height += CGFloat(workspace.columns.count) * columnRowAdvance
+        if workspace.diffStats != nil { height += diffTopGap + diffAdvance }
+        if workspace.prInfo != nil {
+            height += prStateAdvance
+            if workspace.prInfo?.ciStatus != nil { height += prDetailAdvance }
+            if let reviewDecision = workspace.prInfo?.reviewDecision, !reviewDecision.isEmpty {
+                height += prDetailAdvance
+            }
+        }
+        height += separatorTopGap
+        if !isLast { height += separatorAdvance }
+        return height
+    }
+}
+
 // MARK: - Expanded mode rendering helpers
 
 extension SidebarView {
@@ -8,30 +57,27 @@ extension SidebarView {
     func rebuildContent() {
         expandedViews.forEach { $0.removeFromSuperview() }
         expandedViews.removeAll()
+        profileIndicatorView?.removeFromSuperview()
+        profileIndicatorView = nil
         clickableAreas.removeAll()
         columnClickAreas.removeAll()
         workspaceClickAreas.removeAll()
         guard isExpanded else { setNeedsDisplay(bounds); return }
 
-        let padding: CGFloat = 20
+        rebuildBottomIndicators()
+
+        let padding = SidebarExpandedMetrics.padding
+        let activeInfos = displayedWorkspaceInfos.filter { !$0.isInactive }
+        let inactiveInfos = displayedWorkspaceInfos.filter { $0.isInactive }
 
         // Calculate total content height — used both to size the scrollable
         // document view (so overflow scrolls) and to anchor content to the top
         // of the scroll viewport.
-        var contentH: CGFloat = 2 * padding
-        for workspace in lastInfos {
-            contentH += 22 // title
-            if let branch = workspace.gitBranch, branch != workspace.title { contentH += 18 }
-            contentH += 16 // gap before columns
-            contentH += CGFloat(workspace.columns.count) * 24
-            if workspace.diffStats != nil { contentH += 20 }
-            if workspace.prInfo != nil {
-                contentH += 14 // PR state
-                if workspace.prInfo?.ciStatus != nil { contentH += 12 }
-                if let rd = workspace.prInfo?.reviewDecision, !rd.isEmpty { contentH += 12 }
-            }
-            contentH += 6 // separator gap
-            if workspace.index < lastInfos.count - 1 { contentH += 8 }
+        var contentH: CGFloat = 2 * SidebarExpandedMetrics.verticalPadding + SidebarExpandedMetrics.bottomReserve
+        contentH += SidebarExpandedMetrics.groupHeight(for: activeInfos)
+        if !inactiveInfos.isEmpty {
+            contentH += SidebarExpandedMetrics.sectionGap + SidebarExpandedMetrics.headerAdvance
+            contentH += SidebarExpandedMetrics.groupHeight(for: inactiveInfos)
         }
 
         // Document view is at least the viewport height (so short content
@@ -41,16 +87,15 @@ extension SidebarView {
         let docHeight = max(bounds.height, contentH)
         contentDocumentView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: docHeight)
 
-        var yOffset = docHeight - padding
+        var yOffset = docHeight - SidebarExpandedMetrics.verticalPadding
 
-        for workspace in lastInfos {
-            yOffset = buildWorkspaceSection(workspace: workspace, padding: padding, yOffset: yOffset)
-
-            // Separator between workspaces
-            yOffset -= 6
-            if workspace.index < lastInfos.count - 1 {
-                yOffset = buildWorkspaceSeparator(padding: padding, yOffset: yOffset)
-            }
+        if !activeInfos.isEmpty {
+            yOffset = buildWorkspaceGroup(activeInfos, padding: padding, yOffset: yOffset)
+        }
+        if !inactiveInfos.isEmpty {
+            yOffset -= SidebarExpandedMetrics.sectionGap
+            yOffset = buildSectionHeader("inactive", padding: padding, yOffset: yOffset)
+            yOffset = buildWorkspaceGroup(inactiveInfos, padding: padding, yOffset: yOffset)
         }
 
         let clip = contentScrollView.contentView
@@ -83,6 +128,66 @@ extension SidebarView {
         lastInfos.first(where: { $0.isActive })?.index ?? -1
     }
 
+
+    private func rebuildBottomIndicators() {
+        var items = lastProfiles.map { profile in
+            SidebarDotIndicatorItem(
+                action: .selectProfile(profile.id),
+                colorHex: profile.colorHex,
+                isActive: profile.isActive,
+                hasAttention: profile.hasAttention,
+                label: nil
+            )
+        }
+        items.append(SidebarDotIndicatorItem(
+            action: .createProfile, colorHex: "#FFFFFF", isActive: false, hasAttention: false, label: "+"
+        ))
+        let width = min(bounds.width - 24, SidebarDotIndicatorView.preferredWidth(itemCount: items.count))
+        let view = SidebarDotIndicatorView(
+            frame: NSRect(x: (bounds.width - width) / 2, y: 10, width: width, height: 22),
+            items: items,
+            tooltip: "Spaces"
+        )
+        view.onSelect = { [weak self] action in
+            switch action {
+            case .createProfile:
+                self?.onCreateProfile?()
+            case .selectProfile(let profileID):
+                self?.onProfileClicked?(profileID)
+            }
+        }
+        addSubview(view)
+        profileIndicatorView = view
+    }
+
+    private func buildSectionHeader(_ title: String, padding: CGFloat, yOffset: CGFloat) -> CGFloat {
+        let label = NSTextField(labelWithString: title.uppercased())
+        label.font = .monospacedSystemFont(ofSize: 9, weight: .semibold)
+        label.textColor = NSColor.white.withAlphaComponent(0.28)
+        label.lineBreakMode = .byTruncatingTail
+        label.frame = NSRect(
+            x: padding,
+            y: yOffset - SidebarExpandedMetrics.headerHeight,
+            width: bounds.width - padding - 10,
+            height: SidebarExpandedMetrics.headerHeight
+        )
+        addSubviewDoc(label)
+        expandedViews.append(label)
+        return yOffset - SidebarExpandedMetrics.headerAdvance
+    }
+
+    private func buildWorkspaceGroup(_ infos: [WorkspaceInfo], padding: CGFloat, yOffset: CGFloat) -> CGFloat {
+        var currentY = yOffset
+        for (position, workspace) in infos.enumerated() {
+            currentY = buildWorkspaceSection(workspace: workspace, padding: padding, yOffset: currentY)
+            currentY -= SidebarExpandedMetrics.separatorTopGap
+            if position < infos.count - 1 {
+                currentY = buildWorkspaceSeparator(padding: padding, yOffset: currentY)
+            }
+        }
+        return currentY
+    }
+
     // MARK: - Workspace section
 
     private func buildWorkspaceSection(workspace: WorkspaceInfo, padding: CGFloat, yOffset: CGFloat) -> CGFloat {
@@ -103,7 +208,7 @@ extension SidebarView {
         currentY = buildWorkspaceTitleLabel(workspace: workspace, padding: padding, yOffset: currentY)
         currentY = buildGitBranchLabel(workspace: workspace, padding: padding, yOffset: currentY)
 
-        currentY -= 16 // gap before columns
+        currentY -= SidebarExpandedMetrics.columnGap
         currentY = buildColumnEntries(columns: workspace.columns, wsIndex: workspace.index, padding: padding, yOffset: currentY)
 
         if let stats = workspace.diffStats {
@@ -142,10 +247,15 @@ extension SidebarView {
             ? NSColor.white.withAlphaComponent(0.9)
             : NSColor.white.withAlphaComponent(0.4)
         titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.frame = NSRect(x: padding, y: yOffset - 18, width: bounds.width - padding * 2, height: 18)
+        titleLabel.frame = NSRect(
+            x: padding,
+            y: yOffset - SidebarExpandedMetrics.titleHeight,
+            width: bounds.width - padding * 2,
+            height: SidebarExpandedMetrics.titleHeight
+        )
         addSubviewDoc(titleLabel)
         expandedViews.append(titleLabel)
-        return yOffset - 22
+        return yOffset - SidebarExpandedMetrics.titleAdvance
     }
 
     // MARK: - Git branch label
@@ -156,10 +266,15 @@ extension SidebarView {
         branchLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         branchLabel.textColor = NSColor.white.withAlphaComponent(0.3)
         branchLabel.lineBreakMode = .byTruncatingTail
-        branchLabel.frame = NSRect(x: padding, y: yOffset - 14, width: bounds.width - padding * 2, height: 14)
+        branchLabel.frame = NSRect(
+            x: padding,
+            y: yOffset - SidebarExpandedMetrics.branchHeight,
+            width: bounds.width - padding * 2,
+            height: SidebarExpandedMetrics.branchHeight
+        )
         addSubviewDoc(branchLabel)
         expandedViews.append(branchLabel)
-        return yOffset - 18
+        return yOffset - SidebarExpandedMetrics.branchAdvance
     }
 
     // MARK: - Column entries
@@ -171,7 +286,7 @@ extension SidebarView {
         let textX: CGFloat = padding + agentDotSize + 6
 
         for column in columns {
-            let rowHeight: CGFloat = 14
+            let rowHeight = SidebarExpandedMetrics.columnRowHeight
 
             if let dot = PilotSidebarRenderer.makeAgentDot(
                 status: column.agentStatus, x: dotColumnX,
@@ -188,10 +303,15 @@ extension SidebarView {
             expandedViews.append(label)
 
             // Full-width hit area for column click
-            let hitRect = NSRect(x: 0, y: currentY - 24, width: bounds.width, height: 24)
+            let hitRect = NSRect(
+                x: 0,
+                y: currentY - SidebarExpandedMetrics.columnRowAdvance,
+                width: bounds.width,
+                height: SidebarExpandedMetrics.columnRowAdvance
+            )
             columnClickAreas.append((frame: hitRect, wsIndex: wsIndex, colIndex: column.index))
 
-            currentY -= 24
+            currentY -= SidebarExpandedMetrics.columnRowAdvance
         }
 
         return currentY
@@ -205,7 +325,7 @@ extension SidebarView {
         padding: CGFloat,
         yOffset: CGFloat
     ) -> CGFloat {
-        var currentY = yOffset - 4
+        var currentY = yOffset - SidebarExpandedMetrics.diffTopGap
         let compact = PilotSidebarRenderer.formatDiffStats(stats)
         let statsLabel = NSTextField(labelWithString: "")
         statsLabel.allowsEditingTextAttributes = true
@@ -213,7 +333,12 @@ extension SidebarView {
 
         statsLabel.attributedStringValue = PilotSidebarRenderer.diffStatsAttributedString(compact, fontSize: 10)
         statsLabel.lineBreakMode = .byTruncatingTail
-        statsLabel.frame = NSRect(x: padding, y: currentY - 12, width: bounds.width - padding * 2, height: 12)
+        statsLabel.frame = NSRect(
+            x: padding,
+            y: currentY - SidebarExpandedMetrics.diffHeight,
+            width: bounds.width - padding * 2,
+            height: SidebarExpandedMetrics.diffHeight
+        )
         addSubviewDoc(statsLabel)
         expandedViews.append(statsLabel)
 
@@ -223,7 +348,7 @@ extension SidebarView {
             label: statsLabel
         ))
 
-        currentY -= 16
+        currentY -= SidebarExpandedMetrics.diffAdvance
         return currentY
     }
 
@@ -246,11 +371,16 @@ extension SidebarView {
         prLabel.font = .monospacedSystemFont(ofSize: 9, weight: .medium)
         prLabel.textColor = stateColor
         prLabel.lineBreakMode = .byTruncatingTail
-        prLabel.frame = NSRect(x: padding, y: yOffset - 12, width: bounds.width - padding * 2, height: 12)
+        prLabel.frame = NSRect(
+            x: padding,
+            y: yOffset - SidebarExpandedMetrics.prStateHeight,
+            width: bounds.width - padding * 2,
+            height: SidebarExpandedMetrics.prStateHeight
+        )
         addSubviewDoc(prLabel)
         expandedViews.append(prLabel)
         clickableAreas.append((frame: prLabel.frame, url: prInfo.url, label: prLabel))
-        return yOffset - 14
+        return yOffset - SidebarExpandedMetrics.prStateAdvance
     }
 
     private func buildCIStatusLabel(prInfo: PRInfo, padding: CGFloat, indent: CGFloat, yOffset: CGFloat) -> CGFloat {
@@ -260,12 +390,17 @@ extension SidebarView {
         ciLabel.font = .monospacedSystemFont(ofSize: 9, weight: .regular)
         ciLabel.textColor = ciColor
         ciLabel.lineBreakMode = .byTruncatingTail
-        ciLabel.frame = NSRect(x: padding + indent, y: yOffset - 10, width: bounds.width - padding * 2 - indent, height: 10)
+        ciLabel.frame = NSRect(
+            x: padding + indent,
+            y: yOffset - SidebarExpandedMetrics.prDetailHeight,
+            width: bounds.width - padding * 2 - indent,
+            height: SidebarExpandedMetrics.prDetailHeight
+        )
         addSubviewDoc(ciLabel)
         expandedViews.append(ciLabel)
         let ciUrl = (ciStatus == "FAILURE" ? prInfo.failedCheckUrl : nil) ?? prInfo.url
         clickableAreas.append((frame: ciLabel.frame, url: ciUrl, label: ciLabel))
-        return yOffset - 12
+        return yOffset - SidebarExpandedMetrics.prDetailAdvance
     }
 
     private func buildReviewDecisionLabel(prInfo: PRInfo, padding: CGFloat, indent: CGFloat, yOffset: CGFloat) -> CGFloat {
@@ -287,11 +422,16 @@ extension SidebarView {
         reviewLabel.font = .monospacedSystemFont(ofSize: 9, weight: .regular)
         reviewLabel.textColor = display.color
         reviewLabel.lineBreakMode = .byTruncatingTail
-        reviewLabel.frame = NSRect(x: padding + indent, y: yOffset - 10, width: bounds.width - padding * 2 - indent, height: 10)
+        reviewLabel.frame = NSRect(
+            x: padding + indent,
+            y: yOffset - SidebarExpandedMetrics.prDetailHeight,
+            width: bounds.width - padding * 2 - indent,
+            height: SidebarExpandedMetrics.prDetailHeight
+        )
         addSubviewDoc(reviewLabel)
         expandedViews.append(reviewLabel)
         clickableAreas.append((frame: reviewLabel.frame, url: prInfo.url, label: reviewLabel))
-        return yOffset - 12
+        return yOffset - SidebarExpandedMetrics.prDetailAdvance
     }
 
     // MARK: - Workspace separator
@@ -302,6 +442,6 @@ extension SidebarView {
         separator.frame = NSRect(x: padding, y: yOffset, width: bounds.width - padding * 2, height: 1)
         addSubviewDoc(separator)
         expandedViews.append(separator)
-        return yOffset - 8
+        return yOffset - SidebarExpandedMetrics.separatorAdvance
     }
 }

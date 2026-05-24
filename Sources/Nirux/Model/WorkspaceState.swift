@@ -10,6 +10,7 @@ struct PilotClickableArea {
 /// A workspace contains columns on an infinite horizontal strip
 @MainActor
 final class WorkspaceState {
+    let id: String
     let containerView: NSView  // clips content, acts as viewport
     private let stripView: NSView  // holds all columns, slides horizontally
     var columns: [ColumnState] = []
@@ -18,6 +19,8 @@ final class WorkspaceState {
     let cwd: String
     var title: String
     var titleIsManual: Bool = false
+    var profileID: String = WorkspaceProfile.defaultID
+    var isInactive: Bool = false
     var gitBranch: String?
     var hasNotification: Bool = false
     var prInfo: PRInfo?
@@ -38,7 +41,8 @@ final class WorkspaceState {
     var onMetadataChanged: (() -> Void)?
     var onDiffStatsClicked: (() -> Void)?
 
-    init(title: String? = nil, cwd: String) {
+    init(id: String = UUID().uuidString, title: String? = nil, cwd: String) {
+        self.id = id
         self.cwd = cwd
         self.title = title ?? "workspace"
         self.titleIsManual = (title != nil)
