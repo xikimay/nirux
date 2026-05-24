@@ -166,6 +166,17 @@ final class WorkspaceStore {
         return profile
     }
 
+    @discardableResult
+    func renameProfile(id: String, to newName: String) -> Bool {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let index = profiles.firstIndex(where: { $0.id == id })
+        else { return false }
+
+        profiles[index].name = uniqueProfileName(trimmed, excluding: id)
+        return true
+    }
+
     func visibleWorkspaceIndices(in profileID: String) -> [Int] {
         let matching = workspaces.indices.filter { workspaces[$0].profileID == profileID }
         return matching.filter { !workspaces[$0].isInactive } + matching.filter { workspaces[$0].isInactive }
@@ -213,10 +224,12 @@ final class WorkspaceStore {
         workspaces.indices.first { $0 != index }
     }
 
-    private func uniqueProfileName(_ base: String) -> String {
+    private func uniqueProfileName(_ base: String, excluding excludedID: String? = nil) -> String {
         let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
         let fallback = trimmed.isEmpty ? "profile" : trimmed
-        let existing = Set(profiles.map { $0.name })
+        let existing = Set(profiles.compactMap { profile in
+            profile.id == excludedID ? nil : profile.name
+        })
         guard existing.contains(fallback) else { return fallback }
         var idx = 2
         while existing.contains("\(fallback) \(idx)") { idx += 1 }

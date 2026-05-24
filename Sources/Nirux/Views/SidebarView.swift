@@ -1,5 +1,11 @@
 import AppKit
 
+/// Decorative layers in the sidebar should not steal events from the
+/// registered workspace/column hit regions.
+final class SidebarBackgroundView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 /// Sidebar: minimal dots in normal mode, expanded detail panel (pilot-style) in expanded mode.
 /// Dragging on empty sidebar area moves the window.
 final class SidebarView: NSView {
@@ -10,6 +16,7 @@ final class SidebarView: NSView {
     var onWorkspaceAction: ((WorkspaceSidebarAction, Int) -> Void)?
     var onProfileClicked: ((String) -> Void)?
     var onCreateProfile: (() -> Void)?
+    var onRenameProfile: ((String) -> Void)?
     var isExpanded: Bool = false {
         didSet {
             // Clear dot pulse layers when switching modes
@@ -30,9 +37,7 @@ final class SidebarView: NSView {
     var lastProfiles: [ProfileInfo] = []
     var expandedViews: [NSView] = []
     var profileIndicatorView: SidebarDotIndicatorView?
-    var clickableAreas: [(frame: NSRect, url: String, label: NSTextField)] = []
-    var columnClickAreas: [(frame: NSRect, wsIndex: Int, colIndex: Int)] = []
-    var workspaceClickAreas: [(frame: NSRect, wsIndex: Int)] = []
+    var hitAreas: [SidebarHitArea] = []
 
     /// Active workspace the sidebar last auto-scrolled to. Used by
     /// `rebuildContent` so we only follow the active workspace when it
@@ -196,12 +201,6 @@ final class SidebarView: NSView {
         }
     }
 
-    // Diff stat formatting, column icons, and attributed column rows are
-    // shared with the pilot panel via PilotSidebarRenderer.
-    func attributedColumn(_ column: ColumnInfo) -> NSAttributedString {
-        PilotSidebarRenderer.attributedColumn(column, fontSize: 11)
-    }
-
     var displayedWorkspaceInfos: [WorkspaceInfo] {
         lastInfos.filter { !$0.isInactive } + lastInfos.filter { $0.isInactive }
     }
@@ -215,25 +214,8 @@ final class SidebarView: NSView {
             // accounts for the current scroll offset).
             let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
 
-            // Check clickable areas first (PR links, CI status, actions)
-            for area in clickableAreas where area.frame.contains(docLocation) {
-                if let workspaceIndex = Self.diffActionWorkspaceIndex(area.url) {
-                    onDiffStatsClicked?(workspaceIndex)
-                } else if let url = URL(string: area.url) {
-                    NSWorkspace.shared.open(url)
-                }
-                return
-            }
-
-            // Check column click areas
-            for area in columnClickAreas where area.frame.contains(docLocation) {
-                onColumnClicked?(area.wsIndex, area.colIndex)
-                return
-            }
-
-            // Hit-test workspace section areas (registered during rendering)
-            for area in workspaceClickAreas where area.frame.contains(docLocation) {
-                onWorkspaceClicked?(area.wsIndex)
+            if let area = hitArea(at: docLocation) {
+                handleHit(area.region, event: event)
                 return
             }
             super.mouseDown(with: event)
@@ -276,32 +258,67 @@ final class SidebarView: NSView {
     override func mouseMoved(with event: NSEvent) {
         guard isExpanded else { clearHover(); return }
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
-        for area in clickableAreas where area.frame.contains(point) {
+
+        guard let area = hitArea(at: point) else {
+            clearHover()
+            NSCursor.arrow.set()
+            return
+        }
+
+        switch area.region {
+        case .link(_, let label):
             NSCursor.pointingHand.set()
-            if hoveredLabel !== area.label {
+            if hoveredLabel !== label {
                 clearHover()
-                applyUnderline(to: area.label)
-                hoveredLabel = area.label
+                applyUnderline(to: label)
+                hoveredLabel = label
             }
-            return
-        }
-        // Remove link underline if we left a clickable area
-        if let label = hoveredLabel {
-            let attr = NSMutableAttributedString(attributedString: label.attributedStringValue)
-            attr.removeAttribute(.underlineStyle, range: NSRange(location: 0, length: attr.length))
-            label.attributedStringValue = attr
-            hoveredLabel = nil
-        }
-        // Show pointer for column and workspace click areas
-        for area in columnClickAreas where area.frame.contains(point) {
+        case .spaceHeader, .column, .workspace:
+            clearHover()
             NSCursor.pointingHand.set()
-            return
         }
-        for area in workspaceClickAreas where area.frame.contains(point) {
-            NSCursor.pointingHand.set()
-            return
+    }
+
+    private func hitArea(at point: NSPoint) -> SidebarHitArea? {
+        hitAreas.first { $0.frame.contains(point) }
+    }
+
+    private func handleHit(_ region: SidebarHitRegion, event: NSEvent) {
+        switch region {
+        case .spaceHeader:
+            let point = convert(event.locationInWindow, from: nil)
+            showSpaceMenu(at: point)
+        case .link(let url, _):
+            if let workspaceIndex = Self.diffActionWorkspaceIndex(url) {
+                onDiffStatsClicked?(workspaceIndex)
+            } else if let url = URL(string: url) {
+                NSWorkspace.shared.open(url)
+            }
+        case .column(let workspaceIndex, let columnIndex):
+            onColumnClicked?(workspaceIndex, columnIndex)
+        case .workspace(let workspaceIndex):
+            onWorkspaceClicked?(workspaceIndex)
         }
-        NSCursor.arrow.set()
+    }
+
+    private func showSpaceMenu(at point: NSPoint) {
+        let menu = NSMenu()
+        for profile in lastProfiles {
+            let title = "\(profile.isActive ? "✓ " : "")\(profile.name)  \(profile.workspaceCount)"
+            menu.addClosureItem(title: title) { [weak self] in
+                self?.onProfileClicked?(profile.id)
+            }
+        }
+        if !lastProfiles.isEmpty { menu.addItem(.separator()) }
+        if let active = lastProfiles.first(where: { $0.isActive }) {
+            menu.addClosureItem(title: "Rename Space…") { [weak self] in
+                self?.onRenameProfile?(active.id)
+            }
+        }
+        menu.addClosureItem(title: "New Space") { [weak self] in
+            self?.onCreateProfile?()
+        }
+        menu.popUp(positioning: nil, at: point, in: self)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -332,11 +349,13 @@ final class SidebarView: NSView {
     private func workspaceIndex(at event: NSEvent) -> Int? {
         if isExpanded {
             let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
-            if let area = columnClickAreas.first(where: { $0.frame.contains(docLocation) }) {
-                return area.wsIndex
-            }
-            if let area = workspaceClickAreas.first(where: { $0.frame.contains(docLocation) }) {
-                return area.wsIndex
+            for area in hitAreas where area.frame.contains(docLocation) {
+                switch area.region {
+                case .column(let workspaceIndex, _), .workspace(let workspaceIndex):
+                    return workspaceIndex
+                case .spaceHeader, .link:
+                    continue
+                }
             }
             return nil
         }

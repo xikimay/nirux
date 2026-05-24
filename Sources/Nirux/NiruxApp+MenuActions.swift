@@ -127,7 +127,11 @@ extension NiruxApp {
         let colMenu = NSMenu(title: "Columns")
         colMenu.addItem(withTitle: "Command Palette", action: #selector(showCommandPalette(_:)), keyEquivalent: "p")
         colMenu.addItem(NSMenuItem.separator())
-        colMenu.addItem(withTitle: "New Terminal", action: #selector(newTerminalColumn(_:)), keyEquivalent: "t")
+        colMenu.addItem(
+            withTitle: "New Terminal",
+            action: #selector(newTerminalColumn(_:)),
+            keyEquivalent: NiruxShortcuts.newTerminalKey
+        )
         colMenu.addItem(withTitle: "Open Browser", action: #selector(openBrowser(_:)), keyEquivalent: "b")
         colMenu.addItem(withTitle: "Close Column", action: #selector(closeColumn(_:)), keyEquivalent: "w")
         colMenu.addItem(NSMenuItem.separator())
@@ -162,7 +166,11 @@ extension NiruxApp {
 
         // Workspaces menu
         let workspacesMenu = NSMenu(title: "Workspaces")
-        workspacesMenu.addItem(withTitle: "New Workspace", action: #selector(newWorkspace(_:)), keyEquivalent: "n")
+        workspacesMenu.addItem(
+            withTitle: "New Workspace",
+            action: #selector(newWorkspace(_:)),
+            keyEquivalent: NiruxShortcuts.newWorkspaceKey
+        )
         workspacesMenu.addItem(withTitle: "Rename Workspace", action: #selector(renameWorkspace(_:)), keyEquivalent: "")
         workspacesMenu.addItem(NSMenuItem.separator())
 
