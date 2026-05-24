@@ -10,7 +10,7 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/xikimay/libghostty-spm.git",
-            revision: "c6843ec0762923357f8c2905381d0a556caa50c1"
+            revision: "91efe702f1afb06e5b4c1e6c40351c5f6b900e98"
         ),
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0")
     ],
