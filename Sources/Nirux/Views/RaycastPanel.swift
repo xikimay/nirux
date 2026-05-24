@@ -1,6 +1,6 @@
 import AppKit
 
-/// Shared Raycast-style panel factory used by RenamePanel, URLInputPanel, and
+/// Shared Raycast-style panel factory used by NameInputPanel, URLInputPanel, and
 /// WorktreePanel. Each of these was hand-rolling an identical NSPanel +
 /// rounded-container + icon + text-field + Escape-monitor setup (~25 lines of
 /// duplicated boilerplate across 3 files); this factory collapses that into

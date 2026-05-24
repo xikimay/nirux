@@ -36,12 +36,10 @@ final class SidebarDotIndicatorView: NSView {
         super.draw(dirtyRect)
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
 
-        let pill = bounds.insetBy(dx: 0, dy: 1)
-        ctx.setFillColor(NSColor(red: 0.08, green: 0.08, blue: 0.105, alpha: 0.88).cgColor)
-        let path = CGMutablePath()
-        path.addRoundedRect(in: pill, cornerWidth: pill.height / 2, cornerHeight: pill.height / 2)
-        ctx.addPath(path)
-        ctx.fillPath()
+        ctx.setFillColor(NSColor(red: 0.09, green: 0.09, blue: 0.115, alpha: 0.96).cgColor)
+        ctx.fill(bounds)
+        ctx.setFillColor(NSColor.white.withAlphaComponent(0.07).cgColor)
+        ctx.fill(CGRect(x: 14, y: bounds.height - 1, width: bounds.width - 28, height: 1))
 
         for (idx, rect) in dotRects().enumerated() {
             let item = items[idx]
@@ -51,6 +49,11 @@ final class SidebarDotIndicatorView: NSView {
             } else {
                 ctx.setFillColor((item.isActive ? color : color.withAlphaComponent(0.45)).cgColor)
                 ctx.fillEllipse(in: rect)
+                if item.isActive {
+                    ctx.setStrokeColor(color.withAlphaComponent(0.9).cgColor)
+                    ctx.setLineWidth(1.5)
+                    ctx.strokeEllipse(in: rect.insetBy(dx: -4, dy: -4))
+                }
             }
 
             if item.hasAttention {
@@ -84,20 +87,22 @@ final class SidebarDotIndicatorView: NSView {
             cornerWidth: actionRect.height / 2,
             cornerHeight: actionRect.height / 2
         )
-        ctx.setFillColor(NSColor.niruxAccent.cgColor)
+        ctx.setFillColor(NSColor.clear.cgColor)
         ctx.addPath(actionPath)
         ctx.fillPath()
-        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.28).cgColor)
-        ctx.setLineWidth(1)
+        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.32).cgColor)
+        ctx.setLineWidth(1.2)
+        ctx.setLineDash(phase: 0, lengths: [3, 3])
         ctx.addPath(actionPath)
         ctx.strokePath()
+        ctx.setLineDash(phase: 0, lengths: [])
     }
 
     private func drawLabelIfNeeded(_ label: String?, in rect: CGRect, context ctx: CGContext) {
         if label == "+" {
             let plusSize: CGFloat = 7
-            ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.98).cgColor)
-            ctx.setLineWidth(1.8)
+            ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.82).cgColor)
+            ctx.setLineWidth(1.6)
             ctx.setLineCap(.round)
             ctx.move(to: CGPoint(x: rect.midX - plusSize / 2, y: rect.midY))
             ctx.addLine(to: CGPoint(x: rect.midX + plusSize / 2, y: rect.midY))
@@ -119,17 +124,17 @@ final class SidebarDotIndicatorView: NSView {
 
     private func dotRects() -> [CGRect] {
         guard !items.isEmpty else { return [] }
-        let normalSize: CGFloat = 8
-        let activeSize: CGFloat = 10
-        let actionSize: CGFloat = 18
-        let gap: CGFloat = 10
+        let normalSize: CGFloat = 9
+        let activeSize: CGFloat = 11
+        let actionSize: CGFloat = 22
+        let gap: CGFloat = 18
         let widths = items.map { item in item.label != nil ? actionSize : (item.isActive ? activeSize : normalSize) }
         let totalW = widths.reduce(0, +) + CGFloat(max(items.count - 1, 0)) * gap
         var x = (bounds.width - totalW) / 2
         return items.map { item in
             let size = item.label != nil ? actionSize : (item.isActive ? activeSize : normalSize)
             defer { x += size + gap }
-            return CGRect(x: x, y: (bounds.height - size) / 2, width: size, height: size)
+            return CGRect(x: x, y: 16 - size / 2, width: size, height: size)
         }
     }
 }

@@ -4,7 +4,7 @@ import GhosttyTerminal
 /// Root AppKit view: sidebar + niri-style 2D scrolling viewport
 final class NiruxShellView: NSView {
     private static let collapsedSidebarWidth: CGFloat = 16
-    private static let expandedSidebarWidth: CGFloat = 180
+    private static let expandedSidebarWidth: CGFloat = 260
     var isSidebarExpanded = false
     private var sidebarWidth: CGFloat {
         if isPilotMode { return 0 }
@@ -53,7 +53,7 @@ final class NiruxShellView: NSView {
     var heartbeatTick: UInt = 0
 
     // Panel references (stored properties must live in main class declaration)
-    var renamePanel: RenamePanel?
+    var nameInputPanel: NameInputPanel?
     var worktreePanel: WorktreePanel?
     var commandPalette: CommandPalette?
     var urlPanel: URLInputPanel?
@@ -97,6 +97,7 @@ final class NiruxShellView: NSView {
         sidebar.onWorkspaceAction = { [weak self] action, index in self?.handleWorkspaceSidebarAction(action, workspaceIndex: index) }
         sidebar.onProfileClicked = { [weak self] profileID in self?.selectProfile(profileID) }
         sidebar.onCreateProfile = { [weak self] in self?.createProfileFromActiveContext() }
+        sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }
         sidebar.onDiffStatsClicked = { [weak self] index in self?.openDiffInEditor(workspaceIndex: index) }
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
@@ -414,15 +415,32 @@ final class NiruxShellView: NSView {
 
     func showRenamePanel() {
         guard let window, let workspace = activeWorkspace else { return }
-        if renamePanel == nil {
-            renamePanel = RenamePanel()
-            renamePanel?.onRename = { [weak self] newTitle in
-                self?.activeWorkspace?.title = newTitle
-                self?.activeWorkspace?.titleIsManual = true
-                self?.updateSidebar()
-            }
+        if nameInputPanel == nil {
+            nameInputPanel = NameInputPanel()
         }
-        renamePanel?.show(relativeTo: window, currentTitle: workspace.title)
+        nameInputPanel?.onSubmit = { [weak self] newTitle in
+            self?.activeWorkspace?.title = newTitle
+            self?.activeWorkspace?.titleIsManual = true
+            self?.updateSidebar()
+            self?.saveState()
+        }
+        nameInputPanel?.show(relativeTo: window, currentValue: workspace.title, placeholder: "Workspace name")
+    }
+
+    func showRenameSpacePanel(profileID: String) {
+        guard let window,
+              let profile = profiles.first(where: { $0.id == profileID })
+        else { return }
+        if nameInputPanel == nil {
+            nameInputPanel = NameInputPanel()
+        }
+        nameInputPanel?.onSubmit = { [weak self] newName in
+            guard let self else { return }
+            guard self.workspaceStore.renameProfile(id: profileID, to: newName) else { return }
+            self.updateSidebar()
+            self.saveState()
+        }
+        nameInputPanel?.show(relativeTo: window, currentValue: profile.name, placeholder: "Space name")
     }
 
     // MARK: - Worktree
@@ -541,7 +559,7 @@ final class NiruxShellView: NSView {
             PaletteAction(icon: "🔑", title: "Import Browser Cookies", subtitle: importCookieSubtitle(), shortcut: "") { [weak self] in
                 self?.importBrowserCookies()
             },
-            PaletteAction(icon: "▶", title: "New Terminal", subtitle: "Open a new terminal column", shortcut: "⌘T") { [weak self] in
+            PaletteAction(icon: "▶", title: "New Terminal", subtitle: "Open a new terminal column", shortcut: NiruxShortcuts.newTerminalDisplay) { [weak self] in
                 self?.addColumn()
             },
             PaletteAction(icon: "📝", title: "Open Editor", subtitle: "Edit files in the current workspace", shortcut: "") { [weak self] in
@@ -559,7 +577,7 @@ final class NiruxShellView: NSView {
             PaletteAction(icon: "📦", title: "Open Codex", subtitle: "Launch OpenAI Codex in a new terminal", shortcut: "") { [weak self] in
                 self?.openCodex()
             },
-            PaletteAction(icon: "📂", title: "New Workspace", subtitle: "Create a new workspace", shortcut: "⌘N") { [weak self] in
+            PaletteAction(icon: "📂", title: "New Workspace", subtitle: "Create a new workspace", shortcut: NiruxShortcuts.newWorkspaceDisplay) { [weak self] in
                 self?.addWorkspace()
             },
             PaletteAction(icon: "🌳", title: "New Worktree", subtitle: "Create a git worktree + workspace", shortcut: "") { [weak self] in

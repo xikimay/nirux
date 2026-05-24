@@ -51,6 +51,18 @@ struct ProfileInfo: Equatable {
     let hasAttention: Bool
 }
 
+struct SidebarHitArea {
+    let frame: NSRect
+    let region: SidebarHitRegion
+}
+
+enum SidebarHitRegion {
+    case spaceHeader
+    case link(url: String, label: NSTextField)
+    case column(workspaceIndex: Int, columnIndex: Int)
+    case workspace(Int)
+}
+
 enum WorkspaceSidebarAction {
     case moveUp, moveDown, markActive, markInactive
 }

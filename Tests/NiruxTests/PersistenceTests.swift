@@ -175,6 +175,29 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(store.visibleWorkspaceIndices.map { store.workspaces[$0].id }, ["main"])
     }
 
+    @MainActor
+    func testWorkspaceStoreRenamesProfilesUniquely() {
+        let store = WorkspaceStore()
+        let profile = WorkspaceProfile(id: "repo", name: "repo", colorHex: "#9ECE6A")
+        store.replaceProfiles([WorkspaceProfile.defaultProfile, profile], activeProfileID: profile.id)
+
+        XCTAssertTrue(store.renameProfile(id: profile.id, to: " main "))
+        XCTAssertEqual(store.profiles.first { $0.id == profile.id }?.name, "main 2")
+
+        XCTAssertTrue(store.renameProfile(id: profile.id, to: "main 2"))
+        XCTAssertEqual(store.profiles.first { $0.id == profile.id }?.name, "main 2")
+    }
+
+    @MainActor
+    func testWorkspaceStoreRejectsBlankProfileRename() {
+        let store = WorkspaceStore()
+        let profile = WorkspaceProfile(id: "repo", name: "repo", colorHex: "#9ECE6A")
+        store.replaceProfiles([WorkspaceProfile.defaultProfile, profile], activeProfileID: profile.id)
+
+        XCTAssertFalse(store.renameProfile(id: profile.id, to: "   "))
+        XCTAssertEqual(store.profiles.first { $0.id == profile.id }?.name, "repo")
+    }
+
     func testResolvedTypeFallsBackToTerminalWhenNil() {
         let missing = PersistedColumn(
             widthPreset: 0.5, cwd: "/tmp",
