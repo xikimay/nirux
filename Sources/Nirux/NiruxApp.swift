@@ -26,7 +26,6 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         NSApp.setActivationPolicy(.regular)
         setupKeyInterceptor()
         setupClickToFocus()
-        setupUpdater()
         setupMenus()
 
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
@@ -50,6 +49,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         shellView.autoresizingMask = [.width, .height]
         window.contentView = shellView
         shell = shellView
+        setupUpdater()
 
         window.makeKeyAndOrderFront(nil)
         mainWindow = window

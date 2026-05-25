@@ -134,21 +134,20 @@ final class PtySession: @unchecked Sendable {
     /// Compute agent status using burst detection (rapid consecutive reads = active)
     /// - isUserFocused: true if the user is currently focused on this specific column
     func agentStatus(snapshot: ProcessSnapshot, isUserFocused: Bool) -> AgentStatus {
+        let now = Date()
         let fgName = foregroundProcessName(snapshot: snapshot) ?? ""
         let isAgent = ["claude", "codex"].contains(fgName)
 
-        // Track when the foreground process changes (detect startup)
+        // Track foreground changes and clear stale output from the previous
+        // command so process startup does not look like a completed turn.
         if fgName != state.lastForegroundName {
-            state.lastForegroundName = fgName
-            state.foregroundSince = Date()
+            state.markForegroundProcessChange(to: fgName, now: now)
         }
 
-        // Ignore bursts during startup (first 5s after agent becomes foreground)
-        let isStartingUp = state.foregroundSince != nil
-            && Date().timeIntervalSince(state.foregroundSince!) < 5.0
+        let isStartingUp = state.shouldSuppressAgentAttention(now: now)
         let inBurst = !isStartingUp
             && state.lastBurstTime != nil
-            && Date().timeIntervalSince(state.lastBurstTime!) < 3.0
+            && now.timeIntervalSince(state.lastBurstTime!) < 3.0
 
         let prev = state.agentState
         switch state.agentState {
@@ -156,6 +155,8 @@ final class PtySession: @unchecked Sendable {
             if isAgent && inBurst { state.agentState = .working }
         case .working:
             if !isAgent {
+                state.agentState = .idle
+            } else if isStartingUp {
                 state.agentState = .idle
             } else if !inBurst {
                 state.agentState = isUserFocused ? .idle : .needsAttention
@@ -172,7 +173,8 @@ final class PtySession: @unchecked Sendable {
         if state.agentState != prev {
             NSLog(
                 "[AgentStatus] \(fgName) \(prev) → \(state.agentState)"
-                + " | isAgent=\(isAgent) inBurst=\(inBurst) isUserFocused=\(isUserFocused)"
+                + " | isAgent=\(isAgent) inBurst=\(inBurst) "
+                + "isStartingUp=\(isStartingUp) isUserFocused=\(isUserFocused)"
             )
         }
         return state.agentState
@@ -313,6 +315,7 @@ final class PtySession: @unchecked Sendable {
         guard pid > 0 else { return }
         state.ptyFd = fd
         state.childPid = pid
+        state.markPtyStarted()
 
         // Read PTY output → feed to terminal for rendering
         let session = terminalSession
@@ -388,6 +391,7 @@ private final class PtyState: @unchecked Sendable {
     var onOsc9Received: (() -> Void)?
     var lastOsc9Timestamp: Date?
     var agentState: AgentStatus = .idle
+    var hasUserInputSinceStart: Bool = false
     var lastBurstTime: Date?
     var readCountInWindow: Int = 0
     var windowStart: Date = Date()
@@ -398,6 +402,7 @@ private final class PtyState: @unchecked Sendable {
 
     private static let writeEchoSuppressionInterval: TimeInterval = 0.3
     private static let displayRefreshSuppressionInterval: TimeInterval = 1.5
+    private static let foregroundStartupSuppressionInterval: TimeInterval = 5.0
 
     func foregroundProcessName(snapshot: ProcessSnapshot) -> String? {
         guard childPid > 0 else { return nil }
@@ -427,7 +432,33 @@ private final class PtyState: @unchecked Sendable {
         return ProcessSnapshot.flagValue(flag, pid: fgPid)
     }
 
+    func markPtyStarted(now: Date = Date()) {
+        hasUserInputSinceStart = false
+        foregroundSince = nil
+        lastForegroundName = nil
+        agentState = .idle
+        lastBurstTime = nil
+        resetBurstWindow(now: now)
+    }
+
+    func markForegroundProcessChange(to name: String, now: Date = Date()) {
+        lastForegroundName = name
+        foregroundSince = now
+        lastBurstTime = nil
+        resetBurstWindow(now: now)
+    }
+
+    func shouldSuppressAgentAttention(now: Date = Date()) -> Bool {
+        guard hasUserInputSinceStart else { return true }
+        if let foregroundSince,
+           now.timeIntervalSince(foregroundSince) < Self.foregroundStartupSuppressionInterval {
+            return true
+        }
+        return false
+    }
+
     func writeToPty(_ data: Data) {
+        hasUserInputSinceStart = true
         markInteraction(suppressBurstDetectionFor: Self.writeEchoSuppressionInterval)
         guard ptyFd >= 0 else { return }
         data.withUnsafeBytes { buf in
@@ -459,6 +490,10 @@ private final class PtyState: @unchecked Sendable {
         let now = Date()
         lastInteractionTime = now
         burstDetectionSuppressedUntil = now.addingTimeInterval(interval)
+        resetBurstWindow(now: now)
+    }
+
+    private func resetBurstWindow(now: Date) {
         windowStart = now
         readCountInWindow = 0
     }
@@ -484,10 +519,14 @@ private final class PtyState: @unchecked Sendable {
     /// Skips reads that are echo from typing or redraw from resize.
     private func updateBurstDetection() {
         let now = Date()
+        if shouldSuppressAgentAttention(now: now) {
+            lastBurstTime = nil
+            resetBurstWindow(now: now)
+            return
+        }
         if let suppressedUntil = burstDetectionSuppressedUntil {
             if now < suppressedUntil {
-                windowStart = now
-                readCountInWindow = 0
+                resetBurstWindow(now: now)
                 return
             }
             burstDetectionSuppressedUntil = nil
@@ -532,8 +571,10 @@ private final class PtyState: @unchecked Sendable {
         }
         // OSC 9 (notification): Claude Code emits this when a turn completes
         if str.contains("\u{1b}]9;") {
-            lastOsc9Timestamp = Date()
+            let now = Date()
+            lastOsc9Timestamp = now
             lastBurstTime = nil
+            guard !shouldSuppressAgentAttention(now: now) else { return }
             if let callback = onOsc9Received {
                 DispatchQueue.main.async { callback() }
             }

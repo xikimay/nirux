@@ -12,10 +12,13 @@ extension NiruxApp {
             updaterDelegate: self,
             userDriverDelegate: nil
         )
-        updaterController?.updater.automaticallyChecksForUpdates = true
-        updaterController?.updater.automaticallyDownloadsUpdates = true
-        try? updaterController?.updater.start()
-        updaterReady = updaterController != nil
+        do {
+            try updaterController?.updater.start()
+            updaterReady = updaterController != nil
+        } catch {
+            updaterReady = false
+            NSLog("Sparkle updater failed to start: \(error.localizedDescription)")
+        }
     }
 
     nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
@@ -35,10 +38,8 @@ extension NiruxApp {
     func showUpdateAvailable(version: String) {
         guard let shell else { return }
         shell.showUpdateAvailable(version: version)
-        if let statusBar = shell.subviews.compactMap({ $0 as? StatusBarView }).first {
-            statusBar.onInstall = { [weak self] in
-                self?.updaterController?.checkForUpdates(nil)
-            }
+        shell.statusBar.onInstall = { [weak self] in
+            self?.updaterController?.checkForUpdates(nil)
         }
     }
 

@@ -26,6 +26,12 @@
     <string>https://github.com/xikimay/nirux/releases/download/nightly/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>7PhLqqTXGKq7h4TMOfi4bocIshhvQaMT/3hue8fVBP0=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>3600</integer>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>
