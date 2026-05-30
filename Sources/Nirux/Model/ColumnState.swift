@@ -103,21 +103,25 @@ final class ColumnState {
         return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
-    convenience init(cwd: String) {
-        self.init(cwd: cwd, shellArgs: ["-l"])
+    convenience init(cwd: String, environment: [String: String] = [:]) {
+        self.init(cwd: cwd, shellArgs: ["-l"], environment: environment)
     }
 
     /// Init for a terminal that runs a command immediately (e.g. claude --continue).
     /// When the command exits, drops into an interactive shell.
-    convenience init(cwd: String, command: String) {
+    convenience init(cwd: String, command: String, environment: [String: String] = [:]) {
         // Match a normal terminal launch: interactive + login shell. This
         // ensures PATH/bootstrap logic from .zprofile/.zshrc is available
         // when Nirux restores command-backed columns after a Finder relaunch.
-        self.init(cwd: cwd, shellArgs: ["-i", "-l", "-c", "\(command); exec /bin/zsh -i -l"])
+        self.init(
+            cwd: cwd,
+            shellArgs: ["-i", "-l", "-c", "\(command); exec /bin/zsh -i -l"],
+            environment: environment
+        )
     }
 
     /// Shared terminal init — pass extra shell args for command mode.
-    private init(cwd: String, shellArgs: [String]) {
+    private init(cwd: String, shellArgs: [String], environment: [String: String]) {
         let dropView = DropTargetView()
         dropView.wantsLayer = true
         view = dropView
@@ -167,8 +171,16 @@ final class ColumnState {
 
         // Delay shell start so the terminal surface is created first
         let args = shellArgs
+        let env = environment
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            ptySession.start(shell: "/bin/zsh", args: args, cwd: cwd, cols: 80, rows: 24)
+            ptySession.start(
+                shell: "/bin/zsh",
+                args: args,
+                cwd: cwd,
+                cols: 80,
+                rows: 24,
+                environment: env
+            )
         }
     }
 

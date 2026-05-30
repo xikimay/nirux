@@ -84,17 +84,18 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         for url in urls {
             guard url.scheme == "nirux" else { continue }
             let params = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+            let profileID = workspaceProfileID(from: params)
             switch url.host {
 
-            // nirux://new-workspace?cwd=...&title=...&agent=claude|codex
+            // nirux://new-workspace?cwd=...&title=...&agent=claude|codex&profile=...
             case "new-workspace":
                 let cwd = params?.first(where: { $0.name == "cwd" })?.value
                 let title = params?.first(where: { $0.name == "title" })?.value
                 let agent = params?.first(where: { $0.name == "agent" })?.value
                     .flatMap { WorkspaceAgent(rawValue: $0) }
-                shell?.addWorkspace(title: title, cwd: cwd, agent: agent)
+                shell?.addWorkspace(title: title, cwd: cwd, agent: agent, profileID: profileID)
 
-            // nirux://new-worktree?branch=...&repo=...&agent=claude|codex&handover=/tmp/file.md
+            // nirux://new-worktree?branch=...&repo=...&agent=claude|codex&handover=/tmp/file.md&profile=...
             case "new-worktree":
                 let branch = params?.first(where: { $0.name == "branch" })?.value
                 let repo = params?.first(where: { $0.name == "repo" })?.value
@@ -102,7 +103,13 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
                     .flatMap { WorkspaceAgent(rawValue: $0) }
                 let handover = params?.first(where: { $0.name == "handover" })?.value
                 if let branch, let repo {
-                    shell?.createWorktreeWorkspace(branch: branch, repoRoot: repo, agent: agent, handoverPath: handover)
+                    shell?.createWorktreeWorkspace(
+                        branch: branch,
+                        repoRoot: repo,
+                        agent: agent,
+                        handoverPath: handover,
+                        profileID: profileID
+                    )
                 }
 
             default:
@@ -111,6 +118,10 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             NSApp.activate(ignoringOtherApps: true)
             mainWindow?.makeKeyAndOrderFront(nil)
         }
+    }
+
+    private func workspaceProfileID(from queryItems: [URLQueryItem]?) -> String? {
+        queryItems?.first(where: { ["profile", "profileID", "space"].contains($0.name) })?.value
     }
 
     // MARK: - NSMenuItemValidation

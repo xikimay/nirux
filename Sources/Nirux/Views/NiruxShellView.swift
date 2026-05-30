@@ -85,7 +85,7 @@ final class NiruxShellView: NSView {
         addSubview(edgeGlowBottom)
         addSubview(statusBar)
 
-        let workspace = WorkspaceState(title: "ws 1", cwd: NSHomeDirectory())
+        let workspace = WorkspaceState(title: "ws 1", cwd: NSHomeDirectory(), profileID: activeProfileID)
         workspace.onMetadataChanged = { [weak self] in self?.updateSidebar(); self?.refreshTitleBarLabels() }
         workspace.onDiffStatsClicked = { [weak self, weak workspace] in
             guard let workspace else { return }
@@ -470,6 +470,7 @@ final class NiruxShellView: NSView {
                     runningAgent = nil
                 }
                 if let runningAgent {
+                    let profileID = self.activeProfileID
                     let dirName = branch.replacingOccurrences(of: "/", with: "-")
                     let handoverFileName = Self.handoverFilename(for: runningAgent)
                     let handoverTmp = "/tmp/nirux-handover-\(runningAgent.rawValue)-\(dirName).md"
@@ -479,6 +480,7 @@ final class NiruxShellView: NSView {
                         + "&repo=\(repoRoot.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? repoRoot)"
                         + "&agent=\(runningAgent.rawValue)"
                         + "&handover=\(handoverTmp.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? handoverTmp)"
+                        + "&profile=\(profileID.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? profileID)"
                     let prompt = "Write a concise session handover to \(handoverTmp) "
                         + "(sections: Goal, Context, Done so far, Next steps). "
                         + "Nirux will move it into the new worktree as \(handoverFileName). "

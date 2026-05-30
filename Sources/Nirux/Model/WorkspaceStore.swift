@@ -58,6 +58,14 @@ final class WorkspaceStore {
         if activate { selectWorkspace(id: workspace.id) }
     }
 
+    func targetProfileID(for requestedProfileID: String?) -> String {
+        guard let requestedProfileID = requestedProfileID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !requestedProfileID.isEmpty,
+              profiles.contains(where: { $0.id == requestedProfileID })
+        else { return activeProfileID }
+        return requestedProfileID
+    }
+
     @discardableResult
     func removeWorkspace(_ workspace: WorkspaceState) -> WorkspaceState? {
         guard let index = workspaces.firstIndex(where: { $0 === workspace }) else { return nil }

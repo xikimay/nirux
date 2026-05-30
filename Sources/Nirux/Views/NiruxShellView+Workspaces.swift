@@ -12,7 +12,12 @@ extension NiruxShellView {
 
     private var activeProfile: WorkspaceProfile { workspaceStore.activeProfile }
 
-    func addWorkspace(title: String? = nil, cwd: String? = nil, agent: NiruxApp.WorkspaceAgent? = nil) {
+    func addWorkspace(
+        title: String? = nil,
+        cwd: String? = nil,
+        agent: NiruxApp.WorkspaceAgent? = nil,
+        profileID requestedProfileID: String? = nil
+    ) {
         let snapshot: NSImageView? = {
             guard let rep = viewport.bitmapImageRepForCachingDisplay(in: viewport.bounds) else { return nil }
             viewport.cacheDisplay(in: viewport.bounds, to: rep)
@@ -27,8 +32,8 @@ extension NiruxShellView {
 
         let wsTitle = title ?? "ws \(workspaces.count + 1)"
         let wsCwd = cwd ?? NSHomeDirectory()
-        let workspace = WorkspaceState(title: wsTitle, cwd: wsCwd)
-        workspace.profileID = activeProfileID
+        let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
+        let workspace = WorkspaceState(title: wsTitle, cwd: wsCwd, profileID: targetProfileID)
         workspace.onMetadataChanged = { [weak self] in self?.updateSidebar(); self?.refreshTitleBarLabels() }
         workspace.onDiffStatsClicked = { [weak self, weak workspace] in
             guard let workspace else { return }
@@ -92,7 +97,14 @@ extension NiruxShellView {
 
     /// Shared entry point: create a git worktree, move an optional handover file into it, and open a workspace.
     /// Used by both the `nirux://new-worktree` URL scheme and the WorktreePanel.
-    func createWorktreeWorkspace(branch: String, repoRoot: String, agent: NiruxApp.WorkspaceAgent? = .claude, handoverPath: String? = nil) {
+    func createWorktreeWorkspace(
+        branch: String,
+        repoRoot: String,
+        agent: NiruxApp.WorkspaceAgent? = .claude,
+        handoverPath: String? = nil,
+        profileID requestedProfileID: String? = nil
+    ) {
+        let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
         DispatchQueue.global(qos: .userInitiated).async {
             let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot)
             // Move handover file into the worktree if provided
@@ -103,7 +115,7 @@ extension NiruxShellView {
             }
             DispatchQueue.main.async { [weak self] in
                 if let path {
-                    self?.addWorkspace(title: branch, cwd: path, agent: agent)
+                    self?.addWorkspace(title: branch, cwd: path, agent: agent, profileID: targetProfileID)
                 } else {
                     NSLog("[Worktree] Failed to create worktree for \(branch): \(error ?? "unknown")")
                 }

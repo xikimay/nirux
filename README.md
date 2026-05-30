@@ -108,10 +108,10 @@ nirux://new-workspace?cwd=/path/to/project&title=my-task&agent=claude
 Create a Git worktree and open it as a workspace:
 
 ```text
-nirux://new-worktree?branch=feat/example&repo=/path/to/repo&agent=codex&handover=/tmp/context.md
+nirux://new-worktree?branch=feat/example&repo=/path/to/repo&agent=codex&handover=/tmp/context.md&profile=default
 ```
 
-Supported agents are `claude` and `codex`. When a handover file is provided, Nirux moves it into the new worktree as `.claude-handover.md` or `.codex-handover.md`, then launches the selected agent with a prompt to read it.
+Supported agents are `claude` and `codex`. The optional `profile` query parameter targets the Nirux session/space that should receive the new workspace; Nirux terminals expose it as `NIRUX_PROFILE_ID` for the worktree skill. When a handover file is provided, Nirux moves it into the new worktree as `.claude-handover.md` or `.codex-handover.md`, then launches the selected agent with a prompt to read it.
 
 The command palette action `Install Worktree Skill` writes a local `nirux-worktree` skill to:
 

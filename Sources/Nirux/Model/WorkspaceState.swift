@@ -41,11 +41,17 @@ final class WorkspaceState {
     var onMetadataChanged: (() -> Void)?
     var onDiffStatsClicked: (() -> Void)?
 
-    init(id: String = UUID().uuidString, title: String? = nil, cwd: String) {
+    init(
+        id: String = UUID().uuidString,
+        title: String? = nil,
+        cwd: String,
+        profileID: String = WorkspaceProfile.defaultID
+    ) {
         self.id = id
         self.cwd = cwd
         self.title = title ?? "workspace"
         self.titleIsManual = (title != nil)
+        self.profileID = profileID
 
         containerView = NSView()
         containerView.wantsLayer = true
@@ -117,6 +123,13 @@ final class WorkspaceState {
 
     // MARK: - Column Management
 
+    private func terminalEnvironment() -> [String: String] {
+        [
+            "NIRUX_PROFILE_ID": profileID,
+            "NIRUX_WORKSPACE_ID": id
+        ]
+    }
+
     private func insertColumn(_ col: ColumnState) {
         let insertAt = columns.isEmpty ? 0 : min(focusedIndex + 1, columns.count)
         columns.insert(col, at: insertAt)
@@ -126,14 +139,14 @@ final class WorkspaceState {
 
     func addColumn() {
         let effectiveCwd = columns[safe: focusedIndex]?.pty?.childCwd ?? cwd
-        let col = ColumnState(cwd: effectiveCwd)
+        let col = ColumnState(cwd: effectiveCwd, environment: terminalEnvironment())
         setupAllTracking(for: col)
         insertColumn(col)
     }
 
     func addColumn(command: String) {
         let effectiveCwd = columns[safe: focusedIndex]?.pty?.childCwd ?? cwd
-        let col = ColumnState(cwd: effectiveCwd, command: command)
+        let col = ColumnState(cwd: effectiveCwd, command: command, environment: terminalEnvironment())
         setupAllTracking(for: col)
         insertColumn(col)
     }

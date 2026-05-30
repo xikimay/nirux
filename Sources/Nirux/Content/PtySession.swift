@@ -277,7 +277,14 @@ final class PtySession: @unchecked Sendable {
         }
     }
 
-    func start(shell: String = "/bin/zsh", args: [String] = ["-l"], cwd: String, cols: Int = 80, rows: Int = 24) {
+    func start(
+        shell: String = "/bin/zsh",
+        args: [String] = ["-l"],
+        cwd: String,
+        cols: Int = 80,
+        rows: Int = 24,
+        environment: [String: String] = [:]
+    ) {
         // Compute PATH BEFORE fork (Foundation APIs like FileManager are not
         // async-signal-safe and crash in child processes). The effective path
         // is memoized via a static-let and only applied to the child, leaving
@@ -299,6 +306,9 @@ final class PtySession: @unchecked Sendable {
             setenv("PATH", effectivePath, 1)
             setenv("TERM", "xterm-256color", 1)
             setenv("LANG", "en_US.UTF-8", 1)
+            for (name, value) in environment {
+                setenv(name, value, 1)
+            }
             if noFlicker {
                 setenv("CLAUDE_CODE_NO_FLICKER", "1", 1)
             }

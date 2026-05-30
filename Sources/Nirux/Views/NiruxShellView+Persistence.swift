@@ -15,13 +15,16 @@ extension NiruxShellView {
         let validProfileIDs = Set(profiles.map { $0.id })
 
         for persistedWS in state.workspaces {
+            let persistedProfileID = persistedWS.profileID ?? WorkspaceProfile.defaultID
+            let profileID = validProfileIDs.contains(persistedProfileID)
+                ? persistedProfileID
+                : WorkspaceProfile.defaultID
             let workspace = WorkspaceState(
                 id: persistedWS.id ?? UUID().uuidString,
                 title: persistedWS.title,
-                cwd: persistedWS.cwd
+                cwd: persistedWS.cwd,
+                profileID: profileID
             )
-            let profileID = persistedWS.profileID ?? WorkspaceProfile.defaultID
-            workspace.profileID = validProfileIDs.contains(profileID) ? profileID : WorkspaceProfile.defaultID
             workspace.isInactive = persistedWS.isInactive
             workspace.onMetadataChanged = { [weak self] in self?.updateSidebar(); self?.refreshTitleBarLabels() }
             workspace.onDiffStatsClicked = { [weak self, weak workspace] in

@@ -176,6 +176,23 @@ final class PersistedStateCodingTests: XCTestCase {
     }
 
     @MainActor
+    func testWorkspaceStoreResolvesExplicitTargetProfile() {
+        let store = WorkspaceStore()
+        let first = WorkspaceProfile(id: "first", name: "first", colorHex: "#9ECE6A")
+        let second = WorkspaceProfile(id: "second", name: "second", colorHex: "#E0AF68")
+        store.replaceProfiles([WorkspaceProfile.defaultProfile, first, second], activeProfileID: first.id)
+
+        let workspace = WorkspaceState(id: "main", title: "main", cwd: "/tmp/main", profileID: first.id)
+        store.appendWorkspace(workspace)
+
+        XCTAssertEqual(store.activeProfileID, first.id)
+        XCTAssertEqual(store.targetProfileID(for: second.id), second.id)
+        XCTAssertEqual(store.targetProfileID(for: "missing"), first.id)
+        XCTAssertEqual(store.targetProfileID(for: "   "), first.id)
+        XCTAssertEqual(store.targetProfileID(for: nil), first.id)
+    }
+
+    @MainActor
     func testWorkspaceStoreRenamesProfilesUniquely() {
         let store = WorkspaceStore()
         let profile = WorkspaceProfile(id: "repo", name: "repo", colorHex: "#9ECE6A")
