@@ -51,6 +51,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     private let tabBar: EditorTabBar
     private let fileTree: EditorFileTree
     private let treeDivider: NSView
+    private let conflictBanner = EditorConflictBanner()
     private var monacoReady = false
     /// Operations queued before Monaco signaled `monacoReady`.
     private var pendingOps: [() -> Void] = []
@@ -135,6 +136,13 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         webView.setValue(false, forKey: "drawsBackground")
         webView.underPageBackgroundColor = NSColor(red: 0.10, green: 0.11, blue: 0.15, alpha: 1)
         addSubview(webView)
+
+        // Conflict banner floats over the editor surface — added last so it
+        // stacks above the webview.
+        conflictBanner.isHidden = true
+        conflictBanner.onReload = { [weak self] in self?.resolveConflict(reload: true) }
+        conflictBanner.onKeep = { [weak self] in self?.resolveConflict(reload: false) }
+        addSubview(conflictBanner)
     }
 
     private func loadEditor() {
@@ -194,6 +202,15 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         let editorW = bounds.width - editorX
         tabBar.frame = NSRect(x: editorX, y: bounds.height - tabH, width: editorW, height: tabH)
         webView.frame = NSRect(x: editorX, y: 0, width: editorW, height: bounds.height - tabH)
+        if !conflictBanner.isHidden {
+            let bannerH = EditorConflictBanner.height
+            conflictBanner.frame = NSRect(
+                x: editorX + 8,
+                y: bounds.height - tabH - bannerH - 8,
+                width: editorW - 16,
+                height: bannerH
+            )
+        }
     }
 
     // MARK: - Public API
@@ -758,6 +775,34 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             return EditorTabBar.Tab(path: path, isDirty: dirty, title: diffGroupTabs[path]?.title)
         }
         tabBar.update(tabs: bars, activePath: activePath)
+        updateConflictBanner()
+    }
+
+    /// Show the disk-conflict banner when the active tab was modified
+    /// externally while dirty. Choosing "Keep My Changes" is the explicit
+    /// overwrite; "Reload from Disk" discards the buffer.
+    private func updateConflictBanner() {
+        guard let path = activePath, diskModifiedWhileDirty.contains(path) else {
+            conflictBanner.isHidden = true
+            return
+        }
+        conflictBanner.configure(fileName: (path as NSString).lastPathComponent)
+        conflictBanner.isHidden = false
+        needsLayout = true
+    }
+
+    private func resolveConflict(reload: Bool) {
+        guard let path = activePath, diskModifiedWhileDirty.contains(path) else { return }
+        if reload {
+            reloadFromDisk(path: path)
+        } else {
+            // Explicit overwrite: adopt the current disk mtime as the new
+            // baseline so the watcher doesn't re-flag before the next save.
+            mtimeByPath[path] = mtime(of: path)
+            diskModifiedWhileDirty.remove(path)
+            refreshTabBar()
+            onDirtyChanged?()
+        }
     }
 
     // MARK: - WKNavigationDelegate
