@@ -294,9 +294,17 @@ final class PtySession: @unchecked Sendable {
         // Read settings BEFORE fork — FileManager is forbidden in child process
         let noFlicker = Persistence.load()?.settings?.claudeNoFlicker != false
 
+        // Prefer the viewport size that arrived while the PTY didn't exist yet
+        // (the shell start is deferred ~0.5s after the surface) — otherwise the
+        // fork keeps the caller's 80x24 and the upstream debounces never
+        // re-send the real size.
+        let initialCols = state.pendingCols > 0 ? state.pendingCols : cols
+        let initialRows = state.pendingRows > 0 ? state.pendingRows : rows
+        NiruxDebugLog.log("pty start cols=\(initialCols) rows=\(initialRows) (pending \(state.pendingCols)x\(state.pendingRows))")
+
         var ws = winsize()
-        ws.ws_col = UInt16(cols)
-        ws.ws_row = UInt16(rows)
+        ws.ws_col = UInt16(initialCols)
+        ws.ws_row = UInt16(initialRows)
 
         var fd: Int32 = 0
         let pid = forkpty(&fd, nil, nil, &ws)
@@ -325,6 +333,8 @@ final class PtySession: @unchecked Sendable {
         guard pid > 0 else { return }
         state.ptyFd = fd
         state.childPid = pid
+        state.lastCols = initialCols
+        state.lastRows = initialRows
         state.markPtyStarted()
 
         // Read PTY output → feed to terminal for rendering
@@ -479,10 +489,64 @@ private final class PtyState: @unchecked Sendable {
 
     var lastCols: Int = 0
     var lastRows: Int = 0
+    /// Last viewport size seen before the PTY existed. The shell starts ~0.5s
+    /// after the surface (ColumnState defers it), so the initial grid resize
+    /// arrives while ptyFd is still -1; without this the fork falls back to
+    /// 80x24 and the debounces upstream never re-send the real size.
+    var pendingCols: Int = 0
+    var pendingRows: Int = 0
 
+    private var targetCols: Int = 0
+    private var targetRows: Int = 0
+    private var winsizeQuietTimer: Timer?
+
+    /// Coalesce winsize updates: apply the first change immediately, then hold
+    /// a quiet window so storms (fullscreen transitions, width-preset cycling,
+    /// session restore) deliver only the final settled size. Rapid zig-zag
+    /// SIGWINCH bursts can wedge TUI renderers (Claude Code ends up stuck on
+    /// an intermediate width) — a single trailing resize never does.
     func resize(cols: Int, rows: Int) {
-        // Debounce: only send SIGWINCH if dimensions actually changed
-        guard ptyFd >= 0, cols != lastCols || rows != lastRows else { return }
+        if Thread.isMainThread {
+            resizeOnMain(cols: cols, rows: rows)
+        } else {
+            DispatchQueue.main.async { self.resizeOnMain(cols: cols, rows: rows) }
+        }
+    }
+
+    private func resizeOnMain(cols: Int, rows: Int) {
+        guard ptyFd >= 0 else {
+            NiruxDebugLog.log("pty fd=-1 resize deferred cols=\(cols) rows=\(rows)")
+            pendingCols = cols
+            pendingRows = rows
+            return
+        }
+        targetCols = cols
+        targetRows = rows
+        guard winsizeQuietTimer == nil else { return }
+        applyTargetWinsize()
+        startWinsizeQuietWindow()
+    }
+
+    private func startWinsizeQuietWindow() {
+        winsizeQuietTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.winsizeQuietTimer = nil
+            if self.targetCols != self.lastCols || self.targetRows != self.lastRows {
+                self.applyTargetWinsize()
+                self.startWinsizeQuietWindow()
+            }
+        }
+    }
+
+    private func applyTargetWinsize() {
+        let cols = targetCols
+        let rows = targetRows
+        guard ptyFd >= 0, cols > 0, rows > 0 else { return }
+        guard cols != lastCols || rows != lastRows else {
+            NiruxDebugLog.log("pty fd=\(ptyFd) pid=\(childPid) resize skipped cols=\(cols) rows=\(rows)")
+            return
+        }
+        NiruxDebugLog.log("pty fd=\(ptyFd) pid=\(childPid) TIOCSWINSZ cols=\(cols) rows=\(rows) (was \(lastCols)x\(lastRows))")
         markInteraction(suppressBurstDetectionFor: Self.displayRefreshSuppressionInterval)
         lastCols = cols
         lastRows = rows

@@ -234,11 +234,10 @@ final class WorkspaceState {
         // 2. Position each column with gap
         var xOffset: CGFloat = 0
         for (index, col) in columns.enumerated() {
-            // Disable auto-resize BEFORE changing the parent frame to prevent
-            // an intermediate terminal resize (which causes garbled display).
-            if let terminal = col.terminalView {
-                terminal.autoresizingMask = fitAll ? [] : [.width, .height]
-            }
+            // Terminal frames are always set explicitly by layoutWithTitleBar;
+            // autoresizing would push intermediate sizes to Ghostty during a
+            // window resize before this layout pass runs (garbled display).
+            col.terminalView?.autoresizingMask = []
             col.view.frame = NSRect(x: xOffset, y: 0, width: widths[index], height: height)
             col.layoutWithTitleBar(width: widths[index], height: height, resizeTerminal: !skipTerminalResize)
             col.view.layer?.masksToBounds = true
