@@ -227,9 +227,12 @@ final class NiruxShellView: NSView {
     /// pile up. In pilot mode every workspace is visible; otherwise only the
     /// active one is.
     private func syncTerminalOcclusion() {
+        // A minimized or fully covered window reports itself non-visible via
+        // occlusionState; without this AND every surface keeps drawing.
+        let windowVisible = window?.occlusionState.contains(.visible) ?? true
         for (index, workspace) in workspaces.enumerated() {
             let isInActiveProfile = workspace.profileID == activeProfileID
-            let visible = isInActiveProfile && (isPilotMode || index == activeWSIndex)
+            let visible = windowVisible && isInActiveProfile && (isPilotMode || index == activeWSIndex)
             for col in workspace.columns {
                 col.terminalView?.setSurfaceVisible(visible)
             }
@@ -296,6 +299,11 @@ final class NiruxShellView: NSView {
                 MainActor.assumeIsolated {
                     self?.relayout(animated: false)
                     self?.scheduleTerminalStabilizationAfterFullscreen()
+                }
+            }
+            NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.syncTerminalOcclusion()
                 }
             }
         }

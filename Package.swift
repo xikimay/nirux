@@ -9,8 +9,8 @@ let package = Package(
     ],
     dependencies: [
         .package(
-            url: "https://github.com/xikimay/libghostty-spm.git",
-            revision: "91efe702f1afb06e5b4c1e6c40351c5f6b900e98"
+            url: "https://github.com/Lakr233/libghostty-spm.git",
+            exact: "1.3.1"
         ),
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0")
     ],
