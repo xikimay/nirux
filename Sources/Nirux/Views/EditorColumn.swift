@@ -21,6 +21,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     private var dirtyByPath: [String: Bool] = [:]
     /// Per-tab on-disk mtime as of the last open / external-modification check.
     private var mtimeByPath: [String: Date] = [:]
+    /// Per-tab encoding detected at open — saves round-trip the same
+    /// encoding instead of silently transcoding everything to UTF-8.
+    private var encodingByPath: [String: String.Encoding] = [:]
     /// Tabs whose disk version moved while the buffer was dirty — saving would
     /// clobber the on-disk content.
     private var diskModifiedWhileDirty: Set<String> = []
@@ -51,7 +54,13 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     private let tabBar: EditorTabBar
     private let fileTree: EditorFileTree
     private let treeDivider: NSView
+    private let conflictBanner = EditorConflictBanner()
+    private let loadFailureOverlay = EditorLoadFailureOverlay()
     private var monacoReady = false
+    /// Fires once if `monacoReady` doesn't arrive shortly after loading —
+    /// without it a failed Monaco load is a silent blank surface.
+    private var monacoLoadWatchdog: Timer?
+    private static let loadWatchdogInterval: TimeInterval = 8
     /// Operations queued before Monaco signaled `monacoReady`.
     private var pendingOps: [() -> Void] = []
 
@@ -64,6 +73,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
     private var fileWatchTimer: Timer?
     private static let watchInterval: TimeInterval = 1.5
+    /// Files above this size ask for confirmation before opening in Monaco.
+    private static let largeFileWarningBytes: UInt64 = 5_000_000
 
     init(workspaceCwd: String) {
         self.workspaceCwd = workspaceCwd
@@ -98,6 +109,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         if window == nil {
             fileWatchTimer?.invalidate()
             fileWatchTimer = nil
+            monacoLoadWatchdog?.invalidate()
+            monacoLoadWatchdog = nil
             webView.configuration.userContentController
                 .removeScriptMessageHandler(forName: "nirux")
         }
@@ -135,16 +148,51 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         webView.setValue(false, forKey: "drawsBackground")
         webView.underPageBackgroundColor = NSColor(red: 0.10, green: 0.11, blue: 0.15, alpha: 1)
         addSubview(webView)
+
+        // Conflict banner floats over the editor surface — added last so it
+        // stacks above the webview.
+        conflictBanner.isHidden = true
+        conflictBanner.onReload = { [weak self] in self?.resolveConflict(reload: true) }
+        conflictBanner.onKeep = { [weak self] in self?.resolveConflict(reload: false) }
+        addSubview(conflictBanner)
+
+        loadFailureOverlay.isHidden = true
+        loadFailureOverlay.onRetry = { [weak self] in self?.retryEditorLoad() }
+        addSubview(loadFailureOverlay)
     }
 
     private func loadEditor() {
         guard let indexURL = Self.findEditorIndex() else {
-            // No assets — surface it via the tab bar so the user sees the error.
-            tabBar.update(tabs: [.init(path: "Editor assets missing", isDirty: false, title: nil)], activePath: nil)
+            showLoadFailure(message: "Editor assets are missing from this build.", showRetry: true)
             return
         }
+        loadFailureOverlay.isHidden = true
         let assetsDir = indexURL.deletingLastPathComponent()
         webView.loadFileURL(indexURL, allowingReadAccessTo: assetsDir)
+        startLoadWatchdog()
+    }
+
+    private func startLoadWatchdog() {
+        monacoLoadWatchdog?.invalidate()
+        monacoLoadWatchdog = Timer.scheduledTimer(
+            withTimeInterval: Self.loadWatchdogInterval, repeats: false
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, !self.monacoReady else { return }
+                self.showLoadFailure(message: "The editor took too long to load.", showRetry: true)
+            }
+        }
+    }
+
+    private func retryEditorLoad() {
+        loadFailureOverlay.isHidden = true
+        loadEditor()
+    }
+
+    private func showLoadFailure(message: String, showRetry: Bool) {
+        loadFailureOverlay.configure(message: message, showRetry: showRetry)
+        loadFailureOverlay.isHidden = false
+        needsLayout = true
     }
 
     /// Locates `EditorAssets/index.html` in release (`bundle.sh` copies the
@@ -194,6 +242,16 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         let editorW = bounds.width - editorX
         tabBar.frame = NSRect(x: editorX, y: bounds.height - tabH, width: editorW, height: tabH)
         webView.frame = NSRect(x: editorX, y: 0, width: editorW, height: bounds.height - tabH)
+        loadFailureOverlay.frame = webView.frame
+        if !conflictBanner.isHidden {
+            let bannerH = EditorConflictBanner.height
+            conflictBanner.frame = NSRect(
+                x: editorX + 8,
+                y: bounds.height - tabH - bannerH - 8,
+                width: editorW - 16,
+                height: bannerH
+            )
+        }
     }
 
     // MARK: - Public API
@@ -202,8 +260,11 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     /// a new tab and makes it active. Path may be absolute or relative to
     /// the workspace cwd. When `line` is non-nil the editor jumps to and
     /// centers that line after the model is ready (used by workspace search
-    /// to land on the matched line).
-    func open(path: String, line: Int? = nil) {
+    /// to land on the matched line). `interactive` controls failure UX:
+    /// explicit user opens get alerts and a large-file confirmation;
+    /// session restore passes false so a problematic file can't pop a modal
+    /// at every launch.
+    func open(path: String, line: Int? = nil, interactive: Bool = true) {
         let absolute = absolutePath(for: path)
 
         // Already open → just switch.
@@ -213,14 +274,84 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             return
         }
 
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: absolute)),
-              let content = String(data: data, encoding: .utf8)
-        else {
-            NSLog("[EditorColumn] cannot read \(absolute)")
-            return
+        // Very large files make Monaco sluggish — confirm before loading.
+        if interactive,
+           let size = Self.fileByteCount(path: absolute),
+           size > Self.largeFileWarningBytes {
+            let alert = NSAlert()
+            alert.messageText = "Open large file?"
+            let mb = String(format: "%.1f", Double(size) / 1_000_000)
+            alert.informativeText = "\((absolute as NSString).lastPathComponent) is \(mb) MB. Editing may be slow."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Open")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
 
-        openBuffer(path: absolute, content: content, mtime: mtime(of: absolute), line: line)
+        guard let (content, encoding) = readFileContent(at: absolute, interactive: interactive)
+        else { return }
+
+        openBuffer(path: absolute, content: content, mtime: mtime(of: absolute), line: line, encoding: encoding)
+    }
+
+    /// Read result with encoding fallbacks. `.binary` means NUL bytes were
+    /// found (after ruling out UTF-16 BOM); `.unreadable` covers I/O errors
+    /// and undecodable content. The detected encoding is carried so saves
+    /// round-trip the file in its original encoding.
+    private enum FileReadResult {
+        case ok(String, String.Encoding)
+        case binary
+        case unreadable
+    }
+
+    private nonisolated static func readTextFile(at path: String) -> FileReadResult {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return .unreadable }
+        // UTF-16 BOM first — those files are full of NUL bytes and would
+        // trip the binary check below.
+        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]),
+           let utf16 = String(data: data, encoding: .utf16) {
+            return .ok(utf16, .utf16)
+        }
+        // Full-file NUL scan — an 8KB-prefix scan let binaries with an ASCII
+        // header through, and the Latin-1 fallback then corrupted them on
+        // save (mojibake byte expansion).
+        if data.contains(0) { return .binary }
+        if let utf8 = String(data: data, encoding: .utf8) { return .ok(utf8, .utf8) }
+        // ISO Latin-1 maps every byte, so it always succeeds — last resort
+        // for legacy single-byte encodings.
+        if let latin = String(data: data, encoding: .isoLatin1) { return .ok(latin, .isoLatin1) }
+        return .unreadable
+    }
+
+    /// Reads a text file for editing. Explicit user opens (`interactive`)
+    /// surface failures as alerts; internal reads just log.
+    private func readFileContent(at absolute: String, interactive: Bool) -> (content: String, encoding: String.Encoding)? {
+        switch Self.readTextFile(at: absolute) {
+        case .ok(let content, let encoding):
+            return (content, encoding)
+        case .binary:
+            if interactive {
+                showOpenFailureAlert(path: absolute, reason: "Binary files can't be edited.")
+            } else {
+                NSLog("[EditorColumn] skipping binary file \(absolute)")
+            }
+        case .unreadable:
+            if interactive {
+                showOpenFailureAlert(path: absolute, reason: "The file couldn't be read.")
+            } else {
+                NSLog("[EditorColumn] cannot read \(absolute)")
+            }
+        }
+        return nil
+    }
+
+    private func showOpenFailureAlert(path: String, reason: String) {
+        let alert = NSAlert()
+        alert.messageText = "Can't open \((path as NSString).lastPathComponent)"
+        alert.informativeText = reason
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private func openDeletedBufferForDiff(path absolute: String, activate: Bool = true) {
@@ -238,10 +369,12 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         content: String,
         mtime: Date?,
         line: Int?,
-        activate: Bool = true
+        activate: Bool = true,
+        encoding: String.Encoding = .utf8
     ) {
         tabPaths.append(absolute)
         dirtyByPath[absolute] = false
+        encodingByPath[absolute] = encoding
         if let mtime {
             mtimeByPath[absolute] = mtime
         } else {
@@ -297,13 +430,18 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         }
     }
 
-    /// Toggle the visual diff for the active tab. In HEAD mode the
+    /// Toggle Monaco's selected diff view on the active tab. In HEAD mode the
     /// original side reads `git show HEAD:<relpath>`. In Branch mode it reads
     /// the merge-base version of the file so committed branch changes are
     /// included too. Modified side keeps the live buffer so the user can save
     /// edits straight from the diff.
     func toggleDiff() {
         toggleDiff(mode: selectedDiffMode)
+    }
+
+    /// Toggle word wrap in the Monaco surface (and diff surface when active).
+    func toggleWordWrap() {
+        sendBridge(["type": "toggleWordWrap"])
     }
 
     func toggleDiff(mode: EditorDiffMode) {
@@ -408,13 +546,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         }
 
         if FileManager.default.fileExists(atPath: absolute) {
-            guard let data = try? Data(contentsOf: URL(fileURLWithPath: absolute)),
-                  let content = String(data: data, encoding: .utf8)
-            else {
-                NSLog("[EditorColumn] cannot read \(absolute)")
-                return false
-            }
-            openBuffer(path: absolute, content: content, mtime: mtime(of: absolute), line: nil, activate: activate)
+            guard let (content, encoding) = readFileContent(at: absolute, interactive: false)
+            else { return false }
+            openBuffer(path: absolute, content: content, mtime: mtime(of: absolute), line: nil, activate: activate, encoding: encoding)
         } else {
             openDeletedBufferForDiff(path: absolute, activate: activate)
         }
@@ -525,7 +659,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         of absPath: String,
         relativePath rel: String
     ) -> [String: Any]? {
-        guard let byteCount = diffCollectionFileByteCount(path: absPath),
+        guard let byteCount = fileByteCount(path: absPath),
               byteCount > maxDiffCollectionFileBytes
         else { return nil }
         NSLog("[EditorColumn] replacing large visual diff file \(absPath) (\(byteCount) bytes)")
@@ -538,7 +672,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         ]
     }
 
-    private nonisolated static func diffCollectionFileByteCount(path: String) -> UInt64? {
+    private nonisolated static func fileByteCount(path: String) -> UInt64? {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
               let size = attrs[.size] as? NSNumber
         else { return nil }
@@ -546,8 +680,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     }
 
     private nonisolated static func fileContent(at path: String) -> String? {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
-        return String(data: data, encoding: .utf8)
+        guard case .ok(let content, _) = readTextFile(at: path) else { return nil }
+        return content
     }
 
     private nonisolated static func gitContent(relativePath rel: String, ref: String, cwd: String) -> String? {
@@ -598,6 +732,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         }
         dirtyByPath.removeValue(forKey: path)
         mtimeByPath.removeValue(forKey: path)
+        encodingByPath.removeValue(forKey: path)
         diskModifiedWhileDirty.remove(path)
         diffModeByPath.removeValue(forKey: path)
         diffGroupTabs.removeValue(forKey: path)
@@ -643,14 +778,17 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     /// Re-read the active file from disk and push its content to Monaco.
     /// Used when an external change races a clean buffer.
     private func reloadFromDisk(path: String) {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-              let content = String(data: data, encoding: .utf8)
-        else { return }
+        guard case .ok(let content, let encoding) = Self.readTextFile(at: path) else { return }
 
         mtimeByPath[path] = mtime(of: path)
+        encodingByPath[path] = encoding
         diskModifiedWhileDirty.remove(path)
         refreshTabBar()
-        sendBridge(["type": "openFile", "path": path, "content": content])
+        // activate: false is critical for background tabs — an openFile with
+        // implicit activation would steal Monaco's active tab, and the next
+        // Cmd+S (which saves the JS-side currentPath) would write the wrong
+        // buffer to the wrong file.
+        sendBridge(["type": "openFile", "path": path, "content": content, "activate": path == activePath])
     }
 
     // MARK: - File watcher
@@ -709,14 +847,12 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     private func sendBridge(_ payload: [String: Any]) {
         let send = { [weak self] in
             guard let self else { return }
-            guard let json = try? JSONSerialization.data(withJSONObject: payload),
-                  let jsonStr = String(data: json, encoding: .utf8)
+            guard let json = try? JSONSerialization.data(withJSONObject: payload)
             else { return }
-            let escaped = jsonStr
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "`", with: "\\`")
-                .replacingOccurrences(of: "$", with: "\\$")
-            let js = "window.niruxBridge.handle(`\(escaped)`)"
+            // Base64 transport: the payload can contain arbitrary file content
+            // (backticks, ${...}, quotes) that breaks template-literal embedding.
+            let b64 = json.base64EncodedString()
+            let js = "window.niruxBridge.handleB64(\"\(b64)\")"
             self.webView.evaluateJavaScript(js, completionHandler: nil)
         }
         if monacoReady { send() } else { pendingOps.append(send) }
@@ -724,16 +860,31 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
     /// Persist a buffer to disk. Path comes from JS but we only honor saves
     /// for tabs we're actually tracking, so a compromised page can't redirect
-    /// writes outside our open set.
+    /// writes outside our open set. Writes use the encoding detected at
+    /// open — a UTF-16 (or Latin-1) file is not silently transcoded to UTF-8.
     private func handleSave(body: [String: Any]) {
         guard let path = body["path"] as? String,
               openPaths.contains(path),
               let content = body["content"] as? String
         else { return }
 
+        let encoding = encodingByPath[path] ?? .utf8
+        var data = content.data(using: encoding)
+        if data == nil, encoding != .utf8 {
+            // e.g. a Latin-1 file that now contains unrepresentable
+            // characters — fall back to UTF-8 so the save can't fail.
+            NSLog("[EditorColumn] \(path): \(encoding) can no longer represent the buffer; saving as UTF-8")
+            data = content.data(using: .utf8)
+            if data != nil { encodingByPath[path] = .utf8 }
+        }
+        guard let data else {
+            NSLog("[EditorColumn] save failed for \(path): buffer not representable")
+            return
+        }
+
         let url = URL(fileURLWithPath: path)
         do {
-            try content.data(using: .utf8)?.write(to: url, options: .atomic)
+            try data.write(to: url, options: .atomic)
         } catch {
             NSLog("[EditorColumn] save failed for \(path): \(error)")
             return
@@ -755,6 +906,34 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             return EditorTabBar.Tab(path: path, isDirty: dirty, title: diffGroupTabs[path]?.title)
         }
         tabBar.update(tabs: bars, activePath: activePath)
+        updateConflictBanner()
+    }
+
+    /// Show the disk-conflict banner when the active tab was modified
+    /// externally while dirty. Choosing "Keep My Changes" is the explicit
+    /// overwrite; "Reload from Disk" discards the buffer.
+    private func updateConflictBanner() {
+        guard let path = activePath, diskModifiedWhileDirty.contains(path) else {
+            conflictBanner.isHidden = true
+            return
+        }
+        conflictBanner.configure(fileName: (path as NSString).lastPathComponent)
+        conflictBanner.isHidden = false
+        needsLayout = true
+    }
+
+    private func resolveConflict(reload: Bool) {
+        guard let path = activePath, diskModifiedWhileDirty.contains(path) else { return }
+        if reload {
+            reloadFromDisk(path: path)
+        } else {
+            // Explicit overwrite: adopt the current disk mtime as the new
+            // baseline so the watcher doesn't re-flag before the next save.
+            mtimeByPath[path] = mtime(of: path)
+            diskModifiedWhileDirty.remove(path)
+            refreshTabBar()
+            onDirtyChanged?()
+        }
     }
 
     // MARK: - WKNavigationDelegate
@@ -786,6 +965,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         switch type {
         case "monacoReady":
             monacoReady = true
+            monacoLoadWatchdog?.invalidate()
+            monacoLoadWatchdog = nil
+            loadFailureOverlay.isHidden = true
             let queued = pendingOps
             pendingOps.removeAll()
             for op in queued { op() }

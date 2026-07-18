@@ -33,6 +33,10 @@ final class ColumnState {
         pty != nil ? 32 : 0
     }
 
+    /// Spec needed to respawn the shell after it exits.
+    private var terminalSpec: (cwd: String, shellArgs: [String], environment: [String: String])?
+    private var shellExitedOverlay: ShellExitedOverlay?
+
     private func setupTitleBar() {
         let bar = WindowDragView()
         bar.wantsLayer = true
@@ -86,6 +90,7 @@ final class ColumnState {
         // Terminal fills the remaining space below the title bar
         if resizeTerminal, let terminal = terminalView {
             terminal.frame = NSRect(x: 0, y: 0, width: width, height: height - barHeight)
+            shellExitedOverlay?.frame = terminal.frame
         }
     }
 
@@ -113,15 +118,20 @@ final class ColumnState {
         // Match a normal terminal launch: interactive + login shell. This
         // ensures PATH/bootstrap logic from .zprofile/.zshrc is available
         // when Nirux restores command-backed columns after a Finder relaunch.
+        // The shell path is single-quoted — an unquoted path with spaces or
+        // metacharacters would be word-split by the -c string.
+        let shell = PtySession.defaultShell
+        let quotedShell = "'" + shell.replacingOccurrences(of: "'", with: "'\\''") + "'"
         self.init(
             cwd: cwd,
-            shellArgs: ["-i", "-l", "-c", "\(command); exec /bin/zsh -i -l"],
+            shellArgs: ["-i", "-l", "-c", "\(command); exec \(quotedShell) -i -l"],
             environment: environment
         )
     }
 
     /// Shared terminal init — pass extra shell args for command mode.
     private init(cwd: String, shellArgs: [String], environment: [String: String]) {
+        terminalSpec = (cwd, shellArgs, environment)
         let dropView = DropTargetView()
         dropView.wantsLayer = true
         view = dropView
@@ -169,12 +179,18 @@ final class ColumnState {
             self?.onOsc9Received?()
         }
 
+        // Shell exit → show the restart overlay over the (still visible)
+        // terminal. Scrollback survives a restart.
+        ptySession.onProcessExit = { [weak self] in
+            self?.showShellExitedOverlay()
+        }
+
         // Delay shell start so the terminal surface is created first
         let args = shellArgs
         let env = environment
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             ptySession.start(
-                shell: "/bin/zsh",
+                shell: PtySession.defaultShell,
                 args: args,
                 cwd: cwd,
                 cols: 80,
@@ -209,6 +225,38 @@ final class ColumnState {
     func cycleWidth() {
         NiruxDebugLog.log("cycleWidth \(widthPreset) -> \(widthPreset.next)")
         widthPreset = widthPreset.next
+    }
+
+    // MARK: - Shell exit / restart
+
+    private func showShellExitedOverlay() {
+        // Column closing also detaches the view — no overlay on a dead column.
+        guard view.window != nil, let terminal = terminalView else { return }
+        if shellExitedOverlay == nil {
+            let overlay = ShellExitedOverlay()
+            overlay.onRestart = { [weak self] in self?.restartShell() }
+            view.addSubview(overlay)
+            shellExitedOverlay = overlay
+        }
+        shellExitedOverlay?.frame = terminal.frame
+        shellExitedOverlay?.isHidden = false
+    }
+
+    /// Respawn the shell with the original spec after it exited. No-op while
+    /// the shell is alive. The new shell starts at the last known grid size
+    /// and the terminal surface keeps its scrollback.
+    func restartShell() {
+        guard pty?.hasExited == true, let spec = terminalSpec else { return }
+        shellExitedOverlay?.isHidden = true
+        let size = pty?.lastSize ?? (cols: 80, rows: 24)
+        pty?.start(
+            shell: PtySession.defaultShell,
+            args: spec.shellArgs,
+            cwd: spec.cwd,
+            cols: size.cols > 0 ? size.cols : 80,
+            rows: size.rows > 0 ? size.rows : 24,
+            environment: spec.environment
+        )
     }
 }
 

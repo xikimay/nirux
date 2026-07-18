@@ -87,13 +87,28 @@ final class WorkspaceState {
     }
 
     private func setupOsc9Tracking(for col: ColumnState) {
-        col.onOsc9Received = { [weak self] in
+        col.onOsc9Received = { [weak self, weak col] in
             guard let self else { return }
             self.hasNotification = true
             self.onMetadataChanged?()
             // Bounce dock icon when app is not active
             if !NSApp.isActive {
                 NSApp.requestUserAttention(.informationalRequest)
+                // Native notification with click-to-focus routing.
+                let processName: String
+                if let col, let title = col.terminalTitle,
+                   !title.isEmpty, !ColumnState.boringTitles.contains(title) {
+                    processName = title
+                } else {
+                    processName = "Agent"
+                }
+                let columnIndex = col.flatMap { column in self.columns.firstIndex(where: { $0 === column }) }
+                NiruxNotifier.shared.postAgentAttention(
+                    workspaceID: self.id,
+                    workspaceTitle: self.title,
+                    columnIndex: columnIndex,
+                    processName: processName
+                )
             }
         }
     }
@@ -157,12 +172,14 @@ final class WorkspaceState {
     }
 
     /// Insert a Monaco editor column scoped to the provided cwd, defaulting
-    /// to this workspace's original cwd.
-    func addEditorColumn(initialFile: String? = nil, workspaceCwd: String? = nil) {
+    /// to this workspace's original cwd. `interactive` forwards to the file
+    /// open path — session restore passes false so a binary or huge file in
+    /// the persisted tabs can't pop a modal alert at every launch.
+    func addEditorColumn(initialFile: String? = nil, workspaceCwd: String? = nil, interactive: Bool = true) {
         let col = ColumnState(editorWorkspaceCwd: workspaceCwd ?? cwd)
         insertColumn(col)
         if let initialFile {
-            col.editorColumn?.open(path: initialFile)
+            col.editorColumn?.open(path: initialFile, interactive: interactive)
         }
     }
 

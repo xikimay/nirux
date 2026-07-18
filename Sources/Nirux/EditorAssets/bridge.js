@@ -16,6 +16,10 @@
   var pierreRenderTimer = null;
   var pendingMessages = [];
   var statusEl = document.getElementById("status");
+  // Per-tab view state (scroll + cursor) so switching tabs restores position.
+  var viewStates = {};
+  var wordWrap = false;
+  var editorFontSize = 13;
 
   function postToSwift(message) {
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.nirux) {
@@ -146,8 +150,15 @@
     // pinned to a single path and showing two files side-by-side from one
     // tab bar is more confusing than helpful.
     if (diffMode) exitDiff();
+    // Save where we were in the file we're leaving.
+    if (currentPath && models[currentPath]) {
+      viewStates[currentPath] = editor.saveViewState();
+    }
     currentPath = path;
     editor.setModel(entry.model);
+    if (viewStates[path]) {
+      editor.restoreViewState(viewStates[path]);
+    }
     editor.focus();
     postToSwift({ type: "ready", path: path });
     reportDirtyFor(path);
@@ -159,6 +170,7 @@
     if (entry.contentListener) entry.contentListener.dispose();
     entry.model.dispose();
     delete models[path];
+    delete viewStates[path];
     if (currentPath === path) currentPath = null;
   }
 
@@ -370,6 +382,11 @@
         monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
         function () { requestSave(); }
       );
+      bindZoomCommands(diffEditor.getModifiedEditor());
+      diffEditor.getModifiedEditor().addCommand(
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF,
+        function () { diffEditor.getModifiedEditor().getAction("actions.find").run(); }
+      );
     }
     diffEditor.setModel({ original: diffOriginalModel, modified: entry.model });
     showMonacoDiffSurface();
@@ -547,6 +564,34 @@
     });
   }
 
+  function applyFontSize() {
+    if (editor) editor.updateOptions({ fontSize: editorFontSize });
+    if (diffEditor) diffEditor.updateOptions({ fontSize: editorFontSize });
+  }
+
+  function zoomFont(delta) {
+    editorFontSize = Math.max(8, Math.min(32, editorFontSize + delta));
+    applyFontSize();
+  }
+
+  function resetFontZoom() {
+    editorFontSize = 13;
+    applyFontSize();
+  }
+
+  function bindZoomCommands(target) {
+    target.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Equal, function () { zoomFont(1); });
+    target.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Minus, function () { zoomFont(-1); });
+    target.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Digit0, function () { resetFontZoom(); });
+  }
+
+  function toggleWordWrap() {
+    wordWrap = !wordWrap;
+    var wrap = wordWrap ? "on" : "off";
+    if (editor) editor.updateOptions({ wordWrap: wrap });
+    if (diffEditor) diffEditor.updateOptions({ wordWrap: wrap });
+  }
+
   function handleMessage(msg) {
     switch (msg.type) {
       case "openFile": applyOpen(msg); break;
@@ -568,6 +613,7 @@
       case "enterMonacoDiff": enterMonacoDiff(msg.path, msg.original); break;
       case "enterDiffGroup": enterPierreDiffGroup(msg); break;
       case "exitDiff": exitDiff(); break;
+      case "toggleWordWrap": toggleWordWrap(); break;
     }
   }
 
@@ -584,6 +630,19 @@
         }
       } catch (e) {
         postToSwift({ type: "error", message: String(e) });
+      }
+    },
+    // Base64 transport — avoids embedding raw JSON (backticks, ${...}) in a
+    // JS template literal, which broke on files containing those sequences.
+    handleB64: function (b64) {
+      try {
+        var binary = atob(b64);
+        var bytes = new Uint8Array(binary.length);
+        for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        var json = new TextDecoder("utf-8").decode(bytes);
+        window.niruxBridge.handle(json);
+      } catch (e) {
+        postToSwift({ type: "error", message: "b64 decode failed: " + String(e) });
       }
     },
     setTheme: function (name) {
@@ -633,6 +692,14 @@
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () {
       requestSave();
     });
+
+    // Explicit find binding — guarantees Cmd+F opens the find widget even if
+    // key routing above the WebView ever intercepts it before Monaco sees it.
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF, function () {
+      editor.getAction("actions.find").run();
+    });
+
+    bindZoomCommands(editor);
 
     // Cmd+P → ask Swift to show its native file picker, scoped to the workspace.
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, function () {

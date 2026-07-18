@@ -809,16 +809,24 @@ private final class FileNode {
 
 private final class FileTreeCellView: NSTableCellView {
     private let iconLabel = NSTextField(labelWithString: "")
+    private let iconImageView = NSImageView()
     private let nameLabel = NSTextField(labelWithString: "")
+
+    /// Finder icons cached by extension (or kind) — NSWorkspace icon lookups
+    /// hit metadata on every call, and rows reconfigure constantly.
+    private static var iconCache: [String: NSImage] = [:]
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         iconLabel.font = .systemFont(ofSize: 11)
         iconLabel.alignment = .center
+        iconImageView.imageScaling = .scaleProportionallyUpOrDown
+        iconImageView.isHidden = true
         nameLabel.font = .systemFont(ofSize: 12)
         nameLabel.textColor = NSColor(red: 0.85, green: 0.88, blue: 0.95, alpha: 1)
         nameLabel.lineBreakMode = .byTruncatingMiddle
         addSubview(iconLabel)
+        addSubview(iconImageView)
         addSubview(nameLabel)
     }
     @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
@@ -826,11 +834,45 @@ private final class FileTreeCellView: NSTableCellView {
     override func layout() {
         super.layout()
         iconLabel.frame = NSRect(x: 2, y: 2, width: 16, height: bounds.height - 4)
+        iconImageView.frame = NSRect(x: 3, y: (bounds.height - 14) / 2, width: 14, height: 14)
         nameLabel.frame = NSRect(x: 20, y: 2, width: bounds.width - 24, height: bounds.height - 4)
+    }
+
+    /// Bundle extensions carry per-file icons (every .app has its own) —
+    /// they must be looked up per file, never cached by extension.
+    private static let bundleExtensions: Set<String> = [
+        "app", "framework", "bundle", "appex", "xpc", "prefpane",
+        "plugin", "kext", "playground", "xcworkspace", "xcodeproj"
+    ]
+
+    private static func icon(for node: FileNode) -> NSImage? {
+        let ext = node.url.pathExtension.lowercased()
+        if Self.bundleExtensions.contains(ext) {
+            let image = NSWorkspace.shared.icon(forFile: node.url.path)
+            image.size = NSSize(width: 14, height: 14)
+            return image
+        }
+        let key = node.isDirectory ? "__folder__" : (ext.isEmpty ? "__file__" : ext)
+        if let cached = iconCache[key] { return cached }
+        let image: NSImage
+        if node.isDirectory {
+            image = NSWorkspace.shared.icon(forFileType: "public.folder")
+        } else if ext.isEmpty {
+            image = NSWorkspace.shared.icon(forFileType: "public.data")
+        } else {
+            // icon(forFileType:) gives the generic icon for the type —
+            // consistent for every file sharing the extension.
+            image = NSWorkspace.shared.icon(forFileType: ext)
+        }
+        image.size = NSSize(width: 14, height: 14)
+        iconCache[key] = image
+        return image
     }
 
     func configure(node: FileNode) {
         if let gitStatus = node.gitStatus {
+            iconImageView.isHidden = true
+            iconLabel.isHidden = false
             iconLabel.stringValue = gitStatus.badge
             iconLabel.font = .monospacedSystemFont(ofSize: 10, weight: .bold)
             iconLabel.textColor = gitStatus.color
@@ -840,11 +882,24 @@ private final class FileTreeCellView: NSTableCellView {
             return
         }
 
-        iconLabel.font = .systemFont(ofSize: 11)
-        iconLabel.stringValue = node.isDirectory ? "▸" : "·"
-        iconLabel.textColor = node.isDirectory
-            ? NSColor(red: 0.55, green: 0.70, blue: 1.0, alpha: node.isVirtual ? 0.95 : 0.7)
-            : NSColor.secondaryLabelColor
+        // Virtual rows (section headers, diff roots) keep the text glyph.
+        if node.isVirtual {
+            iconImageView.isHidden = true
+            iconLabel.isHidden = false
+            iconLabel.font = .systemFont(ofSize: 11)
+            iconLabel.stringValue = node.isDirectory ? "▸" : "·"
+            iconLabel.textColor = NSColor(red: 0.55, green: 0.70, blue: 1.0, alpha: 0.95)
+        } else if let icon = Self.icon(for: node) {
+            iconLabel.isHidden = true
+            iconImageView.isHidden = false
+            iconImageView.image = icon
+        } else {
+            iconImageView.isHidden = true
+            iconLabel.isHidden = false
+            iconLabel.font = .systemFont(ofSize: 11)
+            iconLabel.stringValue = node.isDirectory ? "▸" : "·"
+            iconLabel.textColor = NSColor.secondaryLabelColor
+        }
         nameLabel.stringValue = node.name
         nameLabel.textColor = node.isVirtual
             ? NSColor.white.withAlphaComponent(0.95)

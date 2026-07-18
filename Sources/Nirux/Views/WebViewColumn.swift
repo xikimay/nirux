@@ -14,6 +14,9 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     private(set) var currentURL: String = ""
     private(set) var pageTitle: String = ""
     private var observations: [NSKeyValueObservation] = []
+    /// Destination URLs of in-flight downloads, for the completion
+    /// notification's reveal-in-Finder action.
+    private var downloadDestinations: [ObjectIdentifier: URL] = [:]
 
     private static let barHeight: CGFloat = 32
     private static let barBg = NSColor(red: 0.13, green: 0.13, blue: 0.17, alpha: 1)
@@ -215,6 +218,25 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     @objc private func goForwardAction() { webView.goForward() }
     @objc private func reloadAction() { webView.reload() }
 
+    func goBack() { webView.goBack() }
+    func goForward() { webView.goForward() }
+
+    /// Move keyboard focus to the URL field with the text selected (Cmd+L).
+    func focusAddressBar() {
+        window?.makeFirstResponder(urlField)
+        urlField.selectText(nil)
+    }
+
+    /// Open the Web Inspector. WKWebView has no public API for this;
+    /// developerExtrasEnabled is set, so `_showInspector` exists — guard the
+    /// call so a future WebKit rename degrades to a no-op instead of a crash.
+    func toggleInspector() {
+        let inspector = Selector(("_showInspector"))
+        if webView.responds(to: inspector) {
+            webView.perform(inspector)
+        }
+    }
+
     @objc private func urlFieldAction() {
         navigate(to: urlField.stringValue)
         window?.makeFirstResponder(webView)
@@ -237,6 +259,46 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
+    /// Responses WebKit can't display (archives, binaries, attachments)
+    /// become downloads instead of failing silently. Signatures must match
+    /// the WKNavigationDelegate requirements exactly (including the
+    /// @MainActor @Sendable handler) or WebKit never calls them.
+    @MainActor
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void
+    ) {
+        if navigationResponse.canShowMIMEType {
+            decisionHandler(.allow)
+        } else {
+            decisionHandler(.download)
+        }
+    }
+
+    @MainActor
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+    ) {
+        if navigationAction.shouldPerformDownload {
+            decisionHandler(.download)
+        } else {
+            decisionHandler(.allow)
+        }
+    }
+
+    @MainActor
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        download.delegate = self
+    }
+
+    @MainActor
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        download.delegate = self
+    }
+
     // MARK: - WKUIDelegate (popups, alerts, new windows)
 
     /// Handle target=_blank links and OAuth popups (Google Sign-In etc.)
@@ -254,7 +316,7 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     /// JS alert()
     @MainActor
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
-                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping @MainActor @Sendable () -> Void) {
         let alert = NSAlert()
         alert.messageText = message
         alert.runModal()
@@ -264,7 +326,7 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     /// JS confirm()
     @MainActor
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
-                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping @Sendable (Bool) -> Void) {
         let alert = NSAlert()
         alert.messageText = message
         alert.addButton(withTitle: "OK")
@@ -323,3 +385,54 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
         """
     }
 }
+
+// MARK: - WKDownloadDelegate
+
+extension WebViewColumn: WKDownloadDelegate {
+    /// Save to ~/Downloads with a unique name (foo.zip → foo-2.zip → …).
+    @MainActor
+    func download(
+        _ download: WKDownload,
+        decideDestinationUsing response: URLResponse,
+        suggestedFilename: String,
+        completionHandler: @escaping @MainActor @Sendable (URL?) -> Void
+    ) {
+        guard let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else {
+            completionHandler(nil)
+            return
+        }
+        var destination = downloads.appendingPathComponent(suggestedFilename)
+        let ext = destination.pathExtension
+        let base = destination.deletingPathExtension().lastPathComponent
+        var counter = 2
+        while FileManager.default.fileExists(atPath: destination.path) {
+            let name = ext.isEmpty ? "\(base)-\(counter)" : "\(base)-\(counter).\(ext)"
+            destination = downloads.appendingPathComponent(name)
+            counter += 1
+        }
+        downloadDestinations[ObjectIdentifier(download)] = destination
+        completionHandler(destination)
+    }
+
+    @MainActor
+    func downloadDidFinish(_ download: WKDownload) {
+        let destination = downloadDestinations.removeValue(forKey: ObjectIdentifier(download))
+        NSLog("[WebViewColumn] download finished")
+        if let destination {
+            NiruxNotifier.shared.postDownloadFinished(
+                filename: destination.lastPathComponent,
+                fileURL: destination
+            )
+        } else if NSApp.isActive == false {
+            // Surface completion when the app is in the background.
+            NSApp.requestUserAttention(.informationalRequest)
+        }
+    }
+
+    @MainActor
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        downloadDestinations.removeValue(forKey: ObjectIdentifier(download))
+        NSLog("[WebViewColumn] download failed: \(error.localizedDescription)")
+    }
+}
+

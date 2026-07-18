@@ -30,6 +30,30 @@ final class PilotSidebarRendererTests: XCTestCase {
         XCTAssertEqual(PilotSidebarRenderer.formatDiffStats("nothing to parse"), "nothing to parse")
     }
 
+    // MARK: - shortDuration
+
+    func testShortDurationSeconds() {
+        XCTAssertEqual(PilotSidebarRenderer.shortDuration(0), "0s")
+        XCTAssertEqual(PilotSidebarRenderer.shortDuration(42), "42s")
+        XCTAssertEqual(PilotSidebarRenderer.shortDuration(59.9), "59s")
+    }
+
+    func testShortDurationMinutes() {
+        XCTAssertEqual(PilotSidebarRenderer.shortDuration(60), "1m")
+        XCTAssertEqual(PilotSidebarRenderer.shortDuration(732), "12m")
+        XCTAssertEqual(PilotSidebarRenderer.shortDuration(3599), "59m")
+    }
+
+    func testShortDurationHours() {
+        XCTAssertEqual(PilotSidebarRenderer.shortDuration(3600), "1h00m")
+        XCTAssertEqual(PilotSidebarRenderer.shortDuration(3920), "1h05m")
+        XCTAssertEqual(PilotSidebarRenderer.shortDuration(7384), "2h03m")
+    }
+
+    func testShortDurationNegativeClampsToZero() {
+        XCTAssertEqual(PilotSidebarRenderer.shortDuration(-5), "0s")
+    }
+
     // MARK: - prStateDisplay
 
     func testPrStateDisplayDraft() {

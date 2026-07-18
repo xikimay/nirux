@@ -238,8 +238,28 @@ extension NiruxShellView {
 
     func importBrowserCookies() {
         let browsers = CookieImporter.availableBrowsers
-        guard let browser = browsers.first else { return }
+        guard !browsers.isEmpty else { return }
 
+        guard browsers.count > 1 else {
+            runCookieImport(from: browsers[0])
+            return
+        }
+
+        // Several Chromium browsers installed — let the user pick the source.
+        let alert = NSAlert()
+        alert.messageText = "Import Cookies"
+        alert.informativeText = "Choose a browser to import cookies from."
+        for browser in browsers {
+            alert.addButton(withTitle: browser.rawValue)
+        }
+        alert.addButton(withTitle: "Cancel")
+        let response = alert.runModal()
+        let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        guard browsers.indices.contains(index) else { return }
+        runCookieImport(from: browsers[index])
+    }
+
+    private func runCookieImport(from browser: CookieImporter.Browser) {
         Task {
             do {
                 let result = try await CookieImporter.importCookies(from: browser, into: WebViewColumn.sharedDataStore)
@@ -356,6 +376,39 @@ extension NiruxShellView {
               let editor = workspace.columns[safe: workspace.focusedIndex]?.editorColumn
         else { return }
         editor.toggleDiff()
+    }
+
+    /// Toggle word wrap on the focused editor column. No-op elsewhere.
+    func toggleWordWrap() {
+        guard let workspace = activeWorkspace,
+              let editor = workspace.columns[safe: workspace.focusedIndex]?.editorColumn
+        else { return }
+        editor.toggleWordWrap()
+    }
+
+    /// Open the Web Inspector on the focused browser column. No-op elsewhere.
+    func toggleDevTools() {
+        guard let workspace = activeWorkspace,
+              let web = workspace.columns[safe: workspace.focusedIndex]?.webViewColumn
+        else { return }
+        web.toggleInspector()
+    }
+
+    /// Focus the URL field of the focused browser column (Cmd+L). No-op
+    /// elsewhere so terminal Cmd+L keeps its terminal meaning.
+    func focusAddressBar() {
+        guard let workspace = activeWorkspace,
+              let web = workspace.columns[safe: workspace.focusedIndex]?.webViewColumn
+        else { return }
+        web.focusAddressBar()
+    }
+
+    /// Focus a column by 1-based number (Cmd+1…9). Out-of-range no-ops.
+    func focusColumn(number: Int) {
+        guard let workspace = activeWorkspace,
+              workspace.columns.indices.contains(number - 1)
+        else { return }
+        focusColumnByIndex(number - 1)
     }
 
     /// Open the workspace-wide search panel scoped to the active workspace

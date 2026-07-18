@@ -131,6 +131,41 @@ final class PtySession: @unchecked Sendable {
         set { state.onOsc9Received = newValue }
     }
 
+    /// Called on the main queue when the shell process exits.
+    var onProcessExit: (() -> Void)? {
+        get { state.onProcessExit }
+        set { state.onProcessExit = newValue }
+    }
+
+    /// True after the shell process exited. The session can be restarted
+    /// with another `start(...)` call — the terminal surface (and its
+    /// scrollback) survives.
+    var hasExited: Bool { state.hasExited }
+
+    /// Last applied grid size — the right starting size for a restart.
+    var lastSize: (cols: Int, rows: Int) { (state.lastCols, state.lastRows) }
+
+    /// When the current foreground process took over (drives the "working
+    /// · 12m" display in the sidebar). Nil while the idle shell runs.
+    var foregroundProcessStartedAt: Date? { state.foregroundSince }
+
+    /// The user's login shell ($SHELL) when it's a mainstream
+    /// POSIX-compatible one, else zsh. Restricted to an allowlist because
+    /// command-backed columns launch it with zsh-style `-i -l -c` flags
+    /// that exotic shells (nu, xonsh, elvish) reject — for those users the
+    /// hardcoded /bin/zsh was the working behavior. Computed once — checked
+    /// in the parent process, never post-fork.
+    static let defaultShell: String = {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? ""
+        let posixCompatible: Set<String> = ["zsh", "bash", "sh", "dash", "ksh", "tcsh", "fish"]
+        let name = (shell as NSString).lastPathComponent
+        if shell.hasPrefix("/"), posixCompatible.contains(name),
+           FileManager.default.fileExists(atPath: shell) {
+            return shell
+        }
+        return "/bin/zsh"
+    }()
+
     /// Compute agent status using burst detection (rapid consecutive reads = active)
     /// - isUserFocused: true if the user is currently focused on this specific column
     func agentStatus(snapshot: ProcessSnapshot, isUserFocused: Bool) -> AgentStatus {
@@ -194,6 +229,8 @@ final class PtySession: @unchecked Sendable {
     /// Name of the foreground process (e.g. "zsh", "node", "claude").
     /// Shows what's running right now — no caching, no filtering.
     func foregroundProcessName(snapshot: ProcessSnapshot) -> String? {
+        // childPid is cleared on exit — pid 0 would resolve to kernel_task.
+        guard state.childPid > 0 else { return nil }
         return state.foregroundProcessName(snapshot: snapshot)
             ?? snapshot.commName(of: state.childPid)
     }
@@ -330,9 +367,16 @@ final class PtySession: @unchecked Sendable {
             _exit(1)
         }
 
-        guard pid > 0 else { return }
+        guard pid > 0 else {
+            // Fork failed — keep the session in the exited state so the
+            // restart overlay stays actionable instead of dead-ending.
+            state.hasExited = true
+            state.onProcessExit?()
+            return
+        }
         state.ptyFd = fd
         state.childPid = pid
+        state.hasExited = false
         state.lastCols = initialCols
         state.lastRows = initialRows
         state.markPtyStarted()
@@ -348,6 +392,32 @@ final class PtySession: @unchecked Sendable {
         }
         source.resume()
         state.readSource = source
+
+        // Watch for shell exit — without this a dead shell leaves a mute
+        // terminal with no way to know (or restart). Also reaps the zombie.
+        state.exitSource?.cancel()
+        let exitSource = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .main)
+        exitSource.setEventHandler { [state] in
+            var status: Int32 = 0
+            _ = waitpid(pid, &status, 0)
+            // Cancel the read source BEFORE clearing the fd: its cancel
+            // handler closes the master fd. Left armed, it would spin at
+            // EOF (or, when a grandchild holds the pty open, never fire at
+            // all) — leaking the fd and, after a restart reassigns
+            // state.ptyFd, reading from the NEW shell's fd.
+            state.readSource?.cancel()
+            state.readSource = nil
+            state.ptyFd = -1
+            // Clear childPid so deinit can't SIGTERM whatever process later
+            // recycles this pid, and process attribution stops resolving
+            // the dead shell's identity.
+            state.childPid = 0
+            state.hasExited = true
+            state.agentState = .idle
+            state.onProcessExit?()
+        }
+        exitSource.resume()
+        state.exitSource = exitSource
     }
 
     /// PATH to pass to child shells — includes standard locations so login
@@ -396,6 +466,7 @@ final class PtySession: @unchecked Sendable {
     }
 
     deinit {
+        state.exitSource?.cancel()
         state.readSource?.cancel()
         if state.childPid > 0 { kill(state.childPid, SIGTERM) }
     }
@@ -406,9 +477,12 @@ private final class PtyState: @unchecked Sendable {
     var ptyFd: Int32 = -1
     var childPid: pid_t = 0
     var readSource: DispatchSourceRead?
+    var exitSource: DispatchSourceProcess?
+    var hasExited: Bool = false
     var onCwdChanged: ((String) -> Void)?
     var onTitleChanged: ((String) -> Void)?
     var onOsc9Received: (() -> Void)?
+    var onProcessExit: (() -> Void)?
     var lastOsc9Timestamp: Date?
     var agentState: AgentStatus = .idle
     var hasUserInputSinceStart: Bool = false
@@ -577,6 +651,8 @@ private final class PtyState: @unchecked Sendable {
         var buffer = [UInt8](repeating: 0, count: 8192)
         let bytesRead = read(ptyFd, &buffer, buffer.count)
         guard bytesRead > 0 else {
+            // EOF — the child is gone; stop writes from hitting a closed fd.
+            ptyFd = -1
             readSource?.cancel()
             return
         }

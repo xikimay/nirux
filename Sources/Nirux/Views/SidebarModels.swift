@@ -11,6 +11,9 @@ struct ColumnInfo {
     let agentStatus: AgentStatus
     let isEditor: Bool
     let editorFileName: String?
+    /// Elapsed time since the foreground process started — shown for
+    /// working agents ("· 12m"). Nil for non-terminal columns / idle shells.
+    var agentElapsedSeconds: TimeInterval? = nil
 }
 
 struct PRInfo {

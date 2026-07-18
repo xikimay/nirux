@@ -141,6 +141,16 @@ extension NiruxShellView {
         refreshAfterWorkspaceSelection(animated: true)
     }
 
+    /// Focus a workspace by ID (notification click-through), optionally
+    /// jumping straight to a specific column.
+    func focusWorkspace(id: String, column columnIndex: Int? = nil) {
+        guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
+        switchToWorkspace(index)
+        if let columnIndex, workspaces.indices.contains(index) {
+            focusColumnByIndex(columnIndex)
+        }
+    }
+
     private func refreshAfterWorkspaceSelection(animated: Bool) {
         guard workspaces.indices.contains(activeWSIndex) else { return }
         workspaces[activeWSIndex].hasNotification = false
@@ -294,6 +304,7 @@ extension NiruxShellView {
         guard !isPilotMode else { return }
         let expanding = !isSidebarExpanded
         isSidebarExpanded = expanding
+        saveState()
 
         if expanding {
             sidebar.fadeOutDots {

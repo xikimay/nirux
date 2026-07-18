@@ -54,6 +54,12 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         shell = shellView
         setupUpdater()
 
+        // Native notifications: click focuses the originating workspace/column.
+        NiruxNotifier.shared.setup()
+        NiruxNotifier.shared.onActivate = { [weak shellView] workspaceID, columnIndex in
+            shellView?.focusWorkspace(id: workspaceID, column: columnIndex)
+        }
+
         window.makeKeyAndOrderFront(nil)
         mainWindow = window
 
@@ -75,6 +81,10 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
     }
 
     // MARK: - URL Scheme

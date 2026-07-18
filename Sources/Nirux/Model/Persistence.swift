@@ -2,7 +2,19 @@ import Foundation
 
 /// Saves/restores workspace layout to ~/Library/Application Support/nirux/state.json
 enum Persistence {
+    /// Rotating backups kept next to state.json for corruption recovery.
+    private static let maxBackups = 5
+
     private static var stateURL: URL {
+        // Development escape hatch: a debug launch restores AND re-saves the
+        // same state file, duplicating live agent sessions. Point
+        // NIRUX_STATE_DIR elsewhere to smoke-test safely. (HOME is not
+        // respected by Application Support resolution — this is.)
+        if let override = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"], !override.isEmpty {
+            let dir = URL(fileURLWithPath: override, isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            return dir.appendingPathComponent("state.json")
+        }
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let dir = appSupport.appendingPathComponent("nirux")
         do {
@@ -13,24 +25,57 @@ enum Persistence {
         return dir.appendingPathComponent("state.json")
     }
 
+    private static func backupURL(_ index: Int) -> URL {
+        stateURL.deletingLastPathComponent().appendingPathComponent("state.backup.\(index).json")
+    }
+
     static func save(_ state: PersistedState) {
         do {
             let data = try JSONEncoder().encode(state)
+            rotateBackups()
             try data.write(to: stateURL, options: .atomic)
         } catch {
             NSLog("[Nirux Persistence] Failed to save state: %@", error.localizedDescription)
         }
     }
 
+    /// Shift state.backup.N.json → N+1 and copy the current state.json to 1.
+    /// Renames within the same directory are cheap; runs on every save.
+    private static func rotateBackups() {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: stateURL.path) else { return }
+        for index in stride(from: maxBackups - 1, through: 1, by: -1) {
+            let src = backupURL(index)
+            let dst = backupURL(index + 1)
+            guard fm.fileExists(atPath: src.path) else { continue }
+            try? fm.removeItem(at: dst)
+            try? fm.moveItem(at: src, to: dst)
+        }
+        try? fm.removeItem(at: backupURL(1))
+        try? fm.copyItem(at: stateURL, to: backupURL(1))
+    }
+
     static func load() -> PersistedState? {
-        let url = stateURL
         // Missing file is normal on first run — don't log it.
+        guard FileManager.default.fileExists(atPath: stateURL.path) else { return nil }
+        if let state = load(from: stateURL) { return state }
+        // Corruption recovery: walk the rotating backups newest-first.
+        for index in 1...maxBackups {
+            if let recovered = load(from: backupURL(index)) {
+                NSLog("[Nirux Persistence] state.json unreadable — recovered from backup %d", index)
+                return recovered
+            }
+        }
+        return nil
+    }
+
+    private static func load(from url: URL) -> PersistedState? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         do {
             let data = try Data(contentsOf: url)
             return try JSONDecoder().decode(PersistedState.self, from: data)
         } catch {
-            NSLog("[Nirux Persistence] Failed to load state: %@", error.localizedDescription)
+            NSLog("[Nirux Persistence] Failed to load %@: %@", url.lastPathComponent, error.localizedDescription)
             return nil
         }
     }
@@ -130,21 +175,25 @@ struct PersistedSettings: Codable {
     var claudeLaunchMode: ClaudeLaunchMode?
     var claudeNoFlicker: Bool? = true
     var codexLaunchMode: CodexLaunchMode?
+    var sidebarExpanded: Bool?
 
     init(
         claudeLaunchMode: ClaudeLaunchMode? = nil,
         claudeNoFlicker: Bool? = true,
-        codexLaunchMode: CodexLaunchMode? = nil
+        codexLaunchMode: CodexLaunchMode? = nil,
+        sidebarExpanded: Bool? = nil
     ) {
         self.claudeLaunchMode = claudeLaunchMode
         self.claudeNoFlicker = claudeNoFlicker
         self.codexLaunchMode = codexLaunchMode
+        self.sidebarExpanded = sidebarExpanded
     }
 
     enum CodingKeys: String, CodingKey {
         case claudeLaunchMode
         case claudeNoFlicker
         case codexLaunchMode
+        case sidebarExpanded
         case claudeBypassPermissions // legacy
     }
 
@@ -161,6 +210,7 @@ struct PersistedSettings: Codable {
         }
         claudeNoFlicker = try c.decodeIfPresent(Bool.self, forKey: .claudeNoFlicker) ?? true
         codexLaunchMode = try c.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)
+        sidebarExpanded = try c.decodeIfPresent(Bool.self, forKey: .sidebarExpanded)
     }
 
     /// Custom encoder is required because `CodingKeys` carries the legacy
@@ -171,6 +221,7 @@ struct PersistedSettings: Codable {
         try c.encodeIfPresent(claudeLaunchMode, forKey: .claudeLaunchMode)
         try c.encodeIfPresent(claudeNoFlicker, forKey: .claudeNoFlicker)
         try c.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
+        try c.encodeIfPresent(sidebarExpanded, forKey: .sidebarExpanded)
     }
 }
 

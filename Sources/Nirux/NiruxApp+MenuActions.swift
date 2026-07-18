@@ -71,6 +71,22 @@ extension NiruxApp {
         shell?.toggleEditorDiff()
     }
 
+    @objc func toggleWordWrap(_ sender: Any?) {
+        shell?.toggleWordWrap()
+    }
+
+    @objc func toggleDevTools(_ sender: Any?) {
+        shell?.toggleDevTools()
+    }
+
+    @objc func focusAddressBar(_ sender: Any?) {
+        shell?.focusAddressBar()
+    }
+
+    @objc func focusColumnByNumber(_ sender: NSMenuItem) {
+        shell?.focusColumn(number: sender.tag)
+    }
+
     @objc func togglePilotMode(_ sender: Any?) {
         shell?.togglePilotMode()
     }
@@ -119,6 +135,14 @@ extension NiruxApp {
         )
         diffItem.keyEquivalentModifierMask = [.command, .shift]
         editMenu.addItem(diffItem)
+
+        let wrapItem = NSMenuItem(
+            title: "Toggle Word Wrap",
+            action: #selector(toggleWordWrap(_:)),
+            keyEquivalent: "z"
+        )
+        wrapItem.keyEquivalentModifierMask = [.command, .option]
+        editMenu.addItem(wrapItem)
         let editItem = NSMenuItem()
         editItem.submenu = editMenu
         mainMenu.addItem(editItem)
@@ -133,6 +157,25 @@ extension NiruxApp {
             keyEquivalent: NiruxShortcuts.newTerminalKey
         )
         colMenu.addItem(withTitle: "Open Browser", action: #selector(openBrowser(_:)), keyEquivalent: "b")
+
+        // Cmd+1…9: jump straight to column N (iTerm-style tab switching).
+        for number in 1...9 {
+            let item = NSMenuItem(
+                title: "Focus Column \(number)",
+                action: #selector(focusColumnByNumber(_:)),
+                keyEquivalent: "\(number)"
+            )
+            item.tag = number
+            colMenu.addItem(item)
+        }
+        colMenu.addItem(NSMenuItem.separator())
+
+        let devToolsItem = NSMenuItem(title: "Toggle Web Inspector", action: #selector(toggleDevTools(_:)), keyEquivalent: "i")
+        devToolsItem.keyEquivalentModifierMask = [.command, .option]
+        colMenu.addItem(devToolsItem)
+
+        colMenu.addItem(withTitle: "Focus Address Bar", action: #selector(focusAddressBar(_:)), keyEquivalent: "l")
+
         colMenu.addItem(withTitle: "Close Column", action: #selector(closeColumn(_:)), keyEquivalent: "w")
         colMenu.addItem(NSMenuItem.separator())
 

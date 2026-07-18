@@ -9,11 +9,12 @@ Nirux is alpha software.
 - Persistent workspaces: stack independent workspaces vertically, each with its own current directory, title, Git branch, focused column, and restored layout.
 - Horizontal columns: mix Ghostty-backed terminals, WKWebView browser columns, and Monaco editor columns in the same workspace.
 - Agent launchers: start Claude Code or Codex from the command palette with configurable permission and sandbox presets.
+- Attention system: per-column agent status (working / needs attention, with elapsed time), edge glows for off-screen attention, native macOS notifications that focus the right workspace and column on click, and a Dock badge counting waiting workspaces.
 - Worktree flow: create or open Git worktrees as new workspaces, optionally handing context from the current agent session into the new workspace.
-- Built-in editor: open files, keep tabs, search the workspace, browse the file tree, view Git changes, and toggle file diffs.
-- Browser context: open URLs in app, keep URL history, and import cookies from Chrome, Brave, Arc, or Edge into the shared WebKit data store.
+- Built-in editor: open files, keep tabs, search the workspace, browse the file tree with Finder icons, view Git changes, and toggle file diffs. Find/replace, word wrap, font zoom, per-tab scroll restore, and disk-conflict protection included.
+- Browser context: open URLs in app, keep URL history, import cookies from Chrome, Brave, Arc, or Edge into the shared WebKit data store, download files to ~/Downloads, and inspect pages with the Web Inspector.
 - Pilot mode: switch to a compact overview of active workspaces with branch, column, diff, PR, CI, and review state where available.
-- Session restore: workspace layout, editor tabs, browser URLs, and detected Claude/Codex launch modes are saved under Application Support.
+- Session restore: workspace layout, editor tabs, browser URLs, sidebar state, and detected Claude/Codex launch modes are saved under Application Support, with rotating backups for corruption recovery.
 
 ## Requirements
 
@@ -82,10 +83,11 @@ Useful shortcuts:
 
 | Shortcut | Action |
 | --- | --- |
-| `Cmd+P` | Command palette |
+| `Cmd+P` | Command palette (fuzzy matching) |
 | `Cmd+T` | New terminal column |
 | `Cmd+B` | Open browser URL flow |
 | `Cmd+W` | Close editor tab, column, or workspace depending on context |
+| `Cmd+1…9` | Focus column N |
 | `Cmd+Left` / `Cmd+Right` | Focus previous or next column |
 | `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column |
 | `Cmd+E` | Cycle focused column width |
@@ -94,6 +96,15 @@ Useful shortcuts:
 | `Cmd+O` | Toggle Pilot Mode |
 | `Cmd+S` | Toggle sidebar |
 | `Shift+Cmd+F` | Search workspace |
+| `Cmd+F` | Find in editor |
+| `Shift+Cmd+D` | Toggle editor diff |
+| `Alt+Cmd+Z` | Toggle word wrap in editor |
+| `Cmd+=` / `Cmd+-` / `Cmd+0` | Editor font zoom in / out / reset |
+| `Cmd+L` | Focus browser address bar |
+| `Cmd+[` / `Cmd+]` | Browser back / forward |
+| `Alt+Cmd+I` | Open Web Inspector on the focused browser column |
+
+When a shell exits, its terminal shows a restart overlay — press `Enter` to respawn it (scrollback is preserved).
 
 ## Worktrees And URL Scheme
 
@@ -187,13 +198,14 @@ That directory contains workspace state, URL history, generated helper scripts, 
 
 The nightly GitHub Actions workflow runs on pushes to `main` and on manual dispatch. It:
 
-1. Builds the release binary.
-2. Bundles `Nirux.app`.
-3. Signs with the Developer ID Application identity.
-4. Submits to Apple notarization and staples the result.
-5. Re-zips the app.
-6. Signs the update archive for Sparkle.
-7. Publishes `Nirux.app.zip` and `appcast.xml` to the `nightly` release.
+1. Runs the test suite.
+2. Builds the release binary.
+3. Bundles `Nirux.app`.
+4. Signs with the Developer ID Application identity.
+5. Submits to Apple notarization and staples the result.
+6. Re-zips the app.
+7. Signs the update archive for Sparkle.
+8. Publishes `Nirux.app.zip` and `appcast.xml` to the `nightly` release, with a changelog generated from the commits since the previous nightly.
 
 Sparkle reads updates from:
 

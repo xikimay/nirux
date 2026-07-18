@@ -281,6 +281,29 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(settings.claudeLaunchMode, .default)
     }
 
+    // MARK: - Sidebar state
+
+    func testSidebarExpandedRoundTripsThroughSettings() throws {
+        let original = PersistedSettings(sidebarExpanded: true)
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(PersistedSettings.self, from: data)
+        XCTAssertEqual(decoded.sidebarExpanded, true)
+        // Other fields keep their defaults.
+        XCTAssertEqual(decoded.claudeNoFlicker, true)
+        XCTAssertNil(decoded.claudeLaunchMode)
+    }
+
+    func testSettingsWithoutSidebarFieldDecodeToNil() throws {
+        // States written before sidebar persistence existed have no key.
+        let json = Data("""
+        { "claudeLaunchMode": "plan", "claudeNoFlicker": false }
+        """.utf8)
+        let settings = try JSONDecoder().decode(PersistedSettings.self, from: json)
+        XCTAssertNil(settings.sidebarExpanded)
+        XCTAssertEqual(settings.claudeLaunchMode, .plan)
+        XCTAssertEqual(settings.claudeNoFlicker, false)
+    }
+
     // MARK: - cliArgs wire format
 
     /// Lock down the CLI flag mapping so a future rename in the enum doesn't

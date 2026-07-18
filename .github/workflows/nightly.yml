@@ -86,6 +86,9 @@ jobs:
           echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
           echo "Building $VERSION (build $BUILD_NUMBER)"
 
+      - name: Run tests
+        run: swift test
+
       - name: Build release
         run: swift build -c release
 
@@ -137,10 +140,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Capture the previous nightly's commit BEFORE deleting the tag —
+          # the changelog diffs against it.
+          PREV_SHA=$(git rev-parse nightly^{commit} 2>/dev/null || echo "")
+
           # Delete existing nightly release if it exists
           gh release delete nightly --yes 2>/dev/null || true
           git tag -d nightly 2>/dev/null || true
           git push origin :refs/tags/nightly 2>/dev/null || true
+
+          # Build release notes from the commits since the previous nightly
+          if [ -n "$PREV_SHA" ]; then
+            RANGE="$PREV_SHA..HEAD"
+          else
+            RANGE="HEAD~20..HEAD"
+          fi
+          CHANGELOG=$(git log --pretty=format:'- %s (%h)' --no-merges $RANGE || echo "- maintenance")
 
           # Create new nightly release
           gh release create nightly \
@@ -150,6 +165,9 @@ jobs:
           **Version:** $VERSION
           **Build:** $BUILD_NUMBER
           **Commit:** $(git rev-parse --short HEAD)
+
+          ## Changes
+          $CHANGELOG
 
           This build is Developer ID signed, notarized by Apple, and signed for Sparkle updates.
 

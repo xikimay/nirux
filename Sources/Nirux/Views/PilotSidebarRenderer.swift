@@ -194,7 +194,23 @@ enum PilotSidebarRenderer {
         }
         result.append(NSAttributedString(string: displayName, attributes: [.font: font, .foregroundColor: textColor]))
 
+        // Elapsed time for working agents — "· 12m" in green next to the name.
+        if column.agentStatus == .working, let elapsed = column.agentElapsedSeconds {
+            result.append(NSAttributedString(string: " · \(shortDuration(elapsed))", attributes: [
+                .font: font,
+                .foregroundColor: NSColor.systemGreen.withAlphaComponent(0.65)
+            ]))
+        }
+
         return result
+    }
+
+    /// Compact duration for sidebar rows: 42s, 12m, 1h05m.
+    static func shortDuration(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds))
+        if total < 60 { return "\(total)s" }
+        if total < 3600 { return "\(total / 60)m" }
+        return "\(total / 3600)h\(String(format: "%02d", (total % 3600) / 60))m"
     }
 
     // MARK: - Agent status dot
