@@ -6,6 +6,15 @@ enum Persistence {
     private static let maxBackups = 5
 
     private static var stateURL: URL {
+        // Development escape hatch: a debug launch restores AND re-saves the
+        // same state file, duplicating live agent sessions. Point
+        // NIRUX_STATE_DIR elsewhere to smoke-test safely. (HOME is not
+        // respected by Application Support resolution — this is.)
+        if let override = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"], !override.isEmpty {
+            let dir = URL(fileURLWithPath: override, isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            return dir.appendingPathComponent("state.json")
+        }
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let dir = appSupport.appendingPathComponent("nirux")
         do {
