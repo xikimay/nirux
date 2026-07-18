@@ -24,7 +24,7 @@ enum GitDetect {
     }
 
     /// Async version for background detection
-    static func branchAsync(at path: String, completion: @escaping (String?) -> Void) {
+    static func branchAsync(at path: String, completion: @escaping @MainActor @Sendable (String?) -> Void) {
         DispatchQueue.global(qos: .utility).async {
             let result = branch(at: path)
             DispatchQueue.main.async {

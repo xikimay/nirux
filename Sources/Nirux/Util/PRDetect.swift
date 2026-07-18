@@ -2,7 +2,7 @@ import Foundation
 
 enum PRDetect {
     /// Fetch PR info for the given branch. Runs `gh` CLI.
-    static func fetchAsync(branch: String, cwd: String, completion: @escaping (PRInfo?) -> Void) {
+    static func fetchAsync(branch: String, cwd: String, completion: @escaping @MainActor @Sendable (PRInfo?) -> Void) {
         DispatchQueue.global(qos: .utility).async {
             let result = fetch(branch: branch, cwd: cwd)
             DispatchQueue.main.async { completion(result) }
@@ -71,14 +71,14 @@ enum PRDetect {
     }
 
     /// Get diff stats via git
-    static func diffStatsAsync(cwd: String, completion: @escaping (String?) -> Void) {
+    static func diffStatsAsync(cwd: String, completion: @escaping @MainActor @Sendable (String?) -> Void) {
         DispatchQueue.global(qos: .utility).async {
             let result = diffStats(cwd: cwd)
             DispatchQueue.main.async { completion(result) }
         }
     }
 
-    static func diffPathsAsync(cwd: String, completion: @escaping ([String]) -> Void) {
+    static func diffPathsAsync(cwd: String, completion: @escaping @MainActor @Sendable ([String]) -> Void) {
         DispatchQueue.global(qos: .utility).async {
             let result = diffPaths(cwd: cwd)
             DispatchQueue.main.async { completion(result) }

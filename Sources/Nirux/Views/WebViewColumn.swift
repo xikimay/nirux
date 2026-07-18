@@ -260,12 +260,14 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     }
 
     /// Responses WebKit can't display (archives, binaries, attachments)
-    /// become downloads instead of failing silently.
+    /// become downloads instead of failing silently. Signatures must match
+    /// the WKNavigationDelegate requirements exactly (including the
+    /// @MainActor @Sendable handler) or WebKit never calls them.
     @MainActor
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationResponse: WKNavigationResponse,
-        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void
     ) {
         if navigationResponse.canShowMIMEType {
             decisionHandler(.allow)
@@ -278,7 +280,7 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
-        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
         if navigationAction.shouldPerformDownload {
             decisionHandler(.download)
@@ -314,7 +316,7 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     /// JS alert()
     @MainActor
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
-                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping @MainActor @Sendable () -> Void) {
         let alert = NSAlert()
         alert.messageText = message
         alert.runModal()
@@ -324,7 +326,7 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     /// JS confirm()
     @MainActor
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
-                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping @Sendable (Bool) -> Void) {
         let alert = NSAlert()
         alert.messageText = message
         alert.addButton(withTitle: "OK")
