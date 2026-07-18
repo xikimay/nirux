@@ -65,6 +65,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
     private var fileWatchTimer: Timer?
     private static let watchInterval: TimeInterval = 1.5
+    /// Files above this size ask for confirmation before opening in Monaco.
+    private static let largeFileWarningBytes: UInt64 = 5_000_000
 
     init(workspaceCwd: String) {
         self.workspaceCwd = workspaceCwd
@@ -230,14 +232,79 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             return
         }
 
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: absolute)),
-              let content = String(data: data, encoding: .utf8)
-        else {
-            NSLog("[EditorColumn] cannot read \(absolute)")
-            return
+        // Very large files make Monaco sluggish — confirm before loading.
+        if let size = Self.diffCollectionFileByteCount(path: absolute),
+           size > Self.largeFileWarningBytes {
+            let alert = NSAlert()
+            alert.messageText = "Open large file?"
+            let mb = String(format: "%.1f", Double(size) / 1_000_000)
+            alert.informativeText = "\((absolute as NSString).lastPathComponent) is \(mb) MB. Editing may be slow."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Open")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
 
+        guard let content = readFileContent(at: absolute, interactive: true)
+        else { return }
+
         openBuffer(path: absolute, content: content, mtime: mtime(of: absolute), line: line)
+    }
+
+    /// Read result with encoding fallbacks. `.binary` means NUL bytes were
+    /// found (after ruling out UTF-16 BOM); `.unreadable` covers I/O errors
+    /// and undecodable content.
+    private enum FileReadResult {
+        case ok(String)
+        case binary
+        case unreadable
+    }
+
+    private nonisolated static func readTextFile(at path: String) -> FileReadResult {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return .unreadable }
+        // UTF-16 BOM first — those files are full of NUL bytes and would
+        // trip the binary check below.
+        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]),
+           let utf16 = String(data: data, encoding: .utf16) {
+            return .ok(utf16)
+        }
+        if data.prefix(8192).contains(0) { return .binary }
+        if let utf8 = String(data: data, encoding: .utf8) { return .ok(utf8) }
+        // ISO Latin-1 maps every byte, so it always succeeds — last resort
+        // for legacy single-byte encodings.
+        if let latin = String(data: data, encoding: .isoLatin1) { return .ok(latin) }
+        return .unreadable
+    }
+
+    /// Reads a text file for editing. Explicit user opens (`interactive`)
+    /// surface failures as alerts; internal reads just log.
+    private func readFileContent(at absolute: String, interactive: Bool) -> String? {
+        switch Self.readTextFile(at: absolute) {
+        case .ok(let content):
+            return content
+        case .binary:
+            if interactive {
+                showOpenFailureAlert(path: absolute, reason: "Binary files can't be edited.")
+            } else {
+                NSLog("[EditorColumn] skipping binary file \(absolute)")
+            }
+        case .unreadable:
+            if interactive {
+                showOpenFailureAlert(path: absolute, reason: "The file couldn't be read.")
+            } else {
+                NSLog("[EditorColumn] cannot read \(absolute)")
+            }
+        }
+        return nil
+    }
+
+    private func showOpenFailureAlert(path: String, reason: String) {
+        let alert = NSAlert()
+        alert.messageText = "Can't open \((path as NSString).lastPathComponent)"
+        alert.informativeText = reason
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private func openDeletedBufferForDiff(path absolute: String, activate: Bool = true) {
@@ -430,12 +497,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         }
 
         if FileManager.default.fileExists(atPath: absolute) {
-            guard let data = try? Data(contentsOf: URL(fileURLWithPath: absolute)),
-                  let content = String(data: data, encoding: .utf8)
-            else {
-                NSLog("[EditorColumn] cannot read \(absolute)")
-                return false
-            }
+            guard let content = readFileContent(at: absolute, interactive: false)
+            else { return false }
             openBuffer(path: absolute, content: content, mtime: mtime(of: absolute), line: nil, activate: activate)
         } else {
             openDeletedBufferForDiff(path: absolute, activate: activate)
@@ -568,8 +631,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     }
 
     private nonisolated static func fileContent(at path: String) -> String? {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
-        return String(data: data, encoding: .utf8)
+        guard case .ok(let content) = readTextFile(at: path) else { return nil }
+        return content
     }
 
     private nonisolated static func gitContent(relativePath rel: String, ref: String, cwd: String) -> String? {
@@ -665,9 +728,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     /// Re-read the active file from disk and push its content to Monaco.
     /// Used when an external change races a clean buffer.
     private func reloadFromDisk(path: String) {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-              let content = String(data: data, encoding: .utf8)
-        else { return }
+        guard case .ok(let content) = Self.readTextFile(at: path) else { return }
 
         mtimeByPath[path] = mtime(of: path)
         diskModifiedWhileDirty.remove(path)
