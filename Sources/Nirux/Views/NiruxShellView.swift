@@ -161,6 +161,7 @@ final class NiruxShellView: NSView {
         let statusH = statusBar.isHidden ? CGFloat(0) : StatusBarView.height
         let viewportH = bounds.height - statusH; let viewportW = bounds.width - sidebarW - 1
         guard viewportH > 0, viewportW > 0 else { return }
+        NiruxDebugLog.log("relayout bounds=\(bounds.width)x\(bounds.height) window=\(window?.frame.width ?? -1)x\(window?.frame.height ?? -1) viewport=\(viewportW)x\(viewportH) pilot=\(isPilotMode)")
 
         let glowWidth: CGFloat = 32
         let vpX = sidebarW + (isPilotMode ? 0 : 1)

@@ -207,6 +207,7 @@ final class ColumnState {
     }
 
     func cycleWidth() {
+        NiruxDebugLog.log("cycleWidth \(widthPreset) -> \(widthPreset.next)")
         widthPreset = widthPreset.next
     }
 }

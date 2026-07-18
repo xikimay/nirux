@@ -23,6 +23,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if ProcessInfo.processInfo.environment["NIRUX_TERM_DEBUG"] != nil {
+            TerminalDebugLog.enable([.metrics, .lifecycle])
+        }
         NSApp.setActivationPolicy(.regular)
         setupKeyInterceptor()
         setupClickToFocus()

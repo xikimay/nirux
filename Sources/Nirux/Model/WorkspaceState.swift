@@ -229,6 +229,8 @@ final class WorkspaceState {
         }
         totalWidth += totalGaps
 
+        NiruxDebugLog.log("layoutAndScroll ws=\(id.prefix(8)) viewportW=\(viewportWidth) h=\(height) widths=\(widths.map { Int($0) }) fitAll=\(fitAll)")
+
         // 2. Position each column with gap
         var xOffset: CGFloat = 0
         for (index, col) in columns.enumerated() {
