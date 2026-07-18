@@ -151,6 +151,24 @@ extension NiruxShellView {
         }
     }
 
+    /// AgentHookCenter resolver: locate the column owning a NIRUX_AGENT_UUID
+    /// and report whether the user is currently watching it (same definition
+    /// as updateSidebar — pilot mode counts every focused column).
+    func resolveAgentColumn(uuid: String) -> AgentHookCenter.Resolution? {
+        for (wsIndex, workspace) in workspaces.enumerated() {
+            guard let colIndex = workspace.columns.firstIndex(where: { $0.agentUUID == uuid }) else { continue }
+            let isActive = wsIndex == activeWSIndex
+            let isUserFocused = colIndex == workspace.focusedIndex && (isActive || isPilotMode)
+            return AgentHookCenter.Resolution(
+                workspace: workspace,
+                column: workspace.columns[colIndex],
+                columnIndex: colIndex,
+                isUserFocused: isUserFocused
+            )
+        }
+        return nil
+    }
+
     private func refreshAfterWorkspaceSelection(animated: Bool) {
         guard workspaces.indices.contains(activeWSIndex) else { return }
         workspaces[activeWSIndex].hasNotification = false

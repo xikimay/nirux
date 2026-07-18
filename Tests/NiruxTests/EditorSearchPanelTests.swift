@@ -3,7 +3,8 @@ import XCTest
 
 final class EditorSearchPanelTests: XCTestCase {
     func testParseRipgrepJSONMatchLine() throws {
-        let line = #"{"type":"match","data":{"path":{"text":"./Sources/App.swift"},"lines":{"text":"let url = \"https://example.com\"\n"},"line_number":42,"absolute_offset":10,"submatches":[{"match":{"text":"url"},"start":4,"end":7}]}}"#
+        let line = #"{"type":"match","data":{"path":{"text":"./Sources/App.swift"},"lines":{"text":"let url = \"https://example.com\"\n"},"line_number":42,"absolute_offset":10,"# +
+            #""submatches":[{"match":{"text":"url"},"start":4,"end":7}]}}"#
 
         let result = try XCTUnwrap(EditorSearchPanel.parseRipgrepJSONLine(line))
 

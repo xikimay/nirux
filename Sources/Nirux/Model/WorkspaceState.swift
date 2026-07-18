@@ -86,8 +86,8 @@ final class WorkspaceState {
         }
     }
 
-    private func setupOsc9Tracking(for col: ColumnState) {
-        col.onOsc9Received = { [weak self, weak col] in
+    private func setupAgentAttentionTracking(for col: ColumnState) {
+        col.onAgentAttention = { [weak self, weak col] in
             guard let self else { return }
             self.hasNotification = true
             self.onMetadataChanged?()
@@ -116,7 +116,7 @@ final class WorkspaceState {
     private func setupAllTracking(for col: ColumnState) {
         setupCwdTracking(for: col)
         setupTitleTracking(for: col)
-        setupOsc9Tracking(for: col)
+        setupAgentAttentionTracking(for: col)
     }
 
     func detectGitBranch() {
@@ -138,10 +138,12 @@ final class WorkspaceState {
 
     // MARK: - Column Management
 
-    private func terminalEnvironment() -> [String: String] {
+    private func terminalEnvironment(agentUUID: String) -> [String: String] {
         [
             "NIRUX_PROFILE_ID": profileID,
-            "NIRUX_WORKSPACE_ID": id
+            "NIRUX_WORKSPACE_ID": id,
+            // Hook events carry this back — see AgentHookCenter.
+            "NIRUX_AGENT_UUID": agentUUID
         ]
     }
 
@@ -152,16 +154,16 @@ final class WorkspaceState {
         focusedIndex = insertAt
     }
 
-    func addColumn() {
+    func addColumn(agentUUID: String = UUID().uuidString) {
         let effectiveCwd = columns[safe: focusedIndex]?.pty?.childCwd ?? cwd
-        let col = ColumnState(cwd: effectiveCwd, environment: terminalEnvironment())
+        let col = ColumnState(cwd: effectiveCwd, environment: terminalEnvironment(agentUUID: agentUUID))
         setupAllTracking(for: col)
         insertColumn(col)
     }
 
-    func addColumn(command: String) {
+    func addColumn(command: String, agentUUID: String = UUID().uuidString) {
         let effectiveCwd = columns[safe: focusedIndex]?.pty?.childCwd ?? cwd
-        let col = ColumnState(cwd: effectiveCwd, command: command, environment: terminalEnvironment())
+        let col = ColumnState(cwd: effectiveCwd, command: command, environment: terminalEnvironment(agentUUID: agentUUID))
         setupAllTracking(for: col)
         insertColumn(col)
     }

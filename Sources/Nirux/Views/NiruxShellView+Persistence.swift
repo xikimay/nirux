@@ -39,10 +39,16 @@ extension NiruxShellView {
                     workspace.addColumn(webViewURL: persistedCol.webViewURL ?? "about:blank")
                 case .claudeCode:
                     let mode = persistedCol.claudeLaunchMode ?? .default
-                    workspace.addColumn(command: NiruxShellView.claudeCommand(continueSession: true, mode: mode))
+                    workspace.addColumn(
+                        command: NiruxShellView.claudeCommand(continueSession: true, mode: mode),
+                        agentUUID: persistedCol.agentUUID ?? UUID().uuidString
+                    )
                 case .codex:
                     let mode = persistedCol.codexLaunchMode ?? .default
-                    workspace.addColumn(command: NiruxShellView.codexCommand(resumeLast: true, mode: mode))
+                    workspace.addColumn(
+                        command: NiruxShellView.codexCommand(resumeLast: true, mode: mode),
+                        agentUUID: persistedCol.agentUUID ?? UUID().uuidString
+                    )
                 case .editor:
                     let openFiles = persistedCol.editorOpenFiles ?? []
                     // Non-interactive: a binary or huge file in the persisted
@@ -62,7 +68,7 @@ extension NiruxShellView {
                         }
                     }
                 case .terminal:
-                    workspace.addColumn()
+                    workspace.addColumn(agentUUID: persistedCol.agentUUID ?? UUID().uuidString)
                 }
                 if let width = ColumnWidth(rawValue: CGFloat(persistedCol.widthPreset)) {
                     workspace.columns.last?.widthPreset = width
@@ -133,7 +139,8 @@ extension NiruxShellView {
                             editorOpenFiles: editorOpenFiles,
                             editorActiveFile: editorActiveFile,
                             claudeLaunchMode: claudeMode,
-                            codexLaunchMode: codexMode
+                            codexLaunchMode: codexMode,
+                            agentUUID: col.agentUUID
                         )
                     },
                     focusedColumnIndex: workspace.focusedIndex,

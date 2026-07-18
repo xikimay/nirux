@@ -15,7 +15,15 @@ final class ColumnState {
     private(set) var pty: PtySession?
     var onCwdChanged: ((String) -> Void)?
     var onTitleChanged: (() -> Void)?
-    var onOsc9Received: (() -> Void)?
+    /// Fires when the agent asks for attention (hook-routed turn end /
+    /// permission prompt while the user isn't watching this column).
+    var onAgentAttention: (() -> Void)?
+
+    /// Stable identity injected into the terminal environment as
+    /// NIRUX_AGENT_UUID — Claude/Codex hook events carry it back so
+    /// AgentHookCenter can route them to THIS column. Persisted across
+    /// restarts; survives shell restarts (same terminal spec).
+    let agentUUID: String?
 
     /// Terminal title from OSC 0/2 (agent context, vim filename, etc.)
     var terminalTitle: String? {
@@ -132,6 +140,7 @@ final class ColumnState {
     /// Shared terminal init — pass extra shell args for command mode.
     private init(cwd: String, shellArgs: [String], environment: [String: String]) {
         terminalSpec = (cwd, shellArgs, environment)
+        agentUUID = environment["NIRUX_AGENT_UUID"]
         let dropView = DropTargetView()
         dropView.wantsLayer = true
         view = dropView
@@ -174,11 +183,6 @@ final class ColumnState {
             self?.onTitleChanged?()
         }
 
-        // Forward OSC 9 (agent turn completed)
-        ptySession.onOsc9Received = { [weak self] in
-            self?.onOsc9Received?()
-        }
-
         // Shell exit → show the restart overlay over the (still visible)
         // terminal. Scrollback survives a restart.
         ptySession.onProcessExit = { [weak self] in
@@ -202,6 +206,7 @@ final class ColumnState {
 
     /// WebView column
     init(url: String) {
+        agentUUID = nil
         view = NSView()
         view.wantsLayer = true
 
@@ -213,6 +218,7 @@ final class ColumnState {
 
     /// Editor column (Monaco-backed). Scoped to a workspace cwd.
     init(editorWorkspaceCwd: String) {
+        agentUUID = nil
         view = NSView()
         view.wantsLayer = true
 
@@ -225,6 +231,12 @@ final class ColumnState {
     func cycleWidth() {
         NiruxDebugLog.log("cycleWidth \(widthPreset) -> \(widthPreset.next)")
         widthPreset = widthPreset.next
+    }
+
+    /// AgentHookCenter entry point: the agent in this column just asked for
+    /// attention — forward to the workspace-level notification wiring.
+    func notifyAgentAttention() {
+        onAgentAttention?()
     }
 
     // MARK: - Shell exit / restart
