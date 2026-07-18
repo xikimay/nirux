@@ -238,8 +238,28 @@ extension NiruxShellView {
 
     func importBrowserCookies() {
         let browsers = CookieImporter.availableBrowsers
-        guard let browser = browsers.first else { return }
+        guard !browsers.isEmpty else { return }
 
+        guard browsers.count > 1 else {
+            runCookieImport(from: browsers[0])
+            return
+        }
+
+        // Several Chromium browsers installed — let the user pick the source.
+        let alert = NSAlert()
+        alert.messageText = "Import Cookies"
+        alert.informativeText = "Choose a browser to import cookies from."
+        for browser in browsers {
+            alert.addButton(withTitle: browser.rawValue)
+        }
+        alert.addButton(withTitle: "Cancel")
+        let response = alert.runModal()
+        let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        guard browsers.indices.contains(index) else { return }
+        runCookieImport(from: browsers[index])
+    }
+
+    private func runCookieImport(from browser: CookieImporter.Browser) {
         Task {
             do {
                 let result = try await CookieImporter.importCookies(from: browser, into: WebViewColumn.sharedDataStore)
@@ -364,6 +384,29 @@ extension NiruxShellView {
               let editor = workspace.columns[safe: workspace.focusedIndex]?.editorColumn
         else { return }
         editor.toggleWordWrap()
+    }
+
+    /// Open the Web Inspector on the focused browser column. No-op elsewhere.
+    func toggleDevTools() {
+        guard let workspace = activeWorkspace,
+              let web = workspace.columns[safe: workspace.focusedIndex]?.webViewColumn
+        else { return }
+        web.toggleInspector()
+    }
+
+    /// Browser back/forward on the focused browser column. No-op elsewhere.
+    func browserGoBack() {
+        guard let workspace = activeWorkspace,
+              let web = workspace.columns[safe: workspace.focusedIndex]?.webViewColumn
+        else { return }
+        web.goBack()
+    }
+
+    func browserGoForward() {
+        guard let workspace = activeWorkspace,
+              let web = workspace.columns[safe: workspace.focusedIndex]?.webViewColumn
+        else { return }
+        web.goForward()
     }
 
     /// Open the workspace-wide search panel scoped to the active workspace

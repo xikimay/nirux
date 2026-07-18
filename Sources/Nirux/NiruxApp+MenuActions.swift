@@ -75,6 +75,18 @@ extension NiruxApp {
         shell?.toggleWordWrap()
     }
 
+    @objc func toggleDevTools(_ sender: Any?) {
+        shell?.toggleDevTools()
+    }
+
+    @objc func browserGoBack(_ sender: Any?) {
+        shell?.browserGoBack()
+    }
+
+    @objc func browserGoForward(_ sender: Any?) {
+        shell?.browserGoForward()
+    }
+
     @objc func togglePilotMode(_ sender: Any?) {
         shell?.togglePilotMode()
     }
@@ -145,6 +157,15 @@ extension NiruxApp {
             keyEquivalent: NiruxShortcuts.newTerminalKey
         )
         colMenu.addItem(withTitle: "Open Browser", action: #selector(openBrowser(_:)), keyEquivalent: "b")
+
+        let browserBackItem = NSMenuItem(title: "Browser Back", action: #selector(browserGoBack(_:)), keyEquivalent: "[")
+        colMenu.addItem(browserBackItem)
+        let browserFwdItem = NSMenuItem(title: "Browser Forward", action: #selector(browserGoForward(_:)), keyEquivalent: "]")
+        colMenu.addItem(browserFwdItem)
+        let devToolsItem = NSMenuItem(title: "Toggle Web Inspector", action: #selector(toggleDevTools(_:)), keyEquivalent: "i")
+        devToolsItem.keyEquivalentModifierMask = [.command, .option]
+        colMenu.addItem(devToolsItem)
+
         colMenu.addItem(withTitle: "Close Column", action: #selector(closeColumn(_:)), keyEquivalent: "w")
         colMenu.addItem(NSMenuItem.separator())
 

@@ -215,6 +215,19 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     @objc private func goForwardAction() { webView.goForward() }
     @objc private func reloadAction() { webView.reload() }
 
+    func goBack() { webView.goBack() }
+    func goForward() { webView.goForward() }
+
+    /// Open the Web Inspector. WKWebView has no public API for this;
+    /// developerExtrasEnabled is set, so `_showInspector` exists — guard the
+    /// call so a future WebKit rename degrades to a no-op instead of a crash.
+    func toggleInspector() {
+        let inspector = Selector(("_showInspector"))
+        if webView.responds(to: inspector) {
+            webView.perform(inspector)
+        }
+    }
+
     @objc private func urlFieldAction() {
         navigate(to: urlField.stringValue)
         window?.makeFirstResponder(webView)
@@ -235,6 +248,44 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
         DispatchQueue.main.async { [weak self] in
             self?.progressBar.isHidden = true
         }
+    }
+
+    /// Responses WebKit can't display (archives, binaries, attachments)
+    /// become downloads instead of failing silently.
+    @MainActor
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+    ) {
+        if navigationResponse.canShowMIMEType {
+            decisionHandler(.allow)
+        } else {
+            decisionHandler(.download)
+        }
+    }
+
+    @MainActor
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        if navigationAction.shouldPerformDownload {
+            decisionHandler(.download)
+        } else {
+            decisionHandler(.allow)
+        }
+    }
+
+    @MainActor
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        download.delegate = self
+    }
+
+    @MainActor
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        download.delegate = self
     }
 
     // MARK: - WKUIDelegate (popups, alerts, new windows)
@@ -323,3 +374,46 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
         """
     }
 }
+
+// MARK: - WKDownloadDelegate
+
+extension WebViewColumn: WKDownloadDelegate {
+    /// Save to ~/Downloads with a unique name (foo.zip → foo-2.zip → …).
+    @MainActor
+    func download(
+        _ download: WKDownload,
+        decideDestinationUsing response: URLResponse,
+        suggestedFilename: String,
+        completionHandler: @escaping @MainActor @Sendable (URL?) -> Void
+    ) {
+        guard let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first else {
+            completionHandler(nil)
+            return
+        }
+        var destination = downloads.appendingPathComponent(suggestedFilename)
+        let ext = destination.pathExtension
+        let base = destination.deletingPathExtension().lastPathComponent
+        var counter = 2
+        while FileManager.default.fileExists(atPath: destination.path) {
+            let name = ext.isEmpty ? "\(base)-\(counter)" : "\(base)-\(counter).\(ext)"
+            destination = downloads.appendingPathComponent(name)
+            counter += 1
+        }
+        completionHandler(destination)
+    }
+
+    @MainActor
+    func downloadDidFinish(_ download: WKDownload) {
+        NSLog("[WebViewColumn] download finished")
+        // Surface completion when the app is in the background.
+        if NSApp.isActive == false {
+            NSApp.requestUserAttention(.informationalRequest)
+        }
+    }
+
+    @MainActor
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        NSLog("[WebViewColumn] download failed: \(error.localizedDescription)")
+    }
+}
+
