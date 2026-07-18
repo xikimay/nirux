@@ -163,6 +163,49 @@ final class WorkspaceState {
         columns.insert(col, at: insertAt)
         stripView.addSubview(col.view)
         focusedIndex = insertAt
+        makeResizeHandle()
+    }
+
+    /// One resize handle per column (its right edge), always the topmost
+    /// strip subviews. Closures resolve the handle back to its CURRENT
+    /// column index at event time, so moveColumn/closeColumn can't leave
+    /// them pointing at the wrong column.
+    private var resizeHandles: [ColumnResizeHandle] = []
+
+    private func makeResizeHandle() {
+        let handle = ColumnResizeHandle()
+        handle.onDragStart = { [weak self, weak handle] in
+            guard let self, let handle,
+                  let index = self.resizeHandles.firstIndex(of: handle),
+                  self.columns.indices.contains(index) else { return 0.5 }
+            self.focusedIndex = index
+            return self.columns[index].widthFraction
+        }
+        handle.onDrag = { [weak self, weak handle] fraction in
+            guard let handle else { return }
+            self?.setColumnWidth(for: handle, fraction: fraction)
+        }
+        handle.onReset = { [weak self, weak handle] in
+            guard let handle else { return }
+            self?.setColumnWidth(for: handle, fraction: ColumnWidth.half.fraction)
+        }
+        stripView.addSubview(handle)
+        resizeHandles.append(handle)
+    }
+
+    static let minWidthFraction: CGFloat = 0.15
+    static let maxWidthFraction: CGFloat = 2.0
+
+    private func setColumnWidth(for handle: ColumnResizeHandle, fraction: CGFloat) {
+        guard let index = resizeHandles.firstIndex(of: handle), columns.indices.contains(index) else { return }
+        let clamped = min(Self.maxWidthFraction, max(Self.minWidthFraction, fraction))
+        guard clamped != columns[index].widthFraction else { return }
+        columns[index].widthFraction = clamped
+        layoutAndScroll(
+            viewportWidth: containerView.bounds.width,
+            height: containerView.bounds.height,
+            animated: false
+        )
     }
 
     func addColumn(agentUUID: String = UUID().uuidString) {
@@ -200,6 +243,10 @@ final class WorkspaceState {
         guard columns.count > 1 else { return }
         let col = columns.remove(at: index)
         col.view.removeFromSuperview()
+        if resizeHandles.indices.contains(index) {
+            let handle = resizeHandles.remove(at: index)
+            handle.removeFromSuperview()
+        }
         if focusedIndex >= columns.count {
             focusedIndex = columns.count - 1
         }
@@ -217,6 +264,7 @@ final class WorkspaceState {
     // MARK: - Layout & Scroll
 
     private static let columnGap: CGFloat = 2
+    private static let resizeHandleWidth: CGFloat = 9
     private static let focusBorderWidth: CGFloat = 2
     private static let focusCornerRadius: CGFloat = 6
     private static let focusColor = NSColor.niruxAccent.withAlphaComponent(0.7)
@@ -253,7 +301,7 @@ final class WorkspaceState {
             for _ in columns { widths.append(columnWidth); totalWidth += columnWidth }
         } else {
             for col in columns {
-                let width = floor(col.widthPreset.fraction * (columnsViewportWidth - totalGaps))
+                let width = floor(col.widthFraction * (columnsViewportWidth - totalGaps))
                 widths.append(width); totalWidth += width
             }
         }
@@ -276,8 +324,24 @@ final class WorkspaceState {
             col.view.layer?.borderWidth = 0
             col.view.layer?.borderColor = nil
 
+            // Resize handle straddling this column's right boundary.
+            if resizeHandles.indices.contains(index) {
+                let handle = resizeHandles[index]
+                handle.referenceWidth = max(columnsViewportWidth, 1)
+                handle.isHidden = fitAll || pilotMode
+                handle.frame = NSRect(
+                    x: xOffset + widths[index] + gap / 2 - Self.resizeHandleWidth / 2,
+                    y: 0,
+                    width: Self.resizeHandleWidth,
+                    height: height
+                )
+            }
+
             xOffset += widths[index] + gap
         }
+        // Handles must stay above every column view, whichever order the
+        // columns were inserted in.
+        for handle in resizeHandles { stripView.addSubview(handle) }
         stripView.frame = NSRect(x: stripView.frame.origin.x, y: 0, width: totalWidth, height: height)
 
         // 3. Camera (scroll to keep focused column visible)

@@ -11,7 +11,10 @@ final class ColumnState {
     var terminalView: TerminalView?
     var webViewColumn: WebViewColumn?
     var editorColumn: EditorColumn?
-    var widthPreset: ColumnWidth = .half
+    /// Column width as a fraction of the columns viewport (0.15…2.0).
+    /// Freeform (drag the resize handles); the ColumnWidth presets are just
+    /// named stops the width cycler snaps to.
+    var widthFraction: CGFloat = ColumnWidth.half.fraction
     private(set) var pty: PtySession?
     var onCwdChanged: ((String) -> Void)?
     var onTitleChanged: (() -> Void)?
@@ -233,9 +236,15 @@ final class ColumnState {
         editorColumn = editor
     }
 
+    /// Snap to the next preset (same cycle order as before: from any
+    /// freeform width, jump to whatever preset follows the nearest one).
     func cycleWidth() {
-        NiruxDebugLog.log("cycleWidth \(widthPreset) -> \(widthPreset.next)")
-        widthPreset = widthPreset.next
+        let all = ColumnWidth.allCases
+        let nearest = all.indices.min(by: {
+            abs(all[$0].fraction - widthFraction) < abs(all[$1].fraction - widthFraction)
+        }) ?? 0
+        widthFraction = all[(nearest + 1) % all.count].fraction
+        NiruxDebugLog.log("cycleWidth -> \(widthFraction)")
     }
 
     /// AgentHookCenter entry point: the agent in this column just asked for
@@ -300,7 +309,7 @@ extension ColumnState: TerminalSurfaceHoverLinkDelegate {
     }
 }
 
-enum ColumnWidth: CaseIterable, Equatable {
+enum ColumnWidth: CaseIterable {
     case full, twoThirds, half, third, quarter
 
     var fraction: CGFloat {
@@ -311,24 +320,5 @@ enum ColumnWidth: CaseIterable, Equatable {
         case .third: 1.0 / 3.0
         case .quarter: 1.0 / 4.0
         }
-    }
-
-    var rawValue: CGFloat { fraction }
-
-    init?(rawValue: CGFloat) {
-        switch rawValue {
-        case 1.0: self = .full
-        case let value where abs(value - 2.0/3.0) < 0.01: self = .twoThirds
-        case 0.5: self = .half
-        case let value where abs(value - 1.0/3.0) < 0.01: self = .third
-        case 0.25: self = .quarter
-        default: return nil
-        }
-    }
-
-    var next: ColumnWidth {
-        let all = ColumnWidth.allCases
-        let idx = all.firstIndex(of: self)!
-        return all[(idx + 1) % all.count]
     }
 }

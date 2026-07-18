@@ -66,8 +66,9 @@ extension NiruxShellView {
                 case .terminal:
                     workspace.addColumn(agentUUID: persistedCol.agentUUID ?? UUID().uuidString)
                 }
-                if let width = ColumnWidth(rawValue: CGFloat(persistedCol.widthPreset)) {
-                    workspace.columns.last?.widthPreset = width
+                let fraction = CGFloat(persistedCol.widthPreset)
+                if (0.05...2.5).contains(fraction) {
+                    workspace.columns.last?.widthFraction = fraction
                 }
             }
             workspace.focusedIndex = min(persistedWS.focusedColumnIndex, max(workspace.columns.count - 1, 0))
@@ -128,7 +129,7 @@ extension NiruxShellView {
                             kind = .terminal; webURL = nil
                         }
                         return PersistedColumn(
-                            widthPreset: Double(col.widthPreset.rawValue),
+                            widthPreset: Double(col.widthFraction),
                             cwd: col.editorColumn?.workspaceCwd ?? col.pty?.childCwd ?? workspace.cwd,
                             columnType: kind,
                             webViewURL: webURL,

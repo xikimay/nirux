@@ -207,3 +207,59 @@ final class ShellExitedOverlay: NSView {
 
     @objc private func restartClicked() { onRestart?() }
 }
+
+/// Draggable divider at a column's right edge — freeform width resize.
+/// Lives in the workspace strip (columns clip their own subviews to their
+/// bounds), positioned over the inter-column boundary by layoutAndScroll.
+/// Drag deltas become width fractions of the columns viewport.
+final class ColumnResizeHandle: NSView {
+    /// Drag start → current column fraction (absolute-set semantics, so a
+    /// wobbly mouse can't compound errors).
+    var onDragStart: (() -> CGFloat)?
+    /// Dragging → new absolute fraction (unclamped — the owner clamps).
+    var onDrag: ((CGFloat) -> Void)?
+    /// Double-click → reset to the default width.
+    var onReset: (() -> Void)?
+
+    /// Width the drag converts pixels against — the columns viewport width.
+    var referenceWidth: CGFloat = 1
+
+    private var dragStartX: CGFloat = 0
+    private let line = NSView()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        line.wantsLayer = true
+        line.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.09).cgColor
+        addSubview(line)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        line.frame = NSRect(x: bounds.midX - 1, y: 0, width: 2, height: bounds.height)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        addCursorRect(bounds, cursor: .resizeLeftRight)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            onReset?()
+            return
+        }
+        dragStartX = event.locationInWindow.x
+        dragStartFraction = onDragStart?() ?? 0.5
+    }
+
+    private var dragStartFraction: CGFloat = 0.5
+
+    override func mouseDragged(with event: NSEvent) {
+        let delta = event.locationInWindow.x - dragStartX
+        onDrag?(dragStartFraction + delta / max(referenceWidth, 1))
+    }
+}
