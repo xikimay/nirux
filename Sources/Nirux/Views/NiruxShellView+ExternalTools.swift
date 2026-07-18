@@ -418,6 +418,14 @@ extension NiruxShellView {
         web.focusAddressBar()
     }
 
+    /// Focus a column by 1-based number (Cmd+1…9). Out-of-range no-ops.
+    func focusColumn(number: Int) {
+        guard let workspace = activeWorkspace,
+              workspace.columns.indices.contains(number - 1)
+        else { return }
+        focusColumnByIndex(number - 1)
+    }
+
     /// Open the workspace-wide search panel scoped to the active workspace
     /// cwd. Picking a result routes through `openInEditorColumn`.
     func showWorkspaceSearch() {

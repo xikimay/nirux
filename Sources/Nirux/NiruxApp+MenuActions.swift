@@ -91,6 +91,10 @@ extension NiruxApp {
         shell?.focusAddressBar()
     }
 
+    @objc func focusColumnByNumber(_ sender: NSMenuItem) {
+        shell?.focusColumn(number: sender.tag)
+    }
+
     @objc func togglePilotMode(_ sender: Any?) {
         shell?.togglePilotMode()
     }
@@ -161,6 +165,18 @@ extension NiruxApp {
             keyEquivalent: NiruxShortcuts.newTerminalKey
         )
         colMenu.addItem(withTitle: "Open Browser", action: #selector(openBrowser(_:)), keyEquivalent: "b")
+
+        // Cmd+1…9: jump straight to column N (iTerm-style tab switching).
+        for number in 1...9 {
+            let item = NSMenuItem(
+                title: "Focus Column \(number)",
+                action: #selector(focusColumnByNumber(_:)),
+                keyEquivalent: "\(number)"
+            )
+            item.tag = number
+            colMenu.addItem(item)
+        }
+        colMenu.addItem(NSMenuItem.separator())
 
         let browserBackItem = NSMenuItem(title: "Browser Back", action: #selector(browserGoBack(_:)), keyEquivalent: "[")
         colMenu.addItem(browserBackItem)
