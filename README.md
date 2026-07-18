@@ -9,7 +9,8 @@ Nirux is alpha software.
 - Persistent workspaces: stack independent workspaces vertically, each with its own current directory, title, Git branch, focused column, and restored layout.
 - Horizontal columns: mix Ghostty-backed terminals, WKWebView browser columns, and Monaco editor columns in the same workspace.
 - Agent launchers: start Claude Code or Codex from the command palette with configurable permission and sandbox presets.
-- Attention system: per-column agent status (working / needs attention, with elapsed time), edge glows for off-screen attention, native macOS notifications that focus the right workspace and column on click, and a Dock badge counting waiting workspaces.
+- Attention system: per-column agent status (working / needs attention, with elapsed time) driven by real Claude Code hooks and Codex turn notifications — not output guessing — plus edge glows for off-screen attention, native macOS notifications that focus the right workspace and column on click, and a Dock badge counting waiting workspaces.
+- Activity feed: the expanded sidebar keeps a rolling "while you were away" log of agent events (permission prompts, finished turns, session starts) with click-to-focus, replayed even for events emitted while the app was closed.
 - Worktree flow: create or open Git worktrees as new workspaces, optionally handing context from the current agent session into the new workspace.
 - Built-in editor: open files, keep tabs, search the workspace, browse the file tree with Finder icons, view Git changes, and toggle file diffs. Find/replace, word wrap, font zoom, per-tab scroll restore, and disk-conflict protection included.
 - Browser context: open URLs in app, keep URL history, import cookies from Chrome, Brave, Arc, or Edge into the shared WebKit data store, download files to ~/Downloads, and inspect pages with the Web Inspector.
@@ -90,7 +91,7 @@ Useful shortcuts:
 | `Cmd+1…9` | Focus column N |
 | `Cmd+Left` / `Cmd+Right` | Focus previous or next column |
 | `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column |
-| `Cmd+E` | Cycle focused column width |
+| `Cmd+E` | Cycle focused column width through presets |
 | `Cmd+N` | New workspace |
 | `Cmd+Up` / `Cmd+Down` | Switch workspace |
 | `Cmd+O` | Toggle Pilot Mode |
@@ -105,6 +106,17 @@ Useful shortcuts:
 | `Alt+Cmd+I` | Open Web Inspector on the focused browser column |
 
 When a shell exits, its terminal shows a restart overlay — press `Enter` to respawn it (scrollback is preserved).
+
+Column widths are freeform: drag the divider between columns to resize (double-click resets to half), or use `Cmd+E` to snap through presets. `Cmd+click` any URL in a terminal to open it as a browser column in the same workspace.
+
+### Agent status hooks
+
+Nirux installs lightweight lifecycle hooks so agent status is exact instead of guessed from terminal output:
+
+- `~/.claude/settings.json` gains `hooks` entries invoking `Nirux --hook claude` on session start, prompt submit, tool use, notification, stop, and session end. Existing hooks are preserved; the entries refresh themselves on every launch.
+- `~/.codex/config.toml` gains a `notify` entry invoking `Nirux --hook codex` on completed turns (left untouched if you already have your own `notify`).
+
+Each event carries the column's stable `NIRUX_AGENT_UUID`, so status, attention signals, and the sidebar activity feed are attributed to the exact column that emitted them — across restarts. Agents launched outside Nirux (or before the hooks were installed) fall back to simple output-activity detection. To remove the hooks, delete the marked entries from those two files.
 
 ## Worktrees And URL Scheme
 
