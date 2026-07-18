@@ -50,6 +50,22 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    /// Post a "download finished" notification; clicking reveals the file
+    /// in Finder. Suppressed while the app is active.
+    func postDownloadFinished(filename: String, fileURL: URL) {
+        guard isAvailable, !NSApp.isActive else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Download finished"
+        content.body = filename
+        content.userInfo = ["filePath": fileURL.path]
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                NSLog("[NiruxNotifier] post failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     /// Dock tile badge: number of workspaces waiting for attention.
     func updateDockBadge(attentionCount: Int) {
         NSApp.dockTile.badgeLabel = attentionCount > 0 ? String(attentionCount) : nil
@@ -72,10 +88,17 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         let info = response.notification.request.content.userInfo
         let workspaceID = info["workspaceID"] as? String
         let columnIndex = info["columnIndex"] as? Int
+        let filePath = info["filePath"] as? String
         // Answer synchronously — sending the closure into the MainActor task
         // below would risk a data race.
         completionHandler()
         Task { @MainActor in
+            // Download notifications reveal the file instead of focusing a
+            // workspace.
+            if let filePath {
+                NSWorkspace.shared.selectFile(filePath, inFileViewerRootedAtPath: "")
+                return
+            }
             NSApp.activate(ignoringOtherApps: true)
             if let workspaceID {
                 self.onActivate?(workspaceID, columnIndex)

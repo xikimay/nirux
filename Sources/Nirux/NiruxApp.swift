@@ -83,6 +83,10 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         true
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
+    }
+
     // MARK: - URL Scheme
 
     enum WorkspaceAgent: String {

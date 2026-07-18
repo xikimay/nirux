@@ -118,9 +118,10 @@ final class ColumnState {
         // Match a normal terminal launch: interactive + login shell. This
         // ensures PATH/bootstrap logic from .zprofile/.zshrc is available
         // when Nirux restores command-backed columns after a Finder relaunch.
+        let shell = PtySession.defaultShell
         self.init(
             cwd: cwd,
-            shellArgs: ["-i", "-l", "-c", "\(command); exec /bin/zsh -i -l"],
+            shellArgs: ["-i", "-l", "-c", "\(command); exec \(shell) -i -l"],
             environment: environment
         )
     }
@@ -186,7 +187,7 @@ final class ColumnState {
         let env = environment
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             ptySession.start(
-                shell: "/bin/zsh",
+                shell: PtySession.defaultShell,
                 args: args,
                 cwd: cwd,
                 cols: 80,
@@ -246,7 +247,7 @@ final class ColumnState {
         shellExitedOverlay?.isHidden = true
         let size = pty?.lastSize ?? (cols: 80, rows: 24)
         pty?.start(
-            shell: "/bin/zsh",
+            shell: PtySession.defaultShell,
             args: spec.shellArgs,
             cwd: spec.cwd,
             cols: size.cols > 0 ? size.cols : 80,

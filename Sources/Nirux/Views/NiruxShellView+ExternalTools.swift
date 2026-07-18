@@ -409,6 +409,15 @@ extension NiruxShellView {
         web.goForward()
     }
 
+    /// Focus the URL field of the focused browser column (Cmd+L). No-op
+    /// elsewhere so terminal Cmd+L keeps its terminal meaning.
+    func focusAddressBar() {
+        guard let workspace = activeWorkspace,
+              let web = workspace.columns[safe: workspace.focusedIndex]?.webViewColumn
+        else { return }
+        web.focusAddressBar()
+    }
+
     /// Open the workspace-wide search panel scoped to the active workspace
     /// cwd. Picking a result routes through `openInEditorColumn`.
     func showWorkspaceSearch() {

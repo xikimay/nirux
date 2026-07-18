@@ -34,7 +34,9 @@ extension NiruxShellView {
                         isUserFocused: isUserFocused
                     ) ?? .idle,
                     isEditor: col.isEditor,
-                    editorFileName: editorFile
+                    editorFileName: editorFile,
+                    agentElapsedSeconds: col.pty?.foregroundProcessStartedAt
+                        .map { Date().timeIntervalSince($0) }
                 )
             }
             return WorkspaceInfo(index: index, title: workspace.title, profileID: workspace.profileID, isInactive: workspace.isInactive,

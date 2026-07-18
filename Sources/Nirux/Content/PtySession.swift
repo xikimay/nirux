@@ -145,6 +145,21 @@ final class PtySession: @unchecked Sendable {
     /// Last applied grid size — the right starting size for a restart.
     var lastSize: (cols: Int, rows: Int) { (state.lastCols, state.lastRows) }
 
+    /// When the current foreground process took over (drives the "working
+    /// · 12m" display in the sidebar). Nil while the idle shell runs.
+    var foregroundProcessStartedAt: Date? { state.foregroundSince }
+
+    /// The user's login shell ($SHELL) when it resolves to a real binary,
+    /// else zsh. Computed once — checked in the parent process, never
+    /// post-fork.
+    static let defaultShell: String = {
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? ""
+        if shell.hasPrefix("/"), FileManager.default.fileExists(atPath: shell) {
+            return shell
+        }
+        return "/bin/zsh"
+    }()
+
     /// Compute agent status using burst detection (rapid consecutive reads = active)
     /// - isUserFocused: true if the user is currently focused on this specific column
     func agentStatus(snapshot: ProcessSnapshot, isUserFocused: Bool) -> AgentStatus {

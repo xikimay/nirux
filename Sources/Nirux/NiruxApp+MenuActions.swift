@@ -87,6 +87,10 @@ extension NiruxApp {
         shell?.browserGoForward()
     }
 
+    @objc func focusAddressBar(_ sender: Any?) {
+        shell?.focusAddressBar()
+    }
+
     @objc func togglePilotMode(_ sender: Any?) {
         shell?.togglePilotMode()
     }
@@ -165,6 +169,8 @@ extension NiruxApp {
         let devToolsItem = NSMenuItem(title: "Toggle Web Inspector", action: #selector(toggleDevTools(_:)), keyEquivalent: "i")
         devToolsItem.keyEquivalentModifierMask = [.command, .option]
         colMenu.addItem(devToolsItem)
+
+        colMenu.addItem(withTitle: "Focus Address Bar", action: #selector(focusAddressBar(_:)), keyEquivalent: "l")
 
         colMenu.addItem(withTitle: "Close Column", action: #selector(closeColumn(_:)), keyEquivalent: "w")
         colMenu.addItem(NSMenuItem.separator())

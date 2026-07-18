@@ -14,6 +14,9 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     private(set) var currentURL: String = ""
     private(set) var pageTitle: String = ""
     private var observations: [NSKeyValueObservation] = []
+    /// Destination URLs of in-flight downloads, for the completion
+    /// notification's reveal-in-Finder action.
+    private var downloadDestinations: [ObjectIdentifier: URL] = [:]
 
     private static let barHeight: CGFloat = 32
     private static let barBg = NSColor(red: 0.13, green: 0.13, blue: 0.17, alpha: 1)
@@ -218,6 +221,12 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     func goBack() { webView.goBack() }
     func goForward() { webView.goForward() }
 
+    /// Move keyboard focus to the URL field with the text selected (Cmd+L).
+    func focusAddressBar() {
+        window?.makeFirstResponder(urlField)
+        urlField.selectText(nil)
+    }
+
     /// Open the Web Inspector. WKWebView has no public API for this;
     /// developerExtrasEnabled is set, so `_showInspector` exists — guard the
     /// call so a future WebKit rename degrades to a no-op instead of a crash.
@@ -399,20 +408,28 @@ extension WebViewColumn: WKDownloadDelegate {
             destination = downloads.appendingPathComponent(name)
             counter += 1
         }
+        downloadDestinations[ObjectIdentifier(download)] = destination
         completionHandler(destination)
     }
 
     @MainActor
     func downloadDidFinish(_ download: WKDownload) {
+        let destination = downloadDestinations.removeValue(forKey: ObjectIdentifier(download))
         NSLog("[WebViewColumn] download finished")
-        // Surface completion when the app is in the background.
-        if NSApp.isActive == false {
+        if let destination {
+            NiruxNotifier.shared.postDownloadFinished(
+                filename: destination.lastPathComponent,
+                fileURL: destination
+            )
+        } else if NSApp.isActive == false {
+            // Surface completion when the app is in the background.
             NSApp.requestUserAttention(.informationalRequest)
         }
     }
 
     @MainActor
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        downloadDestinations.removeValue(forKey: ObjectIdentifier(download))
         NSLog("[WebViewColumn] download failed: \(error.localizedDescription)")
     }
 }
