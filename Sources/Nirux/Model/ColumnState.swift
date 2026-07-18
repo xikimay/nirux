@@ -19,6 +19,10 @@ final class ColumnState {
     /// permission prompt while the user isn't watching this column).
     var onAgentAttention: (() -> Void)?
 
+    /// Fires when the user cmd-clicks an http(s) link in the terminal —
+    /// the workspace opens it in a browser column.
+    var onOpenURL: ((String) -> Void)?
+
     /// Stable identity injected into the terminal environment as
     /// NIRUX_AGENT_UUID — Claude/Codex hook events carry it back so
     /// AgentHookCenter can route them to THIS column. Persisted across
@@ -166,6 +170,7 @@ final class ColumnState {
             backend: .inMemory(ptySession.terminalSession),
             workingDirectory: cwd
         )
+        terminal.delegate = self
         view.addSubview(terminal)
         terminalView = terminal
 
@@ -269,6 +274,29 @@ final class ColumnState {
             rows: size.rows > 0 ? size.rows : 24,
             environment: spec.environment
         )
+    }
+}
+
+// MARK: - Link opening (cmd+click / hover)
+
+extension ColumnState: TerminalSurfaceOpenURLDelegate {
+    /// Ghostty auto-detects URLs (plain text and OSC 8 hyperlinks) and
+    /// forwards cmd+click here. Web links open inside Nirux as a browser
+    /// column; anything else (mailto:, file:, custom schemes) goes to the
+    /// system handler.
+    func terminalDidRequestOpenURL(_ url: String, kind: TerminalOpenURLKind) {
+        guard let parsed = URL(string: url), parsed.scheme != nil else { return }
+        if ["http", "https"].contains(parsed.scheme!.lowercased()) {
+            onOpenURL?(url)
+        } else {
+            NSWorkspace.shared.open(parsed)
+        }
+    }
+}
+
+extension ColumnState: TerminalSurfaceHoverLinkDelegate {
+    func terminalDidUpdateHoverLink(_ url: String?) {
+        (url == nil ? NSCursor.arrow : .pointingHand).set()
     }
 }
 

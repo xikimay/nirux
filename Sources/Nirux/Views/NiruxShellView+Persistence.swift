@@ -26,11 +26,7 @@ extension NiruxShellView {
                 profileID: profileID
             )
             workspace.isInactive = persistedWS.isInactive
-            workspace.onMetadataChanged = { [weak self] in self?.updateSidebar(); self?.refreshTitleBarLabels() }
-            workspace.onDiffStatsClicked = { [weak self, weak workspace] in
-                guard let workspace else { return }
-                self?.openDiffInEditor(for: workspace)
-            }
+            wireWorkspace(workspace)
             // Remove the default column created by WorkspaceState.init
             if let first = workspace.columns.first { first.view.removeFromSuperview(); workspace.columns.removeAll() }
             for persistedCol in persistedWS.columns {

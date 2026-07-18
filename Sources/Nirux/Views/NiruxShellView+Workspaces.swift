@@ -34,11 +34,7 @@ extension NiruxShellView {
         let wsCwd = cwd ?? NSHomeDirectory()
         let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
         let workspace = WorkspaceState(title: wsTitle, cwd: wsCwd, profileID: targetProfileID)
-        workspace.onMetadataChanged = { [weak self] in self?.updateSidebar(); self?.refreshTitleBarLabels() }
-        workspace.onDiffStatsClicked = { [weak self, weak workspace] in
-            guard let workspace else { return }
-            self?.openDiffInEditor(for: workspace)
-        }
+        wireWorkspace(workspace)
         workspaceStore.appendWorkspace(workspace)
         verticalStrip.addSubview(workspace.containerView)
         if isPilotMode { workspace.createPilotPanel() }

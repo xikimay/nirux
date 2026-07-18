@@ -40,6 +40,9 @@ final class WorkspaceState {
     /// Called by NiruxShellView to wire up sidebar refresh
     var onMetadataChanged: (() -> Void)?
     var onDiffStatsClicked: (() -> Void)?
+    /// A terminal link was cmd-clicked — the shell opens a browser column
+    /// in this workspace.
+    var onTerminalOpenURL: ((WorkspaceState, String) -> Void)?
 
     init(
         id: String = UUID().uuidString,
@@ -113,10 +116,18 @@ final class WorkspaceState {
         }
     }
 
+    private func setupLinkOpening(for col: ColumnState) {
+        col.onOpenURL = { [weak self] url in
+            guard let self else { return }
+            self.onTerminalOpenURL?(self, url)
+        }
+    }
+
     private func setupAllTracking(for col: ColumnState) {
         setupCwdTracking(for: col)
         setupTitleTracking(for: col)
         setupAgentAttentionTracking(for: col)
+        setupLinkOpening(for: col)
     }
 
     func detectGitBranch() {
