@@ -17,6 +17,9 @@ final class SidebarView: NSView {
     var onProfileClicked: ((String) -> Void)?
     var onCreateProfile: (() -> Void)?
     var onRenameProfile: ((String) -> Void)?
+    /// Activity feed row clicked — focus the workspace (and column when
+    /// the entry still resolves to one).
+    var onActivityClicked: ((ActivityEntry) -> Void)?
     var isExpanded: Bool = false {
         didSet {
             // Clear dot pulse layers when switching modes
@@ -35,6 +38,8 @@ final class SidebarView: NSView {
 
     var lastInfos: [WorkspaceInfo] = []
     var lastProfiles: [ProfileInfo] = []
+    /// Activity feed snapshot shown in the expanded "activity" section.
+    var lastActivity: [ActivityEntry] = []
     var expandedViews: [NSView] = []
     var profileIndicatorView: SidebarDotIndicatorView?
     var hitAreas: [SidebarHitArea] = []
@@ -89,9 +94,10 @@ final class SidebarView: NSView {
         if isExpanded { rebuildContent() } else { setNeedsDisplay(bounds) }
     }
 
-    func update(profiles: [ProfileInfo], workspaces: [WorkspaceInfo]) {
+    func update(profiles: [ProfileInfo], workspaces: [WorkspaceInfo], activity: [ActivityEntry] = []) {
         lastProfiles = profiles
         lastInfos = workspaces
+        lastActivity = activity
         if isExpanded { rebuildContent() } else { setNeedsDisplay(bounds) }
     }
 
@@ -273,7 +279,7 @@ final class SidebarView: NSView {
                 applyUnderline(to: label)
                 hoveredLabel = label
             }
-        case .spaceHeader, .column, .workspace:
+        case .spaceHeader, .column, .workspace, .activity:
             clearHover()
             NSCursor.pointingHand.set()
         }
@@ -298,6 +304,9 @@ final class SidebarView: NSView {
             onColumnClicked?(workspaceIndex, columnIndex)
         case .workspace(let workspaceIndex):
             onWorkspaceClicked?(workspaceIndex)
+        case .activity(let index):
+            guard lastActivity.indices.contains(index) else { return }
+            onActivityClicked?(lastActivity[index])
         }
     }
 
@@ -353,7 +362,7 @@ final class SidebarView: NSView {
                 switch area.region {
                 case .column(let workspaceIndex, _), .workspace(let workspaceIndex):
                     return workspaceIndex
-                case .spaceHeader, .link:
+                case .spaceHeader, .link, .activity:
                     continue
                 }
             }

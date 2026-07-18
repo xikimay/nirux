@@ -59,7 +59,7 @@ extension NiruxShellView {
                 hasAttention: hasAttention
             )
         }
-        sidebar.update(profiles: profileInfos, workspaces: infos)
+        sidebar.update(profiles: profileInfos, workspaces: infos, activity: ActivityStore.shared.entries)
 
         // Dock badge: workspaces currently waiting for attention.
         let attentionCount = workspaces.filter { workspace in
@@ -164,6 +164,21 @@ extension NiruxShellView {
                 colLayer?.borderColor = isFocus ? accent : nil
             }
         }
+    }
+
+    // MARK: - Activity feed
+
+    /// AgentHookCenter.onActivity entry point. Signal events become feed
+    /// rows; prompt/tool pings are filtered out by ActivityEntry.init.
+    func recordActivity(_ event: AgentHookEvent, resolution: AgentHookCenter.Resolution?) {
+        let title = resolution?.workspace.title
+            ?? event.workspaceID.flatMap { id in workspaces.first(where: { $0.id == id })?.title }
+            ?? event.cwd.map { ($0 as NSString).lastPathComponent }
+            ?? "agent"
+        guard let entry = ActivityEntry(
+            event: event, workspaceTitle: title, columnIndex: resolution?.columnIndex
+        ) else { return }
+        ActivityStore.shared.record(entry)
     }
 
     func refreshGitBranches() {
