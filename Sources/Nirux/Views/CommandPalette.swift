@@ -428,10 +428,17 @@ final class CommandPalette: NSObject {
         if query.isEmpty {
             filteredActions = actions
         } else {
-            let lowercasedQuery = query.lowercased()
-            filteredActions = actions.filter {
-                $0.title.lowercased().contains(lowercasedQuery) || $0.subtitle.lowercased().contains(lowercasedQuery)
+            // Title matches rank above subtitle matches; fuzzy scoring keeps
+            // acronym-style queries ("nt" → "New Terminal") working.
+            let scored: [(action: PaletteAction, score: Int, index: Int)] = actions.enumerated().compactMap { index, action in
+                let titleScore = FuzzyMatch.score(query: query, candidate: action.title).map { $0 + 25 }
+                let subtitleScore = FuzzyMatch.score(query: query, candidate: action.subtitle)
+                guard let best = [titleScore, subtitleScore].compactMap({ $0 }).max() else { return nil }
+                return (action, best, index)
             }
+            filteredActions = scored
+                .sorted { $0.score != $1.score ? $0.score > $1.score : $0.index < $1.index }
+                .map { $0.action }
         }
         selectedIndex = 0
         rebuildList()
