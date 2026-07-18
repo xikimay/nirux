@@ -298,9 +298,9 @@ final class PersistedStateCodingTests: XCTestCase {
     func testCodexLaunchModeCLIArgs() {
         XCTAssertEqual(CodexLaunchMode.default.cliArgs, [])
         XCTAssertEqual(CodexLaunchMode.fullAccess.cliArgs, ["--sandbox", "danger-full-access"])
-        XCTAssertEqual(CodexLaunchMode.workspaceWrite.cliArgs, ["--sandbox", "workspace-write", "--ask-for-approval", "on-failure"])
+        XCTAssertEqual(CodexLaunchMode.workspaceWrite.cliArgs, ["--sandbox", "workspace-write", "--ask-for-approval", "on-request"])
         XCTAssertEqual(CodexLaunchMode.readOnly.cliArgs, ["--sandbox", "read-only"])
-        XCTAssertEqual(CodexLaunchMode.fullAuto.cliArgs, ["--sandbox", "danger-full-access", "--ask-for-approval", "on-failure", "--search"])
+        XCTAssertEqual(CodexLaunchMode.fullAuto.cliArgs, ["--sandbox", "danger-full-access", "--ask-for-approval", "never", "--search"])
         XCTAssertEqual(CodexLaunchMode.bypass.cliArgs, ["--dangerously-bypass-approvals-and-sandbox"])
     }
 }

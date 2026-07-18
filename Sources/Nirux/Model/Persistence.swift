@@ -104,7 +104,7 @@ enum CodexLaunchMode: String, Codable, CaseIterable {
         switch self {
         case .default: return "Default (codex defaults)"
         case .fullAccess: return "Full Access (no sandbox)"
-        case .workspaceWrite: return "Workspace Write (sandboxed, non-blocking)"
+        case .workspaceWrite: return "Workspace Write (sandboxed, asks to escalate)"
         case .readOnly: return "Read-only"
         case .fullAuto: return "Full Auto (no sandbox, non-blocking)"
         case .bypass: return "Yolo (bypass approvals & sandbox)"
@@ -116,9 +116,11 @@ enum CodexLaunchMode: String, Codable, CaseIterable {
         switch self {
         case .default: return []
         case .fullAccess: return ["--sandbox", "danger-full-access"]
-        case .workspaceWrite: return ["--sandbox", "workspace-write", "--ask-for-approval", "on-failure"]
+        // codex >= 0.143.0 removed the `on-failure` approval policy; `never`
+        // returns sandbox failures to the model, `on-request` lets it ask.
+        case .workspaceWrite: return ["--sandbox", "workspace-write", "--ask-for-approval", "on-request"]
         case .readOnly: return ["--sandbox", "read-only"]
-        case .fullAuto: return ["--sandbox", "danger-full-access", "--ask-for-approval", "on-failure", "--search"]
+        case .fullAuto: return ["--sandbox", "danger-full-access", "--ask-for-approval", "never", "--search"]
         case .bypass: return ["--dangerously-bypass-approvals-and-sandbox"]
         }
     }
