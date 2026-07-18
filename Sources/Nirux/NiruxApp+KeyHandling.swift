@@ -115,6 +115,15 @@ extension NiruxApp {
                 return event
             }
 
+            // Shell exited — swallow input instead of writing to a dead PTY;
+            // Enter (or keypad Enter) restarts the shell.
+            if pty.hasExited {
+                if event.keyCode == 0x24 || event.keyCode == 0x4C {
+                    col.restartShell()
+                }
+                return nil
+            }
+
             // ALL other keys: send to PTY and ALWAYS consume.
             // Never let ghostty's keyDown handler see the event.
             let bytes = KeyMapper.bytesForEvent(event)

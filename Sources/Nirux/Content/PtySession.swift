@@ -131,6 +131,20 @@ final class PtySession: @unchecked Sendable {
         set { state.onOsc9Received = newValue }
     }
 
+    /// Called on the main queue when the shell process exits.
+    var onProcessExit: (() -> Void)? {
+        get { state.onProcessExit }
+        set { state.onProcessExit = newValue }
+    }
+
+    /// True after the shell process exited. The session can be restarted
+    /// with another `start(...)` call — the terminal surface (and its
+    /// scrollback) survives.
+    var hasExited: Bool { state.hasExited }
+
+    /// Last applied grid size — the right starting size for a restart.
+    var lastSize: (cols: Int, rows: Int) { (state.lastCols, state.lastRows) }
+
     /// Compute agent status using burst detection (rapid consecutive reads = active)
     /// - isUserFocused: true if the user is currently focused on this specific column
     func agentStatus(snapshot: ProcessSnapshot, isUserFocused: Bool) -> AgentStatus {
@@ -333,6 +347,7 @@ final class PtySession: @unchecked Sendable {
         guard pid > 0 else { return }
         state.ptyFd = fd
         state.childPid = pid
+        state.hasExited = false
         state.lastCols = initialCols
         state.lastRows = initialRows
         state.markPtyStarted()
@@ -348,6 +363,21 @@ final class PtySession: @unchecked Sendable {
         }
         source.resume()
         state.readSource = source
+
+        // Watch for shell exit — without this a dead shell leaves a mute
+        // terminal with no way to know (or restart). Also reaps the zombie.
+        state.exitSource?.cancel()
+        let exitSource = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .main)
+        exitSource.setEventHandler { [state] in
+            var status: Int32 = 0
+            _ = waitpid(pid, &status, 0)
+            state.ptyFd = -1
+            state.hasExited = true
+            state.agentState = .idle
+            state.onProcessExit?()
+        }
+        exitSource.resume()
+        state.exitSource = exitSource
     }
 
     /// PATH to pass to child shells — includes standard locations so login
@@ -396,6 +426,7 @@ final class PtySession: @unchecked Sendable {
     }
 
     deinit {
+        state.exitSource?.cancel()
         state.readSource?.cancel()
         if state.childPid > 0 { kill(state.childPid, SIGTERM) }
     }
@@ -406,9 +437,12 @@ private final class PtyState: @unchecked Sendable {
     var ptyFd: Int32 = -1
     var childPid: pid_t = 0
     var readSource: DispatchSourceRead?
+    var exitSource: DispatchSourceProcess?
+    var hasExited: Bool = false
     var onCwdChanged: ((String) -> Void)?
     var onTitleChanged: ((String) -> Void)?
     var onOsc9Received: (() -> Void)?
+    var onProcessExit: (() -> Void)?
     var lastOsc9Timestamp: Date?
     var agentState: AgentStatus = .idle
     var hasUserInputSinceStart: Bool = false
@@ -577,6 +611,8 @@ private final class PtyState: @unchecked Sendable {
         var buffer = [UInt8](repeating: 0, count: 8192)
         let bytesRead = read(ptyFd, &buffer, buffer.count)
         guard bytesRead > 0 else {
+            // EOF — the child is gone; stop writes from hitting a closed fd.
+            ptyFd = -1
             readSource?.cancel()
             return
         }

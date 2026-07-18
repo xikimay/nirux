@@ -159,4 +159,54 @@ final class EditorLoadFailureOverlay: NSView {
     @objc private func retryClicked() { onRetry?() }
 }
 
+/// Overlay shown over a terminal whose shell process exited. Previously a
+/// dead shell left a mute terminal with no explanation and no way back.
+/// Restart keeps the terminal surface — scrollback stays visible above.
+final class ShellExitedOverlay: NSView {
+    var onRestart: (() -> Void)?
+
+    private let label = NSTextField(labelWithString: "Session ended")
+    private let hint = NSTextField(labelWithString: "Press Enter to restart the shell")
+    private let restartButton = NSButton(title: "Restart Shell", target: nil, action: nil)
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.10, alpha: 0.92).cgColor
+
+        label.font = .systemFont(ofSize: 13, weight: .semibold)
+        label.textColor = NSColor.white.withAlphaComponent(0.85)
+        label.alignment = .center
+        addSubview(label)
+
+        hint.font = .systemFont(ofSize: 11)
+        hint.textColor = NSColor.white.withAlphaComponent(0.45)
+        hint.alignment = .center
+        addSubview(hint)
+
+        restartButton.bezelStyle = .rounded
+        restartButton.font = .systemFont(ofSize: 12, weight: .medium)
+        restartButton.target = self
+        restartButton.action = #selector(restartClicked)
+        addSubview(restartButton)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        let midX = bounds.width / 2
+        let midY = bounds.height / 2
+        restartButton.sizeToFit()
+        let w = restartButton.frame.width + 20
+        restartButton.frame = NSRect(x: midX - w / 2, y: midY - 40, width: w, height: 26)
+        label.frame = NSRect(x: 0, y: midY + 18, width: bounds.width, height: 18)
+        hint.frame = NSRect(x: 0, y: midY - 4, width: bounds.width, height: 14)
+    }
+
+    @objc private func restartClicked() { onRestart?() }
+}
+
+
 
