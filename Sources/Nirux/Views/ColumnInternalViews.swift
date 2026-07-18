@@ -103,3 +103,60 @@ final class EditorConflictBanner: NSView {
     @objc private func keepClicked() { onKeep?() }
 }
 
+/// Full-surface overlay shown when the Monaco editor fails to load (missing
+/// bundled assets, or no `monacoReady` within the watchdog window). Replaces
+/// the previous silent blank surface / error tab.
+final class EditorLoadFailureOverlay: NSView {
+    var onRetry: (() -> Void)?
+
+    private let messageLabel = NSTextField(labelWithString: "")
+    private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor(red: 0.10, green: 0.11, blue: 0.15, alpha: 1).cgColor
+
+        messageLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        messageLabel.textColor = NSColor.white.withAlphaComponent(0.55)
+        messageLabel.alignment = .center
+        addSubview(messageLabel)
+
+        retryButton.bezelStyle = .rounded
+        retryButton.font = .systemFont(ofSize: 12, weight: .medium)
+        retryButton.target = self
+        retryButton.action = #selector(retryClicked)
+        addSubview(retryButton)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    func configure(message: String, showRetry: Bool) {
+        messageLabel.stringValue = message
+        retryButton.isHidden = !showRetry
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        retryButton.sizeToFit()
+        let buttonW = retryButton.frame.width + 16
+        retryButton.frame = NSRect(
+            x: (bounds.width - buttonW) / 2,
+            y: bounds.height / 2 - 34,
+            width: buttonW,
+            height: 26
+        )
+        messageLabel.frame = NSRect(
+            x: 16,
+            y: bounds.height / 2 + 2,
+            width: bounds.width - 32,
+            height: 18
+        )
+    }
+
+    @objc private func retryClicked() { onRetry?() }
+}
+
+

@@ -52,7 +52,12 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     private let fileTree: EditorFileTree
     private let treeDivider: NSView
     private let conflictBanner = EditorConflictBanner()
+    private let loadFailureOverlay = EditorLoadFailureOverlay()
     private var monacoReady = false
+    /// Fires once if `monacoReady` doesn't arrive shortly after loading —
+    /// without it a failed Monaco load is a silent blank surface.
+    private var monacoLoadWatchdog: Timer?
+    private static let loadWatchdogInterval: TimeInterval = 8
     /// Operations queued before Monaco signaled `monacoReady`.
     private var pendingOps: [() -> Void] = []
 
@@ -101,6 +106,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         if window == nil {
             fileWatchTimer?.invalidate()
             fileWatchTimer = nil
+            monacoLoadWatchdog?.invalidate()
+            monacoLoadWatchdog = nil
             webView.configuration.userContentController
                 .removeScriptMessageHandler(forName: "nirux")
         }
@@ -145,16 +152,44 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         conflictBanner.onReload = { [weak self] in self?.resolveConflict(reload: true) }
         conflictBanner.onKeep = { [weak self] in self?.resolveConflict(reload: false) }
         addSubview(conflictBanner)
+
+        loadFailureOverlay.isHidden = true
+        loadFailureOverlay.onRetry = { [weak self] in self?.retryEditorLoad() }
+        addSubview(loadFailureOverlay)
     }
 
     private func loadEditor() {
         guard let indexURL = Self.findEditorIndex() else {
-            // No assets — surface it via the tab bar so the user sees the error.
-            tabBar.update(tabs: [.init(path: "Editor assets missing", isDirty: false, title: nil)], activePath: nil)
+            showLoadFailure(message: "Editor assets are missing from this build.", showRetry: true)
             return
         }
+        loadFailureOverlay.isHidden = true
         let assetsDir = indexURL.deletingLastPathComponent()
         webView.loadFileURL(indexURL, allowingReadAccessTo: assetsDir)
+        startLoadWatchdog()
+    }
+
+    private func startLoadWatchdog() {
+        monacoLoadWatchdog?.invalidate()
+        monacoLoadWatchdog = Timer.scheduledTimer(
+            withTimeInterval: Self.loadWatchdogInterval, repeats: false
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, !self.monacoReady else { return }
+                self.showLoadFailure(message: "The editor took too long to load.", showRetry: true)
+            }
+        }
+    }
+
+    private func retryEditorLoad() {
+        loadFailureOverlay.isHidden = true
+        loadEditor()
+    }
+
+    private func showLoadFailure(message: String, showRetry: Bool) {
+        loadFailureOverlay.configure(message: message, showRetry: showRetry)
+        loadFailureOverlay.isHidden = false
+        needsLayout = true
     }
 
     /// Locates `EditorAssets/index.html` in release (`bundle.sh` copies the
@@ -204,6 +239,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         let editorW = bounds.width - editorX
         tabBar.frame = NSRect(x: editorX, y: bounds.height - tabH, width: editorW, height: tabH)
         webView.frame = NSRect(x: editorX, y: 0, width: editorW, height: bounds.height - tabH)
+        loadFailureOverlay.frame = webView.frame
         if !conflictBanner.isHidden {
             let bannerH = EditorConflictBanner.height
             conflictBanner.frame = NSRect(
@@ -895,6 +931,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         switch type {
         case "monacoReady":
             monacoReady = true
+            monacoLoadWatchdog?.invalidate()
+            monacoLoadWatchdog = nil
+            loadFailureOverlay.isHidden = true
             let queued = pendingOps
             pendingOps.removeAll()
             for op in queued { op() }
