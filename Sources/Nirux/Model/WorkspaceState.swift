@@ -102,7 +102,7 @@ final class WorkspaceState {
                 } else {
                     processName = "Agent"
                 }
-                let columnIndex = col.flatMap { c in self.columns.firstIndex(where: { $0 === c }) }
+                let columnIndex = col.flatMap { column in self.columns.firstIndex(where: { $0 === column }) }
                 NiruxNotifier.shared.postAgentAttention(
                     workspaceID: self.id,
                     workspaceTitle: self.title,

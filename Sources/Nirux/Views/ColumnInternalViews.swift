@@ -199,14 +199,11 @@ final class ShellExitedOverlay: NSView {
         let midX = bounds.width / 2
         let midY = bounds.height / 2
         restartButton.sizeToFit()
-        let w = restartButton.frame.width + 20
-        restartButton.frame = NSRect(x: midX - w / 2, y: midY - 40, width: w, height: 26)
+        let buttonWidth = restartButton.frame.width + 20
+        restartButton.frame = NSRect(x: midX - buttonWidth / 2, y: midY - 40, width: buttonWidth, height: 26)
         label.frame = NSRect(x: 0, y: midY + 18, width: bounds.width, height: 18)
         hint.frame = NSRect(x: 0, y: midY - 4, width: bounds.width, height: 14)
     }
 
     @objc private func restartClicked() { onRestart?() }
 }
-
-
-
