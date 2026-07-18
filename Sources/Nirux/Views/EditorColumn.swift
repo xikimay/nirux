@@ -21,6 +21,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     private var dirtyByPath: [String: Bool] = [:]
     /// Per-tab on-disk mtime as of the last open / external-modification check.
     private var mtimeByPath: [String: Date] = [:]
+    /// Per-tab encoding detected at open — saves round-trip the same
+    /// encoding instead of silently transcoding everything to UTF-8.
+    private var encodingByPath: [String: String.Encoding] = [:]
     /// Tabs whose disk version moved while the buffer was dirty — saving would
     /// clobber the on-disk content.
     private var diskModifiedWhileDirty: Set<String> = []
@@ -273,7 +276,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
         // Very large files make Monaco sluggish — confirm before loading.
         if interactive,
-           let size = Self.diffCollectionFileByteCount(path: absolute),
+           let size = Self.fileByteCount(path: absolute),
            size > Self.largeFileWarningBytes {
             let alert = NSAlert()
             alert.messageText = "Open large file?"
@@ -285,17 +288,18 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
 
-        guard let content = readFileContent(at: absolute, interactive: interactive)
+        guard let (content, encoding) = readFileContent(at: absolute, interactive: interactive)
         else { return }
 
-        openBuffer(path: absolute, content: content, mtime: mtime(of: absolute), line: line)
+        openBuffer(path: absolute, content: content, mtime: mtime(of: absolute), line: line, encoding: encoding)
     }
 
     /// Read result with encoding fallbacks. `.binary` means NUL bytes were
     /// found (after ruling out UTF-16 BOM); `.unreadable` covers I/O errors
-    /// and undecodable content.
+    /// and undecodable content. The detected encoding is carried so saves
+    /// round-trip the file in its original encoding.
     private enum FileReadResult {
-        case ok(String)
+        case ok(String, String.Encoding)
         case binary
         case unreadable
     }
@@ -306,22 +310,25 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         // trip the binary check below.
         if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]),
            let utf16 = String(data: data, encoding: .utf16) {
-            return .ok(utf16)
+            return .ok(utf16, .utf16)
         }
-        if data.prefix(8192).contains(0) { return .binary }
-        if let utf8 = String(data: data, encoding: .utf8) { return .ok(utf8) }
+        // Full-file NUL scan — an 8KB-prefix scan let binaries with an ASCII
+        // header through, and the Latin-1 fallback then corrupted them on
+        // save (mojibake byte expansion).
+        if data.contains(0) { return .binary }
+        if let utf8 = String(data: data, encoding: .utf8) { return .ok(utf8, .utf8) }
         // ISO Latin-1 maps every byte, so it always succeeds — last resort
         // for legacy single-byte encodings.
-        if let latin = String(data: data, encoding: .isoLatin1) { return .ok(latin) }
+        if let latin = String(data: data, encoding: .isoLatin1) { return .ok(latin, .isoLatin1) }
         return .unreadable
     }
 
     /// Reads a text file for editing. Explicit user opens (`interactive`)
     /// surface failures as alerts; internal reads just log.
-    private func readFileContent(at absolute: String, interactive: Bool) -> String? {
+    private func readFileContent(at absolute: String, interactive: Bool) -> (content: String, encoding: String.Encoding)? {
         switch Self.readTextFile(at: absolute) {
-        case .ok(let content):
-            return content
+        case .ok(let content, let encoding):
+            return (content, encoding)
         case .binary:
             if interactive {
                 showOpenFailureAlert(path: absolute, reason: "Binary files can't be edited.")
@@ -362,10 +369,12 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         content: String,
         mtime: Date?,
         line: Int?,
-        activate: Bool = true
+        activate: Bool = true,
+        encoding: String.Encoding = .utf8
     ) {
         tabPaths.append(absolute)
         dirtyByPath[absolute] = false
+        encodingByPath[absolute] = encoding
         if let mtime {
             mtimeByPath[absolute] = mtime
         } else {
@@ -537,9 +546,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         }
 
         if FileManager.default.fileExists(atPath: absolute) {
-            guard let content = readFileContent(at: absolute, interactive: false)
+            guard let (content, encoding) = readFileContent(at: absolute, interactive: false)
             else { return false }
-            openBuffer(path: absolute, content: content, mtime: mtime(of: absolute), line: nil, activate: activate)
+            openBuffer(path: absolute, content: content, mtime: mtime(of: absolute), line: nil, activate: activate, encoding: encoding)
         } else {
             openDeletedBufferForDiff(path: absolute, activate: activate)
         }
@@ -650,7 +659,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         of absPath: String,
         relativePath rel: String
     ) -> [String: Any]? {
-        guard let byteCount = diffCollectionFileByteCount(path: absPath),
+        guard let byteCount = fileByteCount(path: absPath),
               byteCount > maxDiffCollectionFileBytes
         else { return nil }
         NSLog("[EditorColumn] replacing large visual diff file \(absPath) (\(byteCount) bytes)")
@@ -663,7 +672,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         ]
     }
 
-    private nonisolated static func diffCollectionFileByteCount(path: String) -> UInt64? {
+    private nonisolated static func fileByteCount(path: String) -> UInt64? {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
               let size = attrs[.size] as? NSNumber
         else { return nil }
@@ -671,7 +680,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     }
 
     private nonisolated static func fileContent(at path: String) -> String? {
-        guard case .ok(let content) = readTextFile(at: path) else { return nil }
+        guard case .ok(let content, _) = readTextFile(at: path) else { return nil }
         return content
     }
 
@@ -723,6 +732,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         }
         dirtyByPath.removeValue(forKey: path)
         mtimeByPath.removeValue(forKey: path)
+        encodingByPath.removeValue(forKey: path)
         diskModifiedWhileDirty.remove(path)
         diffModeByPath.removeValue(forKey: path)
         diffGroupTabs.removeValue(forKey: path)
@@ -768,12 +778,17 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     /// Re-read the active file from disk and push its content to Monaco.
     /// Used when an external change races a clean buffer.
     private func reloadFromDisk(path: String) {
-        guard case .ok(let content) = Self.readTextFile(at: path) else { return }
+        guard case .ok(let content, let encoding) = Self.readTextFile(at: path) else { return }
 
         mtimeByPath[path] = mtime(of: path)
+        encodingByPath[path] = encoding
         diskModifiedWhileDirty.remove(path)
         refreshTabBar()
-        sendBridge(["type": "openFile", "path": path, "content": content])
+        // activate: false is critical for background tabs — an openFile with
+        // implicit activation would steal Monaco's active tab, and the next
+        // Cmd+S (which saves the JS-side currentPath) would write the wrong
+        // buffer to the wrong file.
+        sendBridge(["type": "openFile", "path": path, "content": content, "activate": path == activePath])
     }
 
     // MARK: - File watcher
@@ -845,16 +860,31 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
     /// Persist a buffer to disk. Path comes from JS but we only honor saves
     /// for tabs we're actually tracking, so a compromised page can't redirect
-    /// writes outside our open set.
+    /// writes outside our open set. Writes use the encoding detected at
+    /// open — a UTF-16 (or Latin-1) file is not silently transcoded to UTF-8.
     private func handleSave(body: [String: Any]) {
         guard let path = body["path"] as? String,
               openPaths.contains(path),
               let content = body["content"] as? String
         else { return }
 
+        let encoding = encodingByPath[path] ?? .utf8
+        var data = content.data(using: encoding)
+        if data == nil, encoding != .utf8 {
+            // e.g. a Latin-1 file that now contains unrepresentable
+            // characters — fall back to UTF-8 so the save can't fail.
+            NSLog("[EditorColumn] \(path): \(encoding) can no longer represent the buffer; saving as UTF-8")
+            data = content.data(using: .utf8)
+            if data != nil { encodingByPath[path] = .utf8 }
+        }
+        guard let data else {
+            NSLog("[EditorColumn] save failed for \(path): buffer not representable")
+            return
+        }
+
         let url = URL(fileURLWithPath: path)
         do {
-            try content.data(using: .utf8)?.write(to: url, options: .atomic)
+            try data.write(to: url, options: .atomic)
         } catch {
             NSLog("[EditorColumn] save failed for \(path): \(error)")
             return

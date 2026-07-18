@@ -61,6 +61,21 @@ extension NiruxApp {
             // we invoke the menu action directly and consume the event.
             if col.isWebView || col.isEditor {
                 if event.modifierFlags.contains(.command) {
+                    // Browser back/forward — handled here rather than as
+                    // menu items: menu items would also consume Cmd+[/] in
+                    // EDITOR columns, killing Monaco's indent/outdent-line
+                    // shortcuts with a no-op action.
+                    if col.isWebView, event.modifierFlags == [.command],
+                       let chars = event.charactersIgnoringModifiers {
+                        if chars == "[" {
+                            col.webViewColumn?.goBack()
+                            return nil
+                        }
+                        if chars == "]" {
+                            col.webViewColumn?.goForward()
+                            return nil
+                        }
+                    }
                     // Cmd+P is bound to "Command Palette" in the menu, but in
                     // an editor column Monaco rebinds it to its own quick-open
                     // (which Nirux replaces with the workspace file picker).

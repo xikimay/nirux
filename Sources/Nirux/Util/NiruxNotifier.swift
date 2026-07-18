@@ -34,7 +34,7 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
     /// Post a system notification for an agent event. Suppressed while the
     /// app is active — in-app visuals already cover that case.
     func postAgentAttention(workspaceID: String, workspaceTitle: String, columnIndex: Int?, processName: String) {
-        guard isAvailable, !NSApp.isActive else { return }
+        guard !NSApp.isActive else { return }
         let content = UNMutableNotificationContent()
         content.title = "\(processName) needs you"
         content.body = workspaceTitle
@@ -42,22 +42,22 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         var info: [String: Any] = ["workspaceID": workspaceID]
         if let columnIndex { info["columnIndex"] = columnIndex }
         content.userInfo = info
-        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error {
-                NSLog("[NiruxNotifier] post failed: \(error.localizedDescription)")
-            }
-        }
+        post(content)
     }
 
     /// Post a "download finished" notification; clicking reveals the file
     /// in Finder. Suppressed while the app is active.
     func postDownloadFinished(filename: String, fileURL: URL) {
-        guard isAvailable, !NSApp.isActive else { return }
+        guard !NSApp.isActive else { return }
         let content = UNMutableNotificationContent()
         content.title = "Download finished"
         content.body = filename
         content.userInfo = ["filePath": fileURL.path]
+        post(content)
+    }
+
+    private func post(_ content: UNMutableNotificationContent) {
+        guard isAvailable else { return }
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { error in
             if let error {

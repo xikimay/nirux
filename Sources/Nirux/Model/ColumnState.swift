@@ -118,10 +118,13 @@ final class ColumnState {
         // Match a normal terminal launch: interactive + login shell. This
         // ensures PATH/bootstrap logic from .zprofile/.zshrc is available
         // when Nirux restores command-backed columns after a Finder relaunch.
+        // The shell path is single-quoted — an unquoted path with spaces or
+        // metacharacters would be word-split by the -c string.
         let shell = PtySession.defaultShell
+        let quotedShell = "'" + shell.replacingOccurrences(of: "'", with: "'\\''") + "'"
         self.init(
             cwd: cwd,
-            shellArgs: ["-i", "-l", "-c", "\(command); exec \(shell) -i -l"],
+            shellArgs: ["-i", "-l", "-c", "\(command); exec \(quotedShell) -i -l"],
             environment: environment
         )
     }

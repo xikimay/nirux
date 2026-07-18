@@ -79,14 +79,6 @@ extension NiruxApp {
         shell?.toggleDevTools()
     }
 
-    @objc func browserGoBack(_ sender: Any?) {
-        shell?.browserGoBack()
-    }
-
-    @objc func browserGoForward(_ sender: Any?) {
-        shell?.browserGoForward()
-    }
-
     @objc func focusAddressBar(_ sender: Any?) {
         shell?.focusAddressBar()
     }
@@ -178,10 +170,6 @@ extension NiruxApp {
         }
         colMenu.addItem(NSMenuItem.separator())
 
-        let browserBackItem = NSMenuItem(title: "Browser Back", action: #selector(browserGoBack(_:)), keyEquivalent: "[")
-        colMenu.addItem(browserBackItem)
-        let browserFwdItem = NSMenuItem(title: "Browser Forward", action: #selector(browserGoForward(_:)), keyEquivalent: "]")
-        colMenu.addItem(browserFwdItem)
         let devToolsItem = NSMenuItem(title: "Toggle Web Inspector", action: #selector(toggleDevTools(_:)), keyEquivalent: "i")
         devToolsItem.keyEquivalentModifierMask = [.command, .option]
         colMenu.addItem(devToolsItem)

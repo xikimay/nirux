@@ -394,21 +394,6 @@ extension NiruxShellView {
         web.toggleInspector()
     }
 
-    /// Browser back/forward on the focused browser column. No-op elsewhere.
-    func browserGoBack() {
-        guard let workspace = activeWorkspace,
-              let web = workspace.columns[safe: workspace.focusedIndex]?.webViewColumn
-        else { return }
-        web.goBack()
-    }
-
-    func browserGoForward() {
-        guard let workspace = activeWorkspace,
-              let web = workspace.columns[safe: workspace.focusedIndex]?.webViewColumn
-        else { return }
-        web.goForward()
-    }
-
     /// Focus the URL field of the focused browser column (Cmd+L). No-op
     /// elsewhere so terminal Cmd+L keeps its terminal meaning.
     func focusAddressBar() {

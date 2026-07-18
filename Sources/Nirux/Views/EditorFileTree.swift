@@ -838,15 +838,31 @@ private final class FileTreeCellView: NSTableCellView {
         nameLabel.frame = NSRect(x: 20, y: 2, width: bounds.width - 24, height: bounds.height - 4)
     }
 
+    /// Bundle extensions carry per-file icons (every .app has its own) —
+    /// they must be looked up per file, never cached by extension.
+    private static let bundleExtensions: Set<String> = [
+        "app", "framework", "bundle", "appex", "xpc", "prefpane",
+        "plugin", "kext", "playground", "xcworkspace", "xcodeproj"
+    ]
+
     private static func icon(for node: FileNode) -> NSImage? {
         let ext = node.url.pathExtension.lowercased()
+        if Self.bundleExtensions.contains(ext) {
+            let image = NSWorkspace.shared.icon(forFile: node.url.path)
+            image.size = NSSize(width: 14, height: 14)
+            return image
+        }
         let key = node.isDirectory ? "__folder__" : (ext.isEmpty ? "__file__" : ext)
         if let cached = iconCache[key] { return cached }
         let image: NSImage
         if node.isDirectory {
             image = NSWorkspace.shared.icon(forFileType: "public.folder")
+        } else if ext.isEmpty {
+            image = NSWorkspace.shared.icon(forFileType: "public.data")
         } else {
-            image = NSWorkspace.shared.icon(forFile: node.url.path)
+            // icon(forFileType:) gives the generic icon for the type —
+            // consistent for every file sharing the extension.
+            image = NSWorkspace.shared.icon(forFileType: ext)
         }
         image.size = NSSize(width: 14, height: 14)
         iconCache[key] = image
