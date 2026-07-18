@@ -100,6 +100,14 @@ final class ActivityStore {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.saveDebounce, execute: item)
     }
 
+    /// Persist immediately — called by the app delegate on terminate so the
+    /// last few seconds of events survive the quit.
+    func flush() {
+        pendingSave?.cancel()
+        pendingSave = nil
+        saveNow()
+    }
+
     private func saveNow() {
         guard let data = try? JSONEncoder().encode(entries) else { return }
         try? data.write(to: Self.fileURL, options: .atomic)

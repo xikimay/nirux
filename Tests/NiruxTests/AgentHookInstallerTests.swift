@@ -44,13 +44,20 @@ final class AgentHookInstallerTests: XCTestCase {
     func testClaudeFreshInstallCoversAllEvents() {
         AgentHookInstaller.installClaudeHooks(executablePath: "/Apps/Nirux", home: home)
         let settings = claudeSettings()
-        for (event, _) in AgentHookInstaller.claudeHookEvents {
+        for event in AgentHookInstaller.claudeHookEvents {
             XCTAssertEqual(
                 hookCommands(settings, event: event),
-                ["\"/Apps/Nirux\" --hook claude"],
+                [AgentHookInstaller.claudeHookCommand(executablePath: "/Apps/Nirux")],
                 event
             )
         }
+    }
+
+    func testClaudeHookCommandGuardsMissingBinary() {
+        let command = AgentHookInstaller.claudeHookCommand(executablePath: "/Apps/Nirux")
+        XCTAssertTrue(command.contains("if [ -x \"/Apps/Nirux\" ]"), "silent no-op when uninstalled")
+        XCTAssertTrue(command.contains("--hook claude"))
+        XCTAssertTrue(command.hasSuffix("fi"))
     }
 
     func testClaudePreservesUserHooksAndRefreshesStalePath() {
@@ -75,8 +82,14 @@ final class AgentHookInstallerTests: XCTestCase {
         XCTAssertEqual(settings["model"] as? String, "opus")
         let preToolCommands = hookCommands(settings, event: "PreToolUse")
         XCTAssertTrue(preToolCommands.contains("/usr/local/bin/linter"), "user hook preserved")
-        XCTAssertEqual(preToolCommands.filter { $0.contains("--hook claude") }, ["\"/new/Nirux\" --hook claude"])
-        XCTAssertEqual(hookCommands(settings, event: "Stop"), ["\"/new/Nirux\" --hook claude"])
+        XCTAssertEqual(
+            preToolCommands.filter { $0.contains("--hook claude") },
+            [AgentHookInstaller.claudeHookCommand(executablePath: "/new/Nirux")]
+        )
+        XCTAssertEqual(
+            hookCommands(settings, event: "Stop"),
+            [AgentHookInstaller.claudeHookCommand(executablePath: "/new/Nirux")]
+        )
     }
 
     func testClaudeInstallIsIdempotent() throws {
@@ -99,16 +112,20 @@ final class AgentHookInstallerTests: XCTestCase {
         XCTAssertEqual(read(".claude/settings.json"), "{ not json ,,")
     }
 
-    func testClaudeAsyncFlags() {
+    func testClaudeHooksRunSyncForDeterministicOrder() {
+        // Async hooks can land out of order (a PreToolUse after its turn's
+        // Stop would wedge the status machine in "working").
         AgentHookInstaller.installClaudeHooks(executablePath: "/Apps/Nirux", home: home)
         let settings = claudeSettings()
         let hooks = settings["hooks"] as? [String: Any] ?? [:]
-        let preTool = (hooks["PreToolUse"] as? [[String: Any]])?.first ?? [:]
-        let preToolHook = (preTool["hooks"] as? [[String: Any]])?.first ?? [:]
-        XCTAssertEqual(preToolHook["async"] as? Bool, true)
-        let stop = (hooks["Stop"] as? [[String: Any]])?.first ?? [:]
-        let stopHook = (stop["hooks"] as? [[String: Any]])?.first ?? [:]
-        XCTAssertNil(stopHook["async"])
+        for event in AgentHookInstaller.claudeHookEvents {
+            let groups = hooks[event] as? [[String: Any]] ?? []
+            for group in groups {
+                for hook in group["hooks"] as? [[String: Any]] ?? [] {
+                    XCTAssertNil(hook["async"], "\(event) must be sync")
+                }
+            }
+        }
     }
 
     // MARK: - Codex

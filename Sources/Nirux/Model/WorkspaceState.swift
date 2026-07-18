@@ -178,7 +178,9 @@ final class WorkspaceState {
             guard let self, let handle,
                   let index = self.resizeHandles.firstIndex(of: handle),
                   self.columns.indices.contains(index) else { return 0.5 }
+            // Dragging a column's edge focuses it (camera + sidebar follow).
             self.focusedIndex = index
+            self.onMetadataChanged?()
             return self.columns[index].widthFraction
         }
         handle.onDrag = { [weak self, weak handle] fraction in

@@ -21,11 +21,15 @@ struct AgentStatusMachine {
     /// Agent kind ("claude") once this session has emitted a hook event —
     /// proof that hooks are installed and authoritative for this session.
     private(set) var hookKind: String?
-    /// Last PTY read that wasn't input echo (drives the fallback heuristic).
-    private var lastReadAt: Date?
-    /// Last write or resize — output within the echo window after one of
-    /// these is the terminal answering the user, not agent work.
-    private var lastInteractionAt: Date?
+    /// Epoch seconds of the last PTY read that wasn't input echo (drives
+    /// the fallback heuristic). 0 = never. Plain TimeInterval — a single
+    /// aligned 8-byte store — because noteRead runs on the PTY read queue
+    /// while tick reads it on the main queue; an Optional<Date> could tear.
+    private var lastReadAt: TimeInterval = 0
+    /// Epoch seconds of the last write or resize — output within the echo
+    /// window after one of these is the terminal answering the user, not
+    /// agent work. 0 = never.
+    private var lastInteractionAt: TimeInterval = 0
 
     /// Foreground-process tracking (drives the "working · 12m" display and
     /// the isAgent gate in `tick`).
@@ -79,13 +83,14 @@ struct AgentStatusMachine {
 
     /// PTY output arrived. Echo right after a keystroke/resize is not work.
     mutating func noteRead(now: Date) {
-        if let last = lastInteractionAt, now.timeIntervalSince(last) < Self.echoWindow { return }
-        lastReadAt = now
+        let t = now.timeIntervalSince1970
+        if lastInteractionAt > 0, t - lastInteractionAt < Self.echoWindow { return }
+        lastReadAt = t
     }
 
     /// User typed or the terminal resized/redrew — following output is echo.
     mutating func noteInteraction(now: Date) {
-        lastInteractionAt = now
+        lastInteractionAt = now.timeIntervalSince1970
     }
 
     /// Reconcile with the foreground process (heartbeat tick). `fgName` is
@@ -126,7 +131,8 @@ struct AgentStatusMachine {
         }
 
         // Fallback: recent output = working; silence ends the turn.
-        let recentlyActive = lastReadAt.map { now.timeIntervalSince($0) < Self.activityWindow } ?? false
+        let recentlyActive = lastReadAt > 0
+            && now.timeIntervalSince1970 - lastReadAt < Self.activityWindow
         switch state {
         case .idle:
             if recentlyActive { state = .working }
@@ -150,12 +156,12 @@ struct AgentStatusMachine {
     }
 
     /// New shell in the same terminal (start/restart) — everything resets.
-    mutating func reset(now: Date) {
+    mutating func reset() {
         state = .idle
         hookWorking = false
         hookKind = nil
-        lastReadAt = nil
-        lastInteractionAt = nil
+        lastReadAt = 0
+        lastInteractionAt = 0
         lastForegroundName = nil
         foregroundSince = nil
     }

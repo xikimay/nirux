@@ -139,7 +139,7 @@ final class AgentStatusMachineTests: XCTestCase {
     func testReset() {
         _ = machine.applyHook(.sessionStart, kind: .claude, isUserFocused: false)
         _ = machine.applyHook(.userPromptSubmit, kind: .claude, isUserFocused: false)
-        machine.reset(now: t0)
+        machine.reset()
         XCTAssertEqual(machine.state, .idle)
         XCTAssertNil(machine.foregroundSince)
         // Output fallback works again (hooks forgotten).

@@ -372,7 +372,7 @@ final class PtySession: @unchecked Sendable {
             // the dead shell's identity.
             state.childPid = 0
             state.hasExited = true
-            state.machine.reset(now: Date())
+            state.machine.reset()
             state.onProcessExit?()
         }
         exitSource.resume()
@@ -471,8 +471,8 @@ private final class PtyState: @unchecked Sendable {
         return ProcessSnapshot.flagValue(flag, pid: fgPid)
     }
 
-    func markPtyStarted(now: Date = Date()) {
-        machine.reset(now: now)
+    func markPtyStarted() {
+        machine.reset()
     }
 
     func writeToPty(_ data: Data) {

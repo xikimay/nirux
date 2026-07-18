@@ -29,17 +29,25 @@ enum AgentHookInstaller {
 
     // MARK: - Claude Code (~/.claude/settings.json)
 
-    /// Events Nirux listens to. High-frequency pings (every prompt, every
-    /// tool call) run async so they never add latency to the agent;
-    /// lifecycle events are sync but the receiver exits in milliseconds.
-    static let claudeHookEvents: [(event: String, async: Bool)] = [
-        ("SessionStart", false),
-        ("UserPromptSubmit", true),
-        ("PreToolUse", true),
-        ("Notification", false),
-        ("Stop", false),
-        ("SessionEnd", false)
+    /// Events Nirux listens to. All sync: sync hooks run in order with the
+    /// agent loop (a PreToolUse can never land after its turn's Stop), which
+    /// keeps the status machine's event stream deterministic. The receiver
+    /// exits in single-digit milliseconds, well under tool-call latency.
+    static let claudeHookEvents = [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "Notification",
+        "Stop",
+        "SessionEnd"
     ]
+
+    /// The command claude invokes on every hook event. Guarded by `test -x`
+    /// so a deleted/moved Nirux binary (app uninstalled, dev build cleaned)
+    /// makes the hook a silent no-op instead of an error on every tool call.
+    static func claudeHookCommand(executablePath: String) -> String {
+        "if [ -x \"\(executablePath)\" ]; then \"\(executablePath)\" --hook claude; fi"
+    }
 
     static func installClaudeHooks(
         executablePath: String = defaultExecutablePath,
@@ -47,7 +55,7 @@ enum AgentHookInstaller {
     ) {
         let dir = home.appendingPathComponent(".claude")
         let url = dir.appendingPathComponent("settings.json")
-        let command = "\"\(executablePath)\" --hook claude"
+        let command = claudeHookCommand(executablePath: executablePath)
 
         var root: [String: Any] = [:]
         if let data = try? Data(contentsOf: url) {
@@ -62,7 +70,7 @@ enum AgentHookInstaller {
         }
 
         var hooks = root["hooks"] as? [String: Any] ?? [:]
-        for (event, isAsync) in claudeHookEvents {
+        for event in claudeHookEvents {
             var groups = hooks[event] as? [[String: Any]] ?? []
             // Drop Nirux-owned hook entries (any stale path); drop groups
             // left empty by that removal. User hooks in mixed groups survive.
@@ -75,8 +83,7 @@ enum AgentHookInstaller {
                     groups[index]["hooks"] = list
                 }
             }
-            var entry: [String: Any] = ["type": "command", "command": command]
-            if isAsync { entry["async"] = true }
+            let entry: [String: Any] = ["type": "command", "command": command]
             groups.append(["matcher": "", "hooks": [entry]])
             hooks[event] = groups
         }

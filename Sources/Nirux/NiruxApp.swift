@@ -113,6 +113,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
 
     func applicationWillTerminate(_ notification: Notification) {
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
+        ActivityStore.shared.flush()
     }
 
     // MARK: - URL Scheme
