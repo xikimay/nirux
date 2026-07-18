@@ -76,13 +76,20 @@ extension NiruxShellView {
         } else {
             activeWSIndex = min(state.activeWorkspaceIndex, max(workspaces.count - 1, 0))
         }
+        // Restore sidebar expanded/collapsed state.
+        if let expanded = state.settings?.sidebarExpanded {
+            isSidebarExpanded = expanded
+            sidebar.isExpanded = expanded
+        }
         relayout(animated: false)
         updateSidebar()
     }
 
     func saveState(snapshot: ProcessSnapshot? = nil) {
         let snapshot = snapshot ?? ProcessSnapshot()
-        let existingSettings = Persistence.load()?.settings
+        var settings = Persistence.load()?.settings ?? PersistedSettings()
+        // The shell is the source of truth for sidebar state — carry the rest.
+        settings.sidebarExpanded = isSidebarExpanded
         Persistence.save(PersistedState(
             workspaces: workspaces.map { workspace in
                 PersistedWorkspace(id: workspace.id, title: workspace.title, cwd: workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.cwd,
@@ -132,7 +139,7 @@ extension NiruxShellView {
                     isInactive: workspace.isInactive)
             },
             activeWorkspaceIndex: activeWSIndex,
-            settings: existingSettings,
+            settings: settings,
             workspaceProfiles: workspaceStore.navigableProfiles,
             activeProfileID: activeProfileID,
             activeWorkspaceID: activeWorkspace?.id

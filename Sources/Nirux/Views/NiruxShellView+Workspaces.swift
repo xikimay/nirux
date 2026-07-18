@@ -304,6 +304,7 @@ extension NiruxShellView {
         guard !isPilotMode else { return }
         let expanding = !isSidebarExpanded
         isSidebarExpanded = expanding
+        saveState()
 
         if expanding {
             sidebar.fadeOutDots {
