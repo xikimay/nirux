@@ -358,6 +358,14 @@ extension NiruxShellView {
         editor.toggleDiff()
     }
 
+    /// Toggle word wrap on the focused editor column. No-op elsewhere.
+    func toggleWordWrap() {
+        guard let workspace = activeWorkspace,
+              let editor = workspace.columns[safe: workspace.focusedIndex]?.editorColumn
+        else { return }
+        editor.toggleWordWrap()
+    }
+
     /// Open the workspace-wide search panel scoped to the active workspace
     /// cwd. Picking a result routes through `openInEditorColumn`.
     func showWorkspaceSearch() {

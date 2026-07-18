@@ -71,6 +71,10 @@ extension NiruxApp {
         shell?.toggleEditorDiff()
     }
 
+    @objc func toggleWordWrap(_ sender: Any?) {
+        shell?.toggleWordWrap()
+    }
+
     @objc func togglePilotMode(_ sender: Any?) {
         shell?.togglePilotMode()
     }
@@ -119,6 +123,14 @@ extension NiruxApp {
         )
         diffItem.keyEquivalentModifierMask = [.command, .shift]
         editMenu.addItem(diffItem)
+
+        let wrapItem = NSMenuItem(
+            title: "Toggle Word Wrap",
+            action: #selector(toggleWordWrap(_:)),
+            keyEquivalent: "z"
+        )
+        wrapItem.keyEquivalentModifierMask = [.command, .option]
+        editMenu.addItem(wrapItem)
         let editItem = NSMenuItem()
         editItem.submenu = editMenu
         mainMenu.addItem(editItem)

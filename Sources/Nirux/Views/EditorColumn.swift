@@ -297,13 +297,18 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         }
     }
 
-    /// Toggle the visual diff for the active tab. In HEAD mode the
+    /// Toggle Monaco's selected diff view on the active tab. In HEAD mode the
     /// original side reads `git show HEAD:<relpath>`. In Branch mode it reads
     /// the merge-base version of the file so committed branch changes are
     /// included too. Modified side keeps the live buffer so the user can save
     /// edits straight from the diff.
     func toggleDiff() {
         toggleDiff(mode: selectedDiffMode)
+    }
+
+    /// Toggle word wrap in the Monaco surface (and diff surface when active).
+    func toggleWordWrap() {
+        sendBridge(["type": "toggleWordWrap"])
     }
 
     func toggleDiff(mode: EditorDiffMode) {
@@ -709,14 +714,12 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     private func sendBridge(_ payload: [String: Any]) {
         let send = { [weak self] in
             guard let self else { return }
-            guard let json = try? JSONSerialization.data(withJSONObject: payload),
-                  let jsonStr = String(data: json, encoding: .utf8)
+            guard let json = try? JSONSerialization.data(withJSONObject: payload)
             else { return }
-            let escaped = jsonStr
-                .replacingOccurrences(of: "\\", with: "\\\\")
-                .replacingOccurrences(of: "`", with: "\\`")
-                .replacingOccurrences(of: "$", with: "\\$")
-            let js = "window.niruxBridge.handle(`\(escaped)`)"
+            // Base64 transport: the payload can contain arbitrary file content
+            // (backticks, ${...}, quotes) that breaks template-literal embedding.
+            let b64 = json.base64EncodedString()
+            let js = "window.niruxBridge.handleB64(\"\(b64)\")"
             self.webView.evaluateJavaScript(js, completionHandler: nil)
         }
         if monacoReady { send() } else { pendingOps.append(send) }
