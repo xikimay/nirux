@@ -59,6 +59,13 @@ extension NiruxShellView {
         }
         sidebar.update(profiles: profileInfos, workspaces: infos)
 
+        // Dock badge: workspaces currently waiting for attention.
+        let attentionCount = workspaces.filter { workspace in
+            workspace.hasNotification
+                || workspace.columns.contains { $0.pty?.cachedAgentState == .needsAttention }
+        }.count
+        NiruxNotifier.shared.updateDockBadge(attentionCount: attentionCount)
+
         // Update per-workspace pilot panels
         if isPilotMode {
             for info in infos {
@@ -139,6 +146,8 @@ extension NiruxShellView {
         // seconds when many agents are running. Just clear the flags and the
         // attention borders directly; the next heartbeat (2s) refreshes the
         // sidebar with fresh process info.
+        NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
+        NiruxNotifier.shared.clearDelivered()
         for (wsIndex, workspace) in workspaces.enumerated() {
             workspace.hasNotification = false
             for (colIndex, col) in workspace.columns.enumerated() {

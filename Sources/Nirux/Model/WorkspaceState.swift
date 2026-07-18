@@ -87,13 +87,28 @@ final class WorkspaceState {
     }
 
     private func setupOsc9Tracking(for col: ColumnState) {
-        col.onOsc9Received = { [weak self] in
+        col.onOsc9Received = { [weak self, weak col] in
             guard let self else { return }
             self.hasNotification = true
             self.onMetadataChanged?()
             // Bounce dock icon when app is not active
             if !NSApp.isActive {
                 NSApp.requestUserAttention(.informationalRequest)
+                // Native notification with click-to-focus routing.
+                let processName: String
+                if let col, let title = col.terminalTitle,
+                   !title.isEmpty, !ColumnState.boringTitles.contains(title) {
+                    processName = title
+                } else {
+                    processName = "Agent"
+                }
+                let columnIndex = col.flatMap { c in self.columns.firstIndex(where: { $0 === c }) }
+                NiruxNotifier.shared.postAgentAttention(
+                    workspaceID: self.id,
+                    workspaceTitle: self.title,
+                    columnIndex: columnIndex,
+                    processName: processName
+                )
             }
         }
     }

@@ -54,6 +54,12 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         shell = shellView
         setupUpdater()
 
+        // Native notifications: click focuses the originating workspace/column.
+        NiruxNotifier.shared.setup()
+        NiruxNotifier.shared.onActivate = { [weak shellView] workspaceID, columnIndex in
+            shellView?.focusWorkspace(id: workspaceID, column: columnIndex)
+        }
+
         window.makeKeyAndOrderFront(nil)
         mainWindow = window
 
