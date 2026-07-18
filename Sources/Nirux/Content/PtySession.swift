@@ -359,7 +359,13 @@ final class PtySession: @unchecked Sendable {
             _exit(1)
         }
 
-        guard pid > 0 else { return }
+        guard pid > 0 else {
+            // Fork failed — keep the session in the exited state so the
+            // restart overlay stays actionable instead of dead-ending.
+            state.hasExited = true
+            state.onProcessExit?()
+            return
+        }
         state.ptyFd = fd
         state.childPid = pid
         state.hasExited = false

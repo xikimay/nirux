@@ -45,13 +45,15 @@ extension NiruxShellView {
                     workspace.addColumn(command: NiruxShellView.codexCommand(resumeLast: true, mode: mode))
                 case .editor:
                     let openFiles = persistedCol.editorOpenFiles ?? []
-                    workspace.addEditorColumn(initialFile: openFiles.first, workspaceCwd: persistedCol.cwd)
+                    // Non-interactive: a binary or huge file in the persisted
+                    // tab set must not pop a modal alert during launch.
+                    workspace.addEditorColumn(initialFile: openFiles.first, workspaceCwd: persistedCol.cwd, interactive: false)
                     if let editor = workspace.columns.last?.editorColumn {
                         wireEditor(editor)
                         // Re-open the rest of the tabs in their persisted
                         // order, then restore the active one.
                         for path in openFiles.dropFirst() {
-                            editor.open(path: path)
+                            editor.open(path: path, interactive: false)
                         }
                         if let active = persistedCol.editorActiveFile,
                            openFiles.contains(active),

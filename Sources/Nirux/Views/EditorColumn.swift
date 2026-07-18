@@ -257,8 +257,11 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     /// a new tab and makes it active. Path may be absolute or relative to
     /// the workspace cwd. When `line` is non-nil the editor jumps to and
     /// centers that line after the model is ready (used by workspace search
-    /// to land on the matched line).
-    func open(path: String, line: Int? = nil) {
+    /// to land on the matched line). `interactive` controls failure UX:
+    /// explicit user opens get alerts and a large-file confirmation;
+    /// session restore passes false so a problematic file can't pop a modal
+    /// at every launch.
+    func open(path: String, line: Int? = nil, interactive: Bool = true) {
         let absolute = absolutePath(for: path)
 
         // Already open → just switch.
@@ -269,7 +272,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         }
 
         // Very large files make Monaco sluggish — confirm before loading.
-        if let size = Self.diffCollectionFileByteCount(path: absolute),
+        if interactive,
+           let size = Self.diffCollectionFileByteCount(path: absolute),
            size > Self.largeFileWarningBytes {
             let alert = NSAlert()
             alert.messageText = "Open large file?"
@@ -281,7 +285,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
 
-        guard let content = readFileContent(at: absolute, interactive: true)
+        guard let content = readFileContent(at: absolute, interactive: interactive)
         else { return }
 
         openBuffer(path: absolute, content: content, mtime: mtime(of: absolute), line: line)

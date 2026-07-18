@@ -140,15 +140,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Capture the previous nightly's commit BEFORE deleting the tag —
+          # the changelog diffs against it.
+          PREV_SHA=$(git rev-parse nightly^{commit} 2>/dev/null || echo "")
+
           # Delete existing nightly release if it exists
           gh release delete nightly --yes 2>/dev/null || true
           git tag -d nightly 2>/dev/null || true
           git push origin :refs/tags/nightly 2>/dev/null || true
 
-          # Build release notes from the commits since the previous nightly tag
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          if [ -n "$PREV_TAG" ]; then
-            RANGE="$PREV_TAG..HEAD"
+          # Build release notes from the commits since the previous nightly
+          if [ -n "$PREV_SHA" ]; then
+            RANGE="$PREV_SHA..HEAD"
           else
             RANGE="HEAD~20..HEAD"
           fi

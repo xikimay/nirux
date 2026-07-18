@@ -172,12 +172,14 @@ final class WorkspaceState {
     }
 
     /// Insert a Monaco editor column scoped to the provided cwd, defaulting
-    /// to this workspace's original cwd.
-    func addEditorColumn(initialFile: String? = nil, workspaceCwd: String? = nil) {
+    /// to this workspace's original cwd. `interactive` forwards to the file
+    /// open path — session restore passes false so a binary or huge file in
+    /// the persisted tabs can't pop a modal alert at every launch.
+    func addEditorColumn(initialFile: String? = nil, workspaceCwd: String? = nil, interactive: Bool = true) {
         let col = ColumnState(editorWorkspaceCwd: workspaceCwd ?? cwd)
         insertColumn(col)
         if let initialFile {
-            col.editorColumn?.open(path: initialFile)
+            col.editorColumn?.open(path: initialFile, interactive: interactive)
         }
     }
 
