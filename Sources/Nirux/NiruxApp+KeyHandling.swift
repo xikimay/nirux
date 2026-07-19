@@ -93,6 +93,15 @@ extension NiruxApp {
                        event.modifierFlags.contains(.option) {
                         return event
                     }
+                    // Cmd+S (exactly — Option/Shift/Control absent): let
+                    // Monaco's save binding fire. The menu would otherwise
+                    // consume it for "Toggle Sidebar" (key equivalent "s")
+                    // and the editor could never save from the keyboard.
+                    // Cmd+Opt+S (Save All) still routes to the menu below.
+                    if col.isEditor, event.charactersIgnoringModifiers == "s",
+                       event.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command] {
+                        return event
+                    }
                     // Cmd+W: in an editor with open tabs, close the active
                     // tab first; only fall through to "Close Column" once
                     // the tab list is empty. Mirrors VSCode/Cursor.
@@ -115,9 +124,12 @@ extension NiruxApp {
 
             // Cmd+key: some go to PTY (Cmd+Backspace), rest to menu system
             if event.modifierFlags.contains(.command) {
-                // Cmd+S: toggle sidebar — must intercept here because
-                // ghostty's performKeyEquivalent swallows the event
-                if event.charactersIgnoringModifiers == "s" {
+                // Cmd+S (exactly): toggle sidebar — must intercept here
+                // because ghostty's performKeyEquivalent swallows the event.
+                // Exact-modifier match so Cmd+Opt+S (Save All) falls through
+                // to the menu instead of toggling the sidebar.
+                if event.charactersIgnoringModifiers == "s",
+                   event.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command] {
                     shell.toggleSidebar()
                     return nil
                 }

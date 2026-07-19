@@ -89,6 +89,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
     private var fileWatchTimer: Timer?
     private static let watchInterval: TimeInterval = 1.5
+    /// Pending debounced git-status refresh (see `scheduleGitReload`).
+    private var gitReloadWorkItem: DispatchWorkItem?
     /// Files above this size ask for confirmation before opening in Monaco.
     private static let largeFileWarningBytes: UInt64 = 5_000_000
 
@@ -478,6 +480,24 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         sendBridge(["type": "toggleWordWrap"])
     }
 
+    /// Save every dirty buffer. JS iterates its models and posts one save per
+    /// dirty path, so each file goes through the normal Cmd+S write path.
+    /// Buffers whose disk version moved while dirty are skipped — writing
+    /// them would silently clobber the external change; the conflict banner
+    /// resolves those when their tab is activated.
+    func saveAll() {
+        var payload: [String: Any] = ["type": "saveAll"]
+        if !diskModifiedWhileDirty.isEmpty {
+            payload["skipPaths"] = Array(diskModifiedWhileDirty)
+        }
+        sendBridge(payload)
+    }
+
+    /// Toggle the minimap in the Monaco surface (and diff surface when active).
+    func toggleMinimap() {
+        sendBridge(["type": "toggleMinimap"])
+    }
+
     func toggleDiff(mode: EditorDiffMode) {
         selectedDiffMode = mode
         refreshTabBar()
@@ -806,7 +826,20 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
         // Tell JS the buffer is now clean for this path.
         sendBridge(["type": "markSaved", "path": path])
-        fileTree.reloadGitChanges()
+        scheduleGitReload()
+    }
+
+    /// Coalesce git-status refreshes: Save All lands one save per dirty file
+    /// in quick succession, and each would otherwise spawn its own burst of
+    /// git subprocesses whose results all but the last get discarded.
+    private func scheduleGitReload() {
+        gitReloadWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            self?.gitReloadWorkItem = nil
+            self?.fileTree.reloadGitChanges()
+        }
+        gitReloadWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: item)
     }
 
     private func refreshTabBar() {

@@ -79,6 +79,14 @@ extension NiruxApp {
         shell?.sendEditorSelectionToAgent()
     }
 
+    @objc func saveAllInEditor(_ sender: Any?) {
+        shell?.saveAllInEditor()
+    }
+
+    @objc func toggleMinimap(_ sender: Any?) {
+        shell?.toggleMinimap()
+    }
+
     @objc func toggleDevTools(_ sender: Any?) {
         shell?.toggleDevTools()
     }
@@ -155,6 +163,22 @@ extension NiruxApp {
         )
         sendSelectionItem.keyEquivalentModifierMask = [.command, .option]
         editMenu.addItem(sendSelectionItem)
+
+        let saveAllItem = NSMenuItem(
+            title: "Save All",
+            action: #selector(saveAllInEditor(_:)),
+            keyEquivalent: "s"
+        )
+        saveAllItem.keyEquivalentModifierMask = [.command, .option]
+        editMenu.addItem(saveAllItem)
+
+        let minimapItem = NSMenuItem(
+            title: "Toggle Minimap",
+            action: #selector(toggleMinimap(_:)),
+            keyEquivalent: "m"
+        )
+        minimapItem.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(minimapItem)
         let editItem = NSMenuItem()
         editItem.submenu = editMenu
         mainMenu.addItem(editItem)

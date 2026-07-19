@@ -19,7 +19,14 @@
   // Per-tab view state (scroll + cursor) so switching tabs restores position.
   var viewStates = {};
   var wordWrap = false;
+  var minimapEnabled = false;
   var editorFontSize = 13;
+  // path -> { content, count } for saves posted to Swift but not yet
+  // acknowledged via markSaved. markSaved must adopt the content that was
+  // actually written, not whatever the buffer holds when the ack arrives —
+  // keystrokes typed during the round-trip would otherwise be blessed as
+  // clean without ever reaching disk.
+  var pendingSaves = {};
 
   function postToSwift(message) {
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.nirux) {
@@ -171,14 +178,22 @@
     entry.model.dispose();
     delete models[path];
     delete viewStates[path];
+    delete pendingSaves[path];
     if (currentPath === path) currentPath = null;
   }
 
   function markSaved(path) {
     var entry = models[path];
     if (!entry) return;
-    entry.cleanValue = entry.model.getValue();
-    postToSwift({ type: "dirty", path: path, isDirty: false });
+    var pending = pendingSaves[path];
+    if (pending) {
+      entry.cleanValue = pending.content;
+      pending.count--;
+      if (pending.count === 0) delete pendingSaves[path];
+    } else {
+      entry.cleanValue = entry.model.getValue();
+    }
+    reportDirtyFor(path);
   }
 
   function splitLines(text) {
@@ -359,8 +374,11 @@
         theme: "nirux-dark",
         automaticLayout: true,
         fontFamily: "ui-monospace, SF Mono, Menlo, monospace",
-        fontSize: 13,
-        minimap: { enabled: false },
+        // Inherit the live toggles — the diff editor is created lazily, so
+        // hardcoding these would desync it from zoom/wrap/minimap state.
+        fontSize: editorFontSize,
+        wordWrap: wordWrap ? "on" : "off",
+        minimap: { enabled: minimapEnabled },
         renderLineHighlight: "none",
         renderSideBySide: true,
         useInlineViewWhenSpaceIsLimited: false,
@@ -391,6 +409,15 @@
         monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.Enter,
         function () { postToSwift({ type: "sendSelectionShortcut" }); },
         "!findWidgetVisible"
+      );
+      // F7 / Shift+F7 — jump between diff hunks (VS Code's diff navigation keys).
+      diffEditor.getModifiedEditor().addCommand(
+        monaco.KeyCode.F7,
+        function () { goToDiffHunk("next"); }
+      );
+      diffEditor.getModifiedEditor().addCommand(
+        monaco.KeyMod.Shift | monaco.KeyCode.F7,
+        function () { goToDiffHunk("previous"); }
       );
     }
     diffEditor.setModel({ original: diffOriginalModel, modified: entry.model });
@@ -558,14 +585,52 @@
     }
   }
 
+  function goToDiffHunk(direction) {
+    if (!diffEditor) return;
+    // IDiffEditor.goToDiff is the modern API; older Monaco builds only have
+    // the accessible diff-review actions, which also move the cursor.
+    if (typeof diffEditor.goToDiff === "function") {
+      diffEditor.goToDiff(direction);
+      return;
+    }
+    var actionId = direction === "next"
+      ? "editor.action.diffReview.next"
+      : "editor.action.diffReview.prev";
+    var action = diffEditor.getModifiedEditor().getAction(actionId);
+    if (action) action.run();
+  }
+
+  function postSave(path, entry) {
+    var content = entry.model.getValue();
+    var pending = pendingSaves[path];
+    if (pending) {
+      pending.content = content;
+      pending.count++;
+    } else {
+      pendingSaves[path] = { content: content, count: 1 };
+    }
+    postToSwift({ type: "save", path: path, content: content });
+  }
+
   function requestSave() {
     if (!currentPath) return;
     var entry = models[currentPath];
     if (!entry) return;
-    postToSwift({
-      type: "save",
-      path: currentPath,
-      content: entry.model.getValue()
+    postSave(currentPath, entry);
+  }
+
+  // Save every dirty buffer, not just the active tab. Each save goes through
+  // the same Swift round-trip as Cmd+S (write + markSaved per path).
+  // skipPaths carries buffers Swift knows changed on disk while dirty —
+  // writing those would clobber the external change.
+  function saveAllDirty(skipPaths) {
+    var skip = {};
+    (skipPaths || []).forEach(function (path) { skip[path] = true; });
+    Object.keys(models).forEach(function (path) {
+      if (skip[path]) return;
+      var entry = models[path];
+      if (entry.model.getValue() === entry.cleanValue) return;
+      postSave(path, entry);
     });
   }
 
@@ -595,6 +660,12 @@
     var wrap = wordWrap ? "on" : "off";
     if (editor) editor.updateOptions({ wordWrap: wrap });
     if (diffEditor) diffEditor.updateOptions({ wordWrap: wrap });
+  }
+
+  function toggleMinimap() {
+    minimapEnabled = !minimapEnabled;
+    if (editor) editor.updateOptions({ minimap: { enabled: minimapEnabled } });
+    if (diffEditor) diffEditor.updateOptions({ minimap: { enabled: minimapEnabled } });
   }
 
   // Swift asks for the current selection (send-to-agent flow). Always
@@ -646,6 +717,8 @@
       case "enterDiffGroup": enterPierreDiffGroup(msg); break;
       case "exitDiff": exitDiff(); break;
       case "toggleWordWrap": toggleWordWrap(); break;
+      case "saveAll": saveAllDirty(msg.skipPaths); break;
+      case "toggleMinimap": toggleMinimap(); break;
       case "getSelection": reportSelection(msg.requestID); break;
     }
   }
@@ -695,6 +768,22 @@
         "editorLineNumber.activeForeground": "#7aa2f7",
         "editor.selectionBackground": "#28344a",
         "editor.lineHighlightBackground": "#1f2335",
+        "editorStickyScroll.background": "#1a1b26",
+        "editorStickyScroll.shadow": "#00000066",
+        "editorStickyScrollHover.background": "#1f2335",
+        "editorBracketHighlight.foreground1": "#7aa2f7",
+        "editorBracketHighlight.foreground2": "#e0af68",
+        "editorBracketHighlight.foreground3": "#9ece6a",
+        "editorBracketHighlight.foreground4": "#bb9af7",
+        "editorBracketHighlight.foreground5": "#7dcfff",
+        "editorBracketHighlight.foreground6": "#f7768e",
+        "editorBracketHighlight.unexpectedBracket.foreground": "#ff6b7d",
+        "editorBracketPairGuide.activeBackground1": "#7aa2f766",
+        "editorBracketPairGuide.activeBackground2": "#e0af6866",
+        "editorBracketPairGuide.activeBackground3": "#9ece6a66",
+        "editorBracketPairGuide.activeBackground4": "#bb9af766",
+        "editorBracketPairGuide.activeBackground5": "#7dcfff66",
+        "editorBracketPairGuide.activeBackground6": "#f7768e66",
         "diffEditor.insertedLineBackground": "#17462f80",
         "diffEditor.insertedTextBackground": "#2f8f5f80",
         "diffEditor.removedLineBackground": "#5a1f2c80",
@@ -717,7 +806,11 @@
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       renderLineHighlight: "all",
-      smoothScrolling: true
+      smoothScrolling: true,
+      stickyScroll: { enabled: true },
+      bracketPairColorization: { enabled: true },
+      guides: { bracketPairs: true },
+      find: { seedSearchStringFromSelection: "selection" }
     });
 
     // Cmd+S → ask Swift to write the active file. Swift writes, then sends
@@ -733,6 +826,15 @@
     });
 
     bindZoomCommands(editor);
+
+    // Explicit go-to-line binding — same rationale as the Cmd+F binding
+    // above. addCommand registers page-globally, so route through
+    // activeEditor(): targeting `editor` while the diff surface is up would
+    // open the goto-line input on the hidden editor.
+    editor.addCommand(monaco.KeyMod.WinCtrl | monaco.KeyCode.KeyG, function () {
+      var target = activeEditor();
+      if (target) target.getAction("editor.action.gotoLine").run();
+    });
 
     // Cmd+P → ask Swift to show its native file picker, scoped to the workspace.
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, function () {

@@ -445,6 +445,22 @@ extension NiruxShellView {
         editor.toggleWordWrap()
     }
 
+    /// Save all dirty buffers in the focused editor column. No-op elsewhere.
+    func saveAllInEditor() {
+        guard let workspace = activeWorkspace,
+              let editor = workspace.columns[safe: workspace.focusedIndex]?.editorColumn
+        else { return }
+        editor.saveAll()
+    }
+
+    /// Toggle the minimap on the focused editor column. No-op elsewhere.
+    func toggleMinimap() {
+        guard let workspace = activeWorkspace,
+              let editor = workspace.columns[safe: workspace.focusedIndex]?.editorColumn
+        else { return }
+        editor.toggleMinimap()
+    }
+
     /// Open the Web Inspector on the focused browser column. No-op elsewhere.
     func toggleDevTools() {
         guard let workspace = activeWorkspace,
