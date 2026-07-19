@@ -9,11 +9,17 @@ final class SidebarBackgroundView: NSView {
 /// Sidebar: minimal dots in normal mode, expanded detail panel (pilot-style) in expanded mode.
 /// Dragging on empty sidebar area moves the window.
 final class SidebarView: NSView {
+    // Note: card drags don't move the window even so — the drag-reorder
+    // tracking loop (SidebarView+Drag) consumes the mouse events before
+    // the window-move machinery sees them.
     override var mouseDownCanMoveWindow: Bool { true }
     var onWorkspaceClicked: ((Int) -> Void)?
     var onColumnClicked: ((Int, Int) -> Void)?  // (workspaceIndex, columnIndex)
     var onDiffStatsClicked: ((Int) -> Void)?
     var onWorkspaceAction: ((WorkspaceSidebarAction, Int) -> Void)?
+    /// Drag-reorder drop: (store index of dragged workspace, target
+    /// position within its active/inactive group).
+    var onWorkspaceReordered: ((Int, Int) -> Void)?
     var onProfileClicked: ((String) -> Void)?
     var onCreateProfile: (() -> Void)?
     var onRenameProfile: ((String) -> Void)?
@@ -61,6 +67,19 @@ final class SidebarView: NSView {
     var expandedViews: [NSView] = []
     var profileIndicatorView: SidebarDotIndicatorView?
     var hitAreas: [SidebarHitArea] = []
+
+    // Workspace drag-reorder state; the tracking logic lives in
+    // SidebarView+Drag.swift (stored properties can't go in extensions).
+    var workspaceDrag: SidebarWorkspaceDrag?
+    var dragGhostView: NSView?
+    var dragDimView: NSView?
+    var dragInsertionView: NSView?
+    /// Sidebar data that arrived mid-drag; applied when the drag ends so
+    /// rebuilds don't tear down rows under the captured drag geometry.
+    var deferredDragUpdate: SidebarUpdatePayload?
+    /// A layout()-driven rebuild was suppressed mid-drag; recover with an
+    /// unconditional rebuild when the drag ends.
+    var rebuildSkippedDuringDrag = false
 
     /// Active workspace the sidebar last auto-scrolled to. Used by
     /// `rebuildContent` so we only follow the active workspace when it
@@ -118,6 +137,14 @@ final class SidebarView: NSView {
         activityReadTimestamp: TimeInterval = 0, liveWorkspaceIDs: Set<String> = [],
         liveAgentUUIDs: Set<String> = []
     ) {
+        guard workspaceDrag == nil else {
+            deferredDragUpdate = SidebarUpdatePayload(
+                profiles: profiles, workspaces: workspaces, activity: activity,
+                activityReadTimestamp: activityReadTimestamp,
+                liveWorkspaceIDs: liveWorkspaceIDs, liveAgentUUIDs: liveAgentUUIDs
+            )
+            return
+        }
         lastProfiles = profiles
         lastInfos = workspaces
         lastActivity = activity
@@ -296,6 +323,12 @@ final class SidebarView: NSView {
             let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
 
             if let area = hitArea(at: docLocation) {
+                // Workspace rows don't click on mouseDown: run the drag
+                // tracking loop, which decides between click and reorder.
+                if case .workspace(let workspaceIndex) = area.region {
+                    trackWorkspaceDrag(workspaceIndex: workspaceIndex, rowFrame: area.frame, startPoint: docLocation)
+                    return
+                }
                 handleHit(area.region, event: event)
                 return
             }

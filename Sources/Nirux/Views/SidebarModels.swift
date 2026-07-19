@@ -73,6 +73,9 @@ struct PRInfo: Hashable {
 }
 
 struct WorkspaceInfo: Hashable {
+    /// Stable workspace identity (WorkspaceState.id). Used to re-resolve
+    /// `index` when the store may have mutated since this snapshot.
+    let id: String
     let index: Int
     let title: String
     let profileID: String
@@ -108,6 +111,17 @@ enum SidebarHitRegion {
     case workspace(Int)
     /// Index into SidebarView.lastActivity (snapshot at rebuild time).
     case activity(Int)
+}
+
+/// Full parameter set of SidebarView.update(...) — stashed while a
+/// drag-reorder is in flight and replayed when the drag ends.
+struct SidebarUpdatePayload {
+    let profiles: [ProfileInfo]
+    let workspaces: [WorkspaceInfo]
+    let activity: [ActivityEntry]
+    let activityReadTimestamp: TimeInterval
+    let liveWorkspaceIDs: Set<String>
+    let liveAgentUUIDs: Set<String>
 }
 
 enum WorkspaceSidebarAction {
