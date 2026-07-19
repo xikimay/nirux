@@ -65,8 +65,16 @@ extension SidebarView {
         else {
             // Geometry capture failed — behave like a plain click, but
             // still swallow the gesture so window-move can't grab it.
+            // Updates apply live during the wait, so re-resolve by id.
+            let clickedID = lastInfos.first { $0.index == workspaceIndex }?.id
             consumeGestureUntilMouseUp(window)
-            onWorkspaceClicked?(workspaceIndex)
+            if let clickedID {
+                if let current = lastInfos.first(where: { $0.id == clickedID })?.index {
+                    onWorkspaceClicked?(current)
+                }
+            } else {
+                onWorkspaceClicked?(workspaceIndex)
+            }
             return
         }
         workspaceDrag = drag
@@ -106,6 +114,8 @@ extension SidebarView {
                     return
                 }
                 // Other keys are swallowed while the drag is modal.
+            case .keyUp where drag.isDragging:
+                break // swallowed symmetrically with the keyDowns above
             case .keyDown, .keyUp:
                 // Not in drag mode (or a keyUp): a press on a card must
                 // not eat typing — hand the event to normal dispatch.
@@ -181,7 +191,15 @@ extension SidebarView {
                 if !window.isVisible || NSEvent.pressedMouseButtons & 1 == 0 { return }
                 continue
             }
-            if event.type == .leftMouseUp { return }
+            switch event.type {
+            case .leftMouseUp:
+                return
+            case .keyDown, .keyUp:
+                // No drag is modal here — don't eat typing.
+                NSApp.sendEvent(event)
+            default:
+                break
+            }
         }
     }
 
