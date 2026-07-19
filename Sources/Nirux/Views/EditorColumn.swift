@@ -57,9 +57,14 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         let startLine: Int
         let endLine: Int
     }
-    /// One-shot completions awaiting a "selection" reply from JS (FIFO —
-    /// the bridge answers requests in order).
-    private var selectionRequests: [(Selection?) -> Void] = []
+    /// One-shot completions awaiting a "selection" reply, keyed by request
+    /// ID so a dropped bridge message can't pair a reply with the wrong
+    /// (earlier) request.
+    private var selectionRequests: [Int: (Selection?) -> Void] = [:]
+    private var nextSelectionRequestID = 0
+    /// Monaco resolved Cmd+Opt+Enter outside the find widget — the shell
+    /// runs the send-selection flow.
+    var onSendSelectionShortcut: (() -> Void)?
 
     private let webView: WKWebView
     private let tabBar: EditorTabBar
@@ -122,6 +127,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             fileWatchTimer = nil
             monacoLoadWatchdog?.invalidate()
             monacoLoadWatchdog = nil
+            drainSelectionRequests()
             webView.configuration.userContentController
                 .removeScriptMessageHandler(forName: "nirux")
         }
@@ -444,8 +450,18 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     /// Ask Monaco for the current selection (send-to-agent flow). The
     /// completion fires with nil when nothing is selected.
     func requestSelection(_ completion: @escaping (Selection?) -> Void) {
-        selectionRequests.append(completion)
-        sendBridge(["type": "getSelection"])
+        nextSelectionRequestID += 1
+        let requestID = nextSelectionRequestID
+        selectionRequests[requestID] = completion
+        sendBridge(["type": "getSelection", "requestID": requestID])
+    }
+
+    /// Fail every in-flight selection request. Called when the webview can
+    /// no longer answer (content process crash, column closed).
+    private func drainSelectionRequests() {
+        let pending = selectionRequests.values
+        selectionRequests.removeAll()
+        for completion in pending { completion(nil) }
     }
 
     /// Toggle Monaco's selected diff view on the active tab. In HEAD mode the
@@ -612,6 +628,319 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             : (workspaceCwd as NSString).appendingPathComponent(path)
     }
 
+    /// Close a tab. Disposes its Monaco model and switches focus to a
+    /// neighbor if the closed tab was active.
+    func close(path: String) {
+        guard let index = tabPaths.firstIndex(of: path) else { return }
+        let isDiffGroup = Self.isDiffGroupPath(path)
+        let wasActive = activePath == path
+        tabPaths.remove(at: index)
+        if isDiffGroup {
+            diffLoadGeneration += 1
+        }
+        dirtyByPath.removeValue(forKey: path)
+        mtimeByPath.removeValue(forKey: path)
+        encodingByPath.removeValue(forKey: path)
+        diskModifiedWhileDirty.remove(path)
+        diffModeByPath.removeValue(forKey: path)
+        diffGroupTabs.removeValue(forKey: path)
+        if diffActivePath == path {
+            diffLoadGeneration += 1
+            diffActivePath = nil
+            diffActiveMode = nil
+            sendBridge(["type": "exitDiff"])
+        }
+        if !isDiffGroup {
+            sendBridge(["type": "closeTab", "path": path])
+        } else if wasActive {
+            sendBridge(["type": "exitDiff"])
+        }
+
+        if wasActive {
+            // Prefer the tab to the right (the one that visually "shifted"
+            // into the closed slot); fall back to the previous neighbor.
+            if index < tabPaths.count {
+                activePath = tabPaths[index]
+            } else if index - 1 >= 0, index - 1 < tabPaths.count {
+                activePath = tabPaths[index - 1]
+            } else {
+                activePath = nil
+            }
+            if let next = activePath {
+                if let group = diffGroupTabs[next] {
+                    sendDiffGroup(group)
+                } else {
+                    sendBridge(["type": "switchTab", "path": next])
+                    fileTree.reveal(absolutePath: next)
+                    if let mode = diffModeByPath[next] {
+                        enterDiff(for: next, mode: mode)
+                    }
+                }
+            }
+            onPathChanged?()
+            onDirtyChanged?()
+        }
+        refreshTabBar()
+    }
+
+    /// Re-read the active file from disk and push its content to Monaco.
+    /// Used when an external change races a clean buffer.
+    private func reloadFromDisk(path: String) {
+        guard case .ok(let content, let encoding) = Self.readTextFile(at: path) else { return }
+
+        mtimeByPath[path] = mtime(of: path)
+        encodingByPath[path] = encoding
+        diskModifiedWhileDirty.remove(path)
+        refreshTabBar()
+        // activate: false is critical for background tabs — an openFile with
+        // implicit activation would steal Monaco's active tab, and the next
+        // Cmd+S (which saves the JS-side currentPath) would write the wrong
+        // buffer to the wrong file.
+        sendBridge(["type": "openFile", "path": path, "content": content, "activate": path == activePath])
+    }
+
+    // MARK: - File watcher
+
+    private func startFileWatch() {
+        guard fileWatchTimer == nil, !openPaths.isEmpty else { return }
+        fileWatchTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.watchInterval, repeats: true
+        ) { [weak self] _ in
+            // Timer callback fires nonisolated; bounce to MainActor for state access.
+            Task { @MainActor [weak self] in
+                self?.checkDisk()
+            }
+        }
+    }
+
+    /// Pause the 1.5s disk-watch timer. Called when the app resigns active so
+    /// we don't burn cycles polling mtimes while backgrounded. `resumeFileWatch`
+    /// restarts it if any files are still open.
+    func pauseFileWatch() {
+        fileWatchTimer?.invalidate()
+        fileWatchTimer = nil
+    }
+
+    /// Resume the disk-watch timer (no-op if no files are open).
+    func resumeFileWatch() {
+        startFileWatch()
+    }
+
+    private func checkDisk() {
+        for path in openPaths {
+            guard let last = mtimeByPath[path] else { continue }
+            guard let now = mtime(of: path) else { continue }
+            guard now > last else { continue }
+
+            let isDirtyHere = dirtyByPath[path] ?? false
+            if isDirtyHere {
+                if !diskModifiedWhileDirty.contains(path) {
+                    diskModifiedWhileDirty.insert(path)
+                    mtimeByPath[path] = now
+                    refreshTabBar()
+                    if path == activePath { onDirtyChanged?() }
+                }
+            } else {
+                reloadFromDisk(path: path)
+            }
+        }
+    }
+
+    private func mtime(of path: String) -> Date? {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+        return attrs?[.modificationDate] as? Date
+    }
+
+    // MARK: - JS bridge
+
+    private func sendBridge(_ payload: [String: Any]) {
+        let send = { [weak self] in
+            guard let self else { return }
+            guard let json = try? JSONSerialization.data(withJSONObject: payload)
+            else { return }
+            // Base64 transport: the payload can contain arbitrary file content
+            // (backticks, ${...}, quotes) that breaks template-literal embedding.
+            let b64 = json.base64EncodedString()
+            let js = "window.niruxBridge.handleB64(\"\(b64)\")"
+            self.webView.evaluateJavaScript(js, completionHandler: nil)
+        }
+        if monacoReady { send() } else { pendingOps.append(send) }
+    }
+
+    /// Persist a buffer to disk. Path comes from JS but we only honor saves
+    /// for tabs we're actually tracking, so a compromised page can't redirect
+    /// writes outside our open set. Writes use the encoding detected at
+    /// open — a UTF-16 (or Latin-1) file is not silently transcoded to UTF-8.
+    private func handleSave(body: [String: Any]) {
+        guard let path = body["path"] as? String,
+              openPaths.contains(path),
+              let content = body["content"] as? String
+        else { return }
+
+        let encoding = encodingByPath[path] ?? .utf8
+        var data = content.data(using: encoding)
+        if data == nil, encoding != .utf8 {
+            // e.g. a Latin-1 file that now contains unrepresentable
+            // characters — fall back to UTF-8 so the save can't fail.
+            NSLog("[EditorColumn] \(path): \(encoding) can no longer represent the buffer; saving as UTF-8")
+            data = content.data(using: .utf8)
+            if data != nil { encodingByPath[path] = .utf8 }
+        }
+        guard let data else {
+            NSLog("[EditorColumn] save failed for \(path): buffer not representable")
+            return
+        }
+
+        let url = URL(fileURLWithPath: path)
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            NSLog("[EditorColumn] save failed for \(path): \(error)")
+            return
+        }
+
+        // Refresh the watcher's mtime baseline so we don't immediately re-detect
+        // our own atomic-write as an external modification.
+        mtimeByPath[path] = mtime(of: path)
+        diskModifiedWhileDirty.remove(path)
+
+        // Tell JS the buffer is now clean for this path.
+        sendBridge(["type": "markSaved", "path": path])
+        fileTree.reloadGitChanges()
+    }
+
+    private func refreshTabBar() {
+        let bars: [EditorTabBar.Tab] = tabPaths.map { path in
+            let dirty = (dirtyByPath[path] ?? false) || diskModifiedWhileDirty.contains(path)
+            return EditorTabBar.Tab(path: path, isDirty: dirty, title: diffGroupTabs[path]?.title)
+        }
+        tabBar.update(tabs: bars, activePath: activePath)
+        updateConflictBanner()
+    }
+
+    /// Show the disk-conflict banner when the active tab was modified
+    /// externally while dirty. Choosing "Keep My Changes" is the explicit
+    /// overwrite; "Reload from Disk" discards the buffer.
+    private func updateConflictBanner() {
+        guard let path = activePath, diskModifiedWhileDirty.contains(path) else {
+            conflictBanner.isHidden = true
+            return
+        }
+        conflictBanner.configure(fileName: (path as NSString).lastPathComponent)
+        conflictBanner.isHidden = false
+        needsLayout = true
+    }
+
+    private func resolveConflict(reload: Bool) {
+        guard let path = activePath, diskModifiedWhileDirty.contains(path) else { return }
+        if reload {
+            reloadFromDisk(path: path)
+        } else {
+            // Explicit overwrite: adopt the current disk mtime as the new
+            // baseline so the watcher doesn't re-flag before the next save.
+            mtimeByPath[path] = mtime(of: path)
+            diskModifiedWhileDirty.remove(path)
+            refreshTabBar()
+            onDirtyChanged?()
+        }
+    }
+
+    // MARK: - WKNavigationDelegate
+
+    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // Monaco loads asynchronously after navigation finishes; we wait for the
+        // "monacoReady" bridge message to actually push content.
+    }
+
+    /// The WebContent process died — Monaco and every model with it. Fail
+    /// in-flight requests and surface the retry overlay instead of leaving
+    /// a silently dead surface that still claims `monacoReady`.
+    nonisolated func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        MainActor.assumeIsolated {
+            monacoReady = false
+            pendingOps.removeAll()
+            drainSelectionRequests()
+            showLoadFailure(message: "The editor process crashed.", showRetry: true)
+        }
+    }
+
+    // MARK: - WKScriptMessageHandler
+
+    nonisolated func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage
+    ) {
+        // WKScriptMessageHandler callbacks always arrive on the main thread
+        // (per Apple's docs). Xcode 16.4 declares `WKScriptMessage.body` as
+        // @MainActor-isolated, so we need to assume isolation to read it from
+        // this nonisolated protocol method.
+        MainActor.assumeIsolated {
+            guard let body = message.body as? [String: Any],
+                  let type = body["type"] as? String
+            else { return }
+            handleBridgeMessage(type: type, body: body)
+        }
+    }
+
+    private func handleBridgeMessage(type: String, body: [String: Any]) {
+        switch type {
+        case "monacoReady":
+            monacoReady = true
+            monacoLoadWatchdog?.invalidate()
+            monacoLoadWatchdog = nil
+            loadFailureOverlay.isHidden = true
+            let queued = pendingOps
+            pendingOps.removeAll()
+            for op in queued { op() }
+        case "dirty":
+            guard let path = body["path"] as? String else { return }
+            let dirty = (body["isDirty"] as? Bool) ?? false
+            if (dirtyByPath[path] ?? false) != dirty {
+                dirtyByPath[path] = dirty
+                refreshTabBar()
+                if path == activePath { onDirtyChanged?() }
+            }
+        case "save":
+            handleSave(body: body)
+        case "selection":
+            guard let requestID = body["requestID"] as? Int,
+                  let completion = selectionRequests.removeValue(forKey: requestID)
+            else { return }
+            if let path = body["path"] as? String, !path.isEmpty,
+               let text = body["text"] as? String, !text.isEmpty,
+               let start = body["startLine"] as? Int,
+               let end = body["endLine"] as? Int {
+                completion(Selection(path: path, text: text, startLine: start, endLine: end))
+            } else {
+                completion(nil)
+            }
+        case "filePickerRequest":
+            onFilePickerRequest?(self)
+        case "sendSelectionShortcut":
+            onSendSelectionShortcut?()
+        case "ready":
+            // Monaco confirmed model swap; nothing to do.
+            break
+        case "error":
+            if let msg = body["message"] as? String {
+                NSLog("[EditorColumn] bridge error: \(msg)")
+            }
+        default:
+            break
+        }
+    }
+}
+
+private struct DiffGroupTab {
+    let title: String
+    let mode: EditorDiffMode
+    let files: [[String: Any]]
+    let isLoading: Bool
+}
+
+// MARK: - Git / diff content helpers (nonisolated statics)
+
+private extension EditorColumn {
     /// Reads the comparison-side content for the requested diff mode.
     /// Nonisolated so we can call it from a background queue.
     private nonisolated static func gitOriginalContent(
@@ -737,297 +1066,4 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
     }
-
-    /// Close a tab. Disposes its Monaco model and switches focus to a
-    /// neighbor if the closed tab was active.
-    func close(path: String) {
-        guard let index = tabPaths.firstIndex(of: path) else { return }
-        let isDiffGroup = Self.isDiffGroupPath(path)
-        let wasActive = activePath == path
-        tabPaths.remove(at: index)
-        if isDiffGroup {
-            diffLoadGeneration += 1
-        }
-        dirtyByPath.removeValue(forKey: path)
-        mtimeByPath.removeValue(forKey: path)
-        encodingByPath.removeValue(forKey: path)
-        diskModifiedWhileDirty.remove(path)
-        diffModeByPath.removeValue(forKey: path)
-        diffGroupTabs.removeValue(forKey: path)
-        if diffActivePath == path {
-            diffLoadGeneration += 1
-            diffActivePath = nil
-            diffActiveMode = nil
-            sendBridge(["type": "exitDiff"])
-        }
-        if !isDiffGroup {
-            sendBridge(["type": "closeTab", "path": path])
-        } else if wasActive {
-            sendBridge(["type": "exitDiff"])
-        }
-
-        if wasActive {
-            // Prefer the tab to the right (the one that visually "shifted"
-            // into the closed slot); fall back to the previous neighbor.
-            if index < tabPaths.count {
-                activePath = tabPaths[index]
-            } else if index - 1 >= 0, index - 1 < tabPaths.count {
-                activePath = tabPaths[index - 1]
-            } else {
-                activePath = nil
-            }
-            if let next = activePath {
-                if let group = diffGroupTabs[next] {
-                    sendDiffGroup(group)
-                } else {
-                    sendBridge(["type": "switchTab", "path": next])
-                    fileTree.reveal(absolutePath: next)
-                    if let mode = diffModeByPath[next] {
-                        enterDiff(for: next, mode: mode)
-                    }
-                }
-            }
-            onPathChanged?()
-            onDirtyChanged?()
-        }
-        refreshTabBar()
-    }
-
-    /// Re-read the active file from disk and push its content to Monaco.
-    /// Used when an external change races a clean buffer.
-    private func reloadFromDisk(path: String) {
-        guard case .ok(let content, let encoding) = Self.readTextFile(at: path) else { return }
-
-        mtimeByPath[path] = mtime(of: path)
-        encodingByPath[path] = encoding
-        diskModifiedWhileDirty.remove(path)
-        refreshTabBar()
-        // activate: false is critical for background tabs — an openFile with
-        // implicit activation would steal Monaco's active tab, and the next
-        // Cmd+S (which saves the JS-side currentPath) would write the wrong
-        // buffer to the wrong file.
-        sendBridge(["type": "openFile", "path": path, "content": content, "activate": path == activePath])
-    }
-
-    // MARK: - File watcher
-
-    private func startFileWatch() {
-        guard fileWatchTimer == nil, !openPaths.isEmpty else { return }
-        fileWatchTimer = Timer.scheduledTimer(
-            withTimeInterval: Self.watchInterval, repeats: true
-        ) { [weak self] _ in
-            // Timer callback fires nonisolated; bounce to MainActor for state access.
-            Task { @MainActor [weak self] in
-                self?.checkDisk()
-            }
-        }
-    }
-
-    /// Pause the 1.5s disk-watch timer. Called when the app resigns active so
-    /// we don't burn cycles polling mtimes while backgrounded. `resumeFileWatch`
-    /// restarts it if any files are still open.
-    func pauseFileWatch() {
-        fileWatchTimer?.invalidate()
-        fileWatchTimer = nil
-    }
-
-    /// Resume the disk-watch timer (no-op if no files are open).
-    func resumeFileWatch() {
-        startFileWatch()
-    }
-
-    private func checkDisk() {
-        for path in openPaths {
-            guard let last = mtimeByPath[path] else { continue }
-            guard let now = mtime(of: path) else { continue }
-            guard now > last else { continue }
-
-            let isDirtyHere = dirtyByPath[path] ?? false
-            if isDirtyHere {
-                if !diskModifiedWhileDirty.contains(path) {
-                    diskModifiedWhileDirty.insert(path)
-                    mtimeByPath[path] = now
-                    refreshTabBar()
-                }
-            } else {
-                reloadFromDisk(path: path)
-            }
-        }
-    }
-
-    private func mtime(of path: String) -> Date? {
-        let attrs = try? FileManager.default.attributesOfItem(atPath: path)
-        return attrs?[.modificationDate] as? Date
-    }
-
-    // MARK: - JS bridge
-
-    private func sendBridge(_ payload: [String: Any]) {
-        let send = { [weak self] in
-            guard let self else { return }
-            guard let json = try? JSONSerialization.data(withJSONObject: payload)
-            else { return }
-            // Base64 transport: the payload can contain arbitrary file content
-            // (backticks, ${...}, quotes) that breaks template-literal embedding.
-            let b64 = json.base64EncodedString()
-            let js = "window.niruxBridge.handleB64(\"\(b64)\")"
-            self.webView.evaluateJavaScript(js, completionHandler: nil)
-        }
-        if monacoReady { send() } else { pendingOps.append(send) }
-    }
-
-    /// Persist a buffer to disk. Path comes from JS but we only honor saves
-    /// for tabs we're actually tracking, so a compromised page can't redirect
-    /// writes outside our open set. Writes use the encoding detected at
-    /// open — a UTF-16 (or Latin-1) file is not silently transcoded to UTF-8.
-    private func handleSave(body: [String: Any]) {
-        guard let path = body["path"] as? String,
-              openPaths.contains(path),
-              let content = body["content"] as? String
-        else { return }
-
-        let encoding = encodingByPath[path] ?? .utf8
-        var data = content.data(using: encoding)
-        if data == nil, encoding != .utf8 {
-            // e.g. a Latin-1 file that now contains unrepresentable
-            // characters — fall back to UTF-8 so the save can't fail.
-            NSLog("[EditorColumn] \(path): \(encoding) can no longer represent the buffer; saving as UTF-8")
-            data = content.data(using: .utf8)
-            if data != nil { encodingByPath[path] = .utf8 }
-        }
-        guard let data else {
-            NSLog("[EditorColumn] save failed for \(path): buffer not representable")
-            return
-        }
-
-        let url = URL(fileURLWithPath: path)
-        do {
-            try data.write(to: url, options: .atomic)
-        } catch {
-            NSLog("[EditorColumn] save failed for \(path): \(error)")
-            return
-        }
-
-        // Refresh the watcher's mtime baseline so we don't immediately re-detect
-        // our own atomic-write as an external modification.
-        mtimeByPath[path] = mtime(of: path)
-        diskModifiedWhileDirty.remove(path)
-
-        // Tell JS the buffer is now clean for this path.
-        sendBridge(["type": "markSaved", "path": path])
-        fileTree.reloadGitChanges()
-    }
-
-    private func refreshTabBar() {
-        let bars: [EditorTabBar.Tab] = tabPaths.map { path in
-            let dirty = (dirtyByPath[path] ?? false) || diskModifiedWhileDirty.contains(path)
-            return EditorTabBar.Tab(path: path, isDirty: dirty, title: diffGroupTabs[path]?.title)
-        }
-        tabBar.update(tabs: bars, activePath: activePath)
-        updateConflictBanner()
-    }
-
-    /// Show the disk-conflict banner when the active tab was modified
-    /// externally while dirty. Choosing "Keep My Changes" is the explicit
-    /// overwrite; "Reload from Disk" discards the buffer.
-    private func updateConflictBanner() {
-        guard let path = activePath, diskModifiedWhileDirty.contains(path) else {
-            conflictBanner.isHidden = true
-            return
-        }
-        conflictBanner.configure(fileName: (path as NSString).lastPathComponent)
-        conflictBanner.isHidden = false
-        needsLayout = true
-    }
-
-    private func resolveConflict(reload: Bool) {
-        guard let path = activePath, diskModifiedWhileDirty.contains(path) else { return }
-        if reload {
-            reloadFromDisk(path: path)
-        } else {
-            // Explicit overwrite: adopt the current disk mtime as the new
-            // baseline so the watcher doesn't re-flag before the next save.
-            mtimeByPath[path] = mtime(of: path)
-            diskModifiedWhileDirty.remove(path)
-            refreshTabBar()
-            onDirtyChanged?()
-        }
-    }
-
-    // MARK: - WKNavigationDelegate
-
-    nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        // Monaco loads asynchronously after navigation finishes; we wait for the
-        // "monacoReady" bridge message to actually push content.
-    }
-
-    // MARK: - WKScriptMessageHandler
-
-    nonisolated func userContentController(
-        _ userContentController: WKUserContentController,
-        didReceive message: WKScriptMessage
-    ) {
-        // WKScriptMessageHandler callbacks always arrive on the main thread
-        // (per Apple's docs). Xcode 16.4 declares `WKScriptMessage.body` as
-        // @MainActor-isolated, so we need to assume isolation to read it from
-        // this nonisolated protocol method.
-        MainActor.assumeIsolated {
-            guard let body = message.body as? [String: Any],
-                  let type = body["type"] as? String
-            else { return }
-            handleBridgeMessage(type: type, body: body)
-        }
-    }
-
-    private func handleBridgeMessage(type: String, body: [String: Any]) {
-        switch type {
-        case "monacoReady":
-            monacoReady = true
-            monacoLoadWatchdog?.invalidate()
-            monacoLoadWatchdog = nil
-            loadFailureOverlay.isHidden = true
-            let queued = pendingOps
-            pendingOps.removeAll()
-            for op in queued { op() }
-        case "dirty":
-            guard let path = body["path"] as? String else { return }
-            let dirty = (body["isDirty"] as? Bool) ?? false
-            if (dirtyByPath[path] ?? false) != dirty {
-                dirtyByPath[path] = dirty
-                refreshTabBar()
-                if path == activePath { onDirtyChanged?() }
-            }
-        case "save":
-            handleSave(body: body)
-        case "selection":
-            guard !selectionRequests.isEmpty else { return }
-            let completion = selectionRequests.removeFirst()
-            if let path = body["path"] as? String, !path.isEmpty,
-               let text = body["text"] as? String, !text.isEmpty,
-               let start = body["startLine"] as? Int,
-               let end = body["endLine"] as? Int {
-                completion(Selection(path: path, text: text, startLine: start, endLine: end))
-            } else {
-                completion(nil)
-            }
-        case "filePickerRequest":
-            onFilePickerRequest?(self)
-        case "ready":
-            // Monaco confirmed model swap; nothing to do.
-            break
-        case "error":
-            if let msg = body["message"] as? String {
-                NSLog("[EditorColumn] bridge error: \(msg)")
-            }
-        default:
-            break
-        }
-    }
-}
-
-private struct DiffGroupTab {
-    let title: String
-    let mode: EditorDiffMode
-    let files: [[String: Any]]
-    let isLoading: Bool
 }

@@ -310,7 +310,15 @@ extension ColumnState: TerminalSurfaceOpenURLDelegate {
             onOpenURL?(url)
         case "file":
             guard let target = FileLink.parse(parsed) else { return }
-            onOpenFile?(target.path, target.line)
+            // Resolve symlinks so the editor's size/content checks see the
+            // real target; hand non-text targets (directories, FIFOs,
+            // images…) to the system like before this route existed.
+            let resolved = URL(fileURLWithPath: target.path).resolvingSymlinksInPath().path
+            if FileLink.opensInEditor(path: resolved) {
+                onOpenFile?(resolved, target.line)
+            } else {
+                NSWorkspace.shared.open(parsed)
+            }
         default:
             NSWorkspace.shared.open(parsed)
         }

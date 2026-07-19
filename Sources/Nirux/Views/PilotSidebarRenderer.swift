@@ -192,15 +192,16 @@ enum PilotSidebarRenderer {
         } else {
             displayName = column.processName ?? "shell"
         }
-        result.append(NSAttributedString(string: displayName, attributes: [.font: font, .foregroundColor: textColor]))
-
-        // Unsaved-changes dot — same amber as the editor tab bar's.
+        // Unsaved-changes dot — same amber as the editor tab bar's. Before
+        // the name: these labels truncate tail-first, and a state indicator
+        // must survive long file names.
         if column.isEditor, column.editorIsDirty {
-            result.append(NSAttributedString(string: " ●", attributes: [
+            result.append(NSAttributedString(string: "● ", attributes: [
                 .font: NSFont.monospacedSystemFont(ofSize: fontSize - 3, weight: .regular),
                 .foregroundColor: NSColor(red: 0.95, green: 0.7, blue: 0.3, alpha: 1)
             ]))
         }
+        result.append(NSAttributedString(string: displayName, attributes: [.font: font, .foregroundColor: textColor]))
 
         // Elapsed time for working agents — "· 12m" in green next to the name.
         if column.agentStatus == .working, let elapsed = column.agentElapsedSeconds {

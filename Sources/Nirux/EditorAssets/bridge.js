@@ -387,6 +387,11 @@
         monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF,
         function () { diffEditor.getModifiedEditor().getAction("actions.find").run(); }
       );
+      diffEditor.getModifiedEditor().addCommand(
+        monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.Enter,
+        function () { postToSwift({ type: "sendSelectionShortcut" }); },
+        "!findWidgetVisible"
+      );
     }
     diffEditor.setModel({ original: diffOriginalModel, modified: entry.model });
     showMonacoDiffSurface();
@@ -594,12 +599,15 @@
 
   // Swift asks for the current selection (send-to-agent flow). Always
   // reply — an empty payload tells the Swift side to no-op.
-  function reportSelection() {
+  function reportSelection(requestID) {
     var target = activeEditor();
     var model = target && target.getModel();
     var sel = target && target.getSelection();
-    if (!currentPath || !model || !sel || sel.isEmpty()) {
-      postToSwift({ type: "selection", path: "" });
+    // Pierre diff modes render outside Monaco: the regular editor is
+    // hidden but keeps its pre-diff selection — never paste that.
+    var pierreActive = diffMode && diffMode !== "monaco";
+    if (pierreActive || !currentPath || !model || !sel || sel.isEmpty()) {
+      postToSwift({ type: "selection", requestID: requestID, path: "" });
       return;
     }
     // A full-line selection parks the cursor on column 1 of the next
@@ -608,6 +616,7 @@
     if (sel.endColumn === 1 && endLine > sel.startLineNumber) endLine -= 1;
     postToSwift({
       type: "selection",
+      requestID: requestID,
       path: currentPath,
       text: model.getValueInRange(sel),
       startLine: sel.startLineNumber,
@@ -637,7 +646,7 @@
       case "enterDiffGroup": enterPierreDiffGroup(msg); break;
       case "exitDiff": exitDiff(); break;
       case "toggleWordWrap": toggleWordWrap(); break;
-      case "getSelection": reportSelection(); break;
+      case "getSelection": reportSelection(msg.requestID); break;
     }
   }
 
@@ -729,6 +738,16 @@
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, function () {
       postToSwift({ type: "filePickerRequest" });
     });
+
+    // Cmd+Opt+Enter → send selection to the agent terminal. The
+    // precondition keeps Monaco's own Cmd+Opt+Enter (Replace All) working
+    // while the find widget is open; Swift's key interceptor forwards the
+    // chord here instead of the menu for editor columns.
+    editor.addCommand(
+      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.Enter,
+      function () { postToSwift({ type: "sendSelectionShortcut" }); },
+      "!findWidgetVisible"
+    );
 
     hideStatus();
     postToSwift({ type: "monacoReady" });

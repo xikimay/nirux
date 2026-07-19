@@ -24,21 +24,45 @@ enum FileLink {
             return Target(path: path, line: line)
         }
 
-        // Trailing `:12` is only a line number when stripping it yields a
-        // file that exists — paths may legally contain colons, and a real
-        // file always wins over the line interpretation.
-        if !fileExists(path),
-           let (stripped, line) = splitLineSuffix(path),
-           fileExists(stripped) {
-            return Target(path: stripped, line: line)
+        // Trailing `:12` (or compiler-style `:12:5`) is only a line number
+        // when stripping it yields a file that exists — paths may legally
+        // contain colons, and a real file always wins over the line
+        // interpretation.
+        if !fileExists(path), let (stripped, line) = splitLineSuffix(path) {
+            if fileExists(stripped) {
+                return Target(path: stripped, line: line)
+            }
+            // `:line:col` — the first number is the line, the column is
+            // dropped (the editor jump is line-based).
+            if let (stripped2, line2) = splitLineSuffix(stripped), fileExists(stripped2) {
+                return Target(path: stripped2, line: line2)
+            }
         }
         return Target(path: path, line: nil)
     }
 
-    /// `L12` → 12. Anything else (including bare digits) is not a line.
+    /// True when the editor should open this path: missing (the editor
+    /// surfaces a readable alert) or a regular text file. Directories,
+    /// FIFOs, and binary content go to the system handler instead —
+    /// Finder / Preview do those jobs; Monaco can't.
+    static func opensInEditor(path: String) -> Bool {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path) else {
+            return true
+        }
+        guard attrs[.type] as? FileAttributeType == .typeRegular else { return false }
+        guard let handle = FileHandle(forReadingAtPath: path) else { return true }
+        defer { try? handle.close() }
+        guard let prefix = try? handle.read(upToCount: 4096) else { return true }
+        // UTF-16 BOM files are text despite being full of NUL bytes.
+        if prefix.starts(with: [0xFF, 0xFE]) || prefix.starts(with: [0xFE, 0xFF]) { return true }
+        return !prefix.contains(0)
+    }
+
+    /// `L12` → 12; GitHub range fragments (`L12-L20`) yield the first
+    /// line. Anything else (including bare digits) is not a line.
     private static func lineNumber(fromFragment fragment: String) -> Int? {
         guard fragment.hasPrefix("L"),
-              let line = Int(fragment.dropFirst()),
+              let line = Int(fragment.dropFirst().prefix(while: \.isNumber)),
               line >= 1
         else { return nil }
         return line

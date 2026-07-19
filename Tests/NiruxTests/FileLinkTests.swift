@@ -94,10 +94,46 @@ final class FileLinkTests: XCTestCase {
         )
     }
 
+    // MARK: - opensInEditor
+
+    func testOpensInEditorDispositions() throws {
+        let dir = NSTemporaryDirectory() + "filelink-tests-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+
+        let text = dir + "/a.txt"
+        try Data("hello\n".utf8).write(to: URL(fileURLWithPath: text))
+        let binary = dir + "/a.bin"
+        try Data([0x41, 0x00, 0x42]).write(to: URL(fileURLWithPath: binary))
+        let utf16 = dir + "/a.utf16"
+        try "héllo".data(using: .utf16)!.write(to: URL(fileURLWithPath: utf16))
+
+        XCTAssertTrue(FileLink.opensInEditor(path: text))
+        XCTAssertTrue(FileLink.opensInEditor(path: utf16), "UTF-16 BOM files are text")
+        XCTAssertTrue(FileLink.opensInEditor(path: dir + "/missing.txt"), "editor surfaces the alert")
+        XCTAssertFalse(FileLink.opensInEditor(path: binary))
+        XCTAssertFalse(FileLink.opensInEditor(path: dir), "directories go to Finder")
+    }
+
     func testNonNumericColonSuffixIsNotALine() {
         XCTAssertEqual(
             parse("file:///Users/me/a:b.swift", existing: ["/Users/me/a"]),
             FileLink.Target(path: "/Users/me/a:b.swift", line: nil)
+        )
+    }
+
+    func testLineColumnSuffix() {
+        // Compiler-style path:line:col — line wins, column is dropped.
+        XCTAssertEqual(
+            parse("file:///Users/me/a.swift:12:5", existing: ["/Users/me/a.swift"]),
+            FileLink.Target(path: "/Users/me/a.swift", line: 12)
+        )
+    }
+
+    func testRangeFragmentUsesFirstLine() {
+        XCTAssertEqual(
+            parse("file:///Users/me/a.swift#L12-L20"),
+            FileLink.Target(path: "/Users/me/a.swift", line: 12)
         )
     }
 

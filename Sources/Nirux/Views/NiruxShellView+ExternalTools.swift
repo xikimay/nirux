@@ -328,6 +328,7 @@ extension NiruxShellView {
         // tab instead of waiting out the 2s heartbeat.
         editor.onPathChanged = { [weak self] in self?.updateSidebar() }
         editor.onDirtyChanged = { [weak self] in self?.updateSidebar() }
+        editor.onSendSelectionShortcut = { [weak self] in self?.sendEditorSelectionToAgent() }
     }
 
     /// Show the workspace file picker, opening the chosen file in `editor`.
@@ -367,10 +368,13 @@ extension NiruxShellView {
             }
             return
         }
-        workspace.addEditorColumn(initialFile: path, workspaceCwd: editorRoot)
+        // Column first, single open after wiring — an initialFile + second
+        // line-targeted open would run the failure alert / large-file
+        // confirmation twice for the same file.
+        workspace.addEditorColumn(workspaceCwd: editorRoot)
         if let editor = workspace.columns[safe: workspace.focusedIndex]?.editorColumn {
             wireEditor(editor)
-            if let line { editor.open(path: path, line: line) }
+            editor.open(path: path, line: line)
         }
         relayout(animated: false)
         updateSidebar()
@@ -391,7 +395,7 @@ extension NiruxShellView {
             NiruxDebugLog.log("sendSelectionToAgent: no editor column in workspace")
             return
         }
-        let terminal = (focused?.pty != nil ? focused : nil)
+        let terminal = (focused?.pty?.hasExited == false ? focused : nil)
             ?? workspace.columns.first { $0.pty?.hasExited == false }
         guard let pty = terminal?.pty, !pty.hasExited else {
             NiruxDebugLog.log("sendSelectionToAgent: no live terminal column in workspace")

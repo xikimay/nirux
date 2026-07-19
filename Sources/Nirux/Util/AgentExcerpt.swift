@@ -6,26 +6,42 @@ enum AgentExcerpt {
     /// Excerpts longer than this are cut off with a note — a huge paste
     /// drowns the agent's input box.
     static let maxLines = 200
+    /// Character backstop for pathological single-line selections
+    /// (minified bundles) that sail past the line cap.
+    static let maxCharacters = 64_000
 
     static func format(path: String, startLine: Int, endLine: Int, text: String) -> String {
+        // ESC could smuggle an end-of-paste sequence (ESC[201~) into the
+        // stream, turning the rest of the excerpt into live keystrokes at
+        // the receiving terminal — strip it like real terminals do on
+        // paste. CRLF normalizes so the strip/count logic and the PTY see
+        // plain \n.
+        var body = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\u{1B}", with: "")
         // A full-line selection ends with the cursor past the last line's
         // newline; drop that single trailing newline so it doesn't render
         // as an empty line inside the fence.
-        var body = text
         if body.hasSuffix("\n") { body.removeLast() }
 
-        var lines = body.components(separatedBy: "\n")
         var note: String?
+        var lines = body.components(separatedBy: "\n")
         if lines.count > maxLines {
             note = "[excerpt truncated: first \(maxLines) of \(lines.count) lines]"
             lines = Array(lines.prefix(maxLines))
             body = lines.joined(separator: "\n")
         }
+        if body.count > maxCharacters {
+            note = "[excerpt truncated at \(maxCharacters) characters]"
+            body = String(body.prefix(maxCharacters))
+        }
 
         let fence = fence(for: body)
         let range = startLine == endLine ? "L\(startLine)" : "L\(startLine)-L\(endLine)"
-        var out = "\(path):\(range)\n\(fence)\n\(body)\n\(fence)\n"
-        if let note { out += note + "\n" }
+        var out = "\(path):\(range)\n\(fence)\n\(body)\n\(fence)"
+        // No trailing newline: on a receiver without bracketed paste a
+        // final \n would submit the excerpt as a command line.
+        if let note { out += "\n" + note }
         return out
     }
 

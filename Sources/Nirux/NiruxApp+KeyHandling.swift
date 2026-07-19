@@ -85,6 +85,14 @@ extension NiruxApp {
                     if col.isEditor, event.charactersIgnoringModifiers == "p" {
                         return event
                     }
+                    // Cmd+Opt+Return: Monaco resolves this chord itself —
+                    // "Replace All" while the find widget is open, else it
+                    // posts the send-selection bridge message. Routing it to
+                    // the menu here would shadow Replace All.
+                    if col.isEditor, event.keyCode == 0x24,
+                       event.modifierFlags.contains(.option) {
+                        return event
+                    }
                     // Cmd+W: in an editor with open tabs, close the active
                     // tab first; only fall through to "Close Column" once
                     // the tab list is empty. Mirrors VSCode/Cursor.
