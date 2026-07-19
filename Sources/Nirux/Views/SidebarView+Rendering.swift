@@ -12,14 +12,7 @@ extension SidebarView {
             rebuildSkippedDuringDrag = true
             return
         }
-        expandedViews.forEach { $0.removeFromSuperview() }
-        expandedViews.removeAll()
-        profileIndicatorView?.removeFromSuperview()
-        profileIndicatorView = nil
-        hitAreas.removeAll()
-        activityRowBackgrounds.removeAll()
-        hoveredActivityIndex = nil
-        activitySectionRect = nil
+        resetRenderState()
         guard isExpanded else { setNeedsDisplay(bounds); return }
 
         rebuildBottomIndicators()
@@ -84,6 +77,7 @@ extension SidebarView {
         }
 
         refreshActivityHoverFromMouse()
+        refreshHoverTargetFromMouse()
 
         let clip = contentScrollView.contentView
         let activeIndex = activeWorkspaceIndex
@@ -100,6 +94,25 @@ extension SidebarView {
             contentScrollView.reflectScrolledClipView(clip)
             lastFollowedActiveIndex = activeIndex
         }
+    }
+
+    /// Tear down every view and state snapshot from the previous expanded
+    /// render pass before rebuilding.
+    private func resetRenderState() {
+        expandedViews.forEach { $0.removeFromSuperview() }
+        expandedViews.removeAll()
+        profileIndicatorView?.removeFromSuperview()
+        profileIndicatorView = nil
+        hitAreas.removeAll()
+        activityRowBackgrounds.removeAll()
+        hoveredActivityIndex = nil
+        activitySectionRect = nil
+        cardHoverViews.removeAll()
+        menuBadgeViews.removeAll()
+        columnHoverViews.removeAll()
+        spaceHeaderHoverView = nil
+        spaceHeaderBadge = nil
+        hoveredTarget = nil
     }
 
     /// Index of the active workspace in `lastInfos`, or -1 if none. Used by
@@ -129,6 +142,20 @@ extension SidebarView {
         )
         hitAreas.append(SidebarHitArea(frame: headerFrame, region: .spaceHeader))
 
+        // Initially-clear hover backing behind the space name/subtitle —
+        // tinted while hovered so the header reads as a clickable menu.
+        let hover = SidebarBackgroundView(frame: NSRect(
+            x: padding - 8,
+            y: headerFrame.minY + 8,
+            width: headerFrame.width + 16,
+            height: headerFrame.height - 8
+        ))
+        hover.wantsLayer = true
+        hover.layer?.cornerRadius = 8
+        addSubviewDoc(hover)
+        expandedViews.append(hover)
+        spaceHeaderHoverView = hover
+
         let dot = SidebarBackgroundView(frame: NSRect(
             x: padding,
             y: yOffset - 28,
@@ -142,13 +169,34 @@ extension SidebarView {
         expandedViews.append(dot)
 
         let title = textLabel(
-            "\(profile.name) ▾",
+            profile.name,
             font: .systemFont(ofSize: 17, weight: .semibold),
             color: NSColor.white.withAlphaComponent(0.92)
         )
-        title.frame = NSRect(x: padding + 16, y: yOffset - 35, width: bounds.width - padding * 2 - 16, height: 24)
+        title.frame = NSRect(x: padding + 16, y: yOffset - 35, width: bounds.width - padding * 2 - 16 - 40, height: 24)
         addSubviewDoc(title)
         expandedViews.append(title)
+
+        // "⋯" space-options badge — same affordance language as the
+        // workspace cards; brightens with the header hover.
+        let badge = SidebarBadgeView(
+            text: "⋯",
+            textColor: NSColor.white.withAlphaComponent(0.58),
+            fillColor: NSColor.white.withAlphaComponent(0.045),
+            font: .monospacedSystemFont(ofSize: 10, weight: .semibold)
+        )
+        badge.hoverTextColor = NSColor.white.withAlphaComponent(0.92)
+        badge.hoverFillColor = NSColor.white.withAlphaComponent(0.14)
+        badge.frame = NSRect(
+            x: bounds.width - padding - SidebarExpandedMetrics.countChipWidth,
+            y: yOffset - 34,
+            width: SidebarExpandedMetrics.countChipWidth,
+            height: SidebarExpandedMetrics.countChipHeight
+        )
+        badge.toolTip = "Space options"
+        addSubviewDoc(badge)
+        expandedViews.append(badge)
+        spaceHeaderBadge = badge
 
         let subtitle = textLabel(
             "\(profile.workspaceCount) \(profile.workspaceCount == 1 ? "workspace" : "workspaces")",
@@ -213,6 +261,7 @@ extension SidebarView {
             }
         }
         addSubview(view)
+        view.refreshHoverFromMouse()
         profileIndicatorView = view
     }
 
@@ -452,6 +501,9 @@ extension SidebarView {
             expandedViews.append(view)
         }
         hitAreas.append(contentsOf: result.hitAreas)
+        cardHoverViews[workspace.index] = result.cardHoverView
+        if let badge = result.menuBadge { menuBadgeViews[workspace.index] = badge }
+        columnHoverViews[workspace.index] = result.columnHoverViews
         return result.bottomY
     }
 

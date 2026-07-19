@@ -185,7 +185,10 @@ extension NiruxShellView {
         guard workspaces.count > 1 else { return }
 
         let wsToRemove = workspaces[index]
-        if let target = workspaceStore.fallbackIndexAfterClosingWorkspace(at: index) {
+        // Only move the selection when the *active* workspace is going away —
+        // closing another workspace from its context menu must not steal focus.
+        if index == activeWSIndex,
+           let target = workspaceStore.fallbackIndexAfterClosingWorkspace(at: index) {
             workspaceStore.selectWorkspace(at: target)
         }
         relayout(animated: true)
@@ -303,6 +306,18 @@ extension NiruxShellView {
             if didChange { workspaceStore.selectWorkspace(at: workspaceIndex) }
         case .markInactive:
             didChange = workspaceStore.setWorkspaceInactive(at: workspaceIndex, true)
+        case .close:
+            requestCloseWorkspace(at: workspaceIndex)
+            return
+        case .rename:
+            showRenamePanel(workspaceIndex: workspaceIndex)
+            return
+        case .newWorkspace:
+            addWorkspace()
+            return
+        case .closeColumn(let columnIndex):
+            closeColumn(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
+            return
         }
         guard didChange else { return }
         refreshAfterWorkspaceMutation()
@@ -329,13 +344,63 @@ extension NiruxShellView {
         saveState()
     }
 
+    /// Sidebar-menu close path: unlike the last-column ⌘W fallthrough, a
+    /// menu click is one careless gesture away — confirm before killing
+    /// live agent sessions or multi-column workspaces.
+    func requestCloseWorkspace(at index: Int) {
+        guard let workspace = workspaces[safe: index] else { return }
+        let context = WorkspaceClosePolicy.Context(
+            totalWorkspaceCount: workspaces.count,
+            columnCount: workspace.columns.count,
+            hasBusyAgent: workspace.columns.contains { ($0.pty?.cachedAgentState ?? .idle) != .idle },
+            isWorktreeBacked: GitWorktree.isLinkedWorktree(at: workspace.cwd)
+        )
+        switch WorkspaceClosePolicy.decision(for: context) {
+        case .blocked:
+            return
+        case .close:
+            closeWorkspace(at: index)
+        case .confirm(let details):
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Close workspace “\(workspace.title)”?"
+            alert.informativeText = details.joined(separator: "\n")
+            alert.addButton(withTitle: "Close Workspace")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            // Main-queue work can mutate `workspaces` while the modal runs
+            // (worktree creation finishing, a prior close's deferred removal) —
+            // re-resolve the index by identity before closing.
+            guard let currentIndex = workspaces.firstIndex(where: { $0 === workspace }) else { return }
+            closeWorkspace(at: currentIndex)
+        }
+    }
+
+    /// Close a specific column of a specific workspace (sidebar context
+    /// menu). The ⌘W path only reaches the focused column of the active
+    /// workspace; this mirrors its non-animated bookkeeping.
+    func closeColumn(workspaceIndex: Int, columnIndex: Int) {
+        guard let workspace = workspaces[safe: workspaceIndex],
+              workspace.columns.count > 1,
+              workspace.columns.indices.contains(columnIndex) else { return }
+        workspace.closeColumn(at: columnIndex)
+        relayout(animated: false)
+        workspace.layoutAndScroll(
+            viewportWidth: viewport.frame.width,
+            height: workspace.containerView.frame.height,
+            animated: true, pilotMode: isPilotMode
+        )
+        updateSidebar()
+        focusActiveTerminal(in: window)
+        saveState()
+    }
+
     private func profileName(for workspace: WorkspaceState) -> String {
         if let cwd = workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.columns.first?.pty?.childCwd {
             return (cwd as NSString).lastPathComponent
         }
         return workspace.title
     }
-
 
     // MARK: - Sidebar toggle
 

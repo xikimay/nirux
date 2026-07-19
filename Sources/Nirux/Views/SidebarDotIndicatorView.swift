@@ -12,6 +12,11 @@ final class SidebarDotIndicatorView: NSView {
     var onSelect: ((SidebarDotIndicatorAction) -> Void)?
 
     private let tooltipText: String
+    private var trackingArea: NSTrackingArea?
+    /// Item under the pointer — its dot gets a halo, the "+" action fills.
+    private var hoveredIndex: Int? {
+        didSet { if oldValue != hoveredIndex { needsDisplay = true } }
+    }
 
     init(frame: NSRect, items: [SidebarDotIndicatorItem], tooltip: String) {
         self.items = items
@@ -32,6 +37,40 @@ final class SidebarDotIndicatorView: NSView {
         }
     }
 
+    // MARK: - Hover
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp],
+            owner: self, userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        hoveredIndex = itemIndex(at: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hoveredIndex = nil
+    }
+
+    /// Re-derive hover from the live mouse position. The sidebar recreates
+    /// this view on every rebuild, so the caller invokes this right after
+    /// adding it — otherwise a stationary pointer would lose its highlight.
+    func refreshHoverFromMouse() {
+        guard let window else { return }
+        hoveredIndex = itemIndex(at: convert(window.mouseLocationOutsideOfEventStream, from: nil))
+    }
+
+    private func itemIndex(at point: NSPoint) -> Int? {
+        dotRects().firstIndex { $0.insetBy(dx: -4, dy: -4).contains(point) }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
@@ -43,11 +82,17 @@ final class SidebarDotIndicatorView: NSView {
 
         for (idx, rect) in dotRects().enumerated() {
             let item = items[idx]
+            let isHovered = idx == hoveredIndex
             let color = NSColor.niruxColor(hex: item.colorHex) ?? .niruxAccent
             if item.label != nil {
-                drawActionBackground(in: rect, context: ctx)
+                drawActionBackground(in: rect, context: ctx, hovered: isHovered)
             } else {
-                ctx.setFillColor((item.isActive ? color : color.withAlphaComponent(0.45)).cgColor)
+                if isHovered {
+                    ctx.setFillColor(NSColor.white.withAlphaComponent(0.10).cgColor)
+                    ctx.fillEllipse(in: rect.insetBy(dx: -5, dy: -5))
+                }
+                let dimAlpha: CGFloat = isHovered ? 0.75 : 0.45
+                ctx.setFillColor((item.isActive ? color : color.withAlphaComponent(dimAlpha)).cgColor)
                 ctx.fillEllipse(in: rect)
                 if item.isActive {
                     ctx.setStrokeColor(color.withAlphaComponent(0.9).cgColor)
@@ -79,7 +124,7 @@ final class SidebarDotIndicatorView: NSView {
         return dotsWidth + actionWidth + gaps + 20
     }
 
-    private func drawActionBackground(in rect: CGRect, context ctx: CGContext) {
+    private func drawActionBackground(in rect: CGRect, context ctx: CGContext, hovered: Bool) {
         let actionRect = rect.insetBy(dx: 1, dy: 1)
         let actionPath = CGMutablePath()
         actionPath.addRoundedRect(
@@ -87,10 +132,10 @@ final class SidebarDotIndicatorView: NSView {
             cornerWidth: actionRect.height / 2,
             cornerHeight: actionRect.height / 2
         )
-        ctx.setFillColor(NSColor.clear.cgColor)
+        ctx.setFillColor((hovered ? NSColor.white.withAlphaComponent(0.10) : NSColor.clear).cgColor)
         ctx.addPath(actionPath)
         ctx.fillPath()
-        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.32).cgColor)
+        ctx.setStrokeColor(NSColor.white.withAlphaComponent(hovered ? 0.55 : 0.32).cgColor)
         ctx.setLineWidth(1.2)
         ctx.setLineDash(phase: 0, lengths: [3, 3])
         ctx.addPath(actionPath)

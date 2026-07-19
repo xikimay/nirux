@@ -3,9 +3,9 @@ import AppKit
 private final class ClosureMenuItem: NSMenuItem {
     private let handler: () -> Void
 
-    init(title: String, handler: @escaping () -> Void) {
+    init(title: String, keyEquivalent: String, handler: @escaping () -> Void) {
         self.handler = handler
-        super.init(title: title, action: #selector(performAction(_:)), keyEquivalent: "")
+        super.init(title: title, action: #selector(performAction(_:)), keyEquivalent: keyEquivalent)
         target = self
     }
 
@@ -18,7 +18,12 @@ private final class ClosureMenuItem: NSMenuItem {
 }
 
 extension NSMenu {
-    func addClosureItem(title: String, handler: @escaping () -> Void) {
-        addItem(ClosureMenuItem(title: title, handler: handler))
+    /// `keyEquivalent` is display-only here (matching the main-menu shortcut);
+    /// the default ⌘ modifier applies when non-empty.
+    @discardableResult
+    func addClosureItem(title: String, keyEquivalent: String = "", handler: @escaping () -> Void) -> NSMenuItem {
+        let item = ClosureMenuItem(title: title, keyEquivalent: keyEquivalent, handler: handler)
+        addItem(item)
+        return item
     }
 }

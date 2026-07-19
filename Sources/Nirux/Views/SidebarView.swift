@@ -86,6 +86,18 @@ final class SidebarView: NSView {
     /// actually changes — not on every periodic refresh, which would yank
     /// the viewport back while the user is dragging the scroller.
     var lastFollowedActiveIndex: Int = Int.min
+
+    // Hover-highlight backing views registered per rebuild (workspace index
+    // → view), plus the current target. Tinting is applied/cleared directly
+    // so no rebuild is needed as the pointer moves.
+    var cardHoverViews: [Int: NSView] = [:]
+    var menuBadgeViews: [Int: SidebarBadgeView] = [:]
+    var columnHoverViews: [Int: [Int: NSView]] = [:]
+    var spaceHeaderHoverView: NSView?
+    /// "⋯" badge in the space header — brightens with the header hover.
+    var spaceHeaderBadge: SidebarBadgeView?
+    var hoveredTarget: SidebarHoverTarget?
+
     private var hoveredLabel: NSTextField?
     var hoveredActivityIndex: Int?
     private var pulseLayers: [CALayer] = []
@@ -371,6 +383,19 @@ final class SidebarView: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         guard isExpanded else { clearHover(); clearActivityHover(); return }
+
+        // The bottom space switcher tracks its own hover — keep the pointing
+        // hand (its cursor rect would otherwise be overridden below) and drop
+        // any list highlight while the pointer is there.
+        if let indicator = profileIndicatorView,
+           indicator.frame.contains(convert(event.locationInWindow, from: nil)) {
+            clearHover()
+            clearActivityHover()
+            setHoverTarget(nil)
+            NSCursor.pointingHand.set()
+            return
+        }
+
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
 
         guard let area = hitArea(at: point) else {
@@ -383,18 +408,36 @@ final class SidebarView: NSView {
         switch area.region {
         case .link(_, let label):
             clearActivityHover()
+            setHoverTarget(nil)
             NSCursor.pointingHand.set()
             if hoveredLabel !== label {
                 clearHover()
                 applyUnderline(to: label)
                 hoveredLabel = label
             }
-        case .spaceHeader, .column, .workspace:
+        case .spaceHeader:
             clearHover()
             clearActivityHover()
+            setHoverTarget(.spaceHeader)
+            NSCursor.pointingHand.set()
+        case .workspace(let workspaceIndex):
+            clearHover()
+            clearActivityHover()
+            setHoverTarget(.workspaceCard(workspaceIndex))
+            NSCursor.pointingHand.set()
+        case .workspaceMenu(let workspaceIndex):
+            clearHover()
+            clearActivityHover()
+            setHoverTarget(.menuBadge(workspaceIndex))
+            NSCursor.pointingHand.set()
+        case .column(let workspaceIndex, let columnIndex):
+            clearHover()
+            clearActivityHover()
+            setHoverTarget(.columnRow(workspaceIndex: workspaceIndex, columnIndex: columnIndex))
             NSCursor.pointingHand.set()
         case .activity(let index):
             clearHover()
+            setHoverTarget(nil)
             setActivityHover(index)
             NSCursor.pointingHand.set()
         }
@@ -414,7 +457,7 @@ final class SidebarView: NSView {
         hoveredActivityIndex = nil
     }
 
-    private func hitArea(at point: NSPoint) -> SidebarHitArea? {
+    func hitArea(at point: NSPoint) -> SidebarHitArea? {
         hitAreas.first { $0.frame.contains(point) }
     }
 
@@ -433,6 +476,10 @@ final class SidebarView: NSView {
             onColumnClicked?(workspaceIndex, columnIndex)
         case .workspace(let workspaceIndex):
             onWorkspaceClicked?(workspaceIndex)
+        case .workspaceMenu(let workspaceIndex):
+            let point = convert(event.locationInWindow, from: nil)
+            workspaceActionMenu(workspaceIndex: workspaceIndex, columnIndex: nil)
+                .popUp(positioning: nil, at: point, in: self)
         case .activity(let index):
             guard lastActivity.indices.contains(index) else { return }
             onActivityClicked?(lastActivity[index])
@@ -440,14 +487,13 @@ final class SidebarView: NSView {
     }
 
     private func showSpaceMenu(at point: NSPoint) {
+        spaceOptionsMenu().popUp(positioning: nil, at: point, in: self)
+    }
+
+    /// Space options only — switching spaces lives in the bottom dot
+    /// switcher (and ⌘←/→), so the header menu doesn't duplicate it.
+    private func spaceOptionsMenu() -> NSMenu {
         let menu = NSMenu()
-        for profile in lastProfiles {
-            let title = "\(profile.isActive ? "✓ " : "")\(profile.name)  \(profile.workspaceCount)"
-            menu.addClosureItem(title: title) { [weak self] in
-                self?.onProfileClicked?(profile.id)
-            }
-        }
-        if !lastProfiles.isEmpty { menu.addItem(.separator()) }
         if let active = lastProfiles.first(where: { $0.isActive }) {
             menu.addClosureItem(title: "Rename Space…") { [weak self] in
                 self?.onRenameProfile?(active.id)
@@ -456,15 +502,53 @@ final class SidebarView: NSView {
         menu.addClosureItem(title: "New Space") { [weak self] in
             self?.onCreateProfile?()
         }
-        menu.popUp(positioning: nil, at: point, in: self)
+        return menu
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        let workspaceIndex = workspaceIndex(at: event)
-        guard let workspaceIndex else { return super.menu(for: event) }
+        // Right-click on the space header mirrors its left-click menu —
+        // every region that advertises a menu answers both buttons.
+        if isExpanded {
+            let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
+            if let area = hitArea(at: docLocation), case .spaceHeader = area.region {
+                return spaceOptionsMenu()
+            }
+        }
+        guard let target = menuTarget(at: event) else { return super.menu(for: event) }
+        return workspaceActionMenu(workspaceIndex: target.workspaceIndex, columnIndex: target.columnIndex)
+    }
+
+    /// Full per-workspace action menu, shared by right-click and the "⋯"
+    /// button. `columnIndex` non-nil when invoked from a column row — adds
+    /// the column-level actions on top.
+    private func workspaceActionMenu(workspaceIndex: Int, columnIndex: Int?) -> NSMenu {
         let workspace = lastInfos.first { $0.index == workspaceIndex }
 
         let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        if let columnIndex {
+            menu.addClosureItem(title: "Focus Column") { [weak self] in
+                self?.onColumnClicked?(workspaceIndex, columnIndex)
+            }
+            // Wording and ⌘W match the main menu's Column ▸ Close Column.
+            menu.addClosureItem(title: "Close Column", keyEquivalent: "w") { [weak self] in
+                self?.onWorkspaceAction?(.closeColumn(columnIndex: columnIndex), workspaceIndex)
+            }.isEnabled = (workspace?.columnCount ?? 0) > 1
+            menu.addItem(.separator())
+        }
+
+        menu.addClosureItem(title: "Close Workspace") { [weak self] in
+            self?.onWorkspaceAction?(.close, workspaceIndex)
+        }.isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
+        menu.addClosureItem(title: "Rename Workspace") { [weak self] in
+            self?.onWorkspaceAction?(.rename, workspaceIndex)
+        }
+        menu.addItem(.separator())
+        menu.addClosureItem(title: "New Workspace", keyEquivalent: NiruxShortcuts.newWorkspaceKey) { [weak self] in
+            self?.onWorkspaceAction?(.newWorkspace, workspaceIndex)
+        }
+        menu.addItem(.separator())
         menu.addClosureItem(title: "Move Up") { [weak self] in
             self?.onWorkspaceAction?(.moveUp, workspaceIndex)
         }
@@ -484,13 +568,28 @@ final class SidebarView: NSView {
         return menu
     }
 
-    private func workspaceIndex(at event: NSEvent) -> Int? {
+    /// Workspace count across every space — the sidebar only lists the
+    /// active space's workspaces, but `closeWorkspace` guards on the global
+    /// count, so the Close item must too.
+    private var totalWorkspaceCount: Int {
+        let profileTotal = lastProfiles.reduce(0) { $0 + $1.workspaceCount }
+        return max(profileTotal, lastInfos.count)
+    }
+
+    private struct MenuTarget {
+        let workspaceIndex: Int
+        let columnIndex: Int?
+    }
+
+    private func menuTarget(at event: NSEvent) -> MenuTarget? {
         if isExpanded {
             let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
             for area in hitAreas where area.frame.contains(docLocation) {
                 switch area.region {
-                case .column(let workspaceIndex, _), .workspace(let workspaceIndex):
-                    return workspaceIndex
+                case .column(let workspaceIndex, let columnIndex):
+                    return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
+                case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex):
+                    return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: nil)
                 case .spaceHeader, .link, .activity:
                     continue
                 }
@@ -508,7 +607,9 @@ final class SidebarView: NSView {
         for (position, workspace) in displayInfos.enumerated() {
             let dotY = startY - CGFloat(position) * (dotDiameter + gap) - dotDiameter
             let hitRect = NSRect(x: 0, y: dotY - 4, width: bounds.width, height: dotDiameter + 8)
-            if hitRect.contains(clickLocation) { return workspace.index }
+            if hitRect.contains(clickLocation) {
+                return MenuTarget(workspaceIndex: workspace.index, columnIndex: nil)
+            }
         }
         return nil
     }
@@ -516,6 +617,7 @@ final class SidebarView: NSView {
     override func mouseExited(with event: NSEvent) {
         clearHover()
         clearActivityHover()
+        setHoverTarget(nil)
     }
 
     private func applyUnderline(to label: NSTextField) {

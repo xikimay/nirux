@@ -152,6 +152,14 @@ enum GitWorktree {
         return entries
     }
 
+    /// A linked worktree checkout has `.git` as a *file* (gitdir pointer)
+    /// rather than a directory. Cheap filesystem check — no git invocation.
+    static func isLinkedWorktree(at path: String) -> Bool {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path + "/.git", isDirectory: &isDirectory) else { return false }
+        return !isDirectory.boolValue
+    }
+
     /// Detect the git repo root from a path
     static func repoRoot(at path: String) -> String? {
         let output = gitRun(["rev-parse", "--show-toplevel"], cwd: path)

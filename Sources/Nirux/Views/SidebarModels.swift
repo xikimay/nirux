@@ -109,6 +109,8 @@ enum SidebarHitRegion {
     case link(url: String, label: NSTextField)
     case column(workspaceIndex: Int, columnIndex: Int)
     case workspace(Int)
+    /// The "⋯" button on a workspace card — opens the workspace action menu.
+    case workspaceMenu(Int)
     /// Index into SidebarView.lastActivity (snapshot at rebuild time).
     case activity(Int)
 }
@@ -126,6 +128,27 @@ struct SidebarUpdatePayload {
 
 enum WorkspaceSidebarAction {
     case moveUp, moveDown, markActive, markInactive
+    case close, rename, newWorkspace
+    case closeColumn(columnIndex: Int)
+}
+
+/// Hover highlight target in the expanded sidebar. Links and activity rows
+/// have their own dedicated hover treatments; this covers the rest.
+enum SidebarHoverTarget: Equatable {
+    case spaceHeader
+    case workspaceCard(Int)
+    case menuBadge(Int)
+    case columnRow(workspaceIndex: Int, columnIndex: Int)
+
+    /// The card containing the target — hovering any sub-region keeps the
+    /// whole card lit. Nil for targets outside the workspace list.
+    var workspaceIndex: Int? {
+        switch self {
+        case .spaceHeader: return nil
+        case .workspaceCard(let index), .menuBadge(let index): return index
+        case .columnRow(let workspaceIndex, _): return workspaceIndex
+        }
+    }
 }
 
 enum SidebarDotIndicatorAction: Equatable {
