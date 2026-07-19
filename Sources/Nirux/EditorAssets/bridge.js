@@ -374,7 +374,10 @@
         theme: "nirux-dark",
         automaticLayout: true,
         fontFamily: "ui-monospace, SF Mono, Menlo, monospace",
-        fontSize: 13,
+        // Inherit the live toggles — the diff editor is created lazily, so
+        // hardcoding these would desync it from zoom/wrap/minimap state.
+        fontSize: editorFontSize,
+        wordWrap: wordWrap ? "on" : "off",
         minimap: { enabled: minimapEnabled },
         renderLineHighlight: "none",
         renderSideBySide: true,
@@ -791,9 +794,13 @@
 
     bindZoomCommands(editor);
 
-    // Explicit go-to-line binding — same rationale as the Cmd+F binding above.
+    // Explicit go-to-line binding — same rationale as the Cmd+F binding
+    // above. addCommand registers page-globally, so route through
+    // activeEditor(): targeting `editor` while the diff surface is up would
+    // open the goto-line input on the hidden editor.
     editor.addCommand(monaco.KeyMod.WinCtrl | monaco.KeyCode.KeyG, function () {
-      editor.getAction("editor.action.gotoLine").run();
+      var target = activeEditor();
+      if (target) target.getAction("editor.action.gotoLine").run();
     });
 
     // Cmd+P → ask Swift to show its native file picker, scoped to the workspace.
