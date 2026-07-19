@@ -107,7 +107,8 @@ struct OpenEditorRequest: Equatable, Sendable {
         else { return false }
         guard let handle = FileHandle(forReadingAtPath: resolved) else { return false }
         defer { try? handle.close() }
-        let prefix = (try? handle.read(upToCount: 8192)) ?? Data()
+        // nil-from-EOF (empty file) is fine; a read *error* is a reject.
+        guard let prefix = try? handle.read(upToCount: 8192) ?? Data() else { return false }
         if prefix.starts(with: [0xFF, 0xFE]) || prefix.starts(with: [0xFE, 0xFF]) { return true }
         return !prefix.contains(0)
     }
