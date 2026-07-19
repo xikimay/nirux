@@ -291,7 +291,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
         // Already open → just switch.
         if tabPaths.contains(absolute) {
-            switchTo(path: absolute)
+            switchTo(path: absolute, takeFocus: takeFocus)
             if let line {
                 var payload: [String: Any] = ["type": "goToLine", "path": absolute, "line": line]
                 if let endLine { payload["endLine"] = endLine }
@@ -440,7 +440,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
     /// Switch the active tab. The model already exists on the JS side; we
     /// only ask Monaco to swap to it.
-    func switchTo(path: String) {
+    func switchTo(path: String, takeFocus: Bool = true) {
         guard tabPaths.contains(path), activePath != path else { return }
         // The JS surface exits the visible diff while switching models. Swift
         // keeps per-tab diff intent and re-enters it after the model swap.
@@ -458,7 +458,13 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             return
         }
         fileTree.reveal(absolutePath: path)
-        sendBridge(["type": "switchTab", "path": path])
+        var payload: [String: Any] = ["type": "switchTab", "path": path]
+        if !takeFocus { payload["focus"] = false }
+        sendBridge(payload)
+        // Known gap: re-entering a saved diff intent below still grabs
+        // focus JS-side even for takeFocus:false — rare enough (agent open
+        // of an inactive tab the user has a diff pinned on) to not thread
+        // the flag through the whole diff pipeline.
         if let mode = diffModeByPath[path] {
             enterDiff(for: path, mode: mode)
         }

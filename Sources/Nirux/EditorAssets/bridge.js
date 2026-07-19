@@ -181,7 +181,7 @@
     // Switching to a different file always exits diff mode — the diff is
     // pinned to a single path and showing two files side-by-side from one
     // tab bar is more confusing than helpful.
-    if (diffMode) exitDiff();
+    if (diffMode) exitDiff(focus);
     // Save where we were in the file we're leaving.
     if (currentPath && models[currentPath]) {
       viewStates[currentPath] = editor.saveViewState();
@@ -595,7 +595,7 @@
     if (pierreDiffRoot) pierreDiffRoot.style.display = "none";
   }
 
-  function exitDiff() {
+  function exitDiff(focus) {
     if (diffMode === "monaco") {
       exitMonacoDiff();
     } else if (diffMode === "pierre" || diffMode === "pierre-group") {
@@ -606,7 +606,7 @@
     hideStatus();
     if (editor) {
       editor.layout();
-      editor.focus();
+      if (focus !== false) editor.focus();
     }
   }
 
@@ -723,7 +723,7 @@
   function handleMessage(msg) {
     switch (msg.type) {
       case "openFile": applyOpen(msg); break;
-      case "switchTab": switchToPath(msg.path); break;
+      case "switchTab": switchToPath(msg.path, msg.focus); break;
       case "closeTab": closeTab(msg.path); break;
       case "markSaved": markSaved(msg.path); break;
       case "goToLine":
