@@ -63,18 +63,7 @@ extension SidebarView {
         }
         guard var drag = makeWorkspaceDrag(workspaceIndex: workspaceIndex, rowFrame: rowFrame, startPoint: startPoint)
         else {
-            // Geometry capture failed — behave like a plain click, but
-            // still swallow the gesture so window-move can't grab it.
-            // Updates apply live during the wait, so re-resolve by id.
-            let clickedID = lastInfos.first { $0.index == workspaceIndex }?.id
-            consumeGestureUntilMouseUp(window)
-            if let clickedID {
-                if let current = lastInfos.first(where: { $0.id == clickedID })?.index {
-                    onWorkspaceClicked?(current)
-                }
-            } else {
-                onWorkspaceClicked?(workspaceIndex)
-            }
+            deliverFallbackClick(workspaceIndex: workspaceIndex, window: window)
             return
         }
         workspaceDrag = drag
@@ -177,6 +166,21 @@ extension SidebarView {
             onWorkspaceReordered?(currentIndex, target)
         } else {
             onWorkspaceClicked?(currentIndex)
+        }
+    }
+
+    /// Geometry capture failed — behave like a plain click, but still
+    /// swallow the gesture so window-move can't grab it. Updates apply
+    /// live during the wait, so re-resolve the workspace by id.
+    private func deliverFallbackClick(workspaceIndex: Int, window: NSWindow) {
+        let clickedID = lastInfos.first { $0.index == workspaceIndex }?.id
+        consumeGestureUntilMouseUp(window)
+        if let clickedID {
+            if let current = lastInfos.first(where: { $0.id == clickedID })?.index {
+                onWorkspaceClicked?(current)
+            }
+        } else {
+            onWorkspaceClicked?(workspaceIndex)
         }
     }
 
