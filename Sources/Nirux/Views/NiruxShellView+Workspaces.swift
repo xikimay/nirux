@@ -185,7 +185,10 @@ extension NiruxShellView {
         guard workspaces.count > 1 else { return }
 
         let wsToRemove = workspaces[index]
-        if let target = workspaceStore.fallbackIndexAfterClosingWorkspace(at: index) {
+        // Only move the selection when the *active* workspace is going away —
+        // closing another workspace from its context menu must not steal focus.
+        if index == activeWSIndex,
+           let target = workspaceStore.fallbackIndexAfterClosingWorkspace(at: index) {
             workspaceStore.selectWorkspace(at: target)
         }
         relayout(animated: true)
@@ -365,7 +368,11 @@ extension NiruxShellView {
             alert.addButton(withTitle: "Close Workspace")
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
-            closeWorkspace(at: index)
+            // Main-queue work can mutate `workspaces` while the modal runs
+            // (worktree creation finishing, a prior close's deferred removal) —
+            // re-resolve the index by identity before closing.
+            guard let currentIndex = workspaces.firstIndex(where: { $0 === workspace }) else { return }
+            closeWorkspace(at: currentIndex)
         }
     }
 
@@ -394,7 +401,6 @@ extension NiruxShellView {
         }
         return workspace.title
     }
-
 
     // MARK: - Sidebar toggle
 

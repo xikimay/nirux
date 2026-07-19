@@ -12,15 +12,7 @@ extension SidebarView {
             rebuildSkippedDuringDrag = true
             return
         }
-        expandedViews.forEach { $0.removeFromSuperview() }
-        expandedViews.removeAll()
-        profileIndicatorView?.removeFromSuperview()
-        profileIndicatorView = nil
-        hitAreas.removeAll()
-        menuAffordances.removeAll()
-        activityRowBackgrounds.removeAll()
-        hoveredActivityIndex = nil
-        activitySectionRect = nil
+        resetRenderState()
         guard isExpanded else { setNeedsDisplay(bounds); return }
 
         rebuildBottomIndicators()
@@ -85,6 +77,7 @@ extension SidebarView {
         }
 
         refreshActivityHoverFromMouse()
+        refreshMenuAffordanceHoverFromMouse()
 
         let clip = contentScrollView.contentView
         let activeIndex = activeWorkspaceIndex
@@ -101,6 +94,20 @@ extension SidebarView {
             contentScrollView.reflectScrolledClipView(clip)
             lastFollowedActiveIndex = activeIndex
         }
+    }
+
+    /// Tear down every view and state snapshot from the previous expanded
+    /// render pass before rebuilding.
+    private func resetRenderState() {
+        expandedViews.forEach { $0.removeFromSuperview() }
+        expandedViews.removeAll()
+        profileIndicatorView?.removeFromSuperview()
+        profileIndicatorView = nil
+        hitAreas.removeAll()
+        menuAffordances.removeAll()
+        activityRowBackgrounds.removeAll()
+        hoveredActivityIndex = nil
+        activitySectionRect = nil
     }
 
     /// Index of the active workspace in `lastInfos`, or -1 if none. Used by

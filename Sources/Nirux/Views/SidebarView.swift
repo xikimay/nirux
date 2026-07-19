@@ -212,6 +212,15 @@ final class SidebarView: NSView {
         setActivityHover(index)
     }
 
+    /// Re-derive the "⋯" affordance hover from the live mouse position.
+    /// Called after every rebuild — rows may have shifted under a stationary
+    /// pointer (scroll, reorder, heartbeat data change).
+    func refreshMenuAffordanceHoverFromMouse() {
+        guard isExpanded, let window else { return }
+        let point = contentDocumentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        updateMenuAffordanceHover(to: workspaceCardIndex(at: point))
+    }
+
     /// Fade out the collapsed dots, then call completion.
     func fadeOutDots(completion: @escaping () -> Void) {
         // Snapshot the current dot content into a temporary layer
