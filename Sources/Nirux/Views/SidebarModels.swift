@@ -135,14 +135,16 @@ enum WorkspaceSidebarAction {
 /// Hover highlight target in the expanded sidebar. Links and activity rows
 /// have their own dedicated hover treatments; this covers the rest.
 enum SidebarHoverTarget: Equatable {
+    case spaceHeader
     case workspaceCard(Int)
     case menuBadge(Int)
     case columnRow(workspaceIndex: Int, columnIndex: Int)
 
     /// The card containing the target — hovering any sub-region keeps the
-    /// whole card lit.
-    var workspaceIndex: Int {
+    /// whole card lit. Nil for targets outside the workspace list.
+    var workspaceIndex: Int? {
         switch self {
+        case .spaceHeader: return nil
         case .workspaceCard(let index), .menuBadge(let index): return index
         case .columnRow(let workspaceIndex, _): return workspaceIndex
         }

@@ -15,11 +15,16 @@ extension SidebarView {
 
     private func applyHover(_ target: SidebarHoverTarget?, on: Bool) {
         guard let target else { return }
-        cardHoverViews[target.workspaceIndex]?.layer?.backgroundColor =
-            on ? NSColor.white.withAlphaComponent(0.035).cgColor : NSColor.clear.cgColor
+        if let workspaceIndex = target.workspaceIndex {
+            cardHoverViews[workspaceIndex]?.layer?.backgroundColor =
+                on ? NSColor.white.withAlphaComponent(0.035).cgColor : NSColor.clear.cgColor
+        }
         switch target {
         case .workspaceCard:
             break
+        case .spaceHeader:
+            spaceHeaderHoverView?.layer?.backgroundColor =
+                on ? NSColor.white.withAlphaComponent(0.05).cgColor : NSColor.clear.cgColor
         case .menuBadge(let workspaceIndex):
             menuBadgeViews[workspaceIndex]?.isHovered = on
         case .columnRow(let workspaceIndex, let columnIndex):
@@ -36,13 +41,15 @@ extension SidebarView {
         let point = contentDocumentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
         guard let area = hitArea(at: point) else { return }
         switch area.region {
+        case .spaceHeader:
+            setHoverTarget(.spaceHeader)
         case .workspace(let workspaceIndex):
             setHoverTarget(.workspaceCard(workspaceIndex))
         case .workspaceMenu(let workspaceIndex):
             setHoverTarget(.menuBadge(workspaceIndex))
         case .column(let workspaceIndex, let columnIndex):
             setHoverTarget(.columnRow(workspaceIndex: workspaceIndex, columnIndex: columnIndex))
-        case .spaceHeader, .link, .activity:
+        case .link, .activity:
             break
         }
     }

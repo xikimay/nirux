@@ -93,6 +93,7 @@ final class SidebarView: NSView {
     var cardHoverViews: [Int: NSView] = [:]
     var menuBadgeViews: [Int: SidebarBadgeView] = [:]
     var columnHoverViews: [Int: [Int: NSView]] = [:]
+    var spaceHeaderHoverView: NSView?
     var hoveredTarget: SidebarHoverTarget?
 
     private var hoveredLabel: NSTextField?
@@ -402,7 +403,7 @@ final class SidebarView: NSView {
         case .spaceHeader:
             clearHover()
             clearActivityHover()
-            setHoverTarget(nil)
+            setHoverTarget(.spaceHeader)
             NSCursor.pointingHand.set()
         case .workspace(let workspaceIndex):
             clearHover()

@@ -110,6 +110,7 @@ extension SidebarView {
         cardHoverViews.removeAll()
         menuBadgeViews.removeAll()
         columnHoverViews.removeAll()
+        spaceHeaderHoverView = nil
         hoveredTarget = nil
     }
 
@@ -139,6 +140,20 @@ extension SidebarView {
             height: SidebarExpandedMetrics.spaceHeaderHeight
         )
         hitAreas.append(SidebarHitArea(frame: headerFrame, region: .spaceHeader))
+
+        // Initially-clear hover backing behind the space name/subtitle —
+        // tinted while hovered so the header reads as a clickable menu.
+        let hover = SidebarBackgroundView(frame: NSRect(
+            x: padding - 8,
+            y: headerFrame.minY + 8,
+            width: headerFrame.width + 16,
+            height: headerFrame.height - 8
+        ))
+        hover.wantsLayer = true
+        hover.layer?.cornerRadius = 8
+        addSubviewDoc(hover)
+        expandedViews.append(hover)
+        spaceHeaderHoverView = hover
 
         let dot = SidebarBackgroundView(frame: NSRect(
             x: padding,
@@ -224,6 +239,7 @@ extension SidebarView {
             }
         }
         addSubview(view)
+        view.refreshHoverFromMouse()
         profileIndicatorView = view
     }
 
