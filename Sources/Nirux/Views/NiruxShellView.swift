@@ -622,11 +622,11 @@ final class NiruxShellView: NSView {
             },
             PaletteAction(
                 icon: "⚙",
-                title: "Install Worktree Skill",
-                subtitle: "Auto-create workspaces when agents create worktrees",
+                title: "Install Agent Skills",
+                subtitle: "Worktree workspaces + open code in the editor from agents",
                 shortcut: ""
             ) { [weak self] in
-                self?.installWorktreeSkill()
+                self?.installAgentSkills()
             }
         ]
 
