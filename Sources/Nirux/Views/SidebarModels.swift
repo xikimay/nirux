@@ -132,6 +132,23 @@ enum WorkspaceSidebarAction {
     case closeColumn(columnIndex: Int)
 }
 
+/// Hover highlight target in the expanded sidebar. Links and activity rows
+/// have their own dedicated hover treatments; this covers the rest.
+enum SidebarHoverTarget: Equatable {
+    case workspaceCard(Int)
+    case menuBadge(Int)
+    case columnRow(workspaceIndex: Int, columnIndex: Int)
+
+    /// The card containing the target — hovering any sub-region keeps the
+    /// whole card lit.
+    var workspaceIndex: Int {
+        switch self {
+        case .workspaceCard(let index), .menuBadge(let index): return index
+        case .columnRow(let workspaceIndex, _): return workspaceIndex
+        }
+    }
+}
+
 enum SidebarDotIndicatorAction: Equatable {
     case selectProfile(String)
     case createProfile

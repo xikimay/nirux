@@ -4,6 +4,14 @@ struct SidebarWorkspaceCardRenderResult {
     let bottomY: CGFloat
     let views: [NSView]
     let hitAreas: [SidebarHitArea]
+    /// Initially-clear overlay covering the card — SidebarView tints it
+    /// while the pointer is anywhere over the card.
+    let cardHoverView: NSView
+    /// The "⋯" action badge — brightens while directly hovered.
+    let menuBadge: SidebarBadgeView?
+    /// Initially-clear backing view per column row (keyed by column index)
+    /// for the row hover highlight.
+    let columnHoverViews: [Int: NSView]
 }
 
 @MainActor
@@ -15,6 +23,8 @@ final class SidebarWorkspaceCardRenderer {
 
     private var views: [NSView] = []
     private var hitAreas: [SidebarHitArea] = []
+    private var menuBadge: SidebarBadgeView?
+    private var columnHoverViews: [Int: NSView] = [:]
 
     init(workspace: WorkspaceInfo, sidebarWidth: CGFloat, padding: CGFloat, yOffset: CGFloat) {
         self.workspace = workspace
@@ -33,6 +43,12 @@ final class SidebarWorkspaceCardRenderer {
 
         let background = cardBackground()
         append(background)
+
+        // Hover tint sits above the card background but below all content.
+        let cardHover = SidebarBackgroundView()
+        cardHover.wantsLayer = true
+        cardHover.layer?.cornerRadius = 8
+        append(cardHover)
 
         let accentBar = SidebarBackgroundView()
         if workspace.isActive {
@@ -53,12 +69,20 @@ final class SidebarWorkspaceCardRenderer {
         let rowHeight = rowTopY - currentY
         let rowFrame = NSRect(x: rowX, y: currentY, width: rowW, height: rowHeight)
         background.frame = rowFrame
+        cardHover.frame = rowFrame
         if workspace.isActive {
             accentBar.frame = NSRect(x: rowX, y: currentY, width: 3, height: rowHeight)
         }
         hitAreas.append(SidebarHitArea(frame: rowFrame, region: .workspace(workspace.index)))
 
-        return SidebarWorkspaceCardRenderResult(bottomY: currentY, views: views, hitAreas: hitAreas)
+        return SidebarWorkspaceCardRenderResult(
+            bottomY: currentY,
+            views: views,
+            hitAreas: hitAreas,
+            cardHoverView: cardHover,
+            menuBadge: menuBadge,
+            columnHoverViews: columnHoverViews
+        )
     }
 
     private func buildTitleRow(contentX: CGFloat, contentW: CGFloat, yOffset: CGFloat) -> CGFloat {
@@ -78,22 +102,25 @@ final class SidebarWorkspaceCardRenderer {
         // "⋯" workspace-actions button — always visible so the menu is
         // discoverable. Replaces the old column-count chip: the columns are
         // already listed right below in the card.
-        let menuBadge = badgeView(
+        let badge = badgeView(
             "⋯",
             color: NSColor.white.withAlphaComponent(0.58),
             background: NSColor.white.withAlphaComponent(0.045)
         )
-        menuBadge.frame = NSRect(
+        badge.hoverTextColor = NSColor.white.withAlphaComponent(0.92)
+        badge.hoverFillColor = NSColor.white.withAlphaComponent(0.14)
+        badge.frame = NSRect(
             x: sidebarWidth - padding - SidebarExpandedMetrics.countChipWidth,
             y: yOffset - SidebarExpandedMetrics.titleHeight
                 + (SidebarExpandedMetrics.titleHeight - SidebarExpandedMetrics.countChipHeight) / 2,
             width: SidebarExpandedMetrics.countChipWidth,
             height: SidebarExpandedMetrics.countChipHeight
         )
-        menuBadge.toolTip = "Workspace actions"
-        append(menuBadge)
+        badge.toolTip = "Workspace actions"
+        append(badge)
+        menuBadge = badge
         hitAreas.append(SidebarHitArea(
-            frame: menuBadge.frame.insetBy(dx: -4, dy: -3),
+            frame: badge.frame.insetBy(dx: -4, dy: -3),
             region: .workspaceMenu(workspace.index)
         ))
 
@@ -136,18 +163,27 @@ final class SidebarWorkspaceCardRenderer {
             let rowHeight = SidebarExpandedMetrics.columnRowHeight
             let rowY = currentY - rowHeight
 
+            let rowBackingFrame = NSRect(
+                x: padding - 7,
+                y: rowY - 3,
+                width: sidebarWidth - padding * 2 + 14,
+                height: rowHeight + 6
+            )
             if column.isFocused {
-                let selected = SidebarBackgroundView(frame: NSRect(
-                    x: padding - 7,
-                    y: rowY - 3,
-                    width: sidebarWidth - padding * 2 + 14,
-                    height: rowHeight + 6
-                ))
+                let selected = SidebarBackgroundView(frame: rowBackingFrame)
                 selected.wantsLayer = true
                 selected.layer?.cornerRadius = 6
                 selected.layer?.backgroundColor = NSColor.niruxAccent.withAlphaComponent(0.10).cgColor
                 append(selected)
             }
+
+            // Initially-clear hover backing, tinted by SidebarView while the
+            // pointer is over this row.
+            let rowHover = SidebarBackgroundView(frame: rowBackingFrame)
+            rowHover.wantsLayer = true
+            rowHover.layer?.cornerRadius = 6
+            append(rowHover)
+            columnHoverViews[column.index] = rowHover
 
             let label = NSTextField(labelWithAttributedString: PilotSidebarRenderer.attributedColumn(column, fontSize: 11))
             label.lineBreakMode = .byTruncatingTail

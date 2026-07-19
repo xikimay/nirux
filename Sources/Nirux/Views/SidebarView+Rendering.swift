@@ -77,6 +77,7 @@ extension SidebarView {
         }
 
         refreshActivityHoverFromMouse()
+        refreshHoverTargetFromMouse()
 
         let clip = contentScrollView.contentView
         let activeIndex = activeWorkspaceIndex
@@ -106,6 +107,10 @@ extension SidebarView {
         activityRowBackgrounds.removeAll()
         hoveredActivityIndex = nil
         activitySectionRect = nil
+        cardHoverViews.removeAll()
+        menuBadgeViews.removeAll()
+        columnHoverViews.removeAll()
+        hoveredTarget = nil
     }
 
     /// Index of the active workspace in `lastInfos`, or -1 if none. Used by
@@ -458,6 +463,9 @@ extension SidebarView {
             expandedViews.append(view)
         }
         hitAreas.append(contentsOf: result.hitAreas)
+        cardHoverViews[workspace.index] = result.cardHoverView
+        if let badge = result.menuBadge { menuBadgeViews[workspace.index] = badge }
+        columnHoverViews[workspace.index] = result.columnHoverViews
         return result.bottomY
     }
 

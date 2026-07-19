@@ -86,6 +86,15 @@ final class SidebarView: NSView {
     /// actually changes — not on every periodic refresh, which would yank
     /// the viewport back while the user is dragging the scroller.
     var lastFollowedActiveIndex: Int = Int.min
+
+    // Hover-highlight backing views registered per rebuild (workspace index
+    // → view), plus the current target. Tinting is applied/cleared directly
+    // so no rebuild is needed as the pointer moves.
+    var cardHoverViews: [Int: NSView] = [:]
+    var menuBadgeViews: [Int: SidebarBadgeView] = [:]
+    var columnHoverViews: [Int: [Int: NSView]] = [:]
+    var hoveredTarget: SidebarHoverTarget?
+
     private var hoveredLabel: NSTextField?
     var hoveredActivityIndex: Int?
     private var pulseLayers: [CALayer] = []
@@ -383,18 +392,36 @@ final class SidebarView: NSView {
         switch area.region {
         case .link(_, let label):
             clearActivityHover()
+            setHoverTarget(nil)
             NSCursor.pointingHand.set()
             if hoveredLabel !== label {
                 clearHover()
                 applyUnderline(to: label)
                 hoveredLabel = label
             }
-        case .spaceHeader, .column, .workspace, .workspaceMenu:
+        case .spaceHeader:
             clearHover()
             clearActivityHover()
+            setHoverTarget(nil)
+            NSCursor.pointingHand.set()
+        case .workspace(let workspaceIndex):
+            clearHover()
+            clearActivityHover()
+            setHoverTarget(.workspaceCard(workspaceIndex))
+            NSCursor.pointingHand.set()
+        case .workspaceMenu(let workspaceIndex):
+            clearHover()
+            clearActivityHover()
+            setHoverTarget(.menuBadge(workspaceIndex))
+            NSCursor.pointingHand.set()
+        case .column(let workspaceIndex, let columnIndex):
+            clearHover()
+            clearActivityHover()
+            setHoverTarget(.columnRow(workspaceIndex: workspaceIndex, columnIndex: columnIndex))
             NSCursor.pointingHand.set()
         case .activity(let index):
             clearHover()
+            setHoverTarget(nil)
             setActivityHover(index)
             NSCursor.pointingHand.set()
         }
@@ -414,7 +441,7 @@ final class SidebarView: NSView {
         hoveredActivityIndex = nil
     }
 
-    private func hitArea(at point: NSPoint) -> SidebarHitArea? {
+    func hitArea(at point: NSPoint) -> SidebarHitArea? {
         hitAreas.first { $0.frame.contains(point) }
     }
 
@@ -567,6 +594,7 @@ final class SidebarView: NSView {
     override func mouseExited(with event: NSEvent) {
         clearHover()
         clearActivityHover()
+        setHoverTarget(nil)
     }
 
     private func applyUnderline(to label: NSTextField) {
