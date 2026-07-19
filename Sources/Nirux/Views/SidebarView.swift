@@ -9,11 +9,17 @@ final class SidebarBackgroundView: NSView {
 /// Sidebar: minimal dots in normal mode, expanded detail panel (pilot-style) in expanded mode.
 /// Dragging on empty sidebar area moves the window.
 final class SidebarView: NSView {
+    // Note: card drags don't move the window even so — the drag-reorder
+    // tracking loop (SidebarView+Drag) consumes the mouse events before
+    // the window-move machinery sees them.
     override var mouseDownCanMoveWindow: Bool { true }
     var onWorkspaceClicked: ((Int) -> Void)?
     var onColumnClicked: ((Int, Int) -> Void)?  // (workspaceIndex, columnIndex)
     var onDiffStatsClicked: ((Int) -> Void)?
     var onWorkspaceAction: ((WorkspaceSidebarAction, Int) -> Void)?
+    /// Drag-reorder drop: (store index of dragged workspace, target
+    /// position within its active/inactive group).
+    var onWorkspaceReordered: ((Int, Int) -> Void)?
     var onProfileClicked: ((String) -> Void)?
     var onCreateProfile: (() -> Void)?
     var onRenameProfile: ((String) -> Void)?
@@ -40,9 +46,40 @@ final class SidebarView: NSView {
     var lastProfiles: [ProfileInfo] = []
     /// Activity feed snapshot shown in the expanded "activity" section.
     var lastActivity: [ActivityEntry] = []
+    /// Entries newer than this render bright and count toward the badge.
+    var lastActivityReadTimestamp: TimeInterval = 0
+    /// Workspace IDs that still exist — rows whose target is gone render
+    /// ghosted and don't register a hit area.
+    var lastLiveWorkspaceIDs: Set<String> = []
+    /// Agent UUIDs of currently existing terminal columns. A row whose
+    /// originating column still exists is never ghosted, even if its
+    /// frozen workspace/column info went stale (column moved, workspace
+    /// renamed).
+    var lastLiveAgentUUIDs: Set<String> = []
+    /// Hover-highlight backing views, one per rendered activity row
+    /// (same index as the `.activity(index)` hit regions).
+    var activityRowBackgrounds: [NSView] = []
+    /// Frame of the activity section (header + rows) in document
+    /// coordinates — nil when the section isn't rendered. Lets the shell
+    /// ask whether the feed is actually inside the scrolled viewport
+    /// before counting it as "seen".
+    var activitySectionRect: NSRect?
     var expandedViews: [NSView] = []
     var profileIndicatorView: SidebarDotIndicatorView?
     var hitAreas: [SidebarHitArea] = []
+
+    // Workspace drag-reorder state; the tracking logic lives in
+    // SidebarView+Drag.swift (stored properties can't go in extensions).
+    var workspaceDrag: SidebarWorkspaceDrag?
+    var dragGhostView: NSView?
+    var dragDimView: NSView?
+    var dragInsertionView: NSView?
+    /// Sidebar data that arrived mid-drag; applied when the drag ends so
+    /// rebuilds don't tear down rows under the captured drag geometry.
+    var deferredDragUpdate: SidebarUpdatePayload?
+    /// A layout()-driven rebuild was suppressed mid-drag; recover with an
+    /// unconditional rebuild when the drag ends.
+    var rebuildSkippedDuringDrag = false
 
     /// Active workspace the sidebar last auto-scrolled to. Used by
     /// `rebuildContent` so we only follow the active workspace when it
@@ -59,6 +96,7 @@ final class SidebarView: NSView {
     var menuAffordances: [Int: (button: NSView, chip: NSView)] = [:]
 
     private var hoveredLabel: NSTextField?
+    var hoveredActivityIndex: Int?
     private var pulseLayers: [CALayer] = []
     private var trackingArea: NSTrackingArea?
 
@@ -103,11 +141,75 @@ final class SidebarView: NSView {
         if isExpanded { rebuildContent() } else { setNeedsDisplay(bounds) }
     }
 
-    func update(profiles: [ProfileInfo], workspaces: [WorkspaceInfo], activity: [ActivityEntry] = []) {
+    func update(
+        profiles: [ProfileInfo], workspaces: [WorkspaceInfo], activity: [ActivityEntry] = [],
+        activityReadTimestamp: TimeInterval = 0, liveWorkspaceIDs: Set<String> = [],
+        liveAgentUUIDs: Set<String> = []
+    ) {
+        guard workspaceDrag == nil else {
+            deferredDragUpdate = SidebarUpdatePayload(
+                profiles: profiles, workspaces: workspaces, activity: activity,
+                activityReadTimestamp: activityReadTimestamp,
+                liveWorkspaceIDs: liveWorkspaceIDs, liveAgentUUIDs: liveAgentUUIDs
+            )
+            return
+        }
         lastProfiles = profiles
         lastInfos = workspaces
         lastActivity = activity
-        if isExpanded { rebuildContent() } else { setNeedsDisplay(bounds) }
+        lastActivityReadTimestamp = activityReadTimestamp
+        lastLiveWorkspaceIDs = liveWorkspaceIDs
+        lastLiveAgentUUIDs = liveAgentUUIDs
+        guard isExpanded else { setNeedsDisplay(bounds); return }
+        // The 2s heartbeat calls this even when nothing visible changed.
+        // Rebuilding then is not just wasted work: it tears down every
+        // row's tooltip tracking rect (the system tooltip delay never
+        // elapses) and blanks the hover highlight under a stationary
+        // cursor. Skip when the rendered output would be identical.
+        let signature = renderSignature()
+        guard signature != lastRenderSignature else { return }
+        lastRenderSignature = signature
+        rebuildContent()
+    }
+
+    /// Everything the expanded sidebar renders, at display granularity —
+    /// time-derived text (relative ages, elapsed durations) is hashed as
+    /// its formatted string so the signature only changes when a label
+    /// actually would.
+    private var lastRenderSignature: Int?
+
+    private func renderSignature() -> Int {
+        var hasher = Hasher()
+        hasher.combine(lastProfiles)
+        hasher.combine(lastInfos)
+        hasher.combine(lastActivity.count)
+        for entry in lastActivity.prefix(SidebarExpandedMetrics.activityMaxRows) {
+            hasher.combine(entry)
+            hasher.combine(Self.relativeAge(since: entry.timestamp))
+        }
+        hasher.combine(lastActivityReadTimestamp)
+        hasher.combine(lastLiveWorkspaceIDs)
+        hasher.combine(lastLiveAgentUUIDs)
+        hasher.combine(bounds.width)
+        hasher.combine(bounds.height)
+        return hasher.finalize()
+    }
+
+    /// True when at least part of the activity section is inside the
+    /// scrolled viewport of the expanded sidebar.
+    var isActivityFeedVisible: Bool {
+        guard isExpanded, let rect = activitySectionRect else { return false }
+        return rect.intersects(contentScrollView.documentVisibleRect)
+    }
+
+    /// Re-apply the activity hover from the current pointer position.
+    /// Called after a rebuild: the old hover view was just destroyed, and
+    /// no mouseMoved arrives while the cursor sits still.
+    func refreshActivityHoverFromMouse() {
+        guard isExpanded, let window else { return }
+        let point = contentDocumentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        guard let area = hitArea(at: point), case .activity(let index) = area.region else { return }
+        setActivityHover(index)
     }
 
     /// Fade out the collapsed dots, then call completion.
@@ -230,6 +332,12 @@ final class SidebarView: NSView {
             let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
 
             if let area = hitArea(at: docLocation) {
+                // Workspace rows don't click on mouseDown: run the drag
+                // tracking loop, which decides between click and reorder.
+                if case .workspace(let workspaceIndex) = area.region {
+                    trackWorkspaceDrag(workspaceIndex: workspaceIndex, rowFrame: area.frame, startPoint: docLocation)
+                    return
+                }
                 handleHit(area.region, event: event)
                 return
             }
@@ -271,26 +379,33 @@ final class SidebarView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        guard isExpanded else { clearHover(); return }
+        guard isExpanded else { clearHover(); clearActivityHover(); return }
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
         updateMenuAffordanceHover(to: workspaceCardIndex(at: point))
 
         guard let area = hitArea(at: point) else {
             clearHover()
+            clearActivityHover()
             NSCursor.arrow.set()
             return
         }
 
         switch area.region {
         case .link(_, let label):
+            clearActivityHover()
             NSCursor.pointingHand.set()
             if hoveredLabel !== label {
                 clearHover()
                 applyUnderline(to: label)
                 hoveredLabel = label
             }
-        case .spaceHeader, .column, .workspace, .workspaceMenu, .activity:
+        case .spaceHeader, .column, .workspace, .workspaceMenu:
             clearHover()
+            clearActivityHover()
+            NSCursor.pointingHand.set()
+        case .activity(let index):
+            clearHover()
+            setActivityHover(index)
             NSCursor.pointingHand.set()
         }
     }
@@ -312,6 +427,20 @@ final class SidebarView: NSView {
             views.button.isHidden = !hovered
             views.chip.isHidden = hovered
         }
+    }
+
+    private func setActivityHover(_ index: Int) {
+        guard hoveredActivityIndex != index else { return }
+        clearActivityHover()
+        guard let background = activityRowBackgrounds[safe: index] else { return }
+        background.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
+        hoveredActivityIndex = index
+    }
+
+    func clearActivityHover() {
+        guard let index = hoveredActivityIndex else { return }
+        activityRowBackgrounds[safe: index]?.layer?.backgroundColor = NSColor.clear.cgColor
+        hoveredActivityIndex = nil
     }
 
     private func hitArea(at point: NSPoint) -> SidebarHitArea? {
@@ -466,6 +595,7 @@ final class SidebarView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         clearHover()
+        clearActivityHover()
         updateMenuAffordanceHover(to: nil)
     }
 

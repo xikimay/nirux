@@ -138,13 +138,16 @@ extension NiruxShellView {
     }
 
     /// Focus a workspace by ID (notification click-through), optionally
-    /// jumping straight to a specific column.
+    /// jumping straight to a specific column. Always flashes the target
+    /// column's border: when the target is already focused, switching is
+    /// a visual no-op and the click would otherwise feel dead.
     func focusWorkspace(id: String, column columnIndex: Int? = nil) {
         guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
         switchToWorkspace(index)
         if let columnIndex, workspaces.indices.contains(index) {
             focusColumnByIndex(columnIndex)
         }
+        flashColumnBorder(workspaceIndex: index, columnIndex: columnIndex)
     }
 
     /// AgentHookCenter resolver: locate the column owning a NIRUX_AGENT_UUID
@@ -314,6 +317,24 @@ extension NiruxShellView {
             return
         }
         guard didChange else { return }
+        refreshAfterWorkspaceMutation()
+    }
+
+    /// Drop handler for sidebar drag-reorder: move the workspace to an
+    /// absolute position within its active/inactive group, then run the
+    /// same refresh dance as the context-menu moves.
+    func handleWorkspaceReorder(workspaceIndex: Int, targetPosition: Int) {
+        guard workspaces.indices.contains(workspaceIndex),
+              workspaceStore.moveWorkspace(at: workspaceIndex, toPosition: targetPosition)
+        else {
+            // Stale or no-op drop — repaint so the sidebar leaves drag state.
+            updateSidebar()
+            return
+        }
+        refreshAfterWorkspaceMutation()
+    }
+
+    private func refreshAfterWorkspaceMutation() {
         relayout(animated: true)
         updateSidebar()
         focusActiveTerminal(in: window)
@@ -380,6 +401,10 @@ extension NiruxShellView {
     func toggleSidebar() {
         guard !isPilotMode else { return }
         let expanding = !isSidebarExpanded
+        // Captured before mutating expansion state: collapsing counts as
+        // "viewed" only if the feed was actually on screen until this
+        // instant (not scrolled past the fold, window visible).
+        let feedWasVisible = activityFeedIsVisibleToUser
         isSidebarExpanded = expanding
         saveState()
 
@@ -392,6 +417,8 @@ extension NiruxShellView {
                 }
             }
         } else {
+            cancelActivityReadMark()
+            if feedWasVisible { ActivityStore.shared.markAllRead() }
             sidebar.isExpanded = false
             relayout(animated: true)
         }
@@ -549,6 +576,9 @@ extension NiruxShellView {
 
     func togglePilotMode() {
         if isSidebarExpanded {
+            let feedWasVisible = activityFeedIsVisibleToUser
+            cancelActivityReadMark()
+            if feedWasVisible { ActivityStore.shared.markAllRead() }
             sidebar.isHidden = true
             isSidebarExpanded = false
             sidebar.isExpanded = false
