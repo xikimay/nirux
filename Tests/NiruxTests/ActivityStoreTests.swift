@@ -69,7 +69,7 @@ final class ActivityStoreTests: XCTestCase {
 
     @MainActor
     func testStoreCapsAndKeepsNewestFirst() {
-        let store = ActivityStore()
+        let store = makeStore()
         for index in 0..<120 {
             store.record(ActivityEntry(
                 category: .turnComplete, agentKind: "claude", workspaceID: "ws",
@@ -83,28 +83,52 @@ final class ActivityStoreTests: XCTestCase {
     }
 
     private func makeEntry(
-        _ category: ActivityEntry.Category, timestamp: TimeInterval, workspaceID: String? = "ws"
+        _ category: ActivityEntry.Category, timestamp: TimeInterval,
+        workspaceID: String? = "ws", columnIndex: Int? = nil
     ) -> ActivityEntry {
         ActivityEntry(
             category: category, agentKind: "claude", workspaceID: workspaceID,
-            columnIndex: nil, workspaceTitle: "ws", detail: nil, timestamp: timestamp
+            columnIndex: columnIndex, workspaceTitle: "ws", detail: nil, timestamp: timestamp
         )
+    }
+
+    /// Never `ActivityStore()` in tests: record()/markRead() schedule real
+    /// writes into the developer's live state directory.
+    @MainActor
+    private func makeStore() -> ActivityStore {
+        ActivityStore(persistsToDisk: false)
     }
 
     @MainActor
     func testFeedEntriesDropLifecycleNoise() {
-        let store = ActivityStore()
+        let store = makeStore()
         store.record(makeEntry(.sessionStart, timestamp: 1))
         store.record(makeEntry(.attention, timestamp: 2))
         store.record(makeEntry(.sessionEnd, timestamp: 3))
-        store.record(makeEntry(.turnComplete, timestamp: 4))
+        store.record(makeEntry(.turnComplete, timestamp: 4, columnIndex: 1))
         XCTAssertEqual(store.entries.count, 4, "history keeps everything")
         XCTAssertEqual(store.feedEntries.map(\.timestamp), [4, 2], "feed shows signals only")
     }
 
     @MainActor
+    func testFeedEntriesCoalesceConsecutiveSameColumnRepeats() {
+        let store = makeStore()
+        store.record(makeEntry(.turnComplete, timestamp: 1, columnIndex: 0))
+        store.record(makeEntry(.turnComplete, timestamp: 2, columnIndex: 0))
+        store.record(makeEntry(.sessionEnd, timestamp: 3))  // lifecycle doesn't break a run
+        store.record(makeEntry(.turnComplete, timestamp: 4, columnIndex: 0))
+        store.record(makeEntry(.turnComplete, timestamp: 5, columnIndex: 1))
+        store.record(makeEntry(.attention, timestamp: 6, columnIndex: 1))
+        store.record(makeEntry(.turnComplete, timestamp: 7, workspaceID: "other", columnIndex: 0))
+        XCTAssertEqual(
+            store.feedEntries.map(\.timestamp), [7, 6, 5, 4],
+            "consecutive same-column same-category repeats keep only the newest"
+        )
+    }
+
+    @MainActor
     func testUnreadCountAndMarkAllRead() {
-        let store = ActivityStore()
+        let store = makeStore()
         XCTAssertEqual(store.unreadCount, 0)
         store.record(makeEntry(.attention, timestamp: 10))
         store.record(makeEntry(.sessionStart, timestamp: 11))
@@ -120,40 +144,45 @@ final class ActivityStoreTests: XCTestCase {
     }
 
     @MainActor
-    func testMarkAllReadIsMonotonic() {
-        let store = ActivityStore()
+    func testMarkReadUpToCutoffLeavesNewerEntriesUnread() {
+        let store = makeStore()
+        store.record(makeEntry(.attention, timestamp: 10))
+        let cutoff = store.newestTimestamp
+        XCTAssertEqual(cutoff, 10)
+        // Arrives mid-dwell, after the cutoff was captured.
+        store.record(makeEntry(.attention, timestamp: 11, columnIndex: 1))
+
+        store.markRead(upTo: cutoff!)
+        XCTAssertEqual(store.unreadCount, 1, "an entry newer than the dwell cutoff stays unread")
+        XCTAssertEqual(store.lastReadTimestamp, 10)
+    }
+
+    @MainActor
+    func testMarkReadIsMonotonic() {
+        let store = makeStore()
         store.record(makeEntry(.attention, timestamp: 50))
         store.markAllRead()
-        store.record(makeEntry(.attention, timestamp: 40, workspaceID: "late-clock"))
-        store.markAllRead()
-        XCTAssertEqual(store.lastReadTimestamp, 50, "an older-stamped entry can't move the read mark back")
+        store.markRead(upTo: 40)
+        XCTAssertEqual(store.lastReadTimestamp, 50, "the read mark never moves backwards")
     }
 
-    @MainActor
-    func testDecodeLegacyArrayTreatsHistoryAsRead() throws {
-        let legacy = [makeEntry(.attention, timestamp: 7), makeEntry(.turnComplete, timestamp: 9)]
-        let data = try JSONEncoder().encode(legacy)
-        let decoded = ActivityStore.decode(data)
-        XCTAssertEqual(decoded?.entries.count, 2)
-        XCTAssertEqual(decoded?.lastReadTimestamp, 9, "pre-update history must not light up the badge")
+    func testInitialReadTimestampWithoutSidecarTreatsHistoryAsRead() {
+        let history = [makeEntry(.attention, timestamp: 7), makeEntry(.turnComplete, timestamp: 9)]
+        XCTAssertEqual(
+            ActivityStore.initialReadTimestamp(entries: history, sidecar: nil), 9,
+            "pre-update history must not light up the badge"
+        )
+        XCTAssertEqual(ActivityStore.initialReadTimestamp(entries: [], sidecar: nil), 0)
+        XCTAssertEqual(
+            ActivityStore.initialReadTimestamp(entries: history, sidecar: 7), 7,
+            "an existing sidecar wins over the history heuristic"
+        )
     }
 
-    @MainActor
-    func testEncodeDecodeRoundtripPreservesReadState() throws {
-        let store = ActivityStore()
-        store.record(makeEntry(.attention, timestamp: 5))
-        store.record(makeEntry(.turnComplete, timestamp: 6))
-        store.markAllRead()
-        store.record(makeEntry(.attention, timestamp: 8))
-
-        let data = try XCTUnwrap(store.encoded())
-        let decoded = try XCTUnwrap(ActivityStore.decode(data))
-        XCTAssertEqual(decoded.entries.map(\.timestamp), [8, 6, 5])
-        XCTAssertEqual(decoded.lastReadTimestamp, 6)
-    }
-
-    func testDecodeGarbageReturnsNil() {
-        XCTAssertNil(ActivityStore.decode(Data("not json".utf8)))
+    func testReadStateSidecarRoundtrip() throws {
+        let data = try JSONEncoder().encode(["lastReadTimestamp": 123.5])
+        XCTAssertEqual(ActivityStore.decodeReadState(data), 123.5)
+        XCTAssertNil(ActivityStore.decodeReadState(Data("not json".utf8)))
     }
 
     func testRelativeAge() {

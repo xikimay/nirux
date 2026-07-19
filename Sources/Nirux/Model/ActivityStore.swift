@@ -3,7 +3,7 @@ import Foundation
 /// One row in the activity feed — a signal event from an agent, captured
 /// while the user may have been elsewhere (other column, other app, app
 /// closed: events queued on disk are replayed into the feed on launch).
-struct ActivityEntry: Codable, Equatable {
+struct ActivityEntry: Codable, Hashable {
     enum Category: String, Codable {
         case attention     // permission prompt / waiting for input
         case turnComplete  // agent finished a turn
@@ -77,16 +77,44 @@ final class ActivityStore {
     private static let maxEntries = 100
     private static let saveDebounce: TimeInterval = 5
     private var pendingSave: DispatchWorkItem?
+    /// False in tests: the store is a singleton path onto the real state
+    /// directory, and record()/markRead() must not schedule writes into
+    /// the developer's live activity.json from a unit test.
+    private let persistsToDisk: Bool
+
+    init(persistsToDisk: Bool = true) {
+        self.persistsToDisk = persistsToDisk
+    }
 
     static var fileURL: URL {
         Persistence.stateDirectory.appendingPathComponent("activity.json")
     }
 
+    /// Read state lives in a sidecar, NOT in activity.json: the entries
+    /// file keeps the bare-array format older builds read and write, so a
+    /// nightly downgrade round-trips the history instead of wiping it.
+    static var readStateURL: URL {
+        Persistence.stateDirectory.appendingPathComponent("activity-read.json")
+    }
+
     /// What the sidebar feed shows: signal rows only. Lifecycle rows
     /// (sessionStart/sessionEnd) stay recorded but drown the feed — a
     /// typical backlog is mostly starts/ends the user can't act on.
+    /// Consecutive repeats from the same column (an agent finishing turn
+    /// after turn) coalesce into their newest occurrence so six visible
+    /// rows cover six distinct things, not one chatty agent.
     var feedEntries: [ActivityEntry] {
-        entries.filter { $0.category == .attention || $0.category == .turnComplete }
+        var result: [ActivityEntry] = []
+        for entry in entries where entry.category == .attention || entry.category == .turnComplete {
+            if let last = result.last,
+               last.category == entry.category,
+               last.workspaceID == entry.workspaceID,
+               last.columnIndex == entry.columnIndex {
+                continue  // entries are newest-first; keep the newest of the run
+            }
+            result.append(entry)
+        }
+        return result
     }
 
     /// Feed rows the user hasn't seen yet — drives the ACTIVITY badge.
@@ -94,13 +122,27 @@ final class ActivityStore {
         feedEntries.filter { $0.timestamp > lastReadTimestamp }.count
     }
 
-    /// The feed has been visible to the user — everything currently in it
-    /// counts as seen.
-    func markAllRead() {
-        guard let newest = entries.map(\.timestamp).max(), newest > lastReadTimestamp else { return }
-        lastReadTimestamp = newest
-        scheduleSave()
+    /// Newest recorded timestamp — captured by the shell when the read
+    /// dwell starts, so entries arriving mid-dwell stay unread.
+    var newestTimestamp: TimeInterval? {
+        entries.map(\.timestamp).max()
+    }
+
+    /// Everything at or before `cutoff` has been visible to the user.
+    /// Saved immediately (the sidecar is tiny): a crash before the 5s
+    /// entry debounce must not resurrect rows the user already saw.
+    func markRead(upTo cutoff: TimeInterval) {
+        guard cutoff > lastReadTimestamp else { return }
+        lastReadTimestamp = cutoff
+        saveReadStateNow()
         scheduleChangeNotification()
+    }
+
+    /// The whole feed has been visible (e.g. sidebar collapsed after
+    /// being on screen) — everything currently recorded counts as seen.
+    func markAllRead() {
+        guard let newest = newestTimestamp else { return }
+        markRead(upTo: newest)
     }
 
     func record(_ entry: ActivityEntry) {
@@ -127,36 +169,31 @@ final class ActivityStore {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: item)
     }
 
-    /// On-disk shape of activity.json. Older builds wrote a bare
-    /// [ActivityEntry] array — decode() accepts both.
-    private struct Archive: Codable {
-        var entries: [ActivityEntry]
-        var lastReadTimestamp: TimeInterval?
+    private struct ReadState: Codable {
+        var lastReadTimestamp: TimeInterval
     }
 
-    /// Pure decode so tests can exercise format compat without touching the
-    /// state directory. Legacy array files predate read tracking — their
-    /// whole history counts as read (a badge of 100 on first launch after
-    /// the update would be exactly the noise this feature removes).
-    nonisolated static func decode(_ data: Data) -> (entries: [ActivityEntry], lastReadTimestamp: TimeInterval)? {
-        if let archive = try? JSONDecoder().decode(Archive.self, from: data) {
-            return (archive.entries, archive.lastReadTimestamp ?? archive.entries.map(\.timestamp).max() ?? 0)
-        }
-        if let legacy = try? JSONDecoder().decode([ActivityEntry].self, from: data) {
-            return (legacy, legacy.map(\.timestamp).max() ?? 0)
-        }
-        return nil
+    nonisolated static func decodeReadState(_ data: Data) -> TimeInterval? {
+        (try? JSONDecoder().decode(ReadState.self, from: data))?.lastReadTimestamp
     }
 
-    func encoded() -> Data? {
-        try? JSONEncoder().encode(Archive(entries: entries, lastReadTimestamp: lastReadTimestamp))
+    /// Pure resolution of the initial read mark so tests can exercise it
+    /// without touching the state directory. No sidecar (first launch
+    /// after the update, or a downgrade cycle deleted trust in it) means
+    /// the whole existing history counts as read — a badge of 100 stale
+    /// rows on upgrade would be exactly the noise this feature removes.
+    nonisolated static func initialReadTimestamp(
+        entries: [ActivityEntry], sidecar: TimeInterval?
+    ) -> TimeInterval {
+        sidecar ?? entries.map(\.timestamp).max() ?? 0
     }
 
     func load() {
         guard let data = try? Data(contentsOf: Self.fileURL),
-              let decoded = Self.decode(data) else { return }
-        entries = Array(decoded.entries.prefix(Self.maxEntries))
-        lastReadTimestamp = decoded.lastReadTimestamp
+              let decoded = try? JSONDecoder().decode([ActivityEntry].self, from: data) else { return }
+        entries = Array(decoded.prefix(Self.maxEntries))
+        let sidecar = (try? Data(contentsOf: Self.readStateURL)).flatMap(Self.decodeReadState)
+        lastReadTimestamp = Self.initialReadTimestamp(entries: entries, sidecar: sidecar)
     }
 
     private func scheduleSave() {
@@ -172,10 +209,18 @@ final class ActivityStore {
         pendingSave?.cancel()
         pendingSave = nil
         saveNow()
+        saveReadStateNow()
     }
 
     private func saveNow() {
-        guard let data = encoded() else { return }
+        guard persistsToDisk, let data = try? JSONEncoder().encode(entries) else { return }
         try? data.write(to: Self.fileURL, options: .atomic)
+    }
+
+    private func saveReadStateNow() {
+        guard persistsToDisk,
+              let data = try? JSONEncoder().encode(ReadState(lastReadTimestamp: lastReadTimestamp))
+        else { return }
+        try? data.write(to: Self.readStateURL, options: .atomic)
     }
 }

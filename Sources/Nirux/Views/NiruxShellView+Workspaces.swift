@@ -324,6 +324,10 @@ extension NiruxShellView {
     func toggleSidebar() {
         guard !isPilotMode else { return }
         let expanding = !isSidebarExpanded
+        // Captured before mutating expansion state: collapsing counts as
+        // "viewed" only if the feed was actually on screen until this
+        // instant (not scrolled past the fold, window visible).
+        let feedWasVisible = activityFeedIsVisibleToUser
         isSidebarExpanded = expanding
         saveState()
 
@@ -336,10 +340,8 @@ extension NiruxShellView {
                 }
             }
         } else {
-            // Collapsing counts as "viewed": the feed was on screen until
-            // this instant, even if the read dwell hadn't fired yet.
             cancelActivityReadMark()
-            ActivityStore.shared.markAllRead()
+            if feedWasVisible { ActivityStore.shared.markAllRead() }
             sidebar.isExpanded = false
             relayout(animated: true)
         }
@@ -497,8 +499,9 @@ extension NiruxShellView {
 
     func togglePilotMode() {
         if isSidebarExpanded {
+            let feedWasVisible = activityFeedIsVisibleToUser
             cancelActivityReadMark()
-            ActivityStore.shared.markAllRead()
+            if feedWasVisible { ActivityStore.shared.markAllRead() }
             sidebar.isHidden = true
             isSidebarExpanded = false
             sidebar.isExpanded = false

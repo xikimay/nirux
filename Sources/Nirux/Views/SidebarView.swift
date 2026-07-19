@@ -48,6 +48,11 @@ final class SidebarView: NSView {
     /// Hover-highlight backing views, one per rendered activity row
     /// (same index as the `.activity(index)` hit regions).
     var activityRowBackgrounds: [NSView] = []
+    /// Frame of the activity section (header + rows) in document
+    /// coordinates — nil when the section isn't rendered. Lets the shell
+    /// ask whether the feed is actually inside the scrolled viewport
+    /// before counting it as "seen".
+    var activitySectionRect: NSRect?
     var expandedViews: [NSView] = []
     var profileIndicatorView: SidebarDotIndicatorView?
     var hitAreas: [SidebarHitArea] = []
@@ -112,7 +117,55 @@ final class SidebarView: NSView {
         lastActivity = activity
         lastActivityReadTimestamp = activityReadTimestamp
         lastLiveWorkspaceIDs = liveWorkspaceIDs
-        if isExpanded { rebuildContent() } else { setNeedsDisplay(bounds) }
+        guard isExpanded else { setNeedsDisplay(bounds); return }
+        // The 2s heartbeat calls this even when nothing visible changed.
+        // Rebuilding then is not just wasted work: it tears down every
+        // row's tooltip tracking rect (the system tooltip delay never
+        // elapses) and blanks the hover highlight under a stationary
+        // cursor. Skip when the rendered output would be identical.
+        let signature = renderSignature()
+        guard signature != lastRenderSignature else { return }
+        lastRenderSignature = signature
+        rebuildContent()
+    }
+
+    /// Everything the expanded sidebar renders, at display granularity —
+    /// time-derived text (relative ages, elapsed durations) is hashed as
+    /// its formatted string so the signature only changes when a label
+    /// actually would.
+    private var lastRenderSignature: Int?
+
+    private func renderSignature() -> Int {
+        var hasher = Hasher()
+        hasher.combine(lastProfiles)
+        hasher.combine(lastInfos)
+        hasher.combine(lastActivity.count)
+        for entry in lastActivity.prefix(SidebarExpandedMetrics.activityMaxRows) {
+            hasher.combine(entry)
+            hasher.combine(Self.relativeAge(since: entry.timestamp))
+        }
+        hasher.combine(lastActivityReadTimestamp)
+        hasher.combine(lastLiveWorkspaceIDs)
+        hasher.combine(bounds.width)
+        hasher.combine(bounds.height)
+        return hasher.finalize()
+    }
+
+    /// True when at least part of the activity section is inside the
+    /// scrolled viewport of the expanded sidebar.
+    var isActivityFeedVisible: Bool {
+        guard isExpanded, let rect = activitySectionRect else { return false }
+        return rect.intersects(contentScrollView.documentVisibleRect)
+    }
+
+    /// Re-apply the activity hover from the current pointer position.
+    /// Called after a rebuild: the old hover view was just destroyed, and
+    /// no mouseMoved arrives while the cursor sits still.
+    func refreshActivityHoverFromMouse() {
+        guard isExpanded, let window else { return }
+        let point = contentDocumentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        guard let area = hitArea(at: point), case .activity(let index) = area.region else { return }
+        setActivityHover(index)
     }
 
     /// Fade out the collapsed dots, then call completion.

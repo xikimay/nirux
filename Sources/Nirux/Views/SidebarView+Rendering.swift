@@ -13,6 +13,7 @@ extension SidebarView {
         hitAreas.removeAll()
         activityRowBackgrounds.removeAll()
         hoveredActivityIndex = nil
+        activitySectionRect = nil
         guard isExpanded else { setNeedsDisplay(bounds); return }
 
         rebuildBottomIndicators()
@@ -69,19 +70,14 @@ extension SidebarView {
         }
         if !lastActivity.isEmpty {
             yOffset -= SidebarExpandedMetrics.activitySectionGap
-            // Badge = unread, not total: "3" must mean "3 things happened
-            // since you last looked", so it hides entirely once caught up.
-            let unread = unreadActivityCount
-            yOffset = buildSectionHeader(
-                "activity", count: unread, padding: padding, yOffset: yOffset,
-                showChip: unread > 0, chipIsHighlighted: true
-            )
-            yOffset = buildActivityRows(padding: padding, yOffset: yOffset)
+            yOffset = buildActivitySection(padding: padding, yOffset: yOffset)
         }
         if hasWorkspaces {
             yOffset -= SidebarExpandedMetrics.shortcutHintGap
             yOffset = buildShortcutHint(padding: padding, yOffset: yOffset)
         }
+
+        refreshActivityHoverFromMouse()
 
         let clip = contentScrollView.contentView
         let activeIndex = activeWorkspaceIndex
@@ -243,6 +239,8 @@ extension SidebarView {
                     : NSColor.white.withAlphaComponent(0.07)
             )
             countChip.frame = NSRect(x: padding + 62, y: yOffset - 18, width: 28, height: 18)
+            countChip.setAccessibilityRole(.staticText)
+            countChip.setAccessibilityLabel(chipIsHighlighted ? "\(count) unread" : "\(count)")
             addSubviewDoc(countChip)
             expandedViews.append(countChip)
         }
@@ -281,6 +279,24 @@ extension SidebarView {
     /// per-row dimming.
     var unreadActivityCount: Int {
         lastActivity.filter { $0.timestamp > lastActivityReadTimestamp }.count
+    }
+
+    /// Header + rows, recording the section's document-space frame so the
+    /// shell can tell whether the feed is actually inside the viewport.
+    private func buildActivitySection(padding: CGFloat, yOffset: CGFloat) -> CGFloat {
+        let sectionTop = yOffset
+        // Badge = unread, not total: "3" must mean "3 things happened
+        // since you last looked", so it hides entirely once caught up.
+        let unread = unreadActivityCount
+        var currentY = buildSectionHeader(
+            "activity", count: unread, padding: padding, yOffset: yOffset,
+            showChip: unread > 0, chipIsHighlighted: true
+        )
+        currentY = buildActivityRows(padding: padding, yOffset: currentY)
+        activitySectionRect = NSRect(
+            x: 0, y: currentY, width: bounds.width, height: sectionTop - currentY
+        )
+        return currentY
     }
 
     /// Row whose click target is gone: workspace never resolved or has
@@ -346,6 +362,8 @@ extension SidebarView {
                 color: NSColor.white.withAlphaComponent(textAlpha)
             )
             label.toolTip = tooltip
+            // Read state is otherwise conveyed by opacity alone.
+            label.setAccessibilityLabel(isRead ? tooltip : "unread, \(tooltip)")
             label.frame = NSRect(
                 x: padding + 16,
                 y: rowFrame.minY + 2,
