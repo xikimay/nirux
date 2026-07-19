@@ -324,6 +324,11 @@ extension NiruxShellView {
         editor.onFilePickerRequest = { [weak self] editor in
             self?.showFilePicker(for: editor)
         }
+        // Keep the sidebar's file name + dirty dot in sync with the active
+        // tab instead of waiting out the 2s heartbeat.
+        editor.onPathChanged = { [weak self] in self?.updateSidebar() }
+        editor.onDirtyChanged = { [weak self] in self?.updateSidebar() }
+        editor.onSendSelectionShortcut = { [weak self] in self?.sendEditorSelectionToAgent() }
     }
 
     /// Show the workspace file picker, opening the chosen file in `editor`.
@@ -338,12 +343,16 @@ extension NiruxShellView {
         }
     }
 
-    /// Open a file in an editor column at an optional line. If the active
+    /// Open a file in an editor column at an optional line. If the target
     /// workspace doesn't yet have an editor column, one is added; otherwise
     /// the existing one is reused so search results don't pile up new
-    /// columns. Used by the workspace-wide search panel.
-    func openInEditorColumn(path: String, line: Int? = nil, workspaceCwd: String? = nil) {
-        guard let workspace = activeWorkspace else { return }
+    /// columns. Used by the workspace-wide search panel and terminal
+    /// file: links (which pass the workspace the link was clicked in).
+    func openInEditorColumn(
+        path: String, line: Int? = nil, workspaceCwd: String? = nil,
+        in targetWorkspace: WorkspaceState? = nil
+    ) {
+        guard let workspace = targetWorkspace ?? activeWorkspace else { return }
         let editorRoot = workspaceCwd ?? currentWorkspaceCwd(for: workspace)
         let existingEditor = workspace.columns
             .compactMap { $0.editorColumn }
@@ -359,13 +368,63 @@ extension NiruxShellView {
             }
             return
         }
-        workspace.addEditorColumn(initialFile: path, workspaceCwd: editorRoot)
+        // Column first, single open after wiring — an initialFile + second
+        // line-targeted open would run the failure alert / large-file
+        // confirmation twice for the same file.
+        workspace.addEditorColumn(workspaceCwd: editorRoot)
         if let editor = workspace.columns[safe: workspace.focusedIndex]?.editorColumn {
             wireEditor(editor)
-            if let line { editor.open(path: path, line: line) }
+            editor.open(path: path, line: line)
         }
         relayout(animated: false)
         updateSidebar()
+    }
+
+    /// Send the editor's current selection into a terminal column of the
+    /// same workspace as a `path:Lx-Ly` header plus fenced excerpt, so the
+    /// user can point the agent at code without retyping paths. Prefers the
+    /// focused column on both ends: the focused editor (else the first
+    /// editor column) supplies the selection, the focused terminal (else
+    /// the first live terminal column) receives it. No-op with a log when
+    /// either side is missing or nothing is selected.
+    func sendEditorSelectionToAgent() {
+        guard let workspace = activeWorkspace else { return }
+        let focused = workspace.columns[safe: workspace.focusedIndex]
+        guard let editor = focused?.editorColumn
+            ?? workspace.columns.compactMap({ $0.editorColumn }).first else {
+            NiruxDebugLog.log("sendSelectionToAgent: no editor column in workspace")
+            return
+        }
+        let terminal = (focused?.pty?.hasExited == false ? focused : nil)
+            ?? workspace.columns.first { $0.pty?.hasExited == false }
+        guard let pty = terminal?.pty, !pty.hasExited else {
+            NiruxDebugLog.log("sendSelectionToAgent: no live terminal column in workspace")
+            return
+        }
+
+        editor.requestSelection { [weak editor, weak pty] selection in
+            guard let editor, let pty else { return }
+            // Path mismatch means the reply is stale (e.g. a diff-group tab
+            // is showing while the hidden editor still holds an old model).
+            guard let selection, selection.path == editor.currentPath else {
+                NiruxDebugLog.log("sendSelectionToAgent: no selection")
+                return
+            }
+            let cwdPrefix = editor.workspaceCwd + "/"
+            let path = selection.path.hasPrefix(cwdPrefix)
+                ? String(selection.path.dropFirst(cwdPrefix.count))
+                : selection.path
+            let excerpt = AgentExcerpt.format(
+                path: path,
+                startLine: selection.startLine,
+                endLine: selection.endLine,
+                text: selection.text
+            )
+            // Bracketed paste: the multiline excerpt lands in the agent's
+            // input as one paste instead of the first newline submitting a
+            // half-built prompt.
+            pty.sendRaw("\u{1B}[200~\(excerpt)\u{1B}[201~")
+        }
     }
 
     /// Toggle Monaco's selected diff view on the focused editor

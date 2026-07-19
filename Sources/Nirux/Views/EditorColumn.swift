@@ -50,6 +50,22 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     var onDirtyChanged: (() -> Void)?
     var onFilePickerRequest: ((EditorColumn) -> Void)?
 
+    /// A Monaco selection as reported over the bridge. Lines are 1-based.
+    struct Selection {
+        let path: String
+        let text: String
+        let startLine: Int
+        let endLine: Int
+    }
+    /// One-shot completions awaiting a "selection" reply, keyed by request
+    /// ID so a dropped bridge message can't pair a reply with the wrong
+    /// (earlier) request.
+    private var selectionRequests: [Int: (Selection?) -> Void] = [:]
+    private var nextSelectionRequestID = 0
+    /// Monaco resolved Cmd+Opt+Enter outside the find widget — the shell
+    /// runs the send-selection flow.
+    var onSendSelectionShortcut: (() -> Void)?
+
     private let webView: WKWebView
     private let tabBar: EditorTabBar
     private let fileTree: EditorFileTree
@@ -113,6 +129,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             fileWatchTimer = nil
             monacoLoadWatchdog?.invalidate()
             monacoLoadWatchdog = nil
+            drainSelectionRequests()
             webView.configuration.userContentController
                 .removeScriptMessageHandler(forName: "nirux")
         }
@@ -432,6 +449,23 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         }
     }
 
+    /// Ask Monaco for the current selection (send-to-agent flow). The
+    /// completion fires with nil when nothing is selected.
+    func requestSelection(_ completion: @escaping (Selection?) -> Void) {
+        nextSelectionRequestID += 1
+        let requestID = nextSelectionRequestID
+        selectionRequests[requestID] = completion
+        sendBridge(["type": "getSelection", "requestID": requestID])
+    }
+
+    /// Fail every in-flight selection request. Called when the webview can
+    /// no longer answer (content process crash, column closed).
+    private func drainSelectionRequests() {
+        let pending = selectionRequests.values
+        selectionRequests.removeAll()
+        for completion in pending { completion(nil) }
+    }
+
     /// Toggle Monaco's selected diff view on the active tab. In HEAD mode the
     /// original side reads `git show HEAD:<relpath>`. In Branch mode it reads
     /// the merge-base version of the file so committed branch changes are
@@ -614,132 +648,6 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             : (workspaceCwd as NSString).appendingPathComponent(path)
     }
 
-    /// Reads the comparison-side content for the requested diff mode.
-    /// Nonisolated so we can call it from a background queue.
-    private nonisolated static func gitOriginalContent(
-        of absPath: String,
-        cwd: String,
-        mode: EditorDiffMode
-    ) -> String? {
-        guard let rel = relativeGitPath(of: absPath, cwd: cwd) else { return nil }
-        switch mode {
-        case .head:
-            if let content = gitContent(relativePath: rel, ref: "HEAD", cwd: cwd) {
-                return content
-            }
-            // New or untracked files have no blob in HEAD. Treat them as an
-            // empty original so clicking a change always opens a useful diff.
-            return FileManager.default.fileExists(atPath: absPath) ? "" : nil
-        case .branch:
-            guard let base = branchBaseRef(cwd: cwd) else { return nil }
-            // A file added on the branch has no blob at the merge-base; an
-            // empty original gives Monaco the expected "whole file added" diff.
-            return gitContent(relativePath: rel, ref: base, cwd: cwd) ?? ""
-        }
-    }
-
-    private nonisolated static func relativeGitPath(of absPath: String, cwd: String) -> String? {
-        let cwdPath = URL(fileURLWithPath: cwd).standardizedFileURL.path
-        let absolutePath = URL(fileURLWithPath: absPath).standardizedFileURL.path
-        guard absolutePath == cwdPath || absolutePath.hasPrefix(cwdPath + "/") else { return nil }
-        let rel = String(absolutePath.dropFirst(cwdPath.count))
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard !rel.isEmpty else { return nil }
-        return rel
-    }
-
-    private nonisolated static func diffGroupPath(mode: EditorDiffMode) -> String {
-        "\(diffGroupPathPrefix)\(mode.rawValue)"
-    }
-
-    private nonisolated static func isDiffGroupPath(_ path: String) -> Bool {
-        path.hasPrefix(diffGroupPathPrefix)
-    }
-
-    private nonisolated static func diffFilePayload(
-        of absPath: String,
-        cwd: String,
-        mode: EditorDiffMode
-    ) -> [String: Any]? {
-        guard let rel = relativeGitPath(of: absPath, cwd: cwd) else { return nil }
-        if let largePayload = largeDiffPlaceholderPayload(of: absPath, relativePath: rel) {
-            return largePayload
-        }
-        guard let original = gitOriginalContent(of: absPath, cwd: cwd, mode: mode) else { return nil }
-        let modified = fileContent(at: absPath) ?? ""
-        return [
-            "path": rel,
-            "name": rel,
-            "original": original,
-            "modified": modified
-        ]
-    }
-
-    private nonisolated static func largeDiffPlaceholderPayload(
-        of absPath: String,
-        relativePath rel: String
-    ) -> [String: Any]? {
-        guard let byteCount = fileByteCount(path: absPath),
-              byteCount > maxDiffCollectionFileBytes
-        else { return nil }
-        NSLog("[EditorColumn] replacing large visual diff file \(absPath) (\(byteCount) bytes)")
-        return [
-            "path": rel,
-            "name": rel,
-            "original": "",
-            "modified": "Large file omitted from visual diff (\(byteCount) bytes).",
-            "language": "plaintext"
-        ]
-    }
-
-    private nonisolated static func fileByteCount(path: String) -> UInt64? {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-              let size = attrs[.size] as? NSNumber
-        else { return nil }
-        return size.uint64Value
-    }
-
-    private nonisolated static func fileContent(at path: String) -> String? {
-        guard case .ok(let content, _) = readTextFile(at: path) else { return nil }
-        return content
-    }
-
-    private nonisolated static func gitContent(relativePath rel: String, ref: String, cwd: String) -> String? {
-        guard let result = runGit(["show", "\(ref):\(rel)"], cwd: cwd),
-              result.status == 0
-        else { return nil }
-        return result.output
-    }
-
-    private nonisolated static func branchBaseRef(cwd: String) -> String? {
-        for candidate in ["@{upstream}", "origin/main", "origin/master", "main", "master"] {
-            guard let result = runGit(["merge-base", "HEAD", candidate], cwd: cwd),
-                  result.status == 0
-            else { continue }
-            let sha = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !sha.isEmpty { return sha }
-        }
-        return nil
-    }
-
-    private nonisolated static func runGit(_ arguments: [String], cwd: String) -> (status: Int32, output: String)? {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = arguments
-        process.currentDirectoryURL = URL(fileURLWithPath: cwd)
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return nil
-        }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
-    }
-
     /// Close a tab. Disposes its Monaco model and switches focus to a
     /// neighbor if the closed tab was active.
     func close(path: String) {
@@ -850,6 +758,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                     diskModifiedWhileDirty.insert(path)
                     mtimeByPath[path] = now
                     refreshTabBar()
+                    if path == activePath { onDirtyChanged?() }
                 }
             } else {
                 reloadFromDisk(path: path)
@@ -976,6 +885,18 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         // "monacoReady" bridge message to actually push content.
     }
 
+    /// The WebContent process died — Monaco and every model with it. Fail
+    /// in-flight requests and surface the retry overlay instead of leaving
+    /// a silently dead surface that still claims `monacoReady`.
+    nonisolated func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        MainActor.assumeIsolated {
+            monacoReady = false
+            pendingOps.removeAll()
+            drainSelectionRequests()
+            showLoadFailure(message: "The editor process crashed.", showRetry: true)
+        }
+    }
+
     // MARK: - WKScriptMessageHandler
 
     nonisolated func userContentController(
@@ -1014,8 +935,22 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             }
         case "save":
             handleSave(body: body)
+        case "selection":
+            guard let requestID = body["requestID"] as? Int,
+                  let completion = selectionRequests.removeValue(forKey: requestID)
+            else { return }
+            if let path = body["path"] as? String, !path.isEmpty,
+               let text = body["text"] as? String, !text.isEmpty,
+               let start = body["startLine"] as? Int,
+               let end = body["endLine"] as? Int {
+                completion(Selection(path: path, text: text, startLine: start, endLine: end))
+            } else {
+                completion(nil)
+            }
         case "filePickerRequest":
             onFilePickerRequest?(self)
+        case "sendSelectionShortcut":
+            onSendSelectionShortcut?()
         case "ready":
             // Monaco confirmed model swap; nothing to do.
             break
@@ -1034,4 +969,134 @@ private struct DiffGroupTab {
     let mode: EditorDiffMode
     let files: [[String: Any]]
     let isLoading: Bool
+}
+
+// MARK: - Git / diff content helpers (nonisolated statics)
+
+private extension EditorColumn {
+    /// Reads the comparison-side content for the requested diff mode.
+    /// Nonisolated so we can call it from a background queue.
+    private nonisolated static func gitOriginalContent(
+        of absPath: String,
+        cwd: String,
+        mode: EditorDiffMode
+    ) -> String? {
+        guard let rel = relativeGitPath(of: absPath, cwd: cwd) else { return nil }
+        switch mode {
+        case .head:
+            if let content = gitContent(relativePath: rel, ref: "HEAD", cwd: cwd) {
+                return content
+            }
+            // New or untracked files have no blob in HEAD. Treat them as an
+            // empty original so clicking a change always opens a useful diff.
+            return FileManager.default.fileExists(atPath: absPath) ? "" : nil
+        case .branch:
+            guard let base = branchBaseRef(cwd: cwd) else { return nil }
+            // A file added on the branch has no blob at the merge-base; an
+            // empty original gives Monaco the expected "whole file added" diff.
+            return gitContent(relativePath: rel, ref: base, cwd: cwd) ?? ""
+        }
+    }
+
+    private nonisolated static func relativeGitPath(of absPath: String, cwd: String) -> String? {
+        let cwdPath = URL(fileURLWithPath: cwd).standardizedFileURL.path
+        let absolutePath = URL(fileURLWithPath: absPath).standardizedFileURL.path
+        guard absolutePath == cwdPath || absolutePath.hasPrefix(cwdPath + "/") else { return nil }
+        let rel = String(absolutePath.dropFirst(cwdPath.count))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !rel.isEmpty else { return nil }
+        return rel
+    }
+
+    private nonisolated static func diffGroupPath(mode: EditorDiffMode) -> String {
+        "\(diffGroupPathPrefix)\(mode.rawValue)"
+    }
+
+    private nonisolated static func isDiffGroupPath(_ path: String) -> Bool {
+        path.hasPrefix(diffGroupPathPrefix)
+    }
+
+    private nonisolated static func diffFilePayload(
+        of absPath: String,
+        cwd: String,
+        mode: EditorDiffMode
+    ) -> [String: Any]? {
+        guard let rel = relativeGitPath(of: absPath, cwd: cwd) else { return nil }
+        if let largePayload = largeDiffPlaceholderPayload(of: absPath, relativePath: rel) {
+            return largePayload
+        }
+        guard let original = gitOriginalContent(of: absPath, cwd: cwd, mode: mode) else { return nil }
+        let modified = fileContent(at: absPath) ?? ""
+        return [
+            "path": rel,
+            "name": rel,
+            "original": original,
+            "modified": modified
+        ]
+    }
+
+    private nonisolated static func largeDiffPlaceholderPayload(
+        of absPath: String,
+        relativePath rel: String
+    ) -> [String: Any]? {
+        guard let byteCount = fileByteCount(path: absPath),
+              byteCount > maxDiffCollectionFileBytes
+        else { return nil }
+        NSLog("[EditorColumn] replacing large visual diff file \(absPath) (\(byteCount) bytes)")
+        return [
+            "path": rel,
+            "name": rel,
+            "original": "",
+            "modified": "Large file omitted from visual diff (\(byteCount) bytes).",
+            "language": "plaintext"
+        ]
+    }
+
+    private nonisolated static func fileByteCount(path: String) -> UInt64? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attrs[.size] as? NSNumber
+        else { return nil }
+        return size.uint64Value
+    }
+
+    private nonisolated static func fileContent(at path: String) -> String? {
+        guard case .ok(let content, _) = readTextFile(at: path) else { return nil }
+        return content
+    }
+
+    private nonisolated static func gitContent(relativePath rel: String, ref: String, cwd: String) -> String? {
+        guard let result = runGit(["show", "\(ref):\(rel)"], cwd: cwd),
+              result.status == 0
+        else { return nil }
+        return result.output
+    }
+
+    private nonisolated static func branchBaseRef(cwd: String) -> String? {
+        for candidate in ["@{upstream}", "origin/main", "origin/master", "main", "master"] {
+            guard let result = runGit(["merge-base", "HEAD", candidate], cwd: cwd),
+                  result.status == 0
+            else { continue }
+            let sha = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !sha.isEmpty { return sha }
+        }
+        return nil
+    }
+
+    private nonisolated static func runGit(_ arguments: [String], cwd: String) -> (status: Int32, output: String)? {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        process.currentDirectoryURL = URL(fileURLWithPath: cwd)
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+    }
 }

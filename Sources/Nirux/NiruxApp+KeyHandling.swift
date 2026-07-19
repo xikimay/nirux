@@ -85,6 +85,14 @@ extension NiruxApp {
                     if col.isEditor, event.charactersIgnoringModifiers == "p" {
                         return event
                     }
+                    // Cmd+Opt+Return: Monaco resolves this chord itself —
+                    // "Replace All" while the find widget is open, else it
+                    // posts the send-selection bridge message. Routing it to
+                    // the menu here would shadow Replace All.
+                    if col.isEditor, event.keyCode == 0x24,
+                       event.modifierFlags.contains(.option) {
+                        return event
+                    }
                     // Cmd+S (exactly — Option/Shift/Control absent): let
                     // Monaco's save binding fire. The menu would otherwise
                     // consume it for "Toggle Sidebar" (key equivalent "s")
