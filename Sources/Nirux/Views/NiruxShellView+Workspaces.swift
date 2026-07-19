@@ -138,13 +138,16 @@ extension NiruxShellView {
     }
 
     /// Focus a workspace by ID (notification click-through), optionally
-    /// jumping straight to a specific column.
+    /// jumping straight to a specific column. Always flashes the target
+    /// column's border: when the target is already focused, switching is
+    /// a visual no-op and the click would otherwise feel dead.
     func focusWorkspace(id: String, column columnIndex: Int? = nil) {
         guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
         switchToWorkspace(index)
         if let columnIndex, workspaces.indices.contains(index) {
             focusColumnByIndex(columnIndex)
         }
+        flashColumnBorder(workspaceIndex: index, columnIndex: columnIndex)
     }
 
     /// AgentHookCenter resolver: locate the column owning a NIRUX_AGENT_UUID
@@ -333,6 +336,10 @@ extension NiruxShellView {
                 }
             }
         } else {
+            // Collapsing counts as "viewed": the feed was on screen until
+            // this instant, even if the read dwell hadn't fired yet.
+            cancelActivityReadMark()
+            ActivityStore.shared.markAllRead()
             sidebar.isExpanded = false
             relayout(animated: true)
         }
@@ -490,6 +497,8 @@ extension NiruxShellView {
 
     func togglePilotMode() {
         if isSidebarExpanded {
+            cancelActivityReadMark()
+            ActivityStore.shared.markAllRead()
             sidebar.isHidden = true
             isSidebarExpanded = false
             sidebar.isExpanded = false

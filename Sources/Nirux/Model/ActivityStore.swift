@@ -67,6 +67,10 @@ final class ActivityStore {
     static let shared = ActivityStore()
 
     private(set) var entries: [ActivityEntry] = []
+    /// Everything at or before this instant has been seen by the user
+    /// (feed on screen while the app was active). Persisted so unread
+    /// state survives relaunches.
+    private(set) var lastReadTimestamp: TimeInterval = 0
     /// Sidebar refresh trigger — set by the shell.
     var onChange: (() -> Void)?
 
@@ -76,6 +80,27 @@ final class ActivityStore {
 
     static var fileURL: URL {
         Persistence.stateDirectory.appendingPathComponent("activity.json")
+    }
+
+    /// What the sidebar feed shows: signal rows only. Lifecycle rows
+    /// (sessionStart/sessionEnd) stay recorded but drown the feed — a
+    /// typical backlog is mostly starts/ends the user can't act on.
+    var feedEntries: [ActivityEntry] {
+        entries.filter { $0.category == .attention || $0.category == .turnComplete }
+    }
+
+    /// Feed rows the user hasn't seen yet — drives the ACTIVITY badge.
+    var unreadCount: Int {
+        feedEntries.filter { $0.timestamp > lastReadTimestamp }.count
+    }
+
+    /// The feed has been visible to the user — everything currently in it
+    /// counts as seen.
+    func markAllRead() {
+        guard let newest = entries.map(\.timestamp).max(), newest > lastReadTimestamp else { return }
+        lastReadTimestamp = newest
+        scheduleSave()
+        scheduleChangeNotification()
     }
 
     func record(_ entry: ActivityEntry) {
@@ -102,10 +127,36 @@ final class ActivityStore {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: item)
     }
 
+    /// On-disk shape of activity.json. Older builds wrote a bare
+    /// [ActivityEntry] array — decode() accepts both.
+    private struct Archive: Codable {
+        var entries: [ActivityEntry]
+        var lastReadTimestamp: TimeInterval?
+    }
+
+    /// Pure decode so tests can exercise format compat without touching the
+    /// state directory. Legacy array files predate read tracking — their
+    /// whole history counts as read (a badge of 100 on first launch after
+    /// the update would be exactly the noise this feature removes).
+    nonisolated static func decode(_ data: Data) -> (entries: [ActivityEntry], lastReadTimestamp: TimeInterval)? {
+        if let archive = try? JSONDecoder().decode(Archive.self, from: data) {
+            return (archive.entries, archive.lastReadTimestamp ?? archive.entries.map(\.timestamp).max() ?? 0)
+        }
+        if let legacy = try? JSONDecoder().decode([ActivityEntry].self, from: data) {
+            return (legacy, legacy.map(\.timestamp).max() ?? 0)
+        }
+        return nil
+    }
+
+    func encoded() -> Data? {
+        try? JSONEncoder().encode(Archive(entries: entries, lastReadTimestamp: lastReadTimestamp))
+    }
+
     func load() {
         guard let data = try? Data(contentsOf: Self.fileURL),
-              let decoded = try? JSONDecoder().decode([ActivityEntry].self, from: data) else { return }
-        entries = Array(decoded.prefix(Self.maxEntries))
+              let decoded = Self.decode(data) else { return }
+        entries = Array(decoded.entries.prefix(Self.maxEntries))
+        lastReadTimestamp = decoded.lastReadTimestamp
     }
 
     private func scheduleSave() {
@@ -124,7 +175,7 @@ final class ActivityStore {
     }
 
     private func saveNow() {
-        guard let data = try? JSONEncoder().encode(entries) else { return }
+        guard let data = encoded() else { return }
         try? data.write(to: Self.fileURL, options: .atomic)
     }
 }

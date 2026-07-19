@@ -11,6 +11,8 @@ extension SidebarView {
         profileIndicatorView?.removeFromSuperview()
         profileIndicatorView = nil
         hitAreas.removeAll()
+        activityRowBackgrounds.removeAll()
+        hoveredActivityIndex = nil
         guard isExpanded else { setNeedsDisplay(bounds); return }
 
         rebuildBottomIndicators()
@@ -67,7 +69,13 @@ extension SidebarView {
         }
         if !lastActivity.isEmpty {
             yOffset -= SidebarExpandedMetrics.activitySectionGap
-            yOffset = buildSectionHeader("activity", count: lastActivity.count, padding: padding, yOffset: yOffset)
+            // Badge = unread, not total: "3" must mean "3 things happened
+            // since you last looked", so it hides entirely once caught up.
+            let unread = unreadActivityCount
+            yOffset = buildSectionHeader(
+                "activity", count: unread, padding: padding, yOffset: yOffset,
+                showChip: unread > 0, chipIsHighlighted: true
+            )
             yOffset = buildActivityRows(padding: padding, yOffset: yOffset)
         }
         if hasWorkspaces {
@@ -208,7 +216,10 @@ extension SidebarView {
 
     // MARK: - Sections
 
-    private func buildSectionHeader(_ title: String, count: Int, padding: CGFloat, yOffset: CGFloat) -> CGFloat {
+    private func buildSectionHeader(
+        _ title: String, count: Int, padding: CGFloat, yOffset: CGFloat,
+        showChip: Bool = true, chipIsHighlighted: Bool = false
+    ) -> CGFloat {
         let label = textLabel(
             title.uppercased(),
             font: .monospacedSystemFont(ofSize: 10, weight: .bold),
@@ -223,14 +234,18 @@ extension SidebarView {
         addSubviewDoc(label)
         expandedViews.append(label)
 
-        let countChip = badgeView(
-            "\(count)",
-            color: NSColor.white.withAlphaComponent(0.60),
-            background: NSColor.white.withAlphaComponent(0.07)
-        )
-        countChip.frame = NSRect(x: padding + 62, y: yOffset - 18, width: 28, height: 18)
-        addSubviewDoc(countChip)
-        expandedViews.append(countChip)
+        if showChip {
+            let countChip = badgeView(
+                "\(count)",
+                color: chipIsHighlighted ? .systemOrange : NSColor.white.withAlphaComponent(0.60),
+                background: chipIsHighlighted
+                    ? NSColor.systemOrange.withAlphaComponent(0.16)
+                    : NSColor.white.withAlphaComponent(0.07)
+            )
+            countChip.frame = NSRect(x: padding + 62, y: yOffset - 18, width: 28, height: 18)
+            addSubviewDoc(countChip)
+            expandedViews.append(countChip)
+        }
 
         return yOffset - SidebarExpandedMetrics.sectionHeaderAdvance
     }
@@ -262,6 +277,19 @@ extension SidebarView {
 
     // MARK: - Activity feed
 
+    /// Feed rows the user hasn't seen yet — drives the section badge and
+    /// per-row dimming.
+    var unreadActivityCount: Int {
+        lastActivity.filter { $0.timestamp > lastActivityReadTimestamp }.count
+    }
+
+    /// Row whose click target is gone: workspace never resolved or has
+    /// since been closed. Rendered ghosted, no hit area.
+    private func isActivityTargetGone(_ entry: ActivityEntry) -> Bool {
+        guard let id = entry.workspaceID else { return true }
+        return !lastLiveWorkspaceIDs.contains(id)
+    }
+
     /// The "while you were away" log: one row per agent signal event,
     /// newest first, capped for display. Clicking a row focuses the
     /// originating workspace/column via onActivityClicked.
@@ -275,7 +303,29 @@ extension SidebarView {
                 width: bounds.width - padding * 2,
                 height: SidebarExpandedMetrics.activityRowAdvance
             )
-            hitAreas.append(SidebarHitArea(frame: rowFrame, region: .activity(index)))
+            let targetGone = isActivityTargetGone(entry)
+            let isRead = entry.timestamp <= lastActivityReadTimestamp
+            // Ghost > read > unread; ghost rows also lose their hit area so
+            // the cursor/click honestly reflect that there's nothing to focus.
+            let textAlpha: CGFloat = targetGone ? 0.30 : (isRead ? 0.45 : 0.85)
+            let dotAlpha: CGFloat = targetGone ? 0.25 : (isRead ? 0.40 : 1.0)
+            let ageAlpha: CGFloat = targetGone ? 0.20 : (isRead ? 0.26 : 0.38)
+            if !targetGone {
+                hitAreas.append(SidebarHitArea(frame: rowFrame, region: .activity(index)))
+            }
+
+            let fullText = activityText(for: entry)
+            let tooltip = targetGone ? "\(fullText) — workspace closed" : fullText
+
+            // Hover-highlight backing (indexed alongside `.activity(index)`
+            // hits — one per row, gone rows included, so indices stay aligned).
+            let hover = SidebarBackgroundView(frame: rowFrame.insetBy(dx: -8, dy: 1))
+            hover.wantsLayer = true
+            hover.layer?.cornerRadius = 5
+            hover.toolTip = tooltip
+            addSubviewDoc(hover)
+            expandedViews.append(hover)
+            activityRowBackgrounds.append(hover)
 
             let dot = SidebarBackgroundView(frame: NSRect(
                 x: padding + 2,
@@ -284,16 +334,18 @@ extension SidebarView {
                 height: 7
             ))
             dot.wantsLayer = true
-            dot.layer?.backgroundColor = Self.activityColor(for: entry.category).cgColor
+            dot.layer?.backgroundColor = Self.activityColor(for: entry.category)
+                .withAlphaComponent(dotAlpha).cgColor
             dot.layer?.cornerRadius = 3.5
             addSubviewDoc(dot)
             expandedViews.append(dot)
 
             let label = textLabel(
-                activityText(for: entry),
+                fullText,
                 font: .systemFont(ofSize: 11, weight: .medium),
-                color: NSColor.white.withAlphaComponent(0.72)
+                color: NSColor.white.withAlphaComponent(textAlpha)
             )
+            label.toolTip = tooltip
             label.frame = NSRect(
                 x: padding + 16,
                 y: rowFrame.minY + 2,
@@ -306,7 +358,7 @@ extension SidebarView {
             let age = textLabel(
                 Self.relativeAge(since: entry.timestamp),
                 font: .monospacedSystemFont(ofSize: 10, weight: .regular),
-                color: NSColor.white.withAlphaComponent(0.38)
+                color: NSColor.white.withAlphaComponent(ageAlpha)
             )
             age.alignment = .right
             age.frame = NSRect(

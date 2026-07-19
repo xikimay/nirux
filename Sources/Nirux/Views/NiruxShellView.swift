@@ -52,6 +52,10 @@ final class NiruxShellView: NSView {
     var heartbeatTimer: Timer?
     var heartbeatTick: UInt = 0
 
+    /// Dwell timer that marks the activity feed read after it's been
+    /// visibly on screen (see scheduleActivityReadMark).
+    var activityReadTimer: Timer?
+
     // Panel references (stored properties must live in main class declaration)
     var nameInputPanel: NameInputPanel?
     var worktreePanel: WorktreePanel?

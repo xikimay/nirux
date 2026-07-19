@@ -60,7 +60,13 @@ extension NiruxShellView {
                 hasAttention: hasAttention
             )
         }
-        sidebar.update(profiles: profileInfos, workspaces: infos, activity: ActivityStore.shared.entries)
+        sidebar.update(
+            profiles: profileInfos, workspaces: infos,
+            activity: ActivityStore.shared.feedEntries,
+            activityReadTimestamp: ActivityStore.shared.lastReadTimestamp,
+            liveWorkspaceIDs: Set(workspaces.map(\.id))
+        )
+        scheduleActivityReadMark()
 
         // Dock badge: workspaces currently waiting for attention.
         let attentionCount = workspaces.filter { workspace in
@@ -168,6 +174,61 @@ extension NiruxShellView {
     }
 
     // MARK: - Activity feed
+
+    /// Unread entries become read once they've actually been on screen for
+    /// a beat: sidebar expanded, app active. A short dwell keeps the badge
+    /// visible long enough to register ("3 new") before rows dim, and a
+    /// collapse counts as "viewed" immediately (handled in toggleSidebar).
+    private func scheduleActivityReadMark() {
+        guard isSidebarExpanded, NSApp.isActive, ActivityStore.shared.unreadCount > 0 else { return }
+        guard activityReadTimer == nil else { return }
+        activityReadTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.activityReadTimer = nil
+                guard self.isSidebarExpanded, NSApp.isActive else { return }
+                ActivityStore.shared.markAllRead()
+            }
+        }
+    }
+
+    func cancelActivityReadMark() {
+        activityReadTimer?.invalidate()
+        activityReadTimer = nil
+    }
+
+    /// One-shot border pulse on a column — click feedback for activity-feed
+    /// and notification click-through, which are otherwise a visual no-op
+    /// when the target is already focused. Runs as an overlay so it can't
+    /// clobber the focus border or the attention pulse.
+    func flashColumnBorder(workspaceIndex: Int, columnIndex: Int?) {
+        guard let workspace = workspaces[safe: workspaceIndex] else { return }
+        let colIndex = columnIndex.flatMap { workspace.columns.indices.contains($0) ? $0 : nil }
+            ?? workspace.focusedIndex
+        guard let col = workspace.columns[safe: colIndex] else { return }
+
+        let overlay = SidebarBackgroundView(frame: col.view.bounds)
+        overlay.autoresizingMask = [.width, .height]
+        overlay.wantsLayer = true
+        overlay.layer?.cornerRadius = 6
+        overlay.layer?.borderWidth = 3
+        overlay.layer?.borderColor = NSColor.niruxAccent.cgColor
+        col.view.addSubview(overlay)
+
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak overlay] in
+            overlay?.removeFromSuperview()
+        }
+        let blink = CABasicAnimation(keyPath: "opacity")
+        blink.fromValue = 1.0
+        blink.toValue = 0.0
+        blink.duration = 0.3
+        blink.repeatCount = 2
+        blink.fillMode = .forwards
+        blink.isRemovedOnCompletion = false
+        overlay.layer?.add(blink, forKey: "activityFlash")
+        CATransaction.commit()
+    }
 
     /// AgentHookCenter.onActivity entry point. Signal events become feed
     /// rows; prompt/tool pings are filtered out by ActivityEntry.init.

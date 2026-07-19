@@ -40,6 +40,14 @@ final class SidebarView: NSView {
     var lastProfiles: [ProfileInfo] = []
     /// Activity feed snapshot shown in the expanded "activity" section.
     var lastActivity: [ActivityEntry] = []
+    /// Entries newer than this render bright and count toward the badge.
+    var lastActivityReadTimestamp: TimeInterval = 0
+    /// Workspace IDs that still exist — rows whose target is gone render
+    /// ghosted and don't register a hit area.
+    var lastLiveWorkspaceIDs: Set<String> = []
+    /// Hover-highlight backing views, one per rendered activity row
+    /// (same index as the `.activity(index)` hit regions).
+    var activityRowBackgrounds: [NSView] = []
     var expandedViews: [NSView] = []
     var profileIndicatorView: SidebarDotIndicatorView?
     var hitAreas: [SidebarHitArea] = []
@@ -50,6 +58,7 @@ final class SidebarView: NSView {
     /// the viewport back while the user is dragging the scroller.
     var lastFollowedActiveIndex: Int = Int.min
     private var hoveredLabel: NSTextField?
+    var hoveredActivityIndex: Int?
     private var pulseLayers: [CALayer] = []
     private var trackingArea: NSTrackingArea?
 
@@ -94,10 +103,15 @@ final class SidebarView: NSView {
         if isExpanded { rebuildContent() } else { setNeedsDisplay(bounds) }
     }
 
-    func update(profiles: [ProfileInfo], workspaces: [WorkspaceInfo], activity: [ActivityEntry] = []) {
+    func update(
+        profiles: [ProfileInfo], workspaces: [WorkspaceInfo], activity: [ActivityEntry] = [],
+        activityReadTimestamp: TimeInterval = 0, liveWorkspaceIDs: Set<String> = []
+    ) {
         lastProfiles = profiles
         lastInfos = workspaces
         lastActivity = activity
+        lastActivityReadTimestamp = activityReadTimestamp
+        lastLiveWorkspaceIDs = liveWorkspaceIDs
         if isExpanded { rebuildContent() } else { setNeedsDisplay(bounds) }
     }
 
@@ -262,27 +276,48 @@ final class SidebarView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        guard isExpanded else { clearHover(); return }
+        guard isExpanded else { clearHover(); clearActivityHover(); return }
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
 
         guard let area = hitArea(at: point) else {
             clearHover()
+            clearActivityHover()
             NSCursor.arrow.set()
             return
         }
 
         switch area.region {
         case .link(_, let label):
+            clearActivityHover()
             NSCursor.pointingHand.set()
             if hoveredLabel !== label {
                 clearHover()
                 applyUnderline(to: label)
                 hoveredLabel = label
             }
-        case .spaceHeader, .column, .workspace, .activity:
+        case .spaceHeader, .column, .workspace:
             clearHover()
+            clearActivityHover()
+            NSCursor.pointingHand.set()
+        case .activity(let index):
+            clearHover()
+            setActivityHover(index)
             NSCursor.pointingHand.set()
         }
+    }
+
+    private func setActivityHover(_ index: Int) {
+        guard hoveredActivityIndex != index else { return }
+        clearActivityHover()
+        guard let background = activityRowBackgrounds[safe: index] else { return }
+        background.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
+        hoveredActivityIndex = index
+    }
+
+    func clearActivityHover() {
+        guard let index = hoveredActivityIndex else { return }
+        activityRowBackgrounds[safe: index]?.layer?.backgroundColor = NSColor.clear.cgColor
+        hoveredActivityIndex = nil
     }
 
     private func hitArea(at point: NSPoint) -> SidebarHitArea? {
@@ -386,6 +421,7 @@ final class SidebarView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         clearHover()
+        clearActivityHover()
     }
 
     private func applyUnderline(to label: NSTextField) {

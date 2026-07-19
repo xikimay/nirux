@@ -82,6 +82,80 @@ final class ActivityStoreTests: XCTestCase {
         XCTAssertEqual(store.entries.last?.timestamp, 20)
     }
 
+    private func makeEntry(
+        _ category: ActivityEntry.Category, timestamp: TimeInterval, workspaceID: String? = "ws"
+    ) -> ActivityEntry {
+        ActivityEntry(
+            category: category, agentKind: "claude", workspaceID: workspaceID,
+            columnIndex: nil, workspaceTitle: "ws", detail: nil, timestamp: timestamp
+        )
+    }
+
+    @MainActor
+    func testFeedEntriesDropLifecycleNoise() {
+        let store = ActivityStore()
+        store.record(makeEntry(.sessionStart, timestamp: 1))
+        store.record(makeEntry(.attention, timestamp: 2))
+        store.record(makeEntry(.sessionEnd, timestamp: 3))
+        store.record(makeEntry(.turnComplete, timestamp: 4))
+        XCTAssertEqual(store.entries.count, 4, "history keeps everything")
+        XCTAssertEqual(store.feedEntries.map(\.timestamp), [4, 2], "feed shows signals only")
+    }
+
+    @MainActor
+    func testUnreadCountAndMarkAllRead() {
+        let store = ActivityStore()
+        XCTAssertEqual(store.unreadCount, 0)
+        store.record(makeEntry(.attention, timestamp: 10))
+        store.record(makeEntry(.sessionStart, timestamp: 11))
+        store.record(makeEntry(.turnComplete, timestamp: 12))
+        XCTAssertEqual(store.unreadCount, 2, "lifecycle rows don't count toward the badge")
+
+        store.markAllRead()
+        XCTAssertEqual(store.unreadCount, 0)
+        XCTAssertEqual(store.lastReadTimestamp, 12)
+
+        store.record(makeEntry(.attention, timestamp: 13))
+        XCTAssertEqual(store.unreadCount, 1, "new entries after markAllRead are unread again")
+    }
+
+    @MainActor
+    func testMarkAllReadIsMonotonic() {
+        let store = ActivityStore()
+        store.record(makeEntry(.attention, timestamp: 50))
+        store.markAllRead()
+        store.record(makeEntry(.attention, timestamp: 40, workspaceID: "late-clock"))
+        store.markAllRead()
+        XCTAssertEqual(store.lastReadTimestamp, 50, "an older-stamped entry can't move the read mark back")
+    }
+
+    @MainActor
+    func testDecodeLegacyArrayTreatsHistoryAsRead() throws {
+        let legacy = [makeEntry(.attention, timestamp: 7), makeEntry(.turnComplete, timestamp: 9)]
+        let data = try JSONEncoder().encode(legacy)
+        let decoded = ActivityStore.decode(data)
+        XCTAssertEqual(decoded?.entries.count, 2)
+        XCTAssertEqual(decoded?.lastReadTimestamp, 9, "pre-update history must not light up the badge")
+    }
+
+    @MainActor
+    func testEncodeDecodeRoundtripPreservesReadState() throws {
+        let store = ActivityStore()
+        store.record(makeEntry(.attention, timestamp: 5))
+        store.record(makeEntry(.turnComplete, timestamp: 6))
+        store.markAllRead()
+        store.record(makeEntry(.attention, timestamp: 8))
+
+        let data = try XCTUnwrap(store.encoded())
+        let decoded = try XCTUnwrap(ActivityStore.decode(data))
+        XCTAssertEqual(decoded.entries.map(\.timestamp), [8, 6, 5])
+        XCTAssertEqual(decoded.lastReadTimestamp, 6)
+    }
+
+    func testDecodeGarbageReturnsNil() {
+        XCTAssertNil(ActivityStore.decode(Data("not json".utf8)))
+    }
+
     func testRelativeAge() {
         let now = Date(timeIntervalSince1970: 10_000)
         XCTAssertEqual(SidebarView.relativeAge(since: 10_000 - 42, now: now), "42s")
