@@ -21,6 +21,12 @@
   var wordWrap = false;
   var minimapEnabled = false;
   var editorFontSize = 13;
+  // path -> { content, count } for saves posted to Swift but not yet
+  // acknowledged via markSaved. markSaved must adopt the content that was
+  // actually written, not whatever the buffer holds when the ack arrives —
+  // keystrokes typed during the round-trip would otherwise be blessed as
+  // clean without ever reaching disk.
+  var pendingSaves = {};
 
   function postToSwift(message) {
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.nirux) {
@@ -172,14 +178,22 @@
     entry.model.dispose();
     delete models[path];
     delete viewStates[path];
+    delete pendingSaves[path];
     if (currentPath === path) currentPath = null;
   }
 
   function markSaved(path) {
     var entry = models[path];
     if (!entry) return;
-    entry.cleanValue = entry.model.getValue();
-    postToSwift({ type: "dirty", path: path, isDirty: false });
+    var pending = pendingSaves[path];
+    if (pending) {
+      entry.cleanValue = pending.content;
+      pending.count--;
+      if (pending.count === 0) delete pendingSaves[path];
+    } else {
+      entry.cleanValue = entry.model.getValue();
+    }
+    reportDirtyFor(path);
   }
 
   function splitLines(text) {
@@ -578,28 +592,37 @@
     if (action) action.run();
   }
 
+  function postSave(path, entry) {
+    var content = entry.model.getValue();
+    var pending = pendingSaves[path];
+    if (pending) {
+      pending.content = content;
+      pending.count++;
+    } else {
+      pendingSaves[path] = { content: content, count: 1 };
+    }
+    postToSwift({ type: "save", path: path, content: content });
+  }
+
   function requestSave() {
     if (!currentPath) return;
     var entry = models[currentPath];
     if (!entry) return;
-    postToSwift({
-      type: "save",
-      path: currentPath,
-      content: entry.model.getValue()
-    });
+    postSave(currentPath, entry);
   }
 
   // Save every dirty buffer, not just the active tab. Each save goes through
   // the same Swift round-trip as Cmd+S (write + markSaved per path).
-  function saveAllDirty() {
+  // skipPaths carries buffers Swift knows changed on disk while dirty —
+  // writing those would clobber the external change.
+  function saveAllDirty(skipPaths) {
+    var skip = {};
+    (skipPaths || []).forEach(function (path) { skip[path] = true; });
     Object.keys(models).forEach(function (path) {
+      if (skip[path]) return;
       var entry = models[path];
       if (entry.model.getValue() === entry.cleanValue) return;
-      postToSwift({
-        type: "save",
-        path: path,
-        content: entry.model.getValue()
-      });
+      postSave(path, entry);
     });
   }
 
@@ -659,7 +682,7 @@
       case "enterDiffGroup": enterPierreDiffGroup(msg); break;
       case "exitDiff": exitDiff(); break;
       case "toggleWordWrap": toggleWordWrap(); break;
-      case "saveAll": saveAllDirty(); break;
+      case "saveAll": saveAllDirty(msg.skipPaths); break;
       case "toggleMinimap": toggleMinimap(); break;
     }
   }
