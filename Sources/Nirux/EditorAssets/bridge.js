@@ -19,6 +19,7 @@
   // Per-tab view state (scroll + cursor) so switching tabs restores position.
   var viewStates = {};
   var wordWrap = false;
+  var minimapEnabled = false;
   var editorFontSize = 13;
 
   function postToSwift(message) {
@@ -360,7 +361,7 @@
         automaticLayout: true,
         fontFamily: "ui-monospace, SF Mono, Menlo, monospace",
         fontSize: 13,
-        minimap: { enabled: false },
+        minimap: { enabled: minimapEnabled },
         renderLineHighlight: "none",
         renderSideBySide: true,
         useInlineViewWhenSpaceIsLimited: false,
@@ -588,6 +589,20 @@
     });
   }
 
+  // Save every dirty buffer, not just the active tab. Each save goes through
+  // the same Swift round-trip as Cmd+S (write + markSaved per path).
+  function saveAllDirty() {
+    Object.keys(models).forEach(function (path) {
+      var entry = models[path];
+      if (entry.model.getValue() === entry.cleanValue) return;
+      postToSwift({
+        type: "save",
+        path: path,
+        content: entry.model.getValue()
+      });
+    });
+  }
+
   function applyFontSize() {
     if (editor) editor.updateOptions({ fontSize: editorFontSize });
     if (diffEditor) diffEditor.updateOptions({ fontSize: editorFontSize });
@@ -616,6 +631,12 @@
     if (diffEditor) diffEditor.updateOptions({ wordWrap: wrap });
   }
 
+  function toggleMinimap() {
+    minimapEnabled = !minimapEnabled;
+    if (editor) editor.updateOptions({ minimap: { enabled: minimapEnabled } });
+    if (diffEditor) diffEditor.updateOptions({ minimap: { enabled: minimapEnabled } });
+  }
+
   function handleMessage(msg) {
     switch (msg.type) {
       case "openFile": applyOpen(msg); break;
@@ -638,6 +659,8 @@
       case "enterDiffGroup": enterPierreDiffGroup(msg); break;
       case "exitDiff": exitDiff(); break;
       case "toggleWordWrap": toggleWordWrap(); break;
+      case "saveAll": saveAllDirty(); break;
+      case "toggleMinimap": toggleMinimap(); break;
     }
   }
 

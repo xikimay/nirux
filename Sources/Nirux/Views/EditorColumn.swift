@@ -444,6 +444,17 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         sendBridge(["type": "toggleWordWrap"])
     }
 
+    /// Save every dirty buffer. JS iterates its models and posts one save per
+    /// dirty path, so each file goes through the normal Cmd+S write path.
+    func saveAll() {
+        sendBridge(["type": "saveAll"])
+    }
+
+    /// Toggle the minimap in the Monaco surface (and diff surface when active).
+    func toggleMinimap() {
+        sendBridge(["type": "toggleMinimap"])
+    }
+
     func toggleDiff(mode: EditorDiffMode) {
         selectedDiffMode = mode
         refreshTabBar()
