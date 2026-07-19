@@ -56,7 +56,7 @@ The intended setup is:
 1. Open Nirux and use the first workspace as your main repo workspace.
 2. In that workspace, `cd` into the main checkout of the repo.
 3. Open the command palette with `Cmd+P`.
-4. Run `Install Worktree Skill` before starting agent work. You only need to do this once.
+4. Run `Install Agent Skills` before starting agent work. You only need to do this once.
 5. Launch Claude Code or Codex from the palette.
 6. Ask the agent to start a feature, bugfix, or investigation in a separate workspace.
 
@@ -66,7 +66,7 @@ That leaves your main workspace on the original checkout while each isolated bra
 
 Typical command palette actions:
 
-- Install Worktree Skill
+- Install Agent Skills
 - Open Claude Code
 - Open Codex
 - New Worktree
@@ -136,14 +136,24 @@ nirux://new-worktree?branch=feat/example&repo=/path/to/repo&agent=codex&handover
 
 Supported agents are `claude` and `codex`. The optional `profile` query parameter targets the Nirux session/space that should receive the new workspace; Nirux terminals expose it as `NIRUX_PROFILE_ID` for the worktree skill. When a handover file is provided, Nirux moves it into the new worktree as `.claude-handover.md` or `.codex-handover.md`, then launches the selected agent with a prompt to read it.
 
-The command palette action `Install Worktree Skill` writes a local `nirux-worktree` skill to:
+Open a file in the editor column at a line range (used by agents to show code instead of pasting it into the terminal):
+
+```text
+nirux://open-editor?file=/path/to/file.swift&line=42&endLine=57&workspace=<NIRUX_WORKSPACE_ID>
+```
+
+`file` must be an absolute, URL-encoded path to an existing regular file of at most 5 MB. `line` and `endLine` are optional 1-based line numbers; when both are present the editor highlights the whole range. `workspace` is optional — when it matches a workspace ID (Nirux terminals expose it as `NIRUX_WORKSPACE_ID`), Nirux switches to that workspace first. The open never pops dialogs and never steals keyboard focus.
+
+The command palette action `Install Agent Skills` writes the bundled skills to:
 
 ```text
 ~/.agents/skills/nirux-worktree/SKILL.md
+~/.agents/skills/nirux-show-code/SKILL.md
 ~/.claude/skills/nirux-worktree/SKILL.md
+~/.claude/skills/nirux-show-code/SKILL.md
 ```
 
-That lets supported agents open isolated Nirux workspaces when the user asks to start work on a feature, bug, or separate branch.
+`nirux-worktree` lets supported agents open isolated Nirux workspaces when the user asks to start work on a feature, bug, or separate branch. `nirux-show-code` teaches agents to open code in the editor column via `nirux://open-editor` when the user asks to see code.
 
 ## Local Development
 

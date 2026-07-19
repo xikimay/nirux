@@ -100,4 +100,42 @@ final class OpenEditorRequestTests: XCTestCase {
         let request = parse("nirux://open-editor?file=/tmp/a.swift&workspace=")
         XCTAssertNil(request?.workspaceID)
     }
+
+    // MARK: - Real filesystem check
+
+    func testFileExistsOnDiskAcceptsRegularFilesOnly() throws {
+        let dir = NSTemporaryDirectory() + "open-editor-tests-" + UUID().uuidString
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+
+        let regular = dir + "/regular.txt"
+        FileManager.default.createFile(atPath: regular, contents: Data("hi".utf8))
+        XCTAssertTrue(OpenEditorRequest.fileExistsOnDisk(regular))
+
+        XCTAssertFalse(OpenEditorRequest.fileExistsOnDisk(dir), "directories must be rejected")
+        XCTAssertFalse(OpenEditorRequest.fileExistsOnDisk(dir + "/missing.txt"))
+
+        // A FIFO would hang EditorColumn's synchronous main-thread read.
+        let fifo = dir + "/fifo"
+        guard mkfifo(fifo, 0o644) == 0 else { return XCTFail("mkfifo failed") }
+        XCTAssertFalse(OpenEditorRequest.fileExistsOnDisk(fifo))
+
+        let linkToFifo = dir + "/link-to-fifo"
+        try FileManager.default.createSymbolicLink(atPath: linkToFifo, withDestinationPath: fifo)
+        XCTAssertFalse(OpenEditorRequest.fileExistsOnDisk(linkToFifo), "symlinked FIFO must be rejected")
+
+        let linkToRegular = dir + "/link-to-regular"
+        try FileManager.default.createSymbolicLink(atPath: linkToRegular, withDestinationPath: regular)
+        XCTAssertTrue(OpenEditorRequest.fileExistsOnDisk(linkToRegular))
+
+        XCTAssertFalse(OpenEditorRequest.fileExistsOnDisk("/dev/zero"), "device nodes must be rejected")
+
+        // URL opens are non-interactive, so oversized files are refused
+        // instead of confirmed via dialog.
+        let big = dir + "/big.bin"
+        FileManager.default.createFile(
+            atPath: big, contents: Data(count: Int(OpenEditorRequest.maxFileBytes) + 1)
+        )
+        XCTAssertFalse(OpenEditorRequest.fileExistsOnDisk(big), "oversized files must be rejected")
+    }
 }

@@ -14,6 +14,11 @@ struct OpenEditorRequest: Equatable {
     /// to reject garbage like Int.max from a hostile caller.
     static let maxLine = 10_000_000
 
+    /// URL-triggered opens are non-interactive (no large-file confirmation
+    /// dialog), so refuse outright what EditorColumn would ask about —
+    /// mirrors EditorColumn.largeFileWarningBytes.
+    static let maxFileBytes: UInt64 = 5_000_000
+
     /// `isOpenableFile` must return true only for paths that exist and are
     /// regular files (not directories). Injectable for tests.
     init?(
@@ -52,9 +57,16 @@ struct OpenEditorRequest: Equatable {
         workspaceID = (workspace?.isEmpty == false) ? workspace : nil
     }
 
-    private static func fileExistsOnDisk(_ path: String) -> Bool {
-        var isDirectory: ObjCBool = false
-        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
-            && !isDirectory.boolValue
+    /// Regular files only, capped in size: a FIFO or device node (reachable
+    /// directly or via symlink) would hang or flood the synchronous
+    /// main-thread read in EditorColumn — attributesOfItem doesn't follow
+    /// the final symlink, so resolve the whole path first.
+    static func fileExistsOnDisk(_ path: String) -> Bool {
+        let resolved = (path as NSString).resolvingSymlinksInPath
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: resolved),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let size = attributes[.size] as? UInt64
+        else { return false }
+        return size <= maxFileBytes
     }
 }

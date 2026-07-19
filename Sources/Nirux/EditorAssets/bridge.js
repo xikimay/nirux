@@ -132,11 +132,14 @@
     if (payload.activate === false) return;
     switchToPath(path);
     if (typeof payload.line === "number" && payload.line > 0) {
-      revealLine(payload.line, payload.column || 1, payload.endLine);
+      revealLine(payload.line, payload.column || 1, payload.endLine, payload.focus);
     }
   }
 
-  function revealLine(line, column, endLine) {
+  // focus === false (agent-driven opens) reveals without grabbing keyboard
+  // focus, so a user mid-keystroke in a terminal doesn't suddenly type
+  // into the source file.
+  function revealLine(line, column, endLine, focus) {
     var target = activeEditor();
     if (!target) return;
     var model = target.getModel();
@@ -144,8 +147,9 @@
       line = Math.min(line, model.getLineCount());
     }
     // A range (agent "show me this code" flow): select line..endLine so the
-    // snippet is visibly highlighted, not just scrolled to.
-    if (typeof endLine === "number" && endLine > line && model) {
+    // snippet is visibly highlighted, not just scrolled to. endLine == line
+    // still selects — a one-line snippet deserves its highlight too.
+    if (typeof endLine === "number" && endLine >= line && model) {
       var end = Math.min(endLine, model.getLineCount());
       var range = {
         startLineNumber: line,
@@ -155,12 +159,12 @@
       };
       target.setSelection(range);
       target.revealRangeInCenter(range);
-      target.focus();
+      if (focus !== false) target.focus();
       return;
     }
     target.revealLineInCenter(line);
     target.setPosition({ lineNumber: line, column: column || 1 });
-    target.focus();
+    if (focus !== false) target.focus();
   }
 
   function activeEditor() {
@@ -722,7 +726,7 @@
       case "markSaved": markSaved(msg.path); break;
       case "goToLine":
         if (msg.path && currentPath !== msg.path) switchToPath(msg.path);
-        if (typeof msg.line === "number") revealLine(msg.line, msg.column, msg.endLine);
+        if (typeof msg.line === "number") revealLine(msg.line, msg.column, msg.endLine, msg.focus);
         break;
       case "enterDiff":
         if (msg.viewer === "monaco") {

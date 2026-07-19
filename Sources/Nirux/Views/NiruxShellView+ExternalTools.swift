@@ -236,13 +236,16 @@ extension NiruxShellView {
         ## Steps
 
         1. **Locate the code** with Grep/Read: absolute file path, start line, and end
-           line of the relevant snippet.
+           line of the relevant snippet. Verify the file exists (`[ -f "$path" ]`) —
+           Nirux silently ignores requests for missing files, so a bad path would
+           leave the user staring at nothing.
         2. **Open it in the editor**:
            ```bash
-           open "nirux://open-editor?file=<url-encoded absolute path>&line=<start>&endLine=<end>&workspace=$NIRUX_WORKSPACE_ID"
+           encoded=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$abs_path")
+           open "nirux://open-editor?file=${encoded}&line=<start>&endLine=<end>&workspace=$NIRUX_WORKSPACE_ID"
            ```
-           - `file` is required and must be an **absolute** path, URL-encoded (spaces
-             etc.). The file must exist.
+           - `file` is required and must be an **absolute** path, URL-encoded. Files
+             larger than 5 MB are refused — quote the snippet in the reply instead.
            - `line` is optional (1-based). `endLine` is optional; when present the
              editor selects/highlights the whole `line..endLine` range — prefer passing
              both so the user sees the snippet boundaries.
@@ -251,6 +254,10 @@ extension NiruxShellView {
         3. **Still answer in the terminal**, one line: what it is and where, e.g.
            `AgentHookCenter.swift:44 — parsing du workspaceID`. The editor shows the
            code; the reply gives the pointer.
+
+        Requires a Nirux build from 2026-07-20 or newer — on older builds the URL
+        only brings Nirux forward without opening anything. If nothing opens, fall
+        back to quoting the code in the reply.
 
         ## Multiple matches
 
@@ -420,6 +427,7 @@ extension NiruxShellView {
     /// file: links (which pass the workspace the link was clicked in).
     func openInEditorColumn(
         path: String, line: Int? = nil, endLine: Int? = nil, workspaceCwd: String? = nil,
+        takeFocus: Bool = true, interactive: Bool = true,
         in targetWorkspace: WorkspaceState? = nil
     ) {
         guard let workspace = targetWorkspace ?? activeWorkspace else { return }
@@ -430,7 +438,7 @@ extension NiruxShellView {
             ?? (workspaceCwd == nil ? workspace.columns.compactMap { $0.editorColumn }.first : nil)
 
         if let existing = existingEditor {
-            existing.open(path: path, line: line, endLine: endLine)
+            existing.open(path: path, line: line, endLine: endLine, takeFocus: takeFocus, interactive: interactive)
             if let idx = workspace.columns.firstIndex(where: { $0.editorColumn === existing }) {
                 workspace.focusedIndex = idx
                 relayout(animated: false)
@@ -444,7 +452,7 @@ extension NiruxShellView {
         workspace.addEditorColumn(workspaceCwd: editorRoot)
         if let editor = workspace.columns[safe: workspace.focusedIndex]?.editorColumn {
             wireEditor(editor)
-            editor.open(path: path, line: line, endLine: endLine)
+            editor.open(path: path, line: line, endLine: endLine, takeFocus: takeFocus, interactive: interactive)
         }
         relayout(animated: false)
         updateSidebar()
@@ -453,11 +461,15 @@ extension NiruxShellView {
     /// Entry point for `nirux://open-editor` (agents opening a snippet from
     /// the terminal). Switches to the requested workspace when it resolves;
     /// an unknown or absent workspace falls through to the active one.
+    /// Non-interactive and unfocused: a URL-triggered open must never pop a
+    /// blocking modal (any app can fire the URL) nor move keyboard focus
+    /// into the buffer while the user is typing elsewhere.
     func openEditorFromURL(_ request: OpenEditorRequest) {
         let target = request.workspaceID.flatMap { id in workspaces.first { $0.id == id } }
         if let target { focusWorkspace(id: target.id) }
         openInEditorColumn(
-            path: request.file, line: request.line, endLine: request.endLine, in: target
+            path: request.file, line: request.line, endLine: request.endLine,
+            takeFocus: false, interactive: false, in: target
         )
     }
 
