@@ -77,7 +77,6 @@ extension SidebarView {
         }
 
         refreshActivityHoverFromMouse()
-        refreshMenuAffordanceHoverFromMouse()
 
         let clip = contentScrollView.contentView
         let activeIndex = activeWorkspaceIndex
@@ -104,7 +103,6 @@ extension SidebarView {
         profileIndicatorView?.removeFromSuperview()
         profileIndicatorView = nil
         hitAreas.removeAll()
-        menuAffordances.removeAll()
         activityRowBackgrounds.removeAll()
         hoveredActivityIndex = nil
         activitySectionRect = nil
@@ -453,17 +451,13 @@ extension SidebarView {
             workspace: workspace,
             sidebarWidth: bounds.width,
             padding: padding,
-            yOffset: yOffset,
-            showsMenuButton: workspace.index == hoveredWorkspaceIndex
+            yOffset: yOffset
         ).render()
         for view in result.views {
             addSubviewDoc(view)
             expandedViews.append(view)
         }
         hitAreas.append(contentsOf: result.hitAreas)
-        if let button = result.menuButton, let chip = result.countChip {
-            menuAffordances[workspace.index] = (button: button, chip: chip)
-        }
         return result.bottomY
     }
 

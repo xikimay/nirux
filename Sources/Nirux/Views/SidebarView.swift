@@ -86,15 +86,6 @@ final class SidebarView: NSView {
     /// actually changes — not on every periodic refresh, which would yank
     /// the viewport back while the user is dragging the scroller.
     var lastFollowedActiveIndex: Int = Int.min
-
-    /// Workspace card currently under the pointer — its "⋯" action button is
-    /// shown in place of the column-count chip. Persisted here (not on the
-    /// views) so the periodic rebuild re-applies it.
-    var hoveredWorkspaceIndex: Int?
-    /// Per-workspace ("⋯" button, count chip) pairs registered at rebuild so
-    /// hover changes can swap visibility without a full rebuild.
-    var menuAffordances: [Int: (button: NSView, chip: NSView)] = [:]
-
     private var hoveredLabel: NSTextField?
     var hoveredActivityIndex: Int?
     private var pulseLayers: [CALayer] = []
@@ -210,15 +201,6 @@ final class SidebarView: NSView {
         let point = contentDocumentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
         guard let area = hitArea(at: point), case .activity(let index) = area.region else { return }
         setActivityHover(index)
-    }
-
-    /// Re-derive the "⋯" affordance hover from the live mouse position.
-    /// Called after every rebuild — rows may have shifted under a stationary
-    /// pointer (scroll, reorder, heartbeat data change).
-    func refreshMenuAffordanceHoverFromMouse() {
-        guard isExpanded, let window else { return }
-        let point = contentDocumentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
-        updateMenuAffordanceHover(to: workspaceCardIndex(at: point))
     }
 
     /// Fade out the collapsed dots, then call completion.
@@ -390,7 +372,6 @@ final class SidebarView: NSView {
     override func mouseMoved(with event: NSEvent) {
         guard isExpanded else { clearHover(); clearActivityHover(); return }
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
-        updateMenuAffordanceHover(to: workspaceCardIndex(at: point))
 
         guard let area = hitArea(at: point) else {
             clearHover()
@@ -416,25 +397,6 @@ final class SidebarView: NSView {
             clearHover()
             setActivityHover(index)
             NSCursor.pointingHand.set()
-        }
-    }
-
-    /// Workspace card whose full row frame contains the point, regardless of
-    /// which sub-region (link, column, menu button) sits on top of it.
-    private func workspaceCardIndex(at point: NSPoint) -> Int? {
-        for area in hitAreas {
-            if case .workspace(let index) = area.region, area.frame.contains(point) { return index }
-        }
-        return nil
-    }
-
-    private func updateMenuAffordanceHover(to index: Int?) {
-        guard hoveredWorkspaceIndex != index else { return }
-        hoveredWorkspaceIndex = index
-        for (workspaceIndex, views) in menuAffordances {
-            let hovered = workspaceIndex == index
-            views.button.isHidden = !hovered
-            views.chip.isHidden = hovered
         }
     }
 
@@ -605,7 +567,6 @@ final class SidebarView: NSView {
     override func mouseExited(with event: NSEvent) {
         clearHover()
         clearActivityHover()
-        updateMenuAffordanceHover(to: nil)
     }
 
     private func applyUnderline(to label: NSTextField) {
