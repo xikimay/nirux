@@ -300,9 +300,68 @@ extension NiruxShellView {
             if didChange { workspaceStore.selectWorkspace(at: workspaceIndex) }
         case .markInactive:
             didChange = workspaceStore.setWorkspaceInactive(at: workspaceIndex, true)
+        case .close:
+            requestCloseWorkspace(at: workspaceIndex)
+            return
+        case .rename:
+            showRenamePanel(workspaceIndex: workspaceIndex)
+            return
+        case .newWorkspace:
+            addWorkspace()
+            return
+        case .closeColumn(let columnIndex):
+            closeColumn(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
+            return
         }
         guard didChange else { return }
         relayout(animated: true)
+        updateSidebar()
+        focusActiveTerminal(in: window)
+        saveState()
+    }
+
+    /// Sidebar-menu close path: unlike the last-column ⌘W fallthrough, a
+    /// menu click is one careless gesture away — confirm before killing
+    /// live agent sessions or multi-column workspaces.
+    func requestCloseWorkspace(at index: Int) {
+        guard let workspace = workspaces[safe: index] else { return }
+        let context = WorkspaceClosePolicy.Context(
+            totalWorkspaceCount: workspaces.count,
+            columnCount: workspace.columns.count,
+            hasBusyAgent: workspace.columns.contains { ($0.pty?.cachedAgentState ?? .idle) != .idle },
+            isWorktreeBacked: GitWorktree.isLinkedWorktree(at: workspace.cwd)
+        )
+        switch WorkspaceClosePolicy.decision(for: context) {
+        case .blocked:
+            return
+        case .close:
+            closeWorkspace(at: index)
+        case .confirm(let details):
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Close workspace “\(workspace.title)”?"
+            alert.informativeText = details.joined(separator: "\n")
+            alert.addButton(withTitle: "Close Workspace")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            closeWorkspace(at: index)
+        }
+    }
+
+    /// Close a specific column of a specific workspace (sidebar context
+    /// menu). The ⌘W path only reaches the focused column of the active
+    /// workspace; this mirrors its non-animated bookkeeping.
+    func closeColumn(workspaceIndex: Int, columnIndex: Int) {
+        guard let workspace = workspaces[safe: workspaceIndex],
+              workspace.columns.count > 1,
+              workspace.columns.indices.contains(columnIndex) else { return }
+        workspace.closeColumn(at: columnIndex)
+        relayout(animated: false)
+        workspace.layoutAndScroll(
+            viewportWidth: viewport.frame.width,
+            height: workspace.containerView.frame.height,
+            animated: true, pilotMode: isPilotMode
+        )
         updateSidebar()
         focusActiveTerminal(in: window)
         saveState()

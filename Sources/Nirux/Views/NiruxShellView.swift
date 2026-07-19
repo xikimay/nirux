@@ -439,16 +439,19 @@ final class NiruxShellView: NSView {
 
     // MARK: - Rename Workspace
 
-    func showRenamePanel() {
-        guard let window, let workspace = activeWorkspace else { return }
+    /// Rename a workspace by index; defaults to the active one (main menu,
+    /// command palette). The sidebar context menu passes an explicit index.
+    func showRenamePanel(workspaceIndex: Int? = nil) {
+        guard let window, let workspace = workspaces[safe: workspaceIndex ?? activeWSIndex] else { return }
         if nameInputPanel == nil {
             nameInputPanel = NameInputPanel()
         }
-        nameInputPanel?.onSubmit = { [weak self] newTitle in
-            self?.activeWorkspace?.title = newTitle
-            self?.activeWorkspace?.titleIsManual = true
-            self?.updateSidebar()
-            self?.saveState()
+        nameInputPanel?.onSubmit = { [weak self, weak workspace] newTitle in
+            guard let self, let workspace else { return }
+            workspace.title = newTitle
+            workspace.titleIsManual = true
+            self.updateSidebar()
+            self.saveState()
         }
         nameInputPanel?.show(relativeTo: window, currentValue: workspace.title, placeholder: "Workspace name")
     }

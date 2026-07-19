@@ -4,6 +4,10 @@ struct SidebarWorkspaceCardRenderResult {
     let bottomY: CGFloat
     let views: [NSView]
     let hitAreas: [SidebarHitArea]
+    /// The hover-only "⋯" action button and the column-count chip it swaps
+    /// with — SidebarView toggles their visibility as the pointer moves.
+    let menuButton: NSView?
+    let countChip: NSView?
 }
 
 @MainActor
@@ -12,15 +16,21 @@ final class SidebarWorkspaceCardRenderer {
     private let sidebarWidth: CGFloat
     private let padding: CGFloat
     private let yOffset: CGFloat
+    /// Card is currently hovered — render the "⋯" button instead of the chip.
+    private let showsMenuButton: Bool
 
     private var views: [NSView] = []
     private var hitAreas: [SidebarHitArea] = []
+    private var menuButton: NSView?
+    private var countChip: NSView?
 
-    init(workspace: WorkspaceInfo, sidebarWidth: CGFloat, padding: CGFloat, yOffset: CGFloat) {
+    init(workspace: WorkspaceInfo, sidebarWidth: CGFloat, padding: CGFloat, yOffset: CGFloat,
+         showsMenuButton: Bool = false) {
         self.workspace = workspace
         self.sidebarWidth = sidebarWidth
         self.padding = padding
         self.yOffset = yOffset
+        self.showsMenuButton = showsMenuButton
     }
 
     func render() -> SidebarWorkspaceCardRenderResult {
@@ -58,7 +68,13 @@ final class SidebarWorkspaceCardRenderer {
         }
         hitAreas.append(SidebarHitArea(frame: rowFrame, region: .workspace(workspace.index)))
 
-        return SidebarWorkspaceCardRenderResult(bottomY: currentY, views: views, hitAreas: hitAreas)
+        return SidebarWorkspaceCardRenderResult(
+            bottomY: currentY,
+            views: views,
+            hitAreas: hitAreas,
+            menuButton: menuButton,
+            countChip: countChip
+        )
     }
 
     private func buildTitleRow(contentX: CGFloat, contentW: CGFloat, yOffset: CGFloat) -> CGFloat {
@@ -75,19 +91,39 @@ final class SidebarWorkspaceCardRenderer {
         )
         append(title)
 
-        let columnCount = badgeView(
-            "\(workspace.columnCount)",
-            color: NSColor.white.withAlphaComponent(0.58),
-            background: NSColor.white.withAlphaComponent(0.045)
-        )
-        columnCount.frame = NSRect(
+        let chipFrame = NSRect(
             x: sidebarWidth - padding - SidebarExpandedMetrics.countChipWidth,
             y: yOffset - SidebarExpandedMetrics.titleHeight
                 + (SidebarExpandedMetrics.titleHeight - SidebarExpandedMetrics.countChipHeight) / 2,
             width: SidebarExpandedMetrics.countChipWidth,
             height: SidebarExpandedMetrics.countChipHeight
         )
+
+        let columnCount = badgeView(
+            "\(workspace.columnCount)",
+            color: NSColor.white.withAlphaComponent(0.58),
+            background: NSColor.white.withAlphaComponent(0.045)
+        )
+        columnCount.frame = chipFrame
+        columnCount.isHidden = showsMenuButton
         append(columnCount)
+        countChip = columnCount
+
+        // "⋯" action button — shares the chip's slot, shown on card hover.
+        let menuBadge = badgeView(
+            "⋯",
+            color: NSColor.white.withAlphaComponent(0.85),
+            background: NSColor.white.withAlphaComponent(0.10)
+        )
+        menuBadge.frame = chipFrame
+        menuBadge.isHidden = !showsMenuButton
+        menuBadge.toolTip = "Workspace actions"
+        append(menuBadge)
+        menuButton = menuBadge
+        hitAreas.append(SidebarHitArea(
+            frame: chipFrame.insetBy(dx: -4, dy: -3),
+            region: .workspaceMenu(workspace.index)
+        ))
 
         return yOffset - SidebarExpandedMetrics.titleAdvance
     }

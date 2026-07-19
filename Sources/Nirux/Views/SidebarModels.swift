@@ -67,12 +67,16 @@ enum SidebarHitRegion {
     case link(url: String, label: NSTextField)
     case column(workspaceIndex: Int, columnIndex: Int)
     case workspace(Int)
+    /// The "⋯" button on a workspace card — opens the workspace action menu.
+    case workspaceMenu(Int)
     /// Index into SidebarView.lastActivity (snapshot at rebuild time).
     case activity(Int)
 }
 
 enum WorkspaceSidebarAction {
     case moveUp, moveDown, markActive, markInactive
+    case close, rename, newWorkspace
+    case closeColumn(columnIndex: Int)
 }
 
 enum SidebarDotIndicatorAction: Equatable {
