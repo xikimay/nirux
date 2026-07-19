@@ -31,6 +31,11 @@ struct AgentStatusMachine {
     /// agent work. 0 = never.
     private var lastInteractionAt: TimeInterval = 0
 
+    /// The user has typed at least once since the shell started. Fallback
+    /// attention is gated on this: output before the first keystroke is
+    /// launch noise (banners, session replay, redraws), never a turn.
+    private(set) var hasUserInput = false
+
     /// Foreground-process tracking (drives the "working · 12m" display and
     /// the isAgent gate in `tick`).
     private(set) var lastForegroundName: String?
@@ -38,6 +43,9 @@ struct AgentStatusMachine {
 
     private static let echoWindow: TimeInterval = 0.3
     private static let activityWindow: TimeInterval = 3.0
+    /// Ignore fallback transitions right after a foreground-process change —
+    /// startup output of the new command is not a completed turn either.
+    private static let startupWindow: TimeInterval = 5.0
 
     /// True when a hook event should flip the column to `.needsAttention`:
     /// the transition into attention fires a callback (dock bounce, sidebar
@@ -54,6 +62,10 @@ struct AgentStatusMachine {
             state = .working
         case .notification:
             hookKind = kind.rawValue
+            // The agent is BLOCKED on the prompt — no longer working. Leave
+            // hookWorking set and the next tick would flip needsAttention
+            // straight back to .working while the agent sits idle.
+            hookWorking = false
             return requestAttention(isUserFocused: isUserFocused)
         case .stop:
             hookKind = kind.rawValue
@@ -66,6 +78,7 @@ struct AgentStatusMachine {
         case .turnComplete:
             // Codex: no working-state hooks — output fallback covers that.
             // The notify payload only marks the end of a turn.
+            hookWorking = false
             return requestAttention(isUserFocused: isUserFocused)
         }
         return false
@@ -88,7 +101,15 @@ struct AgentStatusMachine {
         lastReadAt = t
     }
 
-    /// User typed or the terminal resized/redrew — following output is echo.
+    /// A keystroke went to the PTY — marks both the echo window and real
+    /// user engagement (fallback attention only counts after this).
+    mutating func noteUserInput(now: Date) {
+        hasUserInput = true
+        lastInteractionAt = now.timeIntervalSince1970
+    }
+
+    /// The terminal resized/redrew — following output is echo, not work.
+    /// Does NOT count as user engagement.
     mutating func noteInteraction(now: Date) {
         lastInteractionAt = now.timeIntervalSince1970
     }
@@ -108,6 +129,7 @@ struct AgentStatusMachine {
             // snapshot notices the change, and clearing it here would knock
             // the session back into the flaky fallback for no reason.
             hookWorking = false
+            lastReadAt = 0 // the old command's dying output is not this one's work
         }
 
         guard isAgent else {
@@ -131,6 +153,15 @@ struct AgentStatusMachine {
         }
 
         // Fallback: recent output = working; silence ends the turn.
+        // Suppressed until the user has actually engaged (first keystroke)
+        // and the new foreground command has settled — startup banners,
+        // session replay and redraws otherwise fabricate a working →
+        // needsAttention cycle for an agent that never ran a turn.
+        let settled = foregroundSince.map { now.timeIntervalSince($0) >= Self.startupWindow } ?? false
+        guard hasUserInput, settled else {
+            state = .idle
+            return state
+        }
         let recentlyActive = lastReadAt > 0
             && now.timeIntervalSince1970 - lastReadAt < Self.activityWindow
         switch state {
@@ -162,6 +193,7 @@ struct AgentStatusMachine {
         hookKind = nil
         lastReadAt = 0
         lastInteractionAt = 0
+        hasUserInput = false
         lastForegroundName = nil
         foregroundSince = nil
     }

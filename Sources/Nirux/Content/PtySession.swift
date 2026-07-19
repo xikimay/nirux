@@ -125,6 +125,14 @@ final class PtySession: @unchecked Sendable {
         set { state.onTitleChanged = newValue }
     }
 
+    /// Called when an OSC 9 notification is received AND this session has
+    /// no hook coverage — hooked sessions get the same turn-complete signal
+    /// from the Stop hook, so firing both would double-count.
+    var onOsc9Received: (() -> Void)? {
+        get { state.onOsc9Received }
+        set { state.onOsc9Received = newValue }
+    }
+
     /// Called on the main queue when the shell process exits.
     var onProcessExit: (() -> Void)? {
         get { state.onProcessExit }
@@ -440,6 +448,7 @@ private final class PtyState: @unchecked Sendable {
     var hasExited: Bool = false
     var onCwdChanged: ((String) -> Void)?
     var onTitleChanged: ((String) -> Void)?
+    var onOsc9Received: (() -> Void)?
     var onProcessExit: (() -> Void)?
     var machine = AgentStatusMachine()
 
@@ -476,7 +485,7 @@ private final class PtyState: @unchecked Sendable {
     }
 
     func writeToPty(_ data: Data) {
-        machine.noteInteraction(now: Date())
+        machine.noteUserInput(now: Date())
         guard ptyFd >= 0 else { return }
         data.withUnsafeBytes { buf in
             guard let ptr = buf.baseAddress else { return }
@@ -601,6 +610,15 @@ private final class PtyState: @unchecked Sendable {
                     }
                 }
             }
+        }
+        // OSC 9 (notification): Claude Code emits this when a turn
+        // completes. Only forwarded for sessions WITHOUT hook coverage —
+        // hooked sessions get the same signal from the Stop hook, and the
+        // hasUserInput gate keeps startup replay from fabricating attention.
+        if str.contains("\u{1b}]9;"),
+           machine.hookKind == nil, machine.hasUserInput,
+           let callback = onOsc9Received {
+            DispatchQueue.main.async { callback() }
         }
     }
 }

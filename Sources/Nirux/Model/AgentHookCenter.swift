@@ -147,22 +147,30 @@ final class AgentHookCenter {
         }
 
         let decoder = JSONDecoder()
+        var applied = false
         for line in slice.split(separator: 0x0A) {
             guard let event = try? decoder.decode(AgentHookEvent.self, from: Data(line)) else { continue }
-            dispatch(event)
+            if dispatch(event) { applied = true }
         }
+        // One sidebar refresh per drain, not per event: updateSidebar does a
+        // full process-table scan, and a PreToolUse storm (or launch replay
+        // of a long backlog) would otherwise run dozens back-to-back on the
+        // main thread.
+        if applied { onEventApplied?() }
     }
 
-    private func dispatch(_ event: AgentHookEvent) {
+    /// Returns true when the event resolved to a live column (a status was
+    /// applied — the drain then refreshes the sidebar once at the end).
+    private func dispatch(_ event: AgentHookEvent) -> Bool {
         let resolution = event.agentUUID.flatMap { resolver?($0) }
         if let resolution, let pty = resolution.column.pty {
             let firedAttention = pty.applyAgentHook(event, isUserFocused: resolution.isUserFocused)
             if firedAttention {
                 resolution.column.notifyAgentAttention()
             }
-            onEventApplied?()
         }
         onActivity?(event, resolution)
+        return resolution != nil
     }
 
     func stop() {

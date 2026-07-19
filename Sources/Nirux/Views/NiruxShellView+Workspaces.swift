@@ -148,13 +148,17 @@ extension NiruxShellView {
     }
 
     /// AgentHookCenter resolver: locate the column owning a NIRUX_AGENT_UUID
-    /// and report whether the user is currently watching it (same definition
-    /// as updateSidebar — pilot mode counts every focused column).
+    /// and report whether the user is currently watching it. The app must be
+    /// active: without that, a turn ending in the FOCUSED column while the
+    /// user sits in another app would produce no dock bounce, no native
+    /// notification and no badge — the exact regression the hooks replaced.
     func resolveAgentColumn(uuid: String) -> AgentHookCenter.Resolution? {
         for (wsIndex, workspace) in workspaces.enumerated() {
             guard let colIndex = workspace.columns.firstIndex(where: { $0.agentUUID == uuid }) else { continue }
             let isActive = wsIndex == activeWSIndex
-            let isUserFocused = colIndex == workspace.focusedIndex && (isActive || isPilotMode)
+            let isUserFocused = NSApp.isActive
+                && colIndex == workspace.focusedIndex
+                && (isActive || isPilotMode)
             return AgentHookCenter.Resolution(
                 workspace: workspace,
                 column: workspace.columns[colIndex],

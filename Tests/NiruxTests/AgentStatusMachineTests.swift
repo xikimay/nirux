@@ -40,6 +40,9 @@ final class AgentStatusMachineTests: XCTestCase {
         _ = machine.applyHook(.userPromptSubmit, kind: .claude, isUserFocused: false)
         XCTAssertTrue(machine.applyHook(.notification, kind: .claude, isUserFocused: false))
         XCTAssertEqual(machine.state, .needsAttention)
+        // Regression: the tick must NOT flip attention back to working —
+        // the agent is blocked on the prompt, hookWorking was cleared.
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 2), .needsAttention)
         // Answering the permission prompt resumes work → attention clears.
         XCTAssertFalse(machine.applyHook(.preToolUse, kind: .claude, isUserFocused: false))
         XCTAssertEqual(machine.state, .working)
@@ -75,39 +78,79 @@ final class AgentStatusMachineTests: XCTestCase {
 
     // MARK: - Fallback path (no hooks — codex, unhooked claude)
 
+    /// Fallback attention requires engagement: first keystroke + 5s settle
+    /// after the foreground change. Without that, startup banners and
+    /// session replay fabricate a working → needsAttention cycle.
     func testFallbackOutputActivityCycle() {
         XCTAssertEqual(machine.tick(fgName: "codex", isUserFocused: false, now: t0), .idle)
-        machine.noteRead(now: t0 + 1)
-        XCTAssertEqual(machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 1.5), .working)
+        machine.noteUserInput(now: t0 + 5)
+        machine.noteRead(now: t0 + 6)
+        XCTAssertEqual(machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 6.5), .working)
         // Silence after the activity window ends the turn → attention.
-        XCTAssertEqual(machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 10), .needsAttention)
+        XCTAssertEqual(machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 20), .needsAttention)
         // Focus clears it.
-        XCTAssertEqual(machine.tick(fgName: "codex", isUserFocused: true, now: t0 + 11), .idle)
+        XCTAssertEqual(machine.tick(fgName: "codex", isUserFocused: true, now: t0 + 21), .idle)
+    }
+
+    func testStartupNoiseNeverSignalsAttention() {
+        // Fresh codex column: banner/redraw output, no keystroke ever.
+        _ = machine.tick(fgName: "codex", isUserFocused: false, now: t0)
+        machine.noteRead(now: t0 + 1)
+        machine.noteRead(now: t0 + 2)
+        XCTAssertEqual(machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 10), .idle)
+        XCTAssertEqual(machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 60), .idle)
+    }
+
+    func testSettlingWindowAfterForegroundChange() {
+        _ = machine.tick(fgName: "zsh", isUserFocused: false, now: t0)
+        machine.noteUserInput(now: t0 + 1) // user types "codex\n"
+        _ = machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 2) // fg change
+        machine.noteRead(now: t0 + 3) // banner output
+        XCTAssertEqual(machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 4), .idle,
+                       "still settling — banner is not a turn")
+        machine.noteRead(now: t0 + 7.5)
+        XCTAssertEqual(machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 8), .working)
+    }
+
+    func testKilledCommandOutputDoesNotLeakIntoNextAgent() {
+        _ = machine.tick(fgName: "zsh", isUserFocused: false, now: t0)
+        machine.noteUserInput(now: t0)
+        _ = machine.tick(fgName: "node", isUserFocused: false, now: t0 + 1) // noisy dev server
+        machine.noteRead(now: t0 + 9.5)
+        // Server killed, unhooked agent launched immediately after.
+        _ = machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 10)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 16), .idle,
+                       "stale output from the killed command must not count")
     }
 
     func testFallbackSilenceWhileFocusedIsQuiet() {
-        machine.noteRead(now: t0)
-        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: true, now: t0), .working)
-        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: true, now: t0 + 10), .idle)
+        _ = machine.tick(fgName: "claude", isUserFocused: true, now: t0)
+        machine.noteUserInput(now: t0 + 5)
+        machine.noteRead(now: t0 + 6)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: true, now: t0 + 6.5), .working)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: true, now: t0 + 20), .idle)
     }
 
     func testEchoAfterTypingIsNotWork() {
-        machine.noteInteraction(now: t0)
-        machine.noteRead(now: t0 + 0.1) // echo
-        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 0.2), .idle)
-        machine.noteRead(now: t0 + 1.0) // outside the echo window → real output
-        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 1.1), .working)
+        _ = machine.tick(fgName: "claude", isUserFocused: false, now: t0)
+        machine.noteUserInput(now: t0 + 5)
+        machine.noteRead(now: t0 + 5.1) // echo
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 5.2), .idle)
+        machine.noteRead(now: t0 + 6.0) // outside the echo window → real output
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 6.1), .working)
     }
 
     func testCodexTurnCompleteMarksAttention() {
-        machine.noteRead(now: t0)
-        _ = machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 0.5)
+        _ = machine.tick(fgName: "codex", isUserFocused: false, now: t0)
+        machine.noteUserInput(now: t0 + 5)
+        machine.noteRead(now: t0 + 6)
+        _ = machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 6.5)
         XCTAssertEqual(machine.state, .working)
         XCTAssertTrue(machine.applyHook(.turnComplete, kind: .codex, isUserFocused: false))
         XCTAssertEqual(machine.state, .needsAttention)
         // Codex keeps the fallback for working: fresh output revives it.
-        machine.noteRead(now: t0 + 2)
-        XCTAssertEqual(machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 2.5), .working)
+        machine.noteRead(now: t0 + 8)
+        XCTAssertEqual(machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 8.5), .working)
     }
 
     // MARK: - Generic transitions
@@ -142,8 +185,11 @@ final class AgentStatusMachineTests: XCTestCase {
         machine.reset()
         XCTAssertEqual(machine.state, .idle)
         XCTAssertNil(machine.foregroundSince)
-        // Output fallback works again (hooks forgotten).
-        machine.noteRead(now: t0 + 1)
-        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 1.5), .working)
+        XCTAssertFalse(machine.hasUserInput)
+        // Output fallback works again (hooks forgotten) — after engagement.
+        _ = machine.tick(fgName: "claude", isUserFocused: false, now: t0)
+        machine.noteUserInput(now: t0 + 5)
+        machine.noteRead(now: t0 + 6)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 6.5), .working)
     }
 }

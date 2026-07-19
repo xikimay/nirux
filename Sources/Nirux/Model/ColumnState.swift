@@ -191,6 +191,11 @@ final class ColumnState {
             self?.onTitleChanged?()
         }
 
+        // Forward OSC 9 (turn complete for sessions without hook coverage)
+        ptySession.onOsc9Received = { [weak self] in
+            self?.onAgentAttention?()
+        }
+
         // Shell exit → show the restart overlay over the (still visible)
         // terminal. Scrollback survives a restart.
         ptySession.onProcessExit = { [weak self] in

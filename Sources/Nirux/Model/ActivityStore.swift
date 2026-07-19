@@ -84,7 +84,22 @@ final class ActivityStore {
             entries.removeLast(entries.count - Self.maxEntries)
         }
         scheduleSave()
-        onChange?()
+        scheduleChangeNotification()
+    }
+
+    /// Coalesce change notifications: a drain replaying a backlog records
+    /// dozens of entries in one pass, and onChange triggers a full sidebar
+    /// refresh (process-table scan) each time without this.
+    private var pendingNotify: DispatchWorkItem?
+
+    private func scheduleChangeNotification() {
+        guard pendingNotify == nil else { return }
+        let item = DispatchWorkItem { [weak self] in
+            self?.pendingNotify = nil
+            self?.onChange?()
+        }
+        pendingNotify = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: item)
     }
 
     func load() {

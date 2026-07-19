@@ -66,10 +66,14 @@ extension NiruxShellView {
                 case .terminal:
                     workspace.addColumn(agentUUID: persistedCol.agentUUID ?? UUID().uuidString)
                 }
+                // Clamp into the drag bounds: a hand-edited or corrupt
+                // widthPreset must not restore an invisible sliver (or a
+                // column wider than the strip allows).
                 let fraction = CGFloat(persistedCol.widthPreset)
-                if (0.05...2.5).contains(fraction) {
-                    workspace.columns.last?.widthFraction = fraction
-                }
+                workspace.columns.last?.widthFraction = min(
+                    WorkspaceState.maxWidthFraction,
+                    max(WorkspaceState.minWidthFraction, fraction)
+                )
             }
             workspace.focusedIndex = min(persistedWS.focusedColumnIndex, max(workspace.columns.count - 1, 0))
             workspaces.append(workspace)
