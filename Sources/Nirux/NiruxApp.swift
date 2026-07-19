@@ -155,10 +155,26 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
                 }
 
             // nirux://open-editor?file=<absolute path>&line=42&endLine=57&workspace=<id>
+            // Validation stats (and prefix-reads) the file, which can block
+            // on a dead network mount — run it off the main actor, then hop
+            // back. Activation is gated on acceptance so a rejected request
+            // can't be used to yank Nirux frontmost.
             case "open-editor":
-                if let request = OpenEditorRequest(queryItems: params) {
-                    shell?.openEditorFromURL(request)
+                let urlString = url.absoluteString
+                Task { [weak self] in
+                    let request = await Task.detached {
+                        OpenEditorRequest(queryItems: URLComponents(string: urlString)?.queryItems)
+                    }.value
+                    guard let request else {
+                        NSLog("[OpenEditor] rejected open-editor URL (missing/non-regular/oversized/binary file?)")
+                        return
+                    }
+                    guard let self else { return }
+                    self.shell?.openEditorFromURL(request)
+                    NSApp.activate(ignoringOtherApps: true)
+                    self.mainWindow?.makeKeyAndOrderFront(nil)
                 }
+                continue
 
             default:
                 break

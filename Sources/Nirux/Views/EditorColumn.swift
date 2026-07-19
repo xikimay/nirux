@@ -92,7 +92,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     /// Pending debounced git-status refresh (see `scheduleGitReload`).
     private var gitReloadWorkItem: DispatchWorkItem?
     /// Files above this size ask for confirmation before opening in Monaco.
-    private static let largeFileWarningBytes: UInt64 = 5_000_000
+    private static let largeFileWarningBytes = EditorFileLimits.maxEditableBytes
 
     init(workspaceCwd: String) {
         self.workspaceCwd = workspaceCwd
@@ -294,8 +294,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             switchTo(path: absolute, takeFocus: takeFocus)
             if let line {
                 var payload: [String: Any] = ["type": "goToLine", "path": absolute, "line": line]
-                if let endLine { payload["endLine"] = endLine }
-                if !takeFocus { payload["focus"] = false }
+                Self.applyNavFlags(&payload, endLine: endLine, takeFocus: takeFocus)
                 sendBridge(payload)
             }
             return
@@ -432,8 +431,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             "activate": activate
         ]
         if let line { payload["line"] = line }
-        if let endLine { payload["endLine"] = endLine }
-        if !takeFocus { payload["focus"] = false }
+        Self.applyNavFlags(&payload, endLine: endLine, takeFocus: takeFocus)
         sendBridge(payload)
         startFileWatch()
     }
@@ -459,7 +457,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         }
         fileTree.reveal(absolutePath: path)
         var payload: [String: Any] = ["type": "switchTab", "path": path]
-        if !takeFocus { payload["focus"] = false }
+        Self.applyNavFlags(&payload, endLine: nil, takeFocus: takeFocus)
         sendBridge(payload)
         // Known gap: re-entering a saved diff intent below still grabs
         // focus JS-side even for takeFocus:false — rare enough (agent open
@@ -736,8 +734,21 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         // activate: false is critical for background tabs — an openFile with
         // implicit activation would steal Monaco's active tab, and the next
         // Cmd+S (which saves the JS-side currentPath) would write the wrong
-        // buffer to the wrong file.
-        sendBridge(["type": "openFile", "path": path, "content": content, "activate": path == activePath])
+        // buffer to the wrong file. focus: false because a background disk
+        // sync must never grab the keyboard — e.g. an agent edits the file
+        // it just revealed while the user is typing in a terminal.
+        sendBridge([
+            "type": "openFile", "path": path, "content": content,
+            "activate": path == activePath, "focus": false
+        ])
+    }
+
+    /// Shared tail of every navigation payload — one place to add the next
+    /// flag so the fresh-open, already-open and switch-tab paths can't
+    /// drift apart.
+    private static func applyNavFlags(_ payload: inout [String: Any], endLine: Int?, takeFocus: Bool) {
+        if let endLine { payload["endLine"] = endLine }
+        if !takeFocus { payload["focus"] = false }
     }
 
     // MARK: - File watcher

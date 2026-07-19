@@ -437,12 +437,15 @@ extension NiruxShellView {
             .first { $0.workspaceCwd == editorRoot }
             ?? (workspaceCwd == nil ? workspace.columns.compactMap { $0.editorColumn }.first : nil)
 
+        // focusedIndex moves even for takeFocus:false opens: the camera
+        // only keeps the FOCUSED column visible, so leaving it put could
+        // reveal entirely off-screen in wide layouts. Keyboard focus is
+        // protected separately (the focus:false bridge flag) — the trade
+        // is that column-level commands (Cmd+W etc.) now target the
+        // agent-opened editor, which conveniently makes Cmd+W a dismiss.
         if let existing = existingEditor {
             existing.open(path: path, line: line, endLine: endLine, takeFocus: takeFocus, interactive: interactive)
-            // takeFocus false keeps the user's focused column: moving it
-            // would silently retarget close/width/navigation commands to
-            // the editor while they're typing elsewhere.
-            if takeFocus, let idx = workspace.columns.firstIndex(where: { $0.editorColumn === existing }) {
+            if let idx = workspace.columns.firstIndex(where: { $0.editorColumn === existing }) {
                 workspace.focusedIndex = idx
                 relayout(animated: false)
                 updateSidebar()
@@ -452,15 +455,11 @@ extension NiruxShellView {
         // Column first, single open after wiring — an initialFile + second
         // line-targeted open would run the failure alert / large-file
         // confirmation twice for the same file.
-        // addEditorColumn moves focusedIndex to the new column (inserted
-        // after the focused one, so the prior index stays valid to restore).
-        let priorFocusedIndex = workspace.focusedIndex
         workspace.addEditorColumn(workspaceCwd: editorRoot)
         if let editor = workspace.columns[safe: workspace.focusedIndex]?.editorColumn {
             wireEditor(editor)
             editor.open(path: path, line: line, endLine: endLine, takeFocus: takeFocus, interactive: interactive)
         }
-        if !takeFocus { workspace.focusedIndex = priorFocusedIndex }
         relayout(animated: false)
         updateSidebar()
     }
@@ -472,8 +471,12 @@ extension NiruxShellView {
     /// blocking modal (any app can fire the URL) nor move keyboard focus
     /// into the buffer while the user is typing elsewhere.
     func openEditorFromURL(_ request: OpenEditorRequest) {
-        let target = request.workspaceID.flatMap { id in workspaces.first { $0.id == id } }
-        if let target { focusWorkspace(id: target.id) }
+        var target: WorkspaceState?
+        if let id = request.workspaceID,
+           let index = workspaces.firstIndex(where: { $0.id == id }) {
+            target = workspaces[index]
+            switchToWorkspace(index)
+        }
         openInEditorColumn(
             path: request.file, line: request.line, endLine: request.endLine,
             takeFocus: false, interactive: false, in: target

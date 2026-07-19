@@ -3,6 +3,8 @@ import XCTest
 
 final class OpenEditorRequestTests: XCTestCase {
 
+    /// Hermetic parse: identity canonicalization (no real-FS symlink
+    /// resolution) and an injected existence set.
     private func parse(
         _ url: String,
         existing: Set<String> = ["/tmp/a.swift"]
@@ -11,7 +13,11 @@ final class OpenEditorRequestTests: XCTestCase {
             XCTFail("unparseable URL: \(url)")
             return nil
         }
-        return OpenEditorRequest(queryItems: components.queryItems) { existing.contains($0) }
+        return OpenEditorRequest(
+            queryItems: components.queryItems,
+            canonicalize: { $0 },
+            isOpenableFile: { existing.contains($0) }
+        )
     }
 
     // MARK: - File validation
@@ -146,11 +152,49 @@ final class OpenEditorRequestTests: XCTestCase {
         XCTAssertFalse(OpenEditorRequest.fileExistsOnDisk("/dev/zero"), "device nodes must be rejected")
 
         // URL opens are non-interactive, so oversized files are refused
-        // instead of confirmed via dialog.
-        let big = dir + "/big.bin"
+        // instead of confirmed via dialog. Non-NUL content so this stays a
+        // pure size test (NUL bytes would trip the binary sniff too).
+        let big = dir + "/big.txt"
         FileManager.default.createFile(
-            atPath: big, contents: Data(count: Int(OpenEditorRequest.maxFileBytes) + 1)
+            atPath: big, contents: Data(repeating: 0x61, count: Int(OpenEditorRequest.maxFileBytes) + 1)
         )
         XCTAssertFalse(OpenEditorRequest.fileExistsOnDisk(big), "oversized files must be rejected")
+    }
+
+    func testFileExistsOnDiskRejectsBinaries() throws {
+        let dir = NSTemporaryDirectory() + "open-editor-tests-" + UUID().uuidString
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+
+        // A binary would fail EditorColumn's decode and leave a silently
+        // empty editor column behind on a non-interactive open.
+        let binary = dir + "/image.png"
+        FileManager.default.createFile(atPath: binary, contents: Data([0x89, 0x50, 0x4E, 0x47, 0x00, 0x01]))
+        XCTAssertFalse(OpenEditorRequest.fileExistsOnDisk(binary), "NUL-bearing files must be rejected")
+
+        // UTF-16 text is full of NULs but decodable — the BOM exempts it.
+        let utf16 = dir + "/utf16.txt"
+        try "hello".data(using: .utf16)!.write(to: URL(fileURLWithPath: utf16))
+        XCTAssertTrue(OpenEditorRequest.fileExistsOnDisk(utf16), "BOM'd UTF-16 must be accepted")
+    }
+
+    func testDefaultCanonicalizationResolvesSymlinkSpellings() throws {
+        let dir = NSTemporaryDirectory() + "open-editor-tests-" + UUID().uuidString
+        try FileManager.default.createDirectory(atPath: dir + "/real", withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+
+        let real = dir + "/real/a.swift"
+        FileManager.default.createFile(atPath: real, contents: Data("x".utf8))
+        try FileManager.default.createSymbolicLink(atPath: dir + "/link", withDestinationPath: dir + "/real")
+
+        // Default canonicalize + default FS check: a symlinked spelling
+        // must land on the resolved path, so tab identity can't fork into
+        // two divergent buffers for one inode.
+        guard let components = URLComponents(string: "nirux://open-editor")
+        else { return XCTFail("components") }
+        var items = components.queryItems ?? []
+        items.append(URLQueryItem(name: "file", value: dir + "/link/a.swift"))
+        let request = OpenEditorRequest(queryItems: items)
+        XCTAssertEqual(request?.file, (real as NSString).resolvingSymlinksInPath)
     }
 }
