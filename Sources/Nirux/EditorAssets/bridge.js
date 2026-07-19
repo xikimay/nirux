@@ -387,6 +387,15 @@
         monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyF,
         function () { diffEditor.getModifiedEditor().getAction("actions.find").run(); }
       );
+      // F7 / Shift+F7 — jump between diff hunks (VS Code's diff navigation keys).
+      diffEditor.getModifiedEditor().addCommand(
+        monaco.KeyCode.F7,
+        function () { goToDiffHunk("next"); }
+      );
+      diffEditor.getModifiedEditor().addCommand(
+        monaco.KeyMod.Shift | monaco.KeyCode.F7,
+        function () { goToDiffHunk("previous"); }
+      );
     }
     diffEditor.setModel({ original: diffOriginalModel, modified: entry.model });
     showMonacoDiffSurface();
@@ -553,6 +562,21 @@
     }
   }
 
+  function goToDiffHunk(direction) {
+    if (!diffEditor) return;
+    // IDiffEditor.goToDiff is the modern API; older Monaco builds only have
+    // the accessible diff-review actions, which also move the cursor.
+    if (typeof diffEditor.goToDiff === "function") {
+      diffEditor.goToDiff(direction);
+      return;
+    }
+    var actionId = direction === "next"
+      ? "editor.action.diffReview.next"
+      : "editor.action.diffReview.prev";
+    var action = diffEditor.getModifiedEditor().getAction(actionId);
+    if (action) action.run();
+  }
+
   function requestSave() {
     if (!currentPath) return;
     var entry = models[currentPath];
@@ -704,6 +728,11 @@
     });
 
     bindZoomCommands(editor);
+
+    // Explicit go-to-line binding — same rationale as the Cmd+F binding above.
+    editor.addCommand(monaco.KeyMod.WinCtrl | monaco.KeyCode.KeyG, function () {
+      editor.getAction("editor.action.gotoLine").run();
+    });
 
     // Cmd+P → ask Swift to show its native file picker, scoped to the workspace.
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyP, function () {
