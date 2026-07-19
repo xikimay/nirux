@@ -94,6 +94,8 @@ final class SidebarView: NSView {
     var menuBadgeViews: [Int: SidebarBadgeView] = [:]
     var columnHoverViews: [Int: [Int: NSView]] = [:]
     var spaceHeaderHoverView: NSView?
+    /// "⋯" badge in the space header — brightens with the header hover.
+    var spaceHeaderBadge: SidebarBadgeView?
     var hoveredTarget: SidebarHoverTarget?
 
     private var hoveredLabel: NSTextField?
@@ -471,15 +473,10 @@ final class SidebarView: NSView {
         }
     }
 
+    /// Space options only — switching spaces lives in the bottom dot
+    /// switcher (and ⌘←/→), so the header menu doesn't duplicate it.
     private func showSpaceMenu(at point: NSPoint) {
         let menu = NSMenu()
-        for profile in lastProfiles {
-            let title = "\(profile.isActive ? "✓ " : "")\(profile.name)  \(profile.workspaceCount)"
-            menu.addClosureItem(title: title) { [weak self] in
-                self?.onProfileClicked?(profile.id)
-            }
-        }
-        if !lastProfiles.isEmpty { menu.addItem(.separator()) }
         if let active = lastProfiles.first(where: { $0.isActive }) {
             menu.addClosureItem(title: "Rename Space…") { [weak self] in
                 self?.onRenameProfile?(active.id)

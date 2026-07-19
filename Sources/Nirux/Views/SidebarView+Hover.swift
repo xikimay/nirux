@@ -23,8 +23,11 @@ extension SidebarView {
         case .workspaceCard:
             break
         case .spaceHeader:
+            // The whole header is one menu trigger, so its "⋯" brightens
+            // together with the background tint.
             spaceHeaderHoverView?.layer?.backgroundColor =
                 on ? NSColor.white.withAlphaComponent(0.05).cgColor : NSColor.clear.cgColor
+            spaceHeaderBadge?.isHovered = on
         case .menuBadge(let workspaceIndex):
             menuBadgeViews[workspaceIndex]?.isHovered = on
         case .columnRow(let workspaceIndex, let columnIndex):
