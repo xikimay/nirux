@@ -148,6 +148,20 @@ final class WorkspaceStore {
         return true
     }
 
+    /// Move a workspace to an absolute position within its own
+    /// active/inactive group (0 = top of group). The position is clamped to
+    /// the group's bounds; a move never crosses the active/inactive boundary.
+    @discardableResult
+    func moveWorkspace(at index: Int, toPosition targetPosition: Int) -> Bool {
+        guard workspaces.indices.contains(index) else { return false }
+        let isInactive = workspaces[index].isInactive
+        let candidates = visibleWorkspaceIndices.filter { workspaces[$0].isInactive == isInactive }
+        guard let position = candidates.firstIndex(of: index) else { return false }
+        let clamped = max(0, min(targetPosition, candidates.count - 1))
+        guard clamped != position else { return false }
+        return moveWorkspace(at: index, delta: clamped - position)
+    }
+
     @discardableResult
     func setWorkspaceInactive(at index: Int, _ isInactive: Bool) -> Bool {
         guard workspaces.indices.contains(index) else { return false }

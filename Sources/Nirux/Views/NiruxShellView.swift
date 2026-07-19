@@ -91,6 +91,9 @@ final class NiruxShellView: NSView {
         verticalStrip.addSubview(workspace.containerView)
         sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index) }
         sidebar.onWorkspaceAction = { [weak self] action, index in self?.handleWorkspaceSidebarAction(action, workspaceIndex: index) }
+        sidebar.onWorkspaceReordered = { [weak self] index, position in
+            self?.handleWorkspaceReorder(workspaceIndex: index, targetPosition: position)
+        }
         sidebar.onProfileClicked = { [weak self] profileID in self?.selectProfile(profileID) }
         sidebar.onCreateProfile = { [weak self] in self?.createProfileFromActiveContext() }
         sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }

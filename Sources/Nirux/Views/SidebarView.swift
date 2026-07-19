@@ -9,11 +9,21 @@ final class SidebarBackgroundView: NSView {
 /// Sidebar: minimal dots in normal mode, expanded detail panel (pilot-style) in expanded mode.
 /// Dragging on empty sidebar area moves the window.
 final class SidebarView: NSView {
-    override var mouseDownCanMoveWindow: Bool { true }
+    /// Dragging on empty sidebar area moves the window — but not on a
+    /// workspace card, where dragging means reorder (SidebarView+Drag).
+    override var mouseDownCanMoveWindow: Bool {
+        guard isExpanded, let window else { return true }
+        let docPoint = contentDocumentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        if case .workspace = hitArea(at: docPoint)?.region { return false }
+        return true
+    }
     var onWorkspaceClicked: ((Int) -> Void)?
     var onColumnClicked: ((Int, Int) -> Void)?  // (workspaceIndex, columnIndex)
     var onDiffStatsClicked: ((Int) -> Void)?
     var onWorkspaceAction: ((WorkspaceSidebarAction, Int) -> Void)?
+    /// Drag-reorder drop: (store index of dragged workspace, target
+    /// position within its active/inactive group).
+    var onWorkspaceReordered: ((Int, Int) -> Void)?
     var onProfileClicked: ((String) -> Void)?
     var onCreateProfile: (() -> Void)?
     var onRenameProfile: ((String) -> Void)?
@@ -43,6 +53,17 @@ final class SidebarView: NSView {
     var expandedViews: [NSView] = []
     var profileIndicatorView: SidebarDotIndicatorView?
     var hitAreas: [SidebarHitArea] = []
+
+    // Workspace drag-reorder state; the tracking logic lives in
+    // SidebarView+Drag.swift (stored properties can't go in extensions).
+    var workspaceDrag: SidebarWorkspaceDrag?
+    var dragSnapshotView: NSImageView?
+    var dragDimView: NSView?
+    var dragInsertionView: NSView?
+    var dragKeyMonitor: Any?
+    /// Sidebar data that arrived mid-drag; applied when the drag ends so
+    /// rebuilds don't tear down rows under the captured drag geometry.
+    var deferredDragUpdate: (profiles: [ProfileInfo], workspaces: [WorkspaceInfo], activity: [ActivityEntry])?
 
     /// Active workspace the sidebar last auto-scrolled to. Used by
     /// `rebuildContent` so we only follow the active workspace when it
@@ -95,6 +116,10 @@ final class SidebarView: NSView {
     }
 
     func update(profiles: [ProfileInfo], workspaces: [WorkspaceInfo], activity: [ActivityEntry] = []) {
+        guard workspaceDrag == nil else {
+            deferredDragUpdate = (profiles, workspaces, activity)
+            return
+        }
         lastProfiles = profiles
         lastInfos = workspaces
         lastActivity = activity
@@ -221,6 +246,12 @@ final class SidebarView: NSView {
             let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
 
             if let area = hitArea(at: docLocation) {
+                // Workspace rows don't click on mouseDown: arm a potential
+                // drag-reorder and let mouseUp decide click vs drop.
+                if case .workspace(let workspaceIndex) = area.region {
+                    beginPotentialWorkspaceDrag(workspaceIndex: workspaceIndex, rowFrame: area.frame, at: docLocation)
+                    return
+                }
                 handleHit(area.region, event: event)
                 return
             }

@@ -308,6 +308,23 @@ extension NiruxShellView {
         saveState()
     }
 
+    /// Drop handler for sidebar drag-reorder: move the workspace to an
+    /// absolute position within its active/inactive group, then run the
+    /// same refresh dance as the context-menu moves.
+    func handleWorkspaceReorder(workspaceIndex: Int, targetPosition: Int) {
+        guard workspaces.indices.contains(workspaceIndex),
+              workspaceStore.moveWorkspace(at: workspaceIndex, toPosition: targetPosition)
+        else {
+            // Stale or no-op drop — repaint so the sidebar leaves drag state.
+            updateSidebar()
+            return
+        }
+        relayout(animated: true)
+        updateSidebar()
+        focusActiveTerminal(in: window)
+        saveState()
+    }
+
     private func profileName(for workspace: WorkspaceState) -> String {
         if let cwd = workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.columns.first?.pty?.childCwd {
             return (cwd as NSString).lastPathComponent
