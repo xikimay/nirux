@@ -1,0 +1,27 @@
+name: Tests
+
+# Nightly (push to main) already gates releases with `swift test`, but PR
+# branches had no test CI at all — an actor-isolation error in a test file
+# once reached main red (2026-07-19, ActivityStoreTests). Run the suite on
+# every PR so mergeStateStatus reflects it before merge.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run tests
+        run: swift test

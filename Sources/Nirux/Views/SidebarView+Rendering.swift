@@ -343,8 +343,9 @@ extension SidebarView {
         return "\(entry.workspaceTitle) · \(entry.agentKind) · \(summary)"
     }
 
-    /// Compact relative timestamp ("42s", "12m", "1h05", "3d").
-    static func relativeAge(since timestamp: TimeInterval, now: Date = Date()) -> String {
+    /// Compact relative timestamp ("42s", "12m", "1h05", "3d"). Pure —
+    /// nonisolated so tests (and any future non-view caller) can use it.
+    nonisolated static func relativeAge(since timestamp: TimeInterval, now: Date = Date()) -> String {
         let seconds = max(0, Int(now.timeIntervalSince1970 - timestamp))
         if seconds < 60 { return "\(seconds)s" }
         if seconds < 3600 { return "\(seconds / 60)m" }
