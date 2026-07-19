@@ -130,7 +130,7 @@
       ensureModel(path, content, lang);
     }
     if (payload.activate === false) return;
-    switchToPath(path);
+    switchToPath(path, payload.focus);
     if (typeof payload.line === "number" && payload.line > 0) {
       revealLine(payload.line, payload.column || 1, payload.endLine, payload.focus);
     }
@@ -172,7 +172,9 @@
     return editor;
   }
 
-  function switchToPath(path) {
+  // focus === false: agent-driven opens switch the visible model without
+  // grabbing keyboard focus (same contract as revealLine).
+  function switchToPath(path, focus) {
     if (!editor) return;
     var entry = models[path];
     if (!entry) return;
@@ -189,7 +191,7 @@
     if (viewStates[path]) {
       editor.restoreViewState(viewStates[path]);
     }
-    editor.focus();
+    if (focus !== false) editor.focus();
     postToSwift({ type: "ready", path: path });
     reportDirtyFor(path);
   }
@@ -725,7 +727,7 @@
       case "closeTab": closeTab(msg.path); break;
       case "markSaved": markSaved(msg.path); break;
       case "goToLine":
-        if (msg.path && currentPath !== msg.path) switchToPath(msg.path);
+        if (msg.path && currentPath !== msg.path) switchToPath(msg.path, msg.focus);
         // If the model is unknown (Swift/JS state diverged, e.g. after a
         // WebContent crash) the switch fails — bail rather than painting
         // the selection onto whatever file is currently displayed.

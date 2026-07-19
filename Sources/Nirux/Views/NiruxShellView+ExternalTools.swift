@@ -439,7 +439,10 @@ extension NiruxShellView {
 
         if let existing = existingEditor {
             existing.open(path: path, line: line, endLine: endLine, takeFocus: takeFocus, interactive: interactive)
-            if let idx = workspace.columns.firstIndex(where: { $0.editorColumn === existing }) {
+            // takeFocus false keeps the user's focused column: moving it
+            // would silently retarget close/width/navigation commands to
+            // the editor while they're typing elsewhere.
+            if takeFocus, let idx = workspace.columns.firstIndex(where: { $0.editorColumn === existing }) {
                 workspace.focusedIndex = idx
                 relayout(animated: false)
                 updateSidebar()
@@ -449,11 +452,15 @@ extension NiruxShellView {
         // Column first, single open after wiring — an initialFile + second
         // line-targeted open would run the failure alert / large-file
         // confirmation twice for the same file.
+        // addEditorColumn moves focusedIndex to the new column (inserted
+        // after the focused one, so the prior index stays valid to restore).
+        let priorFocusedIndex = workspace.focusedIndex
         workspace.addEditorColumn(workspaceCwd: editorRoot)
         if let editor = workspace.columns[safe: workspace.focusedIndex]?.editorColumn {
             wireEditor(editor)
             editor.open(path: path, line: line, endLine: endLine, takeFocus: takeFocus, interactive: interactive)
         }
+        if !takeFocus { workspace.focusedIndex = priorFocusedIndex }
         relayout(animated: false)
         updateSidebar()
     }

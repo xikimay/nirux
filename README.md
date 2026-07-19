@@ -142,7 +142,7 @@ Open a file in the editor column at a line range (used by agents to show code in
 nirux://open-editor?file=/path/to/file.swift&line=42&endLine=57&workspace=<NIRUX_WORKSPACE_ID>
 ```
 
-`file` must be an absolute, URL-encoded path to an existing regular file of at most 5 MB. `line` and `endLine` are optional 1-based line numbers; when both are present the editor highlights the whole range. `workspace` is optional — when it matches a workspace ID (Nirux terminals expose it as `NIRUX_WORKSPACE_ID`), Nirux switches to that workspace first. The open never pops dialogs and never steals keyboard focus.
+`file` must be an absolute, URL-encoded path to an existing regular file of at most 5 MB. `line` and `endLine` are optional 1-based line numbers; when both are present the editor highlights the whole range. `workspace` is optional — when it matches a workspace ID (Nirux terminals expose it as `NIRUX_WORKSPACE_ID`), Nirux switches to that workspace first. The open never pops dialogs; Nirux comes to the front, but keyboard focus stays in the column the user was working in — it never lands in the editor buffer.
 
 The command palette action `Install Agent Skills` writes the bundled skills to:
 
