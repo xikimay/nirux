@@ -383,6 +383,19 @@ final class SidebarView: NSView {
 
     override func mouseMoved(with event: NSEvent) {
         guard isExpanded else { clearHover(); clearActivityHover(); return }
+
+        // The bottom space switcher tracks its own hover — keep the pointing
+        // hand (its cursor rect would otherwise be overridden below) and drop
+        // any list highlight while the pointer is there.
+        if let indicator = profileIndicatorView,
+           indicator.frame.contains(convert(event.locationInWindow, from: nil)) {
+            clearHover()
+            clearActivityHover()
+            setHoverTarget(nil)
+            NSCursor.pointingHand.set()
+            return
+        }
+
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
 
         guard let area = hitArea(at: point) else {
@@ -473,9 +486,13 @@ final class SidebarView: NSView {
         }
     }
 
+    private func showSpaceMenu(at point: NSPoint) {
+        spaceOptionsMenu().popUp(positioning: nil, at: point, in: self)
+    }
+
     /// Space options only — switching spaces lives in the bottom dot
     /// switcher (and ⌘←/→), so the header menu doesn't duplicate it.
-    private func showSpaceMenu(at point: NSPoint) {
+    private func spaceOptionsMenu() -> NSMenu {
         let menu = NSMenu()
         if let active = lastProfiles.first(where: { $0.isActive }) {
             menu.addClosureItem(title: "Rename Space…") { [weak self] in
@@ -485,10 +502,18 @@ final class SidebarView: NSView {
         menu.addClosureItem(title: "New Space") { [weak self] in
             self?.onCreateProfile?()
         }
-        menu.popUp(positioning: nil, at: point, in: self)
+        return menu
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
+        // Right-click on the space header mirrors its left-click menu —
+        // every region that advertises a menu answers both buttons.
+        if isExpanded {
+            let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
+            if let area = hitArea(at: docLocation), case .spaceHeader = area.region {
+                return spaceOptionsMenu()
+            }
+        }
         guard let target = menuTarget(at: event) else { return super.menu(for: event) }
         return workspaceActionMenu(workspaceIndex: target.workspaceIndex, columnIndex: target.columnIndex)
     }
