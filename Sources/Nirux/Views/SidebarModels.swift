@@ -113,6 +113,17 @@ enum SidebarHitRegion {
     case activity(Int)
 }
 
+/// Full parameter set of SidebarView.update(...) — stashed while a
+/// drag-reorder is in flight and replayed when the drag ends.
+struct SidebarUpdatePayload {
+    let profiles: [ProfileInfo]
+    let workspaces: [WorkspaceInfo]
+    let activity: [ActivityEntry]
+    let activityReadTimestamp: TimeInterval
+    let liveWorkspaceIDs: Set<String>
+    let liveAgentUUIDs: Set<String>
+}
+
 enum WorkspaceSidebarAction {
     case moveUp, moveDown, markActive, markInactive
 }
