@@ -35,6 +35,7 @@ extension NiruxShellView {
                     ) ?? .idle,
                     isEditor: col.isEditor,
                     editorFileName: editorFile,
+                    editorIsDirty: col.editorColumn?.isDirty ?? false,
                     agentElapsedSeconds: col.pty?.foregroundProcessStartedAt
                         .map { Date().timeIntervalSince($0) }
                 )

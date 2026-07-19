@@ -194,6 +194,14 @@ enum PilotSidebarRenderer {
         }
         result.append(NSAttributedString(string: displayName, attributes: [.font: font, .foregroundColor: textColor]))
 
+        // Unsaved-changes dot — same amber as the editor tab bar's.
+        if column.isEditor, column.editorIsDirty {
+            result.append(NSAttributedString(string: " ●", attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: fontSize - 3, weight: .regular),
+                .foregroundColor: NSColor(red: 0.95, green: 0.7, blue: 0.3, alpha: 1)
+            ]))
+        }
+
         // Elapsed time for working agents — "· 12m" in green next to the name.
         if column.agentStatus == .working, let elapsed = column.agentElapsedSeconds {
             result.append(NSAttributedString(string: " · \(shortDuration(elapsed))", attributes: [
