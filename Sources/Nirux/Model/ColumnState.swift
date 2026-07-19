@@ -26,6 +26,10 @@ final class ColumnState {
     /// the workspace opens it in a browser column.
     var onOpenURL: ((String) -> Void)?
 
+    /// Fires when the user cmd-clicks a file: link in the terminal — the
+    /// workspace routes it into an editor column at the optional line.
+    var onOpenFile: ((String, Int?) -> Void)?
+
     /// Stable identity injected into the terminal environment as
     /// NIRUX_AGENT_UUID — Claude/Codex hook events carry it back so
     /// AgentHookCenter can route them to THIS column. Persisted across
@@ -296,13 +300,18 @@ final class ColumnState {
 extension ColumnState: TerminalSurfaceOpenURLDelegate {
     /// Ghostty auto-detects URLs (plain text and OSC 8 hyperlinks) and
     /// forwards cmd+click here. Web links open inside Nirux as a browser
-    /// column; anything else (mailto:, file:, custom schemes) goes to the
-    /// system handler.
+    /// column; file: links (Claude Code emits OSC 8 file:// links for
+    /// paths) open inside Nirux as an editor column; anything else
+    /// (mailto:, custom schemes) goes to the system handler.
     func terminalDidRequestOpenURL(_ url: String, kind: TerminalOpenURLKind) {
-        guard let parsed = URL(string: url), parsed.scheme != nil else { return }
-        if ["http", "https"].contains(parsed.scheme!.lowercased()) {
+        guard let parsed = URL(string: url), let scheme = parsed.scheme?.lowercased() else { return }
+        switch scheme {
+        case "http", "https":
             onOpenURL?(url)
-        } else {
+        case "file":
+            guard let target = FileLink.parse(parsed) else { return }
+            onOpenFile?(target.path, target.line)
+        default:
             NSWorkspace.shared.open(parsed)
         }
     }

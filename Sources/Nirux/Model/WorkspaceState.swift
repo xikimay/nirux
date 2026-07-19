@@ -43,6 +43,9 @@ final class WorkspaceState {
     /// A terminal link was cmd-clicked — the shell opens a browser column
     /// in this workspace.
     var onTerminalOpenURL: ((WorkspaceState, String) -> Void)?
+    /// A terminal file: link was cmd-clicked — the shell opens it in an
+    /// editor column in this workspace, at the optional line.
+    var onTerminalOpenFile: ((WorkspaceState, String, Int?) -> Void)?
 
     init(
         id: String = UUID().uuidString,
@@ -120,6 +123,10 @@ final class WorkspaceState {
         col.onOpenURL = { [weak self] url in
             guard let self else { return }
             self.onTerminalOpenURL?(self, url)
+        }
+        col.onOpenFile = { [weak self] path, line in
+            guard let self else { return }
+            self.onTerminalOpenFile?(self, path, line)
         }
     }
 

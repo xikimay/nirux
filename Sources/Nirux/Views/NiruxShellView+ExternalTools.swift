@@ -338,12 +338,16 @@ extension NiruxShellView {
         }
     }
 
-    /// Open a file in an editor column at an optional line. If the active
+    /// Open a file in an editor column at an optional line. If the target
     /// workspace doesn't yet have an editor column, one is added; otherwise
     /// the existing one is reused so search results don't pile up new
-    /// columns. Used by the workspace-wide search panel.
-    func openInEditorColumn(path: String, line: Int? = nil, workspaceCwd: String? = nil) {
-        guard let workspace = activeWorkspace else { return }
+    /// columns. Used by the workspace-wide search panel and terminal
+    /// file: links (which pass the workspace the link was clicked in).
+    func openInEditorColumn(
+        path: String, line: Int? = nil, workspaceCwd: String? = nil,
+        in targetWorkspace: WorkspaceState? = nil
+    ) {
+        guard let workspace = targetWorkspace ?? activeWorkspace else { return }
         let editorRoot = workspaceCwd ?? currentWorkspaceCwd(for: workspace)
         let existingEditor = workspace.columns
             .compactMap { $0.editorColumn }

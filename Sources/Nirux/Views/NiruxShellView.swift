@@ -154,6 +154,9 @@ final class NiruxShellView: NSView {
         workspace.onTerminalOpenURL = { [weak self] targetWorkspace, url in
             self?.openWebView(url: url, in: targetWorkspace)
         }
+        workspace.onTerminalOpenFile = { [weak self] targetWorkspace, path, line in
+            self?.openInEditorColumn(path: path, line: line, in: targetWorkspace)
+        }
     }
 
     /// Iterate every editor column across all workspaces. Used by the
