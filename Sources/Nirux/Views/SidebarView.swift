@@ -9,14 +9,10 @@ final class SidebarBackgroundView: NSView {
 /// Sidebar: minimal dots in normal mode, expanded detail panel (pilot-style) in expanded mode.
 /// Dragging on empty sidebar area moves the window.
 final class SidebarView: NSView {
-    /// Dragging on empty sidebar area moves the window — but not on a
-    /// workspace card, where dragging means reorder (SidebarView+Drag).
-    override var mouseDownCanMoveWindow: Bool {
-        guard isExpanded, let window else { return true }
-        let docPoint = contentDocumentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
-        if case .workspace = hitArea(at: docPoint)?.region { return false }
-        return true
-    }
+    // Note: card drags don't move the window even so — the drag-reorder
+    // tracking loop (SidebarView+Drag) consumes the mouse events before
+    // the window-move machinery sees them.
+    override var mouseDownCanMoveWindow: Bool { true }
     var onWorkspaceClicked: ((Int) -> Void)?
     var onColumnClicked: ((Int, Int) -> Void)?  // (workspaceIndex, columnIndex)
     var onDiffStatsClicked: ((Int) -> Void)?
@@ -60,7 +56,6 @@ final class SidebarView: NSView {
     var dragSnapshotView: NSImageView?
     var dragDimView: NSView?
     var dragInsertionView: NSView?
-    var dragKeyMonitor: Any?
     /// Sidebar data that arrived mid-drag; applied when the drag ends so
     /// rebuilds don't tear down rows under the captured drag geometry.
     var deferredDragUpdate: (profiles: [ProfileInfo], workspaces: [WorkspaceInfo], activity: [ActivityEntry])?
@@ -246,10 +241,10 @@ final class SidebarView: NSView {
             let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
 
             if let area = hitArea(at: docLocation) {
-                // Workspace rows don't click on mouseDown: arm a potential
-                // drag-reorder and let mouseUp decide click vs drop.
+                // Workspace rows don't click on mouseDown: run the drag
+                // tracking loop, which decides between click and reorder.
                 if case .workspace(let workspaceIndex) = area.region {
-                    beginPotentialWorkspaceDrag(workspaceIndex: workspaceIndex, rowFrame: area.frame, at: docLocation)
+                    trackWorkspaceDrag(workspaceIndex: workspaceIndex, rowFrame: area.frame, startPoint: docLocation)
                     return
                 }
                 handleHit(area.region, event: event)

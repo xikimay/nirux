@@ -1,6 +1,6 @@
 import AppKit
 
-/// Geometry captured when a drag is armed, in the scroll document view's
+/// Geometry captured when a drag starts, in the scroll document view's
 /// coordinate space. Frames stay valid for the whole gesture because
 /// sidebar rebuilds are suspended while a drag is in flight.
 struct SidebarWorkspaceDrag {
@@ -37,15 +37,57 @@ enum SidebarDragMath {
 extension SidebarView {
 
     private static let dragThreshold: CGFloat = 4
+    private static let escapeKeyCode: UInt16 = 53
 
-    /// Called from mouseDown on a `.workspace` hit region: don't fire the
-    /// click yet — capture the group geometry and let mouseDragged/mouseUp
-    /// decide between click and reorder.
-    func beginPotentialWorkspaceDrag(workspaceIndex: Int, rowFrame: NSRect, at point: NSPoint) {
-        guard let dragged = lastInfos.first(where: { $0.index == workspaceIndex }) else {
+    /// Called from mouseDown on a `.workspace` hit region. Runs a local
+    /// event-tracking loop until mouseUp: a sub-threshold gesture delivers
+    /// the normal click, anything larger becomes a reorder drag. Consuming
+    /// the events here (instead of relying on mouseDragged/mouseUp
+    /// delivery) also keeps the window-move machinery from seeing them —
+    /// the sidebar's subviews report `mouseDownCanMoveWindow == true`.
+    func trackWorkspaceDrag(workspaceIndex: Int, rowFrame: NSRect, startPoint: NSPoint) {
+        guard let window,
+              let drag0 = makeWorkspaceDrag(workspaceIndex: workspaceIndex, rowFrame: rowFrame, startPoint: startPoint)
+        else {
             onWorkspaceClicked?(workspaceIndex)
             return
         }
+        var drag = drag0
+        workspaceDrag = drag
+
+        let mask: NSEvent.EventTypeMask = [.leftMouseDragged, .leftMouseUp, .keyDown]
+        while let event = window.nextEvent(matching: mask) {
+            switch event.type {
+            case .leftMouseDragged:
+                dragMoved(event, drag: &drag)
+                workspaceDrag = drag
+            case .leftMouseUp:
+                finishWorkspaceDrag()
+                if drag.isDragging {
+                    if let slot = drag.currentSlot,
+                       let target = SidebarDragMath.targetPosition(slot: slot, draggedPosition: drag.position) {
+                        onWorkspaceReordered?(drag.workspaceIndex, target)
+                    }
+                } else {
+                    onWorkspaceClicked?(drag.workspaceIndex)
+                }
+                return
+            case .keyDown where event.keyCode == Self.escapeKeyCode:
+                // Cancel: tear down, then swallow the rest of the gesture
+                // so the leftover drag can't start moving the window.
+                finishWorkspaceDrag()
+                consumeGestureUntilMouseUp(window)
+                return
+            default:
+                // Swallow other key presses for the duration of the drag.
+                break
+            }
+        }
+        finishWorkspaceDrag()
+    }
+
+    private func makeWorkspaceDrag(workspaceIndex: Int, rowFrame: NSRect, startPoint: NSPoint) -> SidebarWorkspaceDrag? {
+        guard let dragged = lastInfos.first(where: { $0.index == workspaceIndex }) else { return nil }
         let group = displayedWorkspaceInfos.filter { $0.isInactive == dragged.isInactive }
         let frames = group.compactMap { info in
             hitAreas.first { area in
@@ -55,24 +97,17 @@ extension SidebarView {
         }
         guard frames.count == group.count,
               let position = group.firstIndex(where: { $0.index == workspaceIndex })
-        else {
-            onWorkspaceClicked?(workspaceIndex)
-            return
-        }
-        workspaceDrag = SidebarWorkspaceDrag(
+        else { return nil }
+        return SidebarWorkspaceDrag(
             workspaceIndex: workspaceIndex,
             rowFrame: rowFrame,
             groupRowFrames: frames,
             position: position,
-            startPoint: point
+            startPoint: startPoint
         )
     }
 
-    override func mouseDragged(with event: NSEvent) {
-        guard var drag = workspaceDrag else {
-            super.mouseDragged(with: event)
-            return
-        }
+    private func dragMoved(_ event: NSEvent, drag: inout SidebarWorkspaceDrag) {
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
         if !drag.isDragging {
             guard hypot(point.x - drag.startPoint.x, point.y - drag.startPoint.y) > Self.dragThreshold else { return }
@@ -84,28 +119,12 @@ extension SidebarView {
         let slot = SidebarDragMath.insertionSlot(forY: point.y, rowMidYs: drag.groupRowFrames.map(\.midY))
         drag.currentSlot = slot
         updateInsertionIndicator(slot: slot, drag: drag)
-        workspaceDrag = drag
     }
 
-    override func mouseUp(with event: NSEvent) {
-        guard let drag = workspaceDrag else {
-            super.mouseUp(with: event)
-            return
+    private func consumeGestureUntilMouseUp(_ window: NSWindow) {
+        while let event = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            if event.type == .leftMouseUp { return }
         }
-        finishWorkspaceDrag()
-        guard drag.isDragging else {
-            onWorkspaceClicked?(drag.workspaceIndex)
-            return
-        }
-        if let slot = drag.currentSlot,
-           let target = SidebarDragMath.targetPosition(slot: slot, draggedPosition: drag.position) {
-            onWorkspaceReordered?(drag.workspaceIndex, target)
-        }
-    }
-
-    func cancelWorkspaceDrag() {
-        guard workspaceDrag != nil else { return }
-        finishWorkspaceDrag()
     }
 
     // MARK: - Visuals
@@ -147,19 +166,6 @@ extension SidebarView {
         dragInsertionView = indicator
 
         NSCursor.closedHand.set()
-
-        // Escape cancels the drag. The view is not first responder during
-        // tracking, so watch key events with a local monitor.
-        dragKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard event.keyCode == 53 else { return event }
-            var consumed = false
-            MainActor.assumeIsolated {
-                guard let self, self.workspaceDrag?.isDragging == true else { return }
-                self.cancelWorkspaceDrag()
-                consumed = true
-            }
-            return consumed ? nil : event
-        }
     }
 
     private func updateInsertionIndicator(slot: Int, drag: SidebarWorkspaceDrag) {
@@ -197,10 +203,6 @@ extension SidebarView {
         dragDimView = nil
         dragInsertionView?.removeFromSuperview()
         dragInsertionView = nil
-        if let monitor = dragKeyMonitor {
-            NSEvent.removeMonitor(monitor)
-            dragKeyMonitor = nil
-        }
         NSCursor.arrow.set()
         if let deferred = deferredDragUpdate {
             deferredDragUpdate = nil
