@@ -4,9 +4,9 @@ import Foundation
 ///
 /// Claude Code hooks and Codex `notify` invoke `Nirux --hook`, which appends
 /// one JSON line per event to `hook-events.jsonl` in the state directory.
-/// This center watches that file (directory-level vnode source, so the very
-/// first creation is caught too), drains it debounced, and dispatches each
-/// event to the matching column's PtySession via `resolver`.
+/// This center watches the file AND its directory (appends only fire on the
+/// file's own vnode), drains it debounced, and dispatches each event to the
+/// matching column's PtySession via `resolver`.
 ///
 /// The file doubles as a queue: events emitted while Nirux isn't running are
 /// replayed on launch (mostly useful for the activity feed — statuses
@@ -25,8 +25,8 @@ final class AgentHookCenter {
         let workspace: WorkspaceState
         let column: ColumnState
         let columnIndex: Int
-        /// Same definition updateSidebar uses: focused column of the active
-        /// workspace (or any focused column in pilot mode).
+        /// App active AND focused column of the active workspace (or any
+        /// focused column in pilot mode) — see resolveAgentColumn.
         let isUserFocused: Bool
     }
 
