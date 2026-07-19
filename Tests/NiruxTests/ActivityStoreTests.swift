@@ -209,6 +209,18 @@ final class ActivityStoreTests: XCTestCase {
         XCTAssertFalse(ActivityStore.isAttentionSuperseded(at: 2, in: feed))
     }
 
+    func testAttentionFromUnidentifiedSessionsNeverSupersedeEachOther() {
+        // Hooks running outside Nirux: no uuid, no workspace, no column.
+        let feed = [
+            makeEntry(.turnComplete, timestamp: 30, workspaceID: nil),
+            makeEntry(.attention, timestamp: 20, workspaceID: nil)
+        ]
+        XCTAssertFalse(
+            ActivityStore.isAttentionSuperseded(at: 1, in: feed),
+            "two unrelated external sessions must not mark each other handled"
+        )
+    }
+
     func testEntryCapturesAgentUUIDAndDecodesWithoutIt() throws {
         let entry = ActivityEntry(
             event: makeEvent(.notification, detail: "x"), workspaceTitle: "ws", columnIndex: 0

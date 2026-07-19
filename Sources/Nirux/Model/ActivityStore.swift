@@ -14,10 +14,12 @@ struct ActivityEntry: Codable, Hashable {
     let category: Category
     /// "claude" / "codex".
     let agentKind: String
-    /// Identity of the agent process that emitted the event. The primary
-    /// click-to-focus target: unlike columnIndex it survives column
-    /// reordering and closures. Optional so pre-existing activity.json
-    /// entries (and hooks without the env var) still decode.
+    /// NIRUX_AGENT_UUID of the emitting column — fixed per terminal
+    /// column, so it identifies "the column this agent lives in" rather
+    /// than one agent session. Primary click-to-focus target: unlike
+    /// columnIndex it survives column reordering. Optional so pre-existing
+    /// activity.json entries (and hooks running outside Nirux, which lack
+    /// the env var) still decode.
     let agentUUID: String?
     /// Positional fallback for click-to-focus when the agent UUID no
     /// longer resolves (agent exited but its workspace lives on). Nil
@@ -137,6 +139,11 @@ final class ActivityStore {
         guard let entry = feed[safe: index], entry.category == .attention else { return false }
         return feed[..<index].contains { newer in
             if let uuid = entry.agentUUID { return newer.agentUUID == uuid }
+            // Positional fallback needs SOME identity: events from hooks
+            // running outside Nirux have nil workspace, column and uuid,
+            // and two unrelated external sessions must not "handle" each
+            // other's attention rows.
+            guard entry.workspaceID != nil || entry.columnIndex != nil else { return false }
             return newer.workspaceID == entry.workspaceID && newer.columnIndex == entry.columnIndex
         }
     }

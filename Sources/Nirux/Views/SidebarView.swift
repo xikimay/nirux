@@ -45,9 +45,10 @@ final class SidebarView: NSView {
     /// Workspace IDs that still exist — rows whose target is gone render
     /// ghosted and don't register a hit area.
     var lastLiveWorkspaceIDs: Set<String> = []
-    /// Agent UUIDs currently attached to a column. A row whose agent still
-    /// lives is never ghosted, even if its frozen workspace/column info
-    /// went stale (column moved, workspace renamed).
+    /// Agent UUIDs of currently existing terminal columns. A row whose
+    /// originating column still exists is never ghosted, even if its
+    /// frozen workspace/column info went stale (column moved, workspace
+    /// renamed).
     var lastLiveAgentUUIDs: Set<String> = []
     /// Hover-highlight backing views, one per rendered activity row
     /// (same index as the `.activity(index)` hit regions).
