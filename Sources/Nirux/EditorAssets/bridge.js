@@ -684,7 +684,11 @@
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
       renderLineHighlight: "all",
-      smoothScrolling: true
+      smoothScrolling: true,
+      stickyScroll: { enabled: true },
+      bracketPairColorization: { enabled: true },
+      guides: { bracketPairs: true },
+      find: { seedSearchStringFromSelection: "selection" }
     });
 
     // Cmd+S → ask Swift to write the active file. Swift writes, then sends
