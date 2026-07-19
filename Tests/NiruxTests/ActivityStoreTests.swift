@@ -84,11 +84,12 @@ final class ActivityStoreTests: XCTestCase {
 
     private func makeEntry(
         _ category: ActivityEntry.Category, timestamp: TimeInterval,
-        workspaceID: String? = "ws", columnIndex: Int? = nil
+        workspaceID: String? = "ws", columnIndex: Int? = nil, agentUUID: String? = nil
     ) -> ActivityEntry {
         ActivityEntry(
-            category: category, agentKind: "claude", workspaceID: workspaceID,
-            columnIndex: columnIndex, workspaceTitle: "ws", detail: nil, timestamp: timestamp
+            category: category, agentKind: "claude", agentUUID: agentUUID,
+            workspaceID: workspaceID, columnIndex: columnIndex,
+            workspaceTitle: "ws", detail: nil, timestamp: timestamp
         )
     }
 
@@ -164,6 +165,64 @@ final class ActivityStoreTests: XCTestCase {
         store.markAllRead()
         store.markRead(upTo: 40)
         XCTAssertEqual(store.lastReadTimestamp, 50, "the read mark never moves backwards")
+    }
+
+    @MainActor
+    func testCoalescingRespectsAgentIdentity() {
+        let store = makeStore()
+        store.record(makeEntry(.turnComplete, timestamp: 1, columnIndex: 0, agentUUID: "a"))
+        store.record(makeEntry(.turnComplete, timestamp: 2, columnIndex: 0, agentUUID: "b"))
+        XCTAssertEqual(
+            store.feedEntries.count, 2,
+            "same column but different agents (session restarted) must not merge"
+        )
+    }
+
+    func testAttentionSupersededByNewerSignalFromSameAgent() {
+        let feed = [
+            makeEntry(.turnComplete, timestamp: 30, agentUUID: "a"),
+            makeEntry(.attention, timestamp: 20, agentUUID: "a"),
+            makeEntry(.attention, timestamp: 10, agentUUID: "b")
+        ]
+        XCTAssertTrue(
+            ActivityStore.isAttentionSuperseded(at: 1, in: feed),
+            "agent a signaled again after asking for input"
+        )
+        XCTAssertFalse(
+            ActivityStore.isAttentionSuperseded(at: 2, in: feed),
+            "agent b is still waiting"
+        )
+        XCTAssertFalse(
+            ActivityStore.isAttentionSuperseded(at: 0, in: feed),
+            "only attention rows can be superseded"
+        )
+        XCTAssertFalse(ActivityStore.isAttentionSuperseded(at: 9, in: feed), "out of bounds is false")
+    }
+
+    func testAttentionSupersededFallsBackToPosition() {
+        let feed = [
+            makeEntry(.turnComplete, timestamp: 30, columnIndex: 1),
+            makeEntry(.attention, timestamp: 20, columnIndex: 1),
+            makeEntry(.attention, timestamp: 10, columnIndex: 2)
+        ]
+        XCTAssertTrue(ActivityStore.isAttentionSuperseded(at: 1, in: feed))
+        XCTAssertFalse(ActivityStore.isAttentionSuperseded(at: 2, in: feed))
+    }
+
+    func testEntryCapturesAgentUUIDAndDecodesWithoutIt() throws {
+        let entry = ActivityEntry(
+            event: makeEvent(.notification, detail: "x"), workspaceTitle: "ws", columnIndex: 0
+        )
+        XCTAssertEqual(entry?.agentUUID, "u1", "hook env NIRUX_AGENT_UUID flows into the entry")
+
+        // Entries persisted by builds that predate agentUUID must decode.
+        let legacyJSON = """
+        [{"category":"attention","agentKind":"claude","workspaceID":"ws",\
+        "workspaceTitle":"ws","timestamp":5}]
+        """
+        let decoded = try JSONDecoder().decode([ActivityEntry].self, from: Data(legacyJSON.utf8))
+        XCTAssertEqual(decoded.first?.agentUUID, nil)
+        XCTAssertEqual(decoded.first?.timestamp, 5)
     }
 
     func testInitialReadTimestampWithoutSidecarTreatsHistoryAsRead() {

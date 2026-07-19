@@ -45,6 +45,10 @@ final class SidebarView: NSView {
     /// Workspace IDs that still exist — rows whose target is gone render
     /// ghosted and don't register a hit area.
     var lastLiveWorkspaceIDs: Set<String> = []
+    /// Agent UUIDs currently attached to a column. A row whose agent still
+    /// lives is never ghosted, even if its frozen workspace/column info
+    /// went stale (column moved, workspace renamed).
+    var lastLiveAgentUUIDs: Set<String> = []
     /// Hover-highlight backing views, one per rendered activity row
     /// (same index as the `.activity(index)` hit regions).
     var activityRowBackgrounds: [NSView] = []
@@ -110,13 +114,15 @@ final class SidebarView: NSView {
 
     func update(
         profiles: [ProfileInfo], workspaces: [WorkspaceInfo], activity: [ActivityEntry] = [],
-        activityReadTimestamp: TimeInterval = 0, liveWorkspaceIDs: Set<String> = []
+        activityReadTimestamp: TimeInterval = 0, liveWorkspaceIDs: Set<String> = [],
+        liveAgentUUIDs: Set<String> = []
     ) {
         lastProfiles = profiles
         lastInfos = workspaces
         lastActivity = activity
         lastActivityReadTimestamp = activityReadTimestamp
         lastLiveWorkspaceIDs = liveWorkspaceIDs
+        lastLiveAgentUUIDs = liveAgentUUIDs
         guard isExpanded else { setNeedsDisplay(bounds); return }
         // The 2s heartbeat calls this even when nothing visible changed.
         // Rebuilding then is not just wasted work: it tears down every
@@ -146,6 +152,7 @@ final class SidebarView: NSView {
         }
         hasher.combine(lastActivityReadTimestamp)
         hasher.combine(lastLiveWorkspaceIDs)
+        hasher.combine(lastLiveAgentUUIDs)
         hasher.combine(bounds.width)
         hasher.combine(bounds.height)
         return hasher.finalize()

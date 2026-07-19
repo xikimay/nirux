@@ -14,9 +14,16 @@ struct ActivityEntry: Codable, Hashable {
     let category: Category
     /// "claude" / "codex".
     let agentKind: String
-    /// Routing target for click-to-focus. Nil when the column is gone —
-    /// the row then focuses the workspace only (or nothing if that's gone
-    /// too; the row is still a valid historical record).
+    /// Identity of the agent process that emitted the event. The primary
+    /// click-to-focus target: unlike columnIndex it survives column
+    /// reordering and closures. Optional so pre-existing activity.json
+    /// entries (and hooks without the env var) still decode.
+    let agentUUID: String?
+    /// Positional fallback for click-to-focus when the agent UUID no
+    /// longer resolves (agent exited but its workspace lives on). Nil
+    /// when the column is gone — the row then focuses the workspace only
+    /// (or nothing if that's gone too; the row is still a valid
+    /// historical record).
     let workspaceID: String?
     let columnIndex: Int?
     /// Workspace title at event time (titles change; the entry freezes it).
@@ -27,12 +34,13 @@ struct ActivityEntry: Codable, Hashable {
     let timestamp: TimeInterval
 
     init(
-        category: Category, agentKind: String, workspaceID: String?,
-        columnIndex: Int?, workspaceTitle: String, detail: String?,
-        timestamp: TimeInterval
+        category: Category, agentKind: String, agentUUID: String? = nil,
+        workspaceID: String?, columnIndex: Int?, workspaceTitle: String,
+        detail: String?, timestamp: TimeInterval
     ) {
         self.category = category
         self.agentKind = agentKind
+        self.agentUUID = agentUUID
         self.workspaceID = workspaceID
         self.columnIndex = columnIndex
         self.workspaceTitle = workspaceTitle
@@ -51,6 +59,7 @@ struct ActivityEntry: Codable, Hashable {
         case .userPromptSubmit, .preToolUse: return nil
         }
         agentKind = event.kind.rawValue
+        agentUUID = event.agentUUID
         workspaceID = event.workspaceID
         self.columnIndex = columnIndex
         self.workspaceTitle = workspaceTitle
@@ -108,6 +117,8 @@ final class ActivityStore {
         for entry in entries where entry.category == .attention || entry.category == .turnComplete {
             if let last = result.last,
                last.category == entry.category,
+               last.agentKind == entry.agentKind,
+               last.agentUUID == entry.agentUUID,
                last.workspaceID == entry.workspaceID,
                last.columnIndex == entry.columnIndex {
                 continue  // entries are newest-first; keep the newest of the run
@@ -115,6 +126,19 @@ final class ActivityStore {
             result.append(entry)
         }
         return result
+    }
+
+    /// An attention row is "handled" when the same agent signaled again
+    /// afterwards (turn finished, new prompt…): the user already gave it
+    /// what it was waiting for, so the row shouldn't keep the urgent
+    /// look. Pure over the feed itself — live column state is unreliable
+    /// here (attention flags are cleared wholesale on app activation).
+    nonisolated static func isAttentionSuperseded(at index: Int, in feed: [ActivityEntry]) -> Bool {
+        guard let entry = feed[safe: index], entry.category == .attention else { return false }
+        return feed[..<index].contains { newer in
+            if let uuid = entry.agentUUID { return newer.agentUUID == uuid }
+            return newer.workspaceID == entry.workspaceID && newer.columnIndex == entry.columnIndex
+        }
     }
 
     /// Feed rows the user hasn't seen yet — drives the ACTIVITY badge.

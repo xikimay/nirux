@@ -64,7 +64,8 @@ extension NiruxShellView {
             profiles: profileInfos, workspaces: infos,
             activity: ActivityStore.shared.feedEntries,
             activityReadTimestamp: ActivityStore.shared.lastReadTimestamp,
-            liveWorkspaceIDs: Set(workspaces.map(\.id))
+            liveWorkspaceIDs: Set(workspaces.map(\.id)),
+            liveAgentUUIDs: Set(workspaces.flatMap { $0.columns.compactMap(\.agentUUID) })
         )
         scheduleActivityReadMark()
 
@@ -174,6 +175,24 @@ extension NiruxShellView {
     }
 
     // MARK: - Activity feed
+
+    /// Click-through for an activity row. Prefers the agent's identity —
+    /// unlike the frozen columnIndex it survives column reordering and
+    /// closures, so the flash confirms the RIGHT column. Falls back to the
+    /// event-time workspace/column when the agent has exited. Clicking is
+    /// also an explicit acknowledgment: everything up to that entry is read.
+    func focusActivityEntry(_ entry: ActivityEntry) {
+        ActivityStore.shared.markRead(upTo: entry.timestamp)
+        if let uuid = entry.agentUUID,
+           let resolution = resolveAgentColumn(uuid: uuid),
+           let wsIndex = workspaces.firstIndex(where: { $0 === resolution.workspace }) {
+            switchToWorkspace(wsIndex)
+            focusColumnByIndex(resolution.columnIndex)
+            flashColumnBorder(workspaceIndex: wsIndex, columnIndex: resolution.columnIndex)
+        } else if let workspaceID = entry.workspaceID {
+            focusWorkspace(id: workspaceID, column: entry.columnIndex)
+        }
+    }
 
     /// "Visible" for read-marking purposes: expanded sidebar in an active,
     /// non-minimized, non-occluded window, with the activity section at

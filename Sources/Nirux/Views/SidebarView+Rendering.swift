@@ -299,9 +299,11 @@ extension SidebarView {
         return currentY
     }
 
-    /// Row whose click target is gone: workspace never resolved or has
-    /// since been closed. Rendered ghosted, no hit area.
+    /// Row whose click target is gone: the agent no longer runs anywhere
+    /// AND the frozen workspace is unresolvable. Rendered ghosted, no hit
+    /// area.
     private func isActivityTargetGone(_ entry: ActivityEntry) -> Bool {
+        if let uuid = entry.agentUUID, lastLiveAgentUUIDs.contains(uuid) { return false }
         guard let id = entry.workspaceID else { return true }
         return !lastLiveWorkspaceIDs.contains(id)
     }
@@ -321,6 +323,9 @@ extension SidebarView {
             )
             let targetGone = isActivityTargetGone(entry)
             let isRead = entry.timestamp <= lastActivityReadTimestamp
+            // The agent signaled again after this attention row — it
+            // already got what it was waiting for; drop the urgent orange.
+            let isHandled = ActivityStore.isAttentionSuperseded(at: index, in: lastActivity)
             // Ghost > read > unread; ghost rows also lose their hit area so
             // the cursor/click honestly reflect that there's nothing to focus.
             let textAlpha: CGFloat = targetGone ? 0.30 : (isRead ? 0.45 : 0.85)
@@ -331,7 +336,9 @@ extension SidebarView {
             }
 
             let fullText = activityText(for: entry)
-            let tooltip = targetGone ? "\(fullText) — workspace closed" : fullText
+            var tooltip = fullText
+            if isHandled { tooltip += " — handled" }
+            if targetGone { tooltip += " — workspace closed" }
 
             // Hover-highlight backing (indexed alongside `.activity(index)`
             // hits — one per row, gone rows included, so indices stay aligned).
@@ -350,8 +357,10 @@ extension SidebarView {
                 height: 7
             ))
             dot.wantsLayer = true
-            dot.layer?.backgroundColor = Self.activityColor(for: entry.category)
-                .withAlphaComponent(dotAlpha).cgColor
+            let dotColor: NSColor = isHandled
+                ? .white.withAlphaComponent(0.35 * dotAlpha)
+                : Self.activityColor(for: entry.category).withAlphaComponent(dotAlpha)
+            dot.layer?.backgroundColor = dotColor.cgColor
             dot.layer?.cornerRadius = 3.5
             addSubviewDoc(dot)
             expandedViews.append(dot)

@@ -102,8 +102,7 @@ final class NiruxShellView: NSView {
         sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }
         sidebar.onDiffStatsClicked = { [weak self] index in self?.openDiffInEditor(workspaceIndex: index) }
         sidebar.onActivityClicked = { [weak self] entry in
-            guard let self, let workspaceID = entry.workspaceID else { return }
-            self.focusWorkspace(id: workspaceID, column: entry.columnIndex)
+            self?.focusActivityEntry(entry)
         }
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
