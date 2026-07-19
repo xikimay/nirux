@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import GhosttyTerminal
 
-enum AgentStatus: Equatable {
+enum AgentStatus: Equatable, Hashable {
     case idle, working, needsAttention
 }
 

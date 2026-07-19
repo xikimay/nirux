@@ -61,7 +61,14 @@ extension NiruxShellView {
                 hasAttention: hasAttention
             )
         }
-        sidebar.update(profiles: profileInfos, workspaces: infos, activity: ActivityStore.shared.entries)
+        sidebar.update(
+            profiles: profileInfos, workspaces: infos,
+            activity: ActivityStore.shared.feedEntries,
+            activityReadTimestamp: ActivityStore.shared.lastReadTimestamp,
+            liveWorkspaceIDs: Set(workspaces.map(\.id)),
+            liveAgentUUIDs: Set(workspaces.flatMap { $0.columns.compactMap(\.agentUUID) })
+        )
+        scheduleActivityReadMark()
 
         // Dock badge: workspaces currently waiting for attention.
         let attentionCount = workspaces.filter { workspace in
@@ -169,6 +176,114 @@ extension NiruxShellView {
     }
 
     // MARK: - Activity feed
+
+    /// Click-through for an activity row. Prefers the agent's identity —
+    /// unlike the frozen columnIndex it survives column reordering and
+    /// closures, so the flash confirms the RIGHT column. Falls back to the
+    /// event-time workspace/column when the agent has exited. Clicking is
+    /// also an explicit acknowledgment: everything up to that entry is read.
+    func focusActivityEntry(_ entry: ActivityEntry) {
+        ActivityStore.shared.markRead(upTo: entry.timestamp)
+        if let uuid = entry.agentUUID,
+           let resolution = resolveAgentColumn(uuid: uuid),
+           let wsIndex = workspaces.firstIndex(where: { $0 === resolution.workspace }) {
+            switchToWorkspace(wsIndex)
+            focusColumnByIndex(resolution.columnIndex)
+            flashColumnBorder(workspaceIndex: wsIndex, columnIndex: resolution.columnIndex)
+        } else if let workspaceID = entry.workspaceID {
+            focusWorkspace(id: workspaceID, column: entry.columnIndex)
+        }
+    }
+
+    /// "Visible" for read-marking purposes: expanded sidebar in an active,
+    /// non-minimized, non-occluded window, with the activity section at
+    /// least partly inside the scrolled viewport. NSApp.isActive alone is
+    /// not enough — the window can be Cmd+M'd or fully covered, and the
+    /// feed sits below the workspace list, often past the fold.
+    var activityFeedIsVisibleToUser: Bool {
+        isSidebarExpanded
+            && NSApp.isActive
+            && window?.isMiniaturized == false
+            && window?.occlusionState.contains(.visible) == true
+            && sidebar.isActivityFeedVisible
+    }
+
+    /// Unread entries become read once they've actually been on screen for
+    /// a beat. The cutoff is captured when the dwell starts, NOT when it
+    /// fires: an entry arriving mid-dwell hasn't been visible for 2.5s and
+    /// must stay unread (it re-arms the next dwell). A collapse while the
+    /// feed is visible counts as "viewed" immediately (see toggleSidebar).
+    private func scheduleActivityReadMark() {
+        guard activityFeedIsVisibleToUser, ActivityStore.shared.unreadCount > 0 else { return }
+        guard activityReadTimer == nil else { return }
+        guard let cutoff = ActivityStore.shared.newestTimestamp else { return }
+        let generation = activityReadGeneration
+        activityReadTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, generation == self.activityReadGeneration else { return }
+                self.activityReadTimer = nil
+                guard self.activityFeedIsVisibleToUser else { return }
+                ActivityStore.shared.markRead(upTo: cutoff)
+            }
+        }
+    }
+
+    /// Invalidates the pending dwell. Bumping the generation also
+    /// neutralizes a timer that already fired but whose MainActor task
+    /// hasn't run yet — that stale task must not touch a newer timer.
+    func cancelActivityReadMark() {
+        activityReadGeneration &+= 1
+        activityReadTimer?.invalidate()
+        activityReadTimer = nil
+    }
+
+    private static let flashOverlayID = NSUserInterfaceItemIdentifier("nirux.activityFlashOverlay")
+
+    /// One-shot border pulse on a column — click feedback for activity-feed
+    /// and notification click-through, which are otherwise a visual no-op
+    /// when the target is already focused. Runs as an overlay so it can't
+    /// clobber the focus border or the attention pulse. The overlay's model
+    /// opacity is 0: if the animation never runs or is dropped (layer
+    /// rebuilt, view detached mid-flash), the failure mode is an invisible
+    /// view, never a stuck border — and a delayed backstop removes it even
+    /// if the CATransaction completion is lost.
+    func flashColumnBorder(workspaceIndex: Int, columnIndex: Int?) {
+        guard let workspace = workspaces[safe: workspaceIndex] else { return }
+        let colIndex = columnIndex.flatMap { workspace.columns.indices.contains($0) ? $0 : nil }
+            ?? workspace.focusedIndex
+        guard let col = workspace.columns[safe: colIndex] else { return }
+
+        // A notification storm can flash the same column repeatedly —
+        // never stack overlays.
+        col.view.subviews.filter { $0.identifier == Self.flashOverlayID }
+            .forEach { $0.removeFromSuperview() }
+
+        let overlay = SidebarBackgroundView(frame: col.view.bounds)
+        overlay.identifier = Self.flashOverlayID
+        overlay.autoresizingMask = [.width, .height]
+        overlay.wantsLayer = true
+        overlay.layer?.cornerRadius = 6
+        overlay.layer?.borderWidth = 3
+        overlay.layer?.borderColor = NSColor.niruxAccent.cgColor
+        overlay.layer?.opacity = 0
+        col.view.addSubview(overlay)
+
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak overlay] in
+            overlay?.removeFromSuperview()
+        }
+        let blink = CABasicAnimation(keyPath: "opacity")
+        blink.fromValue = 1.0
+        blink.toValue = 0.0
+        blink.duration = 0.3
+        blink.repeatCount = 2
+        overlay.layer?.add(blink, forKey: "activityFlash")
+        CATransaction.commit()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak overlay] in
+            overlay?.removeFromSuperview()
+        }
+    }
 
     /// AgentHookCenter.onActivity entry point. Signal events become feed
     /// rows; prompt/tool pings are filtered out by ActivityEntry.init.

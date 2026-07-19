@@ -52,6 +52,12 @@ final class NiruxShellView: NSView {
     var heartbeatTimer: Timer?
     var heartbeatTick: UInt = 0
 
+    /// Dwell timer that marks the activity feed read after it's been
+    /// visibly on screen (see scheduleActivityReadMark). The generation
+    /// counter invalidates fired-but-not-yet-run timer tasks on cancel.
+    var activityReadTimer: Timer?
+    var activityReadGeneration: UInt = 0
+
     // Panel references (stored properties must live in main class declaration)
     var nameInputPanel: NameInputPanel?
     var worktreePanel: WorktreePanel?
@@ -99,8 +105,7 @@ final class NiruxShellView: NSView {
         sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }
         sidebar.onDiffStatsClicked = { [weak self] index in self?.openDiffInEditor(workspaceIndex: index) }
         sidebar.onActivityClicked = { [weak self] entry in
-            guard let self, let workspaceID = entry.workspaceID else { return }
-            self.focusWorkspace(id: workspaceID, column: entry.columnIndex)
+            self?.focusActivityEntry(entry)
         }
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
@@ -625,11 +630,11 @@ final class NiruxShellView: NSView {
             },
             PaletteAction(
                 icon: "⚙",
-                title: "Install Worktree Skill",
-                subtitle: "Auto-create workspaces when agents create worktrees",
+                title: "Install Agent Skills",
+                subtitle: "Worktree workspaces + open code in the editor from agents",
                 shortcut: ""
             ) { [weak self] in
-                self?.installWorktreeSkill()
+                self?.installAgentSkills()
             }
         ]
 

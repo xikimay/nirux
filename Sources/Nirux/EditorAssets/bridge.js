@@ -130,18 +130,49 @@
       ensureModel(path, content, lang);
     }
     if (payload.activate === false) return;
-    switchToPath(path);
+    switchToPath(path, payload.focus);
     if (typeof payload.line === "number" && payload.line > 0) {
-      revealLine(payload.line, payload.column || 1);
+      revealLine(payload.line, payload.column || 1, payload.endLine, payload.focus);
     }
   }
 
-  function revealLine(line, column) {
+  // focus === false means "don't STEAL keyboard focus from elsewhere":
+  // a user mid-keystroke in a terminal must not suddenly type into the
+  // source file. If the editor itself already holds focus, keep focusing —
+  // the model just changed under the caret, and focus must follow content
+  // or the next keystroke edits an invisible buffer.
+  function shouldFocus(target, focus) {
+    if (focus !== false) return true;
+    return typeof target.hasTextFocus === "function" && target.hasTextFocus();
+  }
+
+  function revealLine(line, column, endLine, focus) {
     var target = activeEditor();
     if (!target) return;
+    var refocus = shouldFocus(target, focus);
+    var model = target.getModel();
+    if (model) {
+      line = Math.min(line, model.getLineCount());
+    }
+    // A range (agent "show me this code" flow): select line..endLine so the
+    // snippet is visibly highlighted, not just scrolled to. endLine == line
+    // still selects — a one-line snippet deserves its highlight too.
+    if (typeof endLine === "number" && endLine >= line && model) {
+      var end = Math.min(endLine, model.getLineCount());
+      var range = {
+        startLineNumber: line,
+        startColumn: 1,
+        endLineNumber: end,
+        endColumn: model.getLineMaxColumn(end)
+      };
+      target.setSelection(range);
+      target.revealRangeInCenter(range);
+      if (refocus) target.focus();
+      return;
+    }
     target.revealLineInCenter(line);
     target.setPosition({ lineNumber: line, column: column || 1 });
-    target.focus();
+    if (refocus) target.focus();
   }
 
   function activeEditor() {
@@ -149,14 +180,19 @@
     return editor;
   }
 
-  function switchToPath(path) {
+  // See shouldFocus for the focus === false contract.
+  function switchToPath(path, focus) {
     if (!editor) return;
     var entry = models[path];
     if (!entry) return;
+    // Decide BEFORE the model swap — hasTextFocus is what makes an
+    // agent-driven switch under a live editor caret re-focus, so focus
+    // keeps following content instead of typing into a hidden buffer.
+    var refocus = shouldFocus(editor, focus);
     // Switching to a different file always exits diff mode — the diff is
     // pinned to a single path and showing two files side-by-side from one
     // tab bar is more confusing than helpful.
-    if (diffMode) exitDiff();
+    if (diffMode) exitDiff(focus);
     // Save where we were in the file we're leaving.
     if (currentPath && models[currentPath]) {
       viewStates[currentPath] = editor.saveViewState();
@@ -166,7 +202,7 @@
     if (viewStates[path]) {
       editor.restoreViewState(viewStates[path]);
     }
-    editor.focus();
+    if (refocus) editor.focus();
     postToSwift({ type: "ready", path: path });
     reportDirtyFor(path);
   }
@@ -570,7 +606,7 @@
     if (pierreDiffRoot) pierreDiffRoot.style.display = "none";
   }
 
-  function exitDiff() {
+  function exitDiff(focus) {
     if (diffMode === "monaco") {
       exitMonacoDiff();
     } else if (diffMode === "pierre" || diffMode === "pierre-group") {
@@ -581,7 +617,7 @@
     hideStatus();
     if (editor) {
       editor.layout();
-      editor.focus();
+      if (focus !== false) editor.focus();
     }
   }
 
@@ -698,12 +734,16 @@
   function handleMessage(msg) {
     switch (msg.type) {
       case "openFile": applyOpen(msg); break;
-      case "switchTab": switchToPath(msg.path); break;
+      case "switchTab": switchToPath(msg.path, msg.focus); break;
       case "closeTab": closeTab(msg.path); break;
       case "markSaved": markSaved(msg.path); break;
       case "goToLine":
-        if (msg.path && currentPath !== msg.path) switchToPath(msg.path);
-        if (typeof msg.line === "number") revealLine(msg.line, msg.column);
+        if (msg.path && currentPath !== msg.path) switchToPath(msg.path, msg.focus);
+        // If the model is unknown (Swift/JS state diverged, e.g. after a
+        // WebContent crash) the switch fails — bail rather than painting
+        // the selection onto whatever file is currently displayed.
+        if (msg.path && currentPath !== msg.path) break;
+        if (typeof msg.line === "number") revealLine(msg.line, msg.column, msg.endLine, msg.focus);
         break;
       case "enterDiff":
         if (msg.viewer === "monaco") {

@@ -214,8 +214,9 @@ enum PilotSidebarRenderer {
         return result
     }
 
-    /// Compact duration for sidebar rows: 42s, 12m, 1h05m.
-    static func shortDuration(_ seconds: TimeInterval) -> String {
+    /// Compact duration for sidebar rows: 42s, 12m, 1h05m. Pure —
+    /// nonisolated so ColumnInfo's display-granularity Hashable can use it.
+    nonisolated static func shortDuration(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds))
         if total < 60 { return "\(total)s" }
         if total < 3600 { return "\(total / 60)m" }

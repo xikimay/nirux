@@ -301,7 +301,13 @@ extension SidebarView {
         }
         if let deferred = deferredDragUpdate {
             deferredDragUpdate = nil
-            update(profiles: deferred.profiles, workspaces: deferred.workspaces, activity: deferred.activity)
+            update(
+                profiles: deferred.profiles, workspaces: deferred.workspaces,
+                activity: deferred.activity,
+                activityReadTimestamp: deferred.activityReadTimestamp,
+                liveWorkspaceIDs: deferred.liveWorkspaceIDs,
+                liveAgentUUIDs: deferred.liveAgentUUIDs
+            )
         } else if rebuildSkippedDuringDrag {
             rebuildContent()
         }
