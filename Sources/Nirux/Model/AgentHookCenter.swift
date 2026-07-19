@@ -41,7 +41,6 @@ final class AgentHookCenter {
     private var dirSource: DispatchSourceFileSystemObject?
     private var fileSource: DispatchSourceFileSystemObject?
     private var dirFd: Int32 = -1
-    private var fileFd: Int32 = -1
     private var pendingDrain: DispatchWorkItem?
     private var started = false
 
@@ -88,7 +87,6 @@ final class AgentHookCenter {
         guard fileSource == nil else { return }
         let fd = open(Self.eventsURL.path, O_RDONLY)
         guard fd >= 0 else { return } // not created yet — the dir watcher will call back
-        fileFd = fd
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
             eventMask: [.write, .extend, .delete, .rename, .revoke],
@@ -102,7 +100,6 @@ final class AgentHookCenter {
             if !source.data.isDisjoint(with: [.delete, .rename, .revoke]) {
                 self.fileSource?.cancel()
                 self.fileSource = nil
-                self.fileFd = -1
                 return
             }
             self.scheduleDrain()
@@ -181,7 +178,6 @@ final class AgentHookCenter {
         dirFd = -1
         fileSource?.cancel()
         fileSource = nil
-        fileFd = -1
         started = false
     }
 }
