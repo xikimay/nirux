@@ -283,13 +283,17 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     /// explicit user opens get alerts and a large-file confirmation;
     /// session restore passes false so a problematic file can't pop a modal
     /// at every launch.
-    func open(path: String, line: Int? = nil, interactive: Bool = true) {
+    func open(path: String, line: Int? = nil, endLine: Int? = nil, interactive: Bool = true) {
         let absolute = absolutePath(for: path)
 
         // Already open → just switch.
         if tabPaths.contains(absolute) {
             switchTo(path: absolute)
-            if let line { sendBridge(["type": "goToLine", "path": absolute, "line": line]) }
+            if let line {
+                var payload: [String: Any] = ["type": "goToLine", "path": absolute, "line": line]
+                if let endLine { payload["endLine"] = endLine }
+                sendBridge(payload)
+            }
             return
         }
 
@@ -310,7 +314,10 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         guard let (content, encoding) = readFileContent(at: absolute, interactive: interactive)
         else { return }
 
-        openBuffer(path: absolute, content: content, mtime: mtime(of: absolute), line: line, encoding: encoding)
+        openBuffer(
+            path: absolute, content: content, mtime: mtime(of: absolute),
+            line: line, endLine: endLine, encoding: encoding
+        )
     }
 
     /// Read result with encoding fallbacks. `.binary` means NUL bytes were
@@ -388,6 +395,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         content: String,
         mtime: Date?,
         line: Int?,
+        endLine: Int? = nil,
         activate: Bool = true,
         encoding: String.Encoding = .utf8
     ) {
@@ -419,6 +427,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             "activate": activate
         ]
         if let line { payload["line"] = line }
+        if let endLine { payload["endLine"] = endLine }
         sendBridge(payload)
         startFileWatch()
     }

@@ -349,7 +349,7 @@ extension NiruxShellView {
     /// columns. Used by the workspace-wide search panel and terminal
     /// file: links (which pass the workspace the link was clicked in).
     func openInEditorColumn(
-        path: String, line: Int? = nil, workspaceCwd: String? = nil,
+        path: String, line: Int? = nil, endLine: Int? = nil, workspaceCwd: String? = nil,
         in targetWorkspace: WorkspaceState? = nil
     ) {
         guard let workspace = targetWorkspace ?? activeWorkspace else { return }
@@ -360,7 +360,7 @@ extension NiruxShellView {
             ?? (workspaceCwd == nil ? workspace.columns.compactMap { $0.editorColumn }.first : nil)
 
         if let existing = existingEditor {
-            existing.open(path: path, line: line)
+            existing.open(path: path, line: line, endLine: endLine)
             if let idx = workspace.columns.firstIndex(where: { $0.editorColumn === existing }) {
                 workspace.focusedIndex = idx
                 relayout(animated: false)
@@ -374,10 +374,21 @@ extension NiruxShellView {
         workspace.addEditorColumn(workspaceCwd: editorRoot)
         if let editor = workspace.columns[safe: workspace.focusedIndex]?.editorColumn {
             wireEditor(editor)
-            editor.open(path: path, line: line)
+            editor.open(path: path, line: line, endLine: endLine)
         }
         relayout(animated: false)
         updateSidebar()
+    }
+
+    /// Entry point for `nirux://open-editor` (agents opening a snippet from
+    /// the terminal). Switches to the requested workspace when it resolves;
+    /// an unknown or absent workspace falls through to the active one.
+    func openEditorFromURL(_ request: OpenEditorRequest) {
+        let target = request.workspaceID.flatMap { id in workspaces.first { $0.id == id } }
+        if let target { focusWorkspace(id: target.id) }
+        openInEditorColumn(
+            path: request.file, line: request.line, endLine: request.endLine, in: target
+        )
     }
 
     /// Send the editor's current selection into a terminal column of the

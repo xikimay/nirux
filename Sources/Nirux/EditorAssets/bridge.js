@@ -132,13 +132,32 @@
     if (payload.activate === false) return;
     switchToPath(path);
     if (typeof payload.line === "number" && payload.line > 0) {
-      revealLine(payload.line, payload.column || 1);
+      revealLine(payload.line, payload.column || 1, payload.endLine);
     }
   }
 
-  function revealLine(line, column) {
+  function revealLine(line, column, endLine) {
     var target = activeEditor();
     if (!target) return;
+    var model = target.getModel();
+    if (model) {
+      line = Math.min(line, model.getLineCount());
+    }
+    // A range (agent "show me this code" flow): select line..endLine so the
+    // snippet is visibly highlighted, not just scrolled to.
+    if (typeof endLine === "number" && endLine > line && model) {
+      var end = Math.min(endLine, model.getLineCount());
+      var range = {
+        startLineNumber: line,
+        startColumn: 1,
+        endLineNumber: end,
+        endColumn: model.getLineMaxColumn(end)
+      };
+      target.setSelection(range);
+      target.revealRangeInCenter(range);
+      target.focus();
+      return;
+    }
     target.revealLineInCenter(line);
     target.setPosition({ lineNumber: line, column: column || 1 });
     target.focus();
@@ -703,7 +722,7 @@
       case "markSaved": markSaved(msg.path); break;
       case "goToLine":
         if (msg.path && currentPath !== msg.path) switchToPath(msg.path);
-        if (typeof msg.line === "number") revealLine(msg.line, msg.column);
+        if (typeof msg.line === "number") revealLine(msg.line, msg.column, msg.endLine);
         break;
       case "enterDiff":
         if (msg.viewer === "monaco") {

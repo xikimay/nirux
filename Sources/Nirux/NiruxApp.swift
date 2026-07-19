@@ -154,6 +154,12 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
                     )
                 }
 
+            // nirux://open-editor?file=<absolute path>&line=42&endLine=57&workspace=<id>
+            case "open-editor":
+                if let request = OpenEditorRequest(queryItems: params) {
+                    shell?.openEditorFromURL(request)
+                }
+
             default:
                 break
             }
