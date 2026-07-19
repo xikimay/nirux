@@ -199,26 +199,103 @@ extension NiruxShellView {
         Do NOT run git worktree commands directly — Nirux handles worktree creation natively.
         """
 
-    func installWorktreeSkill() {
+    // MARK: - Show-Code Skill
+
+    private static let showCodeSkillContent = """
+        ---
+        name: nirux-show-code
+        description: >
+          This skill should be used when the user asks to SEE code — "show me the code",
+          "montre-moi le code", "show me where X is defined", "ouvre ce fichier",
+          "fais voir cette fonction", "where is this handled", "open that file",
+          "let me see that function", "où est défini X" — while the session runs inside
+          a Nirux terminal (the NIRUX_WORKSPACE_ID environment variable is set). Opens
+          the snippet in the Nirux editor column instead of pasting it into the terminal.
+          Not intended for editing code or for sessions outside Nirux.
+        metadata:
+          author: nirux
+        ---
+
+        ## Overview
+
+        Nirux (the terminal app hosting this session) has a built-in code editor column.
+        Instead of quoting a long snippet in the reply, open the file directly in the
+        editor at the right lines via the `nirux://open-editor` URL scheme. The editor
+        reveals and highlights the range; the terminal reply stays to one line.
+
+        ## Preconditions
+
+        Only use this when `$NIRUX_WORKSPACE_ID` is set (the session runs inside Nirux):
+
+        ```bash
+        [ -n "$NIRUX_WORKSPACE_ID" ] && echo inside-nirux
+        ```
+
+        If it is unset, do NOT use the URL — quote the relevant code in the reply as usual.
+
+        ## Steps
+
+        1. **Locate the code** with Grep/Read: absolute file path, start line, and end
+           line of the relevant snippet. Verify the file exists (`[ -f "$path" ]`) —
+           Nirux silently ignores requests for missing files, so a bad path would
+           leave the user staring at nothing.
+        2. **Open it in the editor**:
+           ```bash
+           encoded=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$abs_path")
+           open "nirux://open-editor?file=${encoded}&line=<start>&endLine=<end>&workspace=$NIRUX_WORKSPACE_ID"
+           ```
+           - `file` is required and must be an **absolute** path, URL-encoded. Files
+             larger than 5 MB are refused — quote the snippet in the reply instead.
+           - `line` is optional (1-based). `endLine` is optional; when present the
+             editor selects/highlights the whole `line..endLine` range — prefer passing
+             both so the user sees the snippet boundaries.
+           - `workspace=$NIRUX_WORKSPACE_ID` makes Nirux switch to this session's
+             workspace before opening; keep it in the command.
+        3. **Still answer in the terminal**, one line: what it is and where, e.g.
+           `AgentHookCenter.swift:44 — parsing du workspaceID`. The editor shows the
+           code; the reply gives the pointer.
+
+        Requires a Nirux build from 2026-07-20 or newer — on older builds the URL
+        only brings Nirux forward without opening anything. If nothing opens, fall
+        back to quoting the code in the reply.
+
+        ## Multiple matches
+
+        Open the most relevant snippet in the editor, and mention the others as
+        `path/file.swift:123` references in the reply — file:line references are
+        clickable in the Nirux terminal.
+        """
+
+    /// Name → content of every skill Nirux ships. Installed together: the
+    /// set is small and versioned with the app, so partial installs would
+    /// only create confusion about which copy is current.
+    private static let agentSkills = [
+        "nirux-worktree": worktreeSkillContent,
+        "nirux-show-code": showCodeSkillContent
+    ]
+
+    func installAgentSkills() {
         // Swift multiline strings already normalize indentation. Preserve the
         // authored content verbatim so YAML front matter stays valid.
-        let content = Self.worktreeSkillContent + "\n"
-
-        let destinations = [
-            NSHomeDirectory() + "/.agents/skills/nirux-worktree",  // Codex, Cursor, Copilot, etc.
-            NSHomeDirectory() + "/.claude/skills/nirux-worktree"  // Claude Code
+        let roots = [
+            NSHomeDirectory() + "/.agents/skills",  // Codex, Cursor, Copilot, etc.
+            NSHomeDirectory() + "/.claude/skills"  // Claude Code
         ]
 
         do {
-            for dir in destinations {
-                try FileManager.default.createDirectory(
-                    atPath: dir, withIntermediateDirectories: true)
-                try content.write(toFile: dir + "/SKILL.md", atomically: true, encoding: .utf8)
+            for (name, content) in Self.agentSkills {
+                for root in roots {
+                    let dir = root + "/" + name
+                    try FileManager.default.createDirectory(
+                        atPath: dir, withIntermediateDirectories: true)
+                    try (content + "\n").write(toFile: dir + "/SKILL.md", atomically: true, encoding: .utf8)
+                }
             }
 
             let alert = NSAlert()
-            alert.messageText = "Worktree Skill Installed"
-            alert.informativeText = "Installed to ~/.agents/skills/ and ~/.claude/skills/\nAll agents will auto-detect it."
+            alert.messageText = "Agent Skills Installed"
+            let names = Self.agentSkills.keys.sorted().joined(separator: ", ")
+            alert.informativeText = "Installed \(names) to ~/.agents/skills/ and ~/.claude/skills/\nAll agents will auto-detect them."
             alert.runModal()
         } catch {
             let alert = NSAlert()
@@ -349,7 +426,8 @@ extension NiruxShellView {
     /// columns. Used by the workspace-wide search panel and terminal
     /// file: links (which pass the workspace the link was clicked in).
     func openInEditorColumn(
-        path: String, line: Int? = nil, workspaceCwd: String? = nil,
+        path: String, line: Int? = nil, endLine: Int? = nil, workspaceCwd: String? = nil,
+        takeFocus: Bool = true, interactive: Bool = true,
         in targetWorkspace: WorkspaceState? = nil
     ) {
         guard let workspace = targetWorkspace ?? activeWorkspace else { return }
@@ -359,8 +437,14 @@ extension NiruxShellView {
             .first { $0.workspaceCwd == editorRoot }
             ?? (workspaceCwd == nil ? workspace.columns.compactMap { $0.editorColumn }.first : nil)
 
+        // focusedIndex moves even for takeFocus:false opens: the camera
+        // only keeps the FOCUSED column visible, so leaving it put could
+        // reveal entirely off-screen in wide layouts. Keyboard focus is
+        // protected separately (the focus:false bridge flag) — the trade
+        // is that column-level commands (Cmd+W etc.) now target the
+        // agent-opened editor, which conveniently makes Cmd+W a dismiss.
         if let existing = existingEditor {
-            existing.open(path: path, line: line)
+            existing.open(path: path, line: line, endLine: endLine, takeFocus: takeFocus, interactive: interactive)
             if let idx = workspace.columns.firstIndex(where: { $0.editorColumn === existing }) {
                 workspace.focusedIndex = idx
                 relayout(animated: false)
@@ -374,10 +458,29 @@ extension NiruxShellView {
         workspace.addEditorColumn(workspaceCwd: editorRoot)
         if let editor = workspace.columns[safe: workspace.focusedIndex]?.editorColumn {
             wireEditor(editor)
-            editor.open(path: path, line: line)
+            editor.open(path: path, line: line, endLine: endLine, takeFocus: takeFocus, interactive: interactive)
         }
         relayout(animated: false)
         updateSidebar()
+    }
+
+    /// Entry point for `nirux://open-editor` (agents opening a snippet from
+    /// the terminal). Switches to the requested workspace when it resolves;
+    /// an unknown or absent workspace falls through to the active one.
+    /// Non-interactive and unfocused: a URL-triggered open must never pop a
+    /// blocking modal (any app can fire the URL) nor move keyboard focus
+    /// into the buffer while the user is typing elsewhere.
+    func openEditorFromURL(_ request: OpenEditorRequest) {
+        var target: WorkspaceState?
+        if let id = request.workspaceID,
+           let index = workspaces.firstIndex(where: { $0.id == id }) {
+            target = workspaces[index]
+            switchToWorkspace(index)
+        }
+        openInEditorColumn(
+            path: request.file, line: request.line, endLine: request.endLine,
+            takeFocus: false, interactive: false, in: target
+        )
     }
 
     /// Send the editor's current selection into a terminal column of the
