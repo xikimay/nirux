@@ -11,11 +11,26 @@ final class ColumnState {
     var terminalView: TerminalView?
     var webViewColumn: WebViewColumn?
     var editorColumn: EditorColumn?
-    var widthPreset: ColumnWidth = .half
+    /// Column width as a fraction of the columns viewport (0.15…2.0).
+    /// Freeform (drag the resize handles); the ColumnWidth presets are just
+    /// named stops the width cycler snaps to.
+    var widthFraction: CGFloat = ColumnWidth.half.fraction
     private(set) var pty: PtySession?
     var onCwdChanged: ((String) -> Void)?
     var onTitleChanged: (() -> Void)?
-    var onOsc9Received: (() -> Void)?
+    /// Fires when the agent asks for attention (hook-routed turn end /
+    /// permission prompt while the user isn't watching this column).
+    var onAgentAttention: (() -> Void)?
+
+    /// Fires when the user cmd-clicks an http(s) link in the terminal —
+    /// the workspace opens it in a browser column.
+    var onOpenURL: ((String) -> Void)?
+
+    /// Stable identity injected into the terminal environment as
+    /// NIRUX_AGENT_UUID — Claude/Codex hook events carry it back so
+    /// AgentHookCenter can route them to THIS column. Persisted across
+    /// restarts; survives shell restarts (same terminal spec).
+    let agentUUID: String?
 
     /// Terminal title from OSC 0/2 (agent context, vim filename, etc.)
     var terminalTitle: String? {
@@ -132,6 +147,7 @@ final class ColumnState {
     /// Shared terminal init — pass extra shell args for command mode.
     private init(cwd: String, shellArgs: [String], environment: [String: String]) {
         terminalSpec = (cwd, shellArgs, environment)
+        agentUUID = environment["NIRUX_AGENT_UUID"]
         let dropView = DropTargetView()
         dropView.wantsLayer = true
         view = dropView
@@ -157,6 +173,7 @@ final class ColumnState {
             backend: .inMemory(ptySession.terminalSession),
             workingDirectory: cwd
         )
+        terminal.delegate = self
         view.addSubview(terminal)
         terminalView = terminal
 
@@ -174,9 +191,9 @@ final class ColumnState {
             self?.onTitleChanged?()
         }
 
-        // Forward OSC 9 (agent turn completed)
+        // Forward OSC 9 (turn complete for sessions without hook coverage)
         ptySession.onOsc9Received = { [weak self] in
-            self?.onOsc9Received?()
+            self?.onAgentAttention?()
         }
 
         // Shell exit → show the restart overlay over the (still visible)
@@ -202,6 +219,7 @@ final class ColumnState {
 
     /// WebView column
     init(url: String) {
+        agentUUID = nil
         view = NSView()
         view.wantsLayer = true
 
@@ -213,6 +231,7 @@ final class ColumnState {
 
     /// Editor column (Monaco-backed). Scoped to a workspace cwd.
     init(editorWorkspaceCwd: String) {
+        agentUUID = nil
         view = NSView()
         view.wantsLayer = true
 
@@ -222,9 +241,21 @@ final class ColumnState {
         editorColumn = editor
     }
 
+    /// Snap to the next preset (same cycle order as before: from any
+    /// freeform width, jump to whatever preset follows the nearest one).
     func cycleWidth() {
-        NiruxDebugLog.log("cycleWidth \(widthPreset) -> \(widthPreset.next)")
-        widthPreset = widthPreset.next
+        let all = ColumnWidth.allCases
+        let nearest = all.indices.min(by: {
+            abs(all[$0].fraction - widthFraction) < abs(all[$1].fraction - widthFraction)
+        }) ?? 0
+        widthFraction = all[(nearest + 1) % all.count].fraction
+        NiruxDebugLog.log("cycleWidth -> \(widthFraction)")
+    }
+
+    /// AgentHookCenter entry point: the agent in this column just asked for
+    /// attention — forward to the workspace-level notification wiring.
+    func notifyAgentAttention() {
+        onAgentAttention?()
     }
 
     // MARK: - Shell exit / restart
@@ -260,7 +291,30 @@ final class ColumnState {
     }
 }
 
-enum ColumnWidth: CaseIterable, Equatable {
+// MARK: - Link opening (cmd+click / hover)
+
+extension ColumnState: TerminalSurfaceOpenURLDelegate {
+    /// Ghostty auto-detects URLs (plain text and OSC 8 hyperlinks) and
+    /// forwards cmd+click here. Web links open inside Nirux as a browser
+    /// column; anything else (mailto:, file:, custom schemes) goes to the
+    /// system handler.
+    func terminalDidRequestOpenURL(_ url: String, kind: TerminalOpenURLKind) {
+        guard let parsed = URL(string: url), parsed.scheme != nil else { return }
+        if ["http", "https"].contains(parsed.scheme!.lowercased()) {
+            onOpenURL?(url)
+        } else {
+            NSWorkspace.shared.open(parsed)
+        }
+    }
+}
+
+extension ColumnState: TerminalSurfaceHoverLinkDelegate {
+    func terminalDidUpdateHoverLink(_ url: String?) {
+        (url == nil ? NSCursor.arrow : .pointingHand).set()
+    }
+}
+
+enum ColumnWidth: CaseIterable {
     case full, twoThirds, half, third, quarter
 
     var fraction: CGFloat {
@@ -271,24 +325,5 @@ enum ColumnWidth: CaseIterable, Equatable {
         case .third: 1.0 / 3.0
         case .quarter: 1.0 / 4.0
         }
-    }
-
-    var rawValue: CGFloat { fraction }
-
-    init?(rawValue: CGFloat) {
-        switch rawValue {
-        case 1.0: self = .full
-        case let value where abs(value - 2.0/3.0) < 0.01: self = .twoThirds
-        case 0.5: self = .half
-        case let value where abs(value - 1.0/3.0) < 0.01: self = .third
-        case 0.25: self = .quarter
-        default: return nil
-        }
-    }
-
-    var next: ColumnWidth {
-        let all = ColumnWidth.allCases
-        let idx = all.firstIndex(of: self)!
-        return all[(idx + 1) % all.count]
     }
 }

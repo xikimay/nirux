@@ -64,6 +64,8 @@ enum SidebarHitRegion {
     case link(url: String, label: NSTextField)
     case column(workspaceIndex: Int, columnIndex: Int)
     case workspace(Int)
+    /// Index into SidebarView.lastActivity (snapshot at rebuild time).
+    case activity(Int)
 }
 
 enum WorkspaceSidebarAction {

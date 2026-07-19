@@ -16,6 +16,16 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var updaterReady = false
 
     static func main() {
+        // Hook-receiver mode: `Nirux --hook claude|codex [payload-json]`.
+        // Claude Code hooks and Codex's notify command invoke the app binary
+        // this way (see AgentHookInstaller); the process appends one event
+        // line and exits — it must never launch the app UI.
+        let args = CommandLine.arguments
+        if args.count >= 3, args[1] == "--hook", let kind = AgentHookEvent.Kind(rawValue: args[2]) {
+            let payload = args.count > 3 ? args.last : nil
+            exit(AgentHookCLI.run(kind: kind, payload: payload))
+        }
+
         let app = NSApplication.shared
         let delegate = NiruxApp()
         app.delegate = delegate
@@ -66,6 +76,24 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // Restore previous session if available
         shellView.restoreState()
 
+        // Agent lifecycle hooks: install into ~/.claude/settings.json and
+        // ~/.codex/config.toml, then start routing events to columns. Must
+        // run AFTER restoreState so queued events resolve to live columns.
+        AgentHookInstaller.installAll()
+        ActivityStore.shared.load()
+        ActivityStore.shared.onChange = { [weak shellView] in shellView?.updateSidebar() }
+        let hooks = AgentHookCenter.shared
+        hooks.resolver = { [weak shellView] uuid in
+            shellView?.resolveAgentColumn(uuid: uuid)
+        }
+        hooks.onEventApplied = { [weak shellView] in
+            shellView?.updateSidebar()
+        }
+        hooks.onActivity = { [weak shellView] event, resolution in
+            shellView?.recordActivity(event, resolution: resolution)
+        }
+        hooks.start()
+
         // Focus first terminal
         shellView.focusActiveTerminal(in: window)
 
@@ -85,6 +113,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
 
     func applicationWillTerminate(_ notification: Notification) {
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
+        ActivityStore.shared.flush()
     }
 
     // MARK: - URL Scheme

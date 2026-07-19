@@ -125,7 +125,9 @@ final class PtySession: @unchecked Sendable {
         set { state.onTitleChanged = newValue }
     }
 
-    /// Called when an OSC 9 notification is received (agent turn completed)
+    /// Called when an OSC 9 notification is received AND this session has
+    /// no hook coverage — hooked sessions get the same turn-complete signal
+    /// from the Stop hook, so firing both would double-count.
     var onOsc9Received: (() -> Void)? {
         get { state.onOsc9Received }
         set { state.onOsc9Received = newValue }
@@ -147,7 +149,7 @@ final class PtySession: @unchecked Sendable {
 
     /// When the current foreground process took over (drives the "working
     /// · 12m" display in the sidebar). Nil while the idle shell runs.
-    var foregroundProcessStartedAt: Date? { state.foregroundSince }
+    var foregroundProcessStartedAt: Date? { state.machine.foregroundSince }
 
     /// The user's login shell ($SHELL) when it's a mainstream
     /// POSIX-compatible one, else zsh. Restricted to an allowlist because
@@ -166,64 +168,29 @@ final class PtySession: @unchecked Sendable {
         return "/bin/zsh"
     }()
 
-    /// Compute agent status using burst detection (rapid consecutive reads = active)
-    /// - isUserFocused: true if the user is currently focused on this specific column
+    /// Compute agent status. With Claude Code hooks installed, lifecycle
+    /// events (prompt submitted, tool call, turn stop, permission request)
+    /// are authoritative; agents without hooks fall back to output-activity
+    /// detection. Called on the heartbeat with a shared process snapshot.
     func agentStatus(snapshot: ProcessSnapshot, isUserFocused: Bool) -> AgentStatus {
-        let now = Date()
         let fgName = foregroundProcessName(snapshot: snapshot) ?? ""
-        let isAgent = ["claude", "codex"].contains(fgName)
+        return state.machine.tick(fgName: fgName, isUserFocused: isUserFocused, now: Date())
+    }
 
-        // Track foreground changes and clear stale output from the previous
-        // command so process startup does not look like a completed turn.
-        if fgName != state.lastForegroundName {
-            state.markForegroundProcessChange(to: fgName, now: now)
-        }
-
-        let isStartingUp = state.shouldSuppressAgentAttention(now: now)
-        let inBurst = !isStartingUp
-            && state.lastBurstTime != nil
-            && now.timeIntervalSince(state.lastBurstTime!) < 3.0
-
-        let prev = state.agentState
-        switch state.agentState {
-        case .idle:
-            if isAgent && inBurst { state.agentState = .working }
-        case .working:
-            if !isAgent {
-                state.agentState = .idle
-            } else if isStartingUp {
-                state.agentState = .idle
-            } else if !inBurst {
-                state.agentState = isUserFocused ? .idle : .needsAttention
-            }
-        case .needsAttention:
-            if !isAgent {
-                state.agentState = .idle
-            } else if inBurst {
-                state.agentState = .working
-            } else if isUserFocused {
-                state.agentState = .idle; state.lastBurstTime = nil
-            }
-        }
-        if state.agentState != prev {
-            NSLog(
-                "[AgentStatus] \(fgName) \(prev) → \(state.agentState)"
-                + " | isAgent=\(isAgent) inBurst=\(inBurst) "
-                + "isStartingUp=\(isStartingUp) isUserFocused=\(isUserFocused)"
-            )
-        }
-        return state.agentState
+    /// Apply a hook event routed by AgentHookCenter (main queue). Returns
+    /// true when the column flipped INTO needsAttention — the caller then
+    /// fires the workspace-level notification path.
+    @discardableResult
+    func applyAgentHook(_ event: AgentHookEvent, isUserFocused: Bool) -> Bool {
+        state.machine.applyHook(event.name, kind: event.kind, isUserFocused: isUserFocused)
     }
 
     /// Last computed agent state (no snapshot needed — read from persistent state)
-    var cachedAgentState: AgentStatus { state.agentState }
+    var cachedAgentState: AgentStatus { state.machine.state }
 
     /// Clear attention flag (user has seen it)
     func clearAgentAttention() {
-        if state.agentState == .needsAttention {
-            state.agentState = .idle
-            state.lastBurstTime = nil
-        }
+        state.machine.clearAttention()
     }
 
     /// Name of the foreground process (e.g. "zsh", "node", "claude").
@@ -413,7 +380,7 @@ final class PtySession: @unchecked Sendable {
             // the dead shell's identity.
             state.childPid = 0
             state.hasExited = true
-            state.agentState = .idle
+            state.machine.reset()
             state.onProcessExit?()
         }
         exitSource.resume()
@@ -483,20 +450,7 @@ private final class PtyState: @unchecked Sendable {
     var onTitleChanged: ((String) -> Void)?
     var onOsc9Received: (() -> Void)?
     var onProcessExit: (() -> Void)?
-    var lastOsc9Timestamp: Date?
-    var agentState: AgentStatus = .idle
-    var hasUserInputSinceStart: Bool = false
-    var lastBurstTime: Date?
-    var readCountInWindow: Int = 0
-    var windowStart: Date = Date()
-    var lastForegroundName: String?
-    var foregroundSince: Date?
-    var lastInteractionTime: Date?  // last write or resize (echo/redraw follows)
-    var burstDetectionSuppressedUntil: Date?
-
-    private static let writeEchoSuppressionInterval: TimeInterval = 0.3
-    private static let displayRefreshSuppressionInterval: TimeInterval = 1.5
-    private static let foregroundStartupSuppressionInterval: TimeInterval = 5.0
+    var machine = AgentStatusMachine()
 
     func foregroundProcessName(snapshot: ProcessSnapshot) -> String? {
         guard childPid > 0 else { return nil }
@@ -526,34 +480,12 @@ private final class PtyState: @unchecked Sendable {
         return ProcessSnapshot.flagValue(flag, pid: fgPid)
     }
 
-    func markPtyStarted(now: Date = Date()) {
-        hasUserInputSinceStart = false
-        foregroundSince = nil
-        lastForegroundName = nil
-        agentState = .idle
-        lastBurstTime = nil
-        resetBurstWindow(now: now)
-    }
-
-    func markForegroundProcessChange(to name: String, now: Date = Date()) {
-        lastForegroundName = name
-        foregroundSince = now
-        lastBurstTime = nil
-        resetBurstWindow(now: now)
-    }
-
-    func shouldSuppressAgentAttention(now: Date = Date()) -> Bool {
-        guard hasUserInputSinceStart else { return true }
-        if let foregroundSince,
-           now.timeIntervalSince(foregroundSince) < Self.foregroundStartupSuppressionInterval {
-            return true
-        }
-        return false
+    func markPtyStarted() {
+        machine.reset()
     }
 
     func writeToPty(_ data: Data) {
-        hasUserInputSinceStart = true
-        markInteraction(suppressBurstDetectionFor: Self.writeEchoSuppressionInterval)
+        machine.noteUserInput(now: Date())
         guard ptyFd >= 0 else { return }
         data.withUnsafeBytes { buf in
             guard let ptr = buf.baseAddress else { return }
@@ -621,7 +553,7 @@ private final class PtyState: @unchecked Sendable {
             return
         }
         NiruxDebugLog.log("pty fd=\(ptyFd) pid=\(childPid) TIOCSWINSZ cols=\(cols) rows=\(rows) (was \(lastCols)x\(lastRows))")
-        markInteraction(suppressBurstDetectionFor: Self.displayRefreshSuppressionInterval)
+        machine.noteInteraction(now: Date())
         lastCols = cols
         lastRows = rows
         var ws = winsize()
@@ -631,19 +563,7 @@ private final class PtyState: @unchecked Sendable {
     }
 
     func markTerminalRedraw() {
-        markInteraction(suppressBurstDetectionFor: Self.displayRefreshSuppressionInterval)
-    }
-
-    private func markInteraction(suppressBurstDetectionFor interval: TimeInterval) {
-        let now = Date()
-        lastInteractionTime = now
-        burstDetectionSuppressedUntil = now.addingTimeInterval(interval)
-        resetBurstWindow(now: now)
-    }
-
-    private func resetBurstWindow(now: Date) {
-        windowStart = now
-        readCountInWindow = 0
+        machine.noteInteraction(now: Date())
     }
 
     func readFromPty(into session: InMemoryTerminalSession) {
@@ -657,7 +577,7 @@ private final class PtyState: @unchecked Sendable {
             return
         }
         let data = Data(buffer[0..<bytesRead])
-        updateBurstDetection()
+        machine.noteRead(now: Date())
         session.receive(data)
         if let str = String(bytes: data, encoding: .utf8),
            str.contains("\u{1b}]") {
@@ -665,35 +585,7 @@ private final class PtyState: @unchecked Sendable {
         }
     }
 
-    /// Burst detection: 5+ reads within 2s = real agent activity.
-    /// Skips reads that are echo from typing or redraw from resize.
-    private func updateBurstDetection() {
-        let now = Date()
-        if shouldSuppressAgentAttention(now: now) {
-            lastBurstTime = nil
-            resetBurstWindow(now: now)
-            return
-        }
-        if let suppressedUntil = burstDetectionSuppressedUntil {
-            if now < suppressedUntil {
-                resetBurstWindow(now: now)
-                return
-            }
-            burstDetectionSuppressedUntil = nil
-        }
-        let isEcho = lastInteractionTime != nil
-            && now.timeIntervalSince(lastInteractionTime!) < Self.writeEchoSuppressionInterval
-        guard !isEcho else { return }
-        if now.timeIntervalSince(windowStart) > 2.0 {
-            windowStart = now
-            readCountInWindow = 1
-        } else {
-            readCountInWindow += 1
-            if readCountInWindow >= 5 { lastBurstTime = now }
-        }
-    }
-
-    /// Parse OSC sequences from terminal output (cwd, title, notifications).
+    /// Parse OSC sequences from terminal output (cwd, title).
     private func parseOscSequences(_ str: String) {
         // OSC 7 (cwd reporting): \e]7;file://hostname/path\a
         if let callback = onCwdChanged, str.contains("\u{1b}]7;") {
@@ -719,15 +611,14 @@ private final class PtyState: @unchecked Sendable {
                 }
             }
         }
-        // OSC 9 (notification): Claude Code emits this when a turn completes
-        if str.contains("\u{1b}]9;") {
-            let now = Date()
-            lastOsc9Timestamp = now
-            lastBurstTime = nil
-            guard !shouldSuppressAgentAttention(now: now) else { return }
-            if let callback = onOsc9Received {
-                DispatchQueue.main.async { callback() }
-            }
+        // OSC 9 (notification): Claude Code emits this when a turn
+        // completes. Only forwarded for sessions WITHOUT hook coverage —
+        // hooked sessions get the same signal from the Stop hook, and the
+        // hasUserInput gate keeps startup replay from fabricating attention.
+        if str.contains("\u{1b}]9;"),
+           machine.hookKind == nil, machine.hasUserInput,
+           let callback = onOsc9Received {
+            DispatchQueue.main.async { callback() }
         }
     }
 }

@@ -86,11 +86,7 @@ final class NiruxShellView: NSView {
         addSubview(statusBar)
 
         let workspace = WorkspaceState(title: "ws 1", cwd: NSHomeDirectory(), profileID: activeProfileID)
-        workspace.onMetadataChanged = { [weak self] in self?.updateSidebar(); self?.refreshTitleBarLabels() }
-        workspace.onDiffStatsClicked = { [weak self, weak workspace] in
-            guard let workspace else { return }
-            self?.openDiffInEditor(for: workspace)
-        }
+        wireWorkspace(workspace)
         workspaces.append(workspace)
         verticalStrip.addSubview(workspace.containerView)
         sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index) }
@@ -99,6 +95,10 @@ final class NiruxShellView: NSView {
         sidebar.onCreateProfile = { [weak self] in self?.createProfileFromActiveContext() }
         sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }
         sidebar.onDiffStatsClicked = { [weak self] index in self?.openDiffInEditor(workspaceIndex: index) }
+        sidebar.onActivityClicked = { [weak self] entry in
+            guard let self, let workspaceID = entry.workspaceID else { return }
+            self.focusWorkspace(id: workspaceID, column: entry.columnIndex)
+        }
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
             if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }
@@ -140,6 +140,20 @@ final class NiruxShellView: NSView {
     func stopHeartbeat() {
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
+    }
+
+    /// Single place that wires a workspace's shell-facing callbacks —
+    /// sidebar refresh, diff click-through, terminal link opening. Used by
+    /// init, addWorkspace and session restore.
+    func wireWorkspace(_ workspace: WorkspaceState) {
+        workspace.onMetadataChanged = { [weak self] in self?.updateSidebar(); self?.refreshTitleBarLabels() }
+        workspace.onDiffStatsClicked = { [weak self, weak workspace] in
+            guard let workspace else { return }
+            self?.openDiffInEditor(for: workspace)
+        }
+        workspace.onTerminalOpenURL = { [weak self] targetWorkspace, url in
+            self?.openWebView(url: url, in: targetWorkspace)
+        }
     }
 
     /// Iterate every editor column across all workspaces. Used by the

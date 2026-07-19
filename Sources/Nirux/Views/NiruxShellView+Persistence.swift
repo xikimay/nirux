@@ -26,11 +26,7 @@ extension NiruxShellView {
                 profileID: profileID
             )
             workspace.isInactive = persistedWS.isInactive
-            workspace.onMetadataChanged = { [weak self] in self?.updateSidebar(); self?.refreshTitleBarLabels() }
-            workspace.onDiffStatsClicked = { [weak self, weak workspace] in
-                guard let workspace else { return }
-                self?.openDiffInEditor(for: workspace)
-            }
+            wireWorkspace(workspace)
             // Remove the default column created by WorkspaceState.init
             if let first = workspace.columns.first { first.view.removeFromSuperview(); workspace.columns.removeAll() }
             for persistedCol in persistedWS.columns {
@@ -39,10 +35,16 @@ extension NiruxShellView {
                     workspace.addColumn(webViewURL: persistedCol.webViewURL ?? "about:blank")
                 case .claudeCode:
                     let mode = persistedCol.claudeLaunchMode ?? .default
-                    workspace.addColumn(command: NiruxShellView.claudeCommand(continueSession: true, mode: mode))
+                    workspace.addColumn(
+                        command: NiruxShellView.claudeCommand(continueSession: true, mode: mode),
+                        agentUUID: persistedCol.agentUUID ?? UUID().uuidString
+                    )
                 case .codex:
                     let mode = persistedCol.codexLaunchMode ?? .default
-                    workspace.addColumn(command: NiruxShellView.codexCommand(resumeLast: true, mode: mode))
+                    workspace.addColumn(
+                        command: NiruxShellView.codexCommand(resumeLast: true, mode: mode),
+                        agentUUID: persistedCol.agentUUID ?? UUID().uuidString
+                    )
                 case .editor:
                     let openFiles = persistedCol.editorOpenFiles ?? []
                     // Non-interactive: a binary or huge file in the persisted
@@ -62,11 +64,16 @@ extension NiruxShellView {
                         }
                     }
                 case .terminal:
-                    workspace.addColumn()
+                    workspace.addColumn(agentUUID: persistedCol.agentUUID ?? UUID().uuidString)
                 }
-                if let width = ColumnWidth(rawValue: CGFloat(persistedCol.widthPreset)) {
-                    workspace.columns.last?.widthPreset = width
-                }
+                // Clamp into the drag bounds: a hand-edited or corrupt
+                // widthPreset must not restore an invisible sliver (or a
+                // column wider than the strip allows).
+                let fraction = CGFloat(persistedCol.widthPreset)
+                workspace.columns.last?.widthFraction = min(
+                    WorkspaceState.maxWidthFraction,
+                    max(WorkspaceState.minWidthFraction, fraction)
+                )
             }
             workspace.focusedIndex = min(persistedWS.focusedColumnIndex, max(workspace.columns.count - 1, 0))
             workspaces.append(workspace)
@@ -126,14 +133,15 @@ extension NiruxShellView {
                             kind = .terminal; webURL = nil
                         }
                         return PersistedColumn(
-                            widthPreset: Double(col.widthPreset.rawValue),
+                            widthPreset: Double(col.widthFraction),
                             cwd: col.editorColumn?.workspaceCwd ?? col.pty?.childCwd ?? workspace.cwd,
                             columnType: kind,
                             webViewURL: webURL,
                             editorOpenFiles: editorOpenFiles,
                             editorActiveFile: editorActiveFile,
                             claudeLaunchMode: claudeMode,
-                            codexLaunchMode: codexMode
+                            codexLaunchMode: codexMode,
+                            agentUUID: col.agentUUID
                         )
                     },
                     focusedColumnIndex: workspace.focusedIndex,

@@ -40,6 +40,9 @@ final class WorkspaceState {
     /// Called by NiruxShellView to wire up sidebar refresh
     var onMetadataChanged: (() -> Void)?
     var onDiffStatsClicked: (() -> Void)?
+    /// A terminal link was cmd-clicked — the shell opens a browser column
+    /// in this workspace.
+    var onTerminalOpenURL: ((WorkspaceState, String) -> Void)?
 
     init(
         id: String = UUID().uuidString,
@@ -86,8 +89,8 @@ final class WorkspaceState {
         }
     }
 
-    private func setupOsc9Tracking(for col: ColumnState) {
-        col.onOsc9Received = { [weak self, weak col] in
+    private func setupAgentAttentionTracking(for col: ColumnState) {
+        col.onAgentAttention = { [weak self, weak col] in
             guard let self else { return }
             self.hasNotification = true
             self.onMetadataChanged?()
@@ -113,10 +116,18 @@ final class WorkspaceState {
         }
     }
 
+    private func setupLinkOpening(for col: ColumnState) {
+        col.onOpenURL = { [weak self] url in
+            guard let self else { return }
+            self.onTerminalOpenURL?(self, url)
+        }
+    }
+
     private func setupAllTracking(for col: ColumnState) {
         setupCwdTracking(for: col)
         setupTitleTracking(for: col)
-        setupOsc9Tracking(for: col)
+        setupAgentAttentionTracking(for: col)
+        setupLinkOpening(for: col)
     }
 
     func detectGitBranch() {
@@ -138,10 +149,12 @@ final class WorkspaceState {
 
     // MARK: - Column Management
 
-    private func terminalEnvironment() -> [String: String] {
+    private func terminalEnvironment(agentUUID: String) -> [String: String] {
         [
             "NIRUX_PROFILE_ID": profileID,
-            "NIRUX_WORKSPACE_ID": id
+            "NIRUX_WORKSPACE_ID": id,
+            // Hook events carry this back — see AgentHookCenter.
+            "NIRUX_AGENT_UUID": agentUUID
         ]
     }
 
@@ -150,18 +163,63 @@ final class WorkspaceState {
         columns.insert(col, at: insertAt)
         stripView.addSubview(col.view)
         focusedIndex = insertAt
+        makeResizeHandle()
     }
 
-    func addColumn() {
+    /// One resize handle per column (its right edge), always the topmost
+    /// strip subviews. Closures resolve the handle back to its CURRENT
+    /// column index at event time, so moveColumn/closeColumn can't leave
+    /// them pointing at the wrong column.
+    private var resizeHandles: [ColumnResizeHandle] = []
+
+    private func makeResizeHandle() {
+        let handle = ColumnResizeHandle()
+        handle.onDragStart = { [weak self, weak handle] in
+            guard let self, let handle,
+                  let index = self.resizeHandles.firstIndex(of: handle),
+                  self.columns.indices.contains(index) else { return 0.5 }
+            // Dragging a column's edge focuses it (camera + sidebar follow).
+            self.focusedIndex = index
+            self.onMetadataChanged?()
+            return self.columns[index].widthFraction
+        }
+        handle.onDrag = { [weak self, weak handle] fraction in
+            guard let handle else { return }
+            self?.setColumnWidth(for: handle, fraction: fraction)
+        }
+        handle.onReset = { [weak self, weak handle] in
+            guard let handle else { return }
+            self?.setColumnWidth(for: handle, fraction: ColumnWidth.half.fraction)
+        }
+        stripView.addSubview(handle)
+        resizeHandles.append(handle)
+    }
+
+    static let minWidthFraction: CGFloat = 0.15
+    static let maxWidthFraction: CGFloat = 2.0
+
+    private func setColumnWidth(for handle: ColumnResizeHandle, fraction: CGFloat) {
+        guard let index = resizeHandles.firstIndex(of: handle), columns.indices.contains(index) else { return }
+        let clamped = min(Self.maxWidthFraction, max(Self.minWidthFraction, fraction))
+        guard clamped != columns[index].widthFraction else { return }
+        columns[index].widthFraction = clamped
+        layoutAndScroll(
+            viewportWidth: containerView.bounds.width,
+            height: containerView.bounds.height,
+            animated: false
+        )
+    }
+
+    func addColumn(agentUUID: String = UUID().uuidString) {
         let effectiveCwd = columns[safe: focusedIndex]?.pty?.childCwd ?? cwd
-        let col = ColumnState(cwd: effectiveCwd, environment: terminalEnvironment())
+        let col = ColumnState(cwd: effectiveCwd, environment: terminalEnvironment(agentUUID: agentUUID))
         setupAllTracking(for: col)
         insertColumn(col)
     }
 
-    func addColumn(command: String) {
+    func addColumn(command: String, agentUUID: String = UUID().uuidString) {
         let effectiveCwd = columns[safe: focusedIndex]?.pty?.childCwd ?? cwd
-        let col = ColumnState(cwd: effectiveCwd, command: command, environment: terminalEnvironment())
+        let col = ColumnState(cwd: effectiveCwd, command: command, environment: terminalEnvironment(agentUUID: agentUUID))
         setupAllTracking(for: col)
         insertColumn(col)
     }
@@ -187,6 +245,10 @@ final class WorkspaceState {
         guard columns.count > 1 else { return }
         let col = columns.remove(at: index)
         col.view.removeFromSuperview()
+        if resizeHandles.indices.contains(index) {
+            let handle = resizeHandles.remove(at: index)
+            handle.removeFromSuperview()
+        }
         if focusedIndex >= columns.count {
             focusedIndex = columns.count - 1
         }
@@ -204,6 +266,7 @@ final class WorkspaceState {
     // MARK: - Layout & Scroll
 
     private static let columnGap: CGFloat = 2
+    private static let resizeHandleWidth: CGFloat = 9
     private static let focusBorderWidth: CGFloat = 2
     private static let focusCornerRadius: CGFloat = 6
     private static let focusColor = NSColor.niruxAccent.withAlphaComponent(0.7)
@@ -240,7 +303,7 @@ final class WorkspaceState {
             for _ in columns { widths.append(columnWidth); totalWidth += columnWidth }
         } else {
             for col in columns {
-                let width = floor(col.widthPreset.fraction * (columnsViewportWidth - totalGaps))
+                let width = floor(col.widthFraction * (columnsViewportWidth - totalGaps))
                 widths.append(width); totalWidth += width
             }
         }
@@ -263,8 +326,24 @@ final class WorkspaceState {
             col.view.layer?.borderWidth = 0
             col.view.layer?.borderColor = nil
 
+            // Resize handle straddling this column's right boundary.
+            if resizeHandles.indices.contains(index) {
+                let handle = resizeHandles[index]
+                handle.referenceWidth = max(columnsViewportWidth, 1)
+                handle.isHidden = fitAll || pilotMode
+                handle.frame = NSRect(
+                    x: xOffset + widths[index] + gap / 2 - Self.resizeHandleWidth / 2,
+                    y: 0,
+                    width: Self.resizeHandleWidth,
+                    height: height
+                )
+            }
+
             xOffset += widths[index] + gap
         }
+        // Handles must stay above every column view, whichever order the
+        // columns were inserted in.
+        for handle in resizeHandles { stripView.addSubview(handle) }
         stripView.frame = NSRect(x: stripView.frame.origin.x, y: 0, width: totalWidth, height: height)
 
         // 3. Camera (scroll to keep focused column visible)

@@ -34,11 +34,7 @@ extension NiruxShellView {
         let wsCwd = cwd ?? NSHomeDirectory()
         let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
         let workspace = WorkspaceState(title: wsTitle, cwd: wsCwd, profileID: targetProfileID)
-        workspace.onMetadataChanged = { [weak self] in self?.updateSidebar(); self?.refreshTitleBarLabels() }
-        workspace.onDiffStatsClicked = { [weak self, weak workspace] in
-            guard let workspace else { return }
-            self?.openDiffInEditor(for: workspace)
-        }
+        wireWorkspace(workspace)
         workspaceStore.appendWorkspace(workspace)
         verticalStrip.addSubview(workspace.containerView)
         if isPilotMode { workspace.createPilotPanel() }
@@ -149,6 +145,28 @@ extension NiruxShellView {
         if let columnIndex, workspaces.indices.contains(index) {
             focusColumnByIndex(columnIndex)
         }
+    }
+
+    /// AgentHookCenter resolver: locate the column owning a NIRUX_AGENT_UUID
+    /// and report whether the user is currently watching it. The app must be
+    /// active: without that, a turn ending in the FOCUSED column while the
+    /// user sits in another app would produce no dock bounce, no native
+    /// notification and no badge — the exact regression the hooks replaced.
+    func resolveAgentColumn(uuid: String) -> AgentHookCenter.Resolution? {
+        for (wsIndex, workspace) in workspaces.enumerated() {
+            guard let colIndex = workspace.columns.firstIndex(where: { $0.agentUUID == uuid }) else { continue }
+            let isActive = wsIndex == activeWSIndex
+            let isUserFocused = NSApp.isActive
+                && colIndex == workspace.focusedIndex
+                && (isActive || isPilotMode)
+            return AgentHookCenter.Resolution(
+                workspace: workspace,
+                column: workspace.columns[colIndex],
+                columnIndex: colIndex,
+                isUserFocused: isUserFocused
+            )
+        }
+        return nil
     }
 
     private func refreshAfterWorkspaceSelection(animated: Bool) {

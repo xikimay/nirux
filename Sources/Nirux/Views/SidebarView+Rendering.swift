@@ -36,6 +36,12 @@ extension SidebarView {
             contentH += SidebarExpandedMetrics.sectionHeaderAdvance
             contentH += SidebarExpandedMetrics.groupHeight(for: inactiveInfos)
         }
+        if !lastActivity.isEmpty {
+            contentH += SidebarExpandedMetrics.activitySectionGap
+            contentH += SidebarExpandedMetrics.sectionHeaderAdvance
+            contentH += CGFloat(min(lastActivity.count, SidebarExpandedMetrics.activityMaxRows))
+                * SidebarExpandedMetrics.activityRowAdvance
+        }
         if hasWorkspaces {
             contentH += SidebarExpandedMetrics.shortcutHintGap + SidebarExpandedMetrics.shortcutHintHeight
         }
@@ -58,6 +64,11 @@ extension SidebarView {
             yOffset -= SidebarExpandedMetrics.sectionGap
             yOffset = buildSectionHeader("inactive", count: inactiveInfos.count, padding: padding, yOffset: yOffset)
             yOffset = buildWorkspaceGroup(inactiveInfos, padding: padding, yOffset: yOffset)
+        }
+        if !lastActivity.isEmpty {
+            yOffset -= SidebarExpandedMetrics.activitySectionGap
+            yOffset = buildSectionHeader("activity", count: lastActivity.count, padding: padding, yOffset: yOffset)
+            yOffset = buildActivityRows(padding: padding, yOffset: yOffset)
         }
         if hasWorkspaces {
             yOffset -= SidebarExpandedMetrics.shortcutHintGap
@@ -247,6 +258,98 @@ extension SidebarView {
         addSubviewDoc(hint)
         expandedViews.append(hint)
         return yOffset - SidebarExpandedMetrics.shortcutHintHeight
+    }
+
+    // MARK: - Activity feed
+
+    /// The "while you were away" log: one row per agent signal event,
+    /// newest first, capped for display. Clicking a row focuses the
+    /// originating workspace/column via onActivityClicked.
+    private func buildActivityRows(padding: CGFloat, yOffset: CGFloat) -> CGFloat {
+        var currentY = yOffset
+        let rows = lastActivity.prefix(SidebarExpandedMetrics.activityMaxRows)
+        for (index, entry) in rows.enumerated() {
+            let rowFrame = NSRect(
+                x: padding,
+                y: currentY - SidebarExpandedMetrics.activityRowAdvance,
+                width: bounds.width - padding * 2,
+                height: SidebarExpandedMetrics.activityRowAdvance
+            )
+            hitAreas.append(SidebarHitArea(frame: rowFrame, region: .activity(index)))
+
+            let dot = SidebarBackgroundView(frame: NSRect(
+                x: padding + 2,
+                y: rowFrame.minY + (SidebarExpandedMetrics.activityRowAdvance - 7) / 2,
+                width: 7,
+                height: 7
+            ))
+            dot.wantsLayer = true
+            dot.layer?.backgroundColor = Self.activityColor(for: entry.category).cgColor
+            dot.layer?.cornerRadius = 3.5
+            addSubviewDoc(dot)
+            expandedViews.append(dot)
+
+            let label = textLabel(
+                activityText(for: entry),
+                font: .systemFont(ofSize: 11, weight: .medium),
+                color: NSColor.white.withAlphaComponent(0.72)
+            )
+            label.frame = NSRect(
+                x: padding + 16,
+                y: rowFrame.minY + 2,
+                width: bounds.width - padding * 2 - 16 - 44,
+                height: 16
+            )
+            addSubviewDoc(label)
+            expandedViews.append(label)
+
+            let age = textLabel(
+                Self.relativeAge(since: entry.timestamp),
+                font: .monospacedSystemFont(ofSize: 10, weight: .regular),
+                color: NSColor.white.withAlphaComponent(0.38)
+            )
+            age.alignment = .right
+            age.frame = NSRect(
+                x: bounds.width - padding - 44,
+                y: rowFrame.minY + 3,
+                width: 44,
+                height: 14
+            )
+            addSubviewDoc(age)
+            expandedViews.append(age)
+
+            currentY -= SidebarExpandedMetrics.activityRowAdvance
+        }
+        return currentY
+    }
+
+    private static func activityColor(for category: ActivityEntry.Category) -> NSColor {
+        switch category {
+        case .attention: return .systemOrange
+        case .turnComplete: return .systemGreen
+        case .sessionStart: return .niruxAccent
+        case .sessionEnd: return .white.withAlphaComponent(0.35)
+        }
+    }
+
+    private func activityText(for entry: ActivityEntry) -> String {
+        let summary: String
+        switch entry.category {
+        case .attention: summary = entry.detail ?? "needs input"
+        case .turnComplete: summary = "turn finished"
+        case .sessionStart: summary = "session started"
+        case .sessionEnd: summary = "session ended"
+        }
+        return "\(entry.workspaceTitle) · \(entry.agentKind) · \(summary)"
+    }
+
+    /// Compact relative timestamp ("42s", "12m", "1h05", "3d").
+    static func relativeAge(since timestamp: TimeInterval, now: Date = Date()) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince1970 - timestamp))
+        if seconds < 60 { return "\(seconds)s" }
+        if seconds < 3600 { return "\(seconds / 60)m" }
+        if seconds < 86400 { return "\(seconds / 3600)h\(String(format: "%02d", (seconds % 3600) / 60))" }
+        return "\(seconds / 86400)d"
     }
 
     // MARK: - Workspace section

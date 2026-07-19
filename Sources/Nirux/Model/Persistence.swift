@@ -25,6 +25,14 @@ enum Persistence {
         return dir.appendingPathComponent("state.json")
     }
 
+    /// The directory holding state.json — also where the hook-events log
+    /// lives. Resolves NIRUX_STATE_DIR the same way stateURL does (the hook
+    /// receiver process inherits that env from the terminal that spawned it,
+    /// so both ends always agree on the location).
+    static var stateDirectory: URL {
+        stateURL.deletingLastPathComponent()
+    }
+
     private static func backupURL(_ index: Int) -> URL {
         stateURL.deletingLastPathComponent().appendingPathComponent("state.backup.\(index).json")
     }
@@ -279,6 +287,8 @@ struct PersistedColumn: Codable {
     var editorActiveFile: String?
     var claudeLaunchMode: ClaudeLaunchMode?
     var codexLaunchMode: CodexLaunchMode?
+    /// Stable hook-routing identity (NIRUX_AGENT_UUID) for terminal columns.
+    var agentUUID: String?
 
     /// Non-optional accessor — missing or unknown `columnType` means terminal.
     var resolvedType: ColumnKind { columnType ?? .terminal }
@@ -289,7 +299,8 @@ struct PersistedColumn: Codable {
         editorOpenFiles: [String]? = nil,
         editorActiveFile: String? = nil,
         claudeLaunchMode: ClaudeLaunchMode?,
-        codexLaunchMode: CodexLaunchMode?
+        codexLaunchMode: CodexLaunchMode?,
+        agentUUID: String? = nil
     ) {
         self.widthPreset = widthPreset
         self.cwd = cwd
@@ -299,6 +310,7 @@ struct PersistedColumn: Codable {
         self.editorActiveFile = editorActiveFile
         self.claudeLaunchMode = claudeLaunchMode
         self.codexLaunchMode = codexLaunchMode
+        self.agentUUID = agentUUID
     }
 
     enum CodingKeys: String, CodingKey {
@@ -307,6 +319,7 @@ struct PersistedColumn: Codable {
         case editorOpenFile // legacy single-file editor state
         case claudeLaunchMode
         case codexLaunchMode
+        case agentUUID
         case claudeBypassPermissions // legacy
     }
 
@@ -342,6 +355,7 @@ struct PersistedColumn: Codable {
             claudeLaunchMode = nil
         }
         codexLaunchMode = try? container.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)
+        agentUUID = try? container.decodeIfPresent(String.self, forKey: .agentUUID)
     }
 
     /// Custom encoder is required because `CodingKeys` carries the legacy
@@ -357,6 +371,7 @@ struct PersistedColumn: Codable {
         try c.encodeIfPresent(editorActiveFile, forKey: .editorActiveFile)
         try c.encodeIfPresent(claudeLaunchMode, forKey: .claudeLaunchMode)
         try c.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
+        try c.encodeIfPresent(agentUUID, forKey: .agentUUID)
     }
 }
 

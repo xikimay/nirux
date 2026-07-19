@@ -292,8 +292,8 @@ extension NiruxShellView {
         urlPanel?.show(relativeTo: window)
     }
 
-    func openWebView(url: String) {
-        guard let workspace = activeWorkspace else { return }
+    func openWebView(url: String, in workspace: WorkspaceState? = nil) {
+        guard let workspace = workspace ?? activeWorkspace else { return }
         workspace.addColumn(webViewURL: url)
         relayout(animated: false)
         updateSidebar()
