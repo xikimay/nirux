@@ -24,7 +24,10 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         guard isAvailable else { return }
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        center.requestAuthorization(options: [.alert, .sound]) { _, error in
+        // @Sendable keeps the closure nonisolated: UNUserNotificationCenter
+        // invokes it on a background queue, and a MainActor-inferred closure
+        // would trap the runtime isolation check there.
+        center.requestAuthorization(options: [.alert, .sound]) { @Sendable _, error in
             if let error {
                 NSLog("[NiruxNotifier] authorization error: \(error.localizedDescription)")
             }
@@ -59,7 +62,8 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
     private func post(_ content: UNMutableNotificationContent) {
         guard isAvailable else { return }
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request) { error in
+        // Same background-queue callback as requestAuthorization above.
+        UNUserNotificationCenter.current().add(request) { @Sendable error in
             if let error {
                 NSLog("[NiruxNotifier] post failed: \(error.localizedDescription)")
             }
