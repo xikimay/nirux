@@ -75,6 +75,10 @@ extension NiruxApp {
         shell?.toggleWordWrap()
     }
 
+    @objc func sendSelectionToAgent(_ sender: Any?) {
+        shell?.sendEditorSelectionToAgent()
+    }
+
     @objc func toggleDevTools(_ sender: Any?) {
         shell?.toggleDevTools()
     }
@@ -143,6 +147,14 @@ extension NiruxApp {
         )
         wrapItem.keyEquivalentModifierMask = [.command, .option]
         editMenu.addItem(wrapItem)
+
+        let sendSelectionItem = NSMenuItem(
+            title: "Send Selection to Agent",
+            action: #selector(sendSelectionToAgent(_:)),
+            keyEquivalent: "\r"
+        )
+        sendSelectionItem.keyEquivalentModifierMask = [.command, .option]
+        editMenu.addItem(sendSelectionItem)
         let editItem = NSMenuItem()
         editItem.submenu = editMenu
         mainMenu.addItem(editItem)

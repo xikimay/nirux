@@ -372,6 +372,53 @@ extension NiruxShellView {
         updateSidebar()
     }
 
+    /// Send the editor's current selection into a terminal column of the
+    /// same workspace as a `path:Lx-Ly` header plus fenced excerpt, so the
+    /// user can point the agent at code without retyping paths. Prefers the
+    /// focused column on both ends: the focused editor (else the first
+    /// editor column) supplies the selection, the focused terminal (else
+    /// the first live terminal column) receives it. No-op with a log when
+    /// either side is missing or nothing is selected.
+    func sendEditorSelectionToAgent() {
+        guard let workspace = activeWorkspace else { return }
+        let focused = workspace.columns[safe: workspace.focusedIndex]
+        guard let editor = focused?.editorColumn
+            ?? workspace.columns.compactMap({ $0.editorColumn }).first else {
+            NiruxDebugLog.log("sendSelectionToAgent: no editor column in workspace")
+            return
+        }
+        let terminal = (focused?.pty != nil ? focused : nil)
+            ?? workspace.columns.first { $0.pty?.hasExited == false }
+        guard let pty = terminal?.pty, !pty.hasExited else {
+            NiruxDebugLog.log("sendSelectionToAgent: no live terminal column in workspace")
+            return
+        }
+
+        editor.requestSelection { [weak editor, weak pty] selection in
+            guard let editor, let pty else { return }
+            // Path mismatch means the reply is stale (e.g. a diff-group tab
+            // is showing while the hidden editor still holds an old model).
+            guard let selection, selection.path == editor.currentPath else {
+                NiruxDebugLog.log("sendSelectionToAgent: no selection")
+                return
+            }
+            let cwdPrefix = editor.workspaceCwd + "/"
+            let path = selection.path.hasPrefix(cwdPrefix)
+                ? String(selection.path.dropFirst(cwdPrefix.count))
+                : selection.path
+            let excerpt = AgentExcerpt.format(
+                path: path,
+                startLine: selection.startLine,
+                endLine: selection.endLine,
+                text: selection.text
+            )
+            // Bracketed paste: the multiline excerpt lands in the agent's
+            // input as one paste instead of the first newline submitting a
+            // half-built prompt.
+            pty.sendRaw("\u{1B}[200~\(excerpt)\u{1B}[201~")
+        }
+    }
+
     /// Toggle Monaco's selected diff view on the focused editor
     /// column. No-op when the focused column isn't an editor — the shortcut
     /// just gets swallowed.

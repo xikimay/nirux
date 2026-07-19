@@ -592,6 +592,29 @@
     if (diffEditor) diffEditor.updateOptions({ wordWrap: wrap });
   }
 
+  // Swift asks for the current selection (send-to-agent flow). Always
+  // reply — an empty payload tells the Swift side to no-op.
+  function reportSelection() {
+    var target = activeEditor();
+    var model = target && target.getModel();
+    var sel = target && target.getSelection();
+    if (!currentPath || !model || !sel || sel.isEmpty()) {
+      postToSwift({ type: "selection", path: "" });
+      return;
+    }
+    // A full-line selection parks the cursor on column 1 of the next
+    // line; that line contributes no content, so drop it from the range.
+    var endLine = sel.endLineNumber;
+    if (sel.endColumn === 1 && endLine > sel.startLineNumber) endLine -= 1;
+    postToSwift({
+      type: "selection",
+      path: currentPath,
+      text: model.getValueInRange(sel),
+      startLine: sel.startLineNumber,
+      endLine: endLine
+    });
+  }
+
   function handleMessage(msg) {
     switch (msg.type) {
       case "openFile": applyOpen(msg); break;
@@ -614,6 +637,7 @@
       case "enterDiffGroup": enterPierreDiffGroup(msg); break;
       case "exitDiff": exitDiff(); break;
       case "toggleWordWrap": toggleWordWrap(); break;
+      case "getSelection": reportSelection(); break;
     }
   }
 

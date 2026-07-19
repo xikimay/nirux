@@ -50,6 +50,17 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     var onDirtyChanged: (() -> Void)?
     var onFilePickerRequest: ((EditorColumn) -> Void)?
 
+    /// A Monaco selection as reported over the bridge. Lines are 1-based.
+    struct Selection {
+        let path: String
+        let text: String
+        let startLine: Int
+        let endLine: Int
+    }
+    /// One-shot completions awaiting a "selection" reply from JS (FIFO —
+    /// the bridge answers requests in order).
+    private var selectionRequests: [(Selection?) -> Void] = []
+
     private let webView: WKWebView
     private let tabBar: EditorTabBar
     private let fileTree: EditorFileTree
@@ -428,6 +439,13 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         if let mode = diffModeByPath[path] {
             enterDiff(for: path, mode: mode)
         }
+    }
+
+    /// Ask Monaco for the current selection (send-to-agent flow). The
+    /// completion fires with nil when nothing is selected.
+    func requestSelection(_ completion: @escaping (Selection?) -> Void) {
+        selectionRequests.append(completion)
+        sendBridge(["type": "getSelection"])
     }
 
     /// Toggle Monaco's selected diff view on the active tab. In HEAD mode the
@@ -981,6 +999,17 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             }
         case "save":
             handleSave(body: body)
+        case "selection":
+            guard !selectionRequests.isEmpty else { return }
+            let completion = selectionRequests.removeFirst()
+            if let path = body["path"] as? String, !path.isEmpty,
+               let text = body["text"] as? String, !text.isEmpty,
+               let start = body["startLine"] as? Int,
+               let end = body["endLine"] as? Int {
+                completion(Selection(path: path, text: text, startLine: start, endLine: end))
+            } else {
+                completion(nil)
+            }
         case "filePickerRequest":
             onFilePickerRequest?(self)
         case "ready":
