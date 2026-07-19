@@ -29,7 +29,7 @@ struct OpenEditorRequest: Equatable {
             queryItems?.first(where: { $0.name == name })?.value
         }
         guard let rawPath = value("file"), rawPath.hasPrefix("/") else { return nil }
-        let path = (rawPath as NSString).standardizingPath
+        let path = Self.resolveDotSegments(rawPath)
         guard path.hasPrefix("/"), isOpenableFile(path) else { return nil }
         file = path
 
@@ -55,6 +55,23 @@ struct OpenEditorRequest: Equatable {
 
         let workspace = value("workspace")
         workspaceID = (workspace?.isEmpty == false) ? workspace : nil
+    }
+
+    /// Lexically resolve "." / ".." segments and collapse duplicate or
+    /// trailing slashes. Deliberately NOT standardizingPath: that strips a
+    /// "/private" prefix, so a file already open under its /private/tmp
+    /// spelling (terminal links) would get a second divergent tab for the
+    /// same inode under /tmp.
+    private static func resolveDotSegments(_ path: String) -> String {
+        var parts: [String] = []
+        for component in path.split(separator: "/") {
+            switch component {
+            case ".": continue
+            case "..": _ = parts.popLast()
+            default: parts.append(String(component))
+            }
+        }
+        return "/" + parts.joined(separator: "/")
     }
 
     /// Regular files only, capped in size: a FIFO or device node (reachable

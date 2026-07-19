@@ -41,6 +41,19 @@ final class OpenEditorRequestTests: XCTestCase {
     func testDotSegmentsAreStandardized() {
         let request = parse("nirux://open-editor?file=/tmp/sub/../a.swift")
         XCTAssertEqual(request?.file, "/tmp/a.swift")
+        XCTAssertEqual(parse("nirux://open-editor?file=/tmp//./a.swift")?.file, "/tmp/a.swift")
+        XCTAssertEqual(parse("nirux://open-editor?file=/tmp/a.swift/")?.file, "/tmp/a.swift")
+    }
+
+    func testPrivatePrefixIsPreserved() {
+        // standardizingPath would strip "/private" and manufacture a second
+        // tab spelling for files already open as /private/tmp/... — the
+        // normalization must not do that.
+        let request = parse(
+            "nirux://open-editor?file=/private/tmp/a.swift",
+            existing: ["/private/tmp/a.swift"]
+        )
+        XCTAssertEqual(request?.file, "/private/tmp/a.swift")
     }
 
     func testURLEncodedPathDecodes() {
@@ -78,9 +91,11 @@ final class OpenEditorRequestTests: XCTestCase {
     }
 
     func testOutOfRangeLinesAreDropped() {
-        XCTAssertNil(parse("nirux://open-editor?file=/tmp/a.swift&line=0")?.line)
-        XCTAssertNil(parse("nirux://open-editor?file=/tmp/a.swift&line=-5")?.line)
-        XCTAssertNil(parse("nirux://open-editor?file=/tmp/a.swift&line=99999999999")?.line)
+        for bad in ["0", "-5", "99999999999"] {
+            let request = parse("nirux://open-editor?file=/tmp/a.swift&line=\(bad)")
+            XCTAssertNotNil(request, "request must survive with line=\(bad) dropped")
+            XCTAssertNil(request?.line)
+        }
     }
 
     func testCapDroppedEndLineKeepsLine() {

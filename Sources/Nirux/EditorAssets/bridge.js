@@ -726,6 +726,10 @@
       case "markSaved": markSaved(msg.path); break;
       case "goToLine":
         if (msg.path && currentPath !== msg.path) switchToPath(msg.path);
+        // If the model is unknown (Swift/JS state diverged, e.g. after a
+        // WebContent crash) the switch fails — bail rather than painting
+        // the selection onto whatever file is currently displayed.
+        if (msg.path && currentPath !== msg.path) break;
         if (typeof msg.line === "number") revealLine(msg.line, msg.column, msg.endLine, msg.focus);
         break;
       case "enterDiff":
