@@ -34,6 +34,9 @@ struct PRInfo {
 }
 
 struct WorkspaceInfo {
+    /// Stable workspace identity (WorkspaceState.id). Used to re-resolve
+    /// `index` when the store may have mutated since this snapshot.
+    let id: String
     let index: Int
     let title: String
     let profileID: String

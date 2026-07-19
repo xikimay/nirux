@@ -8,7 +8,10 @@ extension SidebarView {
     func rebuildContent() {
         // Never rebuild mid-drag: rows would shift under the captured drag
         // geometry. SidebarView+Drag defers updates until the drag ends.
-        guard workspaceDrag == nil else { return }
+        guard workspaceDrag == nil else {
+            rebuildSkippedDuringDrag = true
+            return
+        }
         expandedViews.forEach { $0.removeFromSuperview() }
         expandedViews.removeAll()
         profileIndicatorView?.removeFromSuperview()

@@ -40,7 +40,8 @@ extension NiruxShellView {
                         .map { Date().timeIntervalSince($0) }
                 )
             }
-            return WorkspaceInfo(index: index, title: workspace.title, profileID: workspace.profileID, isInactive: workspace.isInactive,
+            return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
+                          profileID: workspace.profileID, isInactive: workspace.isInactive,
                           columnCount: workspace.columns.count,
                           focusedColumn: workspace.focusedIndex,
                           gitBranch: workspace.gitBranch, hasNotification: workspace.hasNotification, isActive: index == activeWSIndex,

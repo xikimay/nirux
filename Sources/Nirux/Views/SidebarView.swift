@@ -53,12 +53,15 @@ final class SidebarView: NSView {
     // Workspace drag-reorder state; the tracking logic lives in
     // SidebarView+Drag.swift (stored properties can't go in extensions).
     var workspaceDrag: SidebarWorkspaceDrag?
-    var dragSnapshotView: NSImageView?
+    var dragGhostView: NSView?
     var dragDimView: NSView?
     var dragInsertionView: NSView?
     /// Sidebar data that arrived mid-drag; applied when the drag ends so
     /// rebuilds don't tear down rows under the captured drag geometry.
     var deferredDragUpdate: (profiles: [ProfileInfo], workspaces: [WorkspaceInfo], activity: [ActivityEntry])?
+    /// A layout()-driven rebuild was suppressed mid-drag; recover with an
+    /// unconditional rebuild when the drag ends.
+    var rebuildSkippedDuringDrag = false
 
     /// Active workspace the sidebar last auto-scrolled to. Used by
     /// `rebuildContent` so we only follow the active workspace when it

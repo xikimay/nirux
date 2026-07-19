@@ -302,10 +302,7 @@ extension NiruxShellView {
             didChange = workspaceStore.setWorkspaceInactive(at: workspaceIndex, true)
         }
         guard didChange else { return }
-        relayout(animated: true)
-        updateSidebar()
-        focusActiveTerminal(in: window)
-        saveState()
+        refreshAfterWorkspaceMutation()
     }
 
     /// Drop handler for sidebar drag-reorder: move the workspace to an
@@ -319,6 +316,10 @@ extension NiruxShellView {
             updateSidebar()
             return
         }
+        refreshAfterWorkspaceMutation()
+    }
+
+    private func refreshAfterWorkspaceMutation() {
         relayout(animated: true)
         updateSidebar()
         focusActiveTerminal(in: window)

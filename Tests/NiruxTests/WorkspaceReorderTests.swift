@@ -64,6 +64,49 @@ final class WorkspaceReorderTests: XCTestCase {
     }
 
     @MainActor
+    func testMoveToPositionClampsNegativeToTop() {
+        let store = makeStore(titles: ["a", "b", "c"])
+        XCTAssertTrue(store.moveWorkspace(at: 2, toPosition: -5))
+        XCTAssertEqual(visibleIDs(store), ["c", "a", "b"])
+    }
+
+    @MainActor
+    func testMoveToPositionIgnoresOtherProfileWorkspaces() {
+        // Other-profile workspaces interleaved in the store array leave
+        // holes in the visible index space — positions must still map to
+        // the active profile's group only.
+        let store = WorkspaceStore()
+        let other = WorkspaceProfile(id: "other", name: "other", colorHex: "#FF0000")
+        store.replaceProfiles([WorkspaceProfile.defaultProfile, other], activeProfileID: WorkspaceProfile.defaultID)
+        for (id, profileID) in [
+            ("a", WorkspaceProfile.defaultID), ("x", "other"),
+            ("b", WorkspaceProfile.defaultID), ("y", "other"),
+            ("c", WorkspaceProfile.defaultID)
+        ] {
+            let workspace = WorkspaceState(id: id, title: id, cwd: "/tmp/\(id)")
+            workspace.profileID = profileID
+            store.appendWorkspace(workspace, activate: false)
+        }
+        XCTAssertEqual(visibleIDs(store), ["a", "b", "c"])
+
+        let aIndex = store.workspaces.firstIndex { $0.id == "a" }!
+        XCTAssertTrue(store.moveWorkspace(at: aIndex, toPosition: 2))
+        XCTAssertEqual(visibleIDs(store), ["b", "c", "a"])
+        XCTAssertEqual(store.workspaces.filter { $0.profileID == "other" }.map(\.id), ["x", "y"])
+    }
+
+    @MainActor
+    func testMoveToPositionWithInterleavedInactiveStoreOrder() {
+        // Store order interleaves the groups; visible order regroups them.
+        let store = makeStore(titles: ["x", "a", "y"], inactive: ["x", "y"])
+        XCTAssertEqual(visibleIDs(store), ["a", "x", "y"])
+
+        let yIndex = store.workspaces.firstIndex { $0.id == "y" }!
+        XCTAssertTrue(store.moveWorkspace(at: yIndex, toPosition: 0))
+        XCTAssertEqual(visibleIDs(store), ["a", "y", "x"])
+    }
+
+    @MainActor
     func testMoveToPositionKeepsActiveWorkspaceByID() {
         let store = makeStore(titles: ["a", "b", "c"])
         store.selectWorkspace(id: "b")
@@ -86,6 +129,17 @@ final class WorkspaceReorderTests: XCTestCase {
     func testTargetPositionAdjacentSlotsAreNoOps() {
         XCTAssertNil(SidebarDragMath.targetPosition(slot: 1, draggedPosition: 1))
         XCTAssertNil(SidebarDragMath.targetPosition(slot: 2, draggedPosition: 1))
+        XCTAssertNil(SidebarDragMath.targetPosition(slot: 0, draggedPosition: 0))
+        XCTAssertNil(SidebarDragMath.targetPosition(slot: 1, draggedPosition: 0))
+    }
+
+    func testInsertionSlotMidpointTieAndSingleRow() {
+        // Strict >: a cursor exactly at a row's midpoint belongs to the
+        // slot below that row.
+        XCTAssertEqual(SidebarDragMath.insertionSlot(forY: 200, rowMidYs: [300, 200, 100]), 1)
+        // Single-row group: both slots exist (and both are no-ops).
+        XCTAssertEqual(SidebarDragMath.insertionSlot(forY: 500, rowMidYs: [200]), 0)
+        XCTAssertEqual(SidebarDragMath.insertionSlot(forY: 50, rowMidYs: [200]), 1)
     }
 
     func testTargetPositionAccountsForRemoval() {
