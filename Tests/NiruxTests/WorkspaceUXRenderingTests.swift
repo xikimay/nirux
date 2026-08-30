@@ -11,6 +11,13 @@ final class WorkspaceUXRenderingTests: XCTestCase {
         return application
     }()
 
+    private func requireInteractiveAppKit() throws {
+        guard ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] != "true" else {
+            throw XCTSkip("AppKit window rendering requires an interactive macOS session")
+        }
+        _ = Self.application
+    }
+
     private func workspace(
         id: String,
         index: Int,
@@ -49,7 +56,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
     }
 
     func testInactiveSectionRendersCollapsedAndExpandedWithoutActivityFeed() throws {
-        _ = Self.application
+        try requireInteractiveAppKit()
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 660))
         let window = NSWindow(
             contentRect: sidebar.bounds,
@@ -132,7 +139,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
     }
 
     func testWorkspaceNamingPanelAcceptsNewAndReplacementNames() throws {
-        _ = Self.application
+        try requireInteractiveAppKit()
         let hostWindow = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
             styleMask: [.titled],
