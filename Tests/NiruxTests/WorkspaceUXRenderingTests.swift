@@ -4,6 +4,13 @@ import XCTest
 
 @MainActor
 final class WorkspaceUXRenderingTests: XCTestCase {
+    private static let application: NSApplication = {
+        let application = NSApplication.shared
+        application.setActivationPolicy(.accessory)
+        application.finishLaunching()
+        return application
+    }()
+
     private func workspace(
         id: String,
         index: Int,
@@ -42,7 +49,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
     }
 
     func testInactiveSectionRendersCollapsedAndExpandedWithoutActivityFeed() throws {
-        _ = NSApplication.shared
+        _ = Self.application
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 660))
         let window = NSWindow(
             contentRect: sidebar.bounds,
@@ -125,7 +132,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
     }
 
     func testWorkspaceNamingPanelAcceptsNewAndReplacementNames() throws {
-        _ = NSApplication.shared
+        _ = Self.application
         let hostWindow = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
             styleMask: [.titled],
