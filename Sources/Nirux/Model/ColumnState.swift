@@ -36,6 +36,12 @@ final class ColumnState {
     /// restarts; survives shell restarts (same terminal spec).
     let agentUUID: String?
 
+    /// Exact Codex thread attached to this terminal. Codex's notify payload
+    /// supplies it after each completed turn. Persisting the ID is essential:
+    /// restoring multiple columns with `codex resume --last` makes every
+    /// column race for the same single-writer thread.
+    var codexSessionID: String?
+
     /// Terminal title from OSC 0/2 (agent context, vim filename, etc.)
     var terminalTitle: String? {
         didSet { titleLabel?.stringValue = terminalTitle ?? "" }

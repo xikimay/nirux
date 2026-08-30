@@ -7,6 +7,10 @@ extension NiruxShellView {
         guard let state = Persistence.load(), !state.workspaces.isEmpty else { return }
         for workspace in workspaces { workspace.containerView.removeFromSuperview() }
         workspaces.removeAll()
+        // A corrupt/hand-edited state file (or an older collision) may map
+        // several columns to one thread. Codex permits one writer, so only
+        // the first occurrence may auto-resume; duplicates use the picker.
+        var claimedCodexSessionIDs = Set<String>()
 
         let restoredProfiles = state.workspaceProfiles?.isEmpty == false
             ? state.workspaceProfiles!
@@ -41,10 +45,17 @@ extension NiruxShellView {
                     )
                 case .codex:
                     let mode = persistedCol.codexLaunchMode ?? .default
+                    let resumeTarget = Self.codexRestoreTarget(
+                        sessionID: persistedCol.codexSessionID,
+                        claimedSessionIDs: &claimedCodexSessionIDs
+                    )
                     workspace.addColumn(
-                        command: NiruxShellView.codexCommand(resumeLast: true, mode: mode),
+                        command: NiruxShellView.codexCommand(resume: resumeTarget, mode: mode),
                         agentUUID: persistedCol.agentUUID ?? UUID().uuidString
                     )
+                    if case .session(let sessionID) = resumeTarget {
+                        workspace.columns.last?.codexSessionID = sessionID
+                    }
                 case .editor:
                     let openFiles = persistedCol.editorOpenFiles ?? []
                     // Non-interactive: a binary or huge file in the persisted
@@ -97,6 +108,18 @@ extension NiruxShellView {
         updateSidebar()
     }
 
+    /// Claim an exact thread once per restore pass. Missing, empty and
+    /// duplicate IDs require explicit selection instead of guessing.
+    static func codexRestoreTarget(
+        sessionID: String?, claimedSessionIDs: inout Set<String>
+    ) -> CodexResumeTarget {
+        guard let sessionID, !sessionID.isEmpty,
+              claimedSessionIDs.insert(sessionID).inserted else {
+            return .picker
+        }
+        return .session(sessionID)
+    }
+
     func saveState(snapshot: ProcessSnapshot? = nil) {
         let snapshot = snapshot ?? ProcessSnapshot()
         var settings = Persistence.load()?.settings ?? PersistedSettings()
@@ -147,6 +170,7 @@ extension NiruxShellView {
                             editorActiveFile: editorActiveFile,
                             claudeLaunchMode: claudeMode,
                             codexLaunchMode: codexMode,
+                            codexSessionID: kind == .codex ? col.codexSessionID : nil,
                             agentUUID: col.agentUUID
                         )
                     },

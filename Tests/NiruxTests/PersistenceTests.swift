@@ -28,7 +28,8 @@ final class PersistedStateCodingTests: XCTestCase {
                         PersistedColumn(
                             widthPreset: 0.5, cwd: "/tmp/project",
                             columnType: .codex, webViewURL: nil,
-                            claudeLaunchMode: nil, codexLaunchMode: .fullAuto
+                            claudeLaunchMode: nil, codexLaunchMode: .fullAuto,
+                            codexSessionID: "01999999-1111-7222-8333-444444444444"
                         )
                     ],
                     focusedColumnIndex: 1
@@ -54,6 +55,10 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(decoded.workspaces[0].columns[1].columnType, .claudeCode)
         XCTAssertEqual(decoded.workspaces[0].columns[1].claudeLaunchMode, .skipPermissions)
         XCTAssertEqual(decoded.workspaces[0].columns[2].codexLaunchMode, .fullAuto)
+        XCTAssertEqual(
+            decoded.workspaces[0].columns[2].codexSessionID,
+            "01999999-1111-7222-8333-444444444444"
+        )
         XCTAssertEqual(decoded.settings?.claudeLaunchMode, .acceptEdits)
         XCTAssertEqual(decoded.settings?.codexLaunchMode, .readOnly)
         XCTAssertEqual(decoded.settings?.claudeNoFlicker, false)
@@ -343,5 +348,54 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(CodexLaunchMode.readOnly.cliArgs, ["--sandbox", "read-only"])
         XCTAssertEqual(CodexLaunchMode.fullAuto.cliArgs, ["--sandbox", "danger-full-access", "--ask-for-approval", "never", "--search"])
         XCTAssertEqual(CodexLaunchMode.bypass.cliArgs, ["--dangerously-bypass-approvals-and-sandbox"])
+    }
+
+    @MainActor
+    func testCodexRestoreCommandsNeverGuessTheLastSession() {
+        let first = NiruxShellView.codexCommand(
+            resume: .session("01999999-1111-7222-8333-444444444444"),
+            mode: .default
+        )
+        let second = NiruxShellView.codexCommand(
+            resume: .session("01999999-5555-7666-8777-888888888888"),
+            mode: .readOnly
+        )
+        let legacy = NiruxShellView.codexCommand(resume: .picker, mode: .default)
+
+        XCTAssertEqual(first, "command codex resume '01999999-1111-7222-8333-444444444444'")
+        XCTAssertEqual(
+            second,
+            "command codex resume '01999999-5555-7666-8777-888888888888' --sandbox read-only"
+        )
+        XCTAssertEqual(legacy, "command codex resume")
+        XCTAssertFalse(first.contains("--last"))
+        XCTAssertFalse(second.contains("--last"))
+        XCTAssertFalse(legacy.contains("--last"))
+    }
+
+    @MainActor
+    func testCodexRestoreClaimsEachExactSessionOnlyOnce() {
+        var claimed = Set<String>()
+
+        XCTAssertEqual(
+            NiruxShellView.codexRestoreTarget(sessionID: "thread-a", claimedSessionIDs: &claimed),
+            .session("thread-a")
+        )
+        XCTAssertEqual(
+            NiruxShellView.codexRestoreTarget(sessionID: "thread-b", claimedSessionIDs: &claimed),
+            .session("thread-b")
+        )
+        XCTAssertEqual(
+            NiruxShellView.codexRestoreTarget(sessionID: "thread-a", claimedSessionIDs: &claimed),
+            .picker
+        )
+        XCTAssertEqual(
+            NiruxShellView.codexRestoreTarget(sessionID: nil, claimedSessionIDs: &claimed),
+            .picker
+        )
+        XCTAssertEqual(
+            NiruxShellView.codexRestoreTarget(sessionID: "", claimedSessionIDs: &claimed),
+            .picker
+        )
     }
 }

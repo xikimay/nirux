@@ -4,6 +4,8 @@ import AppKit
 
 extension NiruxShellView {
     func updateSidebar(snapshot: ProcessSnapshot? = nil) {
+        persistCodexSessionIDsFromCurrentHookBatch()
+
         let snapshot = snapshot ?? ProcessSnapshot()
         let visibleIndices = visibleWorkspaceIndices
         let infos = visibleIndices.map { index in
@@ -217,6 +219,31 @@ extension NiruxShellView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak overlay] in
             overlay?.removeFromSuperview()
         }
+    }
+
+    /// `AgentHookCenter` invokes `updateSidebar` synchronously after draining
+    /// a batch. Its processing file still exists during that callback, so
+    /// capture Codex thread IDs without restoring the removed activity feed.
+    private func persistCodexSessionIDsFromCurrentHookBatch() {
+        let processingURL = AgentHookCenter.eventsURL
+            .deletingPathExtension()
+            .appendingPathExtension("processing")
+        guard let data = try? Data(contentsOf: processingURL), !data.isEmpty else { return }
+
+        let decoder = JSONDecoder()
+        var changed = false
+        for line in data.split(separator: 0x0A) {
+            guard let event = try? decoder.decode(AgentHookEvent.self, from: Data(line)),
+                  event.kind == .codex,
+                  let sessionID = event.sessionID,
+                  !sessionID.isEmpty,
+                  let agentUUID = event.agentUUID,
+                  let resolution = resolveAgentColumn(uuid: agentUUID),
+                  resolution.column.codexSessionID != sessionID else { continue }
+            resolution.column.codexSessionID = sessionID
+            changed = true
+        }
+        if changed { saveState() }
     }
 
     func refreshGitBranches() {

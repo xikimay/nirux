@@ -292,6 +292,9 @@ struct PersistedColumn: Codable {
     var editorActiveFile: String?
     var claudeLaunchMode: ClaudeLaunchMode?
     var codexLaunchMode: CodexLaunchMode?
+    /// Exact Codex thread formerly attached to this column. Older state files
+    /// omit it and restore through Codex's interactive session picker.
+    var codexSessionID: String?
     /// Stable hook-routing identity (NIRUX_AGENT_UUID) for terminal columns.
     var agentUUID: String?
 
@@ -305,6 +308,7 @@ struct PersistedColumn: Codable {
         editorActiveFile: String? = nil,
         claudeLaunchMode: ClaudeLaunchMode?,
         codexLaunchMode: CodexLaunchMode?,
+        codexSessionID: String? = nil,
         agentUUID: String? = nil
     ) {
         self.widthPreset = widthPreset
@@ -315,6 +319,7 @@ struct PersistedColumn: Codable {
         self.editorActiveFile = editorActiveFile
         self.claudeLaunchMode = claudeLaunchMode
         self.codexLaunchMode = codexLaunchMode
+        self.codexSessionID = codexSessionID
         self.agentUUID = agentUUID
     }
 
@@ -324,6 +329,7 @@ struct PersistedColumn: Codable {
         case editorOpenFile // legacy single-file editor state
         case claudeLaunchMode
         case codexLaunchMode
+        case codexSessionID
         case agentUUID
         case claudeBypassPermissions // legacy
     }
@@ -360,6 +366,7 @@ struct PersistedColumn: Codable {
             claudeLaunchMode = nil
         }
         codexLaunchMode = try? container.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)
+        codexSessionID = try? container.decodeIfPresent(String.self, forKey: .codexSessionID)
         agentUUID = try? container.decodeIfPresent(String.self, forKey: .agentUUID)
     }
 
@@ -376,6 +383,7 @@ struct PersistedColumn: Codable {
         try container.encodeIfPresent(editorActiveFile, forKey: .editorActiveFile)
         try container.encodeIfPresent(claudeLaunchMode, forKey: .claudeLaunchMode)
         try container.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
+        try container.encodeIfPresent(codexSessionID, forKey: .codexSessionID)
         try container.encodeIfPresent(agentUUID, forKey: .agentUUID)
     }
 }
