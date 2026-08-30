@@ -128,8 +128,8 @@ final class ActivityStore {
     /// (sessionStart/sessionEnd) stay recorded but drown the feed — a
     /// typical backlog is mostly starts/ends the user can't act on.
     /// Consecutive repeats from the same column (an agent finishing turn
-    /// after turn) coalesce into their newest occurrence so six visible
-    /// rows cover six distinct things, not one chatty agent.
+    /// after turn) coalesce into their newest occurrence so the ordinary
+    /// row budget covers distinct things, not one chatty agent.
     var feedEntries: [ActivityEntry] {
         var result: [ActivityEntry] = []
         for entry in entries where [
@@ -154,6 +154,8 @@ final class ActivityStore {
         return result
     }
 
+    /// Fills the normal row budget while keeping every unanswered Mission
+    /// question visible, even when that requires more than `maxCount` rows.
     func visibleFeedEntries(maxCount: Int) -> [ActivityEntry] {
         Self.visibleFeedEntries(in: feedEntries, maxCount: maxCount)
     }

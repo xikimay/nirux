@@ -148,7 +148,6 @@ extension NiruxShellView {
     // MARK: - Worktree Skill
 
     // Generated shell commands must stay on one line in the installed skill.
-    // swiftlint:disable line_length
     private static let worktreeSkillContent = """
         ---
         name: nirux-worktree
@@ -243,7 +242,6 @@ extension NiruxShellView {
 
         Do NOT run git worktree commands directly — Nirux handles worktree creation natively.
         """
-    // swiftlint:enable line_length
 
     // MARK: - Show-Code Skill
 

@@ -290,7 +290,9 @@ final class MissionTests: XCTestCase {
         XCTAssertEqual(store.missions[0].events[0].parentConsumedAt, 31)
         XCTAssertEqual(store.missions[0].events.count, 1)
     }
+}
 
+extension MissionTests {
     func testCLIRequiresMissionEnvironmentAndWritesOneJSONLine() throws {
         let eventsURL = try makeDirectory().appendingPathComponent("mission-events.jsonl")
         let environment = [
