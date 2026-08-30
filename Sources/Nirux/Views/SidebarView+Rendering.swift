@@ -65,7 +65,7 @@ extension SidebarView {
         let inactiveInfos = displayedWorkspaceInfos.filter { $0.isInactive }
         let hasWorkspaces = !activeInfos.isEmpty || !inactiveInfos.isEmpty
         let activeProfile = lastProfiles.first(where: { $0.isActive })
-        let activityRows = Array(ActivityStore.shared.feedEntries.prefix(Self.activityMaxRows))
+        let activityRows = ActivityStore.shared.visibleFeedEntries(maxCount: Self.activityMaxRows)
 
         let contentH = expandedContentHeight(
             activeInfos: activeInfos,

@@ -98,6 +98,12 @@ final class MissionStore {
     private(set) var missions: [Mission] = []
     private let fileURL: URL
     private let persistsToDisk: Bool
+    private enum LedgerState: Equatable {
+        case notLoaded
+        case available
+        case unavailable
+    }
+    private var ledgerState: LedgerState
 
     nonisolated static var defaultFileURL: URL {
         Persistence.stateDirectory.appendingPathComponent("missions.json")
@@ -106,13 +112,34 @@ final class MissionStore {
     init(fileURL: URL = MissionStore.defaultFileURL, persistsToDisk: Bool = true) {
         self.fileURL = fileURL
         self.persistsToDisk = persistsToDisk
+        ledgerState = persistsToDisk ? .notLoaded : .available
     }
 
-    func load() {
-        guard let data = try? Data(contentsOf: fileURL),
-              let decoded = try? JSONDecoder().decode([Mission].self, from: data)
-        else { return }
-        missions = decoded
+    @discardableResult
+    func load() -> Bool {
+        guard persistsToDisk else {
+            ledgerState = .available
+            return true
+        }
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            missions = []
+            ledgerState = .available
+            return true
+        }
+        do {
+            let data = try Data(contentsOf: fileURL)
+            missions = try JSONDecoder().decode([Mission].self, from: data)
+            ledgerState = .available
+            return true
+        } catch {
+            ledgerState = .unavailable
+            NSLog("[MissionStore] Failed to load missions: %@", error.localizedDescription)
+            return false
+        }
+    }
+
+    func ensureLoaded() -> Bool {
+        ledgerState == .available || load()
     }
 
     @discardableResult
@@ -122,6 +149,7 @@ final class MissionStore {
         now: TimeInterval = Date().timeIntervalSince1970
     ) -> Mission? {
         guard enabled,
+              ensureLoaded(),
               Self.isIdentifier(request.id),
               Self.isIdentifier(request.parentWorkspaceID),
               Self.isIdentifier(request.parentAgentUUID),
@@ -173,6 +201,7 @@ final class MissionStore {
     // adjacent so persistence commits exactly one candidate Mission ledger.
     // swiftlint:disable:next function_body_length
     func process(_ incoming: MissionEvent, enabled: Bool) -> ProcessingResult {
+        guard ensureLoaded() else { return .persistenceFailed }
         guard enabled,
               incoming.deliveredAt == nil,
               incoming.parentConsumedAt == nil,
@@ -329,6 +358,7 @@ final class MissionStore {
     }
 
     private func commit(_ updated: [Mission]) -> Bool {
+        guard ledgerState == .available else { return false }
         guard persistsToDisk else {
             missions = updated
             return true

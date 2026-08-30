@@ -114,6 +114,48 @@ final class MissionTests: XCTestCase {
         ])
     }
 
+    func testUnreadableLedgerBlocksMissionCreationAndQueueDrain() throws {
+        let directory = try makeDirectory()
+        let missionsURL = directory.appendingPathComponent("missions.json")
+        let eventsURL = directory.appendingPathComponent("mission-events.jsonl")
+        let initialStore = MissionStore(fileURL: missionsURL)
+        XCTAssertNotNil(initialStore.create(request(), enabled: true, now: 10))
+        let validLedger = try Data(contentsOf: missionsURL)
+        let invalidLedger = Data("not valid mission json".utf8)
+        try invalidLedger.write(to: missionsURL)
+        let pending = event()
+        try write(pending, to: eventsURL)
+
+        let restoredStore = MissionStore(fileURL: missionsURL)
+        XCTAssertFalse(restoredStore.load())
+        XCTAssertNil(restoredStore.create(
+            request(id: "77777777-7777-4777-8777-777777777777"),
+            enabled: true,
+            now: 20
+        ))
+        XCTAssertEqual(try Data(contentsOf: missionsURL), invalidLedger)
+
+        let center = MissionEventCenter(
+            store: restoredStore,
+            eventsURL: eventsURL,
+            initialRetryDelay: 10,
+            maximumRetryDelay: 10,
+            isEnabled: { true }
+        )
+        center.drain()
+        center.stop()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: eventsURL.path))
+        XCTAssertTrue(restoredStore.missions.isEmpty)
+
+        try validLedger.write(to: missionsURL)
+        XCTAssertTrue(restoredStore.load())
+        center.drain()
+
+        XCTAssertEqual(restoredStore.missions[0].events.map(\.id), [pending.id])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: eventsURL.path))
+    }
+
     func testRoutingRejectsUnknownMismatchedAndStaleMissionEvents() throws {
         let fileURL = try makeDirectory().appendingPathComponent("missions.json")
         let store = MissionStore(fileURL: fileURL)
@@ -429,7 +471,7 @@ final class MissionTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: processingURL.path))
     }
 
-    func testCenterRetainsProcessingFileUntilMissionSaveSucceeds() throws {
+    func testCenterRetriesProcessingFileUntilMissionSaveSucceeds() async throws {
         let directory = try makeDirectory()
         let missionsURL = directory.appendingPathComponent("missions.json")
         let eventsURL = directory.appendingPathComponent("mission-events.jsonl")
@@ -440,15 +482,33 @@ final class MissionTests: XCTestCase {
         try FileManager.default.createDirectory(at: missionsURL, withIntermediateDirectories: false)
         let pending = event()
         try write(pending, to: processingURL)
-        let center = MissionEventCenter(store: store, eventsURL: eventsURL, isEnabled: { true })
+        let delivered = expectation(description: "processing file retried")
+        let center = MissionEventCenter(
+            store: store,
+            eventsURL: eventsURL,
+            initialRetryDelay: 0.02,
+            maximumRetryDelay: 0.02,
+            isEnabled: { true }
+        )
+        center.onEvent = { _, event in
+            if event.id == pending.id { delivered.fulfill() }
+            return true
+        }
 
         center.drain()
 
         XCTAssertTrue(store.missions[0].events.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: processingURL.path))
 
-        try FileManager.default.removeItem(at: missionsURL)
-        center.drain()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.005) {
+            do {
+                try FileManager.default.removeItem(at: missionsURL)
+            } catch {
+                XCTFail("Failed to restore mission persistence: \(error)")
+            }
+        }
+        await fulfillment(of: [delivered], timeout: 1)
+        center.stop()
 
         XCTAssertEqual(store.missions[0].events.map(\.id), [pending.id])
         XCTAssertFalse(FileManager.default.fileExists(atPath: processingURL.path))

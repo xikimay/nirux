@@ -282,6 +282,55 @@ final class ActivityStoreTests: XCTestCase {
         XCTAssertEqual(store.unreadCount, 2)
     }
 
+    @MainActor
+    func testPendingMissionQuestionsStayVisibleBeyondRecentRowLimit() {
+        let store = makeStore()
+        let question = ActivityEntry(
+            category: .missionQuestion,
+            agentKind: "codex",
+            workspaceID: "child-workspace",
+            columnIndex: 0,
+            workspaceTitle: "feat/mission",
+            detail: "Which API?",
+            timestamp: 1,
+            missionID: "mission-1",
+            missionEventID: "question-1"
+        )
+        store.record(question)
+        for index in 2...7 {
+            store.record(ActivityEntry(
+                category: .turnComplete,
+                agentKind: "codex",
+                workspaceID: "workspace-\(index)",
+                columnIndex: index,
+                workspaceTitle: "workspace-\(index)",
+                detail: "Done",
+                timestamp: TimeInterval(index)
+            ))
+        }
+
+        let visible = store.visibleFeedEntries(maxCount: 6)
+
+        XCTAssertEqual(visible.count, 6)
+        XCTAssertTrue(visible.contains(question))
+        XCTAssertEqual(visible.first?.timestamp, 7)
+
+        store.record(ActivityEntry(
+            category: .missionResponse,
+            agentKind: "parent",
+            workspaceID: "child-workspace",
+            columnIndex: 0,
+            workspaceTitle: "feat/mission",
+            detail: "Use AuthService",
+            timestamp: 8,
+            missionID: "mission-1",
+            missionEventID: "response-1",
+            missionReplyToEventID: "question-1"
+        ))
+
+        XCTAssertFalse(store.visibleFeedEntries(maxCount: 6).contains(question))
+    }
+
     func testMissionCompletionSupersedesEarlierQuestion() {
         let completed = ActivityEntry(
             category: .missionCompleted,

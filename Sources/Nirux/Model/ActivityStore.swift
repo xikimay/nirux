@@ -154,6 +154,26 @@ final class ActivityStore {
         return result
     }
 
+    func visibleFeedEntries(maxCount: Int) -> [ActivityEntry] {
+        Self.visibleFeedEntries(in: feedEntries, maxCount: maxCount)
+    }
+
+    nonisolated static func visibleFeedEntries(
+        in feed: [ActivityEntry], maxCount: Int
+    ) -> [ActivityEntry] {
+        guard maxCount > 0 else { return [] }
+        var selected = Set(feed.indices.filter { index in
+            let entry = feed[index]
+            return entry.category == .missionQuestion
+                && entry.missionEventID != nil
+                && !isAttentionSuperseded(at: index, in: feed)
+        })
+        for index in feed.indices where selected.count < maxCount {
+            selected.insert(index)
+        }
+        return feed.indices.compactMap { selected.contains($0) ? feed[$0] : nil }
+    }
+
     /// An attention row is "handled" when the same agent signaled again
     /// afterwards (turn finished, new prompt…): the user already gave it
     /// what it was waiting for, so the row shouldn't keep the urgent

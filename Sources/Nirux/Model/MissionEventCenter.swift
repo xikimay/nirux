@@ -13,6 +13,8 @@ final class MissionEventCenter {
     private let store: MissionStore
     private let eventsURL: URL
     private let isEnabled: () -> Bool
+    private let initialRetryDelay: TimeInterval
+    private let maximumRetryDelay: TimeInterval
     /// Return true only after the event is durably represented to the user.
     var onEvent: ((Mission, MissionEvent) -> Bool)?
 
@@ -20,18 +22,25 @@ final class MissionEventCenter {
     private var fileSource: DispatchSourceFileSystemObject?
     private var dirFd: Int32 = -1
     private var pendingDrain: DispatchWorkItem?
+    private var nextRetryDelay: TimeInterval
     private var started = false
 
     init(
         store: MissionStore,
         eventsURL: URL = MissionEventCenter.defaultEventsURL,
+        initialRetryDelay: TimeInterval = 0.5,
+        maximumRetryDelay: TimeInterval = 30,
         isEnabled: @escaping () -> Bool = {
             Persistence.load()?.settings?.missionHandoffsEnabled == true
         }
     ) {
+        let retryDelay = max(0.01, initialRetryDelay)
         self.store = store
         self.eventsURL = eventsURL
         self.isEnabled = isEnabled
+        self.initialRetryDelay = retryDelay
+        self.maximumRetryDelay = max(retryDelay, maximumRetryDelay)
+        nextRetryDelay = retryDelay
     }
 
     func start() {
@@ -58,7 +67,6 @@ final class MissionEventCenter {
         }
         watchEventsFileIfPresent()
         drain()
-        deliverPendingEvents()
     }
 
     private func watchEventsFileIfPresent() {
@@ -84,28 +92,52 @@ final class MissionEventCenter {
         fileSource = source
     }
 
-    private func scheduleDrain() {
+    private func scheduleDrain(after delay: TimeInterval = 0.15) {
         guard pendingDrain == nil else { return }
         let item = DispatchWorkItem { [weak self] in
             self?.pendingDrain = nil
             self?.drain()
         }
         pendingDrain = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+    }
+
+    private func scheduleRetry() {
+        let delay = nextRetryDelay
+        nextRetryDelay = min(maximumRetryDelay, nextRetryDelay * 2)
+        scheduleDrain(after: delay)
+    }
+
+    private func resetRetryDelay() {
+        nextRetryDelay = initialRetryDelay
     }
 
     func drain() {
+        pendingDrain?.cancel()
+        pendingDrain = nil
+        guard store.ensureLoaded() else {
+            scheduleRetry()
+            return
+        }
         let aside = eventsURL.deletingPathExtension().appendingPathExtension("processing")
         let fileManager = FileManager.default
         if fileManager.fileExists(atPath: aside.path), !process(aside, fileManager: fileManager) {
+            scheduleRetry()
             return
         }
         do {
             try fileManager.moveItem(at: eventsURL, to: aside)
         } catch {
+            resetRetryDelay()
+            deliverPendingEvents()
             return
         }
-        _ = process(aside, fileManager: fileManager)
+        guard process(aside, fileManager: fileManager) else {
+            scheduleRetry()
+            return
+        }
+        resetRetryDelay()
+        deliverPendingEvents()
     }
 
     private func process(_ source: URL, fileManager: FileManager) -> Bool {
@@ -135,7 +167,7 @@ final class MissionEventCenter {
     }
 
     func deliverPendingEvents() {
-        guard isEnabled() else { return }
+        guard store.ensureLoaded(), isEnabled() else { return }
         for pending in store.pendingEvents() {
             deliver(pending)
         }
@@ -149,6 +181,7 @@ final class MissionEventCenter {
     func stop() {
         pendingDrain?.cancel()
         pendingDrain = nil
+        resetRetryDelay()
         dirSource?.cancel()
         dirSource = nil
         dirFd = -1
