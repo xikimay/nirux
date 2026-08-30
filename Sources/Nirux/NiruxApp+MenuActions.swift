@@ -24,7 +24,7 @@ extension NiruxApp {
     }
 
     @objc func newWorkspace(_ sender: Any?) {
-        shell?.addWorkspace()
+        shell?.showNewWorkspacePanel()
     }
 
     @objc func renameWorkspace(_ sender: Any?) {

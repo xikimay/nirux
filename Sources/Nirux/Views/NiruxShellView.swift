@@ -52,12 +52,6 @@ final class NiruxShellView: NSView {
     var heartbeatTimer: Timer?
     var heartbeatTick: UInt = 0
 
-    /// Dwell timer that marks the activity feed read after it's been
-    /// visibly on screen (see scheduleActivityReadMark). The generation
-    /// counter invalidates fired-but-not-yet-run timer tasks on cancel.
-    var activityReadTimer: Timer?
-    var activityReadGeneration: UInt = 0
-
     // Panel references (stored properties must live in main class declaration)
     var nameInputPanel: NameInputPanel?
     var worktreePanel: WorktreePanel?
@@ -103,10 +97,8 @@ final class NiruxShellView: NSView {
         sidebar.onProfileClicked = { [weak self] profileID in self?.selectProfile(profileID) }
         sidebar.onCreateProfile = { [weak self] in self?.createProfileFromActiveContext() }
         sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }
+        sidebar.onInactiveSectionCollapsedChange = { [weak self] _ in self?.saveState() }
         sidebar.onDiffStatsClicked = { [weak self] index in self?.openDiffInEditor(workspaceIndex: index) }
-        sidebar.onActivityClicked = { [weak self] entry in
-            self?.focusActivityEntry(entry)
-        }
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
             if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }
@@ -445,7 +437,23 @@ final class NiruxShellView: NSView {
         focusActiveTerminal(in: window)
     }
 
-    // MARK: - Rename Workspace
+    // MARK: - Workspace naming
+
+    func showNewWorkspacePanel() {
+        guard let window else { return }
+        if nameInputPanel == nil {
+            nameInputPanel = NameInputPanel()
+        }
+        nameInputPanel?.onSubmit = { [weak self] title in
+            self?.addWorkspace(title: title)
+            self?.saveState()
+        }
+        nameInputPanel?.show(
+            relativeTo: window,
+            currentValue: "",
+            placeholder: "Name this workspace for the task"
+        )
+    }
 
     /// Rename a workspace by index; defaults to the active one (main menu,
     /// command palette). The sidebar context menu passes an explicit index.
@@ -617,7 +625,7 @@ final class NiruxShellView: NSView {
                 self?.openCodex()
             },
             PaletteAction(icon: "📂", title: "New Workspace", subtitle: "Create a new workspace", shortcut: NiruxShortcuts.newWorkspaceDisplay) { [weak self] in
-                self?.addWorkspace()
+                self?.showNewWorkspacePanel()
             },
             PaletteAction(icon: "🌳", title: "New Worktree", subtitle: "Create a git worktree + workspace", shortcut: "") { [weak self] in
                 self?.showWorktreePanel()

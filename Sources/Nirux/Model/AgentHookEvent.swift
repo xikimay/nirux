@@ -22,8 +22,8 @@ struct AgentHookEvent: Codable, Equatable {
     /// the shell of the column that launched the agent). Nil when the agent
     /// runs outside a Nirux terminal.
     let agentUUID: String?
-    /// NIRUX_WORKSPACE_ID from the same environment — lets the activity feed
-    /// group events even for unresolvable (closed) columns.
+    /// NIRUX_WORKSPACE_ID from the same environment — lets notifications
+    /// route events back to their workspace.
     let workspaceID: String?
     /// Claude session_id / Codex thread-id.
     let sessionID: String?

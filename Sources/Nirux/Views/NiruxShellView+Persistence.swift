@@ -90,6 +90,9 @@ extension NiruxShellView {
             isSidebarExpanded = expanded
             sidebar.isExpanded = expanded
         }
+        sidebar.setInactiveSectionCollapsed(
+            state.settings?.inactiveWorkspacesCollapsed ?? true
+        )
         relayout(animated: false)
         updateSidebar()
     }
@@ -99,6 +102,7 @@ extension NiruxShellView {
         var settings = Persistence.load()?.settings ?? PersistedSettings()
         // The shell is the source of truth for sidebar state — carry the rest.
         settings.sidebarExpanded = isSidebarExpanded
+        settings.inactiveWorkspacesCollapsed = sidebar.isInactiveSectionCollapsed
         Persistence.save(PersistedState(
             workspaces: workspaces.map { workspace in
                 PersistedWorkspace(id: workspace.id, title: workspace.title, cwd: workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.cwd,

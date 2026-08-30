@@ -23,9 +23,7 @@ final class SidebarView: NSView {
     var onProfileClicked: ((String) -> Void)?
     var onCreateProfile: (() -> Void)?
     var onRenameProfile: ((String) -> Void)?
-    /// Activity feed row clicked — focus the workspace (and column when
-    /// the entry still resolves to one).
-    var onActivityClicked: ((ActivityEntry) -> Void)?
+    var onInactiveSectionCollapsedChange: ((Bool) -> Void)?
     var isExpanded: Bool = false {
         didSet {
             // Clear dot pulse layers when switching modes
@@ -44,26 +42,9 @@ final class SidebarView: NSView {
 
     var lastInfos: [WorkspaceInfo] = []
     var lastProfiles: [ProfileInfo] = []
-    /// Activity feed snapshot shown in the expanded "activity" section.
-    var lastActivity: [ActivityEntry] = []
-    /// Entries newer than this render bright and count toward the badge.
-    var lastActivityReadTimestamp: TimeInterval = 0
-    /// Workspace IDs that still exist — rows whose target is gone render
-    /// ghosted and don't register a hit area.
-    var lastLiveWorkspaceIDs: Set<String> = []
-    /// Agent UUIDs of currently existing terminal columns. A row whose
-    /// originating column still exists is never ghosted, even if its
-    /// frozen workspace/column info went stale (column moved, workspace
-    /// renamed).
-    var lastLiveAgentUUIDs: Set<String> = []
-    /// Hover-highlight backing views, one per rendered activity row
-    /// (same index as the `.activity(index)` hit regions).
-    var activityRowBackgrounds: [NSView] = []
-    /// Frame of the activity section (header + rows) in document
-    /// coordinates — nil when the section isn't rendered. Lets the shell
-    /// ask whether the feed is actually inside the scrolled viewport
-    /// before counting it as "seen".
-    var activitySectionRect: NSRect?
+    /// Inactive workspaces default to hidden so a large archive cannot
+    /// consume the whole sidebar. Persisted by NiruxShellView.
+    var isInactiveSectionCollapsed = true
     var expandedViews: [NSView] = []
     var profileIndicatorView: SidebarDotIndicatorView?
     var hitAreas: [SidebarHitArea] = []
@@ -99,7 +80,6 @@ final class SidebarView: NSView {
     var hoveredTarget: SidebarHoverTarget?
 
     private var hoveredLabel: NSTextField?
-    var hoveredActivityIndex: Int?
     private var pulseLayers: [CALayer] = []
     private var trackingArea: NSTrackingArea?
 
@@ -144,25 +124,17 @@ final class SidebarView: NSView {
         if isExpanded { rebuildContent() } else { setNeedsDisplay(bounds) }
     }
 
-    func update(
-        profiles: [ProfileInfo], workspaces: [WorkspaceInfo], activity: [ActivityEntry] = [],
-        activityReadTimestamp: TimeInterval = 0, liveWorkspaceIDs: Set<String> = [],
-        liveAgentUUIDs: Set<String> = []
-    ) {
+    func update(profiles: [ProfileInfo], workspaces: [WorkspaceInfo]) {
         guard workspaceDrag == nil else {
-            deferredDragUpdate = SidebarUpdatePayload(
-                profiles: profiles, workspaces: workspaces, activity: activity,
-                activityReadTimestamp: activityReadTimestamp,
-                liveWorkspaceIDs: liveWorkspaceIDs, liveAgentUUIDs: liveAgentUUIDs
-            )
+            deferredDragUpdate = SidebarUpdatePayload(profiles: profiles, workspaces: workspaces)
             return
         }
+        let shouldRevealInactive = isInactiveSectionCollapsed
+            && workspaces.contains { $0.isInactive && $0.isActive }
+        if shouldRevealInactive { isInactiveSectionCollapsed = false }
         lastProfiles = profiles
         lastInfos = workspaces
-        lastActivity = activity
-        lastActivityReadTimestamp = activityReadTimestamp
-        lastLiveWorkspaceIDs = liveWorkspaceIDs
-        lastLiveAgentUUIDs = liveAgentUUIDs
+        if shouldRevealInactive { onInactiveSectionCollapsedChange?(false) }
         guard isExpanded else { setNeedsDisplay(bounds); return }
         // The 2s heartbeat calls this even when nothing visible changed.
         // Rebuilding then is not just wasted work: it tears down every
@@ -185,34 +157,10 @@ final class SidebarView: NSView {
         var hasher = Hasher()
         hasher.combine(lastProfiles)
         hasher.combine(lastInfos)
-        hasher.combine(lastActivity.count)
-        for entry in lastActivity.prefix(SidebarExpandedMetrics.activityMaxRows) {
-            hasher.combine(entry)
-            hasher.combine(Self.relativeAge(since: entry.timestamp))
-        }
-        hasher.combine(lastActivityReadTimestamp)
-        hasher.combine(lastLiveWorkspaceIDs)
-        hasher.combine(lastLiveAgentUUIDs)
+        hasher.combine(isInactiveSectionCollapsed)
         hasher.combine(bounds.width)
         hasher.combine(bounds.height)
         return hasher.finalize()
-    }
-
-    /// True when at least part of the activity section is inside the
-    /// scrolled viewport of the expanded sidebar.
-    var isActivityFeedVisible: Bool {
-        guard isExpanded, let rect = activitySectionRect else { return false }
-        return rect.intersects(contentScrollView.documentVisibleRect)
-    }
-
-    /// Re-apply the activity hover from the current pointer position.
-    /// Called after a rebuild: the old hover view was just destroyed, and
-    /// no mouseMoved arrives while the cursor sits still.
-    func refreshActivityHoverFromMouse() {
-        guard isExpanded, let window else { return }
-        let point = contentDocumentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
-        guard let area = hitArea(at: point), case .activity(let index) = area.region else { return }
-        setActivityHover(index)
     }
 
     /// Fade out the collapsed dots, then call completion.
@@ -273,7 +221,7 @@ final class SidebarView: NSView {
 
         let dotDiameter = Self.dotSize
         let gap = Self.dotGap
-        let displayInfos = displayedWorkspaceInfos
+        let displayInfos = dotWorkspaceInfos
         let totalHeight = CGFloat(displayInfos.count) * dotDiameter + CGFloat(displayInfos.count - 1) * gap
         let startY = bounds.midY + totalHeight / 2
 
@@ -325,6 +273,25 @@ final class SidebarView: NSView {
         lastInfos.filter { !$0.isInactive } + lastInfos.filter { $0.isInactive }
     }
 
+    var dotWorkspaceInfos: [WorkspaceInfo] {
+        isInactiveSectionCollapsed
+            ? displayedWorkspaceInfos.filter { !$0.isInactive }
+            : displayedWorkspaceInfos
+    }
+
+    func setInactiveSectionCollapsed(_ collapsed: Bool, notify: Bool = false) {
+        // Never hide the workspace currently on screen. This can happen when
+        // every workspace in a space is inactive and keyboard navigation
+        // selects one of them.
+        let effectiveValue = collapsed
+            && !lastInfos.contains { $0.isInactive && $0.isActive }
+        guard effectiveValue != isInactiveSectionCollapsed else { return }
+        isInactiveSectionCollapsed = effectiveValue
+        lastRenderSignature = nil
+        if isExpanded { rebuildContent() } else { setNeedsDisplay(bounds) }
+        if notify { onInactiveSectionCollapsedChange?(effectiveValue) }
+    }
+
     // MARK: - Click handling
 
     override func mouseDown(with event: NSEvent) {
@@ -338,6 +305,11 @@ final class SidebarView: NSView {
                 // Workspace rows don't click on mouseDown: run the drag
                 // tracking loop, which decides between click and reorder.
                 if case .workspace(let workspaceIndex) = area.region {
+                    if event.clickCount == 2 {
+                        onWorkspaceClicked?(workspaceIndex)
+                        onWorkspaceAction?(.rename, workspaceIndex)
+                        return
+                    }
                     trackWorkspaceDrag(workspaceIndex: workspaceIndex, rowFrame: area.frame, startPoint: docLocation)
                     return
                 }
@@ -352,7 +324,7 @@ final class SidebarView: NSView {
         let clickLocation = convert(event.locationInWindow, from: nil)
         let dotDiameter = Self.dotSize
         let gap = Self.dotGap
-        let displayInfos = displayedWorkspaceInfos
+        let displayInfos = dotWorkspaceInfos
         let totalHeight = CGFloat(displayInfos.count) * dotDiameter + CGFloat(displayInfos.count - 1) * gap
         let startY = bounds.midY + totalHeight / 2
 
@@ -382,7 +354,7 @@ final class SidebarView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        guard isExpanded else { clearHover(); clearActivityHover(); return }
+        guard isExpanded else { clearHover(); setHoverTarget(nil); return }
 
         // The bottom space switcher tracks its own hover — keep the pointing
         // hand (its cursor rect would otherwise be overridden below) and drop
@@ -390,24 +362,21 @@ final class SidebarView: NSView {
         if let indicator = profileIndicatorView,
            indicator.frame.contains(convert(event.locationInWindow, from: nil)) {
             clearHover()
-            clearActivityHover()
             setHoverTarget(nil)
             NSCursor.pointingHand.set()
             return
         }
-
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
 
         guard let area = hitArea(at: point) else {
             clearHover()
-            clearActivityHover()
+            setHoverTarget(nil)
             NSCursor.arrow.set()
             return
         }
 
         switch area.region {
         case .link(_, let label):
-            clearActivityHover()
             setHoverTarget(nil)
             NSCursor.pointingHand.set()
             if hoveredLabel !== label {
@@ -417,44 +386,25 @@ final class SidebarView: NSView {
             }
         case .spaceHeader:
             clearHover()
-            clearActivityHover()
             setHoverTarget(.spaceHeader)
             NSCursor.pointingHand.set()
         case .workspace(let workspaceIndex):
             clearHover()
-            clearActivityHover()
             setHoverTarget(.workspaceCard(workspaceIndex))
             NSCursor.pointingHand.set()
         case .workspaceMenu(let workspaceIndex):
             clearHover()
-            clearActivityHover()
             setHoverTarget(.menuBadge(workspaceIndex))
             NSCursor.pointingHand.set()
         case .column(let workspaceIndex, let columnIndex):
             clearHover()
-            clearActivityHover()
             setHoverTarget(.columnRow(workspaceIndex: workspaceIndex, columnIndex: columnIndex))
             NSCursor.pointingHand.set()
-        case .activity(let index):
+        case .activity:
             clearHover()
             setHoverTarget(nil)
-            setActivityHover(index)
-            NSCursor.pointingHand.set()
+            NSCursor.arrow.set()
         }
-    }
-
-    private func setActivityHover(_ index: Int) {
-        guard hoveredActivityIndex != index else { return }
-        clearActivityHover()
-        guard let background = activityRowBackgrounds[safe: index] else { return }
-        background.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
-        hoveredActivityIndex = index
-    }
-
-    func clearActivityHover() {
-        guard let index = hoveredActivityIndex else { return }
-        activityRowBackgrounds[safe: index]?.layer?.backgroundColor = NSColor.clear.cgColor
-        hoveredActivityIndex = nil
     }
 
     func hitArea(at point: NSPoint) -> SidebarHitArea? {
@@ -467,7 +417,9 @@ final class SidebarView: NSView {
             let point = convert(event.locationInWindow, from: nil)
             showSpaceMenu(at: point)
         case .link(let url, _):
-            if let workspaceIndex = Self.diffActionWorkspaceIndex(url) {
+            if url == Self.inactiveSectionActionURL {
+                setInactiveSectionCollapsed(!isInactiveSectionCollapsed, notify: true)
+            } else if let workspaceIndex = Self.diffActionWorkspaceIndex(url) {
                 onDiffStatsClicked?(workspaceIndex)
             } else if let url = URL(string: url) {
                 NSWorkspace.shared.open(url)
@@ -480,9 +432,8 @@ final class SidebarView: NSView {
             let point = convert(event.locationInWindow, from: nil)
             workspaceActionMenu(workspaceIndex: workspaceIndex, columnIndex: nil)
                 .popUp(positioning: nil, at: point, in: self)
-        case .activity(let index):
-            guard lastActivity.indices.contains(index) else { return }
-            onActivityClicked?(lastActivity[index])
+        case .activity:
+            break
         }
     }
 
@@ -600,7 +551,7 @@ final class SidebarView: NSView {
         let clickLocation = convert(event.locationInWindow, from: nil)
         let dotDiameter = Self.dotSize
         let gap = Self.dotGap
-        let displayInfos = displayedWorkspaceInfos
+        let displayInfos = dotWorkspaceInfos
         let totalHeight = CGFloat(displayInfos.count) * dotDiameter + CGFloat(displayInfos.count - 1) * gap
         let startY = bounds.midY + totalHeight / 2
 
@@ -616,7 +567,6 @@ final class SidebarView: NSView {
 
     override func mouseExited(with event: NSEvent) {
         clearHover()
-        clearActivityHover()
         setHoverTarget(nil)
     }
 
@@ -639,6 +589,8 @@ final class SidebarView: NSView {
     static func diffActionURL(workspaceIndex: Int) -> String {
         "action:diff:\(workspaceIndex)"
     }
+
+    static let inactiveSectionActionURL = "action:inactive-section-toggle"
 
     private static func diffActionWorkspaceIndex(_ value: String) -> Int? {
         let prefix = "action:diff:"

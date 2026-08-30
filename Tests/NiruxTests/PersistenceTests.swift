@@ -284,10 +284,14 @@ final class PersistedStateCodingTests: XCTestCase {
     // MARK: - Sidebar state
 
     func testSidebarExpandedRoundTripsThroughSettings() throws {
-        let original = PersistedSettings(sidebarExpanded: true)
+        let original = PersistedSettings(
+            sidebarExpanded: true,
+            inactiveWorkspacesCollapsed: false
+        )
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(PersistedSettings.self, from: data)
         XCTAssertEqual(decoded.sidebarExpanded, true)
+        XCTAssertEqual(decoded.inactiveWorkspacesCollapsed, false)
         // Other fields keep their defaults.
         XCTAssertEqual(decoded.claudeNoFlicker, true)
         XCTAssertNil(decoded.claudeLaunchMode)
@@ -300,6 +304,7 @@ final class PersistedStateCodingTests: XCTestCase {
         """.utf8)
         let settings = try JSONDecoder().decode(PersistedSettings.self, from: json)
         XCTAssertNil(settings.sidebarExpanded)
+        XCTAssertNil(settings.inactiveWorkspacesCollapsed)
         XCTAssertEqual(settings.claudeLaunchMode, .plan)
         XCTAssertEqual(settings.claudeNoFlicker, false)
     }

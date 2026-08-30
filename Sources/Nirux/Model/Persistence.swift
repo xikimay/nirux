@@ -184,17 +184,20 @@ struct PersistedSettings: Codable {
     var claudeNoFlicker: Bool? = true
     var codexLaunchMode: CodexLaunchMode?
     var sidebarExpanded: Bool?
+    var inactiveWorkspacesCollapsed: Bool?
 
     init(
         claudeLaunchMode: ClaudeLaunchMode? = nil,
         claudeNoFlicker: Bool? = true,
         codexLaunchMode: CodexLaunchMode? = nil,
-        sidebarExpanded: Bool? = nil
+        sidebarExpanded: Bool? = nil,
+        inactiveWorkspacesCollapsed: Bool? = nil
     ) {
         self.claudeLaunchMode = claudeLaunchMode
         self.claudeNoFlicker = claudeNoFlicker
         self.codexLaunchMode = codexLaunchMode
         self.sidebarExpanded = sidebarExpanded
+        self.inactiveWorkspacesCollapsed = inactiveWorkspacesCollapsed
     }
 
     enum CodingKeys: String, CodingKey {
@@ -202,6 +205,7 @@ struct PersistedSettings: Codable {
         case claudeNoFlicker
         case codexLaunchMode
         case sidebarExpanded
+        case inactiveWorkspacesCollapsed
         case claudeBypassPermissions // legacy
     }
 
@@ -219,6 +223,7 @@ struct PersistedSettings: Codable {
         claudeNoFlicker = try c.decodeIfPresent(Bool.self, forKey: .claudeNoFlicker) ?? true
         codexLaunchMode = try c.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)
         sidebarExpanded = try c.decodeIfPresent(Bool.self, forKey: .sidebarExpanded)
+        inactiveWorkspacesCollapsed = try c.decodeIfPresent(Bool.self, forKey: .inactiveWorkspacesCollapsed)
     }
 
     /// Custom encoder is required because `CodingKeys` carries the legacy
@@ -230,6 +235,7 @@ struct PersistedSettings: Codable {
         try c.encodeIfPresent(claudeNoFlicker, forKey: .claudeNoFlicker)
         try c.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
         try c.encodeIfPresent(sidebarExpanded, forKey: .sidebarExpanded)
+        try c.encodeIfPresent(inactiveWorkspacesCollapsed, forKey: .inactiveWorkspacesCollapsed)
     }
 }
 

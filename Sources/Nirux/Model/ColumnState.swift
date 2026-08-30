@@ -302,25 +302,33 @@ extension ColumnState: TerminalSurfaceOpenURLDelegate {
     /// forwards cmd+click here. Web links open inside Nirux as a browser
     /// column; file: links (Claude Code emits OSC 8 file:// links for
     /// paths) open inside Nirux as an editor column; anything else
-    /// (mailto:, custom schemes) goes to the system handler.
+    /// (mailto:, custom schemes) goes to the system handler. Routing is
+    /// deferred one run-loop turn: mutating columns/focus synchronously from
+    /// Ghostty's mouse callback can invalidate its event state and crash.
     func terminalDidRequestOpenURL(_ url: String, kind: TerminalOpenURLKind) {
-        guard let parsed = URL(string: url), let scheme = parsed.scheme?.lowercased() else { return }
-        switch scheme {
-        case "http", "https":
-            onOpenURL?(url)
-        case "file":
-            guard let target = FileLink.parse(parsed) else { return }
+        guard let target = TerminalLinkTarget.parse(url) else { return }
+        DispatchQueue.main.async { [weak self] in
+            self?.openTerminalLink(target)
+        }
+    }
+
+    private func openTerminalLink(_ target: TerminalLinkTarget) {
+        switch target {
+        case .web(let url):
+            onOpenURL?(url.absoluteString)
+        case .file(let url):
+            guard let file = FileLink.parse(url) else { return }
             // Resolve symlinks so the editor's size/content checks see the
             // real target; hand non-text targets (directories, FIFOs,
             // images…) to the system like before this route existed.
-            let resolved = URL(fileURLWithPath: target.path).resolvingSymlinksInPath().path
+            let resolved = URL(fileURLWithPath: file.path).resolvingSymlinksInPath().path
             if FileLink.opensInEditor(path: resolved) {
-                onOpenFile?(resolved, target.line)
+                onOpenFile?(resolved, file.line)
             } else {
-                NSWorkspace.shared.open(parsed)
+                NSWorkspace.shared.open(url)
             }
-        default:
-            NSWorkspace.shared.open(parsed)
+        case .external(let url):
+            NSWorkspace.shared.open(url)
         }
     }
 }

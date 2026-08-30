@@ -111,7 +111,8 @@ enum SidebarHitRegion {
     case workspace(Int)
     /// The "⋯" button on a workspace card — opens the workspace action menu.
     case workspaceMenu(Int)
-    /// Index into SidebarView.lastActivity (snapshot at rebuild time).
+    /// Legacy shape retained for the upstream hover helper. The Activity feed
+    /// no longer creates or handles these regions.
     case activity(Int)
 }
 
@@ -120,10 +121,6 @@ enum SidebarHitRegion {
 struct SidebarUpdatePayload {
     let profiles: [ProfileInfo]
     let workspaces: [WorkspaceInfo]
-    let activity: [ActivityEntry]
-    let activityReadTimestamp: TimeInterval
-    let liveWorkspaceIDs: Set<String>
-    let liveAgentUUIDs: Set<String>
 }
 
 enum WorkspaceSidebarAction {
@@ -132,8 +129,8 @@ enum WorkspaceSidebarAction {
     case closeColumn(columnIndex: Int)
 }
 
-/// Hover highlight target in the expanded sidebar. Links and activity rows
-/// have their own dedicated hover treatments; this covers the rest.
+/// Hover highlight target in the expanded sidebar. Links have their own
+/// dedicated hover treatment; this covers the rest.
 enum SidebarHoverTarget: Equatable {
     case spaceHeader
     case workspaceCard(Int)

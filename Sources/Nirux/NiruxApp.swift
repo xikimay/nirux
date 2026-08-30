@@ -80,17 +80,12 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // ~/.codex/config.toml, then start routing events to columns. Must
         // run AFTER restoreState so queued events resolve to live columns.
         AgentHookInstaller.installAll()
-        ActivityStore.shared.load()
-        ActivityStore.shared.onChange = { [weak shellView] in shellView?.updateSidebar() }
         let hooks = AgentHookCenter.shared
         hooks.resolver = { [weak shellView] uuid in
             shellView?.resolveAgentColumn(uuid: uuid)
         }
         hooks.onEventApplied = { [weak shellView] in
             shellView?.updateSidebar()
-        }
-        hooks.onActivity = { [weak shellView] event, resolution in
-            shellView?.recordActivity(event, resolution: resolution)
         }
         hooks.start()
 
@@ -113,7 +108,6 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
 
     func applicationWillTerminate(_ notification: Notification) {
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
-        ActivityStore.shared.flush()
     }
 
     // MARK: - URL Scheme

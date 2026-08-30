@@ -9,8 +9,7 @@ import Foundation
 /// matching column's PtySession via `resolver`.
 ///
 /// The file doubles as a queue: events emitted while Nirux isn't running are
-/// replayed on launch (mostly useful for the activity feed — statuses
-/// self-correct within one heartbeat).
+/// replayed on launch so agent statuses catch up immediately.
 @MainActor
 final class AgentHookCenter {
     static let shared = AgentHookCenter()
@@ -32,8 +31,6 @@ final class AgentHookCenter {
 
     /// Given NIRUX_AGENT_UUID, locate the owning column. Set by the shell.
     var resolver: ((String) -> Resolution?)?
-    /// Every event, resolved or not — the activity feed taps this.
-    var onActivity: ((AgentHookEvent, Resolution?) -> Void)?
     /// A status was applied — lets the shell refresh the sidebar immediately
     /// instead of waiting for the next heartbeat.
     var onEventApplied: (() -> Void)?
@@ -46,7 +43,7 @@ final class AgentHookCenter {
 
     /// Upper bound for one drain. If the app stays closed for days while
     /// hooked agents keep working the file grows unboundedly; only the tail
-    /// matters (latest status per session, recent activity).
+    /// matters (the latest status per session).
     private static let maxDrainBytes = 1_000_000
 
     func start() {
@@ -166,7 +163,6 @@ final class AgentHookCenter {
                 resolution.column.notifyAgentAttention()
             }
         }
-        onActivity?(event, resolution)
         return resolution != nil
     }
 
