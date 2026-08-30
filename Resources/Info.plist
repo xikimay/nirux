@@ -12,6 +12,8 @@
     <string>__VERSION__</string>
     <key>CFBundleExecutable</key>
     <string>Nirux</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleInfoDictionaryVersion</key>

@@ -56,6 +56,7 @@ fi
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$APP/Contents/Info.plist"
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
+cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 # Set rpath so the binary can find Sparkle.framework at runtime
 install_name_tool -add_rpath @executable_path/../Frameworks "$APP/Contents/MacOS/Nirux"
