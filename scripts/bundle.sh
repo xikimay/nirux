@@ -52,7 +52,7 @@ if [[ -d "$EDITOR_ASSETS_SRC" ]]; then
     cp -R "$EDITOR_ASSETS_SRC" "$APP/Contents/Resources/EditorAssets"
 fi
 
-# Copy and patch Info.plist
+# Copy and patch bundle metadata and the app icon before signing
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$APP/Contents/Info.plist"
 plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
