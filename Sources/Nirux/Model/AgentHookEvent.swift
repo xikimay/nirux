@@ -27,6 +27,7 @@ struct AgentHookEvent: Codable, Equatable {
     let workspaceID: String?
     /// Claude session_id / Codex thread-id.
     let sessionID: String?
+    let emitterProcess: ProcessInstance?
     let cwd: String?
     /// Tool name (PreToolUse), notification message (Notification), or final
     /// assistant message (Codex turnComplete, truncated).
@@ -38,11 +39,18 @@ struct AgentHookEvent: Codable, Equatable {
     /// Parse the JSON payload a hook receives (Claude: stdin, Codex: last
     /// argv) into an event. Returns nil for payloads we don't care about —
     /// unknown events are ignored, never errors.
-    init?(kind: Kind, payload: [String: Any], env: [String: String], now: TimeInterval) {
+    init?(
+        kind: Kind,
+        payload: [String: Any],
+        env: [String: String],
+        now: TimeInterval,
+        emitterProcess: ProcessInstance? = nil
+    ) {
         self.kind = kind
         agentUUID = env["NIRUX_AGENT_UUID"]
         workspaceID = env["NIRUX_WORKSPACE_ID"]
         timestamp = now
+        self.emitterProcess = emitterProcess
 
         switch kind {
         case .claude:
@@ -100,8 +108,15 @@ enum AgentHookCLI {
         }
 
         let env = ProcessInfo.processInfo.environment
+        let emitterProcess = kind == .codex
+            ? ProcessInstance.running(pid: getppid())
+            : nil
         guard let event = AgentHookEvent(
-            kind: kind, payload: raw, env: env, now: Date().timeIntervalSince1970
+            kind: kind,
+            payload: raw,
+            env: env,
+            now: Date().timeIntervalSince1970,
+            emitterProcess: emitterProcess
         ) else { return 0 }
 
         append(event)

@@ -176,6 +176,28 @@ enum CodexLaunchMode: String, Codable, CaseIterable {
         case .bypass: return ["--dangerously-bypass-approvals-and-sandbox"]
         }
     }
+
+    static func detect(arguments: [String]) -> CodexLaunchMode? {
+        if arguments.contains("--dangerously-bypass-approvals-and-sandbox") {
+            return .bypass
+        }
+        guard let sandboxIndex = arguments.firstIndex(of: "--sandbox"),
+              arguments.indices.contains(sandboxIndex + 1) else { return nil }
+        switch arguments[sandboxIndex + 1] {
+        case "workspace-write":
+            return .workspaceWrite
+        case "read-only":
+            return .readOnly
+        case "danger-full-access":
+            guard let approvalIndex = arguments.firstIndex(of: "--ask-for-approval"),
+                  arguments.indices.contains(approvalIndex + 1),
+                  arguments[approvalIndex + 1] == "never",
+                  arguments.contains("--search") else { return .fullAccess }
+            return .fullAuto
+        default:
+            return nil
+        }
+    }
 }
 
 struct PersistedSettings: Codable {

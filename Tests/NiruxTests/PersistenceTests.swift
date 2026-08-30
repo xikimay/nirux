@@ -350,6 +350,23 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(CodexLaunchMode.bypass.cliArgs, ["--dangerously-bypass-approvals-and-sandbox"])
     }
 
+    func testCodexLaunchModesRoundTripThroughArguments() {
+        for mode in CodexLaunchMode.allCases where mode != .default {
+            XCTAssertEqual(
+                CodexLaunchMode.detect(arguments: ["codex"] + mode.cliArgs),
+                mode
+            )
+        }
+        XCTAssertNil(CodexLaunchMode.detect(arguments: ["codex"]))
+        XCTAssertEqual(
+            CodexLaunchMode.detect(arguments: [
+                "codex", "--sandbox", "danger-full-access",
+                "--ask-for-approval", "never"
+            ]),
+            .fullAccess
+        )
+    }
+
     @MainActor
     func testCodexRestoreCommandsNeverGuessTheLastSession() {
         let first = NiruxShellView.codexCommand(
@@ -414,7 +431,7 @@ final class PersistedStateCodingTests: XCTestCase {
 
         XCTAssertTrue(tracker.capture(
             sessionID: "thread-a",
-            eventTimestamp: 110,
+            emitterProcess: first.instance,
             foregroundProcess: first
         ))
         XCTAssertEqual(tracker.sessionID(for: first), "thread-a")
@@ -422,9 +439,10 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertNil(tracker.sessionID(for: second))
     }
 
-    func testCodexSessionTrackerRejectsAnEventOlderThanTheCurrentProcess() {
-        let replacement = ForegroundProcess(
-            instance: ProcessInstance(pid: 101, startedAt: 120),
+    func testCodexSessionTrackerRejectsBackgroundEmitter() {
+        let background = ProcessInstance(pid: 101, startedAt: 100)
+        let foreground = ForegroundProcess(
+            instance: ProcessInstance(pid: 102, startedAt: 120),
             name: "codex",
             arguments: ["codex"]
         )
@@ -432,10 +450,10 @@ final class PersistedStateCodingTests: XCTestCase {
 
         XCTAssertFalse(tracker.capture(
             sessionID: "stale-thread",
-            eventTimestamp: 110,
-            foregroundProcess: replacement
+            emitterProcess: background,
+            foregroundProcess: foreground
         ))
-        XCTAssertNil(tracker.sessionID(for: replacement))
+        XCTAssertNil(tracker.sessionID(for: foreground))
     }
 
     func testCodexSessionTrackerBindsARestoredThreadOnce() {
@@ -473,9 +491,25 @@ final class PersistedStateCodingTests: XCTestCase {
 
         XCTAssertFalse(tracker.capture(
             sessionID: "queued-thread",
-            eventTimestamp: 100,
+            emitterProcess: ProcessInstance(pid: 301, startedAt: 90),
             foregroundProcess: nil
         ))
         XCTAssertNil(tracker.sessionID(for: nil))
+    }
+
+    func testCodexSessionTrackerRejectsLegacyEventForRunningProcess() {
+        let foreground = ForegroundProcess(
+            instance: ProcessInstance(pid: 301, startedAt: 90),
+            name: "codex",
+            arguments: ["codex"]
+        )
+        var tracker = CodexSessionTracker()
+
+        XCTAssertFalse(tracker.capture(
+            sessionID: "legacy-thread",
+            emitterProcess: nil,
+            foregroundProcess: foreground
+        ))
+        XCTAssertNil(tracker.sessionID(for: foreground))
     }
 }

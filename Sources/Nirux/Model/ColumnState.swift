@@ -18,12 +18,13 @@ struct CodexSessionTracker {
     @discardableResult
     mutating func capture(
         sessionID: String?,
-        eventTimestamp: TimeInterval,
+        emitterProcess: ProcessInstance?,
         foregroundProcess: ForegroundProcess?
     ) -> Bool {
         guard let sessionID, !sessionID.isEmpty,
               let foregroundProcess, foregroundProcess.name == "codex",
-              foregroundProcess.instance.startedAt <= eventTimestamp else {
+              let emitterProcess,
+              foregroundProcess.instance == emitterProcess else {
             return false
         }
         let next = Binding(sessionID: sessionID, process: foregroundProcess.instance)
@@ -339,12 +340,12 @@ final class ColumnState {
 
     func captureCodexSession(
         sessionID: String?,
-        eventTimestamp: TimeInterval,
+        emitterProcess: ProcessInstance?,
         snapshot: ProcessSnapshot
     ) -> Bool {
         codexSessionTracker.capture(
             sessionID: sessionID,
-            eventTimestamp: eventTimestamp,
+            emitterProcess: emitterProcess,
             foregroundProcess: pty?.foregroundProcess(snapshot: snapshot)
         )
     }

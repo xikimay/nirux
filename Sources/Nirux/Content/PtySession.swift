@@ -6,9 +6,24 @@ enum AgentStatus: Equatable, Hashable {
     case idle, working, needsAttention
 }
 
-struct ProcessInstance: Equatable {
+struct ProcessInstance: Codable, Equatable {
     let pid: pid_t
     let startedAt: TimeInterval
+
+    static func running(pid: pid_t) -> ProcessInstance? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        var process = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.size
+        guard sysctl(&mib, 4, &process, &size, nil, 0) == 0,
+              size == MemoryLayout<kinfo_proc>.size,
+              process.kp_proc.p_pid == pid else { return nil }
+        let startTime = process.kp_proc.p_starttime
+        return ProcessInstance(
+            pid: pid,
+            startedAt: TimeInterval(startTime.tv_sec)
+                + TimeInterval(startTime.tv_usec) / 1_000_000
+        )
+    }
 }
 
 struct ForegroundProcess: Equatable {
@@ -34,6 +49,7 @@ final class ProcessSnapshot {
         let pid: pid_t
         let parentPID: pid_t
         let processGroupID: pid_t
+        let terminalForegroundProcessGroupID: pid_t
         let name: String
         let startedAt: TimeInterval
         let arguments: [String]
@@ -41,6 +57,7 @@ final class ProcessSnapshot {
 
     private var childrenMap: [pid_t: [pid_t]] = [:]
     private var processGroupMap: [pid_t: [pid_t]] = [:]
+    private var terminalForegroundProcessGroupMap: [pid_t: pid_t] = [:]
     private var commMap: [pid_t: String] = [:]
     private var instanceMap: [pid_t: ProcessInstance] = [:]
     private var capturedArguments: [pid_t: [String]]?
@@ -57,6 +74,7 @@ final class ProcessSnapshot {
             let pid = procs[i].kp_proc.p_pid
             let ppid = procs[i].kp_eproc.e_ppid
             let processGroupID = procs[i].kp_eproc.e_pgid
+            let terminalForegroundProcessGroupID = procs[i].kp_eproc.e_tpgid
             let name = withUnsafePointer(to: &procs[i].kp_proc.p_comm) { ptr in
                 ptr.withMemoryRebound(to: CChar.self, capacity: Int(MAXCOMLEN)) {
                     String(cString: $0)
@@ -67,6 +85,7 @@ final class ProcessSnapshot {
                 pid: pid,
                 parentPID: ppid,
                 processGroupID: processGroupID,
+                terminalForegroundProcessGroupID: terminalForegroundProcessGroupID,
                 name: name,
                 startedAt: TimeInterval(startTime.tv_sec)
                     + TimeInterval(startTime.tv_usec) / 1_000_000
@@ -81,6 +100,7 @@ final class ProcessSnapshot {
                 pid: entry.pid,
                 parentPID: entry.parentPID,
                 processGroupID: entry.processGroupID,
+                terminalForegroundProcessGroupID: entry.terminalForegroundProcessGroupID,
                 name: entry.name,
                 startedAt: entry.startedAt
             )
@@ -91,19 +111,20 @@ final class ProcessSnapshot {
         pid: pid_t,
         parentPID: pid_t,
         processGroupID: pid_t,
+        terminalForegroundProcessGroupID: pid_t,
         name: String,
         startedAt: TimeInterval
     ) {
         childrenMap[parentPID, default: []].append(pid)
         processGroupMap[processGroupID, default: []].append(pid)
+        terminalForegroundProcessGroupMap[pid] = terminalForegroundProcessGroupID
         commMap[pid] = name
         instanceMap[pid] = ProcessInstance(pid: pid, startedAt: startedAt)
     }
 
-    func foregroundProcess(
-        shellPID: pid_t,
-        processGroupID: pid_t?
-    ) -> ForegroundProcess? {
+    func foregroundProcess(shellPID: pid_t) -> ForegroundProcess? {
+        let processGroupID = terminalForegroundProcessGroupMap[shellPID]
+            .flatMap { $0 > 0 ? $0 : nil }
         let groupedPID: pid_t? = processGroupID.flatMap { groupID -> pid_t? in
             guard let members = processGroupMap[groupID], !members.isEmpty else { return nil }
             return members.first(where: { $0 == groupID })
@@ -509,11 +530,7 @@ private final class PtyState: @unchecked Sendable {
 
     func foregroundProcess(snapshot: ProcessSnapshot) -> ForegroundProcess? {
         guard childPid > 0 else { return nil }
-        let processGroupID = ptyFd >= 0 ? tcgetpgrp(ptyFd) : -1
-        return snapshot.foregroundProcess(
-            shellPID: childPid,
-            processGroupID: processGroupID > 0 ? processGroupID : nil
-        )
+        return snapshot.foregroundProcess(shellPID: childPid)
     }
 
     func markPtyStarted() {

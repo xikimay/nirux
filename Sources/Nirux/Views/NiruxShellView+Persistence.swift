@@ -209,16 +209,6 @@ extension NiruxShellView {
     /// it was started with. Order matters: bypass beats full-auto beats
     /// read-only since the bypass flag implies the others.
     private func detectCodexLaunchMode(process: ForegroundProcess) -> CodexLaunchMode? {
-        if process.hasFlag("--dangerously-bypass-approvals-and-sandbox") {
-            return .bypass
-        }
-        let sandbox = process.flagValue("--sandbox")
-        if sandbox == "workspace-write" {
-            return .fullAuto
-        }
-        if sandbox == "read-only" {
-            return .readOnly
-        }
-        return nil
+        CodexLaunchMode.detect(arguments: process.arguments)
     }
 }

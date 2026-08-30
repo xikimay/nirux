@@ -242,7 +242,7 @@ extension NiruxShellView {
         for appliedEvent in events where appliedEvent.event.kind == .codex {
             if appliedEvent.resolution.column.captureCodexSession(
                 sessionID: appliedEvent.event.sessionID,
-                eventTimestamp: appliedEvent.event.timestamp,
+                emitterProcess: appliedEvent.event.emitterProcess,
                 snapshot: snapshot
             ) {
                 changed = true
