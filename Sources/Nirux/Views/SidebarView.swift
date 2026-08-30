@@ -400,10 +400,6 @@ final class SidebarView: NSView {
             clearHover()
             setHoverTarget(.columnRow(workspaceIndex: workspaceIndex, columnIndex: columnIndex))
             NSCursor.pointingHand.set()
-        case .activity:
-            clearHover()
-            setHoverTarget(nil)
-            NSCursor.arrow.set()
         }
     }
 
@@ -432,8 +428,6 @@ final class SidebarView: NSView {
             let point = convert(event.locationInWindow, from: nil)
             workspaceActionMenu(workspaceIndex: workspaceIndex, columnIndex: nil)
                 .popUp(positioning: nil, at: point, in: self)
-        case .activity:
-            break
         }
     }
 
@@ -541,7 +535,7 @@ final class SidebarView: NSView {
                     return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
                 case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex):
                     return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: nil)
-                case .spaceHeader, .link, .activity:
+                case .spaceHeader, .link:
                     continue
                 }
             }

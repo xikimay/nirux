@@ -111,9 +111,6 @@ enum SidebarHitRegion {
     case workspace(Int)
     /// The "⋯" button on a workspace card — opens the workspace action menu.
     case workspaceMenu(Int)
-    /// Legacy shape retained for the upstream hover helper. The Activity feed
-    /// no longer creates or handles these regions.
-    case activity(Int)
 }
 
 /// Full parameter set of SidebarView.update(...) — stashed while a
