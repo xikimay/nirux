@@ -286,13 +286,28 @@ final class PersistedStateCodingTests: XCTestCase {
             sidebarExpanded: true,
             inactiveWorkspacesCollapsed: false
         )
-        let data = try JSONEncoder().encode(original)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(original)
         let decoded = try JSONDecoder().decode(PersistedSettings.self, from: data)
         XCTAssertEqual(decoded.sidebarExpanded, true)
         XCTAssertEqual(decoded.inactiveWorkspacesCollapsed, false)
         // Other fields keep their defaults.
         XCTAssertEqual(decoded.claudeNoFlicker, true)
         XCTAssertNil(decoded.claudeLaunchMode)
+
+        if let evidenceDirectory = ProcessInfo.processInfo.environment["NO_MISTAKES_EVIDENCE_DIR"],
+           !evidenceDirectory.isEmpty {
+            let directoryURL = URL(fileURLWithPath: evidenceDirectory, isDirectory: true)
+            try FileManager.default.createDirectory(
+                at: directoryURL,
+                withIntermediateDirectories: true
+            )
+            try data.write(
+                to: directoryURL.appendingPathComponent("persisted-sidebar-settings.json"),
+                options: .atomic
+            )
+        }
     }
 
     func testSettingsWithoutSidebarFieldDecodeToNil() throws {

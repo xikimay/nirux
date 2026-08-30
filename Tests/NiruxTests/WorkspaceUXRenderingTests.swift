@@ -85,6 +85,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
         XCTAssertTrue(visibleText.contains("▸ INACTIVE"))
         XCTAssertFalse(visibleText.contains("Release notes"))
         XCTAssertFalse(visibleText.contains("ACTIVITY"))
+        try capture(sidebar, named: "workspace-sidebar-collapsed.png")
 
         var renamedWorkspaceIndex: Int?
         sidebar.onWorkspaceAction = { action, index in
@@ -119,6 +120,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
         XCTAssertTrue(visibleText.contains("Release notes"))
         XCTAssertTrue(visibleText.contains("Search prototype"))
         XCTAssertFalse(visibleText.contains("ACTIVITY"))
+        try capture(sidebar, named: "workspace-sidebar-expanded.png")
     }
 
     func testWorkspaceNamingPanelAcceptsNewAndReplacementNames() throws {
@@ -143,6 +145,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
         let newNameField = try XCTUnwrap(textField(targeting: namePanel))
         XCTAssertEqual(newNameField.placeholderString, "Name this workspace for the task")
         XCTAssertEqual(newNameField.stringValue, "")
+        try capture(try XCTUnwrap(newNameField.window?.contentView), named: "workspace-name-new.png")
         newNameField.stringValue = "  Customer onboarding  "
         XCTAssertTrue(NSApp.sendAction(
             try XCTUnwrap(newNameField.action),
@@ -159,6 +162,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
         let renameField = try XCTUnwrap(textField(targeting: namePanel))
         XCTAssertEqual(renameField.placeholderString, "Workspace name")
         XCTAssertEqual(renameField.stringValue, "Workspace UX polish")
+        try capture(try XCTUnwrap(renameField.window?.contentView), named: "workspace-name-rename.png")
         renameField.stringValue = "Navigation polish"
         XCTAssertTrue(NSApp.sendAction(
             try XCTUnwrap(renameField.action),
@@ -166,6 +170,46 @@ final class WorkspaceUXRenderingTests: XCTestCase {
             from: renameField
         ))
         XCTAssertEqual(submittedNames, ["Customer onboarding", "Navigation polish"])
+    }
+
+    private func capture(_ view: NSView, named filename: String) throws {
+        guard let evidenceDirectory = ProcessInfo.processInfo.environment["NO_MISTAKES_EVIDENCE_DIR"],
+              !evidenceDirectory.isEmpty
+        else { return }
+
+        let directoryURL = URL(fileURLWithPath: evidenceDirectory, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true
+        )
+        view.layoutSubtreeIfNeeded()
+        view.displayIfNeeded()
+        let transparentBitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: transparentBitmap)
+        let bitmap = try opaqueBitmap(from: transparentBitmap)
+        let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        try png.write(to: directoryURL.appendingPathComponent(filename), options: .atomic)
+    }
+
+    private func opaqueBitmap(from bitmap: NSBitmapImageRep) throws -> NSBitmapImageRep {
+        let width = bitmap.pixelsWide
+        let height = bitmap.pixelsHigh
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ))
+        context.setFillColor(CGColor(red: 0.11, green: 0.11, blue: 0.14, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.draw(
+            try XCTUnwrap(bitmap.cgImage),
+            in: CGRect(x: 0, y: 0, width: width, height: height)
+        )
+        return NSBitmapImageRep(cgImage: try XCTUnwrap(context.makeImage()))
     }
 
     private func text(in view: NSView) -> [String] {

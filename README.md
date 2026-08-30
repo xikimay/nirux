@@ -106,7 +106,7 @@ Useful shortcuts:
 
 When a shell exits, its terminal shows a restart overlay — press `Enter` to respawn it (scrollback is preserved).
 
-Column widths are freeform: drag the divider between columns to resize (double-click resets to half), or use `Cmd+E` to snap through presets. `Cmd+click` any URL in a terminal to open it as a browser column in the same workspace.
+Column widths are freeform: drag the divider between columns to resize (double-click resets to half), or use `Cmd+E` to snap through presets. `Cmd+click` a web URL in a terminal to open it as a browser column in the same workspace; file links open in the editor, while other supported schemes use their macOS handler.
 
 Creating a workspace with `Cmd+N` asks for its task name. Double-click a workspace card in the sidebar, or use `Rename Workspace`, to change that name later.
 
