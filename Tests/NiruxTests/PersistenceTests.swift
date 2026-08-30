@@ -122,7 +122,6 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(decoded.isInactive, false)
     }
 
-
     @MainActor
     func testWorkspaceStoreKeepsActiveWorkspaceByIDWhenReordered() {
         let store = WorkspaceStore()
@@ -157,7 +156,6 @@ final class PersistedStateCodingTests: XCTestCase {
 
         XCTAssertEqual(store.visibleWorkspaceIndices.map { store.workspaces[$0].id }, ["active", "inactive"])
     }
-
 
     @MainActor
     func testWorkspaceStoreDoesNotNavigateToEmptyProfiles() {

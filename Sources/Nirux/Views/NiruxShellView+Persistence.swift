@@ -105,12 +105,14 @@ extension NiruxShellView {
         settings.inactiveWorkspacesCollapsed = sidebar.isInactiveSectionCollapsed
         Persistence.save(PersistedState(
             workspaces: workspaces.map { workspace in
-                PersistedWorkspace(id: workspace.id, title: workspace.title, cwd: workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.cwd,
+                PersistedWorkspace(
+                    id: workspace.id, title: workspace.title,
+                    cwd: workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.cwd,
                     columns: workspace.columns.map { col -> PersistedColumn in
                         let kind: ColumnKind
                         let webURL: String?
-                        var editorOpenFiles: [String]? = nil
-                        var editorActiveFile: String? = nil
+                        var editorOpenFiles: [String]?
+                        var editorActiveFile: String?
                         var claudeMode: ClaudeLaunchMode?
                         var codexMode: CodexLaunchMode?
                         if col.isEditor {

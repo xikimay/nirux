@@ -16,7 +16,7 @@ struct ColumnInfo: Hashable {
     var editorIsDirty: Bool = false
     /// Elapsed time since the foreground process started — shown for
     /// working agents ("· 12m"). Nil for non-terminal columns / idle shells.
-    var agentElapsedSeconds: TimeInterval? = nil
+    var agentElapsedSeconds: TimeInterval?
 
     /// Hashable is hand-written to compare `agentElapsedSeconds` at the
     /// granularity it's *displayed* ("12m" via shortDuration), not raw

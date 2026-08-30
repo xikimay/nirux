@@ -192,7 +192,10 @@ final class WorkspaceUXRenderingTests: XCTestCase {
     }
 
     private func textFields(in view: NSView) -> [NSTextField] {
-        var fields = view as? NSTextField == nil ? [] : [view as! NSTextField]
+        var fields: [NSTextField] = []
+        if let field = view as? NSTextField {
+            fields.append(field)
+        }
         for subview in view.subviews {
             fields.append(contentsOf: textFields(in: subview))
         }

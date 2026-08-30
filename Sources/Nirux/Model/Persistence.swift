@@ -93,11 +93,10 @@ struct PersistedState: Codable {
     var workspaces: [PersistedWorkspace]
     var activeWorkspaceIndex: Int
     var settings: PersistedSettings?
-    var workspaceProfiles: [WorkspaceProfile]? = nil
-    var activeProfileID: String? = nil
-    var activeWorkspaceID: String? = nil
+    var workspaceProfiles: [WorkspaceProfile]?
+    var activeProfileID: String?
+    var activeWorkspaceID: String?
 }
-
 
 /// Mirrors Claude Code's `--permission-mode` values plus the legacy
 /// `--dangerously-skip-permissions` shortcut. `bypassPermissions` and
@@ -210,32 +209,32 @@ struct PersistedSettings: Codable {
     }
 
     init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        if let mode = try c.decodeIfPresent(ClaudeLaunchMode.self, forKey: .claudeLaunchMode) {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let mode = try container.decodeIfPresent(ClaudeLaunchMode.self, forKey: .claudeLaunchMode) {
             claudeLaunchMode = mode
-        } else if let legacy = try c.decodeIfPresent(Bool.self, forKey: .claudeBypassPermissions) {
+        } else if let legacy = try container.decodeIfPresent(Bool.self, forKey: .claudeBypassPermissions) {
             // Old `claudeBypassPermissions: true` emitted `--dangerously-skip-permissions`,
             // so migrate it to `.skipPermissions` rather than the milder `.bypassPermissions`.
             claudeLaunchMode = legacy ? .skipPermissions : .default
         } else {
             claudeLaunchMode = nil
         }
-        claudeNoFlicker = try c.decodeIfPresent(Bool.self, forKey: .claudeNoFlicker) ?? true
-        codexLaunchMode = try c.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)
-        sidebarExpanded = try c.decodeIfPresent(Bool.self, forKey: .sidebarExpanded)
-        inactiveWorkspacesCollapsed = try c.decodeIfPresent(Bool.self, forKey: .inactiveWorkspacesCollapsed)
+        claudeNoFlicker = try container.decodeIfPresent(Bool.self, forKey: .claudeNoFlicker) ?? true
+        codexLaunchMode = try container.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)
+        sidebarExpanded = try container.decodeIfPresent(Bool.self, forKey: .sidebarExpanded)
+        inactiveWorkspacesCollapsed = try container.decodeIfPresent(Bool.self, forKey: .inactiveWorkspacesCollapsed)
     }
 
     /// Custom encoder is required because `CodingKeys` carries the legacy
     /// `claudeBypassPermissions` key, which has no matching stored property —
     /// the synthesized encoder rejects that.
     func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encodeIfPresent(claudeLaunchMode, forKey: .claudeLaunchMode)
-        try c.encodeIfPresent(claudeNoFlicker, forKey: .claudeNoFlicker)
-        try c.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
-        try c.encodeIfPresent(sidebarExpanded, forKey: .sidebarExpanded)
-        try c.encodeIfPresent(inactiveWorkspacesCollapsed, forKey: .inactiveWorkspacesCollapsed)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(claudeLaunchMode, forKey: .claudeLaunchMode)
+        try container.encodeIfPresent(claudeNoFlicker, forKey: .claudeNoFlicker)
+        try container.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
+        try container.encodeIfPresent(sidebarExpanded, forKey: .sidebarExpanded)
+        try container.encodeIfPresent(inactiveWorkspacesCollapsed, forKey: .inactiveWorkspacesCollapsed)
     }
 }
 
@@ -271,14 +270,14 @@ struct PersistedWorkspace: Codable {
     }
 
     init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decodeIfPresent(String.self, forKey: .id)
-        title = try c.decode(String.self, forKey: .title)
-        cwd = try c.decode(String.self, forKey: .cwd)
-        columns = try c.decode([PersistedColumn].self, forKey: .columns)
-        focusedColumnIndex = try c.decode(Int.self, forKey: .focusedColumnIndex)
-        profileID = try c.decodeIfPresent(String.self, forKey: .profileID)
-        isInactive = try c.decodeIfPresent(Bool.self, forKey: .isInactive) ?? false
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        cwd = try container.decode(String.self, forKey: .cwd)
+        columns = try container.decode([PersistedColumn].self, forKey: .columns)
+        focusedColumnIndex = try container.decode(Int.self, forKey: .focusedColumnIndex)
+        profileID = try container.decodeIfPresent(String.self, forKey: .profileID)
+        isInactive = try container.decodeIfPresent(Bool.self, forKey: .isInactive) ?? false
     }
 }
 
@@ -368,16 +367,16 @@ struct PersistedColumn: Codable {
     /// `claudeBypassPermissions` / `editorOpenFile` keys with no matching
     /// stored property.
     func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(widthPreset, forKey: .widthPreset)
-        try c.encode(cwd, forKey: .cwd)
-        try c.encodeIfPresent(columnType, forKey: .columnType)
-        try c.encodeIfPresent(webViewURL, forKey: .webViewURL)
-        try c.encodeIfPresent(editorOpenFiles, forKey: .editorOpenFiles)
-        try c.encodeIfPresent(editorActiveFile, forKey: .editorActiveFile)
-        try c.encodeIfPresent(claudeLaunchMode, forKey: .claudeLaunchMode)
-        try c.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
-        try c.encodeIfPresent(agentUUID, forKey: .agentUUID)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(widthPreset, forKey: .widthPreset)
+        try container.encode(cwd, forKey: .cwd)
+        try container.encodeIfPresent(columnType, forKey: .columnType)
+        try container.encodeIfPresent(webViewURL, forKey: .webViewURL)
+        try container.encodeIfPresent(editorOpenFiles, forKey: .editorOpenFiles)
+        try container.encodeIfPresent(editorActiveFile, forKey: .editorActiveFile)
+        try container.encodeIfPresent(claudeLaunchMode, forKey: .claudeLaunchMode)
+        try container.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
+        try container.encodeIfPresent(agentUUID, forKey: .agentUUID)
     }
 }
 

@@ -62,7 +62,10 @@ extension NiruxShellView {
             )
         }
         sidebar.update(profiles: profileInfos, workspaces: infos)
+        updateSidebarAttention(infos: infos)
+    }
 
+    private func updateSidebarAttention(infos: [WorkspaceInfo]) {
         // Dock badge: workspaces currently waiting for attention.
         let attentionCount = workspaces.filter { workspace in
             workspace.hasNotification

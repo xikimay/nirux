@@ -178,7 +178,11 @@ final class NiruxShellView: NSView {
         let statusH = statusBar.isHidden ? CGFloat(0) : StatusBarView.height
         let viewportH = bounds.height - statusH; let viewportW = bounds.width - sidebarW - 1
         guard viewportH > 0, viewportW > 0 else { return }
-        NiruxDebugLog.log("relayout bounds=\(bounds.width)x\(bounds.height) window=\(window?.frame.width ?? -1)x\(window?.frame.height ?? -1) viewport=\(viewportW)x\(viewportH) pilot=\(isPilotMode)")
+        NiruxDebugLog.log(
+            "relayout bounds=\(bounds.width)x\(bounds.height) "
+                + "window=\(window?.frame.width ?? -1)x\(window?.frame.height ?? -1) "
+                + "viewport=\(viewportW)x\(viewportH) pilot=\(isPilotMode)"
+        )
 
         let glowWidth: CGFloat = 32
         let vpX = sidebarW + (isPilotMode ? 0 : 1)
@@ -319,7 +323,9 @@ final class NiruxShellView: NSView {
                     self?.scheduleTerminalStabilizationAfterFullscreen()
                 }
             }
-            NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self] _ in
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
+            ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.syncTerminalOcclusion()
                 }
@@ -343,6 +349,9 @@ final class NiruxShellView: NSView {
             }
         }
     }
+}
+
+extension NiruxShellView {
 
     // MARK: - Columns
 
@@ -606,16 +615,23 @@ final class NiruxShellView: NSView {
             PaletteAction(icon: "🔑", title: "Import Browser Cookies", subtitle: importCookieSubtitle(), shortcut: "") { [weak self] in
                 self?.importBrowserCookies()
             },
-            PaletteAction(icon: "▶", title: "New Terminal", subtitle: "Open a new terminal column", shortcut: NiruxShortcuts.newTerminalDisplay) { [weak self] in
+            PaletteAction(
+                icon: "▶", title: "New Terminal", subtitle: "Open a new terminal column",
+                shortcut: NiruxShortcuts.newTerminalDisplay
+            ) { [weak self] in
                 self?.addColumn()
             },
             PaletteAction(icon: "📝", title: "Open Editor", subtitle: "Edit files in the current workspace", shortcut: "") { [weak self] in
                 self?.openEditorColumn()
             },
-            PaletteAction(icon: "🔎", title: "Search Workspace", subtitle: "Find text across files in the current workspace", shortcut: "⇧⌘F") { [weak self] in
+            PaletteAction(
+                icon: "🔎", title: "Search Workspace", subtitle: "Find text across files in the current workspace", shortcut: "⇧⌘F"
+            ) { [weak self] in
                 self?.showWorkspaceSearch()
             },
-            PaletteAction(icon: "🔀", title: "Toggle Editor Diff", subtitle: "Show the diff for the active editor file", shortcut: "⇧⌘D") { [weak self] in
+            PaletteAction(
+                icon: "🔀", title: "Toggle Editor Diff", subtitle: "Show the diff for the active editor file", shortcut: "⇧⌘D"
+            ) { [weak self] in
                 self?.toggleEditorDiff()
             },
             PaletteAction(icon: "🤖", title: "Open Claude Code", subtitle: "Launch Claude Code in a new terminal", shortcut: "") { [weak self] in
@@ -624,7 +640,10 @@ final class NiruxShellView: NSView {
             PaletteAction(icon: "📦", title: "Open Codex", subtitle: "Launch OpenAI Codex in a new terminal", shortcut: "") { [weak self] in
                 self?.openCodex()
             },
-            PaletteAction(icon: "📂", title: "New Workspace", subtitle: "Create a new workspace", shortcut: NiruxShortcuts.newWorkspaceDisplay) { [weak self] in
+            PaletteAction(
+                icon: "📂", title: "New Workspace", subtitle: "Create a new workspace",
+                shortcut: NiruxShortcuts.newWorkspaceDisplay
+            ) { [weak self] in
                 self?.showNewWorkspacePanel()
             },
             PaletteAction(icon: "🌳", title: "New Worktree", subtitle: "Create a git worktree + workspace", shortcut: "") { [weak self] in
