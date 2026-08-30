@@ -29,11 +29,14 @@ final class AgentHookCenter {
         let isUserFocused: Bool
     }
 
+    struct AppliedEvent {
+        let event: AgentHookEvent
+        let resolution: Resolution
+    }
+
     /// Given NIRUX_AGENT_UUID, locate the owning column. Set by the shell.
     var resolver: ((String) -> Resolution?)?
-    /// A status was applied — lets the shell refresh the sidebar immediately
-    /// instead of waiting for the next heartbeat.
-    var onEventApplied: (() -> Void)?
+    var onEventsApplied: (([AppliedEvent]) -> Void)?
 
     private var dirSource: DispatchSourceFileSystemObject?
     private var fileSource: DispatchSourceFileSystemObject?
@@ -141,21 +144,19 @@ final class AgentHookCenter {
         }
 
         let decoder = JSONDecoder()
-        var applied = false
+        var appliedEvents: [AppliedEvent] = []
         for line in slice.split(separator: 0x0A) {
             guard let event = try? decoder.decode(AgentHookEvent.self, from: Data(line)) else { continue }
-            if dispatch(event) { applied = true }
+            if let appliedEvent = dispatch(event) { appliedEvents.append(appliedEvent) }
         }
         // One sidebar refresh per drain, not per event: updateSidebar does a
         // full process-table scan, and a PreToolUse storm (or launch replay
         // of a long backlog) would otherwise run dozens back-to-back on the
         // main thread.
-        if applied { onEventApplied?() }
+        if !appliedEvents.isEmpty { onEventsApplied?(appliedEvents) }
     }
 
-    /// Returns true when the event resolved to a live column (a status was
-    /// applied — the drain then refreshes the sidebar once at the end).
-    private func dispatch(_ event: AgentHookEvent) -> Bool {
+    private func dispatch(_ event: AgentHookEvent) -> AppliedEvent? {
         let resolution = event.agentUUID.flatMap { resolver?($0) }
         if let resolution, let pty = resolution.column.pty {
             let firedAttention = pty.applyAgentHook(event, isUserFocused: resolution.isUserFocused)
@@ -163,7 +164,7 @@ final class AgentHookCenter {
                 resolution.column.notifyAgentAttention()
             }
         }
-        return resolution != nil
+        return resolution.map { AppliedEvent(event: event, resolution: $0) }
     }
 
     func stop() {

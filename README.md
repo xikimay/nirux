@@ -14,7 +14,7 @@ Nirux is alpha software.
 - Built-in editor: open files, keep tabs, search the workspace, browse the file tree with Finder icons, view Git changes, and toggle file diffs. Find/replace, word wrap, font zoom, per-tab scroll restore, and disk-conflict protection included.
 - Browser context: open URLs in app, keep URL history, import cookies from Chrome, Brave, Arc, or Edge into the shared WebKit data store, download files to ~/Downloads, and inspect pages with the Web Inspector.
 - Pilot mode: switch to a compact overview of active workspaces with branch, column, diff, PR, CI, and review state where available.
-- Session restore: workspace layout, editor tabs, browser URLs, sidebar state, and detected Claude/Codex launch modes are saved under Application Support, with rotating backups for corruption recovery.
+- Session restore: workspace layout, editor tabs, browser URLs, sidebar state, detected Claude/Codex launch modes, and verified Codex thread IDs are saved under Application Support, with rotating backups for corruption recovery. Known Codex threads resume by exact ID; legacy, missing, empty, or duplicate IDs open Codex's interactive resume picker instead of guessing the last session.
 
 ## Requirements
 

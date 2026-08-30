@@ -163,7 +163,7 @@ enum CodexLaunchMode: String, Codable, CaseIterable {
         }
     }
 
-    /// argv tail to append after `codex` / `codex resume --last`.
+    /// argv tail to append after `codex` or either `codex resume` form.
     var cliArgs: [String] {
         switch self {
         case .default: return []
@@ -174,6 +174,30 @@ enum CodexLaunchMode: String, Codable, CaseIterable {
         case .readOnly: return ["--sandbox", "read-only"]
         case .fullAuto: return ["--sandbox", "danger-full-access", "--ask-for-approval", "never", "--search"]
         case .bypass: return ["--dangerously-bypass-approvals-and-sandbox"]
+        }
+    }
+
+    /// Recover a preset only when argv identifies its sandbox and approval
+    /// semantics; nil leaves restore on the backward-compatible default path.
+    static func detect(arguments: [String]) -> CodexLaunchMode? {
+        if arguments.contains("--dangerously-bypass-approvals-and-sandbox") {
+            return .bypass
+        }
+        guard let sandboxIndex = arguments.firstIndex(of: "--sandbox"),
+              arguments.indices.contains(sandboxIndex + 1) else { return nil }
+        switch arguments[sandboxIndex + 1] {
+        case "workspace-write":
+            return .workspaceWrite
+        case "read-only":
+            return .readOnly
+        case "danger-full-access":
+            guard let approvalIndex = arguments.firstIndex(of: "--ask-for-approval"),
+                  arguments.indices.contains(approvalIndex + 1),
+                  arguments[approvalIndex + 1] == "never",
+                  arguments.contains("--search") else { return .fullAccess }
+            return .fullAuto
+        default:
+            return nil
         }
     }
 }
@@ -292,6 +316,9 @@ struct PersistedColumn: Codable {
     var editorActiveFile: String?
     var claudeLaunchMode: ClaudeLaunchMode?
     var codexLaunchMode: CodexLaunchMode?
+    /// Exact Codex thread formerly attached to this column. Older state files
+    /// omit it and restore through Codex's interactive session picker.
+    var codexSessionID: String?
     /// Stable hook-routing identity (NIRUX_AGENT_UUID) for terminal columns.
     var agentUUID: String?
 
@@ -305,6 +332,7 @@ struct PersistedColumn: Codable {
         editorActiveFile: String? = nil,
         claudeLaunchMode: ClaudeLaunchMode?,
         codexLaunchMode: CodexLaunchMode?,
+        codexSessionID: String? = nil,
         agentUUID: String? = nil
     ) {
         self.widthPreset = widthPreset
@@ -315,6 +343,7 @@ struct PersistedColumn: Codable {
         self.editorActiveFile = editorActiveFile
         self.claudeLaunchMode = claudeLaunchMode
         self.codexLaunchMode = codexLaunchMode
+        self.codexSessionID = codexSessionID
         self.agentUUID = agentUUID
     }
 
@@ -324,6 +353,7 @@ struct PersistedColumn: Codable {
         case editorOpenFile // legacy single-file editor state
         case claudeLaunchMode
         case codexLaunchMode
+        case codexSessionID
         case agentUUID
         case claudeBypassPermissions // legacy
     }
@@ -360,6 +390,7 @@ struct PersistedColumn: Codable {
             claudeLaunchMode = nil
         }
         codexLaunchMode = try? container.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)
+        codexSessionID = try? container.decodeIfPresent(String.self, forKey: .codexSessionID)
         agentUUID = try? container.decodeIfPresent(String.self, forKey: .agentUUID)
     }
 
@@ -376,6 +407,7 @@ struct PersistedColumn: Codable {
         try container.encodeIfPresent(editorActiveFile, forKey: .editorActiveFile)
         try container.encodeIfPresent(claudeLaunchMode, forKey: .claudeLaunchMode)
         try container.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
+        try container.encodeIfPresent(codexSessionID, forKey: .codexSessionID)
         try container.encodeIfPresent(agentUUID, forKey: .agentUUID)
     }
 }

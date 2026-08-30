@@ -28,7 +28,8 @@ final class PersistedStateCodingTests: XCTestCase {
                         PersistedColumn(
                             widthPreset: 0.5, cwd: "/tmp/project",
                             columnType: .codex, webViewURL: nil,
-                            claudeLaunchMode: nil, codexLaunchMode: .fullAuto
+                            claudeLaunchMode: nil, codexLaunchMode: .fullAuto,
+                            codexSessionID: "01999999-1111-7222-8333-444444444444"
                         )
                     ],
                     focusedColumnIndex: 1
@@ -54,6 +55,10 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(decoded.workspaces[0].columns[1].columnType, .claudeCode)
         XCTAssertEqual(decoded.workspaces[0].columns[1].claudeLaunchMode, .skipPermissions)
         XCTAssertEqual(decoded.workspaces[0].columns[2].codexLaunchMode, .fullAuto)
+        XCTAssertEqual(
+            decoded.workspaces[0].columns[2].codexSessionID,
+            "01999999-1111-7222-8333-444444444444"
+        )
         XCTAssertEqual(decoded.settings?.claudeLaunchMode, .acceptEdits)
         XCTAssertEqual(decoded.settings?.codexLaunchMode, .readOnly)
         XCTAssertEqual(decoded.settings?.claudeNoFlicker, false)
@@ -343,5 +348,167 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(CodexLaunchMode.readOnly.cliArgs, ["--sandbox", "read-only"])
         XCTAssertEqual(CodexLaunchMode.fullAuto.cliArgs, ["--sandbox", "danger-full-access", "--ask-for-approval", "never", "--search"])
         XCTAssertEqual(CodexLaunchMode.bypass.cliArgs, ["--dangerously-bypass-approvals-and-sandbox"])
+    }
+
+    func testCodexLaunchModesRoundTripThroughArguments() {
+        for mode in CodexLaunchMode.allCases where mode != .default {
+            XCTAssertEqual(
+                CodexLaunchMode.detect(arguments: ["codex"] + mode.cliArgs),
+                mode
+            )
+        }
+        XCTAssertNil(CodexLaunchMode.detect(arguments: ["codex"]))
+        XCTAssertEqual(
+            CodexLaunchMode.detect(arguments: [
+                "codex", "--sandbox", "danger-full-access",
+                "--ask-for-approval", "never"
+            ]),
+            .fullAccess
+        )
+    }
+
+    @MainActor
+    func testCodexRestoreCommandsNeverGuessTheLastSession() {
+        let first = NiruxShellView.codexCommand(
+            resume: .session("01999999-1111-7222-8333-444444444444"),
+            mode: .default
+        )
+        let second = NiruxShellView.codexCommand(
+            resume: .session("01999999-5555-7666-8777-888888888888"),
+            mode: .readOnly
+        )
+        let legacy = NiruxShellView.codexCommand(resume: .picker, mode: .default)
+
+        XCTAssertEqual(first, "command codex resume '01999999-1111-7222-8333-444444444444'")
+        XCTAssertEqual(
+            second,
+            "command codex resume '01999999-5555-7666-8777-888888888888' --sandbox read-only"
+        )
+        XCTAssertEqual(legacy, "command codex resume")
+        XCTAssertFalse(first.contains("--last"))
+        XCTAssertFalse(second.contains("--last"))
+        XCTAssertFalse(legacy.contains("--last"))
+    }
+
+    @MainActor
+    func testCodexRestoreClaimsEachExactSessionOnlyOnce() {
+        var claimed = Set<String>()
+
+        XCTAssertEqual(
+            NiruxShellView.codexRestoreTarget(sessionID: "thread-a", claimedSessionIDs: &claimed),
+            .session("thread-a")
+        )
+        XCTAssertEqual(
+            NiruxShellView.codexRestoreTarget(sessionID: "thread-b", claimedSessionIDs: &claimed),
+            .session("thread-b")
+        )
+        XCTAssertEqual(
+            NiruxShellView.codexRestoreTarget(sessionID: "thread-a", claimedSessionIDs: &claimed),
+            .picker
+        )
+        XCTAssertEqual(
+            NiruxShellView.codexRestoreTarget(sessionID: nil, claimedSessionIDs: &claimed),
+            .picker
+        )
+        XCTAssertEqual(
+            NiruxShellView.codexRestoreTarget(sessionID: "", claimedSessionIDs: &claimed),
+            .picker
+        )
+    }
+
+    func testCodexSessionTrackerInvalidatesReplacementBeforeQuit() {
+        let first = ForegroundProcess(
+            instance: ProcessInstance(pid: 101, startedAt: 100),
+            name: "codex",
+            arguments: ["codex"]
+        )
+        let second = ForegroundProcess(
+            instance: ProcessInstance(pid: 101, startedAt: 120),
+            name: "codex",
+            arguments: ["codex"]
+        )
+        var tracker = CodexSessionTracker()
+
+        XCTAssertTrue(tracker.capture(
+            sessionID: "thread-a",
+            emitterBelongsToForegroundJob: true,
+            foregroundProcess: first
+        ))
+        XCTAssertEqual(tracker.sessionID(for: first), "thread-a")
+        XCTAssertTrue(tracker.invalidateBinding(ifProcessChangedTo: second))
+        XCTAssertNil(tracker.sessionID(for: second))
+    }
+
+    func testCodexSessionTrackerRejectsBackgroundEmitter() {
+        let foreground = ForegroundProcess(
+            instance: ProcessInstance(pid: 102, startedAt: 120),
+            name: "codex",
+            arguments: ["codex"]
+        )
+        var tracker = CodexSessionTracker()
+
+        XCTAssertFalse(tracker.capture(
+            sessionID: "stale-thread",
+            emitterBelongsToForegroundJob: false,
+            foregroundProcess: foreground
+        ))
+        XCTAssertNil(tracker.sessionID(for: foreground))
+    }
+
+    func testCodexSessionTrackerBindsARestoredThreadOnce() {
+        let restored = ForegroundProcess(
+            instance: ProcessInstance(pid: 201, startedAt: 200),
+            name: "codex",
+            arguments: ["codex", "resume", "restored-thread"]
+        )
+        let fresh = ForegroundProcess(
+            instance: ProcessInstance(pid: 202, startedAt: 220),
+            name: "codex",
+            arguments: ["codex"]
+        )
+        var tracker = CodexSessionTracker()
+        tracker.prepareResume(sessionID: "restored-thread")
+
+        XCTAssertEqual(tracker.sessionID(for: restored), "restored-thread")
+        XCTAssertNil(tracker.sessionID(for: fresh))
+    }
+
+    func testCodexSessionTrackerDoesNotBindAFailedRestoreToAFreshProcess() {
+        let fresh = ForegroundProcess(
+            instance: ProcessInstance(pid: 202, startedAt: 220),
+            name: "codex",
+            arguments: ["codex"]
+        )
+        var tracker = CodexSessionTracker()
+        tracker.prepareResume(sessionID: "failed-restore")
+
+        XCTAssertNil(tracker.sessionID(for: fresh))
+    }
+
+    func testCodexSessionTrackerIgnoresReplayWithoutARunningProcess() {
+        var tracker = CodexSessionTracker()
+
+        XCTAssertFalse(tracker.capture(
+            sessionID: "queued-thread",
+            emitterBelongsToForegroundJob: false,
+            foregroundProcess: nil
+        ))
+        XCTAssertNil(tracker.sessionID(for: nil))
+    }
+
+    func testCodexSessionTrackerRejectsLegacyEventForRunningProcess() {
+        let foreground = ForegroundProcess(
+            instance: ProcessInstance(pid: 301, startedAt: 90),
+            name: "codex",
+            arguments: ["codex"]
+        )
+        var tracker = CodexSessionTracker()
+
+        XCTAssertFalse(tracker.capture(
+            sessionID: "legacy-thread",
+            emitterBelongsToForegroundJob: false,
+            foregroundProcess: foreground
+        ))
+        XCTAssertNil(tracker.sessionID(for: foreground))
     }
 }

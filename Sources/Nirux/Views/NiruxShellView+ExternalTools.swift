@@ -3,6 +3,14 @@ import AppKit
 // MARK: - External Tools, Cookie Import, URL Input
 
 extension NiruxShellView {
+    enum CodexResumeTarget: Equatable {
+        /// No stored thread ID (state written by an older Nirux, or a Codex
+        /// session that has not completed a turn yet). Let the user choose;
+        /// silently using `--last` can attach several columns to one thread.
+        case picker
+        case session(String)
+    }
+
     static func shellQuotedArgument(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
@@ -33,20 +41,25 @@ extension NiruxShellView {
     }
 
     /// Build a `codex …` shell command for the given launch mode.
-    /// `resumeLast` produces `codex resume --last` (used when restoring a
-    /// previously-running Codex column).
+    /// Restores use either an exact thread ID or Codex's interactive picker;
+    /// they deliberately never guess with `resume --last`.
     /// `handoverPrompt` is appended as a single-quoted positional prompt
     /// (used by the worktree handover flow).
     ///
     /// `command` prefix mirrors `claudeCommand` so any user alias on `codex`
     /// can't override the launch flags Nirux selected.
     static func codexCommand(
-        resumeLast: Bool = false,
+        resume: CodexResumeTarget? = nil,
         mode: CodexLaunchMode,
         handoverPrompt: String? = nil
     ) -> String {
         var parts = ["command", "codex"]
-        if resumeLast { parts.append(contentsOf: ["resume", "--last"]) }
+        if let resume {
+            parts.append("resume")
+            if case .session(let sessionID) = resume {
+                parts.append(Self.shellQuotedArgument(sessionID))
+            }
+        }
         parts.append(contentsOf: mode.cliArgs)
         if let prompt = handoverPrompt {
             parts.append(Self.shellQuotedArgument(prompt))
@@ -134,6 +147,8 @@ extension NiruxShellView {
 
     // MARK: - Worktree Skill
 
+    // Generated shell commands must stay on one line in the installed skill.
+    // swiftlint:disable line_length
     private static let worktreeSkillContent = """
         ---
         name: nirux-worktree
@@ -198,6 +213,7 @@ extension NiruxShellView {
 
         Do NOT run git worktree commands directly — Nirux handles worktree creation natively.
         """
+    // swiftlint:enable line_length
 
     // MARK: - Show-Code Skill
 

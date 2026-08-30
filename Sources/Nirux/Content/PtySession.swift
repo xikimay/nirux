@@ -6,11 +6,61 @@ enum AgentStatus: Equatable, Hashable {
     case idle, working, needsAttention
 }
 
+struct ProcessInstance: Codable, Equatable {
+    let pid: pid_t
+    let startedAt: TimeInterval
+
+    static func running(pid: pid_t) -> ProcessInstance? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        var process = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.size
+        guard sysctl(&mib, 4, &process, &size, nil, 0) == 0,
+              size == MemoryLayout<kinfo_proc>.size,
+              process.kp_proc.p_pid == pid else { return nil }
+        let startTime = process.kp_proc.p_starttime
+        return ProcessInstance(
+            pid: pid,
+            startedAt: TimeInterval(startTime.tv_sec)
+                + TimeInterval(startTime.tv_usec) / 1_000_000
+        )
+    }
+}
+
+struct ForegroundProcess: Equatable {
+    let instance: ProcessInstance
+    let name: String
+    let arguments: [String]
+
+    func hasFlag(_ flag: String) -> Bool {
+        arguments.contains(flag)
+    }
+
+    func flagValue(_ flag: String) -> String? {
+        guard let index = arguments.firstIndex(of: flag),
+              arguments.indices.contains(index + 1) else { return nil }
+        return arguments[index + 1]
+    }
+}
+
 /// Single sysctl snapshot of the process table, shared across all terminals.
 /// Create once per refresh cycle instead of one KERN_PROC_ALL per terminal.
 final class ProcessSnapshot {
+    struct Entry {
+        let pid: pid_t
+        let parentPID: pid_t
+        let processGroupID: pid_t
+        let terminalForegroundProcessGroupID: pid_t
+        let name: String
+        let startedAt: TimeInterval
+        let arguments: [String]
+    }
+
     private var childrenMap: [pid_t: [pid_t]] = [:]
+    private var processGroupMap: [pid_t: [pid_t]] = [:]
+    private var terminalForegroundProcessGroupMap: [pid_t: pid_t] = [:]
     private var commMap: [pid_t: String] = [:]
+    private var instanceMap: [pid_t: ProcessInstance] = [:]
+    private var capturedArguments: [pid_t: [String]]?
 
     init() {
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
@@ -23,46 +73,78 @@ final class ProcessSnapshot {
         for i in 0..<actual {
             let pid = procs[i].kp_proc.p_pid
             let ppid = procs[i].kp_eproc.e_ppid
-            childrenMap[ppid, default: []].append(pid)
+            let processGroupID = procs[i].kp_eproc.e_pgid
+            let terminalForegroundProcessGroupID = procs[i].kp_eproc.e_tpgid
             let name = withUnsafePointer(to: &procs[i].kp_proc.p_comm) { ptr in
                 ptr.withMemoryRebound(to: CChar.self, capacity: Int(MAXCOMLEN)) {
                     String(cString: $0)
                 }
             }
-            commMap[pid] = name
+            let startTime = procs[i].kp_proc.p_starttime
+            add(Entry(
+                pid: pid,
+                parentPID: ppid,
+                processGroupID: processGroupID,
+                terminalForegroundProcessGroupID: terminalForegroundProcessGroupID,
+                name: name,
+                startedAt: TimeInterval(startTime.tv_sec)
+                    + TimeInterval(startTime.tv_usec) / 1_000_000,
+                arguments: []
+            ))
         }
     }
 
-    func children(of ppid: pid_t) -> [pid_t] {
-        childrenMap[ppid] ?? []
+    init(entries: [Entry]) {
+        capturedArguments = Dictionary(uniqueKeysWithValues: entries.map { ($0.pid, $0.arguments) })
+        for entry in entries {
+            add(entry)
+        }
     }
 
-    func commName(of pid: pid_t) -> String? {
-        commMap[pid]
+    private func add(_ entry: Entry) {
+        childrenMap[entry.parentPID, default: []].append(entry.pid)
+        processGroupMap[entry.processGroupID, default: []].append(entry.pid)
+        terminalForegroundProcessGroupMap[entry.pid] = entry.terminalForegroundProcessGroupID
+        commMap[entry.pid] = entry.name
+        instanceMap[entry.pid] = ProcessInstance(pid: entry.pid, startedAt: entry.startedAt)
+    }
+
+    func foregroundProcess(shellPID: pid_t) -> ForegroundProcess? {
+        let processGroupID = terminalForegroundProcessGroupMap[shellPID]
+            .flatMap { $0 > 0 ? $0 : nil }
+        let groupedPID: pid_t? = processGroupID.flatMap { groupID -> pid_t? in
+            guard let members = processGroupMap[groupID], !members.isEmpty else { return nil }
+            return members.first(where: { $0 == groupID })
+                ?? members.first(where: { $0 != shellPID })
+                ?? members.first
+        }
+        let pid = groupedPID ?? childrenMap[shellPID]?.first ?? shellPID
+        guard let instance = instanceMap[pid] else { return nil }
+        let arguments: [String]
+        if let capturedArguments {
+            arguments = capturedArguments[pid] ?? []
+        } else {
+            arguments = Self.arguments(of: pid, maxArgs: 32)
+        }
+        guard let name = Self.execName(from: arguments) ?? commMap[pid] else { return nil }
+        return ForegroundProcess(instance: instance, name: name, arguments: arguments)
+    }
+
+    func isProcess(
+        _ process: ProcessInstance,
+        inForegroundProcessGroupOf shellPID: pid_t
+    ) -> Bool {
+        guard instanceMap[process.pid] == process,
+              let processGroupID = terminalForegroundProcessGroupMap[shellPID],
+              processGroupID > 0 else { return false }
+        return processGroupMap[processGroupID]?.contains(process.pid) == true
     }
 
     private static let runtimeBinaries: Set<String> = [
         "node", "python", "python3", "ruby", "perl", "java", "deno", "bun"
     ]
 
-    /// Check if a process was launched with a specific CLI flag.
-    static func hasFlag(_ flag: String, pid: pid_t) -> Bool {
-        let argv = readArgv(of: pid, maxArgs: 32)
-        return argv.contains(flag)
-    }
-
-    /// Returns the argv token immediately following `flag` (e.g. the value of
-    /// `--permission-mode <value>`).
-    static func flagValue(_ flag: String, pid: pid_t) -> String? {
-        let argv = readArgv(of: pid, maxArgs: 32)
-        guard let idx = argv.firstIndex(of: flag), idx + 1 < argv.count else { return nil }
-        return argv[idx + 1]
-    }
-
-    /// Get the best process name from argv via KERN_PROCARGS2.
-    /// For runtimes (node, python...), resolves argv[1] to find the actual command.
-    static func execName(of pid: pid_t) -> String? {
-        let argv = readArgv(of: pid, maxArgs: 2)
+    fileprivate static func execName(from argv: [String]) -> String? {
         guard let first = argv.first else { return nil }
         let name0 = (first as NSString).lastPathComponent
         // If argv[0] is a known runtime, try argv[1] for the real command name
@@ -77,7 +159,7 @@ final class ProcessSnapshot {
     }
 
     /// Read up to maxArgs arguments from KERN_PROCARGS2
-    private static func readArgv(of pid: pid_t, maxArgs: Int) -> [String] {
+    static func arguments(of pid: pid_t, maxArgs: Int) -> [String] {
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
         var size: Int = 0
         guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return [] }
@@ -172,8 +254,8 @@ final class PtySession: @unchecked Sendable {
     /// events (prompt submitted, tool call, turn stop, permission request)
     /// are authoritative; agents without hooks fall back to output-activity
     /// detection. Called on the heartbeat with a shared process snapshot.
-    func agentStatus(snapshot: ProcessSnapshot, isUserFocused: Bool) -> AgentStatus {
-        let fgName = foregroundProcessName(snapshot: snapshot) ?? ""
+    func agentStatus(foregroundProcess: ForegroundProcess?, isUserFocused: Bool) -> AgentStatus {
+        let fgName = foregroundProcess?.name ?? ""
         return state.machine.tick(fgName: fgName, isUserFocused: isUserFocused, now: Date())
     }
 
@@ -198,20 +280,18 @@ final class PtySession: @unchecked Sendable {
     func foregroundProcessName(snapshot: ProcessSnapshot) -> String? {
         // childPid is cleared on exit — pid 0 would resolve to kernel_task.
         guard state.childPid > 0 else { return nil }
-        return state.foregroundProcessName(snapshot: snapshot)
-            ?? snapshot.commName(of: state.childPid)
+        return state.foregroundProcess(snapshot: snapshot)?.name
     }
 
-    /// Check if the foreground process was launched with a specific CLI flag.
-    func foregroundProcessHasFlag(_ flag: String, snapshot: ProcessSnapshot) -> Bool {
-        return state.foregroundProcessHasFlag(flag, snapshot: snapshot)
+    func foregroundProcess(snapshot: ProcessSnapshot) -> ForegroundProcess? {
+        state.foregroundProcess(snapshot: snapshot)
     }
 
-    /// Returns the argv token immediately following `flag`, e.g. the value of
-    /// `--permission-mode <value>`. Returns nil if the flag isn't present or
-    /// has no argument after it.
-    func foregroundProcessFlagValue(_ flag: String, snapshot: ProcessSnapshot) -> String? {
-        return state.foregroundProcessFlagValue(flag, snapshot: snapshot)
+    func isProcessInForegroundJob(
+        _ process: ProcessInstance,
+        snapshot: ProcessSnapshot
+    ) -> Bool {
+        state.isProcessInForegroundJob(process, snapshot: snapshot)
     }
 
     /// Returns the cwd of the child process (follows cd).
@@ -452,32 +532,17 @@ private final class PtyState: @unchecked Sendable {
     var onProcessExit: (() -> Void)?
     var machine = AgentStatusMachine()
 
-    func foregroundProcessName(snapshot: ProcessSnapshot) -> String? {
+    func foregroundProcess(snapshot: ProcessSnapshot) -> ForegroundProcess? {
         guard childPid > 0 else { return nil }
-        // Find the first direct child of the shell (the foreground command)
-        let children = snapshot.children(of: childPid)
-        // If no children, shell is idle — return shell name
-        guard let fgPid = children.first else {
-            return ProcessSnapshot.execName(of: childPid)
-        }
-        // Use argv[0] basename for the foreground process (most accurate)
-        if let name = ProcessSnapshot.execName(of: fgPid) { return name }
-        // Fallback to p_comm from the snapshot
-        return snapshot.commName(of: fgPid)
+        return snapshot.foregroundProcess(shellPID: childPid)
     }
 
-    func foregroundProcessHasFlag(_ flag: String, snapshot: ProcessSnapshot) -> Bool {
+    func isProcessInForegroundJob(
+        _ process: ProcessInstance,
+        snapshot: ProcessSnapshot
+    ) -> Bool {
         guard childPid > 0 else { return false }
-        let children = snapshot.children(of: childPid)
-        guard let fgPid = children.first else { return false }
-        return ProcessSnapshot.hasFlag(flag, pid: fgPid)
-    }
-
-    func foregroundProcessFlagValue(_ flag: String, snapshot: ProcessSnapshot) -> String? {
-        guard childPid > 0 else { return nil }
-        let children = snapshot.children(of: childPid)
-        guard let fgPid = children.first else { return nil }
-        return ProcessSnapshot.flagValue(flag, pid: fgPid)
+        return snapshot.isProcess(process, inForegroundProcessGroupOf: childPid)
     }
 
     func markPtyStarted() {

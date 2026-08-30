@@ -53,16 +53,24 @@ final class AgentHookEventTests: XCTestCase {
     }
 
     func testCodexTurnComplete() {
+        let emitter = ProcessInstance(pid: 321, startedAt: 4)
         let payload: [String: Any] = [
             "type": "agent-turn-complete",
             "thread-id": "thread-9",
             "cwd": "/tmp/proj",
             "last-assistant-message": "Done."
         ]
-        let event = AgentHookEvent(kind: .codex, payload: payload, env: env, now: 5)
+        let event = AgentHookEvent(
+            kind: .codex,
+            payload: payload,
+            env: env,
+            now: 5,
+            emitterProcess: emitter
+        )
         XCTAssertEqual(event?.name, .turnComplete)
         XCTAssertEqual(event?.sessionID, "thread-9")
         XCTAssertEqual(event?.detail, "Done.")
+        XCTAssertEqual(event?.emitterProcess, emitter)
     }
 
     func testCodexLongMessageTruncated() {
@@ -87,5 +95,31 @@ final class AgentHookEventTests: XCTestCase {
         let data = try JSONEncoder().encode(event)
         let decoded = try JSONDecoder().decode(AgentHookEvent.self, from: data)
         XCTAssertEqual(event, decoded)
+    }
+
+    func testCodexEmitterRoundTripsThroughJSONLine() throws {
+        let payload: [String: Any] = [
+            "type": "agent-turn-complete", "thread-id": "thread-9"
+        ]
+        let event = try XCTUnwrap(AgentHookEvent(
+            kind: .codex,
+            payload: payload,
+            env: env,
+            now: 42,
+            emitterProcess: ProcessInstance(pid: 321, startedAt: 40)
+        ))
+
+        let data = try JSONEncoder().encode(event)
+        let decoded = try JSONDecoder().decode(AgentHookEvent.self, from: data)
+
+        XCTAssertEqual(event, decoded)
+    }
+
+    func testLegacyCodexEventDecodesWithoutEmitter() throws {
+        let data = Data(#"{"kind":"codex","name":"turnComplete","timestamp":42}"#.utf8)
+
+        let decoded = try JSONDecoder().decode(AgentHookEvent.self, from: data)
+
+        XCTAssertNil(decoded.emitterProcess)
     }
 }

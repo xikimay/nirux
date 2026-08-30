@@ -1,6 +1,75 @@
 import AppKit
 import GhosttyTerminal
 
+struct CodexSessionTracker {
+    private struct Binding: Equatable {
+        let sessionID: String
+        let process: ProcessInstance
+    }
+
+    private var binding: Binding?
+    private var pendingResumeSessionID: String?
+
+    mutating func prepareResume(sessionID: String) {
+        binding = nil
+        pendingResumeSessionID = sessionID
+    }
+
+    @discardableResult
+    mutating func capture(
+        sessionID: String?,
+        emitterBelongsToForegroundJob: Bool,
+        foregroundProcess: ForegroundProcess?
+    ) -> Bool {
+        guard let sessionID, !sessionID.isEmpty,
+              let foregroundProcess, foregroundProcess.name == "codex",
+              emitterBelongsToForegroundJob else {
+            return false
+        }
+        let next = Binding(sessionID: sessionID, process: foregroundProcess.instance)
+        guard binding != next || pendingResumeSessionID != nil else { return false }
+        binding = next
+        pendingResumeSessionID = nil
+        return true
+    }
+
+    mutating func sessionID(for foregroundProcess: ForegroundProcess?) -> String? {
+        _ = invalidateBinding(ifProcessChangedTo: foregroundProcess)
+        guard let foregroundProcess, foregroundProcess.name == "codex" else {
+            binding = nil
+            pendingResumeSessionID = nil
+            return nil
+        }
+        if binding?.process == foregroundProcess.instance {
+            return binding?.sessionID
+        }
+        binding = nil
+        guard let pendingResumeSessionID else { return nil }
+        guard let resumeIndex = foregroundProcess.arguments.firstIndex(of: "resume"),
+              foregroundProcess.arguments.indices.contains(resumeIndex + 1),
+              foregroundProcess.arguments[resumeIndex + 1] == pendingResumeSessionID else {
+            if !foregroundProcess.arguments.isEmpty {
+                self.pendingResumeSessionID = nil
+            }
+            return nil
+        }
+        binding = Binding(
+            sessionID: pendingResumeSessionID,
+            process: foregroundProcess.instance
+        )
+        self.pendingResumeSessionID = nil
+        return pendingResumeSessionID
+    }
+
+    @discardableResult
+    mutating func invalidateBinding(ifProcessChangedTo foregroundProcess: ForegroundProcess?) -> Bool {
+        guard let binding, let foregroundProcess,
+              binding.process != foregroundProcess.instance else { return false }
+        self.binding = nil
+        return true
+    }
+}
+
 // WindowDragView and DropTargetView now live in Views/ColumnInternalViews.swift
 // — NSView subclasses don't belong in the model layer.
 
@@ -35,6 +104,8 @@ final class ColumnState {
     /// AgentHookCenter can route them to THIS column. Persisted across
     /// restarts; survives shell restarts (same terminal spec).
     let agentUUID: String?
+
+    private var codexSessionTracker = CodexSessionTracker()
 
     /// Terminal title from OSC 0/2 (agent context, vim filename, etc.)
     var terminalTitle: String? {
@@ -260,6 +331,37 @@ final class ColumnState {
     /// attention — forward to the workspace-level notification wiring.
     func notifyAgentAttention() {
         onAgentAttention?()
+    }
+
+    func prepareCodexResume(sessionID: String) {
+        codexSessionTracker.prepareResume(sessionID: sessionID)
+    }
+
+    func captureCodexSession(
+        sessionID: String?,
+        emitterProcess: ProcessInstance?,
+        snapshot: ProcessSnapshot
+    ) -> Bool {
+        guard let pty else { return false }
+        let foregroundProcess = pty.foregroundProcess(snapshot: snapshot)
+        let emitterBelongsToForegroundJob = emitterProcess.map {
+            pty.isProcessInForegroundJob($0, snapshot: snapshot)
+        } ?? false
+        return codexSessionTracker.capture(
+            sessionID: sessionID,
+            emitterBelongsToForegroundJob: emitterBelongsToForegroundJob,
+            foregroundProcess: foregroundProcess
+        )
+    }
+
+    func persistedCodexSessionID(foregroundProcess: ForegroundProcess?) -> String? {
+        codexSessionTracker.sessionID(for: foregroundProcess)
+    }
+
+    func invalidateCodexSessionIfProcessChanged(
+        foregroundProcess: ForegroundProcess?
+    ) -> Bool {
+        codexSessionTracker.invalidateBinding(ifProcessChangedTo: foregroundProcess)
     }
 
     // MARK: - Shell exit / restart

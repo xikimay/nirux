@@ -84,8 +84,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         hooks.resolver = { [weak shellView] uuid in
             shellView?.resolveAgentColumn(uuid: uuid)
         }
-        hooks.onEventApplied = { [weak shellView] in
-            shellView?.updateSidebar()
+        hooks.onEventsApplied = { [weak shellView] events in
+            shellView?.applyAgentHookEvents(events)
         }
         hooks.start()
 
@@ -107,6 +107,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        shell?.saveState(snapshot: ProcessSnapshot())
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
     }
 
