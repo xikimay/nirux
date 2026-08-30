@@ -107,6 +107,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        shell?.saveState(snapshot: ProcessSnapshot())
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
     }
 

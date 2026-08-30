@@ -399,7 +399,7 @@ final class PersistedStateCodingTests: XCTestCase {
         )
     }
 
-    func testCodexSessionTrackerInvalidatesAnExitedProcess() {
+    func testCodexSessionTrackerInvalidatesReplacementBeforeQuit() {
         let first = ForegroundProcess(
             instance: ProcessInstance(pid: 101, startedAt: 100),
             name: "codex",
@@ -418,6 +418,7 @@ final class PersistedStateCodingTests: XCTestCase {
             foregroundProcess: first
         ))
         XCTAssertEqual(tracker.sessionID(for: first), "thread-a")
+        XCTAssertTrue(tracker.invalidateBinding(ifProcessChangedTo: second))
         XCTAssertNil(tracker.sessionID(for: second))
     }
 

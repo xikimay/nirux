@@ -34,6 +34,7 @@ struct CodexSessionTracker {
     }
 
     mutating func sessionID(for foregroundProcess: ForegroundProcess?) -> String? {
+        _ = invalidateBinding(ifProcessChangedTo: foregroundProcess)
         guard let foregroundProcess, foregroundProcess.name == "codex" else {
             binding = nil
             pendingResumeSessionID = nil
@@ -58,6 +59,14 @@ struct CodexSessionTracker {
         )
         self.pendingResumeSessionID = nil
         return pendingResumeSessionID
+    }
+
+    @discardableResult
+    mutating func invalidateBinding(ifProcessChangedTo foregroundProcess: ForegroundProcess?) -> Bool {
+        guard let binding, let foregroundProcess,
+              binding.process != foregroundProcess.instance else { return false }
+        self.binding = nil
+        return true
     }
 }
 
@@ -342,6 +351,12 @@ final class ColumnState {
 
     func persistedCodexSessionID(foregroundProcess: ForegroundProcess?) -> String? {
         codexSessionTracker.sessionID(for: foregroundProcess)
+    }
+
+    func invalidateCodexSessionIfProcessChanged(
+        foregroundProcess: ForegroundProcess?
+    ) -> Bool {
+        codexSessionTracker.invalidateBinding(ifProcessChangedTo: foregroundProcess)
     }
 
     // MARK: - Shell exit / restart

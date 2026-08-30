@@ -236,8 +236,8 @@ final class PtySession: @unchecked Sendable {
     /// events (prompt submitted, tool call, turn stop, permission request)
     /// are authoritative; agents without hooks fall back to output-activity
     /// detection. Called on the heartbeat with a shared process snapshot.
-    func agentStatus(snapshot: ProcessSnapshot, isUserFocused: Bool) -> AgentStatus {
-        let fgName = foregroundProcessName(snapshot: snapshot) ?? ""
+    func agentStatus(foregroundProcess: ForegroundProcess?, isUserFocused: Bool) -> AgentStatus {
+        let fgName = foregroundProcess?.name ?? ""
         return state.machine.tick(fgName: fgName, isUserFocused: isUserFocused, now: Date())
     }
 

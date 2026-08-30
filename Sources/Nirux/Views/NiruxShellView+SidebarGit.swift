@@ -5,6 +5,21 @@ import AppKit
 extension NiruxShellView {
     func updateSidebar(snapshot: ProcessSnapshot? = nil) {
         let snapshot = snapshot ?? ProcessSnapshot()
+        var foregroundProcesses: [ObjectIdentifier: ForegroundProcess] = [:]
+        var invalidatedCodexBinding = false
+        for workspace in workspaces {
+            for column in workspace.columns {
+                let foregroundProcess = column.pty?.foregroundProcess(snapshot: snapshot)
+                if let foregroundProcess {
+                    foregroundProcesses[ObjectIdentifier(column)] = foregroundProcess
+                }
+                if column.invalidateCodexSessionIfProcessChanged(
+                    foregroundProcess: foregroundProcess
+                ) {
+                    invalidatedCodexBinding = true
+                }
+            }
+        }
         let visibleIndices = visibleWorkspaceIndices
         let infos = visibleIndices.map { index in
             let workspace = workspaces[index]
@@ -18,19 +33,20 @@ extension NiruxShellView {
                 // switches.
                 let isFocusedCol = colIndex == workspace.focusedIndex
                 let isUserFocused = isFocusedCol && (isActive || isPilotMode)
+                let foregroundProcess = foregroundProcesses[ObjectIdentifier(col)]
                 let editorFile = col.editorColumn?.currentPath.map {
                     ($0 as NSString).lastPathComponent
                 }
                 return ColumnInfo(
                     index: colIndex,
-                    processName: col.pty?.foregroundProcessName(snapshot: snapshot),
+                    processName: foregroundProcess?.name,
                     abbreviatedCwd: col.pty?.childCwd?.abbreviatedPath(),
                     isFocused: isFocusedCol && isActive,
                     isWebView: col.isWebView,
                     webTitle: col.webViewColumn?.pageTitle,
                     terminalTitle: col.terminalTitle,
                     agentStatus: col.pty?.agentStatus(
-                        snapshot: snapshot,
+                        foregroundProcess: foregroundProcess,
                         isUserFocused: isUserFocused
                     ) ?? .idle,
                     isEditor: col.isEditor,
@@ -63,6 +79,7 @@ extension NiruxShellView {
         }
         sidebar.update(profiles: profileInfos, workspaces: infos)
         updateSidebarAttention(infos: infos)
+        if invalidatedCodexBinding { saveState(snapshot: snapshot) }
     }
 
     private func updateSidebarAttention(infos: [WorkspaceInfo]) {
