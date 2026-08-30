@@ -27,6 +27,9 @@ struct AgentHookEvent: Codable, Equatable {
     let workspaceID: String?
     /// Claude session_id / Codex thread-id.
     let sessionID: String?
+    /// Parent of the Codex hook receiver. Its process identity proves that a
+    /// reported thread belongs to the column's current foreground job. Legacy
+    /// queue entries and Claude events omit it.
     let emitterProcess: ProcessInstance?
     let cwd: String?
     /// Tool name (PreToolUse), notification message (Notification), or final

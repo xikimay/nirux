@@ -33,57 +33,11 @@ extension NiruxShellView {
             wireWorkspace(workspace)
             // Remove the default column created by WorkspaceState.init
             if let first = workspace.columns.first { first.view.removeFromSuperview(); workspace.columns.removeAll() }
-            for persistedCol in persistedWS.columns {
-                switch persistedCol.resolvedType {
-                case .webView:
-                    workspace.addColumn(webViewURL: persistedCol.webViewURL ?? "about:blank")
-                case .claudeCode:
-                    let mode = persistedCol.claudeLaunchMode ?? .default
-                    workspace.addColumn(
-                        command: NiruxShellView.claudeCommand(continueSession: true, mode: mode),
-                        agentUUID: persistedCol.agentUUID ?? UUID().uuidString
-                    )
-                case .codex:
-                    let mode = persistedCol.codexLaunchMode ?? .default
-                    let resumeTarget = Self.codexRestoreTarget(
-                        sessionID: persistedCol.codexSessionID,
-                        claimedSessionIDs: &claimedCodexSessionIDs
-                    )
-                    workspace.addColumn(
-                        command: NiruxShellView.codexCommand(resume: resumeTarget, mode: mode),
-                        agentUUID: persistedCol.agentUUID ?? UUID().uuidString
-                    )
-                    if case .session(let sessionID) = resumeTarget {
-                        workspace.columns.last?.prepareCodexResume(sessionID: sessionID)
-                    }
-                case .editor:
-                    let openFiles = persistedCol.editorOpenFiles ?? []
-                    // Non-interactive: a binary or huge file in the persisted
-                    // tab set must not pop a modal alert during launch.
-                    workspace.addEditorColumn(initialFile: openFiles.first, workspaceCwd: persistedCol.cwd, interactive: false)
-                    if let editor = workspace.columns.last?.editorColumn {
-                        wireEditor(editor)
-                        // Re-open the rest of the tabs in their persisted
-                        // order, then restore the active one.
-                        for path in openFiles.dropFirst() {
-                            editor.open(path: path, interactive: false)
-                        }
-                        if let active = persistedCol.editorActiveFile,
-                           openFiles.contains(active),
-                           active != openFiles.first {
-                            editor.switchTo(path: active)
-                        }
-                    }
-                case .terminal:
-                    workspace.addColumn(agentUUID: persistedCol.agentUUID ?? UUID().uuidString)
-                }
-                // Clamp into the drag bounds: a hand-edited or corrupt
-                // widthPreset must not restore an invisible sliver (or a
-                // column wider than the strip allows).
-                let fraction = CGFloat(persistedCol.widthPreset)
-                workspace.columns.last?.widthFraction = min(
-                    WorkspaceState.maxWidthFraction,
-                    max(WorkspaceState.minWidthFraction, fraction)
+            for persistedColumn in persistedWS.columns {
+                restoreColumn(
+                    persistedColumn,
+                    in: workspace,
+                    claimedCodexSessionIDs: &claimedCodexSessionIDs
                 )
             }
             workspace.focusedIndex = min(persistedWS.focusedColumnIndex, max(workspace.columns.count - 1, 0))
@@ -106,6 +60,67 @@ extension NiruxShellView {
         )
         relayout(animated: false)
         updateSidebar()
+    }
+
+    private func restoreColumn(
+        _ persistedColumn: PersistedColumn,
+        in workspace: WorkspaceState,
+        claimedCodexSessionIDs: inout Set<String>
+    ) {
+        switch persistedColumn.resolvedType {
+        case .webView:
+            workspace.addColumn(webViewURL: persistedColumn.webViewURL ?? "about:blank")
+        case .claudeCode:
+            let mode = persistedColumn.claudeLaunchMode ?? .default
+            workspace.addColumn(
+                command: NiruxShellView.claudeCommand(continueSession: true, mode: mode),
+                agentUUID: persistedColumn.agentUUID ?? UUID().uuidString
+            )
+        case .codex:
+            let mode = persistedColumn.codexLaunchMode ?? .default
+            let resumeTarget = Self.codexRestoreTarget(
+                sessionID: persistedColumn.codexSessionID,
+                claimedSessionIDs: &claimedCodexSessionIDs
+            )
+            workspace.addColumn(
+                command: NiruxShellView.codexCommand(resume: resumeTarget, mode: mode),
+                agentUUID: persistedColumn.agentUUID ?? UUID().uuidString
+            )
+            if case .session(let sessionID) = resumeTarget {
+                workspace.columns.last?.prepareCodexResume(sessionID: sessionID)
+            }
+        case .editor:
+            let openFiles = persistedColumn.editorOpenFiles ?? []
+            // Non-interactive: a binary or huge file in the persisted tab set
+            // must not pop a modal alert during launch.
+            workspace.addEditorColumn(
+                initialFile: openFiles.first,
+                workspaceCwd: persistedColumn.cwd,
+                interactive: false
+            )
+            if let editor = workspace.columns.last?.editorColumn {
+                wireEditor(editor)
+                // Re-open the rest of the tabs in their persisted order, then
+                // restore the active one.
+                for path in openFiles.dropFirst() {
+                    editor.open(path: path, interactive: false)
+                }
+                if let active = persistedColumn.editorActiveFile,
+                   openFiles.contains(active),
+                   active != openFiles.first {
+                    editor.switchTo(path: active)
+                }
+            }
+        case .terminal:
+            workspace.addColumn(agentUUID: persistedColumn.agentUUID ?? UUID().uuidString)
+        }
+        // Clamp into the drag bounds: a hand-edited or corrupt widthPreset
+        // must not restore an invisible sliver or an over-wide column.
+        let fraction = CGFloat(persistedColumn.widthPreset)
+        workspace.columns.last?.widthFraction = min(
+            WorkspaceState.maxWidthFraction,
+            max(WorkspaceState.minWidthFraction, fraction)
+        )
     }
 
     /// Claim an exact thread once per restore pass. Missing, empty and
@@ -205,9 +220,6 @@ extension NiruxShellView {
         return nil
     }
 
-    /// Map a running `codex` process's argv flags back to the launch preset
-    /// it was started with. Order matters: bypass beats full-auto beats
-    /// read-only since the bypass flag implies the others.
     private func detectCodexLaunchMode(process: ForegroundProcess) -> CodexLaunchMode? {
         CodexLaunchMode.detect(arguments: process.arguments)
     }

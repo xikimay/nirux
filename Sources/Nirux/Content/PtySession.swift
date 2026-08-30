@@ -81,45 +81,32 @@ final class ProcessSnapshot {
                 }
             }
             let startTime = procs[i].kp_proc.p_starttime
-            add(
+            add(Entry(
                 pid: pid,
                 parentPID: ppid,
                 processGroupID: processGroupID,
                 terminalForegroundProcessGroupID: terminalForegroundProcessGroupID,
                 name: name,
                 startedAt: TimeInterval(startTime.tv_sec)
-                    + TimeInterval(startTime.tv_usec) / 1_000_000
-            )
+                    + TimeInterval(startTime.tv_usec) / 1_000_000,
+                arguments: []
+            ))
         }
     }
 
     init(entries: [Entry]) {
         capturedArguments = Dictionary(uniqueKeysWithValues: entries.map { ($0.pid, $0.arguments) })
         for entry in entries {
-            add(
-                pid: entry.pid,
-                parentPID: entry.parentPID,
-                processGroupID: entry.processGroupID,
-                terminalForegroundProcessGroupID: entry.terminalForegroundProcessGroupID,
-                name: entry.name,
-                startedAt: entry.startedAt
-            )
+            add(entry)
         }
     }
 
-    private func add(
-        pid: pid_t,
-        parentPID: pid_t,
-        processGroupID: pid_t,
-        terminalForegroundProcessGroupID: pid_t,
-        name: String,
-        startedAt: TimeInterval
-    ) {
-        childrenMap[parentPID, default: []].append(pid)
-        processGroupMap[processGroupID, default: []].append(pid)
-        terminalForegroundProcessGroupMap[pid] = terminalForegroundProcessGroupID
-        commMap[pid] = name
-        instanceMap[pid] = ProcessInstance(pid: pid, startedAt: startedAt)
+    private func add(_ entry: Entry) {
+        childrenMap[entry.parentPID, default: []].append(entry.pid)
+        processGroupMap[entry.processGroupID, default: []].append(entry.pid)
+        terminalForegroundProcessGroupMap[entry.pid] = entry.terminalForegroundProcessGroupID
+        commMap[entry.pid] = entry.name
+        instanceMap[entry.pid] = ProcessInstance(pid: entry.pid, startedAt: entry.startedAt)
     }
 
     func foregroundProcess(shellPID: pid_t) -> ForegroundProcess? {

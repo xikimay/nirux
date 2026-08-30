@@ -163,7 +163,7 @@ enum CodexLaunchMode: String, Codable, CaseIterable {
         }
     }
 
-    /// argv tail to append after `codex` / `codex resume --last`.
+    /// argv tail to append after `codex` or either `codex resume` form.
     var cliArgs: [String] {
         switch self {
         case .default: return []
@@ -177,6 +177,8 @@ enum CodexLaunchMode: String, Codable, CaseIterable {
         }
     }
 
+    /// Recover a preset only when argv identifies its sandbox and approval
+    /// semantics; nil leaves restore on the backward-compatible default path.
     static func detect(arguments: [String]) -> CodexLaunchMode? {
         if arguments.contains("--dangerously-bypass-approvals-and-sandbox") {
             return .bypass
