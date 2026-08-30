@@ -9,7 +9,7 @@ Nirux is alpha software.
 - Persistent workspaces: name each new task as you create it, stack workspaces vertically, and archive inactive ones in a collapsible sidebar section that does not poll GitHub.
 - Horizontal columns: mix Ghostty-backed terminals, WKWebView browser columns, and Monaco editor columns in the same workspace.
 - Agent launchers: start Claude Code or Codex from the command palette with configurable permission and sandbox presets.
-- Attention system: per-column agent status (working / needs attention, with elapsed time) driven by real Claude Code hooks and Codex turn notifications — not output guessing — plus edge glows for off-screen attention, native macOS notifications that focus the right workspace and column on click, and a Dock badge counting waiting workspaces.
+- Attention and Activity: per-column agent status (working / needs attention, with elapsed time) driven by real Claude Code hooks and Codex turn notifications — not output guessing — plus a persistent sidebar feed, edge glows for off-screen attention, native macOS notifications that focus the right workspace and column on click, and a Dock badge counting waiting workspaces.
 - Worktree flow: create or open Git worktrees as new workspaces, optionally handing context from the current agent session into the new workspace.
 - Built-in editor: open files, keep tabs, search the workspace, browse the file tree with Finder icons, view Git changes, and toggle file diffs. Find/replace, word wrap, font zoom, per-tab scroll restore, and disk-conflict protection included.
 - Browser context: open URLs in app, keep URL history, import cookies from Chrome, Brave, Arc, or Edge into the shared WebKit data store, download files to ~/Downloads, and inspect pages with the Web Inspector.
@@ -62,6 +62,14 @@ The intended setup is:
 After the skill is installed, supported agents know how to hand work back to Nirux. When you ask for a separate task, the agent writes a short handover file and opens `nirux://new-worktree`. Nirux creates the Git worktree, moves the handover into it, opens a new workspace pointed at that worktree, and launches the same agent there.
 
 That leaves your main workspace on the original checkout while each isolated branch gets its own Nirux workspace.
+
+### Mission handoffs (experimental)
+
+Mission handoffs add an explicit, durable mailbox between the agent that delegates a worktree task and the agent launched in that worktree. The feature is disabled by default. Enable `Settings` → `Experimental` → `Mission handoffs`; the setting applies to new terminals. After updating Nirux, run `Install Agent Skills` again so the installed `nirux-worktree` skill has the matching mailbox instructions.
+
+With Mission handoffs enabled, worktrees opened by the installed skill can send correlated questions and wait for answers, while the parent agent can receive and reply from its terminal. Questions and explicit completion results also appear in the Activity section of the expanded sidebar and in native notifications while Nirux is in the background. Click a question in Activity to reply or open its child workspace.
+
+Mission completion is always reported explicitly by the child agent. Nirux does not infer completion from a stopped turn and does not inject replies into a terminal. Worktrees opened without Mission metadata keep the existing handover behavior.
 
 Typical command palette actions:
 
@@ -136,6 +144,8 @@ nirux://new-worktree?branch=feat/example&repo=/path/to/repo&agent=codex&handover
 ```
 
 Supported agents are `claude` and `codex`. The optional `profile` query parameter targets the Nirux session/space that should receive the new workspace; Nirux terminals expose it as `NIRUX_PROFILE_ID` for the worktree skill. When a handover file is provided, Nirux moves it into the new worktree as `.claude-handover.md` or `.codex-handover.md`, then launches the selected agent with a prompt to read it.
+
+When Mission handoffs are enabled, the optional `parentWorkspace` and `parentAgent` query parameters identify the delegating Nirux workspace and terminal by UUID. Supplying both creates the parent/child Mission record; the bundled `nirux-worktree` skill adds them automatically. See [Mission handoffs](#mission-handoffs-experimental) for the user workflow.
 
 Open a file in the editor column at a line range (used by agents to show code instead of pasting it into the terminal):
 
@@ -215,7 +225,7 @@ Nirux writes user state under:
 ~/Library/Application Support/nirux/
 ```
 
-That directory contains workspace state, URL history, generated helper scripts, and optional tool installs. Local agent state, generated build output, release archives, and signing assets are intentionally ignored by git. Keep `.desloppify/`, `.claude/`, `.build/`, `.env*`, certificates, provisioning profiles, and app archives out of commits.
+That directory contains workspace state, Activity and Mission history, URL history, generated helper scripts, and optional tool installs. Local agent state, generated build output, release archives, and signing assets are intentionally ignored by git. Keep `.desloppify/`, `.claude/`, `.build/`, `.env*`, certificates, provisioning profiles, and app archives out of commits.
 
 ## Release Pipeline
 

@@ -67,31 +67,11 @@ extension SidebarView {
         let activeProfile = lastProfiles.first(where: { $0.isActive })
         let activityRows = Array(ActivityStore.shared.feedEntries.prefix(Self.activityMaxRows))
 
-        // Size the scrollable document so content is top-anchored and never
-        // hides behind the bottom space switcher.
-        var contentH = SidebarExpandedMetrics.verticalPadding
-            + SidebarExpandedMetrics.spaceHeaderHeight
-            + SidebarExpandedMetrics.spaceHeaderBottomGap
-            + SidebarExpandedMetrics.bottomReserve
-        if !activeInfos.isEmpty {
-            contentH += SidebarExpandedMetrics.sectionHeaderAdvance
-            contentH += SidebarExpandedMetrics.groupHeight(for: activeInfos)
-        }
-        if !inactiveInfos.isEmpty {
-            contentH += SidebarExpandedMetrics.sectionGap
-            contentH += SidebarExpandedMetrics.sectionHeaderAdvance
-            if !isInactiveSectionCollapsed {
-                contentH += SidebarExpandedMetrics.groupHeight(for: inactiveInfos)
-            }
-        }
-        if hasWorkspaces {
-            contentH += SidebarExpandedMetrics.shortcutHintGap + SidebarExpandedMetrics.shortcutHintHeight
-        }
-        if !activityRows.isEmpty {
-            contentH += SidebarExpandedMetrics.sectionGap
-                + SidebarExpandedMetrics.sectionHeaderAdvance
-                + CGFloat(activityRows.count) * Self.activityRowAdvance
-        }
+        let contentH = expandedContentHeight(
+            activeInfos: activeInfos,
+            inactiveInfos: inactiveInfos,
+            activityCount: activityRows.count
+        )
 
         let docHeight = max(bounds.height, contentH)
         contentDocumentView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: docHeight)
@@ -146,6 +126,37 @@ extension SidebarView {
             contentScrollView.reflectScrolledClipView(clip)
             lastFollowedActiveIndex = activeIndex
         }
+    }
+
+    /// Size the scrollable document so content is top-anchored and never
+    /// hides behind the bottom space switcher.
+    private func expandedContentHeight(
+        activeInfos: [WorkspaceInfo], inactiveInfos: [WorkspaceInfo], activityCount: Int
+    ) -> CGFloat {
+        var height = SidebarExpandedMetrics.verticalPadding
+            + SidebarExpandedMetrics.spaceHeaderHeight
+            + SidebarExpandedMetrics.spaceHeaderBottomGap
+            + SidebarExpandedMetrics.bottomReserve
+        if !activeInfos.isEmpty {
+            height += SidebarExpandedMetrics.sectionHeaderAdvance
+            height += SidebarExpandedMetrics.groupHeight(for: activeInfos)
+        }
+        if !inactiveInfos.isEmpty {
+            height += SidebarExpandedMetrics.sectionGap
+            height += SidebarExpandedMetrics.sectionHeaderAdvance
+            if !isInactiveSectionCollapsed {
+                height += SidebarExpandedMetrics.groupHeight(for: inactiveInfos)
+            }
+        }
+        if !activeInfos.isEmpty || !inactiveInfos.isEmpty {
+            height += SidebarExpandedMetrics.shortcutHintGap + SidebarExpandedMetrics.shortcutHintHeight
+        }
+        if activityCount > 0 {
+            height += SidebarExpandedMetrics.sectionGap
+                + SidebarExpandedMetrics.sectionHeaderAdvance
+                + CGFloat(activityCount) * Self.activityRowAdvance
+        }
+        return height
     }
 
     /// Tear down every view and state snapshot from the previous expanded
@@ -445,94 +456,143 @@ extension SidebarView {
                 width: bounds.width - padding * 2,
                 height: Self.activityRowAdvance
             )
-            let canReply = entry.category == .missionQuestion
-                && entry.missionEventID.map { MissionStore.shared.response(to: $0) == nil } == true
-            let targetGone = !canReply && isActivityTargetGone(entry)
-            let canActivate = canReply || !targetGone
-            let isRead = entry.category == .missionResponse
-                || entry.timestamp <= ActivityStore.shared.lastReadTimestamp
-            let isHandled = ActivityStore.isAttentionSuperseded(at: index, in: rows)
-            let textAlpha: CGFloat = targetGone ? 0.30 : (isRead ? 0.45 : 0.85)
-            let dotAlpha: CGFloat = targetGone ? 0.25 : (isRead ? 0.40 : 1.0)
-            let ageAlpha: CGFloat = targetGone ? 0.20 : (isRead ? 0.26 : 0.38)
-
-            let fullText = activityText(for: entry)
-            var tooltip = fullText
-            if isHandled { tooltip += " — handled" }
-            if canReply {
-                tooltip += " — click to reply"
-            }
-            if targetGone { tooltip += " — workspace closed" }
-
-            let dot = SidebarBackgroundView(frame: NSRect(
-                x: padding + 2,
-                y: rowFrame.minY + (Self.activityRowAdvance - 7) / 2,
-                width: 7,
-                height: 7
-            ))
-            dot.wantsLayer = true
-            let dotColor: NSColor = isHandled
-                ? .white.withAlphaComponent(0.35 * dotAlpha)
-                : Self.activityColor(for: entry.category).withAlphaComponent(dotAlpha)
-            dot.layer?.backgroundColor = dotColor.cgColor
-            dot.layer?.cornerRadius = 3.5
-            addSubviewDoc(dot)
-            expandedViews.append(dot)
-
-            let label = textLabel(
-                fullText,
-                font: .systemFont(ofSize: 11, weight: .medium),
-                color: NSColor.white.withAlphaComponent(textAlpha)
-            )
-            label.toolTip = tooltip
-            // Read state is otherwise conveyed by opacity alone.
-            label.setAccessibilityLabel(isRead ? tooltip : "unread, \(tooltip)")
-            label.frame = NSRect(
-                x: padding + 16,
-                y: rowFrame.minY + 2,
-                width: bounds.width - padding * 2 - 16 - 44,
-                height: 16
-            )
-            addSubviewDoc(label)
-            expandedViews.append(label)
-
-            let age = textLabel(
-                Self.relativeAge(since: entry.timestamp),
-                font: .monospacedSystemFont(ofSize: 10, weight: .regular),
-                color: NSColor.white.withAlphaComponent(ageAlpha)
-            )
-            age.alignment = .right
-            age.frame = NSRect(
-                x: bounds.width - padding - 44,
-                y: rowFrame.minY + 3,
-                width: 44,
-                height: 14
-            )
-            addSubviewDoc(age)
-            expandedViews.append(age)
-
-            if canActivate {
-                let hit = SidebarActivityHitView(frame: rowFrame.insetBy(dx: -8, dy: 1))
-                hit.wantsLayer = true
-                hit.layer?.cornerRadius = 5
-                hit.toolTip = tooltip
-                hit.setAccessibilityRole(.button)
-                hit.setAccessibilityLabel(tooltip)
-                hit.onActivate = { [weak self] in
-                    guard let self else { return }
-                    NotificationCenter.default.post(
-                        name: .niruxSidebarActivityEntryActivated,
-                        object: self,
-                        userInfo: ["entry": entry]
-                    )
-                }
-                addSubviewDoc(hit)
-                expandedViews.append(hit)
-            }
-
+            buildActivityRow(entry, index: index, feed: rows, padding: padding, frame: rowFrame)
             currentY -= Self.activityRowAdvance
         }
         return currentY
+    }
+
+    private struct ActivityRowStyle {
+        let canReply: Bool
+        let targetGone: Bool
+        let isRead: Bool
+        let isHandled: Bool
+        let textAlpha: CGFloat
+        let dotAlpha: CGFloat
+        let ageAlpha: CGFloat
+
+        var canActivate: Bool { canReply || !targetGone }
+    }
+
+    private func activityRowStyle(
+        for entry: ActivityEntry, index: Int, feed: [ActivityEntry]
+    ) -> ActivityRowStyle {
+        let canReply = entry.category == .missionQuestion
+            && entry.missionEventID.map { MissionStore.shared.response(to: $0) == nil } == true
+        let targetGone = !canReply && isActivityTargetGone(entry)
+        let isRead = entry.category == .missionResponse
+            || entry.timestamp <= ActivityStore.shared.lastReadTimestamp
+        return ActivityRowStyle(
+            canReply: canReply,
+            targetGone: targetGone,
+            isRead: isRead,
+            isHandled: ActivityStore.isAttentionSuperseded(at: index, in: feed),
+            textAlpha: targetGone ? 0.30 : (isRead ? 0.45 : 0.85),
+            dotAlpha: targetGone ? 0.25 : (isRead ? 0.40 : 1.0),
+            ageAlpha: targetGone ? 0.20 : (isRead ? 0.26 : 0.38)
+        )
+    }
+
+    private func buildActivityRow(
+        _ entry: ActivityEntry,
+        index: Int,
+        feed: [ActivityEntry],
+        padding: CGFloat,
+        frame: NSRect
+    ) {
+        let style = activityRowStyle(for: entry, index: index, feed: feed)
+        let tooltip = activityTooltip(for: entry, style: style)
+        addActivityDot(for: entry, frame: frame, padding: padding, style: style)
+        addActivityText(for: entry, tooltip: tooltip, frame: frame, padding: padding, style: style)
+        if style.canActivate {
+            addActivityHit(for: entry, tooltip: tooltip, frame: frame)
+        }
+    }
+
+    private func activityTooltip(for entry: ActivityEntry, style: ActivityRowStyle) -> String {
+        var tooltip = activityText(for: entry)
+        if style.isHandled { tooltip += " — handled" }
+        if style.canReply { tooltip += " — click to reply" }
+        if style.targetGone { tooltip += " — workspace closed" }
+        return tooltip
+    }
+
+    private func addActivityDot(
+        for entry: ActivityEntry, frame: NSRect, padding: CGFloat, style: ActivityRowStyle
+    ) {
+        let dot = SidebarBackgroundView(frame: NSRect(
+            x: padding + 2,
+            y: frame.minY + (Self.activityRowAdvance - 7) / 2,
+            width: 7,
+            height: 7
+        ))
+        dot.wantsLayer = true
+        let color: NSColor = style.isHandled
+            ? .white.withAlphaComponent(0.35 * style.dotAlpha)
+            : Self.activityColor(for: entry.category).withAlphaComponent(style.dotAlpha)
+        dot.layer?.backgroundColor = color.cgColor
+        dot.layer?.cornerRadius = 3.5
+        addSubviewDoc(dot)
+        expandedViews.append(dot)
+    }
+
+    private func addActivityText(
+        for entry: ActivityEntry,
+        tooltip: String,
+        frame: NSRect,
+        padding: CGFloat,
+        style: ActivityRowStyle
+    ) {
+        let label = textLabel(
+            activityText(for: entry),
+            font: .systemFont(ofSize: 11, weight: .medium),
+            color: NSColor.white.withAlphaComponent(style.textAlpha)
+        )
+        label.toolTip = tooltip
+        // Read state is otherwise conveyed by opacity alone.
+        label.setAccessibilityLabel(style.isRead ? tooltip : "unread, \(tooltip)")
+        label.frame = NSRect(
+            x: padding + 16,
+            y: frame.minY + 2,
+            width: bounds.width - padding * 2 - 16 - 44,
+            height: 16
+        )
+        addSubviewDoc(label)
+        expandedViews.append(label)
+
+        let age = textLabel(
+            Self.relativeAge(since: entry.timestamp),
+            font: .monospacedSystemFont(ofSize: 10, weight: .regular),
+            color: NSColor.white.withAlphaComponent(style.ageAlpha)
+        )
+        age.alignment = .right
+        age.frame = NSRect(
+            x: bounds.width - padding - 44,
+            y: frame.minY + 3,
+            width: 44,
+            height: 14
+        )
+        addSubviewDoc(age)
+        expandedViews.append(age)
+    }
+
+    private func addActivityHit(for entry: ActivityEntry, tooltip: String, frame: NSRect) {
+        let hit = SidebarActivityHitView(frame: frame.insetBy(dx: -8, dy: 1))
+        hit.wantsLayer = true
+        hit.layer?.cornerRadius = 5
+        hit.toolTip = tooltip
+        hit.setAccessibilityRole(.button)
+        hit.setAccessibilityLabel(tooltip)
+        hit.onActivate = { [weak self] in
+            guard let self else { return }
+            NotificationCenter.default.post(
+                name: .niruxSidebarActivityEntryActivated,
+                object: self,
+                userInfo: ["entry": entry]
+            )
+        }
+        addSubviewDoc(hit)
+        expandedViews.append(hit)
     }
 
     private static func activityColor(for category: ActivityEntry.Category) -> NSColor {

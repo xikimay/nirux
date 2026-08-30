@@ -214,7 +214,8 @@ extension NiruxShellView {
               [ -x "${NIRUX_CLI_PATH:-}" ]; then
              mission_query="&parentWorkspace=${NIRUX_WORKSPACE_ID}&parentAgent=${NIRUX_AGENT_UUID}"
            fi
-           open "nirux://new-worktree?branch=<url-encoded-branch>&repo=<url-encoded-repo-root>&agent=<claude-or-codex>&handover=<url-encoded-temp-path>${profile_query}${mission_query}"
+           open "nirux://new-worktree?branch=<url-encoded-branch>&repo=<url-encoded-repo-root>\
+        &agent=<claude-or-codex>&handover=<url-encoded-temp-path>${profile_query}${mission_query}"
            ```
            Nirux moves the handover file into the worktree on launch; no manual cleanup is needed.
 

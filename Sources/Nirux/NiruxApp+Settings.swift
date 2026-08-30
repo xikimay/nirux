@@ -195,15 +195,15 @@ extension NiruxApp {
         // Save settings
         let claudeMode: ClaudeLaunchMode = {
             if let raw = settingsLaunchModePopup?.selectedItem?.representedObject as? String,
-               let m = ClaudeLaunchMode(rawValue: raw) {
-                return m
+               let mode = ClaudeLaunchMode(rawValue: raw) {
+                return mode
             }
             return .default
         }()
         let codexMode: CodexLaunchMode = {
             if let raw = settingsCodexLaunchModePopup?.selectedItem?.representedObject as? String,
-               let m = CodexLaunchMode(rawValue: raw) {
-                return m
+               let mode = CodexLaunchMode(rawValue: raw) {
+                return mode
             }
             return CodexLaunchMode.niruxDefault
         }()

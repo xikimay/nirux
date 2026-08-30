@@ -177,8 +177,11 @@ final class WorkspaceState {
         )
     }
 
-    /// Pure builder so feature-gating of terminal metadata can be tested
-    /// without starting a PTY-backed WorkspaceState.
+    // Pure builder so feature-gating of terminal metadata can be tested
+    // without starting a PTY-backed WorkspaceState.
+    // The inputs mirror the independently persisted routing identities and
+    // optional Mission context; grouping them would obscure that wire contract.
+    // swiftlint:disable:next function_parameter_count
     nonisolated static func makeTerminalEnvironment(
         profileID: String,
         workspaceID: String,
@@ -356,7 +359,8 @@ final class WorkspaceState {
         }
         totalWidth += totalGaps
 
-        NiruxDebugLog.log("layoutAndScroll ws=\(id.prefix(8)) viewportW=\(viewportWidth) h=\(height) widths=\(widths.map { Int($0) }) fitAll=\(fitAll)")
+        NiruxDebugLog.log("layoutAndScroll ws=\(id.prefix(8)) viewportW=\(viewportWidth) h=\(height) "
+            + "widths=\(widths.map { Int($0) }) fitAll=\(fitAll)")
 
         // 2. Position each column with gap
         var xOffset: CGFloat = 0
