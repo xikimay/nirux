@@ -24,7 +24,7 @@ extension NiruxApp {
     }
 
     @objc func newWorkspace(_ sender: Any?) {
-        shell?.addWorkspace()
+        shell?.showNewWorkspacePanel()
     }
 
     @objc func renameWorkspace(_ sender: Any?) {
@@ -110,11 +110,21 @@ extension NiruxApp {
     @MainActor
     func setupMenus() {
         let mainMenu = NSMenu()
+        mainMenu.addItem(applicationMenuItem())
+        mainMenu.addItem(editMenuItem())
+        mainMenu.addItem(columnsMenuItem())
+        mainMenu.addItem(workspacesMenuItem())
+        NSApp.mainMenu = mainMenu
+    }
 
+    @MainActor
+    private func applicationMenuItem() -> NSMenuItem {
         // App menu (must be first item — macOS uses index 0 as the application menu)
         let appMenu = NSMenu(title: "Nirux")
         appMenu.addItem(withTitle: "About Nirux", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
-        let checkUpdate = NSMenuItem(title: "Check for Updates...", action: #selector(manualCheckForUpdates(_:)), keyEquivalent: "")
+        let checkUpdate = NSMenuItem(
+            title: "Check for Updates...", action: #selector(manualCheckForUpdates(_:)), keyEquivalent: ""
+        )
         checkUpdate.target = self
         appMenu.addItem(checkUpdate)
         appMenu.addItem(NSMenuItem.separator())
@@ -123,8 +133,11 @@ extension NiruxApp {
         appMenu.addItem(withTitle: "Quit Nirux", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let appItem = NSMenuItem()
         appItem.submenu = appMenu
-        mainMenu.addItem(appItem)
+        return appItem
+    }
 
+    @MainActor
+    private func editMenuItem() -> NSMenuItem {
         // Edit menu (needed for Cmd+C/V/X/A in text fields and WebViews)
         let editMenu = NSMenu(title: "Edit")
         editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
@@ -181,8 +194,11 @@ extension NiruxApp {
         editMenu.addItem(minimapItem)
         let editItem = NSMenuItem()
         editItem.submenu = editMenu
-        mainMenu.addItem(editItem)
+        return editItem
+    }
 
+    @MainActor
+    private func columnsMenuItem() -> NSMenuItem {
         // Columns menu
         let colMenu = NSMenu(title: "Columns")
         colMenu.addItem(withTitle: "Command Palette", action: #selector(showCommandPalette(_:)), keyEquivalent: "p")
@@ -241,8 +257,11 @@ extension NiruxApp {
 
         let colItem = NSMenuItem()
         colItem.submenu = colMenu
-        mainMenu.addItem(colItem)
+        return colItem
+    }
 
+    @MainActor
+    private func workspacesMenuItem() -> NSMenuItem {
         // Workspaces menu
         let workspacesMenu = NSMenu(title: "Workspaces")
         workspacesMenu.addItem(
@@ -277,8 +296,6 @@ extension NiruxApp {
 
         let workspacesItem = NSMenuItem()
         workspacesItem.submenu = workspacesMenu
-        mainMenu.addItem(workspacesItem)
-
-        NSApp.mainMenu = mainMenu
+        return workspacesItem
     }
 }

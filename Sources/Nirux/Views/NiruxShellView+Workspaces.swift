@@ -297,6 +297,9 @@ extension NiruxShellView {
         guard workspaces.indices.contains(workspaceIndex) else { return }
         let didChange: Bool
         switch action {
+        case .rename:
+            showRenamePanel(workspaceIndex: workspaceIndex)
+            return
         case .moveUp:
             didChange = workspaceStore.moveWorkspace(at: workspaceIndex, delta: -1)
         case .moveDown:
@@ -309,9 +312,6 @@ extension NiruxShellView {
         case .close:
             requestCloseWorkspace(at: workspaceIndex)
             return
-        case .rename:
-            showRenamePanel(workspaceIndex: workspaceIndex)
-            return
         case .newWorkspace:
             addWorkspace()
             return
@@ -321,6 +321,9 @@ extension NiruxShellView {
         }
         guard didChange else { return }
         refreshAfterWorkspaceMutation()
+        if case .markActive = action {
+            refreshPRInfo(for: [workspaces[workspaceIndex]])
+        }
     }
 
     /// Drop handler for sidebar drag-reorder: move the workspace to an
@@ -407,10 +410,6 @@ extension NiruxShellView {
     func toggleSidebar() {
         guard !isPilotMode else { return }
         let expanding = !isSidebarExpanded
-        // Captured before mutating expansion state: collapsing counts as
-        // "viewed" only if the feed was actually on screen until this
-        // instant (not scrolled past the fold, window visible).
-        let feedWasVisible = activityFeedIsVisibleToUser
         isSidebarExpanded = expanding
         saveState()
 
@@ -423,8 +422,6 @@ extension NiruxShellView {
                 }
             }
         } else {
-            cancelActivityReadMark()
-            if feedWasVisible { ActivityStore.shared.markAllRead() }
             sidebar.isExpanded = false
             relayout(animated: true)
         }
@@ -582,9 +579,6 @@ extension NiruxShellView {
 
     func togglePilotMode() {
         if isSidebarExpanded {
-            let feedWasVisible = activityFeedIsVisibleToUser
-            cancelActivityReadMark()
-            if feedWasVisible { ActivityStore.shared.markAllRead() }
             sidebar.isHidden = true
             isSidebarExpanded = false
             sidebar.isExpanded = false

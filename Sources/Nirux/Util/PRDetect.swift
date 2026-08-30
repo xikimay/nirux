@@ -1,6 +1,15 @@
 import Foundation
 
 enum PRDetect {
+    /// Inactive workspaces are archival UI. They keep their last-known PR
+    /// metadata but must never spend GitHub GraphQL quota in the background.
+    static func shouldRefresh(isInactive: Bool, branch: String?) -> Bool {
+        guard !isInactive,
+              let branch = branch?.trimmingCharacters(in: .whitespacesAndNewlines)
+        else { return false }
+        return !branch.isEmpty
+    }
+
     /// Fetch PR info for the given branch. Runs `gh` CLI.
     static func fetchAsync(branch: String, cwd: String, completion: @escaping @MainActor @Sendable (PRInfo?) -> Void) {
         DispatchQueue.global(qos: .utility).async {

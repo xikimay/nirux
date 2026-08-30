@@ -1,5 +1,37 @@
 import Foundation
 
+/// Validated destination for a link coming from Ghostty. Keeping parsing
+/// pure makes malformed OSC 8 links harmless before they reach AppKit or
+/// WebKit.
+enum TerminalLinkTarget: Equatable, Sendable {
+    case web(URL)
+    case file(URL)
+    case external(URL)
+
+    static func parse(_ rawValue: String) -> TerminalLinkTarget? {
+        let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty,
+              !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+              let components = URLComponents(string: value),
+              let scheme = components.scheme?.lowercased(),
+              let url = components.url
+        else { return nil }
+
+        switch scheme {
+        case "http", "https":
+            guard components.host?.isEmpty == false else { return nil }
+            return .web(url)
+        case "file":
+            guard url.isFileURL, !url.path.isEmpty else { return nil }
+            return .file(url)
+        case "javascript", "data":
+            return nil
+        default:
+            return .external(url)
+        }
+    }
+}
+
 /// Parses a terminal `file:` link (a cmd+clicked path or a `file://` OSC 8
 /// hyperlink as emitted by Claude Code) into an absolute path plus an
 /// optional 1-based line number. Line numbers come from a GitHub-style

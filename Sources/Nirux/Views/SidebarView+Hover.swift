@@ -52,7 +52,7 @@ extension SidebarView {
             setHoverTarget(.menuBadge(workspaceIndex))
         case .column(let workspaceIndex, let columnIndex):
             setHoverTarget(.columnRow(workspaceIndex: workspaceIndex, columnIndex: columnIndex))
-        case .link, .activity:
+        case .link:
             break
         }
     }

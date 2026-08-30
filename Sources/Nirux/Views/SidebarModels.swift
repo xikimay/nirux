@@ -16,7 +16,7 @@ struct ColumnInfo: Hashable {
     var editorIsDirty: Bool = false
     /// Elapsed time since the foreground process started — shown for
     /// working agents ("· 12m"). Nil for non-terminal columns / idle shells.
-    var agentElapsedSeconds: TimeInterval? = nil
+    var agentElapsedSeconds: TimeInterval?
 
     /// Hashable is hand-written to compare `agentElapsedSeconds` at the
     /// granularity it's *displayed* ("12m" via shortDuration), not raw
@@ -111,8 +111,6 @@ enum SidebarHitRegion {
     case workspace(Int)
     /// The "⋯" button on a workspace card — opens the workspace action menu.
     case workspaceMenu(Int)
-    /// Index into SidebarView.lastActivity (snapshot at rebuild time).
-    case activity(Int)
 }
 
 /// Full parameter set of SidebarView.update(...) — stashed while a
@@ -120,10 +118,6 @@ enum SidebarHitRegion {
 struct SidebarUpdatePayload {
     let profiles: [ProfileInfo]
     let workspaces: [WorkspaceInfo]
-    let activity: [ActivityEntry]
-    let activityReadTimestamp: TimeInterval
-    let liveWorkspaceIDs: Set<String>
-    let liveAgentUUIDs: Set<String>
 }
 
 enum WorkspaceSidebarAction {
@@ -132,8 +126,8 @@ enum WorkspaceSidebarAction {
     case closeColumn(columnIndex: Int)
 }
 
-/// Hover highlight target in the expanded sidebar. Links and activity rows
-/// have their own dedicated hover treatments; this covers the rest.
+/// Hover highlight target in the expanded sidebar. Links have their own
+/// dedicated hover treatment; this covers the rest.
 enum SidebarHoverTarget: Equatable {
     case spaceHeader
     case workspaceCard(Int)

@@ -33,10 +33,6 @@ enum SidebarExpandedMetrics {
     static let countChipWidth: CGFloat = 34
     static let countChipHeight: CGFloat = 22
 
-    static let activityMaxRows = 6
-    static let activityRowAdvance: CGFloat = 22
-    static let activitySectionGap: CGFloat = 20
-
     static func groupHeight(for infos: [WorkspaceInfo]) -> CGFloat {
         infos.reduce(CGFloat(0)) { total, info in
             total + workspaceHeight(for: info) + workspaceGap
