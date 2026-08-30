@@ -312,9 +312,6 @@ extension NiruxShellView {
         case .close:
             requestCloseWorkspace(at: workspaceIndex)
             return
-        case .rename:
-            showRenamePanel(workspaceIndex: workspaceIndex)
-            return
         case .newWorkspace:
             addWorkspace()
             return

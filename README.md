@@ -108,6 +108,8 @@ When a shell exits, its terminal shows a restart overlay — press `Enter` to re
 
 Column widths are freeform: drag the divider between columns to resize (double-click resets to half), or use `Cmd+E` to snap through presets. `Cmd+click` any URL in a terminal to open it as a browser column in the same workspace.
 
+Creating a workspace with `Cmd+N` asks for its task name. Double-click a workspace card in the sidebar, or use `Rename Workspace`, to change that name later.
+
 ### Agent status hooks
 
 Nirux installs lightweight lifecycle hooks so agent status is exact instead of guessed from terminal output:

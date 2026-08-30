@@ -1,7 +1,28 @@
 import XCTest
+import GhosttyTerminal
 @testable import Nirux
 
 final class TerminalLinkTests: XCTestCase {
+    @MainActor
+    func testGhosttyLinkRoutingIsDeferredUntilAfterItsMouseCallback() async {
+        let column = ColumnState(url: "about:blank")
+        let routed = expectation(description: "web link routed")
+        var openedURL: String?
+        column.onOpenURL = { url in
+            openedURL = url
+            routed.fulfill()
+        }
+
+        column.terminalDidRequestOpenURL(
+            "https://github.com/openai/codex",
+            kind: .text
+        )
+
+        XCTAssertNil(openedURL, "Routing must not mutate columns inside Ghostty's mouse callback")
+        await fulfillment(of: [routed], timeout: 1)
+        XCTAssertEqual(openedURL, "https://github.com/openai/codex")
+    }
+
     func testWebLinkRequiresAHost() {
         XCTAssertEqual(
             TerminalLinkTarget.parse("https://github.com/openai/codex"),
