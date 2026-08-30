@@ -4,7 +4,7 @@ import AppKit
 
 extension NiruxApp {
     static let settingsWidth: CGFloat = 440
-    static let settingsHeight: CGFloat = 310
+    static let settingsHeight: CGFloat = 420
 
     @objc func showSettings(_ sender: Any?) {
         if let existing = settingsPanel {
@@ -37,6 +37,7 @@ extension NiruxApp {
         settingsLaunchModePopup = modePopup
         settingsNoFlickerCheckbox = noFlickerCheck
         settingsCodexLaunchModePopup = buildCodexSection(in: background, width: width, height: height)
+        settingsMissionHandoffsCheckbox = buildExperimentalSection(in: background, width: width, height: height)
         buildSettingsButtons(in: background, width: width)
 
         panel.contentView = background
@@ -132,6 +133,32 @@ extension NiruxApp {
         return modePopup
     }
 
+    private func buildExperimentalSection(in background: NSView, width: CGFloat, height: CGFloat) -> NSButton {
+        let sectionLabel = NSTextField(labelWithString: "Experimental")
+        sectionLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        sectionLabel.textColor = NSColor.white.withAlphaComponent(0.6)
+        sectionLabel.frame = NSRect(x: 24, y: height - 290, width: width - 48, height: 16)
+        background.addSubview(sectionLabel)
+
+        let checkbox = NSButton(checkboxWithTitle: "Mission handoffs", target: nil, action: nil)
+        checkbox.contentTintColor = NSColor.white.withAlphaComponent(0.85)
+        checkbox.font = .systemFont(ofSize: 12)
+        checkbox.frame = NSRect(x: 22, y: height - 320, width: width - 44, height: 20)
+        checkbox.state = Persistence.load()?.settings?.missionHandoffsEnabled == true ? .on : .off
+        background.addSubview(checkbox)
+
+        let hint = NSTextField(labelWithString:
+            "Allows worktree agents to exchange questions, answers, and completion results. "
+            + "New terminals pick up changes.")
+        hint.font = .systemFont(ofSize: 11)
+        hint.textColor = NSColor.white.withAlphaComponent(0.3)
+        hint.maximumNumberOfLines = 2
+        hint.frame = NSRect(x: 24, y: height - 354, width: width - 48, height: 28)
+        background.addSubview(hint)
+
+        return checkbox
+    }
+
     private func buildSettingsButtons(in background: NSView, width: CGFloat) {
         let accent = NSColor.niruxAccent
 
@@ -168,32 +195,39 @@ extension NiruxApp {
         // Save settings
         let claudeMode: ClaudeLaunchMode = {
             if let raw = settingsLaunchModePopup?.selectedItem?.representedObject as? String,
-               let m = ClaudeLaunchMode(rawValue: raw) {
-                return m
+               let mode = ClaudeLaunchMode(rawValue: raw) {
+                return mode
             }
             return .default
         }()
         let codexMode: CodexLaunchMode = {
             if let raw = settingsCodexLaunchModePopup?.selectedItem?.representedObject as? String,
-               let m = CodexLaunchMode(rawValue: raw) {
-                return m
+               let mode = CodexLaunchMode(rawValue: raw) {
+                return mode
             }
             return CodexLaunchMode.niruxDefault
         }()
         let noFlicker = settingsNoFlickerCheckbox?.state == .on
+        let missionHandoffsEnabled = settingsMissionHandoffsCheckbox?.state == .on
         var state = Persistence.load() ?? PersistedState(workspaces: [], activeWorkspaceIndex: 0)
         var settings = state.settings ?? PersistedSettings()
         settings.claudeLaunchMode = claudeMode
         settings.claudeNoFlicker = noFlicker
         settings.codexLaunchMode = codexMode
+        settings.missionHandoffsEnabled = missionHandoffsEnabled
         state.settings = settings
         Persistence.save(state)
+        shell?.workspaces.forEach { $0.missionHandoffsEnabled = missionHandoffsEnabled }
+        if missionHandoffsEnabled {
+            MissionEventCenter.shared.deliverPendingEvents()
+        }
 
         settingsPanel?.close()
         settingsPanel = nil
         settingsLaunchModePopup = nil
         settingsNoFlickerCheckbox = nil
         settingsCodexLaunchModePopup = nil
+        settingsMissionHandoffsCheckbox = nil
     }
 
     @objc func settingsCancel(_ sender: NSButton) {
@@ -202,5 +236,6 @@ extension NiruxApp {
         settingsLaunchModePopup = nil
         settingsNoFlickerCheckbox = nil
         settingsCodexLaunchModePopup = nil
+        settingsMissionHandoffsCheckbox = nil
     }
 }

@@ -148,7 +148,6 @@ extension NiruxShellView {
     // MARK: - Worktree Skill
 
     // Generated shell commands must stay on one line in the installed skill.
-    // swiftlint:disable line_length
     private static let worktreeSkillContent = """
         ---
         name: nirux-worktree
@@ -207,13 +206,42 @@ extension NiruxShellView {
            if [ -n "${NIRUX_PROFILE_ID:-}" ]; then
              profile_query="&profile=${NIRUX_PROFILE_ID}"
            fi
-           open "nirux://new-worktree?branch=<url-encoded-branch>&repo=<url-encoded-repo-root>&agent=<claude-or-codex>&handover=<url-encoded-temp-path>${profile_query}"
+           mission_query=""
+           if [ "${NIRUX_MISSION_HANDOFFS:-0}" = "1" ] && \
+              [ -n "${NIRUX_WORKSPACE_ID:-}" ] && \
+              [ -n "${NIRUX_AGENT_UUID:-}" ] && \
+              [ -x "${NIRUX_CLI_PATH:-}" ]; then
+             mission_query="&parentWorkspace=${NIRUX_WORKSPACE_ID}&parentAgent=${NIRUX_AGENT_UUID}"
+           fi
+           open "nirux://new-worktree?branch=<url-encoded-branch>&repo=<url-encoded-repo-root>\
+        &agent=<claude-or-codex>&handover=<url-encoded-temp-path>${profile_query}${mission_query}"
            ```
            Nirux moves the handover file into the worktree on launch; no manual cleanup is needed.
 
+        When `mission_query` is present, Nirux records the parent/child link and starts the child
+        with explicit mailbox instructions. The child asks and waits without PTY injection:
+
+        ```bash
+        "$NIRUX_CLI_PATH" --mission ask --message "<concise blocker or question>" --timeout 900
+        "$NIRUX_CLI_PATH" --mission completed --message "<concise result>"
+        ```
+
+        The parent can wait for a child event, then answer a question by its `eventID`:
+
+        ```bash
+        "$NIRUX_CLI_PATH" --mission receive --timeout 900
+        "$NIRUX_CLI_PATH" --mission reply --event <question-event-id> --message "<concise answer>"
+        ```
+
+        `receive` prints one JSON object. For a `question`, reply before calling `receive` again;
+        for `completed`, the event is acknowledged automatically. A human can also click the
+        question in Nirux Activity and use the Reply action.
+
+        Do not report completion from a Stop/turn-complete hook. Use `completed` only when the
+        delegated task is genuinely complete; use `ask` only when parent input is needed.
+
         Do NOT run git worktree commands directly — Nirux handles worktree creation natively.
         """
-    // swiftlint:enable line_length
 
     // MARK: - Show-Code Skill
 

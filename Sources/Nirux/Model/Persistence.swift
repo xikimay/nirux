@@ -208,19 +208,24 @@ struct PersistedSettings: Codable {
     var codexLaunchMode: CodexLaunchMode?
     var sidebarExpanded: Bool?
     var inactiveWorkspacesCollapsed: Bool?
+    /// Experimental and intentionally opt-in. Missing in older state files
+    /// decodes to false so existing worktree behavior is unchanged.
+    var missionHandoffsEnabled: Bool = false
 
     init(
         claudeLaunchMode: ClaudeLaunchMode? = nil,
         claudeNoFlicker: Bool? = true,
         codexLaunchMode: CodexLaunchMode? = nil,
         sidebarExpanded: Bool? = nil,
-        inactiveWorkspacesCollapsed: Bool? = nil
+        inactiveWorkspacesCollapsed: Bool? = nil,
+        missionHandoffsEnabled: Bool = false
     ) {
         self.claudeLaunchMode = claudeLaunchMode
         self.claudeNoFlicker = claudeNoFlicker
         self.codexLaunchMode = codexLaunchMode
         self.sidebarExpanded = sidebarExpanded
         self.inactiveWorkspacesCollapsed = inactiveWorkspacesCollapsed
+        self.missionHandoffsEnabled = missionHandoffsEnabled
     }
 
     enum CodingKeys: String, CodingKey {
@@ -229,6 +234,7 @@ struct PersistedSettings: Codable {
         case codexLaunchMode
         case sidebarExpanded
         case inactiveWorkspacesCollapsed
+        case missionHandoffsEnabled
         case claudeBypassPermissions // legacy
     }
 
@@ -247,6 +253,7 @@ struct PersistedSettings: Codable {
         codexLaunchMode = try container.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)
         sidebarExpanded = try container.decodeIfPresent(Bool.self, forKey: .sidebarExpanded)
         inactiveWorkspacesCollapsed = try container.decodeIfPresent(Bool.self, forKey: .inactiveWorkspacesCollapsed)
+        missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? false
     }
 
     /// Custom encoder is required because `CodingKeys` carries the legacy
@@ -259,6 +266,7 @@ struct PersistedSettings: Codable {
         try container.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
         try container.encodeIfPresent(sidebarExpanded, forKey: .sidebarExpanded)
         try container.encodeIfPresent(inactiveWorkspacesCollapsed, forKey: .inactiveWorkspacesCollapsed)
+        try container.encode(missionHandoffsEnabled, forKey: .missionHandoffsEnabled)
     }
 }
 
@@ -270,6 +278,9 @@ struct PersistedWorkspace: Codable {
     var focusedColumnIndex: Int
     var profileID: String?
     var isInactive: Bool
+    /// Mission owning this child workspace, when the experimental handoff
+    /// flow created it. Optional for backward compatibility.
+    var missionID: String?
 
     init(
         id: String? = nil,
@@ -278,7 +289,8 @@ struct PersistedWorkspace: Codable {
         columns: [PersistedColumn],
         focusedColumnIndex: Int,
         profileID: String? = nil,
-        isInactive: Bool = false
+        isInactive: Bool = false,
+        missionID: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -287,10 +299,11 @@ struct PersistedWorkspace: Codable {
         self.focusedColumnIndex = focusedColumnIndex
         self.profileID = profileID
         self.isInactive = isInactive
+        self.missionID = missionID
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive
+        case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID
     }
 
     init(from decoder: Decoder) throws {
@@ -302,6 +315,7 @@ struct PersistedWorkspace: Codable {
         focusedColumnIndex = try container.decode(Int.self, forKey: .focusedColumnIndex)
         profileID = try container.decodeIfPresent(String.self, forKey: .profileID)
         isInactive = try container.decodeIfPresent(Bool.self, forKey: .isInactive) ?? false
+        missionID = try container.decodeIfPresent(String.self, forKey: .missionID)
     }
 }
 

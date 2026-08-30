@@ -27,7 +27,9 @@ extension NiruxShellView {
                 id: persistedWS.id ?? UUID().uuidString,
                 title: persistedWS.title,
                 cwd: persistedWS.cwd,
-                profileID: profileID
+                profileID: profileID,
+                missionID: persistedWS.missionID,
+                missionHandoffsEnabled: state.settings?.missionHandoffsEnabled == true
             )
             workspace.isInactive = persistedWS.isInactive
             wireWorkspace(workspace)
@@ -50,16 +52,17 @@ extension NiruxShellView {
         } else {
             activeWSIndex = min(state.activeWorkspaceIndex, max(workspaces.count - 1, 0))
         }
-        // Restore sidebar expanded/collapsed state.
-        if let expanded = state.settings?.sidebarExpanded {
+        restoreSidebarState(state.settings)
+        relayout(animated: false)
+        updateSidebar()
+    }
+
+    private func restoreSidebarState(_ settings: PersistedSettings?) {
+        if let expanded = settings?.sidebarExpanded {
             isSidebarExpanded = expanded
             sidebar.isExpanded = expanded
         }
-        sidebar.setInactiveSectionCollapsed(
-            state.settings?.inactiveWorkspacesCollapsed ?? true
-        )
-        relayout(animated: false)
-        updateSidebar()
+        sidebar.setInactiveSectionCollapsed(settings?.inactiveWorkspacesCollapsed ?? true)
     }
 
     private func restoreColumn(
@@ -194,7 +197,8 @@ extension NiruxShellView {
                     },
                     focusedColumnIndex: workspace.focusedIndex,
                     profileID: workspace.profileID,
-                    isInactive: workspace.isInactive)
+                    isInactive: workspace.isInactive,
+                    missionID: workspace.missionID)
             },
             activeWorkspaceIndex: activeWSIndex,
             settings: settings,

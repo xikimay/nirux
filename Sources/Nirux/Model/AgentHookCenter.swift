@@ -37,6 +37,7 @@ final class AgentHookCenter {
     /// Given NIRUX_AGENT_UUID, locate the owning column. Set by the shell.
     var resolver: ((String) -> Resolution?)?
     var onEventsApplied: (([AppliedEvent]) -> Void)?
+    var onEventReceived: ((AgentHookEvent, Resolution?) -> Void)?
 
     private var dirSource: DispatchSourceFileSystemObject?
     private var fileSource: DispatchSourceFileSystemObject?
@@ -156,8 +157,10 @@ final class AgentHookCenter {
         if !appliedEvents.isEmpty { onEventsApplied?(appliedEvents) }
     }
 
-    private func dispatch(_ event: AgentHookEvent) -> AppliedEvent? {
+    @discardableResult
+    func dispatch(_ event: AgentHookEvent) -> AppliedEvent? {
         let resolution = event.agentUUID.flatMap { resolver?($0) }
+        onEventReceived?(event, resolution)
         if let resolution, let pty = resolution.column.pty {
             let firedAttention = pty.applyAgentHook(event, isUserFocused: resolution.isUserFocused)
             if firedAttention {

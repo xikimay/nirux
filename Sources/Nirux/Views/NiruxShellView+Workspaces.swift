@@ -16,7 +16,10 @@ extension NiruxShellView {
         title: String? = nil,
         cwd: String? = nil,
         agent: NiruxApp.WorkspaceAgent? = nil,
-        profileID requestedProfileID: String? = nil
+        profileID requestedProfileID: String? = nil,
+        workspaceID: String = UUID().uuidString,
+        initialAgentUUID: String = UUID().uuidString,
+        missionID: String? = nil
     ) {
         let snapshot: NSImageView? = {
             guard let rep = viewport.bitmapImageRepForCachingDisplay(in: viewport.bounds) else { return nil }
@@ -33,7 +36,15 @@ extension NiruxShellView {
         let wsTitle = title ?? "ws \(workspaces.count + 1)"
         let wsCwd = cwd ?? NSHomeDirectory()
         let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
-        let workspace = WorkspaceState(title: wsTitle, cwd: wsCwd, profileID: targetProfileID)
+        let workspace = WorkspaceState(
+            id: workspaceID,
+            title: wsTitle,
+            cwd: wsCwd,
+            profileID: targetProfileID,
+            missionID: missionID,
+            missionHandoffsEnabled: Self.currentMissionHandoffsEnabled(),
+            initialAgentUUID: initialAgentUUID
+        )
         wireWorkspace(workspace)
         workspaceStore.appendWorkspace(workspace)
         verticalStrip.addSubview(workspace.containerView)
@@ -66,63 +77,38 @@ extension NiruxShellView {
         let handoverPath = workspace.cwd + "/\(handoverName)"
         let hasHandover = FileManager.default.fileExists(atPath: handoverPath)
 
+        let handoverPrompt: String? = {
+            var instructions: [String] = []
+            if hasHandover {
+                instructions.append("Read \(handoverName) for full context, then proceed with the next steps described there.")
+            }
+            if workspace.missionID != nil {
+                instructions.append(
+                    "This is a Nirux mission workspace. Ask the parent and wait safely with "
+                    + "\"$NIRUX_CLI_PATH\" --mission ask --message \"...\" --timeout 900; "
+                    + "the command output is the parent's answer. Report the final result with "
+                    + "\"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
+                )
+            }
+            return instructions.isEmpty ? nil : instructions.joined(separator: " ")
+        }()
+
         let cmd: String
         switch agent {
         case .claude:
-            let prompt = hasHandover
-                ? "Read \(handoverName) for full context, then proceed with the next steps described there."
-                : nil
             cmd = NiruxShellView.claudeCommand(
                 mode: NiruxShellView.currentClaudeLaunchMode(),
-                handoverPrompt: prompt
+                handoverPrompt: handoverPrompt
             )
         case .codex:
-            let prompt = hasHandover
-                ? "Read \(handoverName) for full context, then proceed with the next steps described there."
-                : nil
             cmd = NiruxShellView.codexCommand(
                 mode: NiruxShellView.currentCodexLaunchMode(),
-                handoverPrompt: prompt
+                handoverPrompt: handoverPrompt
             )
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             col.pty?.sendRaw("\(cmd)\n")
-        }
-    }
-
-    /// Shared entry point: create a git worktree, move an optional handover file into it, and open a workspace.
-    /// Used by both the `nirux://new-worktree` URL scheme and the WorktreePanel.
-    func createWorktreeWorkspace(
-        branch: String,
-        repoRoot: String,
-        agent: NiruxApp.WorkspaceAgent? = .claude,
-        handoverPath: String? = nil,
-        profileID requestedProfileID: String? = nil
-    ) {
-        let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
-        DispatchQueue.global(qos: .userInitiated).async {
-            let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot)
-            // Move handover file into the worktree if provided
-            if let path, let handoverPath, FileManager.default.fileExists(atPath: handoverPath) {
-                let dest = path + "/\(Self.handoverFilename(for: agent ?? .claude))"
-                try? FileManager.default.removeItem(atPath: dest)
-                try? FileManager.default.moveItem(atPath: handoverPath, toPath: dest)
-            }
-            DispatchQueue.main.async { [weak self] in
-                if let path {
-                    self?.addWorkspace(title: branch, cwd: path, agent: agent, profileID: targetProfileID)
-                } else {
-                    NSLog("[Worktree] Failed to create worktree for \(branch): \(error ?? "unknown")")
-                }
-            }
-        }
-    }
-
-    nonisolated static func handoverFilename(for agent: NiruxApp.WorkspaceAgent) -> String {
-        switch agent {
-        case .claude: return ".claude-handover.md"
-        case .codex: return ".codex-handover.md"
         }
     }
 

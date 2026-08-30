@@ -48,6 +48,31 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         post(content)
     }
 
+    /// Explicit child-to-parent Mission signal. The activity feed is the
+    /// durable surface; this banner covers the user being in another app.
+    func postMissionEvent(
+        workspaceID: String,
+        workspaceTitle: String,
+        columnIndex: Int?,
+        kind: MissionEvent.Kind,
+        message: String
+    ) {
+        guard !NSApp.isActive else { return }
+        let content = UNMutableNotificationContent()
+        switch kind {
+        case .question: content.title = "Mission needs input"
+        case .completed: content.title = "Mission completed"
+        case .response, .acknowledged: return
+        }
+        content.subtitle = workspaceTitle
+        content.body = message
+        content.sound = .default
+        var info: [String: Any] = ["workspaceID": workspaceID]
+        if let columnIndex { info["columnIndex"] = columnIndex }
+        content.userInfo = info
+        post(content)
+    }
+
     /// Post a "download finished" notification; clicking reveals the file
     /// in Finder. Suppressed while the app is active.
     func postDownloadFinished(filename: String, fileURL: URL) {
