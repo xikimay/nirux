@@ -116,9 +116,7 @@ final class AgentHookEventTests: XCTestCase {
     }
 
     func testLegacyCodexEventDecodesWithoutEmitter() throws {
-        let data = try XCTUnwrap(
-            #"{"kind":"codex","name":"turnComplete","timestamp":42}"#.data(using: .utf8)
-        )
+        let data = Data(#"{"kind":"codex","name":"turnComplete","timestamp":42}"#.utf8)
 
         let decoded = try JSONDecoder().decode(AgentHookEvent.self, from: data)
 
