@@ -138,6 +138,7 @@ extension NiruxShellView {
                         var editorActiveFile: String?
                         var claudeMode: ClaudeLaunchMode?
                         var codexMode: CodexLaunchMode?
+                        let foregroundProcess = col.pty?.foregroundProcess(snapshot: snapshot)
                         if col.isEditor {
                             kind = .editor
                             webURL = nil
@@ -148,14 +149,14 @@ extension NiruxShellView {
                         } else if col.isWebView {
                             kind = .webView
                             webURL = col.webViewColumn?.currentURL
-                        } else if let name = col.pty?.foregroundProcessName(snapshot: snapshot) {
-                            switch name {
+                        } else if let foregroundProcess {
+                            switch foregroundProcess.name {
                             case "claude":
                                 kind = .claudeCode; webURL = nil
-                                claudeMode = detectClaudeLaunchMode(col: col, snapshot: snapshot)
+                                claudeMode = detectClaudeLaunchMode(process: foregroundProcess)
                             case "codex":
                                 kind = .codex; webURL = nil
-                                codexMode = detectCodexLaunchMode(col: col, snapshot: snapshot)
+                                codexMode = detectCodexLaunchMode(process: foregroundProcess)
                             default: kind = .terminal; webURL = nil
                             }
                         } else {
@@ -171,7 +172,7 @@ extension NiruxShellView {
                             claudeLaunchMode: claudeMode,
                             codexLaunchMode: codexMode,
                             codexSessionID: kind == .codex
-                                ? col.persistedCodexSessionID(snapshot: snapshot)
+                                ? col.persistedCodexSessionID(foregroundProcess: foregroundProcess)
                                 : nil,
                             agentUUID: col.agentUUID
                         )
@@ -193,12 +194,11 @@ extension NiruxShellView {
     /// `--dangerously-skip-permissions` and `--permission-mode bypassPermissions`
     /// are *not* equivalent (the former bypasses protected dirs too), so they
     /// map to distinct enum cases.
-    private func detectClaudeLaunchMode(col: ColumnState, snapshot: ProcessSnapshot) -> ClaudeLaunchMode? {
-        guard let pty = col.pty else { return nil }
-        if pty.foregroundProcessHasFlag("--dangerously-skip-permissions", snapshot: snapshot) {
+    private func detectClaudeLaunchMode(process: ForegroundProcess) -> ClaudeLaunchMode? {
+        if process.hasFlag("--dangerously-skip-permissions") {
             return .skipPermissions
         }
-        if let value = pty.foregroundProcessFlagValue("--permission-mode", snapshot: snapshot),
+        if let value = process.flagValue("--permission-mode"),
            let mode = ClaudeLaunchMode(rawValue: value) {
             return mode
         }
@@ -208,12 +208,11 @@ extension NiruxShellView {
     /// Map a running `codex` process's argv flags back to the launch preset
     /// it was started with. Order matters: bypass beats full-auto beats
     /// read-only since the bypass flag implies the others.
-    private func detectCodexLaunchMode(col: ColumnState, snapshot: ProcessSnapshot) -> CodexLaunchMode? {
-        guard let pty = col.pty else { return nil }
-        if pty.foregroundProcessHasFlag("--dangerously-bypass-approvals-and-sandbox", snapshot: snapshot) {
+    private func detectCodexLaunchMode(process: ForegroundProcess) -> CodexLaunchMode? {
+        if process.hasFlag("--dangerously-bypass-approvals-and-sandbox") {
             return .bypass
         }
-        let sandbox = pty.foregroundProcessFlagValue("--sandbox", snapshot: snapshot)
+        let sandbox = process.flagValue("--sandbox")
         if sandbox == "workspace-write" {
             return .fullAuto
         }

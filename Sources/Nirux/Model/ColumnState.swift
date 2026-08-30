@@ -340,8 +340,8 @@ final class ColumnState {
         )
     }
 
-    func persistedCodexSessionID(snapshot: ProcessSnapshot) -> String? {
-        codexSessionTracker.sessionID(for: pty?.foregroundProcess(snapshot: snapshot))
+    func persistedCodexSessionID(foregroundProcess: ForegroundProcess?) -> String? {
+        codexSessionTracker.sessionID(for: foregroundProcess)
     }
 
     // MARK: - Shell exit / restart
