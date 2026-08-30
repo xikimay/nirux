@@ -431,7 +431,7 @@ final class PersistedStateCodingTests: XCTestCase {
 
         XCTAssertTrue(tracker.capture(
             sessionID: "thread-a",
-            emitterProcess: first.instance,
+            emitterBelongsToForegroundJob: true,
             foregroundProcess: first
         ))
         XCTAssertEqual(tracker.sessionID(for: first), "thread-a")
@@ -440,7 +440,6 @@ final class PersistedStateCodingTests: XCTestCase {
     }
 
     func testCodexSessionTrackerRejectsBackgroundEmitter() {
-        let background = ProcessInstance(pid: 101, startedAt: 100)
         let foreground = ForegroundProcess(
             instance: ProcessInstance(pid: 102, startedAt: 120),
             name: "codex",
@@ -450,7 +449,7 @@ final class PersistedStateCodingTests: XCTestCase {
 
         XCTAssertFalse(tracker.capture(
             sessionID: "stale-thread",
-            emitterProcess: background,
+            emitterBelongsToForegroundJob: false,
             foregroundProcess: foreground
         ))
         XCTAssertNil(tracker.sessionID(for: foreground))
@@ -491,7 +490,7 @@ final class PersistedStateCodingTests: XCTestCase {
 
         XCTAssertFalse(tracker.capture(
             sessionID: "queued-thread",
-            emitterProcess: ProcessInstance(pid: 301, startedAt: 90),
+            emitterBelongsToForegroundJob: false,
             foregroundProcess: nil
         ))
         XCTAssertNil(tracker.sessionID(for: nil))
@@ -507,7 +506,7 @@ final class PersistedStateCodingTests: XCTestCase {
 
         XCTAssertFalse(tracker.capture(
             sessionID: "legacy-thread",
-            emitterProcess: nil,
+            emitterBelongsToForegroundJob: false,
             foregroundProcess: foreground
         ))
         XCTAssertNil(tracker.sessionID(for: foreground))

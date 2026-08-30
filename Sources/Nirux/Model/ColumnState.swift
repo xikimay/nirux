@@ -18,13 +18,12 @@ struct CodexSessionTracker {
     @discardableResult
     mutating func capture(
         sessionID: String?,
-        emitterProcess: ProcessInstance?,
+        emitterBelongsToForegroundJob: Bool,
         foregroundProcess: ForegroundProcess?
     ) -> Bool {
         guard let sessionID, !sessionID.isEmpty,
               let foregroundProcess, foregroundProcess.name == "codex",
-              let emitterProcess,
-              foregroundProcess.instance == emitterProcess else {
+              emitterBelongsToForegroundJob else {
             return false
         }
         let next = Binding(sessionID: sessionID, process: foregroundProcess.instance)
@@ -343,10 +342,15 @@ final class ColumnState {
         emitterProcess: ProcessInstance?,
         snapshot: ProcessSnapshot
     ) -> Bool {
-        codexSessionTracker.capture(
+        guard let pty else { return false }
+        let foregroundProcess = pty.foregroundProcess(snapshot: snapshot)
+        let emitterBelongsToForegroundJob = emitterProcess.map {
+            pty.isProcessInForegroundJob($0, snapshot: snapshot)
+        } ?? false
+        return codexSessionTracker.capture(
             sessionID: sessionID,
-            emitterProcess: emitterProcess,
-            foregroundProcess: pty?.foregroundProcess(snapshot: snapshot)
+            emitterBelongsToForegroundJob: emitterBelongsToForegroundJob,
+            foregroundProcess: foregroundProcess
         )
     }
 

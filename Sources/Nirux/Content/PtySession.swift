@@ -143,6 +143,16 @@ final class ProcessSnapshot {
         return ForegroundProcess(instance: instance, name: name, arguments: arguments)
     }
 
+    func isProcess(
+        _ process: ProcessInstance,
+        inForegroundProcessGroupOf shellPID: pid_t
+    ) -> Bool {
+        guard instanceMap[process.pid] == process,
+              let processGroupID = terminalForegroundProcessGroupMap[shellPID],
+              processGroupID > 0 else { return false }
+        return processGroupMap[processGroupID]?.contains(process.pid) == true
+    }
+
     private static let runtimeBinaries: Set<String> = [
         "node", "python", "python3", "ruby", "perl", "java", "deno", "bun"
     ]
@@ -288,6 +298,13 @@ final class PtySession: @unchecked Sendable {
 
     func foregroundProcess(snapshot: ProcessSnapshot) -> ForegroundProcess? {
         state.foregroundProcess(snapshot: snapshot)
+    }
+
+    func isProcessInForegroundJob(
+        _ process: ProcessInstance,
+        snapshot: ProcessSnapshot
+    ) -> Bool {
+        state.isProcessInForegroundJob(process, snapshot: snapshot)
     }
 
     /// Returns the cwd of the child process (follows cd).
@@ -531,6 +548,14 @@ private final class PtyState: @unchecked Sendable {
     func foregroundProcess(snapshot: ProcessSnapshot) -> ForegroundProcess? {
         guard childPid > 0 else { return nil }
         return snapshot.foregroundProcess(shellPID: childPid)
+    }
+
+    func isProcessInForegroundJob(
+        _ process: ProcessInstance,
+        snapshot: ProcessSnapshot
+    ) -> Bool {
+        guard childPid > 0 else { return false }
+        return snapshot.isProcess(process, inForegroundProcessGroupOf: childPid)
     }
 
     func markPtyStarted() {
