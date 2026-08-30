@@ -42,6 +42,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
     }
 
     func testInactiveSectionRendersCollapsedAndExpandedWithoutActivityFeed() throws {
+        _ = NSApplication.shared
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 660))
         let window = NSWindow(
             contentRect: sidebar.bounds,
@@ -124,6 +125,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
     }
 
     func testWorkspaceNamingPanelAcceptsNewAndReplacementNames() throws {
+        _ = NSApplication.shared
         let hostWindow = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
             styleMask: [.titled],
