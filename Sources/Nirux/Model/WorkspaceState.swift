@@ -21,6 +21,11 @@ final class WorkspaceState {
     var titleIsManual: Bool = false
     var profileID: String = WorkspaceProfile.defaultID
     var isInactive: Bool = false
+    let missionID: String?
+    /// Controls mission variables for terminals created after a Settings
+    /// change. Already-running shells retain the environment they launched
+    /// with and pick up changes after a new terminal or app restart.
+    var missionHandoffsEnabled: Bool
     var gitBranch: String?
     var hasNotification: Bool = false
     var prInfo: PRInfo?
@@ -51,13 +56,18 @@ final class WorkspaceState {
         id: String = UUID().uuidString,
         title: String? = nil,
         cwd: String,
-        profileID: String = WorkspaceProfile.defaultID
+        profileID: String = WorkspaceProfile.defaultID,
+        missionID: String? = nil,
+        missionHandoffsEnabled: Bool = false,
+        initialAgentUUID: String = UUID().uuidString
     ) {
         self.id = id
         self.cwd = cwd
         self.title = title ?? "workspace"
         self.titleIsManual = (title != nil)
         self.profileID = profileID
+        self.missionID = missionID
+        self.missionHandoffsEnabled = missionHandoffsEnabled
 
         containerView = NSView()
         containerView.wantsLayer = true
@@ -67,7 +77,7 @@ final class WorkspaceState {
         stripView.wantsLayer = true
         containerView.addSubview(stripView)
 
-        addColumn()
+        addColumn(agentUUID: initialAgentUUID)
     }
 
     // MARK: - CWD / Git / Title Tracking
@@ -157,12 +167,42 @@ final class WorkspaceState {
     // MARK: - Column Management
 
     private func terminalEnvironment(agentUUID: String) -> [String: String] {
-        [
+        Self.makeTerminalEnvironment(
+            profileID: profileID,
+            workspaceID: id,
+            agentUUID: agentUUID,
+            missionID: missionID,
+            missionHandoffsEnabled: missionHandoffsEnabled,
+            executablePath: Bundle.main.executableURL?.path
+        )
+    }
+
+    /// Pure builder so feature-gating of terminal metadata can be tested
+    /// without starting a PTY-backed WorkspaceState.
+    nonisolated static func makeTerminalEnvironment(
+        profileID: String,
+        workspaceID: String,
+        agentUUID: String,
+        missionID: String?,
+        missionHandoffsEnabled: Bool,
+        executablePath: String?
+    ) -> [String: String] {
+        var environment = [
             "NIRUX_PROFILE_ID": profileID,
-            "NIRUX_WORKSPACE_ID": id,
+            "NIRUX_WORKSPACE_ID": workspaceID,
             // Hook events carry this back — see AgentHookCenter.
             "NIRUX_AGENT_UUID": agentUUID
         ]
+        if missionHandoffsEnabled {
+            environment["NIRUX_MISSION_HANDOFFS"] = "1"
+            if let executablePath {
+                environment["NIRUX_CLI_PATH"] = executablePath
+            }
+            if let missionID {
+                environment["NIRUX_MISSION_ID"] = missionID
+            }
+        }
+        return environment
     }
 
     private func insertColumn(_ col: ColumnState) {

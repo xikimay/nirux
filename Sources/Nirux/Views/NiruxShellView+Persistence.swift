@@ -27,7 +27,9 @@ extension NiruxShellView {
                 id: persistedWS.id ?? UUID().uuidString,
                 title: persistedWS.title,
                 cwd: persistedWS.cwd,
-                profileID: profileID
+                profileID: profileID,
+                missionID: persistedWS.missionID,
+                missionHandoffsEnabled: state.settings?.missionHandoffsEnabled == true
             )
             workspace.isInactive = persistedWS.isInactive
             wireWorkspace(workspace)
@@ -194,7 +196,8 @@ extension NiruxShellView {
                     },
                     focusedColumnIndex: workspace.focusedIndex,
                     profileID: workspace.profileID,
-                    isInactive: workspace.isInactive)
+                    isInactive: workspace.isInactive,
+                    missionID: workspace.missionID)
             },
             activeWorkspaceIndex: activeWSIndex,
             settings: settings,

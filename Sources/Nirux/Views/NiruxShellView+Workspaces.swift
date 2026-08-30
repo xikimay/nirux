@@ -16,7 +16,10 @@ extension NiruxShellView {
         title: String? = nil,
         cwd: String? = nil,
         agent: NiruxApp.WorkspaceAgent? = nil,
-        profileID requestedProfileID: String? = nil
+        profileID requestedProfileID: String? = nil,
+        workspaceID: String = UUID().uuidString,
+        initialAgentUUID: String = UUID().uuidString,
+        missionID: String? = nil
     ) {
         let snapshot: NSImageView? = {
             guard let rep = viewport.bitmapImageRepForCachingDisplay(in: viewport.bounds) else { return nil }
@@ -33,7 +36,15 @@ extension NiruxShellView {
         let wsTitle = title ?? "ws \(workspaces.count + 1)"
         let wsCwd = cwd ?? NSHomeDirectory()
         let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
-        let workspace = WorkspaceState(title: wsTitle, cwd: wsCwd, profileID: targetProfileID)
+        let workspace = WorkspaceState(
+            id: workspaceID,
+            title: wsTitle,
+            cwd: wsCwd,
+            profileID: targetProfileID,
+            missionID: missionID,
+            missionHandoffsEnabled: Self.currentMissionHandoffsEnabled(),
+            initialAgentUUID: initialAgentUUID
+        )
         wireWorkspace(workspace)
         workspaceStore.appendWorkspace(workspace)
         verticalStrip.addSubview(workspace.containerView)
@@ -66,23 +77,33 @@ extension NiruxShellView {
         let handoverPath = workspace.cwd + "/\(handoverName)"
         let hasHandover = FileManager.default.fileExists(atPath: handoverPath)
 
+        let handoverPrompt: String? = {
+            var instructions: [String] = []
+            if hasHandover {
+                instructions.append("Read \(handoverName) for full context, then proceed with the next steps described there.")
+            }
+            if workspace.missionID != nil {
+                instructions.append(
+                    "This is a Nirux mission workspace. Ask the parent and wait safely with "
+                    + "\"$NIRUX_CLI_PATH\" --mission ask --message \"...\" --timeout 900; "
+                    + "the command output is the parent's answer. Report the final result with "
+                    + "\"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
+                )
+            }
+            return instructions.isEmpty ? nil : instructions.joined(separator: " ")
+        }()
+
         let cmd: String
         switch agent {
         case .claude:
-            let prompt = hasHandover
-                ? "Read \(handoverName) for full context, then proceed with the next steps described there."
-                : nil
             cmd = NiruxShellView.claudeCommand(
                 mode: NiruxShellView.currentClaudeLaunchMode(),
-                handoverPrompt: prompt
+                handoverPrompt: handoverPrompt
             )
         case .codex:
-            let prompt = hasHandover
-                ? "Read \(handoverName) for full context, then proceed with the next steps described there."
-                : nil
             cmd = NiruxShellView.codexCommand(
                 mode: NiruxShellView.currentCodexLaunchMode(),
-                handoverPrompt: prompt
+                handoverPrompt: handoverPrompt
             )
         }
 
@@ -98,7 +119,9 @@ extension NiruxShellView {
         repoRoot: String,
         agent: NiruxApp.WorkspaceAgent? = .claude,
         handoverPath: String? = nil,
-        profileID requestedProfileID: String? = nil
+        profileID requestedProfileID: String? = nil,
+        parentWorkspaceID: String? = nil,
+        parentAgentUUID: String? = nil
     ) {
         let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
         DispatchQueue.global(qos: .userInitiated).async {
@@ -110,8 +133,42 @@ extension NiruxShellView {
                 try? FileManager.default.moveItem(atPath: handoverPath, toPath: dest)
             }
             DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
                 if let path {
-                    self?.addWorkspace(title: branch, cwd: path, agent: agent, profileID: targetProfileID)
+                    let childWorkspaceID = UUID().uuidString
+                    let childAgentUUID = UUID().uuidString
+                    var missionID: String?
+                    if let parent = self.validMissionParent(
+                        workspaceID: parentWorkspaceID,
+                        agentUUID: parentAgentUUID
+                    ) {
+                        let candidateID = UUID().uuidString
+                        let request = MissionCreationRequest(
+                            id: candidateID,
+                            parentWorkspaceID: parent.workspaceID,
+                            parentAgentUUID: parent.agentUUID,
+                            childWorkspaceID: childWorkspaceID,
+                            childAgentUUID: childAgentUUID,
+                            childAgentKind: agent?.rawValue ?? "agent",
+                            branch: branch
+                        )
+                        if MissionStore.shared.create(
+                            request,
+                            enabled: Self.currentMissionHandoffsEnabled()
+                        ) != nil {
+                            missionID = candidateID
+                        }
+                    }
+                    self.addWorkspace(
+                        title: branch,
+                        cwd: path,
+                        agent: agent,
+                        profileID: targetProfileID,
+                        workspaceID: childWorkspaceID,
+                        initialAgentUUID: childAgentUUID,
+                        missionID: missionID
+                    )
+                    self.saveState()
                 } else {
                     NSLog("[Worktree] Failed to create worktree for \(branch): \(error ?? "unknown")")
                 }
@@ -124,6 +181,24 @@ extension NiruxShellView {
         case .claude: return ".claude-handover.md"
         case .codex: return ".codex-handover.md"
         }
+    }
+
+    static func currentMissionHandoffsEnabled() -> Bool {
+        Persistence.load()?.settings?.missionHandoffsEnabled == true
+    }
+
+    private func validMissionParent(
+        workspaceID: String?, agentUUID: String?
+    ) -> (workspaceID: String, agentUUID: String)? {
+        guard Self.currentMissionHandoffsEnabled(),
+              let workspaceID,
+              let agentUUID,
+              UUID(uuidString: workspaceID) != nil,
+              UUID(uuidString: agentUUID) != nil,
+              let workspace = workspaces.first(where: { $0.id == workspaceID }),
+              workspace.columns.contains(where: { $0.agentUUID == agentUUID })
+        else { return nil }
+        return (workspaceID, agentUUID)
     }
 
     func focusWorkspace(_ dir: VDir) {

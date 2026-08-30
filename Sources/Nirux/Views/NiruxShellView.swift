@@ -52,6 +52,11 @@ final class NiruxShellView: NSView {
     var heartbeatTimer: Timer?
     var heartbeatTick: UInt = 0
 
+    /// Dwell timer that marks visible Activity entries as read. The
+    /// generation invalidates a fired timer whose MainActor task is queued.
+    var activityReadTimer: Timer?
+    var activityReadGeneration: UInt = 0
+
     // Panel references (stored properties must live in main class declaration)
     var nameInputPanel: NameInputPanel?
     var worktreePanel: WorktreePanel?
@@ -85,7 +90,12 @@ final class NiruxShellView: NSView {
         addSubview(edgeGlowBottom)
         addSubview(statusBar)
 
-        let workspace = WorkspaceState(title: "ws 1", cwd: NSHomeDirectory(), profileID: activeProfileID)
+        let workspace = WorkspaceState(
+            title: "ws 1",
+            cwd: NSHomeDirectory(),
+            profileID: activeProfileID,
+            missionHandoffsEnabled: Self.currentMissionHandoffsEnabled()
+        )
         wireWorkspace(workspace)
         workspaces.append(workspace)
         verticalStrip.addSubview(workspace.containerView)
@@ -99,6 +109,12 @@ final class NiruxShellView: NSView {
         sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }
         sidebar.onInactiveSectionCollapsedChange = { [weak self] _ in self?.saveState() }
         sidebar.onDiffStatsClicked = { [weak self] index in self?.openDiffInEditor(workspaceIndex: index) }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleSidebarActivityActivation(_:)),
+            name: .niruxSidebarActivityEntryActivated,
+            object: sidebar
+        )
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
             if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }
@@ -529,12 +545,20 @@ extension NiruxShellView {
                     let handoverFileName = Self.handoverFilename(for: runningAgent)
                     let handoverTmp = "/tmp/nirux-handover-\(runningAgent.rawValue)-\(dirName).md"
                     let queryAllowed = CharacterSet.urlQueryAllowed
+                    let missionQuery: String = {
+                        guard Self.currentMissionHandoffsEnabled(),
+                              let workspaceID = self.activeWorkspace?.id,
+                              let agentUUID = col?.agentUUID
+                        else { return "" }
+                        return "&parentWorkspace=\(workspaceID)&parentAgent=\(agentUUID)"
+                    }()
                     let url = "nirux://new-worktree"
                         + "?branch=\(branch.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? branch)"
                         + "&repo=\(repoRoot.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? repoRoot)"
                         + "&agent=\(runningAgent.rawValue)"
                         + "&handover=\(handoverTmp.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? handoverTmp)"
                         + "&profile=\(profileID.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? profileID)"
+                        + missionQuery
                     let prompt = "Write a concise session handover to \(handoverTmp) "
                         + "(sections: Goal, Context, Done so far, Next steps). "
                         + "Nirux will move it into the new worktree as \(handoverFileName). "

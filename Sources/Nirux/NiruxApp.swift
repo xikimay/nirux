@@ -12,6 +12,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     weak var settingsLaunchModePopup: NSPopUpButton?
     weak var settingsNoFlickerCheckbox: NSButton?
     weak var settingsCodexLaunchModePopup: NSPopUpButton?
+    weak var settingsMissionHandoffsCheckbox: NSButton?
     var isManualUpdateCheck = false
     var updaterReady = false
 
@@ -24,6 +25,18 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         if args.count >= 3, args[1] == "--hook", let kind = AgentHookEvent.Kind(rawValue: args[2]) {
             let payload = args.count > 3 ? args.last : nil
             exit(AgentHookCLI.run(kind: kind, payload: payload))
+        }
+        if args.count >= 2, args[1] == "--mission" {
+            guard args.count >= 3 else { exit(2) }
+            let arguments = Array(args.dropFirst(3))
+            switch args[2] {
+            case "ask": exit(MissionEventCLI.ask(arguments: arguments))
+            case "receive": exit(MissionEventCLI.receive(arguments: arguments))
+            case "reply": exit(MissionEventCLI.reply(arguments: arguments))
+            default:
+                guard let kind = MissionEvent.Kind(rawValue: args[2]) else { exit(2) }
+                exit(MissionEventCLI.run(kind: kind, arguments: arguments))
+            }
         }
 
         let app = NSApplication.shared
@@ -80,6 +93,12 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // ~/.codex/config.toml, then start routing events to columns. Must
         // run AFTER restoreState so queued events resolve to live columns.
         AgentHookInstaller.installAll()
+        ActivityStore.shared.load()
+        MissionStore.shared.load()
+        ActivityStore.shared.onChange = { [weak shellView] in
+            shellView?.refreshActivitySidebar()
+        }
+        shellView.refreshActivitySidebar()
         let hooks = AgentHookCenter.shared
         hooks.resolver = { [weak shellView] uuid in
             shellView?.resolveAgentColumn(uuid: uuid)
@@ -88,6 +107,12 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             shellView?.applyAgentHookEvents(events)
         }
         hooks.start()
+
+        let missionEvents = MissionEventCenter.shared
+        missionEvents.onEvent = { [weak shellView] mission, event in
+            shellView?.recordMissionActivity(mission, event: event) ?? false
+        }
+        missionEvents.start()
 
         // Focus first terminal
         shellView.focusActiveTerminal(in: window)
@@ -109,6 +134,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     func applicationWillTerminate(_ notification: Notification) {
         shell?.saveState(snapshot: ProcessSnapshot())
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
+        ActivityStore.shared.flush()
+        AgentHookCenter.shared.stop()
+        MissionEventCenter.shared.stop()
     }
 
     // MARK: - URL Scheme
@@ -139,13 +167,17 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
                 let agent = params?.first(where: { $0.name == "agent" })?.value
                     .flatMap { WorkspaceAgent(rawValue: $0) }
                 let handover = params?.first(where: { $0.name == "handover" })?.value
+                let parentWorkspaceID = params?.first(where: { $0.name == "parentWorkspace" })?.value
+                let parentAgentUUID = params?.first(where: { $0.name == "parentAgent" })?.value
                 if let branch, let repo {
                     shell?.createWorktreeWorkspace(
                         branch: branch,
                         repoRoot: repo,
                         agent: agent,
                         handoverPath: handover,
-                        profileID: profileID
+                        profileID: profileID,
+                        parentWorkspaceID: parentWorkspaceID,
+                        parentAgentUUID: parentAgentUUID
                     )
                 }
 
