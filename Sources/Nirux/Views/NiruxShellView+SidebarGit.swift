@@ -4,8 +4,6 @@ import AppKit
 
 extension NiruxShellView {
     func updateSidebar(snapshot: ProcessSnapshot? = nil) {
-        persistCodexSessionIDsFromCurrentHookBatch()
-
         let snapshot = snapshot ?? ProcessSnapshot()
         let visibleIndices = visibleWorkspaceIndices
         let infos = visibleIndices.map { index in
@@ -221,29 +219,20 @@ extension NiruxShellView {
         }
     }
 
-    /// `AgentHookCenter` invokes `updateSidebar` synchronously after draining
-    /// a batch. Its processing file still exists during that callback, so
-    /// capture Codex thread IDs without restoring the removed activity feed.
-    private func persistCodexSessionIDsFromCurrentHookBatch() {
-        let processingURL = AgentHookCenter.eventsURL
-            .deletingPathExtension()
-            .appendingPathExtension("processing")
-        guard let data = try? Data(contentsOf: processingURL), !data.isEmpty else { return }
-
-        let decoder = JSONDecoder()
+    func applyAgentHookEvents(_ events: [AgentHookCenter.AppliedEvent]) {
+        let snapshot = ProcessSnapshot()
         var changed = false
-        for line in data.split(separator: 0x0A) {
-            guard let event = try? decoder.decode(AgentHookEvent.self, from: Data(line)),
-                  event.kind == .codex,
-                  let sessionID = event.sessionID,
-                  !sessionID.isEmpty,
-                  let agentUUID = event.agentUUID,
-                  let resolution = resolveAgentColumn(uuid: agentUUID),
-                  resolution.column.codexSessionID != sessionID else { continue }
-            resolution.column.codexSessionID = sessionID
-            changed = true
+        for appliedEvent in events where appliedEvent.event.kind == .codex {
+            if appliedEvent.resolution.column.captureCodexSession(
+                sessionID: appliedEvent.event.sessionID,
+                eventTimestamp: appliedEvent.event.timestamp,
+                snapshot: snapshot
+            ) {
+                changed = true
+            }
         }
-        if changed { saveState() }
+        updateSidebar(snapshot: snapshot)
+        if changed { saveState(snapshot: snapshot) }
     }
 
     func refreshGitBranches() {

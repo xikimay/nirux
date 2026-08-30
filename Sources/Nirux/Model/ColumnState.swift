@@ -1,6 +1,66 @@
 import AppKit
 import GhosttyTerminal
 
+struct CodexSessionTracker {
+    private struct Binding: Equatable {
+        let sessionID: String
+        let process: ProcessInstance
+    }
+
+    private var binding: Binding?
+    private var pendingResumeSessionID: String?
+
+    mutating func prepareResume(sessionID: String) {
+        binding = nil
+        pendingResumeSessionID = sessionID
+    }
+
+    @discardableResult
+    mutating func capture(
+        sessionID: String?,
+        eventTimestamp: TimeInterval,
+        foregroundProcess: ForegroundProcess?
+    ) -> Bool {
+        guard let sessionID, !sessionID.isEmpty,
+              let foregroundProcess, foregroundProcess.name == "codex",
+              foregroundProcess.instance.startedAt <= eventTimestamp else {
+            return false
+        }
+        let next = Binding(sessionID: sessionID, process: foregroundProcess.instance)
+        guard binding != next || pendingResumeSessionID != nil else { return false }
+        binding = next
+        pendingResumeSessionID = nil
+        return true
+    }
+
+    mutating func sessionID(for foregroundProcess: ForegroundProcess?) -> String? {
+        guard let foregroundProcess, foregroundProcess.name == "codex" else {
+            binding = nil
+            pendingResumeSessionID = nil
+            return nil
+        }
+        if binding?.process == foregroundProcess.instance {
+            return binding?.sessionID
+        }
+        binding = nil
+        guard let pendingResumeSessionID else { return nil }
+        guard let resumeIndex = foregroundProcess.arguments.firstIndex(of: "resume"),
+              foregroundProcess.arguments.indices.contains(resumeIndex + 1),
+              foregroundProcess.arguments[resumeIndex + 1] == pendingResumeSessionID else {
+            if !foregroundProcess.arguments.isEmpty {
+                self.pendingResumeSessionID = nil
+            }
+            return nil
+        }
+        binding = Binding(
+            sessionID: pendingResumeSessionID,
+            process: foregroundProcess.instance
+        )
+        self.pendingResumeSessionID = nil
+        return pendingResumeSessionID
+    }
+}
+
 // WindowDragView and DropTargetView now live in Views/ColumnInternalViews.swift
 // — NSView subclasses don't belong in the model layer.
 
@@ -36,11 +96,7 @@ final class ColumnState {
     /// restarts; survives shell restarts (same terminal spec).
     let agentUUID: String?
 
-    /// Exact Codex thread attached to this terminal. Codex's notify payload
-    /// supplies it after each completed turn. Persisting the ID is essential:
-    /// restoring multiple columns with `codex resume --last` makes every
-    /// column race for the same single-writer thread.
-    var codexSessionID: String?
+    private var codexSessionTracker = CodexSessionTracker()
 
     /// Terminal title from OSC 0/2 (agent context, vim filename, etc.)
     var terminalTitle: String? {
@@ -266,6 +322,26 @@ final class ColumnState {
     /// attention — forward to the workspace-level notification wiring.
     func notifyAgentAttention() {
         onAgentAttention?()
+    }
+
+    func prepareCodexResume(sessionID: String) {
+        codexSessionTracker.prepareResume(sessionID: sessionID)
+    }
+
+    func captureCodexSession(
+        sessionID: String?,
+        eventTimestamp: TimeInterval,
+        snapshot: ProcessSnapshot
+    ) -> Bool {
+        codexSessionTracker.capture(
+            sessionID: sessionID,
+            eventTimestamp: eventTimestamp,
+            foregroundProcess: pty?.foregroundProcess(snapshot: snapshot)
+        )
+    }
+
+    func persistedCodexSessionID(snapshot: ProcessSnapshot) -> String? {
+        codexSessionTracker.sessionID(for: pty?.foregroundProcess(snapshot: snapshot))
     }
 
     // MARK: - Shell exit / restart

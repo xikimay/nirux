@@ -54,7 +54,7 @@ extension NiruxShellView {
                         agentUUID: persistedCol.agentUUID ?? UUID().uuidString
                     )
                     if case .session(let sessionID) = resumeTarget {
-                        workspace.columns.last?.codexSessionID = sessionID
+                        workspace.columns.last?.prepareCodexResume(sessionID: sessionID)
                     }
                 case .editor:
                     let openFiles = persistedCol.editorOpenFiles ?? []
@@ -170,7 +170,9 @@ extension NiruxShellView {
                             editorActiveFile: editorActiveFile,
                             claudeLaunchMode: claudeMode,
                             codexLaunchMode: codexMode,
-                            codexSessionID: kind == .codex ? col.codexSessionID : nil,
+                            codexSessionID: kind == .codex
+                                ? col.persistedCodexSessionID(snapshot: snapshot)
+                                : nil,
                             agentUUID: col.agentUUID
                         )
                     },

@@ -398,4 +398,83 @@ final class PersistedStateCodingTests: XCTestCase {
             .picker
         )
     }
+
+    func testCodexSessionTrackerInvalidatesAnExitedProcess() {
+        let first = ForegroundProcess(
+            instance: ProcessInstance(pid: 101, startedAt: 100),
+            name: "codex",
+            arguments: ["codex"]
+        )
+        let second = ForegroundProcess(
+            instance: ProcessInstance(pid: 101, startedAt: 120),
+            name: "codex",
+            arguments: ["codex"]
+        )
+        var tracker = CodexSessionTracker()
+
+        XCTAssertTrue(tracker.capture(
+            sessionID: "thread-a",
+            eventTimestamp: 110,
+            foregroundProcess: first
+        ))
+        XCTAssertEqual(tracker.sessionID(for: first), "thread-a")
+        XCTAssertNil(tracker.sessionID(for: second))
+    }
+
+    func testCodexSessionTrackerRejectsAnEventOlderThanTheCurrentProcess() {
+        let replacement = ForegroundProcess(
+            instance: ProcessInstance(pid: 101, startedAt: 120),
+            name: "codex",
+            arguments: ["codex"]
+        )
+        var tracker = CodexSessionTracker()
+
+        XCTAssertFalse(tracker.capture(
+            sessionID: "stale-thread",
+            eventTimestamp: 110,
+            foregroundProcess: replacement
+        ))
+        XCTAssertNil(tracker.sessionID(for: replacement))
+    }
+
+    func testCodexSessionTrackerBindsARestoredThreadOnce() {
+        let restored = ForegroundProcess(
+            instance: ProcessInstance(pid: 201, startedAt: 200),
+            name: "codex",
+            arguments: ["codex", "resume", "restored-thread"]
+        )
+        let fresh = ForegroundProcess(
+            instance: ProcessInstance(pid: 202, startedAt: 220),
+            name: "codex",
+            arguments: ["codex"]
+        )
+        var tracker = CodexSessionTracker()
+        tracker.prepareResume(sessionID: "restored-thread")
+
+        XCTAssertEqual(tracker.sessionID(for: restored), "restored-thread")
+        XCTAssertNil(tracker.sessionID(for: fresh))
+    }
+
+    func testCodexSessionTrackerDoesNotBindAFailedRestoreToAFreshProcess() {
+        let fresh = ForegroundProcess(
+            instance: ProcessInstance(pid: 202, startedAt: 220),
+            name: "codex",
+            arguments: ["codex"]
+        )
+        var tracker = CodexSessionTracker()
+        tracker.prepareResume(sessionID: "failed-restore")
+
+        XCTAssertNil(tracker.sessionID(for: fresh))
+    }
+
+    func testCodexSessionTrackerIgnoresReplayWithoutARunningProcess() {
+        var tracker = CodexSessionTracker()
+
+        XCTAssertFalse(tracker.capture(
+            sessionID: "queued-thread",
+            eventTimestamp: 100,
+            foregroundProcess: nil
+        ))
+        XCTAssertNil(tracker.sessionID(for: nil))
+    }
 }
