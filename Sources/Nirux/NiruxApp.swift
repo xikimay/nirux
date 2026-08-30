@@ -106,6 +106,13 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         hooks.onEventsApplied = { [weak shellView] events in
             shellView?.applyAgentHookEvents(events)
         }
+        hooks.onEventReceived = { event, resolution in
+            ActivityStore.shared.record(
+                event,
+                workspaceTitle: resolution?.workspace.title ?? event.cwd ?? "External agent",
+                columnIndex: resolution?.columnIndex
+            )
+        }
         hooks.start()
 
         let missionEvents = MissionEventCenter.shared

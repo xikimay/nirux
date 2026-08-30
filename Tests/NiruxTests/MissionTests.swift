@@ -139,6 +139,37 @@ final class MissionTests: XCTestCase {
         ))
     }
 
+    func testCompletionRetiresPendingQuestionsBeforeParentReceive() throws {
+        let directory = try makeDirectory()
+        let missionsURL = directory.appendingPathComponent("missions.json")
+        let eventsURL = directory.appendingPathComponent("mission-events.jsonl")
+        let store = MissionStore(fileURL: missionsURL)
+        XCTAssertNotNil(store.create(request(), enabled: true, now: 10))
+        let question = event(timestamp: 20)
+        let completion = event(
+            id: "77777777-7777-4777-8777-777777777777",
+            kind: .completed,
+            message: "Done",
+            timestamp: 30
+        )
+
+        XCTAssertNotNil(store.accept(question, enabled: true))
+        XCTAssertNotNil(store.accept(completion, enabled: true))
+        XCTAssertEqual(store.missions[0].events[0].parentConsumedAt, 30)
+
+        XCTAssertEqual(MissionEventCLI.receive(
+            arguments: ["--timeout", "0"],
+            environment: parentEnvironment,
+            now: { 40 },
+            eventsURL: eventsURL,
+            missionsURL: missionsURL,
+            pollInterval: 0.01
+        ), 0)
+        let acknowledgement = try decodeSingleEvent(from: eventsURL)
+        XCTAssertEqual(acknowledgement.kind, .acknowledged)
+        XCTAssertEqual(acknowledgement.inReplyTo, completion.id)
+    }
+
     func testResponseRequiresRecordedParentAndCorrelatesToQuestion() throws {
         let fileURL = try makeDirectory().appendingPathComponent("missions.json")
         let store = MissionStore(fileURL: fileURL)
@@ -375,6 +406,55 @@ final class MissionTests: XCTestCase {
 
         XCTAssertTrue(store.missions[0].events.isEmpty)
         XCTAssertFalse(FileManager.default.fileExists(atPath: eventsURL.path))
+    }
+
+    func testCenterRecoversProcessingFileAfterRestart() throws {
+        let directory = try makeDirectory()
+        let missionsURL = directory.appendingPathComponent("missions.json")
+        let eventsURL = directory.appendingPathComponent("mission-events.jsonl")
+        let processingURL = eventsURL.deletingPathExtension().appendingPathExtension("processing")
+        let initialStore = MissionStore(fileURL: missionsURL)
+        XCTAssertNotNil(initialStore.create(request(), enabled: true, now: 10))
+        let pending = event()
+        try write(pending, to: processingURL)
+
+        let restoredStore = MissionStore(fileURL: missionsURL)
+        restoredStore.load()
+        let center = MissionEventCenter(
+            store: restoredStore, eventsURL: eventsURL, isEnabled: { true }
+        )
+        center.drain()
+
+        XCTAssertEqual(restoredStore.missions[0].events.map(\.id), [pending.id])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: processingURL.path))
+    }
+
+    func testCenterRetainsProcessingFileUntilMissionSaveSucceeds() throws {
+        let directory = try makeDirectory()
+        let missionsURL = directory.appendingPathComponent("missions.json")
+        let eventsURL = directory.appendingPathComponent("mission-events.jsonl")
+        let processingURL = eventsURL.deletingPathExtension().appendingPathExtension("processing")
+        let store = MissionStore(fileURL: missionsURL)
+        XCTAssertNotNil(store.create(request(), enabled: true, now: 10))
+        try FileManager.default.removeItem(at: missionsURL)
+        try FileManager.default.createDirectory(at: missionsURL, withIntermediateDirectories: false)
+        let pending = event()
+        try write(pending, to: processingURL)
+        let center = MissionEventCenter(store: store, eventsURL: eventsURL, isEnabled: { true })
+
+        center.drain()
+
+        XCTAssertTrue(store.missions[0].events.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: processingURL.path))
+
+        try FileManager.default.removeItem(at: missionsURL)
+        center.drain()
+
+        XCTAssertEqual(store.missions[0].events.map(\.id), [pending.id])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: processingURL.path))
+        let restoredStore = MissionStore(fileURL: missionsURL)
+        restoredStore.load()
+        XCTAssertEqual(restoredStore.missions[0].events.map(\.id), [pending.id])
     }
 
     func testPendingEventSurvivesRestartAndDeliversOnce() throws {

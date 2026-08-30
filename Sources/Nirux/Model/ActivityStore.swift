@@ -41,12 +41,14 @@ struct ActivityEntry: Codable, Hashable {
     /// existing activity.json wire format remains backward-compatible.
     let missionID: String?
     let missionEventID: String?
+    let missionReplyToEventID: String?
 
     init(
         category: Category, agentKind: String, agentUUID: String? = nil,
         workspaceID: String?, columnIndex: Int?, workspaceTitle: String,
         detail: String?, timestamp: TimeInterval,
-        missionID: String? = nil, missionEventID: String? = nil
+        missionID: String? = nil, missionEventID: String? = nil,
+        missionReplyToEventID: String? = nil
     ) {
         self.category = category
         self.agentKind = agentKind
@@ -58,6 +60,7 @@ struct ActivityEntry: Codable, Hashable {
         self.timestamp = timestamp
         self.missionID = missionID
         self.missionEventID = missionEventID
+        self.missionReplyToEventID = missionReplyToEventID
     }
 
     /// Events worth a feed row. UserPromptSubmit/PreToolUse fire far too
@@ -79,6 +82,7 @@ struct ActivityEntry: Codable, Hashable {
         timestamp = event.timestamp
         missionID = nil
         missionEventID = nil
+        missionReplyToEventID = nil
     }
 }
 
@@ -136,6 +140,8 @@ final class ActivityStore {
             .missionResponse
         ].contains(entry.category) {
             if let last = result.last,
+               last.missionEventID == nil,
+               entry.missionEventID == nil,
                last.category == entry.category,
                last.agentKind == entry.agentKind,
                last.agentUUID == entry.agentUUID,
@@ -157,8 +163,18 @@ final class ActivityStore {
         guard let entry = feed[safe: index],
               entry.category == .attention || entry.category == .missionQuestion
         else { return false }
+        if entry.category == .missionQuestion {
+            guard let missionID = entry.missionID,
+                  let questionID = entry.missionEventID
+            else { return false }
+            return feed[..<index].contains { newer in
+                guard newer.missionID == missionID else { return false }
+                return newer.category == .missionCompleted
+                    || (newer.category == .missionResponse
+                        && newer.missionReplyToEventID == questionID)
+            }
+        }
         return feed[..<index].contains { newer in
-            if let missionID = entry.missionID { return newer.missionID == missionID }
             if let uuid = entry.agentUUID { return newer.agentUUID == uuid }
             // Positional fallback needs SOME identity: events from hooks
             // running outside Nirux have nil workspace, column and uuid,
@@ -215,6 +231,17 @@ final class ActivityStore {
         }
         scheduleSave()
         scheduleChangeNotification()
+    }
+
+    @discardableResult
+    func record(
+        _ event: AgentHookEvent, workspaceTitle: String, columnIndex: Int?
+    ) -> Bool {
+        guard let entry = ActivityEntry(
+            event: event, workspaceTitle: workspaceTitle, columnIndex: columnIndex
+        ) else { return false }
+        record(entry)
+        return true
     }
 
     /// Coalesce change notifications: a drain replaying a backlog records

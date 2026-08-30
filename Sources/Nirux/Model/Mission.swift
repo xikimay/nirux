@@ -145,9 +145,9 @@ final class MissionStore {
             updatedAt: now,
             events: []
         )
-        missions.append(mission)
-        save()
-        return mission
+        var updated = missions
+        updated.append(mission)
+        return commit(updated) ? mission : nil
     }
 
     struct AcceptedEvent {
@@ -155,10 +155,21 @@ final class MissionStore {
         let event: MissionEvent
     }
 
+    enum ProcessingResult {
+        case rejected
+        case persistenceFailed
+        case accepted(AcceptedEvent?)
+    }
+
     /// Validate routing identities against the recorded Mission. Child
     /// reports must match the child; responses and acknowledgements must
     /// match the parent and reference a real pending child event.
     func accept(_ incoming: MissionEvent, enabled: Bool) -> AcceptedEvent? {
+        guard case let .accepted(event) = process(incoming, enabled: enabled) else { return nil }
+        return event
+    }
+
+    func process(_ incoming: MissionEvent, enabled: Bool) -> ProcessingResult {
         guard enabled,
               incoming.deliveredAt == nil,
               incoming.parentConsumedAt == nil,
@@ -168,12 +179,22 @@ final class MissionStore {
               Self.isIdentifier(incoming.childAgentUUID),
               let index = missions.firstIndex(where: { $0.id == incoming.missionID }),
               missions[index].childWorkspaceID == incoming.childWorkspaceID,
-              missions[index].childAgentUUID == incoming.childAgentUUID,
-              !missions[index].events.contains(where: { $0.id == incoming.id })
-        else { return nil }
+              missions[index].childAgentUUID == incoming.childAgentUUID
+        else { return .rejected }
+
+        if let existing = missions[index].events.first(where: { $0.id == incoming.id }) {
+            let pending = existing.deliveredAt == nil
+                ? AcceptedEvent(mission: missions[index], event: existing)
+                : nil
+            return .accepted(pending)
+        }
 
         let message = incoming.message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !message.isEmpty, message.count <= MissionEventCLI.maxMessageLength else { return nil }
+        guard !message.isEmpty, message.count <= MissionEventCLI.maxMessageLength else {
+            return .rejected
+        }
+
+        var updated = missions
 
         switch incoming.kind {
         case .question, .completed:
@@ -181,7 +202,7 @@ final class MissionStore {
                   incoming.parentWorkspaceID == nil,
                   incoming.parentAgentUUID == nil,
                   incoming.inReplyTo == nil
-            else { return nil }
+            else { return .rejected }
 
         case .response:
             guard missions[index].status == .active,
@@ -194,9 +215,8 @@ final class MissionStore {
                   !missions[index].events.contains(where: {
                       $0.kind == .response && $0.inReplyTo == questionID
                   })
-            else { return nil }
-            // A response proves the parent consumed the question.
-            missions[index].events[questionIndex].parentConsumedAt = incoming.timestamp
+            else { return .rejected }
+            updated[index].events[questionIndex].parentConsumedAt = incoming.timestamp
 
         case .acknowledged:
             guard incoming.parentWorkspaceID == missions[index].parentWorkspaceID,
@@ -205,12 +225,12 @@ final class MissionStore {
                   let targetIndex = missions[index].events.firstIndex(where: {
                       $0.id == targetID && ($0.kind == .question || $0.kind == .completed)
                   })
-            else { return nil }
-            if missions[index].events[targetIndex].parentConsumedAt == nil {
-                missions[index].events[targetIndex].parentConsumedAt = incoming.timestamp
-                save()
+            else { return .rejected }
+            guard missions[index].events[targetIndex].parentConsumedAt == nil else {
+                return .accepted(nil)
             }
-            return nil
+            updated[index].events[targetIndex].parentConsumedAt = incoming.timestamp
+            return commit(updated) ? .accepted(nil) : .persistenceFailed
         }
 
         let event = MissionEvent(
@@ -227,13 +247,22 @@ final class MissionStore {
             deliveredAt: nil,
             parentConsumedAt: nil
         )
-        missions[index].events.append(event)
-        missions[index].updatedAt = event.timestamp
+        updated[index].events.append(event)
+        updated[index].updatedAt = event.timestamp
         if event.kind == .completed {
-            missions[index].status = .completed
+            let answered = Set(updated[index].events.compactMap { candidate in
+                candidate.kind == .response ? candidate.inReplyTo : nil
+            })
+            for eventIndex in updated[index].events.indices
+            where updated[index].events[eventIndex].kind == .question
+                && updated[index].events[eventIndex].parentConsumedAt == nil
+                && !answered.contains(updated[index].events[eventIndex].id) {
+                updated[index].events[eventIndex].parentConsumedAt = event.timestamp
+            }
+            updated[index].status = .completed
         }
-        save()
-        return AcceptedEvent(mission: missions[index], event: event)
+        guard commit(updated) else { return .persistenceFailed }
+        return .accepted(AcceptedEvent(mission: missions[index], event: event))
     }
 
     /// Trusted UI response path. It uses the same validation and persistence
@@ -277,30 +306,41 @@ final class MissionStore {
         }.sorted { $0.event.timestamp < $1.event.timestamp }
     }
 
-    func markDelivered(eventID: String, at timestamp: TimeInterval = Date().timeIntervalSince1970) {
+    @discardableResult
+    func markDelivered(
+        eventID: String, at timestamp: TimeInterval = Date().timeIntervalSince1970
+    ) -> Bool {
         for missionIndex in missions.indices {
             guard let eventIndex = missions[missionIndex].events.firstIndex(where: { $0.id == eventID }),
                   missions[missionIndex].events[eventIndex].deliveredAt == nil
             else { continue }
-            missions[missionIndex].events[eventIndex].deliveredAt = timestamp
-            save()
-            return
+            var updated = missions
+            updated[missionIndex].events[eventIndex].deliveredAt = timestamp
+            return commit(updated)
         }
+        return false
     }
 
     private static func isIdentifier(_ value: String) -> Bool {
         UUID(uuidString: value) != nil
     }
 
-    private func save() {
-        guard persistsToDisk, let data = try? JSONEncoder().encode(missions) else { return }
+    private func commit(_ updated: [Mission]) -> Bool {
+        guard persistsToDisk else {
+            missions = updated
+            return true
+        }
         do {
+            let data = try JSONEncoder().encode(updated)
             try FileManager.default.createDirectory(
                 at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true
             )
             try data.write(to: fileURL, options: .atomic)
+            missions = updated
+            return true
         } catch {
             NSLog("[MissionStore] Failed to save missions: %@", error.localizedDescription)
+            return false
         }
     }
 }
@@ -719,21 +759,40 @@ final class MissionEventCenter {
     func drain() {
         let aside = eventsURL.deletingPathExtension().appendingPathExtension("processing")
         let fileManager = FileManager.default
-        try? fileManager.removeItem(at: aside)
+        if fileManager.fileExists(atPath: aside.path), !process(aside, fileManager: fileManager) {
+            return
+        }
         do {
             try fileManager.moveItem(at: eventsURL, to: aside)
         } catch {
             return
         }
-        defer { try? fileManager.removeItem(at: aside) }
+        _ = process(aside, fileManager: fileManager)
+    }
 
-        guard let data = try? Data(contentsOf: aside), !data.isEmpty else { return }
+    private func process(_ source: URL, fileManager: FileManager) -> Bool {
+        guard let data = try? Data(contentsOf: source) else { return false }
         let decoder = JSONDecoder()
+        var persistenceFailed = false
         for line in data.split(separator: 0x0A) {
-            guard let incoming = try? decoder.decode(MissionEvent.self, from: Data(line)),
-                  let accepted = store.accept(incoming, enabled: isEnabled())
-            else { continue }
-            deliver(accepted)
+            guard let incoming = try? decoder.decode(MissionEvent.self, from: Data(line)) else {
+                continue
+            }
+            switch store.process(incoming, enabled: isEnabled()) {
+            case .rejected:
+                continue
+            case .persistenceFailed:
+                persistenceFailed = true
+            case let .accepted(accepted):
+                if let accepted { deliver(accepted) }
+            }
+        }
+        guard !persistenceFailed else { return false }
+        do {
+            try fileManager.removeItem(at: source)
+            return true
+        } catch {
+            return false
         }
     }
 

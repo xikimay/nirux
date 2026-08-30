@@ -260,6 +260,28 @@ final class ActivityStoreTests: XCTestCase {
         XCTAssertEqual(store.unreadCount, 1)
     }
 
+    @MainActor
+    func testDistinctMissionQuestionsRemainSeparateFeedRows() {
+        let store = makeStore()
+        for (eventID, timestamp) in [("event-1", 10.0), ("event-2", 20.0)] {
+            store.record(ActivityEntry(
+                category: .missionQuestion,
+                agentKind: "codex",
+                agentUUID: "child-agent",
+                workspaceID: "child-workspace",
+                columnIndex: 0,
+                workspaceTitle: "feat/mission",
+                detail: "Question \(eventID)",
+                timestamp: timestamp,
+                missionID: "mission-1",
+                missionEventID: eventID
+            ))
+        }
+
+        XCTAssertEqual(store.feedEntries.map(\.missionEventID), ["event-2", "event-1"])
+        XCTAssertEqual(store.unreadCount, 2)
+    }
+
     func testMissionCompletionSupersedesEarlierQuestion() {
         let completed = ActivityEntry(
             category: .missionCompleted,
@@ -296,7 +318,8 @@ final class ActivityStoreTests: XCTestCase {
             detail: "Use AuthService",
             timestamp: 20,
             missionID: "mission-1",
-            missionEventID: "event-2"
+            missionEventID: "event-2",
+            missionReplyToEventID: "event-1"
         )
         let question = ActivityEntry(
             category: .missionQuestion,
@@ -310,6 +333,47 @@ final class ActivityStoreTests: XCTestCase {
             missionEventID: "event-1"
         )
         XCTAssertTrue(ActivityStore.isAttentionSuperseded(at: 1, in: [response, question]))
+    }
+
+    func testMissionResponseOnlySupersedesItsReferencedQuestion() {
+        let response = ActivityEntry(
+            category: .missionResponse,
+            agentKind: "parent",
+            workspaceID: "child",
+            columnIndex: 0,
+            workspaceTitle: "child",
+            detail: "Use AuthService",
+            timestamp: 30,
+            missionID: "mission-1",
+            missionEventID: "response-1",
+            missionReplyToEventID: "question-2"
+        )
+        let secondQuestion = ActivityEntry(
+            category: .missionQuestion,
+            agentKind: "codex",
+            workspaceID: "child",
+            columnIndex: 0,
+            workspaceTitle: "child",
+            detail: "Which auth API?",
+            timestamp: 20,
+            missionID: "mission-1",
+            missionEventID: "question-2"
+        )
+        let firstQuestion = ActivityEntry(
+            category: .missionQuestion,
+            agentKind: "codex",
+            workspaceID: "child",
+            columnIndex: 0,
+            workspaceTitle: "child",
+            detail: "Which storage API?",
+            timestamp: 10,
+            missionID: "mission-1",
+            missionEventID: "question-1"
+        )
+        let feed = [response, secondQuestion, firstQuestion]
+
+        XCTAssertTrue(ActivityStore.isAttentionSuperseded(at: 1, in: feed))
+        XCTAssertFalse(ActivityStore.isAttentionSuperseded(at: 2, in: feed))
     }
 
     @MainActor
@@ -335,13 +399,32 @@ final class ActivityStoreTests: XCTestCase {
             detail: "Use AuthService",
             timestamp: 20,
             missionID: "mission-1",
-            missionEventID: "event-2"
+            missionEventID: "event-2",
+            missionReplyToEventID: "event-1"
         )
 
         store.record(question)
         XCTAssertEqual(store.unreadCount, 1)
         store.record(response)
         XCTAssertEqual(store.unreadCount, 0)
+    }
+
+    @MainActor
+    func testHookCenterRoutesAttentionAndTurnCompleteIntoActivity() {
+        let store = makeStore()
+        let center = AgentHookCenter()
+        center.onEventReceived = { event, resolution in
+            store.record(
+                event,
+                workspaceTitle: resolution?.workspace.title ?? event.cwd ?? "External agent",
+                columnIndex: resolution?.columnIndex
+            )
+        }
+
+        center.dispatch(makeEvent(.notification, detail: "needs permission"))
+        center.dispatch(makeEvent(.turnComplete, kind: .codex, detail: "done"))
+
+        XCTAssertEqual(store.feedEntries.map(\.category), [.turnComplete, .attention])
     }
 
     func testInitialReadTimestampWithoutSidecarTreatsHistoryAsRead() {

@@ -389,7 +389,8 @@ extension NiruxShellView {
             detail: event.message,
             timestamp: event.timestamp,
             missionID: mission.id,
-            missionEventID: event.id
+            missionEventID: event.id,
+            missionReplyToEventID: event.inReplyTo
         )
         ActivityStore.shared.record(entry)
         ActivityStore.shared.flush()
