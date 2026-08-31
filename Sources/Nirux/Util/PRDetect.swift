@@ -19,14 +19,18 @@ enum PRDetect {
     }
 
     private static func fetch(branch: String, cwd: String) -> PRInfo? {
-        // Find gh binary
         let ghPath = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
             .first { FileManager.default.fileExists(atPath: $0) }
         guard let ghPath else { return nil }
 
+        return fetch(branch: branch, cwd: cwd, ghPath: ghPath)
+    }
+
+    static func fetch(branch: String, cwd: String, ghPath: String) -> PRInfo? {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: ghPath)
         proc.arguments = ["pr", "list", "--head", branch,
+                          "--state", "all",
                           "--json", "number,state,isDraft,statusCheckRollup,reviewDecision,mergeable,url,additions,deletions,changedFiles",
                           "--limit", "1"]
         proc.currentDirectoryURL = URL(fileURLWithPath: cwd)

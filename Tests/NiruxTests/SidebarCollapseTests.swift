@@ -19,7 +19,11 @@ final class SidebarCollapseTests: XCTestCase {
             isActive: isActive,
             columns: [],
             prInfo: nil,
-            diffStats: nil
+            diffStats: nil,
+            purpose: nil,
+            phase: isInactive ? .parked : .active,
+            lastSummary: nil,
+            lastActivityAt: nil
         )
     }
 
