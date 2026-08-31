@@ -181,9 +181,10 @@ enum PRDetect {
         guard let owner = candidate["headRepositoryOwner"] as? [String: Any],
               let login = owner["login"] as? String,
               let repository = candidate["headRepository"] as? [String: Any],
-              let name = repository["name"] as? String
+              let name = repository["name"] as? String,
+              let url = candidate["url"] as? String
         else { return nil }
-        return GitHubRepository(owner: login, name: name)
+        return GitHubRepository(repositoryURL: url, owner: login, name: name)
     }
 
     /// Get diff stats via git

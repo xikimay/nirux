@@ -468,7 +468,11 @@ final class WorkspaceContextTests: XCTestCase {
         let reassigned = GitContext(
             branch: "feature/task",
             identity: identity,
-            upstreamRepository: GitHubRepository(owner: "other", name: "repo")
+            upstreamRepository: GitHubRepository(
+                host: "ghe.example.com",
+                owner: "owner",
+                name: "repo"
+            )
         )
         let pullRequest = PRInfo(
             number: 42,
@@ -572,7 +576,11 @@ final class WorkspaceContextTests: XCTestCase {
         let confirmedReassignment = GitContext(
             branch: "feature/task",
             identity: retainedIdentity.identity,
-            upstreamRepository: GitHubRepository(owner: "other", name: "repo")
+            upstreamRepository: GitHubRepository(
+                host: "ghe.example.com",
+                owner: "owner",
+                name: "repo"
+            )
         )
         let reassignmentObservation = try XCTUnwrap(
             workspace.beginGitContextObservation(at: "/repo")

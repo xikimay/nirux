@@ -26,6 +26,14 @@ final class PRDetectTests: XCTestCase {
             GitHubRepository(remoteURL: "git@github.com:XikiMay/Nirux.git"),
             expected
         )
+        XCTAssertEqual(
+            GitHubRepository(remoteURL: "ssh://git@GITHUB.COM/XikiMay/Nirux.git"),
+            expected
+        )
+        XCTAssertNotEqual(
+            GitHubRepository(remoteURL: "git@ghe.example.com:XikiMay/Nirux.git"),
+            expected
+        )
     }
 
     func testGitContextTracksUpstreamRepositoryReassignment() throws {
@@ -56,12 +64,10 @@ final class PRDetectTests: XCTestCase {
             GitHubRepository(owner: "owner", name: "nirux")
         )
 
-        try runGit([
-            "remote", "set-url", "origin", "https://github.com/Other/Nirux.git"
-        ], at: directory)
+        try runGit(["remote", "set-url", "origin", "https://ghe.example.com/Owner/Nirux.git"], at: directory)
         XCTAssertEqual(
             try XCTUnwrap(GitDetect.context(at: directory.path)).upstreamRepository,
-            GitHubRepository(owner: "other", name: "nirux")
+            GitHubRepository(host: "ghe.example.com", owner: "owner", name: "nirux")
         )
     }
 
@@ -138,6 +144,27 @@ final class PRDetectTests: XCTestCase {
           {"number":80,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/80"}
         ]
         """#)
+
+        guard case .success(_, let fetched) = result else {
+            return XCTFail("Expected successful PR lookup")
+        }
+        XCTAssertEqual(try XCTUnwrap(fetched).number, 80)
+    }
+
+    func testOpenPullRequestFromDifferentHostIsIgnored() throws {
+        let result = try fetchUsingFakeGitHubCLI(
+            openJSON: #"""
+            [
+              {"number":90,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://github.com/xikimay/nirux/pull/90"},
+              {"number":80,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://ghe.example.com/xikimay/nirux/pull/80"}
+            ]
+            """#,
+            upstreamRepository: GitHubRepository(
+                host: "ghe.example.com",
+                owner: "xikimay",
+                name: "nirux"
+            )
+        )
 
         guard case .success(_, let fetched) = result else {
             return XCTFail("Expected successful PR lookup")
@@ -403,7 +430,11 @@ final class PRDetectTests: XCTestCase {
         isDirty: Bool = false,
         failingState: String? = nil,
         watchdogDelay: Int = 30,
-        upstreamRepository: GitHubRepository? = GitHubRepository(owner: "xikimay", name: "nirux")
+        upstreamRepository: GitHubRepository? = GitHubRepository(
+            host: "example.test",
+            owner: "xikimay",
+            name: "nirux"
+        )
     ) throws -> PRDetect.FetchResult {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

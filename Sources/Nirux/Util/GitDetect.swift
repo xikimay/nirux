@@ -1,21 +1,31 @@
 import Foundation
 
 struct GitHubRepository: Hashable, Sendable {
+    let host: String
     let owner: String
     let name: String
 
-    init(owner: String, name: String) {
+    init(host: String = "github.com", owner: String, name: String) {
+        self.host = Self.normalizedHost(host)
         self.owner = owner.lowercased()
         self.name = name.lowercased()
     }
 
     init?(remoteURL: String) {
         let trimmed = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let host: String
         let path: String
-        if let url = URL(string: trimmed), url.scheme != nil, url.host != nil {
+        if let url = URL(string: trimmed), url.scheme != nil,
+           let parsedHost = url.host, !parsedHost.isEmpty {
+            host = parsedHost
             path = url.path
         } else if let colon = trimmed.firstIndex(of: ":"),
                   !trimmed[..<colon].contains("/") {
+            let authority = trimmed[..<colon]
+            guard let parsedHost = authority.split(separator: "@").last,
+                  !parsedHost.isEmpty
+            else { return nil }
+            host = String(parsedHost)
             path = String(trimmed[trimmed.index(after: colon)...])
         } else {
             return nil
@@ -29,7 +39,20 @@ struct GitHubRepository: Hashable, Sendable {
             name.removeLast(4)
         }
         guard !owner.isEmpty, !name.isEmpty else { return nil }
-        self.init(owner: owner, name: name)
+        self.init(host: host, owner: owner, name: name)
+    }
+
+    init?(repositoryURL: String, owner: String, name: String) {
+        guard let url = URL(string: repositoryURL),
+              let host = url.host, !host.isEmpty,
+              !owner.isEmpty, !name.isEmpty
+        else { return nil }
+        self.init(host: host, owner: owner, name: name)
+    }
+
+    private static func normalizedHost(_ host: String) -> String {
+        host.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+            .lowercased()
     }
 }
 
