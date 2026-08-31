@@ -28,6 +28,39 @@ final class PRDetectTests: XCTestCase {
         )
     }
 
+    func testGitContextTracksUntrackedUnstagedAndStagedChanges() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try runGit(["init", "-q"], at: directory)
+        let trackedFile = directory.appendingPathComponent("tracked.txt")
+        try "clean\n".write(to: trackedFile, atomically: true, encoding: .utf8)
+        try runGit(["add", "tracked.txt"], at: directory)
+        try runGit([
+            "-c", "user.name=Nirux Tests",
+            "-c", "user.email=nirux@example.test",
+            "commit", "-qm", "initial"
+        ], at: directory)
+
+        XCTAssertFalse(try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty)
+
+        let untrackedFile = directory.appendingPathComponent("untracked.txt")
+        try "new\n".write(to: untrackedFile, atomically: true, encoding: .utf8)
+        XCTAssertTrue(try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty)
+        try FileManager.default.removeItem(at: untrackedFile)
+
+        try "modified\n".write(to: trackedFile, atomically: true, encoding: .utf8)
+        XCTAssertTrue(try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty)
+        try runGit(["restore", "tracked.txt"], at: directory)
+        XCTAssertFalse(try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty)
+
+        try "staged\n".write(to: trackedFile, atomically: true, encoding: .utf8)
+        try runGit(["add", "tracked.txt"], at: directory)
+        XCTAssertTrue(try XCTUnwrap(GitDetect.context(at: directory.path)).identity.isDirty)
+    }
+
     func testOpenPullRequestIsPreferredOverNewerClosedPullRequest() throws {
         let result = try fetchUsingFakeGitHubCLI(
             openJSON: #"""
@@ -142,6 +175,34 @@ final class PRDetectTests: XCTestCase {
         )
     }
 
+    func testDirtyWorktreeKeepsOpenPullRequestAndRejectsTerminalState() throws {
+        let openResult = try fetchUsingFakeGitHubCLI(
+            openJSON: #"""
+            [
+              {"number":41,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/41"}
+            ]
+            """#,
+            isDirty: true
+        )
+        guard case .success(_, let openInfo) = openResult else {
+            return XCTFail("Expected successful open PR lookup")
+        }
+        XCTAssertEqual(try XCTUnwrap(openInfo).state, "OPEN")
+
+        let terminalResult = try fetchUsingFakeGitHubCLI(
+            terminalJSON: #"""
+            [
+              {"number":42,"state":"MERGED","headRefOid":"current-head","isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/42"}
+            ]
+            """#,
+            isDirty: true
+        )
+        guard case .success(_, let terminalInfo) = terminalResult else {
+            return XCTFail("Expected successful terminal PR lookup")
+        }
+        XCTAssertNil(terminalInfo)
+    }
+
     func testTerminalPullRequestFromReusedBranchNameIsIgnored() throws {
         let result = try fetchUsingFakeGitHubCLI(terminalJSON: #"""
         [
@@ -185,6 +246,7 @@ final class PRDetectTests: XCTestCase {
         openJSON: String = "[]",
         terminalJSON: String = "[]",
         currentHead: String = "current-head",
+        isDirty: Bool = false,
         failingState: String? = nil,
         watchdogDelay: Int = 30,
         upstreamRepository: GitHubRepository? = GitHubRepository(owner: "xikimay", name: "nirux")
@@ -262,10 +324,25 @@ final class PRDetectTests: XCTestCase {
                 branch: "feature/task",
                 identity: GitIdentity(
                     repositoryRoot: directory.path,
-                    head: currentHead
+                    head: currentHead,
+                    isDirty: isDirty
                 )
             ),
             upstreamRepository: upstreamRepository
         )
+    }
+
+    private func runGit(_ arguments: [String], at directory: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        process.currentDirectoryURL = directory
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "PRDetectTests.Git", code: Int(process.terminationStatus))
+        }
     }
 }

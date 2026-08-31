@@ -125,6 +125,7 @@ final class WorkspaceState {
 
     /// Called by NiruxShellView to wire up sidebar refresh
     var onMetadataChanged: (() -> Void)?
+    var onGitContextChanged: (() -> Void)?
     var onDiffStatsClicked: (() -> Void)?
     /// A terminal link was cmd-clicked — the shell opens a browser column
     /// in this workspace.
@@ -191,20 +192,35 @@ final class WorkspaceState {
 
     private func replaceGitContext(_ context: GitContext?) -> Bool {
         guard gitContext != context else { return false }
+        let previousContext = gitContext
         gitContext = context
-        prInfo = nil
+        let sameRevision = previousContext?.branch == context?.branch
+            && previousContext?.identity.repositoryRoot == context?.identity.repositoryRoot
+            && previousContext?.identity.head == context?.identity.head
+        if !sameRevision || (context?.identity.isDirty == true && Self.isTerminalPullRequest(prInfo)) {
+            prInfo = nil
+        }
         diffStats = nil
         if !titleIsManual, let branch = context?.branch, !branch.isEmpty {
             title = branch
         }
+        onGitContextChanged?()
         return true
     }
 
     @discardableResult
     func applyPullRequestInfo(_ info: PRInfo?, for context: GitContext) -> Bool {
-        guard gitContext == context, prInfo != info else { return false }
+        guard gitContext == context,
+              !(context.identity.isDirty && Self.isTerminalPullRequest(info)),
+              prInfo != info
+        else { return false }
         prInfo = info
         return true
+    }
+
+    private static func isTerminalPullRequest(_ info: PRInfo?) -> Bool {
+        guard let state = info?.state.uppercased() else { return false }
+        return state == "MERGED" || state == "CLOSED"
     }
 
     /// Record meaningful agent activity without overwriting a user-edited
@@ -249,10 +265,10 @@ final class WorkspaceState {
         col.onCwdChanged = { [weak self] path in
             guard let observation = self?.beginGitContextObservation() else { return }
             GitDetect.contextAsync(at: path) { [weak self] context in
-                guard let self,
-                      self.applyGitContextObservation(context, observation: observation) != .stale
-                else { return }
-                self.onMetadataChanged?()
+                guard let self else { return }
+                let result = self.applyGitContextObservation(context, observation: observation)
+                guard result != .stale else { return }
+                if result == .unchanged { self.onMetadataChanged?() }
             }
         }
     }

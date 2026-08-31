@@ -164,6 +164,12 @@ final class NiruxShellView: NSView {
     /// init, addWorkspace and session restore.
     func wireWorkspace(_ workspace: WorkspaceState) {
         workspace.onMetadataChanged = { [weak self] in self?.updateSidebar(); self?.refreshTitleBarLabels() }
+        workspace.onGitContextChanged = { [weak self, weak workspace] in
+            guard let self, let workspace else { return }
+            self.updateSidebar()
+            self.refreshTitleBarLabels()
+            self.refreshPRInfo(for: [workspace])
+        }
         workspace.onDiffStatsClicked = { [weak self, weak workspace] in
             guard let workspace else { return }
             self?.openDiffInEditor(for: workspace)

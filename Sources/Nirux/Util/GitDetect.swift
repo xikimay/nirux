@@ -36,6 +36,13 @@ struct GitHubRepository: Hashable, Sendable {
 struct GitIdentity: Hashable, Sendable {
     let repositoryRoot: String
     let head: String
+    let isDirty: Bool
+
+    init(repositoryRoot: String, head: String, isDirty: Bool = false) {
+        self.repositoryRoot = repositoryRoot
+        self.head = head
+        self.isDirty = isDirty
+    }
 }
 
 struct GitContext: Hashable, Sendable {
@@ -48,6 +55,9 @@ enum GitDetect {
         guard let output = gitOutput(
             arguments: ["rev-parse", "--show-toplevel", "HEAD", "--abbrev-ref", "HEAD"],
             at: path
+        ), let status = gitOutput(
+            arguments: ["status", "--porcelain=v1", "--untracked-files=normal"],
+            at: path
         ) else { return nil }
         let lines = output
             .split(whereSeparator: { $0.isNewline })
@@ -59,7 +69,8 @@ enum GitDetect {
             branch: lines[2],
             identity: GitIdentity(
                 repositoryRoot: URL(fileURLWithPath: lines[0]).standardizedFileURL.path,
-                head: lines[1]
+                head: lines[1],
+                isDirty: !status.isEmpty
             )
         )
     }

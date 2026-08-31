@@ -74,6 +74,10 @@ enum PRDetect {
             else { return .failure }
         }
 
+        guard !context.identity.isDirty else {
+            return .success(context: context, info: nil)
+        }
+
         guard let terminalCandidates = candidates(
             branch: branch,
             state: "all",

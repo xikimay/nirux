@@ -30,6 +30,11 @@ struct WorkspaceContextPanelConfiguration {
 /// a read-only block so the normal sidebar can stay compact.
 @MainActor
 final class WorkspaceContextPanel {
+    enum ShortcutAction: Equatable {
+        case cancel
+        case save
+    }
+
     var onSave: ((WorkspaceContextValues) -> Void)?
 
     private var panel: NSPanel?
@@ -197,17 +202,37 @@ final class WorkspaceContextPanel {
         liveContextLabel = live
 
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak panel] event in
-            guard let self, let panel, panel.isVisible else { return event }
-            if event.keyCode == 0x35 {
+            guard let self, let panel, panel.isVisible,
+                  let action = Self.shortcutAction(
+                      keyCode: event.keyCode,
+                      modifierFlags: event.modifierFlags,
+                      eventWindow: event.window,
+                      panel: panel
+                  )
+            else { return event }
+            switch action {
+            case .cancel:
                 self.cancelAction()
                 return nil
-            }
-            if [0x24, 0x4C].contains(event.keyCode), event.modifierFlags.contains(.command) {
+            case .save:
                 self.saveAction()
                 return nil
             }
-            return event
         }
+    }
+
+    static func shortcutAction(
+        keyCode: UInt16,
+        modifierFlags: NSEvent.ModifierFlags,
+        eventWindow: AnyObject?,
+        panel: AnyObject
+    ) -> ShortcutAction? {
+        guard eventWindow === panel else { return nil }
+        if keyCode == 0x35 { return .cancel }
+        if [0x24, 0x4C].contains(keyCode), modifierFlags.contains(.command) {
+            return .save
+        }
+        return nil
     }
 
     private func fieldLabel(_ text: String, x: CGFloat = 24, y: CGFloat) -> NSTextField {

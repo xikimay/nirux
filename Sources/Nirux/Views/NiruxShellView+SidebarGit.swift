@@ -425,14 +425,11 @@ extension NiruxShellView {
         for workspace in workspaces {
             if let col = workspace.columns[safe: workspace.focusedIndex], let cwd = col.pty?.childCwd {
                 let observation = workspace.beginGitContextObservation()
-                GitDetect.contextAsync(at: cwd) { [weak self, weak workspace] context in
-                    guard let workspace,
-                          workspace.applyGitContextObservation(
-                              context,
-                              observation: observation
-                          ) == .changed
-                    else { return }
-                    self?.updateSidebar()
+                GitDetect.contextAsync(at: cwd) { [weak workspace] context in
+                    workspace?.applyGitContextObservation(
+                        context,
+                        observation: observation
+                    )
                 }
             }
         }

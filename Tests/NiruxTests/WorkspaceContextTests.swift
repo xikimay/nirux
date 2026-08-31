@@ -202,6 +202,129 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(workspace.prInfo?.number, 42)
     }
 
+    func testGitCleanlinessChangeClearsTerminalStateButRetainsOpenReview() {
+        let workspace = WorkspaceState(title: "context", cwd: "/tmp")
+        let cleanContext = GitContext(
+            branch: "feature/task",
+            identity: GitIdentity(repositoryRoot: "/repo", head: "head-a", isDirty: false)
+        )
+        let dirtyContext = GitContext(
+            branch: "feature/task",
+            identity: GitIdentity(repositoryRoot: "/repo", head: "head-a", isDirty: true)
+        )
+        let merged = PRInfo(
+            number: 41,
+            state: "MERGED",
+            isDraft: false,
+            ciStatus: nil,
+            failedCheckUrl: nil,
+            reviewDecision: nil,
+            mergeable: nil,
+            url: "https://example.test/pull/41",
+            additions: nil,
+            deletions: nil,
+            changedFiles: nil
+        )
+        let open = PRInfo(
+            number: 42,
+            state: "OPEN",
+            isDraft: false,
+            ciStatus: nil,
+            failedCheckUrl: nil,
+            reviewDecision: nil,
+            mergeable: nil,
+            url: "https://example.test/pull/42",
+            additions: nil,
+            deletions: nil,
+            changedFiles: nil
+        )
+
+        XCTAssertTrue(workspace.updateGitContext(cleanContext))
+        XCTAssertTrue(workspace.applyPullRequestInfo(merged, for: cleanContext))
+        XCTAssertEqual(workspace.effectivePhase, .done)
+        XCTAssertTrue(workspace.updateGitContext(dirtyContext))
+        XCTAssertNil(workspace.prInfo)
+        XCTAssertEqual(workspace.effectivePhase, .active)
+
+        XCTAssertTrue(workspace.updateGitContext(cleanContext))
+        XCTAssertTrue(workspace.applyPullRequestInfo(open, for: cleanContext))
+        XCTAssertTrue(workspace.updateGitContext(dirtyContext))
+        XCTAssertEqual(workspace.prInfo, open)
+        XCTAssertEqual(workspace.effectivePhase, .review)
+        XCTAssertFalse(workspace.applyPullRequestInfo(merged, for: dirtyContext))
+        XCTAssertEqual(workspace.prInfo, open)
+    }
+
+    func testChangedGitObservationSchedulesRefreshAndRejectsStaleRequest() {
+        let workspace = WorkspaceState(title: "context", cwd: "/tmp")
+        let staleContext = GitContext(
+            branch: "feature/task",
+            identity: GitIdentity(repositoryRoot: "/repo", head: "head-a")
+        )
+        let currentContext = GitContext(
+            branch: "feature/task",
+            identity: GitIdentity(repositoryRoot: "/repo", head: "head-b")
+        )
+        var refreshContexts: [GitContext?] = []
+        workspace.onGitContextChanged = { refreshContexts.append(workspace.gitContext) }
+        let staleObservation = workspace.beginGitContextObservation()
+        let currentObservation = workspace.beginGitContextObservation()
+
+        XCTAssertEqual(
+            workspace.applyGitContextObservation(currentContext, observation: currentObservation),
+            .changed
+        )
+        XCTAssertEqual(refreshContexts, [currentContext])
+        XCTAssertEqual(
+            workspace.applyGitContextObservation(staleContext, observation: staleObservation),
+            .stale
+        )
+        XCTAssertEqual(refreshContexts, [currentContext])
+
+        let unchangedObservation = workspace.beginGitContextObservation()
+        XCTAssertEqual(
+            workspace.applyGitContextObservation(currentContext, observation: unchangedObservation),
+            .unchanged
+        )
+        XCTAssertEqual(refreshContexts, [currentContext])
+    }
+
+    func testWorkspaceContextShortcutsIgnoreOtherWindows() {
+        let panel = NSObject()
+        let otherWindow = NSObject()
+
+        XCTAssertEqual(
+            WorkspaceContextPanel.shortcutAction(
+                keyCode: 0x35,
+                modifierFlags: [],
+                eventWindow: panel,
+                panel: panel
+            ),
+            .cancel
+        )
+        XCTAssertNil(WorkspaceContextPanel.shortcutAction(
+            keyCode: 0x35,
+            modifierFlags: [],
+            eventWindow: otherWindow,
+            panel: panel
+        ))
+        XCTAssertEqual(
+            WorkspaceContextPanel.shortcutAction(
+                keyCode: 0x24,
+                modifierFlags: .command,
+                eventWindow: panel,
+                panel: panel
+            ),
+            .save
+        )
+        XCTAssertNil(WorkspaceContextPanel.shortcutAction(
+            keyCode: 0x24,
+            modifierFlags: .command,
+            eventWindow: otherWindow,
+            panel: panel
+        ))
+    }
+
     func testContextTextNormalizationDropsBlankOptionalRows() {
         XCTAssertNil(WorkspaceState.normalizedContextText(" \n "))
         XCTAssertEqual(WorkspaceState.normalizedContextText("  Ship it  "), "Ship it")
