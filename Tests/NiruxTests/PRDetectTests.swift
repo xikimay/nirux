@@ -29,12 +29,18 @@ final class PRDetectTests: XCTestCase {
     }
 
     func testOpenPullRequestIsPreferredOverNewerClosedPullRequest() throws {
-        let result = try fetchUsingFakeGitHubCLI(json: #"""
+        let result = try fetchUsingFakeGitHubCLI(
+            openJSON: #"""
         [
-          {"number":52,"state":"CLOSED","headRefOid":"current-head","isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/52"},
           {"number":41,"state":"OPEN","headRefOid":"older-head","headRepositoryOwner":{"login":"XikiMay"},"headRepository":{"name":"Nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/41"}
         ]
-        """#)
+        """#,
+            terminalJSON: #"""
+        [
+          {"number":52,"state":"CLOSED","headRefOid":"current-head","isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/52"}
+        ]
+        """#
+        )
         guard case .success(let context, let fetched) = result else {
             return XCTFail("Expected successful PR lookup")
         }
@@ -56,7 +62,7 @@ final class PRDetectTests: XCTestCase {
     }
 
     func testOpenPullRequestFromSameNamedForkBranchIsIgnored() throws {
-        let result = try fetchUsingFakeGitHubCLI(json: #"""
+        let result = try fetchUsingFakeGitHubCLI(openJSON: #"""
         [
           {"number":90,"state":"OPEN","headRefOid":"foreign-head","headRepositoryOwner":{"login":"alice"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/90"},
           {"number":80,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/80"}
@@ -69,8 +75,50 @@ final class PRDetectTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(fetched).number, 80)
     }
 
+    func testOpenPullRequestWithoutUpstreamIdentityPreservesCachedResult() throws {
+        let result = try fetchUsingFakeGitHubCLI(
+            openJSON: #"""
+            [
+              {"number":41,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/41"}
+            ]
+            """#,
+            upstreamRepository: nil
+        )
+
+        guard case .failure = result else {
+            return XCTFail("Expected an unclassifiable open PR lookup to fail")
+        }
+    }
+
+    func testReopenedPullRequestIsNotHiddenByLongClosedHistory() throws {
+        let terminalCandidates: [[String: Any]] = (100 ... 199).map { number in
+            [
+                "number": number,
+                "state": "CLOSED",
+                "headRefOid": "historical-\(number)",
+                "isDraft": false,
+                "url": "https://example.test/pull/\(number)"
+            ]
+        }
+        let terminalData = try JSONSerialization.data(withJSONObject: terminalCandidates)
+        let terminalJSON = try XCTUnwrap(String(data: terminalData, encoding: .utf8))
+        let result = try fetchUsingFakeGitHubCLI(
+            openJSON: #"""
+            [
+              {"number":1,"state":"OPEN","headRefOid":"reopened-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/1"}
+            ]
+            """#,
+            terminalJSON: terminalJSON
+        )
+
+        guard case .success(_, let fetched) = result else {
+            return XCTFail("Expected successful PR lookup")
+        }
+        XCTAssertEqual(try XCTUnwrap(fetched).number, 1)
+    }
+
     func testNewestTerminalPullRequestIsSelectedWhenNoneAreOpen() throws {
-        let result = try fetchUsingFakeGitHubCLI(json: #"""
+        let result = try fetchUsingFakeGitHubCLI(terminalJSON: #"""
         [
           {"number":42,"state":"MERGED","headRefOid":"current-head","isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/42"},
           {"number":57,"state":"CLOSED","headRefOid":"current-head","isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/57"}
@@ -95,7 +143,7 @@ final class PRDetectTests: XCTestCase {
     }
 
     func testTerminalPullRequestFromReusedBranchNameIsIgnored() throws {
-        let result = try fetchUsingFakeGitHubCLI(json: #"""
+        let result = try fetchUsingFakeGitHubCLI(terminalJSON: #"""
         [
           {"number":42,"state":"MERGED","headRefOid":"historical-head","isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/42"}
         ]
@@ -108,12 +156,12 @@ final class PRDetectTests: XCTestCase {
     }
 
     func testLookupFailureDiffersFromSuccessfulEmptyResult() throws {
-        let failure = try fetchUsingFakeGitHubCLI(json: "[]", exitStatus: 1)
+        let failure = try fetchUsingFakeGitHubCLI(failingState: "open")
         guard case .failure = failure else {
             return XCTFail("Expected failed PR lookup")
         }
 
-        let empty = try fetchUsingFakeGitHubCLI(json: "[]")
+        let empty = try fetchUsingFakeGitHubCLI()
         guard case .success(_, let pullRequest) = empty else {
             return XCTFail("Expected successful empty PR lookup")
         }
@@ -124,7 +172,7 @@ final class PRDetectTests: XCTestCase {
         let padding = String(repeating: "x", count: 512 * 1024)
         let json = #"[{"number":41,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[{"conclusion":"SUCCESS","padding":"\#(padding)"}],"url":"https://example.test/pull/41"}]"#
         let result = try fetchUsingFakeGitHubCLI(
-            json: json,
+            openJSON: json,
             watchdogDelay: 2
         )
         guard case .success(_, let fetched) = result else {
@@ -134,10 +182,12 @@ final class PRDetectTests: XCTestCase {
     }
 
     private func fetchUsingFakeGitHubCLI(
-        json: String,
+        openJSON: String = "[]",
+        terminalJSON: String = "[]",
         currentHead: String = "current-head",
-        exitStatus: Int = 0,
-        watchdogDelay: Int = 30
+        failingState: String? = nil,
+        watchdogDelay: Int = 30,
+        upstreamRepository: GitHubRepository? = GitHubRepository(owner: "xikimay", name: "nirux")
     ) throws -> PRDetect.FetchResult {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -150,6 +200,7 @@ final class PRDetectTests: XCTestCase {
         state=""
         limit=0
         json_fields=""
+        search=""
         while [ "$#" -gt 0 ]; do
             case "$1" in
                 --state)
@@ -164,12 +215,23 @@ final class PRDetectTests: XCTestCase {
                     json_fields="$2"
                     shift 2
                     ;;
+                --search)
+                    search="$2"
+                    shift 2
+                    ;;
                 *)
                     shift
                     ;;
             esac
         done
-        [ "$state" = "all" ] || exit 64
+        case "$state" in
+            open) payload='\#(openJSON)' ;;
+            all)
+                [ "$search" = "\#(currentHead)" ] || exit 69
+                payload='\#(terminalJSON)'
+                ;;
+            *) exit 64 ;;
+        esac
         [ "$limit" -ge 2 ] || exit 65
         case ",$json_fields," in
             *,headRefOid,*) ;;
@@ -183,12 +245,12 @@ final class PRDetectTests: XCTestCase {
             *,headRepository,*) ;;
             *) exit 68 ;;
         esac
+        [ "$state" != "\#(failingState ?? "")" ] || exit 1
         parent_pid=$$
         (sleep \#(watchdogDelay); kill -TERM "$parent_pid") >/dev/null 2>&1 &
         watchdog_pid=$!
-        printf '%s\n' '\#(json)'
+        printf '%s\n' "$payload"
         kill "$watchdog_pid" 2>/dev/null || true
-        exit \#(exitStatus)
         """#
         try script.write(to: gh, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: gh.path)
@@ -203,7 +265,7 @@ final class PRDetectTests: XCTestCase {
                     head: currentHead
                 )
             ),
-            upstreamRepository: GitHubRepository(owner: "xikimay", name: "nirux")
+            upstreamRepository: upstreamRepository
         )
     }
 }

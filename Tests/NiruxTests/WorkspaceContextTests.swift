@@ -81,6 +81,31 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(workspace.lastActivityAt, 30)
     }
 
+    func testUserPromptUpdatesActivityWithoutReplacingSummaryOrCountingToolUse() throws {
+        let workspace = WorkspaceState(title: "context", cwd: "/tmp")
+        workspace.lastSummary = "Keep the completed work summary"
+
+        let prompt = try XCTUnwrap(AgentHookEvent(
+            kind: .claude,
+            payload: ["hook_event_name": "UserPromptSubmit"],
+            env: [:],
+            now: 20
+        ))
+        XCTAssertTrue(workspace.recordAgentHookActivity(prompt))
+        XCTAssertEqual(workspace.lastActivityAt, 20)
+        XCTAssertEqual(workspace.lastSummary, "Keep the completed work summary")
+
+        let toolUse = try XCTUnwrap(AgentHookEvent(
+            kind: .claude,
+            payload: ["hook_event_name": "PreToolUse", "tool_name": "Bash"],
+            env: [:],
+            now: 30
+        ))
+        XCTAssertFalse(workspace.recordAgentHookActivity(toolUse))
+        XCTAssertEqual(workspace.lastActivityAt, 20)
+        XCTAssertEqual(workspace.lastSummary, "Keep the completed work summary")
+    }
+
     func testGitContextChangesRejectStalePRMetadata() {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         let pullRequest = PRInfo(
@@ -137,6 +162,44 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertTrue(workspace.updateGitContext(nil))
         XCTAssertNil(workspace.prInfo)
         XCTAssertNil(workspace.diffStats)
+    }
+
+    func testOlderGitObservationCannotReplaceNewerContext() {
+        let workspace = WorkspaceState(title: "context", cwd: "/tmp")
+        let oldContext = GitContext(
+            branch: "feature/task",
+            identity: GitIdentity(repositoryRoot: "/repo", head: "head-a")
+        )
+        let newContext = GitContext(
+            branch: "feature/task",
+            identity: GitIdentity(repositoryRoot: "/repo", head: "head-b")
+        )
+        let olderObservation = workspace.beginGitContextObservation()
+        let newerObservation = workspace.beginGitContextObservation()
+
+        XCTAssertEqual(
+            workspace.applyGitContextObservation(newContext, observation: newerObservation),
+            .changed
+        )
+        workspace.prInfo = PRInfo(
+            number: 42,
+            state: "OPEN",
+            isDraft: false,
+            ciStatus: nil,
+            failedCheckUrl: nil,
+            reviewDecision: nil,
+            mergeable: nil,
+            url: "https://example.test/pull/42",
+            additions: nil,
+            deletions: nil,
+            changedFiles: nil
+        )
+        XCTAssertEqual(
+            workspace.applyGitContextObservation(oldContext, observation: olderObservation),
+            .stale
+        )
+        XCTAssertEqual(workspace.gitContext, newContext)
+        XCTAssertEqual(workspace.prInfo?.number, 42)
     }
 
     func testContextTextNormalizationDropsBlankOptionalRows() {

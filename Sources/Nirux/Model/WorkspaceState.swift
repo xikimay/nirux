@@ -55,6 +55,16 @@ struct PilotClickableArea {
     let label: NSTextField
 }
 
+struct GitContextObservation: Sendable {
+    fileprivate let generation: UInt64
+}
+
+enum GitContextObservationResult: Equatable {
+    case stale
+    case unchanged
+    case changed
+}
+
 /// A workspace contains columns on an infinite horizontal strip
 @MainActor
 final class WorkspaceState {
@@ -75,6 +85,7 @@ final class WorkspaceState {
     /// with and pick up changes after a new terminal or app restart.
     var missionHandoffsEnabled: Bool
     private(set) var gitContext: GitContext?
+    private var gitContextObservationGeneration: UInt64 = 0
     var gitBranch: String? { gitContext?.branch }
     var hasNotification: Bool = false
     var prInfo: PRInfo?
@@ -160,6 +171,25 @@ final class WorkspaceState {
 
     @discardableResult
     func updateGitContext(_ context: GitContext?) -> Bool {
+        gitContextObservationGeneration &+= 1
+        return replaceGitContext(context)
+    }
+
+    func beginGitContextObservation() -> GitContextObservation {
+        gitContextObservationGeneration &+= 1
+        return GitContextObservation(generation: gitContextObservationGeneration)
+    }
+
+    @discardableResult
+    func applyGitContextObservation(
+        _ context: GitContext?,
+        observation: GitContextObservation
+    ) -> GitContextObservationResult {
+        guard observation.generation == gitContextObservationGeneration else { return .stale }
+        return replaceGitContext(context) ? .changed : .unchanged
+    }
+
+    private func replaceGitContext(_ context: GitContext?) -> Bool {
         guard gitContext != context else { return false }
         gitContext = context
         prInfo = nil
@@ -201,13 +231,27 @@ final class WorkspaceState {
         return true
     }
 
+    @discardableResult
+    func recordAgentHookActivity(_ event: AgentHookEvent) -> Bool {
+        switch event.name {
+        case .stop, .turnComplete:
+            return recordAgentActivity(at: event.timestamp, automaticSummary: event.detail)
+        case .notification, .sessionStart, .sessionEnd, .userPromptSubmit:
+            return recordAgentActivity(at: event.timestamp, automaticSummary: nil)
+        case .preToolUse:
+            return false
+        }
+    }
+
     // MARK: - CWD / Git / Title Tracking
 
     private func setupCwdTracking(for col: ColumnState) {
         col.onCwdChanged = { [weak self] path in
+            guard let observation = self?.beginGitContextObservation() else { return }
             GitDetect.contextAsync(at: path) { [weak self] context in
-                guard let self else { return }
-                self.updateGitContext(context)
+                guard let self,
+                      self.applyGitContextObservation(context, observation: observation) != .stale
+                else { return }
                 self.onMetadataChanged?()
             }
         }
@@ -272,9 +316,9 @@ final class WorkspaceState {
         } else {
             detectPath = cwd
         }
+        let observation = beginGitContextObservation()
         GitDetect.contextAsync(at: detectPath) { [weak self] context in
-            guard let self else { return }
-            self.updateGitContext(context)
+            self?.applyGitContextObservation(context, observation: observation)
         }
     }
 

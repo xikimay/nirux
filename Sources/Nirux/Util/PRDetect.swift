@@ -52,13 +52,65 @@ enum PRDetect {
         context: GitContext,
         upstreamRepository: GitHubRepository?
     ) -> FetchResult {
+        guard let openCandidates = candidates(
+            branch: branch,
+            state: "open",
+            search: nil,
+            ghPath: ghPath,
+            repositoryRoot: context.identity.repositoryRoot
+        ) else { return .failure }
+
+        let sortedOpenCandidates = openCandidates
+            .filter { ($0["state"] as? String)?.uppercased() == "OPEN" }
+            .sorted(by: pullRequestNumberDescending)
+        if !sortedOpenCandidates.isEmpty {
+            guard let upstreamRepository else { return .failure }
+            if let openCandidate = sortedOpenCandidates.first(where: {
+                repository(for: $0) == upstreamRepository
+            }) {
+                return .success(context: context, info: pullRequestInfo(from: openCandidate))
+            }
+            guard sortedOpenCandidates.allSatisfy({ repository(for: $0) != nil })
+            else { return .failure }
+        }
+
+        guard let terminalCandidates = candidates(
+            branch: branch,
+            state: "all",
+            search: context.identity.head,
+            ghPath: ghPath,
+            repositoryRoot: context.identity.repositoryRoot
+        ) else { return .failure }
+        let terminalCandidate = terminalCandidates
+            .filter {
+                guard let state = ($0["state"] as? String)?.uppercased() else { return false }
+                return (state == "MERGED" || state == "CLOSED")
+                    && ($0["headRefOid"] as? String) == context.identity.head
+            }
+            .sorted(by: pullRequestNumberDescending)
+            .first
+        return .success(
+            context: context,
+            info: terminalCandidate.map { pullRequestInfo(from: $0) }
+        )
+    }
+
+    private static func candidates(
+        branch: String,
+        state: String,
+        search: String?,
+        ghPath: String,
+        repositoryRoot: String
+    ) -> [[String: Any]]? {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: ghPath)
-        proc.arguments = ["pr", "list", "--head", branch,
-                          "--state", "all",
-                          "--json", "number,state,headRefOid,headRepositoryOwner,headRepository,isDraft,statusCheckRollup,reviewDecision,mergeable,url,additions,deletions,changedFiles",
-                          "--limit", "100"]
-        proc.currentDirectoryURL = URL(fileURLWithPath: context.identity.repositoryRoot)
+        var arguments = ["pr", "list", "--head", branch,
+                         "--state", state,
+                         "--json", "number,state,headRefOid,headRepositoryOwner,headRepository,isDraft,statusCheckRollup,reviewDecision,mergeable,url,additions,deletions,changedFiles",
+                         "--limit", "100"]
+        if let search { arguments.append(contentsOf: ["--search", search]) }
+        proc.arguments = arguments
+        proc.currentDirectoryURL = URL(fileURLWithPath: repositoryRoot)
 
         let pipe = Pipe()
         proc.standardOutput = pipe
@@ -68,61 +120,55 @@ enum PRDetect {
             try proc.run()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             proc.waitUntilExit()
-            guard proc.terminationStatus == 0 else { return .failure }
-            guard let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-            else { return .failure }
-            let candidates = arr.sorted {
-                ($0["number"] as? Int ?? 0) > ($1["number"] as? Int ?? 0)
-            }
-            let openCandidate = upstreamRepository.flatMap { upstreamRepository in
-                candidates.first(where: {
-                    ($0["state"] as? String)?.uppercased() == "OPEN"
-                        && repository(for: $0) == upstreamRepository
-                })
-            }
-            guard let first = openCandidate ?? candidates.first(where: {
-                guard let state = ($0["state"] as? String)?.uppercased() else { return false }
-                return (state == "MERGED" || state == "CLOSED")
-                    && ($0["headRefOid"] as? String) == context.identity.head
-            }) else { return .success(context: context, info: nil) }
-
-            let number = first["number"] as? Int ?? 0
-            let state = first["state"] as? String ?? ""
-            let isDraft = first["isDraft"] as? Bool ?? false
-            let url = first["url"] as? String ?? ""
-            let additions = first["additions"] as? Int
-            let deletions = first["deletions"] as? Int
-            let changedFiles = first["changedFiles"] as? Int
-            let reviewDecision = first["reviewDecision"] as? String
-            let mergeable = first["mergeable"] as? String
-
-            var ciStatus: String?
-            var failedCheckUrl: String?
-            if let rollup = first["statusCheckRollup"] as? [[String: Any]], !rollup.isEmpty {
-                let conclusions = rollup.compactMap { $0["conclusion"] as? String }
-                if conclusions.contains("FAILURE") {
-                    ciStatus = "FAILURE"
-                    failedCheckUrl = rollup
-                        .first { ($0["conclusion"] as? String) == "FAILURE" }
-                        .flatMap { $0["detailsUrl"] as? String }
-                } else if conclusions.contains("PENDING") || conclusions.allSatisfy({ $0.isEmpty }) {
-                    ciStatus = "PENDING"
-                } else if !conclusions.isEmpty {
-                    ciStatus = "SUCCESS"
-                }
-            }
-
-            return .success(
-                context: context,
-                info: PRInfo(number: number, state: state, isDraft: isDraft,
-                             ciStatus: ciStatus, failedCheckUrl: failedCheckUrl,
-                             reviewDecision: reviewDecision, mergeable: mergeable,
-                             url: url, additions: additions, deletions: deletions,
-                             changedFiles: changedFiles)
-            )
+            guard proc.terminationStatus == 0 else { return nil }
+            return try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
         } catch {
-            return .failure
+            return nil
         }
+    }
+
+    private static func pullRequestNumberDescending(
+        _ lhs: [String: Any],
+        _ rhs: [String: Any]
+    ) -> Bool {
+        (lhs["number"] as? Int ?? 0) > (rhs["number"] as? Int ?? 0)
+    }
+
+    private static func pullRequestInfo(from candidate: [String: Any]) -> PRInfo {
+        let rollup = candidate["statusCheckRollup"] as? [[String: Any]] ?? []
+        let conclusions = rollup.compactMap { $0["conclusion"] as? String }
+        let allChecksPending = !rollup.isEmpty && conclusions.allSatisfy({ $0.isEmpty })
+        let ciStatus: String?
+        let failedCheckUrl: String?
+        if conclusions.contains("FAILURE") {
+            ciStatus = "FAILURE"
+            failedCheckUrl = rollup
+                .first { ($0["conclusion"] as? String) == "FAILURE" }
+                .flatMap { $0["detailsUrl"] as? String }
+        } else if conclusions.contains("PENDING") || allChecksPending {
+            ciStatus = "PENDING"
+            failedCheckUrl = nil
+        } else if !conclusions.isEmpty {
+            ciStatus = "SUCCESS"
+            failedCheckUrl = nil
+        } else {
+            ciStatus = nil
+            failedCheckUrl = nil
+        }
+
+        return PRInfo(
+            number: candidate["number"] as? Int ?? 0,
+            state: candidate["state"] as? String ?? "",
+            isDraft: candidate["isDraft"] as? Bool ?? false,
+            ciStatus: ciStatus,
+            failedCheckUrl: failedCheckUrl,
+            reviewDecision: candidate["reviewDecision"] as? String,
+            mergeable: candidate["mergeable"] as? String,
+            url: candidate["url"] as? String ?? "",
+            additions: candidate["additions"] as? Int,
+            deletions: candidate["deletions"] as? Int,
+            changedFiles: candidate["changedFiles"] as? Int
+        )
     }
 
     private static func repository(for candidate: [String: Any]) -> GitHubRepository? {
