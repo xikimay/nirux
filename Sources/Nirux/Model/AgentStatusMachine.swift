@@ -47,6 +47,13 @@ struct AgentStatusMachine {
     /// startup output of the new command is not a completed turn either.
     private static let startupWindow: TimeInterval = 5.0
 
+    /// Central capability gate shared by local status and remote prompt
+    /// routing. Bot commands remain agent-agnostic even as this allowlist
+    /// grows with Nirux's supported terminal agents.
+    static func isRecognizedAgentProcess(_ name: String) -> Bool {
+        name == "claude" || name == "codex"
+    }
+
     /// True when a hook event should flip the column to `.needsAttention`:
     /// the transition into attention fires a callback (dock bounce, sidebar
     /// badge); already-attention stays quiet.
@@ -118,7 +125,7 @@ struct AgentStatusMachine {
     /// the foreground process name, "" when unknown.
     @discardableResult
     mutating func tick(fgName: String, isUserFocused: Bool, now: Date) -> AgentStatus {
-        let isAgent = fgName == "claude" || fgName == "codex"
+        let isAgent = Self.isRecognizedAgentProcess(fgName)
 
         if fgName != lastForegroundName {
             lastForegroundName = fgName

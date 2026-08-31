@@ -24,6 +24,9 @@ let package = Package(
             path: "Sources/Nirux",
             resources: [
                 .copy("EditorAssets")
+            ],
+            linkerSettings: [
+                .linkedFramework("Security")
             ]
         ),
         .testTarget(

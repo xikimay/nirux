@@ -352,6 +352,40 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(decodedWorkspace.missionID, missionID)
     }
 
+    func testTelegramRemoteAccessSettingsRoundTripWithoutToken() throws {
+        let original = PersistedSettings(
+            telegramRemoteAccessEnabled: true,
+            telegramPairedUserID: 123_456,
+            telegramPairedChatID: 654_321,
+            telegramNotifyOnCompletion: false,
+            telegramNotifyOnAttention: true,
+            telegramLastUpdateID: 88
+        )
+        let data = try JSONEncoder().encode(original)
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        let decoded = try JSONDecoder().decode(PersistedSettings.self, from: data)
+
+        XCTAssertTrue(decoded.telegramRemoteAccessEnabled)
+        XCTAssertEqual(decoded.telegramPairedUserID, 123_456)
+        XCTAssertEqual(decoded.telegramPairedChatID, 654_321)
+        XCTAssertFalse(decoded.telegramNotifyOnCompletion)
+        XCTAssertTrue(decoded.telegramNotifyOnAttention)
+        XCTAssertEqual(decoded.telegramLastUpdateID, 88)
+        XCTAssertFalse(json.localizedCaseInsensitiveContains("token"))
+    }
+
+    func testLegacySettingsDefaultTelegramRemoteAccessOff() throws {
+        let json = Data("""
+        { "claudeLaunchMode": "plan", "claudeNoFlicker": true }
+        """.utf8)
+        let settings = try JSONDecoder().decode(PersistedSettings.self, from: json)
+        XCTAssertFalse(settings.telegramRemoteAccessEnabled)
+        XCTAssertNil(settings.telegramPairedUserID)
+        XCTAssertNil(settings.telegramPairedChatID)
+        XCTAssertTrue(settings.telegramNotifyOnCompletion)
+        XCTAssertTrue(settings.telegramNotifyOnAttention)
+    }
+
     // MARK: - cliArgs wire format
 
     /// Lock down the CLI flag mapping so a future rename in the enum doesn't

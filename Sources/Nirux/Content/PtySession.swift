@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import GhosttyTerminal
 
-enum AgentStatus: Equatable, Hashable {
+enum AgentStatus: Equatable, Hashable, Sendable {
     case idle, working, needsAttention
 }
 
@@ -270,6 +270,20 @@ final class PtySession: @unchecked Sendable {
     /// Last computed agent state (no snapshot needed — read from persistent state)
     var cachedAgentState: AgentStatus { state.machine.state }
 
+    /// Remote prompts are accepted only while a supported agent process is
+    /// currently in the foreground. A stable UUID alone is not enough: the
+    /// same column can later fall back to an idle shell.
+    func acceptsRemotePrompts(snapshot: ProcessSnapshot) -> Bool {
+        guard !hasExited,
+              let process = foregroundProcessName(snapshot: snapshot)
+        else { return false }
+        return AgentStatusMachine.isRecognizedAgentProcess(process)
+    }
+
+    func recentOutput(maxLines: Int = 40, maxCharacters: Int = 3_500) -> String {
+        state.outputBuffer.tail(maxLines: maxLines, maxCharacters: maxCharacters)
+    }
+
     /// Clear attention flag (user has seen it)
     func clearAgentAttention() {
         state.machine.clearAttention()
@@ -531,6 +545,7 @@ private final class PtyState: @unchecked Sendable {
     var onOsc9Received: (() -> Void)?
     var onProcessExit: (() -> Void)?
     var machine = AgentStatusMachine()
+    let outputBuffer = TerminalOutputBuffer()
 
     func foregroundProcess(snapshot: ProcessSnapshot) -> ForegroundProcess? {
         guard childPid > 0 else { return nil }
@@ -643,6 +658,7 @@ private final class PtyState: @unchecked Sendable {
         }
         let data = Data(buffer[0..<bytesRead])
         machine.noteRead(now: Date())
+        outputBuffer.append(data)
         session.receive(data)
         if let str = String(bytes: data, encoding: .utf8),
            str.contains("\u{1b}]") {
