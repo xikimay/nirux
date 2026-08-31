@@ -1,11 +1,20 @@
 import Foundation
 
-/// Detects git branch from a directory path
+struct GitIdentity: Hashable, Sendable {
+    let repositoryRoot: String
+    let head: String
+}
+
+struct GitContext: Hashable, Sendable {
+    let branch: String
+    let identity: GitIdentity
+}
+
 enum GitDetect {
-    static func branch(at path: String) -> String? {
+    static func context(at path: String) -> GitContext? {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        proc.arguments = ["rev-parse", "--abbrev-ref", "HEAD"]
+        proc.arguments = ["rev-parse", "--show-toplevel", "HEAD", "--abbrev-ref", "HEAD"]
         proc.currentDirectoryURL = URL(fileURLWithPath: path)
 
         let pipe = Pipe()
@@ -14,19 +23,35 @@ enum GitDetect {
 
         do {
             try proc.run()
-            proc.waitUntilExit()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let result = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return result?.isEmpty == true ? nil : result
+            proc.waitUntilExit()
+            guard proc.terminationStatus == 0,
+                  let output = String(data: data, encoding: .utf8)
+            else { return nil }
+            let lines = output
+                .split(whereSeparator: { $0.isNewline })
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            guard lines.count == 3,
+                  lines.allSatisfy({ !$0.isEmpty })
+            else { return nil }
+            return GitContext(
+                branch: lines[2],
+                identity: GitIdentity(
+                    repositoryRoot: URL(fileURLWithPath: lines[0]).standardizedFileURL.path,
+                    head: lines[1]
+                )
+            )
         } catch {
             return nil
         }
     }
 
-    /// Async version for background detection
-    static func branchAsync(at path: String, completion: @escaping @MainActor @Sendable (String?) -> Void) {
+    static func contextAsync(
+        at path: String,
+        completion: @escaping @MainActor @Sendable (GitContext?) -> Void
+    ) {
         DispatchQueue.global(qos: .utility).async {
-            let result = branch(at: path)
+            let result = context(at: path)
             DispatchQueue.main.async {
                 completion(result)
             }

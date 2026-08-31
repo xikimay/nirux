@@ -435,9 +435,9 @@ extension NiruxShellView {
     func refreshGitBranches() {
         for workspace in workspaces {
             if let col = workspace.columns[safe: workspace.focusedIndex], let cwd = col.pty?.childCwd {
-                GitDetect.branchAsync(at: cwd) { [weak self, weak workspace] branch in
-                    guard let workspace, workspace.gitBranch != branch else { return }
-                    workspace.gitBranch = branch; self?.updateSidebar()
+                GitDetect.contextAsync(at: cwd) { [weak self, weak workspace] context in
+                    guard let workspace, workspace.updateGitContext(context) else { return }
+                    self?.updateSidebar()
                 }
             }
         }
@@ -452,18 +452,25 @@ extension NiruxShellView {
             guard PRDetect.shouldRefresh(
                 isInactive: workspace.isInactive,
                 branch: workspace.gitBranch
-            ), let branch = workspace.gitBranch else { continue }
+            ), let requestedContext = workspace.gitContext else { continue }
+            let branch = requestedContext.branch
             let cwd = workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.cwd
             PRDetect.fetchAsync(branch: branch, cwd: cwd) { [weak self, weak workspace] result in
-                guard case .success(let info) = result,
-                      let workspace, !workspace.isInactive, workspace.gitBranch == branch,
-                      workspace.prInfo != info else { return }
-                workspace.prInfo = info
-                self?.updateSidebar()
+                guard case .success(let queriedContext, let info) = result,
+                      let workspace, !workspace.isInactive else { return }
+                let currentCwd = workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd
+                    ?? workspace.cwd
+                GitDetect.contextAsync(at: currentCwd) { [weak self, weak workspace] currentContext in
+                    guard let workspace, !workspace.isInactive else { return }
+                    let contextChanged = workspace.updateGitContext(currentContext)
+                    let infoChanged = currentContext == queriedContext
+                        && workspace.applyPullRequestInfo(info, for: queriedContext)
+                    if contextChanged || infoChanged { self?.updateSidebar() }
+                }
             }
             PRDetect.diffStatsAsync(cwd: cwd) { [weak self, weak workspace] stats in
                 guard let workspace, !workspace.isInactive,
-                      workspace.gitBranch == branch,
+                      workspace.gitContext == requestedContext,
                       workspace.diffStats != stats else { return }
                 workspace.diffStats = stats
                 self?.updateSidebar()

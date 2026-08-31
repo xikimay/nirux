@@ -81,7 +81,7 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(workspace.lastActivityAt, 30)
     }
 
-    func testBranchChangesClearBranchScopedMetadata() {
+    func testGitContextChangesRejectStalePRMetadata() {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         let pullRequest = PRInfo(
             number: 42,
@@ -97,23 +97,44 @@ final class WorkspaceContextTests: XCTestCase {
             changedFiles: 1
         )
 
-        workspace.gitBranch = "feature/one"
-        workspace.prInfo = pullRequest
+        let original = GitContext(
+            branch: "feature/task",
+            identity: GitIdentity(repositoryRoot: "/repo/one", head: "head-a")
+        )
+        let newCommit = GitContext(
+            branch: "feature/task",
+            identity: GitIdentity(repositoryRoot: "/repo/one", head: "head-b")
+        )
+        let otherRepository = GitContext(
+            branch: "feature/task",
+            identity: GitIdentity(repositoryRoot: "/repo/two", head: "head-b")
+        )
+
+        XCTAssertTrue(workspace.updateGitContext(original))
+        XCTAssertTrue(workspace.applyPullRequestInfo(pullRequest, for: original))
         workspace.diffStats = "1 file changed"
         XCTAssertEqual(workspace.effectivePhase, .done)
 
-        workspace.gitBranch = "feature/one"
+        XCTAssertFalse(workspace.updateGitContext(original))
         XCTAssertEqual(workspace.prInfo, pullRequest)
         XCTAssertEqual(workspace.diffStats, "1 file changed")
 
-        workspace.gitBranch = "feature/two"
+        XCTAssertTrue(workspace.updateGitContext(newCommit))
         XCTAssertNil(workspace.prInfo)
         XCTAssertNil(workspace.diffStats)
         XCTAssertEqual(workspace.effectivePhase, .active)
+        XCTAssertFalse(workspace.applyPullRequestInfo(pullRequest, for: original))
+        XCTAssertNil(workspace.prInfo)
+
+        XCTAssertTrue(workspace.applyPullRequestInfo(pullRequest, for: newCommit))
+        workspace.diffStats = "1 file changed"
+        XCTAssertTrue(workspace.updateGitContext(otherRepository))
+        XCTAssertNil(workspace.prInfo)
+        XCTAssertNil(workspace.diffStats)
 
         workspace.prInfo = pullRequest
         workspace.diffStats = "1 file changed"
-        workspace.gitBranch = nil
+        XCTAssertTrue(workspace.updateGitContext(nil))
         XCTAssertNil(workspace.prInfo)
         XCTAssertNil(workspace.diffStats)
     }

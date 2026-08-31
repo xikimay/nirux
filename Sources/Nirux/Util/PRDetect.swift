@@ -2,7 +2,7 @@ import Foundation
 
 enum PRDetect {
     enum FetchResult: Sendable {
-        case success(PRInfo?)
+        case success(context: GitContext, info: PRInfo?)
         case failure
     }
 
@@ -31,19 +31,17 @@ enum PRDetect {
         let ghPath = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
             .first { FileManager.default.fileExists(atPath: $0) }
         guard let ghPath,
-              let currentHead = gitOutput(arguments: ["rev-parse", "HEAD"], cwd: cwd)?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-              !currentHead.isEmpty
+              let context = GitDetect.context(at: cwd),
+              context.branch == branch
         else { return .failure }
 
-        return fetch(branch: branch, cwd: cwd, ghPath: ghPath, currentHead: currentHead)
+        return fetch(branch: branch, ghPath: ghPath, context: context)
     }
 
     static func fetch(
         branch: String,
-        cwd: String,
         ghPath: String,
-        currentHead: String
+        context: GitContext
     ) -> FetchResult {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: ghPath)
@@ -51,7 +49,7 @@ enum PRDetect {
                           "--state", "all",
                           "--json", "number,state,headRefOid,isDraft,statusCheckRollup,reviewDecision,mergeable,url,additions,deletions,changedFiles",
                           "--limit", "100"]
-        proc.currentDirectoryURL = URL(fileURLWithPath: cwd)
+        proc.currentDirectoryURL = URL(fileURLWithPath: context.identity.repositoryRoot)
 
         let pipe = Pipe()
         proc.standardOutput = pipe
@@ -72,8 +70,8 @@ enum PRDetect {
             }) ?? candidates.first(where: {
                 guard let state = ($0["state"] as? String)?.uppercased() else { return false }
                 return (state == "MERGED" || state == "CLOSED")
-                    && ($0["headRefOid"] as? String) == currentHead
-            }) else { return .success(nil) }
+                    && ($0["headRefOid"] as? String) == context.identity.head
+            }) else { return .success(context: context, info: nil) }
 
             let number = first["number"] as? Int ?? 0
             let state = first["state"] as? String ?? ""
@@ -101,11 +99,14 @@ enum PRDetect {
                 }
             }
 
-            return .success(PRInfo(number: number, state: state, isDraft: isDraft,
-                                   ciStatus: ciStatus, failedCheckUrl: failedCheckUrl,
-                                   reviewDecision: reviewDecision, mergeable: mergeable,
-                                   url: url, additions: additions, deletions: deletions,
-                                   changedFiles: changedFiles))
+            return .success(
+                context: context,
+                info: PRInfo(number: number, state: state, isDraft: isDraft,
+                             ciStatus: ciStatus, failedCheckUrl: failedCheckUrl,
+                             reviewDecision: reviewDecision, mergeable: mergeable,
+                             url: url, additions: additions, deletions: deletions,
+                             changedFiles: changedFiles)
+            )
         } catch {
             return .failure
         }

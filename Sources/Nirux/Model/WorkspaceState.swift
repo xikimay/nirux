@@ -74,13 +74,8 @@ final class WorkspaceState {
     /// change. Already-running shells retain the environment they launched
     /// with and pick up changes after a new terminal or app restart.
     var missionHandoffsEnabled: Bool
-    var gitBranch: String? {
-        didSet {
-            guard gitBranch != oldValue else { return }
-            prInfo = nil
-            diffStats = nil
-        }
-    }
+    private(set) var gitContext: GitContext?
+    var gitBranch: String? { gitContext?.branch }
     var hasNotification: Bool = false
     var prInfo: PRInfo?
     var diffStats: String?
@@ -163,6 +158,25 @@ final class WorkspaceState {
         return trimmed
     }
 
+    @discardableResult
+    func updateGitContext(_ context: GitContext?) -> Bool {
+        guard gitContext != context else { return false }
+        gitContext = context
+        prInfo = nil
+        diffStats = nil
+        if !titleIsManual, let branch = context?.branch, !branch.isEmpty {
+            title = branch
+        }
+        return true
+    }
+
+    @discardableResult
+    func applyPullRequestInfo(_ info: PRInfo?, for context: GitContext) -> Bool {
+        guard gitContext == context, prInfo != info else { return false }
+        prInfo = info
+        return true
+    }
+
     /// Record meaningful agent activity without overwriting a user-edited
     /// summary. Replayed hook events can be older than persisted context, so
     /// only the newest event is allowed to replace the automatic summary.
@@ -191,13 +205,9 @@ final class WorkspaceState {
 
     private func setupCwdTracking(for col: ColumnState) {
         col.onCwdChanged = { [weak self] path in
-            GitDetect.branchAsync(at: path) { [weak self] branch in
+            GitDetect.contextAsync(at: path) { [weak self] context in
                 guard let self else { return }
-                self.gitBranch = branch
-                // Auto-name workspace from branch (manual rename takes precedence)
-                if !self.titleIsManual, let branch, !branch.isEmpty {
-                    self.title = branch
-                }
+                self.updateGitContext(context)
                 self.onMetadataChanged?()
             }
         }
@@ -262,12 +272,9 @@ final class WorkspaceState {
         } else {
             detectPath = cwd
         }
-        GitDetect.branchAsync(at: detectPath) { [weak self] branch in
+        GitDetect.contextAsync(at: detectPath) { [weak self] context in
             guard let self else { return }
-            self.gitBranch = branch
-            if !self.titleIsManual, let branch, !branch.isEmpty {
-                self.title = branch
-            }
+            self.updateGitContext(context)
         }
     }
 

@@ -22,11 +22,13 @@ final class PRDetectTests: XCTestCase {
           {"number":41,"state":"OPEN","headRefOid":"older-head","isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/41"}
         ]
         """#)
-        guard case .success(let fetched) = result else {
+        guard case .success(let context, let fetched) = result else {
             return XCTFail("Expected successful PR lookup")
         }
         let pullRequest = try XCTUnwrap(fetched)
 
+        XCTAssertEqual(context.identity.head, "current-head")
+        XCTAssertEqual(context.branch, "feature/task")
         XCTAssertEqual(pullRequest.number, 41)
         XCTAssertEqual(pullRequest.state, "OPEN")
         XCTAssertEqual(
@@ -47,7 +49,7 @@ final class PRDetectTests: XCTestCase {
           {"number":57,"state":"CLOSED","headRefOid":"current-head","isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/57"}
         ]
         """#)
-        guard case .success(let fetched) = result else {
+        guard case .success(_, let fetched) = result else {
             return XCTFail("Expected successful PR lookup")
         }
         let pullRequest = try XCTUnwrap(fetched)
@@ -72,7 +74,7 @@ final class PRDetectTests: XCTestCase {
         ]
         """#, currentHead: "recreated-head")
 
-        guard case .success(let pullRequest) = result else {
+        guard case .success(_, let pullRequest) = result else {
             return XCTFail("Expected successful PR lookup")
         }
         XCTAssertNil(pullRequest)
@@ -85,7 +87,7 @@ final class PRDetectTests: XCTestCase {
         }
 
         let empty = try fetchUsingFakeGitHubCLI(json: "[]")
-        guard case .success(let pullRequest) = empty else {
+        guard case .success(_, let pullRequest) = empty else {
             return XCTFail("Expected successful empty PR lookup")
         }
         XCTAssertNil(pullRequest)
@@ -98,7 +100,7 @@ final class PRDetectTests: XCTestCase {
             json: json,
             watchdogDelay: 2
         )
-        guard case .success(let fetched) = result else {
+        guard case .success(_, let fetched) = result else {
             return XCTFail("Expected large PR lookup to complete")
         }
         XCTAssertEqual(try XCTUnwrap(fetched).ciStatus, "SUCCESS")
@@ -158,9 +160,14 @@ final class PRDetectTests: XCTestCase {
 
         return PRDetect.fetch(
             branch: "feature/task",
-            cwd: directory.path,
             ghPath: gh.path,
-            currentHead: currentHead
+            context: GitContext(
+                branch: "feature/task",
+                identity: GitIdentity(
+                    repositoryRoot: directory.path,
+                    head: currentHead
+                )
+            )
         )
     }
 }
