@@ -1,6 +1,11 @@
 import Foundation
 
 enum PRDetect {
+    enum FetchResult: Sendable {
+        case success(PRInfo?)
+        case failure
+    }
+
     /// Inactive workspaces are archival UI. They keep their last-known PR
     /// metadata but must never spend GitHub GraphQL quota in the background.
     static func shouldRefresh(isInactive: Bool, branch: String?) -> Bool {
@@ -11,27 +16,40 @@ enum PRDetect {
     }
 
     /// Fetch PR info for the given branch. Runs `gh` CLI.
-    static func fetchAsync(branch: String, cwd: String, completion: @escaping @MainActor @Sendable (PRInfo?) -> Void) {
+    static func fetchAsync(
+        branch: String,
+        cwd: String,
+        completion: @escaping @MainActor @Sendable (FetchResult) -> Void
+    ) {
         DispatchQueue.global(qos: .utility).async {
             let result = fetch(branch: branch, cwd: cwd)
             DispatchQueue.main.async { completion(result) }
         }
     }
 
-    private static func fetch(branch: String, cwd: String) -> PRInfo? {
+    private static func fetch(branch: String, cwd: String) -> FetchResult {
         let ghPath = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
             .first { FileManager.default.fileExists(atPath: $0) }
-        guard let ghPath else { return nil }
+        guard let ghPath,
+              let currentHead = gitOutput(arguments: ["rev-parse", "HEAD"], cwd: cwd)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !currentHead.isEmpty
+        else { return .failure }
 
-        return fetch(branch: branch, cwd: cwd, ghPath: ghPath)
+        return fetch(branch: branch, cwd: cwd, ghPath: ghPath, currentHead: currentHead)
     }
 
-    static func fetch(branch: String, cwd: String, ghPath: String) -> PRInfo? {
+    static func fetch(
+        branch: String,
+        cwd: String,
+        ghPath: String,
+        currentHead: String
+    ) -> FetchResult {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: ghPath)
         proc.arguments = ["pr", "list", "--head", branch,
                           "--state", "all",
-                          "--json", "number,state,isDraft,statusCheckRollup,reviewDecision,mergeable,url,additions,deletions,changedFiles",
+                          "--json", "number,state,headRefOid,isDraft,statusCheckRollup,reviewDecision,mergeable,url,additions,deletions,changedFiles",
                           "--limit", "100"]
         proc.currentDirectoryURL = URL(fileURLWithPath: cwd)
 
@@ -41,11 +59,11 @@ enum PRDetect {
 
         do {
             try proc.run()
-            proc.waitUntilExit()
-            guard proc.terminationStatus == 0 else { return nil }
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            proc.waitUntilExit()
+            guard proc.terminationStatus == 0 else { return .failure }
             guard let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-            else { return nil }
+            else { return .failure }
             let candidates = arr.sorted {
                 ($0["number"] as? Int ?? 0) > ($1["number"] as? Int ?? 0)
             }
@@ -53,8 +71,9 @@ enum PRDetect {
                 ($0["state"] as? String)?.uppercased() == "OPEN"
             }) ?? candidates.first(where: {
                 guard let state = ($0["state"] as? String)?.uppercased() else { return false }
-                return state == "MERGED" || state == "CLOSED"
-            }) else { return nil }
+                return (state == "MERGED" || state == "CLOSED")
+                    && ($0["headRefOid"] as? String) == currentHead
+            }) else { return .success(nil) }
 
             let number = first["number"] as? Int ?? 0
             let state = first["state"] as? String ?? ""
@@ -82,13 +101,13 @@ enum PRDetect {
                 }
             }
 
-            return PRInfo(number: number, state: state, isDraft: isDraft,
-                         ciStatus: ciStatus, failedCheckUrl: failedCheckUrl,
-                         reviewDecision: reviewDecision, mergeable: mergeable,
-                         url: url, additions: additions, deletions: deletions,
-                         changedFiles: changedFiles)
+            return .success(PRInfo(number: number, state: state, isDraft: isDraft,
+                                   ciStatus: ciStatus, failedCheckUrl: failedCheckUrl,
+                                   reviewDecision: reviewDecision, mergeable: mergeable,
+                                   url: url, additions: additions, deletions: deletions,
+                                   changedFiles: changedFiles))
         } catch {
-            return nil
+            return .failure
         }
     }
 

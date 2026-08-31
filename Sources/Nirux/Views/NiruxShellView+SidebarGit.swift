@@ -454,8 +454,9 @@ extension NiruxShellView {
                 branch: workspace.gitBranch
             ), let branch = workspace.gitBranch else { continue }
             let cwd = workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.cwd
-            PRDetect.fetchAsync(branch: branch, cwd: cwd) { [weak self, weak workspace] info in
-                guard let workspace, !workspace.isInactive, workspace.gitBranch == branch,
+            PRDetect.fetchAsync(branch: branch, cwd: cwd) { [weak self, weak workspace] result in
+                guard case .success(let info) = result,
+                      let workspace, !workspace.isInactive, workspace.gitBranch == branch,
                       workspace.prInfo != info else { return }
                 workspace.prInfo = info
                 self?.updateSidebar()

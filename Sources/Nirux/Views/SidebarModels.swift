@@ -58,7 +58,7 @@ struct ColumnInfo: Hashable {
     }
 }
 
-struct PRInfo: Hashable {
+struct PRInfo: Hashable, Sendable {
     let number: Int
     let state: String
     let isDraft: Bool
