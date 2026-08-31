@@ -22,10 +22,23 @@ struct TelegramRemoteAccessDisplayState: Equatable {
         }
         if let pairingCode, let pairingExpiresAt {
             let minutes = max(1, Int(ceil(pairingExpiresAt.timeIntervalSinceNow / 60)))
-            return "Send /pair \(pairingCode) to the bot within \(minutes) min."
+            let base = "Send /pair \(pairingCode) to the bot within \(minutes) min."
+            return lastError.map { "\(base) \($0)" } ?? base
         }
         let base = "Not paired. Generate a one-time pairing code."
         return lastError.map { "\(base) \($0)" } ?? base
+    }
+}
+
+enum TelegramPromptRoute: Equatable {
+    case currentSelection
+    case explicit(String)
+    case unavailableReply
+
+    static func resolve(replyToMessageID: Int64?, routes: [Int64: String]) -> TelegramPromptRoute {
+        guard let replyToMessageID else { return .currentSelection }
+        guard let target = routes[replyToMessageID] else { return .unavailableReply }
+        return .explicit(target)
     }
 }
 
@@ -33,6 +46,14 @@ struct TelegramRemoteAccessDisplayState: Equatable {
 final class TelegramRemoteAccessController {
     typealias SessionsProvider = () -> [RemoteAgentSession]
     typealias PromptSender = (String, String) -> RemotePromptResult
+
+    private enum PollingError: LocalizedError {
+        case updateStatePersistenceFailed
+
+        var errorDescription: String? {
+            "Unable to save Telegram update state; no remote prompt was processed."
+        }
+    }
 
     var onStateChange: (() -> Void)?
 
@@ -205,20 +226,22 @@ final class TelegramRemoteAccessController {
 
     private func poll(client: TelegramBotClient, generation: Int) async {
         var retryDelay: TimeInterval = 1
-        while !Task.isCancelled, generation == pollGeneration {
+        while isCurrentPoll(generation) {
             do {
                 let updates = try await client.getUpdates(offset: nextUpdateOffset)
-                guard !Task.isCancelled, generation == pollGeneration else { return }
+                guard isCurrentPoll(generation) else { return }
                 if lastError != nil {
                     lastError = nil
                     publishState()
                 }
                 for update in updates.sorted(by: { $0.updateID < $1.updateID }) {
+                    guard isCurrentPoll(generation) else { return }
                     guard update.updateID >= (nextUpdateOffset ?? Int64.min) else { continue }
-                    // Persist before executing an update. Dropping one message
-                    // after a crash is preferable to injecting a prompt twice.
+                    guard persistLastUpdateID(update.updateID) else {
+                        throw PollingError.updateStatePersistenceFailed
+                    }
+                    guard isCurrentPoll(generation) else { return }
                     nextUpdateOffset = update.updateID + 1
-                    persistLastUpdateID(update.updateID)
                     await handle(update, client: client)
                 }
                 retryDelay = 1
@@ -256,8 +279,22 @@ final class TelegramRemoteAccessController {
             return
         }
 
-        let replyTarget = message.replyToMessage.flatMap { replyRoutes[$0.messageID] }
-        await sendPrompt(text, preferredTarget: replyTarget, chatID: message.chat.id, client: client)
+        let route = TelegramPromptRoute.resolve(
+            replyToMessageID: message.replyToMessage?.messageID,
+            routes: replyRoutes
+        )
+        switch route {
+        case .currentSelection:
+            await sendPrompt(text, preferredTarget: nil, chatID: message.chat.id, client: client)
+        case let .explicit(target):
+            await sendPrompt(text, preferredTarget: target, chatID: message.chat.id, client: client)
+        case .unavailableReply:
+            _ = await send(
+                "That reply target is no longer available. Use /sessions to select a live agent.",
+                chatID: message.chat.id,
+                client: client
+            )
+        }
     }
 
     private func handlePairingMessage(
@@ -466,6 +503,7 @@ final class TelegramRemoteAccessController {
         do {
             return try await client.sendMessage(chatID: chatID, text: limited, keyboard: keyboard)
         } catch {
+            if Task.isCancelled { return nil }
             let description = error.localizedDescription
             if lastError != description {
                 lastError = description
@@ -490,6 +528,10 @@ final class TelegramRemoteAccessController {
         userID == pairedUserID && chatID == pairedChatID
     }
 
+    private func isCurrentPoll(_ generation: Int) -> Bool {
+        !Task.isCancelled && generation == pollGeneration
+    }
+
     private func updatePersistedPairing(userID: Int64?, chatID: Int64?) {
         var state = Persistence.load() ?? PersistedState(workspaces: [], activeWorkspaceIndex: 0)
         var settings = state.settings ?? PersistedSettings()
@@ -499,13 +541,13 @@ final class TelegramRemoteAccessController {
         Persistence.save(state)
     }
 
-    private func persistLastUpdateID(_ updateID: Int64) {
+    private func persistLastUpdateID(_ updateID: Int64) -> Bool {
         var state = Persistence.load() ?? PersistedState(workspaces: [], activeWorkspaceIndex: 0)
         var settings = state.settings ?? PersistedSettings()
-        guard updateID > (settings.telegramLastUpdateID ?? Int64.min) else { return }
+        guard updateID > (settings.telegramLastUpdateID ?? Int64.min) else { return true }
         settings.telegramLastUpdateID = updateID
         state.settings = settings
-        Persistence.save(state)
+        return Persistence.save(state)
     }
 
     private func publishState() {

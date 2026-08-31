@@ -2,6 +2,36 @@ import XCTest
 @testable import Nirux
 
 final class TelegramRemoteAccessTests: XCTestCase {
+    func testPairingStatusIncludesPollingError() {
+        let state = TelegramRemoteAccessDisplayState(
+            enabled: true,
+            polling: true,
+            hasToken: true,
+            pairedUserID: nil,
+            pairingCode: "12345678",
+            pairingExpiresAt: Date().addingTimeInterval(600),
+            lastError: "Telegram rejected the token."
+        )
+
+        XCTAssertTrue(state.statusText.contains("Send /pair 12345678"))
+        XCTAssertTrue(state.statusText.contains("Telegram rejected the token."))
+    }
+
+    func testExplicitReplyRequiresRememberedRoute() {
+        XCTAssertEqual(
+            TelegramPromptRoute.resolve(replyToMessageID: nil, routes: [:]),
+            .currentSelection
+        )
+        XCTAssertEqual(
+            TelegramPromptRoute.resolve(replyToMessageID: 7, routes: [7: "agent-a"]),
+            .explicit("agent-a")
+        )
+        XCTAssertEqual(
+            TelegramPromptRoute.resolve(replyToMessageID: 6, routes: [7: "agent-a"]),
+            .unavailableReply
+        )
+    }
+
     func testBotTokenValidation() {
         XCTAssertTrue(TelegramBotToken.isPlausible("123456789:abcdefghijklmnopqrstuvwxyz_ABC-123"))
         XCTAssertFalse(TelegramBotToken.isPlausible("not-a-token"))

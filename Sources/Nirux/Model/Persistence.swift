@@ -37,13 +37,16 @@ enum Persistence {
         stateURL.deletingLastPathComponent().appendingPathComponent("state.backup.\(index).json")
     }
 
-    static func save(_ state: PersistedState) {
+    @discardableResult
+    static func save(_ state: PersistedState) -> Bool {
         do {
             let data = try JSONEncoder().encode(state)
             rotateBackups()
             try data.write(to: stateURL, options: .atomic)
+            return true
         } catch {
             NSLog("[Nirux Persistence] Failed to save state: %@", error.localizedDescription)
+            return false
         }
     }
 
