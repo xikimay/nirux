@@ -18,6 +18,12 @@ struct TelegramBotClient: Sendable {
     }
 
     let token: String
+    let session: URLSession
+
+    init(token: String, session: URLSession = .shared) {
+        self.token = token
+        self.session = session
+    }
 
     func getUpdates(offset: Int64?, timeout: Int = 25) async throws -> [TelegramUpdate] {
         try await request(
@@ -65,7 +71,7 @@ struct TelegramBotClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw ClientError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else { throw ClientError.httpStatus(http.statusCode) }
         let envelope = try JSONDecoder().decode(TelegramAPIResponse<Result>.self, from: data)

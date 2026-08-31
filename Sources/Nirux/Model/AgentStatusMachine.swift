@@ -103,9 +103,9 @@ struct AgentStatusMachine {
 
     /// PTY output arrived. Echo right after a keystroke/resize is not work.
     mutating func noteRead(now: Date) {
-        let t = now.timeIntervalSince1970
-        if lastInteractionAt > 0, t - lastInteractionAt < Self.echoWindow { return }
-        lastReadAt = t
+        let timestamp = now.timeIntervalSince1970
+        if lastInteractionAt > 0, timestamp - lastInteractionAt < Self.echoWindow { return }
+        lastReadAt = timestamp
     }
 
     /// A keystroke went to the PTY — marks both the echo window and real

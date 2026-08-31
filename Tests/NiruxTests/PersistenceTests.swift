@@ -371,7 +371,9 @@ final class PersistedStateCodingTests: XCTestCase {
         )
         XCTAssertEqual(decodedWorkspace.missionID, missionID)
     }
+}
 
+extension PersistedStateCodingTests {
     func testTelegramRemoteAccessSettingsRoundTripWithoutToken() throws {
         let original = PersistedSettings(
             telegramRemoteAccessEnabled: true,

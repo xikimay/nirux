@@ -46,6 +46,7 @@ enum TelegramPromptRoute: Equatable {
 final class TelegramRemoteAccessController {
     typealias SessionsProvider = () -> [RemoteAgentSession]
     typealias PromptSender = (String, String) -> RemotePromptResult
+    typealias TokenLoader = () throws -> String?
 
     private enum PollingError: LocalizedError {
         case updateStatePersistenceFailed
@@ -59,6 +60,8 @@ final class TelegramRemoteAccessController {
 
     private let sessionsProvider: SessionsProvider
     private let promptSender: PromptSender
+    private let tokenLoader: TokenLoader
+    private let urlSession: URLSession
     private var pollingTask: Task<Void, Never>?
     private var pollGeneration = 0
     private var client: TelegramBotClient?
@@ -78,9 +81,16 @@ final class TelegramRemoteAccessController {
     private var notificationArmedAt = Date.distantFuture
     private var lastError: String?
 
-    init(sessions: @escaping SessionsProvider, sendPrompt: @escaping PromptSender) {
+    init(
+        sessions: @escaping SessionsProvider,
+        sendPrompt: @escaping PromptSender,
+        tokenLoader: @escaping TokenLoader = TelegramTokenStore.load,
+        urlSession: URLSession = .shared
+    ) {
         sessionsProvider = sessions
         promptSender = sendPrompt
+        self.tokenLoader = tokenLoader
+        self.urlSession = urlSession
     }
 
     var displayState: TelegramRemoteAccessDisplayState {
@@ -114,7 +124,7 @@ final class TelegramRemoteAccessController {
 
         let token: String?
         do {
-            token = try TelegramTokenStore.load()
+            token = try tokenLoader()
         } catch {
             token = nil
             lastError = "Keychain: \(error.localizedDescription)"
@@ -134,7 +144,7 @@ final class TelegramRemoteAccessController {
             return
         }
 
-        let botClient = TelegramBotClient(token: token)
+        let botClient = TelegramBotClient(token: token, session: urlSession)
         client = botClient
         notificationArmedAt = Date()
         let generation = pollGeneration

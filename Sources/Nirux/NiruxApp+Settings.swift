@@ -213,7 +213,7 @@ extension NiruxApp {
             : "Paste the token from @BotFather"
         background.addSubview(token)
 
-        let tokenHint = NSTextField(labelWithString:
+        let tokenHint = NSTextField(wrappingLabelWithString:
             "Use a dedicated bot. The token is stored only in macOS Keychain; pairing IDs and preferences are stored in state.json.")
         tokenHint.font = .systemFont(ofSize: 10.5)
         tokenHint.textColor = NSColor.white.withAlphaComponent(0.3)

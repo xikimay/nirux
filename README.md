@@ -137,7 +137,7 @@ Set it up with a dedicated bot:
 1. Create a bot with Telegram's `@BotFather` and copy its token.
 2. Open **Nirux → Settings**, enable **Telegram Remote Access**, paste the token, choose the notification preferences, and click **Generate Pairing Code**.
 3. Open a private chat with that bot and send `/pair CODE` using the one-time code shown in Settings. Codes expire after 10 minutes.
-4. Send `/sessions`, choose a live agent, then send ordinary text as a prompt. You can also reply directly to a completion or attention notification.
+4. Send `/sessions`, choose a live agent, then send ordinary text as a prompt. You can also reply directly to a recent completion or attention notification; if its route has expired, use `/sessions` to select the agent again.
 
 Supported commands:
 
@@ -146,7 +146,7 @@ Supported commands:
 - `/tail` — show a bounded plain-text tail of recent terminal output.
 - `/help` — show the command summary.
 
-The bot token is stored as a generic password in macOS Keychain, never in `state.json`. Nirux persists only non-secret preferences, the paired Telegram user/chat IDs, and the last consumed update ID. Messages from every other user or chat are ignored. There is deliberately no `/exec`: prompts are routed by stable column UUID and injected only after Nirux re-verifies that a recognized agent process—not an idle shell—is currently live in that column. Clearing the token disables Remote Access and removes the pairing.
+The bot token is stored as a generic password in macOS Keychain, never in `state.json`. Nirux persists only non-secret preferences, the paired Telegram user/chat IDs, and the last consumed update ID. Once pairing is complete, messages from every other user or chat are ignored. There is deliberately no `/exec`: prompts are routed by stable column UUID and injected only after Nirux re-verifies that a recognized agent process—not an idle shell—is currently live in that column. Clearing the token disables Remote Access and removes the pairing.
 
 ## Worktrees And URL Scheme
 
