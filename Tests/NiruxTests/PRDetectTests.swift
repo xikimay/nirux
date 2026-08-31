@@ -191,8 +191,8 @@ final class PRDetectTests: XCTestCase {
     func testNewestTerminalPullRequestIsSelectedWhenNoneAreOpen() throws {
         let result = try fetchUsingFakeGitHubCLI(terminalJSON: #"""
         [
-          {"number":42,"state":"MERGED","headRefOid":"current-head","isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/42"},
-          {"number":57,"state":"CLOSED","headRefOid":"current-head","isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/57"}
+          {"number":42,"state":"MERGED","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/42"},
+          {"number":57,"state":"CLOSED","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/57"}
         ]
         """#)
         guard case .success(_, let fetched) = result else {
@@ -211,6 +211,34 @@ final class PRDetectTests: XCTestCase {
             ),
             .done
         )
+    }
+
+    func testTerminalPullRequestFromSameNamedForkIsIgnored() throws {
+        let result = try fetchUsingFakeGitHubCLI(terminalJSON: #"""
+        [
+          {"number":90,"state":"CLOSED","headRefOid":"current-head","headRepositoryOwner":{"login":"alice"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/90"},
+          {"number":80,"state":"MERGED","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/80"}
+        ]
+        """#)
+
+        guard case .success(_, let fetched) = result else {
+            return XCTFail("Expected successful PR lookup")
+        }
+        let pullRequest = try XCTUnwrap(fetched)
+        XCTAssertEqual(pullRequest.number, 80)
+        XCTAssertEqual(pullRequest.state, "MERGED")
+    }
+
+    func testUnclassifiableTerminalPullRequestPreservesCachedResult() throws {
+        let result = try fetchUsingFakeGitHubCLI(terminalJSON: #"""
+        [
+          {"number":80,"state":"MERGED","headRefOid":"current-head","isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/80"}
+        ]
+        """#)
+
+        guard case .failure = result else {
+            return XCTFail("Expected an unclassifiable terminal PR lookup to fail")
+        }
     }
 
     func testDirtyWorktreeKeepsOpenPullRequestAndRejectsTerminalState() throws {

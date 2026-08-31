@@ -202,6 +202,56 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(workspace.prInfo?.number, 42)
     }
 
+    func testOlderPullRequestObservationCannotReplaceNewerResult() {
+        let workspace = WorkspaceState(title: "context", cwd: "/tmp")
+        let context = GitContext(
+            branch: "feature/task",
+            identity: GitIdentity(repositoryRoot: "/repo", head: "head-a")
+        )
+        let open = PRInfo(
+            number: 41,
+            state: "OPEN",
+            isDraft: false,
+            ciStatus: nil,
+            failedCheckUrl: nil,
+            reviewDecision: nil,
+            mergeable: nil,
+            url: "https://example.test/pull/41",
+            additions: nil,
+            deletions: nil,
+            changedFiles: nil
+        )
+        let merged = PRInfo(
+            number: 41,
+            state: "MERGED",
+            isDraft: false,
+            ciStatus: "SUCCESS",
+            failedCheckUrl: nil,
+            reviewDecision: "APPROVED",
+            mergeable: "MERGEABLE",
+            url: "https://example.test/pull/41",
+            additions: nil,
+            deletions: nil,
+            changedFiles: nil
+        )
+
+        XCTAssertTrue(workspace.updateGitContext(context))
+        let olderObservation = workspace.beginPullRequestObservation()
+        let newerObservation = workspace.beginPullRequestObservation()
+        XCTAssertTrue(workspace.applyPullRequestInfo(
+            merged,
+            for: context,
+            observation: newerObservation
+        ))
+        XCTAssertFalse(workspace.applyPullRequestInfo(
+            open,
+            for: context,
+            observation: olderObservation
+        ))
+        XCTAssertEqual(workspace.prInfo, merged)
+        XCTAssertEqual(workspace.effectivePhase, .done)
+    }
+
     func testGitCleanlinessChangeClearsTerminalStateButRetainsOpenReview() {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         let cleanContext = GitContext(
@@ -333,6 +383,29 @@ final class WorkspaceContextTests: XCTestCase {
                 [canonicalPath(editorRoot.path), canonicalPath(terminalRoot.path)]
             )
         }
+    }
+
+    func testBackgroundTerminalCwdEventDoesNotClaimGitObservation() {
+        let workspace = WorkspaceState(title: "context", cwd: "/tmp")
+        let backgroundTerminal = workspace.columns[0]
+        workspace.addEditorColumn(workspaceCwd: "/tmp/editor")
+        let editorContext = GitContext(
+            branch: "editor/task",
+            identity: GitIdentity(repositoryRoot: "/repo/editor", head: "editor-head")
+        )
+        XCTAssertTrue(workspace.updateGitContext(editorContext))
+        let pendingFocusedObservation = workspace.beginGitContextObservation()
+
+        backgroundTerminal.onCwdChanged?("/repo/terminal")
+
+        XCTAssertEqual(
+            workspace.applyGitContextObservation(
+                editorContext,
+                observation: pendingFocusedObservation
+            ),
+            .unchanged
+        )
+        XCTAssertEqual(workspace.gitContext, editorContext)
     }
 
     func testWorkspaceContextShortcutsIgnoreOtherWindows() {

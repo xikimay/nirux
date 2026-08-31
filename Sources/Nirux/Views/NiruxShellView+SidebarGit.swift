@@ -445,16 +445,23 @@ extension NiruxShellView {
             ), let requestedContext = workspace.gitContext else { continue }
             let branch = requestedContext.branch
             let cwd = workspace.focusedWorkingDirectory
+            let observation = workspace.beginPullRequestObservation()
             PRDetect.fetchAsync(branch: branch, cwd: cwd) { [weak self, weak workspace] result in
                 guard case .success(let queriedContext, let info) = result,
                       let workspace, !workspace.isInactive,
-                      workspace.gitContext == queriedContext else { return }
+                      workspace.isCurrentPullRequestObservation(
+                          observation,
+                          for: queriedContext
+                      ) else { return }
                 let currentCwd = workspace.focusedWorkingDirectory
                 GitDetect.contextAsync(at: currentCwd) { [weak self, weak workspace] currentContext in
                     guard let workspace, !workspace.isInactive,
-                          workspace.gitContext == queriedContext,
                           currentContext == queriedContext,
-                          workspace.applyPullRequestInfo(info, for: queriedContext)
+                          workspace.applyPullRequestInfo(
+                              info,
+                              for: queriedContext,
+                              observation: observation
+                          )
                     else { return }
                     self?.updateSidebar()
                 }

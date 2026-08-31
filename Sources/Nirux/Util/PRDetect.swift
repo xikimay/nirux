@@ -79,6 +79,7 @@ enum PRDetect {
             return .success(context: context, info: nil)
         }
 
+        guard let upstreamRepository else { return .failure }
         guard let terminalCandidates = candidates(
             branch: branch,
             state: "all",
@@ -87,12 +88,16 @@ enum PRDetect {
             ghPath: ghPath,
             repositoryRoot: context.identity.repositoryRoot
         ) else { return .failure }
-        let terminalCandidate = terminalCandidates
+        let matchingTerminalCandidates = terminalCandidates
             .filter {
                 guard let state = ($0["state"] as? String)?.uppercased() else { return false }
                 return (state == "MERGED" || state == "CLOSED")
                     && ($0["headRefOid"] as? String) == context.identity.head
             }
+        guard matchingTerminalCandidates.allSatisfy({ repository(for: $0) != nil })
+        else { return .failure }
+        let terminalCandidate = matchingTerminalCandidates
+            .filter { repository(for: $0) == upstreamRepository }
             .sorted(by: pullRequestNumberDescending)
             .first
         return .success(

@@ -59,6 +59,10 @@ struct GitContextObservation: Sendable {
     fileprivate let generation: UInt64
 }
 
+struct PullRequestObservation: Sendable {
+    fileprivate let generation: UInt64
+}
+
 enum GitContextObservationResult: Equatable {
     case stale
     case unchanged
@@ -91,6 +95,7 @@ final class WorkspaceState {
     var missionHandoffsEnabled: Bool
     private(set) var gitContext: GitContext?
     private var gitContextObservationGeneration: UInt64 = 0
+    private var pullRequestObservationGeneration: UInt64 = 0
     var gitBranch: String? { gitContext?.branch }
     var focusedWorkingDirectory: String {
         let column = columns[safe: focusedIndex]
@@ -214,6 +219,7 @@ final class WorkspaceState {
 
     private func replaceGitContext(_ context: GitContext?) -> Bool {
         guard gitContext != context else { return false }
+        pullRequestObservationGeneration &+= 1
         let previousContext = gitContext
         gitContext = context
         let sameRevision = previousContext?.branch == context?.branch
@@ -238,6 +244,28 @@ final class WorkspaceState {
         else { return false }
         prInfo = info
         return true
+    }
+
+    func beginPullRequestObservation() -> PullRequestObservation {
+        pullRequestObservationGeneration &+= 1
+        return PullRequestObservation(generation: pullRequestObservationGeneration)
+    }
+
+    func isCurrentPullRequestObservation(
+        _ observation: PullRequestObservation,
+        for context: GitContext
+    ) -> Bool {
+        observation.generation == pullRequestObservationGeneration && gitContext == context
+    }
+
+    @discardableResult
+    func applyPullRequestInfo(
+        _ info: PRInfo?,
+        for context: GitContext,
+        observation: PullRequestObservation
+    ) -> Bool {
+        guard isCurrentPullRequestObservation(observation, for: context) else { return false }
+        return applyPullRequestInfo(info, for: context)
     }
 
     private static func isTerminalPullRequest(_ info: PRInfo?) -> Bool {
@@ -284,9 +312,12 @@ final class WorkspaceState {
     // MARK: - CWD / Git / Title Tracking
 
     private func setupCwdTracking(for col: ColumnState) {
-        col.onCwdChanged = { [weak self] path in
-            guard let observation = self?.beginGitContextObservation() else { return }
-            GitDetect.contextAsync(at: path) { [weak self] context in
+        col.onCwdChanged = { [weak self, weak col] _ in
+            guard let self, let col,
+                  self.columns[safe: self.focusedIndex] === col
+            else { return }
+            let observation = self.beginGitContextObservation()
+            GitDetect.contextAsync(at: self.focusedWorkingDirectory) { [weak self] context in
                 guard let self else { return }
                 let result = self.applyGitContextObservation(context, observation: observation)
                 guard result != .stale else { return }
