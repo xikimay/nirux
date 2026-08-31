@@ -239,9 +239,66 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertTrue(labels.contains("Persistence is complete"))
     }
 
+    func testSidebarContextRowPrioritizesBlocker() throws {
+        let workspace = makeWorkspaceInfo(
+            nextStep: "Retry the deployment",
+            blocker: "Waiting for API access"
+        )
+        let result = SidebarWorkspaceCardRenderer(
+            workspace: workspace,
+            sidebarWidth: 260,
+            padding: 20,
+            yOffset: 400
+        ).render()
+        let labels = result.views.compactMap { $0 as? NSTextField }
+        let blockerLabel = try XCTUnwrap(labels.first {
+            $0.stringValue == "Blocker: Waiting for API access"
+        })
+
+        XCTAssertEqual(blockerLabel.lineBreakMode, .byTruncatingTail)
+        XCTAssertFalse(labels.contains { $0.stringValue == "Next: Retry the deployment" })
+    }
+
+    func testSidebarContextRowFallsBackToNextStep() {
+        let workspace = makeWorkspaceInfo(nextStep: "Retry the deployment")
+        let result = SidebarWorkspaceCardRenderer(
+            workspace: workspace,
+            sidebarWidth: 260,
+            padding: 20,
+            yOffset: 400
+        ).render()
+        let labels = result.views.compactMap { ($0 as? NSTextField)?.stringValue }
+
+        XCTAssertTrue(labels.contains("Next: Retry the deployment"))
+        XCTAssertEqual(
+            SidebarExpandedMetrics.workspaceHeight(for: workspace)
+                - SidebarExpandedMetrics.workspaceHeight(for: makeWorkspaceInfo()),
+            SidebarExpandedMetrics.actionAdvance
+        )
+    }
+
+    func testSidebarContextRowIsOmittedWhenActionFieldsAreBlank() {
+        let workspace = makeWorkspaceInfo(nextStep: "  ", blocker: "\n")
+        let result = SidebarWorkspaceCardRenderer(
+            workspace: workspace,
+            sidebarWidth: 260,
+            padding: 20,
+            yOffset: 400
+        ).render()
+        let labels = result.views.compactMap { ($0 as? NSTextField)?.stringValue }
+
+        XCTAssertFalse(labels.contains { $0.hasPrefix("Blocker:") || $0.hasPrefix("Next:") })
+        XCTAssertEqual(
+            SidebarExpandedMetrics.workspaceHeight(for: workspace),
+            SidebarExpandedMetrics.workspaceHeight(for: makeWorkspaceInfo())
+        )
+    }
+
     private func makeWorkspaceInfo(
         purpose: String? = nil,
-        summary: String? = nil
+        summary: String? = nil,
+        nextStep: String? = nil,
+        blocker: String? = nil
     ) -> WorkspaceInfo {
         WorkspaceInfo(
             id: "workspace",
@@ -258,6 +315,8 @@ final class WorkspaceContextTests: XCTestCase {
             prInfo: nil,
             diffStats: nil,
             purpose: purpose,
+            nextStep: nextStep,
+            blocker: blocker,
             phase: .active,
             lastSummary: summary,
             lastActivityAt: nil

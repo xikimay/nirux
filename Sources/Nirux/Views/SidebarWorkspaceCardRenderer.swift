@@ -106,6 +106,7 @@ final class SidebarWorkspaceCardRenderer {
         }
 
         currentY = buildPhaseRow(contentX: contentX, contentW: contentW, yOffset: currentY)
+        currentY = buildActionRowIfNeeded(contentX: contentX, contentW: contentW, yOffset: currentY)
 
         if let summary = workspace.lastSummary {
             let label = textLabel(
@@ -124,6 +125,30 @@ final class SidebarWorkspaceCardRenderer {
             currentY -= SidebarExpandedMetrics.summaryAdvance
         }
         return currentY
+    }
+
+    private func buildActionRowIfNeeded(
+        contentX: CGFloat,
+        contentW: CGFloat,
+        yOffset: CGFloat
+    ) -> CGFloat {
+        guard let action = workspace.sidebarAction else { return yOffset }
+        let label = textLabel(
+            action.text,
+            font: .systemFont(ofSize: 10.5, weight: .medium),
+            color: action.isBlocker
+                ? NSColor.systemRed.withAlphaComponent(workspace.isActive ? 0.82 : 0.58)
+                : NSColor.white.withAlphaComponent(workspace.isActive ? 0.58 : 0.42)
+        )
+        label.toolTip = action.text
+        label.frame = NSRect(
+            x: contentX,
+            y: yOffset - SidebarExpandedMetrics.actionHeight,
+            width: contentW,
+            height: SidebarExpandedMetrics.actionHeight
+        )
+        append(label)
+        return yOffset - SidebarExpandedMetrics.actionAdvance
     }
 
     private func buildPhaseRow(contentX: CGFloat, contentW: CGFloat, yOffset: CGFloat) -> CGFloat {

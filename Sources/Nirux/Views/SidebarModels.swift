@@ -89,9 +89,27 @@ struct WorkspaceInfo: Hashable {
     let prInfo: PRInfo?
     let diffStats: String?
     let purpose: String?
+    let nextStep: String?
+    let blocker: String?
     let phase: WorkspacePhase
     let lastSummary: String?
     let lastActivityAt: TimeInterval?
+
+    var sidebarAction: (text: String, isBlocker: Bool)? {
+        if let blocker = normalizedContextText(blocker) {
+            return ("Blocker: \(blocker)", true)
+        }
+        if let nextStep = normalizedContextText(nextStep) {
+            return ("Next: \(nextStep)", false)
+        }
+        return nil
+    }
+
+    private func normalizedContextText(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty else { return nil }
+        return value
+    }
 }
 
 struct ProfileInfo: Hashable {

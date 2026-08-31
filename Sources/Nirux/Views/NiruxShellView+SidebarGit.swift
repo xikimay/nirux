@@ -62,7 +62,8 @@ extension NiruxShellView {
                           focusedColumn: workspace.focusedIndex,
                           gitBranch: workspace.gitBranch, hasNotification: workspace.hasNotification, isActive: index == activeWSIndex,
                           columns: colInfos, prInfo: workspace.prInfo, diffStats: workspace.diffStats,
-                          purpose: workspace.purpose, phase: workspace.effectivePhase,
+                          purpose: workspace.purpose, nextStep: workspace.nextStep,
+                          blocker: workspace.blocker, phase: workspace.effectivePhase,
                           lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt)
         }
         let profileInfos = workspaceStore.navigableProfiles.map { profile in

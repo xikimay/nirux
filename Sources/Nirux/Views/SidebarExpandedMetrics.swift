@@ -23,6 +23,8 @@ enum SidebarExpandedMetrics {
     static let purposeAdvance: CGFloat = 19
     static let phaseHeight: CGFloat = 16
     static let phaseAdvance: CGFloat = 20
+    static let actionHeight: CGFloat = 14
+    static let actionAdvance: CGFloat = 18
     static let summaryHeight: CGFloat = 14
     static let summaryAdvance: CGFloat = 18
     static let branchHeight: CGFloat = 14
@@ -49,6 +51,7 @@ enum SidebarExpandedMetrics {
         var height = workspacePaddingY * 2 + titleAdvance
         if workspace.purpose != nil { height += purposeAdvance }
         height += phaseAdvance
+        if workspace.sidebarAction != nil { height += actionAdvance }
         if workspace.lastSummary != nil { height += summaryAdvance }
         if let branch = workspace.gitBranch, branch != workspace.title { height += branchAdvance }
         if workspace.diffStats != nil { height += diffAdvance }

@@ -21,6 +21,8 @@ final class SidebarCollapseTests: XCTestCase {
             prInfo: nil,
             diffStats: nil,
             purpose: nil,
+            nextStep: nil,
+            blocker: nil,
             phase: isInactive ? .parked : .active,
             lastSummary: nil,
             lastActivityAt: nil
