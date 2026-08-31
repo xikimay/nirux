@@ -233,6 +233,7 @@ final class WorkspaceState {
     }
 
     private func replaceGitContext(_ context: GitContext?) -> Bool {
+        let context = preservingKnownUpstreamRepository(in: context)
         guard gitContext != context else { return false }
         pullRequestObservationGeneration &+= 1
         pullRequestObservation = nil
@@ -251,6 +252,21 @@ final class WorkspaceState {
         }
         onGitContextChanged?()
         return true
+    }
+
+    private func preservingKnownUpstreamRepository(in context: GitContext?) -> GitContext? {
+        guard let context,
+              context.upstreamRepository == nil,
+              let previousContext = gitContext,
+              previousContext.branch == context.branch,
+              previousContext.identity.repositoryRoot == context.identity.repositoryRoot,
+              let upstreamRepository = previousContext.upstreamRepository
+        else { return context }
+        return GitContext(
+            branch: context.branch,
+            identity: context.identity,
+            upstreamRepository: upstreamRepository
+        )
     }
 
     @discardableResult
