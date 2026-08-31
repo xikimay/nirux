@@ -35,19 +35,28 @@ enum PRDetect {
               context.branch == branch
         else { return .failure }
 
-        return fetch(branch: branch, ghPath: ghPath, context: context)
+        return fetch(
+            branch: branch,
+            ghPath: ghPath,
+            context: context,
+            upstreamRepository: GitDetect.upstreamRepository(
+                at: context.identity.repositoryRoot,
+                branch: branch
+            )
+        )
     }
 
     static func fetch(
         branch: String,
         ghPath: String,
-        context: GitContext
+        context: GitContext,
+        upstreamRepository: GitHubRepository?
     ) -> FetchResult {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: ghPath)
         proc.arguments = ["pr", "list", "--head", branch,
                           "--state", "all",
-                          "--json", "number,state,headRefOid,isDraft,statusCheckRollup,reviewDecision,mergeable,url,additions,deletions,changedFiles",
+                          "--json", "number,state,headRefOid,headRepositoryOwner,headRepository,isDraft,statusCheckRollup,reviewDecision,mergeable,url,additions,deletions,changedFiles",
                           "--limit", "100"]
         proc.currentDirectoryURL = URL(fileURLWithPath: context.identity.repositoryRoot)
 
@@ -65,9 +74,13 @@ enum PRDetect {
             let candidates = arr.sorted {
                 ($0["number"] as? Int ?? 0) > ($1["number"] as? Int ?? 0)
             }
-            guard let first = candidates.first(where: {
-                ($0["state"] as? String)?.uppercased() == "OPEN"
-            }) ?? candidates.first(where: {
+            let openCandidate = upstreamRepository.flatMap { upstreamRepository in
+                candidates.first(where: {
+                    ($0["state"] as? String)?.uppercased() == "OPEN"
+                        && repository(for: $0) == upstreamRepository
+                })
+            }
+            guard let first = openCandidate ?? candidates.first(where: {
                 guard let state = ($0["state"] as? String)?.uppercased() else { return false }
                 return (state == "MERGED" || state == "CLOSED")
                     && ($0["headRefOid"] as? String) == context.identity.head
@@ -110,6 +123,15 @@ enum PRDetect {
         } catch {
             return .failure
         }
+    }
+
+    private static func repository(for candidate: [String: Any]) -> GitHubRepository? {
+        guard let owner = candidate["headRepositoryOwner"] as? [String: Any],
+              let login = owner["login"] as? String,
+              let repository = candidate["headRepository"] as? [String: Any],
+              let name = repository["name"] as? String
+        else { return nil }
+        return GitHubRepository(owner: login, name: name)
     }
 
     /// Get diff stats via git

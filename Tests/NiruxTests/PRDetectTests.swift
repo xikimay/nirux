@@ -15,11 +15,24 @@ final class PRDetectTests: XCTestCase {
         XCTAssertFalse(PRDetect.shouldRefresh(isInactive: false, branch: "   "))
     }
 
+    func testGitHubRepositoryIdentityParsesCommonRemoteURLs() {
+        let expected = GitHubRepository(owner: "xikimay", name: "nirux")
+
+        XCTAssertEqual(
+            GitHubRepository(remoteURL: "https://github.com/XikiMay/Nirux.git"),
+            expected
+        )
+        XCTAssertEqual(
+            GitHubRepository(remoteURL: "git@github.com:XikiMay/Nirux.git"),
+            expected
+        )
+    }
+
     func testOpenPullRequestIsPreferredOverNewerClosedPullRequest() throws {
         let result = try fetchUsingFakeGitHubCLI(json: #"""
         [
           {"number":52,"state":"CLOSED","headRefOid":"current-head","isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/52"},
-          {"number":41,"state":"OPEN","headRefOid":"older-head","isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/41"}
+          {"number":41,"state":"OPEN","headRefOid":"older-head","headRepositoryOwner":{"login":"XikiMay"},"headRepository":{"name":"Nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/41"}
         ]
         """#)
         guard case .success(let context, let fetched) = result else {
@@ -40,6 +53,20 @@ final class PRDetectTests: XCTestCase {
             ),
             .review
         )
+    }
+
+    func testOpenPullRequestFromSameNamedForkBranchIsIgnored() throws {
+        let result = try fetchUsingFakeGitHubCLI(json: #"""
+        [
+          {"number":90,"state":"OPEN","headRefOid":"foreign-head","headRepositoryOwner":{"login":"alice"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/90"},
+          {"number":80,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/80"}
+        ]
+        """#)
+
+        guard case .success(_, let fetched) = result else {
+            return XCTFail("Expected successful PR lookup")
+        }
+        XCTAssertEqual(try XCTUnwrap(fetched).number, 80)
     }
 
     func testNewestTerminalPullRequestIsSelectedWhenNoneAreOpen() throws {
@@ -95,7 +122,7 @@ final class PRDetectTests: XCTestCase {
 
     func testLargeGitHubResponseIsDrainedWhileProcessRuns() throws {
         let padding = String(repeating: "x", count: 512 * 1024)
-        let json = #"[{"number":41,"state":"OPEN","headRefOid":"current-head","isDraft":false,"statusCheckRollup":[{"conclusion":"SUCCESS","padding":"\#(padding)"}],"url":"https://example.test/pull/41"}]"#
+        let json = #"[{"number":41,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[{"conclusion":"SUCCESS","padding":"\#(padding)"}],"url":"https://example.test/pull/41"}]"#
         let result = try fetchUsingFakeGitHubCLI(
             json: json,
             watchdogDelay: 2
@@ -148,6 +175,14 @@ final class PRDetectTests: XCTestCase {
             *,headRefOid,*) ;;
             *) exit 66 ;;
         esac
+        case ",$json_fields," in
+            *,headRepositoryOwner,*) ;;
+            *) exit 67 ;;
+        esac
+        case ",$json_fields," in
+            *,headRepository,*) ;;
+            *) exit 68 ;;
+        esac
         parent_pid=$$
         (sleep \#(watchdogDelay); kill -TERM "$parent_pid") >/dev/null 2>&1 &
         watchdog_pid=$!
@@ -167,7 +202,8 @@ final class PRDetectTests: XCTestCase {
                     repositoryRoot: directory.path,
                     head: currentHead
                 )
-            )
+            ),
+            upstreamRepository: GitHubRepository(owner: "xikimay", name: "nirux")
         )
     }
 }
