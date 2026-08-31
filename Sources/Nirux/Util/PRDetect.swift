@@ -32,7 +32,7 @@ enum PRDetect {
         proc.arguments = ["pr", "list", "--head", branch,
                           "--state", "all",
                           "--json", "number,state,isDraft,statusCheckRollup,reviewDecision,mergeable,url,additions,deletions,changedFiles",
-                          "--limit", "1"]
+                          "--limit", "100"]
         proc.currentDirectoryURL = URL(fileURLWithPath: cwd)
 
         let pipe = Pipe()
@@ -44,8 +44,17 @@ enum PRDetect {
             proc.waitUntilExit()
             guard proc.terminationStatus == 0 else { return nil }
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            guard let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-                  let first = arr.first else { return nil }
+            guard let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+            else { return nil }
+            let candidates = arr.sorted {
+                ($0["number"] as? Int ?? 0) > ($1["number"] as? Int ?? 0)
+            }
+            guard let first = candidates.first(where: {
+                ($0["state"] as? String)?.uppercased() == "OPEN"
+            }) ?? candidates.first(where: {
+                guard let state = ($0["state"] as? String)?.uppercased() else { return false }
+                return state == "MERGED" || state == "CLOSED"
+            }) else { return nil }
 
             let number = first["number"] as? Int ?? 0
             let state = first["state"] as? String ?? ""
