@@ -57,10 +57,12 @@ struct PilotClickableArea {
 
 struct GitContextObservation: Sendable {
     fileprivate let generation: UInt64
+    fileprivate let workingDirectory: String
 }
 
 struct PullRequestObservation: Sendable {
     fileprivate let generation: UInt64
+    fileprivate let context: GitContext
 }
 
 enum GitContextObservationResult: Equatable {
@@ -95,7 +97,9 @@ final class WorkspaceState {
     var missionHandoffsEnabled: Bool
     private(set) var gitContext: GitContext?
     private var gitContextObservationGeneration: UInt64 = 0
+    private var gitContextObservation: GitContextObservation?
     private var pullRequestObservationGeneration: UInt64 = 0
+    private var pullRequestObservation: PullRequestObservation?
     var gitBranch: String? { gitContext?.branch }
     var focusedWorkingDirectory: String {
         let column = columns[safe: focusedIndex]
@@ -200,12 +204,20 @@ final class WorkspaceState {
     @discardableResult
     func updateGitContext(_ context: GitContext?) -> Bool {
         gitContextObservationGeneration &+= 1
+        gitContextObservation = nil
         return replaceGitContext(context)
     }
 
-    func beginGitContextObservation() -> GitContextObservation {
+    func beginGitContextObservation(at workingDirectory: String) -> GitContextObservation? {
+        let workingDirectory = URL(fileURLWithPath: workingDirectory).standardizedFileURL.path
+        guard gitContextObservation?.workingDirectory != workingDirectory else { return nil }
         gitContextObservationGeneration &+= 1
-        return GitContextObservation(generation: gitContextObservationGeneration)
+        let observation = GitContextObservation(
+            generation: gitContextObservationGeneration,
+            workingDirectory: workingDirectory
+        )
+        gitContextObservation = observation
+        return observation
     }
 
     @discardableResult
@@ -213,18 +225,23 @@ final class WorkspaceState {
         _ context: GitContext?,
         observation: GitContextObservation
     ) -> GitContextObservationResult {
-        guard observation.generation == gitContextObservationGeneration else { return .stale }
+        guard observation.generation == gitContextObservationGeneration,
+              gitContextObservation?.generation == observation.generation
+        else { return .stale }
+        gitContextObservation = nil
         return replaceGitContext(context) ? .changed : .unchanged
     }
 
     private func replaceGitContext(_ context: GitContext?) -> Bool {
         guard gitContext != context else { return false }
         pullRequestObservationGeneration &+= 1
+        pullRequestObservation = nil
         let previousContext = gitContext
         gitContext = context
         let sameRevision = previousContext?.branch == context?.branch
             && previousContext?.identity.repositoryRoot == context?.identity.repositoryRoot
             && previousContext?.identity.head == context?.identity.head
+            && previousContext?.upstreamRepository == context?.upstreamRepository
         if !sameRevision || (context?.identity.isDirty == true && Self.isTerminalPullRequest(prInfo)) {
             prInfo = nil
         }
@@ -246,16 +263,36 @@ final class WorkspaceState {
         return true
     }
 
-    func beginPullRequestObservation() -> PullRequestObservation {
+    func beginPullRequestObservation(for context: GitContext) -> PullRequestObservation? {
+        guard gitContext == context,
+              pullRequestObservation?.context != context
+        else { return nil }
         pullRequestObservationGeneration &+= 1
-        return PullRequestObservation(generation: pullRequestObservationGeneration)
+        let observation = PullRequestObservation(
+            generation: pullRequestObservationGeneration,
+            context: context
+        )
+        pullRequestObservation = observation
+        return observation
     }
 
     func isCurrentPullRequestObservation(
         _ observation: PullRequestObservation,
         for context: GitContext
     ) -> Bool {
-        observation.generation == pullRequestObservationGeneration && gitContext == context
+        observation.generation == pullRequestObservationGeneration
+            && pullRequestObservation?.generation == observation.generation
+            && observation.context == context
+            && gitContext == context
+    }
+
+    @discardableResult
+    func finishPullRequestObservation(_ observation: PullRequestObservation) -> Bool {
+        guard observation.generation == pullRequestObservationGeneration,
+              pullRequestObservation?.generation == observation.generation
+        else { return false }
+        pullRequestObservation = nil
+        return true
     }
 
     @discardableResult
@@ -265,6 +302,7 @@ final class WorkspaceState {
         observation: PullRequestObservation
     ) -> Bool {
         guard isCurrentPullRequestObservation(observation, for: context) else { return false }
+        pullRequestObservation = nil
         return applyPullRequestInfo(info, for: context)
     }
 
@@ -316,8 +354,9 @@ final class WorkspaceState {
             guard let self, let col,
                   self.columns[safe: self.focusedIndex] === col
             else { return }
-            let observation = self.beginGitContextObservation()
-            GitDetect.contextAsync(at: self.focusedWorkingDirectory) { [weak self] context in
+            let workingDirectory = self.focusedWorkingDirectory
+            guard let observation = self.beginGitContextObservation(at: workingDirectory) else { return }
+            GitDetect.contextAsync(at: workingDirectory) { [weak self] context in
                 guard let self else { return }
                 let result = self.applyGitContextObservation(context, observation: observation)
                 guard result != .stale else { return }
@@ -378,8 +417,9 @@ final class WorkspaceState {
     }
 
     func detectGitBranch() {
-        let observation = beginGitContextObservation()
-        GitDetect.contextAsync(at: focusedWorkingDirectory) { [weak self] context in
+        let workingDirectory = focusedWorkingDirectory
+        guard let observation = beginGitContextObservation(at: workingDirectory) else { return }
+        GitDetect.contextAsync(at: workingDirectory) { [weak self] context in
             self?.applyGitContextObservation(context, observation: observation)
         }
     }

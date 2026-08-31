@@ -423,8 +423,9 @@ extension NiruxShellView {
 
     func refreshGitBranches() {
         for workspace in workspaces {
-            let observation = workspace.beginGitContextObservation()
-            GitDetect.contextAsync(at: workspace.focusedWorkingDirectory) { [weak workspace] context in
+            let workingDirectory = workspace.focusedWorkingDirectory
+            guard let observation = workspace.beginGitContextObservation(at: workingDirectory) else { continue }
+            GitDetect.contextAsync(at: workingDirectory) { [weak workspace] context in
                 workspace?.applyGitContextObservation(
                     context,
                     observation: observation
@@ -445,24 +446,31 @@ extension NiruxShellView {
             ), let requestedContext = workspace.gitContext else { continue }
             let branch = requestedContext.branch
             let cwd = workspace.focusedWorkingDirectory
-            let observation = workspace.beginPullRequestObservation()
+            guard let observation = workspace.beginPullRequestObservation(for: requestedContext) else { continue }
             PRDetect.fetchAsync(branch: branch, cwd: cwd) { [weak self, weak workspace] result in
+                guard let workspace else { return }
+                guard !workspace.isInactive else {
+                    workspace.finishPullRequestObservation(observation)
+                    return
+                }
                 guard case .success(let queriedContext, let info) = result,
-                      let workspace, !workspace.isInactive,
-                      workspace.isCurrentPullRequestObservation(
-                          observation,
-                          for: queriedContext
-                      ) else { return }
+                      workspace.isCurrentPullRequestObservation(observation, for: queriedContext)
+                else {
+                    workspace.finishPullRequestObservation(observation)
+                    return
+                }
                 let currentCwd = workspace.focusedWorkingDirectory
                 GitDetect.contextAsync(at: currentCwd) { [weak self, weak workspace] currentContext in
-                    guard let workspace, !workspace.isInactive,
-                          currentContext == queriedContext,
-                          workspace.applyPullRequestInfo(
-                              info,
-                              for: queriedContext,
-                              observation: observation
-                          )
-                    else { return }
+                    guard let workspace else { return }
+                    guard !workspace.isInactive, currentContext == queriedContext else {
+                        workspace.finishPullRequestObservation(observation)
+                        return
+                    }
+                    guard workspace.applyPullRequestInfo(
+                        info,
+                        for: queriedContext,
+                        observation: observation
+                    ) else { return }
                     self?.updateSidebar()
                 }
             }

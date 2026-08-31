@@ -28,6 +28,43 @@ final class PRDetectTests: XCTestCase {
         )
     }
 
+    func testGitContextTracksUpstreamRepositoryReassignment() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try runGit(["init", "-q"], at: directory)
+        try "initial\n".write(
+            to: directory.appendingPathComponent("tracked.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try runGit(["add", "tracked.txt"], at: directory)
+        try runGit([
+            "-c", "user.name=Nirux Tests",
+            "-c", "user.email=nirux@example.test",
+            "commit", "-qm", "initial"
+        ], at: directory)
+        let branch = try XCTUnwrap(GitDetect.context(at: directory.path)).branch
+        try runGit(["remote", "add", "origin", "git@github.com:Owner/Nirux.git"], at: directory)
+        try runGit(["update-ref", "refs/remotes/origin/\(branch)", "HEAD"], at: directory)
+        try runGit(["branch", "--set-upstream-to=origin/\(branch)"], at: directory)
+
+        XCTAssertEqual(
+            try XCTUnwrap(GitDetect.context(at: directory.path)).upstreamRepository,
+            GitHubRepository(owner: "owner", name: "nirux")
+        )
+
+        try runGit([
+            "remote", "set-url", "origin", "https://github.com/Other/Nirux.git"
+        ], at: directory)
+        XCTAssertEqual(
+            try XCTUnwrap(GitDetect.context(at: directory.path)).upstreamRepository,
+            GitHubRepository(owner: "other", name: "nirux")
+        )
+    }
+
     func testGitContextTracksUntrackedUnstagedAndStagedChanges() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -269,6 +306,17 @@ final class PRDetectTests: XCTestCase {
         XCTAssertNil(terminalInfo)
     }
 
+    func testDirtyWorktreeWithoutUpstreamIdentityPreservesCachedResult() throws {
+        let result = try fetchUsingFakeGitHubCLI(
+            isDirty: true,
+            upstreamRepository: nil
+        )
+
+        guard case .failure = result else {
+            return XCTFail("Expected missing upstream identity to preserve cached PR state")
+        }
+    }
+
     func testTerminalPullRequestFromReusedBranchNameIsIgnored() throws {
         let result = try fetchUsingFakeGitHubCLI(terminalJSON: #"""
         [
@@ -280,6 +328,44 @@ final class PRDetectTests: XCTestCase {
             return XCTFail("Expected successful PR lookup")
         }
         XCTAssertNil(pullRequest)
+    }
+
+    func testAuthoritativeTerminalPullRequestIsFoundBeyondFirstHundredForks() throws {
+        let foreignCandidates: [[String: Any]] = (100 ... 199).map { number in
+            [
+                "number": number,
+                "state": "CLOSED",
+                "headRefOid": "current-head",
+                "headRepositoryOwner": ["login": "fork-\(number)"],
+                "headRepository": ["name": "nirux"],
+                "isDraft": false,
+                "statusCheckRollup": [],
+                "url": "https://example.test/pull/\(number)"
+            ]
+        }
+        let authoritativeCandidate: [String: Any] = [
+            "number": 1,
+            "state": "MERGED",
+            "headRefOid": "current-head",
+            "headRepositoryOwner": ["login": "xikimay"],
+            "headRepository": ["name": "nirux"],
+            "isDraft": false,
+            "statusCheckRollup": [],
+            "url": "https://example.test/pull/1"
+        ]
+        let cappedData = try JSONSerialization.data(withJSONObject: foreignCandidates)
+        let exhaustiveData = try JSONSerialization.data(
+            withJSONObject: foreignCandidates + [authoritativeCandidate]
+        )
+        let result = try fetchUsingFakeGitHubCLI(
+            terminalJSON: try XCTUnwrap(String(data: exhaustiveData, encoding: .utf8)),
+            cappedTerminalJSON: try XCTUnwrap(String(data: cappedData, encoding: .utf8))
+        )
+
+        guard case .success(_, let fetched) = result else {
+            return XCTFail("Expected exhaustive terminal PR lookup")
+        }
+        XCTAssertEqual(try XCTUnwrap(fetched).number, 1)
     }
 
     func testLookupFailureDiffersFromSuccessfulEmptyResult() throws {
@@ -312,6 +398,7 @@ final class PRDetectTests: XCTestCase {
         openJSON: String = "[]",
         cappedOpenJSON: String? = nil,
         terminalJSON: String = "[]",
+        cappedTerminalJSON: String? = nil,
         currentHead: String = "current-head",
         isDirty: Bool = false,
         failingState: String? = nil,
@@ -363,7 +450,11 @@ final class PRDetectTests: XCTestCase {
                 ;;
             all)
                 [ "$search" = "\#(currentHead)" ] || exit 69
-                payload='\#(terminalJSON)'
+                if [ "\#(cappedTerminalJSON == nil ? "0" : "1")" = "1" ] && [ "$limit" = "100" ]; then
+                    payload='\#(cappedTerminalJSON ?? "")'
+                else
+                    payload='\#(terminalJSON)'
+                fi
                 ;;
             *) exit 64 ;;
         esac
@@ -399,9 +490,9 @@ final class PRDetectTests: XCTestCase {
                     repositoryRoot: directory.path,
                     head: currentHead,
                     isDirty: isDirty
-                )
-            ),
-            upstreamRepository: upstreamRepository
+                ),
+                upstreamRepository: upstreamRepository
+            )
         )
     }
 

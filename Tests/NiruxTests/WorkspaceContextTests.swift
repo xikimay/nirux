@@ -164,7 +164,7 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertNil(workspace.diffStats)
     }
 
-    func testOlderGitObservationCannotReplaceNewerContext() {
+    func testOlderGitObservationCannotReplaceNewerContext() throws {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         let oldContext = GitContext(
             branch: "feature/task",
@@ -174,8 +174,12 @@ final class WorkspaceContextTests: XCTestCase {
             branch: "feature/task",
             identity: GitIdentity(repositoryRoot: "/repo", head: "head-b")
         )
-        let olderObservation = workspace.beginGitContextObservation()
-        let newerObservation = workspace.beginGitContextObservation()
+        let olderObservation = try XCTUnwrap(
+            workspace.beginGitContextObservation(at: "/repo/old")
+        )
+        let newerObservation = try XCTUnwrap(
+            workspace.beginGitContextObservation(at: "/repo/new")
+        )
 
         XCTAssertEqual(
             workspace.applyGitContextObservation(newContext, observation: newerObservation),
@@ -202,11 +206,17 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(workspace.prInfo?.number, 42)
     }
 
-    func testOlderPullRequestObservationCannotReplaceNewerResult() {
+    func testOlderPullRequestObservationCannotReplaceNewerResult() throws {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
-        let context = GitContext(
+        let oldContext = GitContext(
             branch: "feature/task",
-            identity: GitIdentity(repositoryRoot: "/repo", head: "head-a")
+            identity: GitIdentity(repositoryRoot: "/repo", head: "head-a"),
+            upstreamRepository: GitHubRepository(owner: "owner", name: "repo")
+        )
+        let newContext = GitContext(
+            branch: "feature/task",
+            identity: GitIdentity(repositoryRoot: "/repo", head: "head-b"),
+            upstreamRepository: GitHubRepository(owner: "owner", name: "repo")
         )
         let open = PRInfo(
             number: 41,
@@ -235,17 +245,22 @@ final class WorkspaceContextTests: XCTestCase {
             changedFiles: nil
         )
 
-        XCTAssertTrue(workspace.updateGitContext(context))
-        let olderObservation = workspace.beginPullRequestObservation()
-        let newerObservation = workspace.beginPullRequestObservation()
+        XCTAssertTrue(workspace.updateGitContext(oldContext))
+        let olderObservation = try XCTUnwrap(
+            workspace.beginPullRequestObservation(for: oldContext)
+        )
+        XCTAssertTrue(workspace.updateGitContext(newContext))
+        let newerObservation = try XCTUnwrap(
+            workspace.beginPullRequestObservation(for: newContext)
+        )
         XCTAssertTrue(workspace.applyPullRequestInfo(
             merged,
-            for: context,
+            for: newContext,
             observation: newerObservation
         ))
         XCTAssertFalse(workspace.applyPullRequestInfo(
             open,
-            for: context,
+            for: oldContext,
             observation: olderObservation
         ))
         XCTAssertEqual(workspace.prInfo, merged)
@@ -305,7 +320,7 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(workspace.prInfo, open)
     }
 
-    func testChangedGitObservationSchedulesRefreshAndRejectsStaleRequest() {
+    func testChangedGitObservationSchedulesRefreshAndRejectsStaleRequest() throws {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         let staleContext = GitContext(
             branch: "feature/task",
@@ -317,8 +332,12 @@ final class WorkspaceContextTests: XCTestCase {
         )
         var refreshContexts: [GitContext?] = []
         workspace.onGitContextChanged = { refreshContexts.append(workspace.gitContext) }
-        let staleObservation = workspace.beginGitContextObservation()
-        let currentObservation = workspace.beginGitContextObservation()
+        let staleObservation = try XCTUnwrap(
+            workspace.beginGitContextObservation(at: "/repo/stale")
+        )
+        let currentObservation = try XCTUnwrap(
+            workspace.beginGitContextObservation(at: "/repo/current")
+        )
 
         XCTAssertEqual(
             workspace.applyGitContextObservation(currentContext, observation: currentObservation),
@@ -331,7 +350,9 @@ final class WorkspaceContextTests: XCTestCase {
         )
         XCTAssertEqual(refreshContexts, [currentContext])
 
-        let unchangedObservation = workspace.beginGitContextObservation()
+        let unchangedObservation = try XCTUnwrap(
+            workspace.beginGitContextObservation(at: "/repo/current")
+        )
         XCTAssertEqual(
             workspace.applyGitContextObservation(currentContext, observation: unchangedObservation),
             .unchanged
@@ -385,7 +406,7 @@ final class WorkspaceContextTests: XCTestCase {
         }
     }
 
-    func testBackgroundTerminalCwdEventDoesNotClaimGitObservation() {
+    func testBackgroundTerminalCwdEventDoesNotClaimGitObservation() throws {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         let backgroundTerminal = workspace.columns[0]
         workspace.addEditorColumn(workspaceCwd: "/tmp/editor")
@@ -394,7 +415,9 @@ final class WorkspaceContextTests: XCTestCase {
             identity: GitIdentity(repositoryRoot: "/repo/editor", head: "editor-head")
         )
         XCTAssertTrue(workspace.updateGitContext(editorContext))
-        let pendingFocusedObservation = workspace.beginGitContextObservation()
+        let pendingFocusedObservation = try XCTUnwrap(
+            workspace.beginGitContextObservation(at: workspace.focusedWorkingDirectory)
+        )
 
         backgroundTerminal.onCwdChanged?("/repo/terminal")
 
@@ -406,6 +429,75 @@ final class WorkspaceContextTests: XCTestCase {
             .unchanged
         )
         XCTAssertEqual(workspace.gitContext, editorContext)
+    }
+
+    func testRepeatedSlowPollsCoalesceUntilObservationsFinish() throws {
+        let workspace = WorkspaceState(title: "context", cwd: "/tmp")
+        let context = GitContext(
+            branch: "feature/task",
+            identity: GitIdentity(repositoryRoot: "/repo", head: "head-a"),
+            upstreamRepository: GitHubRepository(owner: "owner", name: "repo")
+        )
+
+        let gitObservation = try XCTUnwrap(
+            workspace.beginGitContextObservation(at: "/repo")
+        )
+        XCTAssertNil(workspace.beginGitContextObservation(at: "/repo"))
+        XCTAssertEqual(
+            workspace.applyGitContextObservation(context, observation: gitObservation),
+            .changed
+        )
+        XCTAssertNotNil(workspace.beginGitContextObservation(at: "/repo"))
+
+        let pullRequestObservation = try XCTUnwrap(
+            workspace.beginPullRequestObservation(for: context)
+        )
+        XCTAssertNil(workspace.beginPullRequestObservation(for: context))
+        XCTAssertTrue(workspace.finishPullRequestObservation(pullRequestObservation))
+        XCTAssertNotNil(workspace.beginPullRequestObservation(for: context))
+    }
+
+    func testUpstreamReassignmentInvalidatesCachedAndInFlightPullRequest() throws {
+        let workspace = WorkspaceState(title: "context", cwd: "/tmp")
+        let identity = GitIdentity(repositoryRoot: "/repo", head: "head-a")
+        let original = GitContext(
+            branch: "feature/task",
+            identity: identity,
+            upstreamRepository: GitHubRepository(owner: "owner", name: "repo")
+        )
+        let reassigned = GitContext(
+            branch: "feature/task",
+            identity: identity,
+            upstreamRepository: GitHubRepository(owner: "other", name: "repo")
+        )
+        let pullRequest = PRInfo(
+            number: 42,
+            state: "OPEN",
+            isDraft: false,
+            ciStatus: nil,
+            failedCheckUrl: nil,
+            reviewDecision: nil,
+            mergeable: nil,
+            url: "https://example.test/pull/42",
+            additions: nil,
+            deletions: nil,
+            changedFiles: nil
+        )
+
+        XCTAssertTrue(workspace.updateGitContext(original))
+        XCTAssertTrue(workspace.applyPullRequestInfo(pullRequest, for: original))
+        let staleObservation = try XCTUnwrap(
+            workspace.beginPullRequestObservation(for: original)
+        )
+
+        XCTAssertTrue(workspace.updateGitContext(reassigned))
+        XCTAssertNil(workspace.prInfo)
+        XCTAssertFalse(workspace.applyPullRequestInfo(
+            pullRequest,
+            for: original,
+            observation: staleObservation
+        ))
+        XCTAssertNotNil(workspace.beginPullRequestObservation(for: reassigned))
     }
 
     func testWorkspaceContextShortcutsIgnoreOtherWindows() {

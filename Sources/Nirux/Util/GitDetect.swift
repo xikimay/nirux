@@ -48,6 +48,17 @@ struct GitIdentity: Hashable, Sendable {
 struct GitContext: Hashable, Sendable {
     let branch: String
     let identity: GitIdentity
+    let upstreamRepository: GitHubRepository?
+
+    init(
+        branch: String,
+        identity: GitIdentity,
+        upstreamRepository: GitHubRepository? = nil
+    ) {
+        self.branch = branch
+        self.identity = identity
+        self.upstreamRepository = upstreamRepository
+    }
 }
 
 enum GitDetect {
@@ -65,13 +76,16 @@ enum GitDetect {
         guard lines.count == 3,
               lines.allSatisfy({ !$0.isEmpty })
         else { return nil }
+        let repositoryRoot = URL(fileURLWithPath: lines[0]).standardizedFileURL.path
+        let branch = lines[2]
         return GitContext(
-            branch: lines[2],
+            branch: branch,
             identity: GitIdentity(
-                repositoryRoot: URL(fileURLWithPath: lines[0]).standardizedFileURL.path,
+                repositoryRoot: repositoryRoot,
                 head: lines[1],
                 isDirty: !status.isEmpty
-            )
+            ),
+            upstreamRepository: upstreamRepository(at: repositoryRoot, branch: branch)
         )
     }
 

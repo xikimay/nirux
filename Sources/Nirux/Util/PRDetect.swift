@@ -38,20 +38,16 @@ enum PRDetect {
         return fetch(
             branch: branch,
             ghPath: ghPath,
-            context: context,
-            upstreamRepository: GitDetect.upstreamRepository(
-                at: context.identity.repositoryRoot,
-                branch: branch
-            )
+            context: context
         )
     }
 
     static func fetch(
         branch: String,
         ghPath: String,
-        context: GitContext,
-        upstreamRepository: GitHubRepository?
+        context: GitContext
     ) -> FetchResult {
+        guard let upstreamRepository = context.upstreamRepository else { return .failure }
         guard let openCandidates = candidates(
             branch: branch,
             state: "open",
@@ -65,7 +61,6 @@ enum PRDetect {
             .filter { ($0["state"] as? String)?.uppercased() == "OPEN" }
             .sorted(by: pullRequestNumberDescending)
         if !sortedOpenCandidates.isEmpty {
-            guard let upstreamRepository else { return .failure }
             if let openCandidate = sortedOpenCandidates.first(where: {
                 repository(for: $0) == upstreamRepository
             }) {
@@ -79,12 +74,11 @@ enum PRDetect {
             return .success(context: context, info: nil)
         }
 
-        guard let upstreamRepository else { return .failure }
         guard let terminalCandidates = candidates(
             branch: branch,
             state: "all",
             search: context.identity.head,
-            limit: 100,
+            limit: Int.max,
             ghPath: ghPath,
             repositoryRoot: context.identity.repositoryRoot
         ) else { return .failure }
