@@ -13,6 +13,13 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     weak var settingsNoFlickerCheckbox: NSButton?
     weak var settingsCodexLaunchModePopup: NSPopUpButton?
     weak var settingsMissionHandoffsCheckbox: NSButton?
+    weak var settingsTelegramEnabledCheckbox: NSButton?
+    weak var settingsTelegramTokenField: NSSecureTextField?
+    weak var settingsTelegramCompletionCheckbox: NSButton?
+    weak var settingsTelegramAttentionCheckbox: NSButton?
+    weak var settingsTelegramStatusLabel: NSTextField?
+    weak var settingsTelegramPairButton: NSButton?
+    var telegramRemoteAccessController: TelegramRemoteAccessController?
     var isManualUpdateCheck = false
     var updaterReady = false
 
@@ -106,14 +113,30 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         hooks.onEventsApplied = { [weak shellView] events in
             shellView?.applyAgentHookEvents(events)
         }
-        hooks.onEventReceived = { event, resolution in
+        let remoteAccess = TelegramRemoteAccessController(
+            sessions: { [weak shellView] in
+                shellView?.remoteAgentSessions() ?? []
+            },
+            sendPrompt: { [weak shellView] agentUUID, prompt in
+                shellView?.sendRemotePrompt(agentUUID: agentUUID, prompt: prompt) ?? .sessionUnavailable
+            }
+        )
+        telegramRemoteAccessController = remoteAccess
+        remoteAccess.onStateChange = { [weak self] in
+            self?.refreshTelegramSettingsState()
+        }
+        hooks.onEventReceived = { [weak remoteAccess] event, resolution in
             ActivityStore.shared.record(
                 event,
                 workspaceTitle: resolution?.workspace.title ?? event.cwd ?? "External agent",
                 columnIndex: resolution?.columnIndex
             )
+            remoteAccess?.handleAgentEvent(event, resolution: resolution)
         }
         hooks.start()
+        // Start after the hook backlog drain so events queued while Nirux was
+        // closed are recorded locally but never replayed as Telegram alerts.
+        remoteAccess.reloadFromPersistence()
 
         let missionEvents = MissionEventCenter.shared
         missionEvents.onEvent = { [weak shellView] mission, event in
@@ -140,6 +163,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
 
     func applicationWillTerminate(_ notification: Notification) {
         shell?.saveState(snapshot: ProcessSnapshot())
+        telegramRemoteAccessController?.shutdown()
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
         ActivityStore.shared.flush()
         AgentHookCenter.shared.stop()

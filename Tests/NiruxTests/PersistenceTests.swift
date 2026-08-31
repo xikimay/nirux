@@ -7,6 +7,26 @@ import XCTest
 /// on-disk store.
 final class PersistedStateCodingTests: XCTestCase {
 
+    func testPersistenceSaveReportsWriteFailure() throws {
+        let invalidDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nirux-persistence-\(UUID().uuidString)")
+        try Data("not a directory".utf8).write(to: invalidDirectory)
+        let previousDirectory = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
+        setenv("NIRUX_STATE_DIR", invalidDirectory.path, 1)
+        defer {
+            if let previousDirectory {
+                setenv("NIRUX_STATE_DIR", previousDirectory, 1)
+            } else {
+                unsetenv("NIRUX_STATE_DIR")
+            }
+            try? FileManager.default.removeItem(at: invalidDirectory)
+        }
+
+        let state = PersistedState(workspaces: [], activeWorkspaceIndex: 0)
+
+        XCTAssertFalse(Persistence.save(state))
+    }
+
     func testPersistedStateRoundTripsThroughJSON() throws {
         let original = PersistedState(
             workspaces: [
@@ -350,6 +370,42 @@ final class PersistedStateCodingTests: XCTestCase {
             from: JSONEncoder().encode(workspace)
         )
         XCTAssertEqual(decodedWorkspace.missionID, missionID)
+    }
+}
+
+extension PersistedStateCodingTests {
+    func testTelegramRemoteAccessSettingsRoundTripWithoutToken() throws {
+        let original = PersistedSettings(
+            telegramRemoteAccessEnabled: true,
+            telegramPairedUserID: 123_456,
+            telegramPairedChatID: 654_321,
+            telegramNotifyOnCompletion: false,
+            telegramNotifyOnAttention: true,
+            telegramLastUpdateID: 88
+        )
+        let data = try JSONEncoder().encode(original)
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        let decoded = try JSONDecoder().decode(PersistedSettings.self, from: data)
+
+        XCTAssertTrue(decoded.telegramRemoteAccessEnabled)
+        XCTAssertEqual(decoded.telegramPairedUserID, 123_456)
+        XCTAssertEqual(decoded.telegramPairedChatID, 654_321)
+        XCTAssertFalse(decoded.telegramNotifyOnCompletion)
+        XCTAssertTrue(decoded.telegramNotifyOnAttention)
+        XCTAssertEqual(decoded.telegramLastUpdateID, 88)
+        XCTAssertFalse(json.localizedCaseInsensitiveContains("token"))
+    }
+
+    func testLegacySettingsDefaultTelegramRemoteAccessOff() throws {
+        let json = Data("""
+        { "claudeLaunchMode": "plan", "claudeNoFlicker": true }
+        """.utf8)
+        let settings = try JSONDecoder().decode(PersistedSettings.self, from: json)
+        XCTAssertFalse(settings.telegramRemoteAccessEnabled)
+        XCTAssertNil(settings.telegramPairedUserID)
+        XCTAssertNil(settings.telegramPairedChatID)
+        XCTAssertTrue(settings.telegramNotifyOnCompletion)
+        XCTAssertTrue(settings.telegramNotifyOnAttention)
     }
 
     // MARK: - cliArgs wire format

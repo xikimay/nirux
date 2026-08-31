@@ -37,13 +37,16 @@ enum Persistence {
         stateURL.deletingLastPathComponent().appendingPathComponent("state.backup.\(index).json")
     }
 
-    static func save(_ state: PersistedState) {
+    @discardableResult
+    static func save(_ state: PersistedState) -> Bool {
         do {
             let data = try JSONEncoder().encode(state)
             rotateBackups()
             try data.write(to: stateURL, options: .atomic)
+            return true
         } catch {
             NSLog("[Nirux Persistence] Failed to save state: %@", error.localizedDescription)
+            return false
         }
     }
 
@@ -211,6 +214,15 @@ struct PersistedSettings: Codable {
     /// Experimental and intentionally opt-in. Missing in older state files
     /// decodes to false so existing worktree behavior is unchanged.
     var missionHandoffsEnabled: Bool = false
+    /// Master gate. Secrets never live here; the bot token is in Keychain.
+    var telegramRemoteAccessEnabled: Bool = false
+    var telegramPairedUserID: Int64?
+    var telegramPairedChatID: Int64?
+    var telegramNotifyOnCompletion: Bool = true
+    var telegramNotifyOnAttention: Bool = true
+    /// Last update claimed before execution, giving prompt delivery
+    /// at-most-once semantics across app restarts.
+    var telegramLastUpdateID: Int64?
 
     init(
         claudeLaunchMode: ClaudeLaunchMode? = nil,
@@ -218,7 +230,13 @@ struct PersistedSettings: Codable {
         codexLaunchMode: CodexLaunchMode? = nil,
         sidebarExpanded: Bool? = nil,
         inactiveWorkspacesCollapsed: Bool? = nil,
-        missionHandoffsEnabled: Bool = false
+        missionHandoffsEnabled: Bool = false,
+        telegramRemoteAccessEnabled: Bool = false,
+        telegramPairedUserID: Int64? = nil,
+        telegramPairedChatID: Int64? = nil,
+        telegramNotifyOnCompletion: Bool = true,
+        telegramNotifyOnAttention: Bool = true,
+        telegramLastUpdateID: Int64? = nil
     ) {
         self.claudeLaunchMode = claudeLaunchMode
         self.claudeNoFlicker = claudeNoFlicker
@@ -226,6 +244,12 @@ struct PersistedSettings: Codable {
         self.sidebarExpanded = sidebarExpanded
         self.inactiveWorkspacesCollapsed = inactiveWorkspacesCollapsed
         self.missionHandoffsEnabled = missionHandoffsEnabled
+        self.telegramRemoteAccessEnabled = telegramRemoteAccessEnabled
+        self.telegramPairedUserID = telegramPairedUserID
+        self.telegramPairedChatID = telegramPairedChatID
+        self.telegramNotifyOnCompletion = telegramNotifyOnCompletion
+        self.telegramNotifyOnAttention = telegramNotifyOnAttention
+        self.telegramLastUpdateID = telegramLastUpdateID
     }
 
     enum CodingKeys: String, CodingKey {
@@ -235,6 +259,12 @@ struct PersistedSettings: Codable {
         case sidebarExpanded
         case inactiveWorkspacesCollapsed
         case missionHandoffsEnabled
+        case telegramRemoteAccessEnabled
+        case telegramPairedUserID
+        case telegramPairedChatID
+        case telegramNotifyOnCompletion
+        case telegramNotifyOnAttention
+        case telegramLastUpdateID
         case claudeBypassPermissions // legacy
     }
 
@@ -254,6 +284,18 @@ struct PersistedSettings: Codable {
         sidebarExpanded = try container.decodeIfPresent(Bool.self, forKey: .sidebarExpanded)
         inactiveWorkspacesCollapsed = try container.decodeIfPresent(Bool.self, forKey: .inactiveWorkspacesCollapsed)
         missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? false
+        telegramRemoteAccessEnabled = try container.decodeIfPresent(
+            Bool.self, forKey: .telegramRemoteAccessEnabled
+        ) ?? false
+        telegramPairedUserID = try container.decodeIfPresent(Int64.self, forKey: .telegramPairedUserID)
+        telegramPairedChatID = try container.decodeIfPresent(Int64.self, forKey: .telegramPairedChatID)
+        telegramNotifyOnCompletion = try container.decodeIfPresent(
+            Bool.self, forKey: .telegramNotifyOnCompletion
+        ) ?? true
+        telegramNotifyOnAttention = try container.decodeIfPresent(
+            Bool.self, forKey: .telegramNotifyOnAttention
+        ) ?? true
+        telegramLastUpdateID = try container.decodeIfPresent(Int64.self, forKey: .telegramLastUpdateID)
     }
 
     /// Custom encoder is required because `CodingKeys` carries the legacy
@@ -267,6 +309,12 @@ struct PersistedSettings: Codable {
         try container.encodeIfPresent(sidebarExpanded, forKey: .sidebarExpanded)
         try container.encodeIfPresent(inactiveWorkspacesCollapsed, forKey: .inactiveWorkspacesCollapsed)
         try container.encode(missionHandoffsEnabled, forKey: .missionHandoffsEnabled)
+        try container.encode(telegramRemoteAccessEnabled, forKey: .telegramRemoteAccessEnabled)
+        try container.encodeIfPresent(telegramPairedUserID, forKey: .telegramPairedUserID)
+        try container.encodeIfPresent(telegramPairedChatID, forKey: .telegramPairedChatID)
+        try container.encode(telegramNotifyOnCompletion, forKey: .telegramNotifyOnCompletion)
+        try container.encode(telegramNotifyOnAttention, forKey: .telegramNotifyOnAttention)
+        try container.encodeIfPresent(telegramLastUpdateID, forKey: .telegramLastUpdateID)
     }
 }
 
