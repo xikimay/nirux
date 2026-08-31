@@ -108,6 +108,44 @@ final class PRDetectTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(fetched).number, 80)
     }
 
+    func testAuthoritativeOpenPullRequestIsFoundBeyondFirstHundredForks() throws {
+        let foreignCandidates: [[String: Any]] = (100 ... 199).map { number in
+            [
+                "number": number,
+                "state": "OPEN",
+                "headRefOid": "foreign-\(number)",
+                "headRepositoryOwner": ["login": "fork-\(number)"],
+                "headRepository": ["name": "nirux"],
+                "isDraft": false,
+                "statusCheckRollup": [],
+                "url": "https://example.test/pull/\(number)"
+            ]
+        }
+        let authoritativeCandidate: [String: Any] = [
+            "number": 1,
+            "state": "OPEN",
+            "headRefOid": "current-head",
+            "headRepositoryOwner": ["login": "xikimay"],
+            "headRepository": ["name": "nirux"],
+            "isDraft": false,
+            "statusCheckRollup": [],
+            "url": "https://example.test/pull/1"
+        ]
+        let cappedData = try JSONSerialization.data(withJSONObject: foreignCandidates)
+        let exhaustiveData = try JSONSerialization.data(
+            withJSONObject: foreignCandidates + [authoritativeCandidate]
+        )
+        let result = try fetchUsingFakeGitHubCLI(
+            openJSON: try XCTUnwrap(String(data: exhaustiveData, encoding: .utf8)),
+            cappedOpenJSON: try XCTUnwrap(String(data: cappedData, encoding: .utf8))
+        )
+
+        guard case .success(_, let fetched) = result else {
+            return XCTFail("Expected exhaustive open PR lookup")
+        }
+        XCTAssertEqual(try XCTUnwrap(fetched).number, 1)
+    }
+
     func testOpenPullRequestWithoutUpstreamIdentityPreservesCachedResult() throws {
         let result = try fetchUsingFakeGitHubCLI(
             openJSON: #"""
@@ -244,6 +282,7 @@ final class PRDetectTests: XCTestCase {
 
     private func fetchUsingFakeGitHubCLI(
         openJSON: String = "[]",
+        cappedOpenJSON: String? = nil,
         terminalJSON: String = "[]",
         currentHead: String = "current-head",
         isDirty: Bool = false,
@@ -287,14 +326,20 @@ final class PRDetectTests: XCTestCase {
             esac
         done
         case "$state" in
-            open) payload='\#(openJSON)' ;;
+            open)
+                if [ "\#(cappedOpenJSON == nil ? "0" : "1")" = "1" ] && [ "$limit" = "100" ]; then
+                    payload='\#(cappedOpenJSON ?? "")'
+                else
+                    payload='\#(openJSON)'
+                fi
+                ;;
             all)
                 [ "$search" = "\#(currentHead)" ] || exit 69
                 payload='\#(terminalJSON)'
                 ;;
             *) exit 64 ;;
         esac
-        [ "$limit" -ge 2 ] || exit 65
+        [ -n "$limit" ] && [ "$limit" != "0" ] && [ "$limit" != "1" ] || exit 65
         case ",$json_fields," in
             *,headRefOid,*) ;;
             *) exit 66 ;;

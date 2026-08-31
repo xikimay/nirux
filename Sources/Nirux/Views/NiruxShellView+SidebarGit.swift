@@ -423,14 +423,12 @@ extension NiruxShellView {
 
     func refreshGitBranches() {
         for workspace in workspaces {
-            if let col = workspace.columns[safe: workspace.focusedIndex], let cwd = col.pty?.childCwd {
-                let observation = workspace.beginGitContextObservation()
-                GitDetect.contextAsync(at: cwd) { [weak workspace] context in
-                    workspace?.applyGitContextObservation(
-                        context,
-                        observation: observation
-                    )
-                }
+            let observation = workspace.beginGitContextObservation()
+            GitDetect.contextAsync(at: workspace.focusedWorkingDirectory) { [weak workspace] context in
+                workspace?.applyGitContextObservation(
+                    context,
+                    observation: observation
+                )
             }
         }
     }
@@ -446,13 +444,12 @@ extension NiruxShellView {
                 branch: workspace.gitBranch
             ), let requestedContext = workspace.gitContext else { continue }
             let branch = requestedContext.branch
-            let cwd = workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.cwd
+            let cwd = workspace.focusedWorkingDirectory
             PRDetect.fetchAsync(branch: branch, cwd: cwd) { [weak self, weak workspace] result in
                 guard case .success(let queriedContext, let info) = result,
                       let workspace, !workspace.isInactive,
                       workspace.gitContext == queriedContext else { return }
-                let currentCwd = workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd
-                    ?? workspace.cwd
+                let currentCwd = workspace.focusedWorkingDirectory
                 GitDetect.contextAsync(at: currentCwd) { [weak self, weak workspace] currentContext in
                     guard let workspace, !workspace.isInactive,
                           workspace.gitContext == queriedContext,

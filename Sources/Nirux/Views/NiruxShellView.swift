@@ -164,6 +164,9 @@ final class NiruxShellView: NSView {
     /// init, addWorkspace and session restore.
     func wireWorkspace(_ workspace: WorkspaceState) {
         workspace.onMetadataChanged = { [weak self] in self?.updateSidebar(); self?.refreshTitleBarLabels() }
+        workspace.onFocusedColumnChanged = { [weak workspace] in
+            workspace?.detectGitBranch()
+        }
         workspace.onGitContextChanged = { [weak self, weak workspace] in
             guard let self, let workspace else { return }
             self.updateSidebar()
@@ -511,12 +514,9 @@ extension NiruxShellView {
             self.saveState()
         }
 
-        let cwd = workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd
-            ?? workspace.columns[safe: workspace.focusedIndex]?.editorColumn?.workspaceCwd
-            ?? workspace.cwd
         let configuration = WorkspaceContextPanelConfiguration(
             title: workspace.title,
-            cwd: cwd,
+            cwd: workspace.focusedWorkingDirectory,
             purpose: workspace.purpose,
             phaseOverride: workspace.phase,
             effectivePhase: workspace.effectivePhase,
@@ -570,7 +570,7 @@ extension NiruxShellView {
 
     func showWorktreePanel() {
         guard let window else { return }
-        guard let cwd = activeWorkspace?.columns[safe: activeWorkspace?.focusedIndex ?? 0]?.pty?.childCwd,
+        guard let cwd = activeWorkspace?.focusedWorkingDirectory,
               let repoRoot = GitWorktree.repoRoot(at: cwd)
         else { return }
 
@@ -628,7 +628,7 @@ extension NiruxShellView {
 
     func showWorktreeListPalette() {
         guard let window else { return }
-        guard let cwd = activeWorkspace?.columns[safe: activeWorkspace?.focusedIndex ?? 0]?.pty?.childCwd,
+        guard let cwd = activeWorkspace?.focusedWorkingDirectory,
               let repoRoot = GitWorktree.repoRoot(at: cwd)
         else { return }
 

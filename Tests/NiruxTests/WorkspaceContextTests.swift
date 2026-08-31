@@ -289,6 +289,52 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(refreshContexts, [currentContext])
     }
 
+    func testFocusedEditorRootReplacesTerminalRootAndSchedulesRefresh() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let terminalRoot = directory.appendingPathComponent("terminal", isDirectory: true)
+        let editorRoot = directory.appendingPathComponent("editor", isDirectory: true)
+        try FileManager.default.createDirectory(at: terminalRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: editorRoot, withIntermediateDirectories: true)
+        try initializeGitRepository(at: terminalRoot)
+        try initializeGitRepository(at: editorRoot)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let canonicalPath: (String) -> String = {
+            URL(fileURLWithPath: $0).resolvingSymlinksInPath().path
+        }
+
+        do {
+            let workspace = WorkspaceState(title: "context", cwd: terminalRoot.path)
+            var focusedRepositoryRoots: [String] = []
+            workspace.onFocusedColumnChanged = { [weak workspace] in
+                guard let root = workspace?.focusedWorkingDirectory,
+                      let context = GitDetect.context(at: root)
+                else { return XCTFail("Expected focused column Git context") }
+                focusedRepositoryRoots.append(context.identity.repositoryRoot)
+            }
+
+            workspace.addEditorColumn(workspaceCwd: editorRoot.path)
+            XCTAssertEqual(
+                canonicalPath(workspace.focusedWorkingDirectory),
+                canonicalPath(editorRoot.path)
+            )
+            XCTAssertEqual(
+                focusedRepositoryRoots.map(canonicalPath),
+                [canonicalPath(editorRoot.path)]
+            )
+
+            workspace.focusedIndex = 0
+            XCTAssertEqual(
+                canonicalPath(workspace.focusedWorkingDirectory),
+                canonicalPath(terminalRoot.path)
+            )
+            XCTAssertEqual(
+                focusedRepositoryRoots.map(canonicalPath),
+                [canonicalPath(editorRoot.path), canonicalPath(terminalRoot.path)]
+            )
+        }
+    }
+
     func testWorkspaceContextShortcutsIgnoreOtherWindows() {
         let panel = NSObject()
         let otherWindow = NSObject()
@@ -444,5 +490,31 @@ final class WorkspaceContextTests: XCTestCase {
             lastSummary: summary,
             lastActivityAt: nil
         )
+    }
+
+    private func initializeGitRepository(at directory: URL) throws {
+        try runGit(["init", "-q"], at: directory)
+        let trackedFile = directory.appendingPathComponent("tracked.txt")
+        try "context\n".write(to: trackedFile, atomically: true, encoding: .utf8)
+        try runGit(["add", "tracked.txt"], at: directory)
+        try runGit([
+            "-c", "user.name=Nirux Tests",
+            "-c", "user.email=nirux@example.test",
+            "commit", "-qm", "initial"
+        ], at: directory)
+    }
+
+    private func runGit(_ arguments: [String], at directory: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        process.currentDirectoryURL = directory
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "WorkspaceContextTests.Git", code: Int(process.terminationStatus))
+        }
     }
 }

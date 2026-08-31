@@ -72,7 +72,12 @@ final class WorkspaceState {
     let containerView: NSView  // clips content, acts as viewport
     private let stripView: NSView  // holds all columns, slides horizontally
     var columns: [ColumnState] = []
-    var focusedIndex: Int = 0
+    var focusedIndex: Int = 0 {
+        didSet {
+            guard focusedIndex != oldValue else { return }
+            onFocusedColumnChanged?()
+        }
+    }
     private var lastCameraX: CGFloat = 0
     let cwd: String
     var title: String
@@ -87,6 +92,14 @@ final class WorkspaceState {
     private(set) var gitContext: GitContext?
     private var gitContextObservationGeneration: UInt64 = 0
     var gitBranch: String? { gitContext?.branch }
+    var focusedWorkingDirectory: String {
+        let column = columns[safe: focusedIndex]
+        return Self.resolveWorkingDirectory(
+            terminalCwd: column?.pty?.childCwd,
+            editorCwd: column?.editorColumn?.workspaceCwd,
+            workspaceCwd: cwd
+        )
+    }
     var hasNotification: Bool = false
     var prInfo: PRInfo?
     var diffStats: String?
@@ -125,6 +138,7 @@ final class WorkspaceState {
 
     /// Called by NiruxShellView to wire up sidebar refresh
     var onMetadataChanged: (() -> Void)?
+    var onFocusedColumnChanged: (() -> Void)?
     var onGitContextChanged: (() -> Void)?
     var onDiffStatsClicked: (() -> Void)?
     /// A terminal link was cmd-clicked — the shell opens a browser column
@@ -168,6 +182,14 @@ final class WorkspaceState {
         guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty else { return nil }
         return trimmed
+    }
+
+    static func resolveWorkingDirectory(
+        terminalCwd: String?,
+        editorCwd: String?,
+        workspaceCwd: String
+    ) -> String {
+        terminalCwd ?? editorCwd ?? workspaceCwd
     }
 
     @discardableResult
@@ -325,15 +347,8 @@ final class WorkspaceState {
     }
 
     func detectGitBranch() {
-        // Use the shell's actual cwd (follows cd), not the initial cwd
-        let detectPath: String
-        if let col = columns.first, let realCwd = col.pty?.childCwd {
-            detectPath = realCwd
-        } else {
-            detectPath = cwd
-        }
         let observation = beginGitContextObservation()
-        GitDetect.contextAsync(at: detectPath) { [weak self] context in
+        GitDetect.contextAsync(at: focusedWorkingDirectory) { [weak self] context in
             self?.applyGitContextObservation(context, observation: observation)
         }
     }
@@ -435,15 +450,20 @@ final class WorkspaceState {
     }
 
     func addColumn(agentUUID: String = UUID().uuidString) {
-        let effectiveCwd = columns[safe: focusedIndex]?.pty?.childCwd ?? cwd
-        let col = ColumnState(cwd: effectiveCwd, environment: terminalEnvironment(agentUUID: agentUUID))
+        let col = ColumnState(
+            cwd: focusedWorkingDirectory,
+            environment: terminalEnvironment(agentUUID: agentUUID)
+        )
         setupAllTracking(for: col)
         insertColumn(col)
     }
 
     func addColumn(command: String, agentUUID: String = UUID().uuidString) {
-        let effectiveCwd = columns[safe: focusedIndex]?.pty?.childCwd ?? cwd
-        let col = ColumnState(cwd: effectiveCwd, command: command, environment: terminalEnvironment(agentUUID: agentUUID))
+        let col = ColumnState(
+            cwd: focusedWorkingDirectory,
+            command: command,
+            environment: terminalEnvironment(agentUUID: agentUUID)
+        )
         setupAllTracking(for: col)
         insertColumn(col)
     }
@@ -467,6 +487,8 @@ final class WorkspaceState {
 
     func closeColumn(at index: Int) {
         guard columns.count > 1 else { return }
+        let previouslyFocusedColumn = columns[safe: focusedIndex]
+        let previousFocusedIndex = focusedIndex
         let col = columns.remove(at: index)
         col.view.removeFromSuperview()
         if resizeHandles.indices.contains(index) {
@@ -475,6 +497,10 @@ final class WorkspaceState {
         }
         if focusedIndex >= columns.count {
             focusedIndex = columns.count - 1
+        }
+        if focusedIndex == previousFocusedIndex,
+           columns[safe: focusedIndex] !== previouslyFocusedColumn {
+            onFocusedColumnChanged?()
         }
     }
 

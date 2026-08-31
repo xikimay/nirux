@@ -269,11 +269,7 @@ extension NiruxShellView {
     func createProfileFromActiveContext() {
         let sourceWorkspace = activeWorkspace
         let baseName = sourceWorkspace.flatMap { profileName(for: $0) } ?? "profile"
-        let cwd = sourceWorkspace.flatMap { workspace in
-            workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd
-                ?? workspace.columns.first?.pty?.childCwd
-                ?? workspace.cwd
-        } ?? NSHomeDirectory()
+        let cwd = sourceWorkspace?.focusedWorkingDirectory ?? NSHomeDirectory()
         let profile = workspaceStore.createProfile(named: baseName)
         addWorkspace(title: profile.name, cwd: cwd)
         saveState()
@@ -388,10 +384,8 @@ extension NiruxShellView {
     }
 
     private func profileName(for workspace: WorkspaceState) -> String {
-        if let cwd = workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.columns.first?.pty?.childCwd {
-            return (cwd as NSString).lastPathComponent
-        }
-        return workspace.title
+        let name = (workspace.focusedWorkingDirectory as NSString).lastPathComponent
+        return name.isEmpty ? workspace.title : name
     }
 
     // MARK: - Sidebar toggle

@@ -39,7 +39,6 @@ extension NiruxShellView {
             workspace.lastActivityAt = persistedWS.lastActivityAt
             workspace.nextStep = persistedWS.nextStep
             workspace.blocker = persistedWS.blocker
-            wireWorkspace(workspace)
             // Remove the default column created by WorkspaceState.init
             if let first = workspace.columns.first { first.view.removeFromSuperview(); workspace.columns.removeAll() }
             for persistedColumn in persistedWS.columns {
@@ -50,6 +49,7 @@ extension NiruxShellView {
                 )
             }
             workspace.focusedIndex = min(persistedWS.focusedColumnIndex, max(workspace.columns.count - 1, 0))
+            wireWorkspace(workspace)
             workspaces.append(workspace)
             verticalStrip.addSubview(workspace.containerView)
         }
@@ -155,7 +155,7 @@ extension NiruxShellView {
             workspaces: workspaces.map { workspace in
                 PersistedWorkspace(
                     id: workspace.id, title: workspace.title,
-                    cwd: workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.cwd,
+                    cwd: workspace.focusedWorkingDirectory,
                     columns: workspace.columns.map { col -> PersistedColumn in
                         let kind: ColumnKind
                         let webURL: String?

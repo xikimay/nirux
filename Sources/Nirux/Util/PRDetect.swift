@@ -56,6 +56,7 @@ enum PRDetect {
             branch: branch,
             state: "open",
             search: nil,
+            limit: Int.max,
             ghPath: ghPath,
             repositoryRoot: context.identity.repositoryRoot
         ) else { return .failure }
@@ -82,6 +83,7 @@ enum PRDetect {
             branch: branch,
             state: "all",
             search: context.identity.head,
+            limit: 100,
             ghPath: ghPath,
             repositoryRoot: context.identity.repositoryRoot
         ) else { return .failure }
@@ -103,6 +105,7 @@ enum PRDetect {
         branch: String,
         state: String,
         search: String?,
+        limit: Int,
         ghPath: String,
         repositoryRoot: String
     ) -> [[String: Any]]? {
@@ -111,7 +114,7 @@ enum PRDetect {
         var arguments = ["pr", "list", "--head", branch,
                          "--state", state,
                          "--json", "number,state,headRefOid,headRepositoryOwner,headRepository,isDraft,statusCheckRollup,reviewDecision,mergeable,url,additions,deletions,changedFiles",
-                         "--limit", "100"]
+                         "--limit", String(limit)]
         if let search { arguments.append(contentsOf: ["--search", search]) }
         proc.arguments = arguments
         proc.currentDirectoryURL = URL(fileURLWithPath: repositoryRoot)
