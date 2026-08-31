@@ -126,6 +126,62 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertNil(decoded.id)
         XCTAssertNil(decoded.profileID)
         XCTAssertEqual(decoded.isInactive, false)
+        XCTAssertNil(decoded.purpose)
+        XCTAssertNil(decoded.phase)
+        XCTAssertNil(decoded.lastSummary)
+        XCTAssertFalse(decoded.lastSummaryIsManual)
+        XCTAssertNil(decoded.lastActivityAt)
+        XCTAssertNil(decoded.nextStep)
+        XCTAssertNil(decoded.blocker)
+    }
+
+    func testWorkspaceContextRoundTripsThroughJSON() throws {
+        let original = PersistedWorkspace(
+            id: "workspace-context",
+            title: "workspace context",
+            cwd: "/tmp/project",
+            columns: [
+                PersistedColumn(
+                    widthPreset: 0.5, cwd: "/tmp/project",
+                    columnType: .terminal, webViewURL: nil,
+                    claudeLaunchMode: nil, codexLaunchMode: nil
+                )
+            ],
+            focusedColumnIndex: 0,
+            purpose: "Make workspaces self-explanatory",
+            phase: .review,
+            lastSummary: "Context panel is ready for review.",
+            lastSummaryIsManual: true,
+            lastActivityAt: 1_725_000_000,
+            nextStep: "Run the test suite",
+            blocker: "Waiting on design feedback"
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(PersistedWorkspace.self, from: data)
+
+        XCTAssertEqual(decoded.purpose, original.purpose)
+        XCTAssertEqual(decoded.phase, .review)
+        XCTAssertEqual(decoded.lastSummary, original.lastSummary)
+        XCTAssertTrue(decoded.lastSummaryIsManual)
+        XCTAssertEqual(decoded.lastActivityAt, original.lastActivityAt)
+        XCTAssertEqual(decoded.nextStep, original.nextStep)
+        XCTAssertEqual(decoded.blocker, original.blocker)
+    }
+
+    func testUnknownWorkspacePhaseFallsBackToAutomatic() throws {
+        let json = Data("""
+        {
+          "title": "future",
+          "cwd": "/tmp/project",
+          "columns": [],
+          "focusedColumnIndex": 0,
+          "phase": "shipping"
+        }
+        """.utf8)
+
+        let decoded = try JSONDecoder().decode(PersistedWorkspace.self, from: json)
+        XCTAssertNil(decoded.phase)
     }
 
     @MainActor

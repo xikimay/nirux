@@ -59,6 +59,7 @@ final class NiruxShellView: NSView {
 
     // Panel references (stored properties must live in main class declaration)
     var nameInputPanel: NameInputPanel?
+    var workspaceContextPanel: WorkspaceContextPanel?
     var worktreePanel: WorktreePanel?
     var commandPalette: CommandPalette?
     var urlPanel: URLInputPanel?
@@ -478,6 +479,52 @@ extension NiruxShellView {
             currentValue: "",
             placeholder: "Name this workspace for the task"
         )
+    }
+
+    func showWorkspaceContextPanel(workspaceIndex: Int) {
+        guard let window, let workspace = workspaces[safe: workspaceIndex] else { return }
+        if workspaceContextPanel == nil {
+            workspaceContextPanel = WorkspaceContextPanel()
+        }
+
+        let presentedSummary = WorkspaceState.normalizedContextText(workspace.lastSummary)
+        workspaceContextPanel?.onSave = { [weak self, weak workspace] values in
+            guard let self, let workspace,
+                  self.workspaces.contains(where: { $0 === workspace }) else { return }
+            workspace.purpose = WorkspaceState.normalizedContextText(values.purpose)
+            workspace.phase = values.phase
+            workspace.nextStep = WorkspaceState.normalizedContextText(values.nextStep)
+            workspace.blocker = WorkspaceState.normalizedContextText(values.blocker)
+
+            let savedSummary = WorkspaceState.normalizedContextText(values.lastSummary)
+            if savedSummary != presentedSummary {
+                workspace.lastSummary = savedSummary
+                workspace.lastSummaryIsManual = savedSummary != nil
+            }
+            self.updateSidebar()
+            self.saveState()
+        }
+
+        let cwd = workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd
+            ?? workspace.columns[safe: workspace.focusedIndex]?.editorColumn?.workspaceCwd
+            ?? workspace.cwd
+        let configuration = WorkspaceContextPanelConfiguration(
+            title: workspace.title,
+            cwd: cwd,
+            purpose: workspace.purpose,
+            phaseOverride: workspace.phase,
+            effectivePhase: workspace.effectivePhase,
+            lastSummary: workspace.lastSummary,
+            lastSummaryIsManual: workspace.lastSummaryIsManual,
+            lastActivityAt: workspace.lastActivityAt,
+            nextStep: workspace.nextStep,
+            blocker: workspace.blocker,
+            gitBranch: workspace.gitBranch,
+            diffStats: workspace.diffStats,
+            prInfo: workspace.prInfo,
+            agentStatuses: workspace.columns.map { $0.pty?.cachedAgentState ?? .idle }
+        )
+        workspaceContextPanel?.show(relativeTo: window, configuration: configuration)
     }
 
     /// Rename a workspace by index; defaults to the active one (main menu,

@@ -298,6 +298,9 @@ extension NiruxShellView {
         case .close:
             requestCloseWorkspace(at: workspaceIndex)
             return
+        case .editContext:
+            showWorkspaceContextPanel(workspaceIndex: workspaceIndex)
+            return
         case .newWorkspace:
             addWorkspace()
             return

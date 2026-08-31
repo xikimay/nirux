@@ -1,5 +1,53 @@
 import AppKit
 
+/// Human-readable lifecycle state for a workspace. `WorkspaceState.phase`
+/// is an optional manual override; when it is nil Nirux derives a phase from
+/// the live agent, blocker, inactive, and pull-request state.
+enum WorkspacePhase: String, Codable, CaseIterable {
+    case active, waiting, blocked, review, parked, done
+
+    var displayName: String {
+        switch self {
+        case .active: return "Active"
+        case .waiting: return "Waiting"
+        case .blocked: return "Blocked"
+        case .review: return "Review"
+        case .parked: return "Parked"
+        case .done: return "Done"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .active: return "▶"
+        case .waiting: return "◷"
+        case .blocked: return "!"
+        case .review: return "◇"
+        case .parked: return "–"
+        case .done: return "✓"
+        }
+    }
+
+    /// Pure derivation kept separate from the live workspace so phase rules
+    /// remain predictable and unit-testable.
+    static func derived(
+        isInactive: Bool,
+        hasBlocker: Bool,
+        agentStatuses: [AgentStatus],
+        pullRequestState: String?
+    ) -> WorkspacePhase {
+        if hasBlocker { return .blocked }
+        if agentStatuses.contains(.needsAttention) { return .waiting }
+        if agentStatuses.contains(.working) { return .active }
+        if isInactive { return .parked }
+        switch pullRequestState?.uppercased() {
+        case "MERGED", "CLOSED": return .done
+        case "OPEN": return .review
+        default: return .active
+        }
+    }
+}
+
 /// A clickable area in the pilot info panel
 struct PilotClickableArea {
     let frame: NSRect
@@ -30,6 +78,27 @@ final class WorkspaceState {
     var hasNotification: Bool = false
     var prInfo: PRInfo?
     var diffStats: String?
+
+    // Workspace context. Purpose/next step/blocker are always human-owned.
+    // `phase` is a manual override (nil means derive from live state), while
+    // automatic agent summaries are allowed only until the user edits one.
+    var purpose: String?
+    var phase: WorkspacePhase?
+    var lastSummary: String?
+    var lastSummaryIsManual: Bool = false
+    var lastActivityAt: TimeInterval?
+    var nextStep: String?
+    var blocker: String?
+
+    var effectivePhase: WorkspacePhase {
+        if let phase { return phase }
+        return WorkspacePhase.derived(
+            isInactive: isInactive,
+            hasBlocker: Self.normalizedContextText(blocker) != nil,
+            agentStatuses: columns.map { $0.pty?.cachedAgentState ?? .idle },
+            pullRequestState: prInfo?.state
+        )
+    }
 
     // Pilot info panel (per-workspace, shown in pilot mode)
     var pilotPanel: NSView?
@@ -78,6 +147,38 @@ final class WorkspaceState {
         containerView.addSubview(stripView)
 
         addColumn(agentUUID: initialAgentUUID)
+    }
+
+    /// Trim human-entered context and collapse blank values back to nil so
+    /// optional sidebar rows do not consume space for whitespace-only text.
+    static func normalizedContextText(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    /// Record meaningful agent activity without overwriting a user-edited
+    /// summary. Replayed hook events can be older than persisted context, so
+    /// only the newest event is allowed to replace the automatic summary.
+    @discardableResult
+    func recordAgentActivity(at timestamp: TimeInterval, automaticSummary: String?) -> Bool {
+        let isNewest = lastActivityAt.map { timestamp >= $0 } ?? true
+        var changed = false
+        if lastActivityAt.map({ timestamp > $0 }) ?? true {
+            lastActivityAt = timestamp
+            changed = true
+        }
+        guard isNewest, !lastSummaryIsManual,
+              let automaticSummary = Self.normalizedContextText(automaticSummary)
+        else { return changed }
+
+        let compactSummary = automaticSummary
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard lastSummary != compactSummary else { return changed }
+        lastSummary = compactSummary
+        return true
     }
 
     // MARK: - CWD / Git / Title Tracking

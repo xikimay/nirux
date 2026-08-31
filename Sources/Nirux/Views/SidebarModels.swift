@@ -88,6 +88,10 @@ struct WorkspaceInfo: Hashable {
     let columns: [ColumnInfo]
     let prInfo: PRInfo?
     let diffStats: String?
+    let purpose: String?
+    let phase: WorkspacePhase
+    let lastSummary: String?
+    let lastActivityAt: TimeInterval?
 }
 
 struct ProfileInfo: Hashable {
@@ -122,7 +126,7 @@ struct SidebarUpdatePayload {
 
 enum WorkspaceSidebarAction {
     case moveUp, moveDown, markActive, markInactive
-    case close, rename, newWorkspace
+    case close, rename, editContext, newWorkspace
     case closeColumn(columnIndex: Int)
 }
 

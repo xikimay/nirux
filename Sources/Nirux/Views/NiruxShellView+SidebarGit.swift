@@ -61,7 +61,9 @@ extension NiruxShellView {
                           columnCount: workspace.columns.count,
                           focusedColumn: workspace.focusedIndex,
                           gitBranch: workspace.gitBranch, hasNotification: workspace.hasNotification, isActive: index == activeWSIndex,
-                          columns: colInfos, prInfo: workspace.prInfo, diffStats: workspace.diffStats)
+                          columns: colInfos, prInfo: workspace.prInfo, diffStats: workspace.diffStats,
+                          purpose: workspace.purpose, phase: workspace.effectivePhase,
+                          lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt)
         }
         let profileInfos = workspaceStore.navigableProfiles.map { profile in
             let profileWorkspaces = workspaces.filter { $0.profileID == profile.id }
@@ -353,11 +355,29 @@ extension NiruxShellView {
     func applyAgentHookEvents(_ events: [AgentHookCenter.AppliedEvent]) {
         let snapshot = ProcessSnapshot()
         var changed = false
-        for appliedEvent in events where appliedEvent.event.kind == .codex {
-            if appliedEvent.resolution.column.captureCodexSession(
-                sessionID: appliedEvent.event.sessionID,
-                emitterProcess: appliedEvent.event.emitterProcess,
-                snapshot: snapshot
+        for appliedEvent in events {
+            let event = appliedEvent.event
+            if event.kind == .codex,
+               appliedEvent.resolution.column.captureCodexSession(
+                   sessionID: event.sessionID,
+                   emitterProcess: event.emitterProcess,
+                   snapshot: snapshot
+               ) {
+                changed = true
+            }
+
+            let automaticSummary: String?
+            switch event.name {
+            case .stop, .turnComplete:
+                automaticSummary = event.detail
+            case .notification, .sessionStart, .sessionEnd:
+                automaticSummary = nil
+            case .userPromptSubmit, .preToolUse:
+                continue
+            }
+            if appliedEvent.resolution.workspace.recordAgentActivity(
+                at: event.timestamp,
+                automaticSummary: automaticSummary
             ) {
                 changed = true
             }

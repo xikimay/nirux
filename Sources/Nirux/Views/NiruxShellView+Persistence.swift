@@ -32,6 +32,13 @@ extension NiruxShellView {
                 missionHandoffsEnabled: state.settings?.missionHandoffsEnabled == true
             )
             workspace.isInactive = persistedWS.isInactive
+            workspace.purpose = persistedWS.purpose
+            workspace.phase = persistedWS.phase
+            workspace.lastSummary = persistedWS.lastSummary
+            workspace.lastSummaryIsManual = persistedWS.lastSummaryIsManual
+            workspace.lastActivityAt = persistedWS.lastActivityAt
+            workspace.nextStep = persistedWS.nextStep
+            workspace.blocker = persistedWS.blocker
             wireWorkspace(workspace)
             // Remove the default column created by WorkspaceState.init
             if let first = workspace.columns.first { first.view.removeFromSuperview(); workspace.columns.removeAll() }
@@ -198,7 +205,14 @@ extension NiruxShellView {
                     focusedColumnIndex: workspace.focusedIndex,
                     profileID: workspace.profileID,
                     isInactive: workspace.isInactive,
-                    missionID: workspace.missionID)
+                    missionID: workspace.missionID,
+                    purpose: workspace.purpose,
+                    phase: workspace.phase,
+                    lastSummary: workspace.lastSummary,
+                    lastSummaryIsManual: workspace.lastSummaryIsManual,
+                    lastActivityAt: workspace.lastActivityAt,
+                    nextStep: workspace.nextStep,
+                    blocker: workspace.blocker)
             },
             activeWorkspaceIndex: activeWSIndex,
             settings: settings,
