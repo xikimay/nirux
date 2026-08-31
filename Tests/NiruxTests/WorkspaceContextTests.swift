@@ -81,6 +81,43 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(workspace.lastActivityAt, 30)
     }
 
+    func testBranchChangesClearBranchScopedMetadata() {
+        let workspace = WorkspaceState(title: "context", cwd: "/tmp")
+        let pullRequest = PRInfo(
+            number: 42,
+            state: "MERGED",
+            isDraft: false,
+            ciStatus: "SUCCESS",
+            failedCheckUrl: nil,
+            reviewDecision: "APPROVED",
+            mergeable: "MERGEABLE",
+            url: "https://example.test/pull/42",
+            additions: 5,
+            deletions: 2,
+            changedFiles: 1
+        )
+
+        workspace.gitBranch = "feature/one"
+        workspace.prInfo = pullRequest
+        workspace.diffStats = "1 file changed"
+        XCTAssertEqual(workspace.effectivePhase, .done)
+
+        workspace.gitBranch = "feature/one"
+        XCTAssertEqual(workspace.prInfo, pullRequest)
+        XCTAssertEqual(workspace.diffStats, "1 file changed")
+
+        workspace.gitBranch = "feature/two"
+        XCTAssertNil(workspace.prInfo)
+        XCTAssertNil(workspace.diffStats)
+        XCTAssertEqual(workspace.effectivePhase, .active)
+
+        workspace.prInfo = pullRequest
+        workspace.diffStats = "1 file changed"
+        workspace.gitBranch = nil
+        XCTAssertNil(workspace.prInfo)
+        XCTAssertNil(workspace.diffStats)
+    }
+
     func testContextTextNormalizationDropsBlankOptionalRows() {
         XCTAssertNil(WorkspaceState.normalizedContextText(" \n "))
         XCTAssertEqual(WorkspaceState.normalizedContextText("  Ship it  "), "Ship it")

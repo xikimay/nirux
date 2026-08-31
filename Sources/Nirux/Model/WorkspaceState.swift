@@ -74,7 +74,13 @@ final class WorkspaceState {
     /// change. Already-running shells retain the environment they launched
     /// with and pick up changes after a new terminal or app restart.
     var missionHandoffsEnabled: Bool
-    var gitBranch: String?
+    var gitBranch: String? {
+        didSet {
+            guard gitBranch != oldValue else { return }
+            prInfo = nil
+            diffStats = nil
+        }
+    }
     var hasNotification: Bool = false
     var prInfo: PRInfo?
     var diffStats: String?
