@@ -7,6 +7,12 @@ enum PRDetect {
         case failure
     }
 
+    enum DiffStatsResult: Equatable, Sendable {
+        case observed(context: GitContext, stats: String?)
+        case notApplicable
+        case failure
+    }
+
     /// Inactive workspaces are archival UI. They keep their last-known PR
     /// metadata but must never spend GitHub GraphQL quota in the background.
     static func shouldRefresh(isInactive: Bool, branch: String?) -> Bool {
@@ -266,7 +272,10 @@ enum PRDetect {
     }
 
     /// Get diff stats via git
-    static func diffStatsAsync(cwd: String, completion: @escaping @MainActor @Sendable (String?) -> Void) {
+    static func diffStatsAsync(
+        cwd: String,
+        completion: @escaping @MainActor @Sendable (DiffStatsResult) -> Void
+    ) {
         DispatchQueue.global(qos: .utility).async {
             let result = diffStats(cwd: cwd)
             DispatchQueue.main.async { completion(result) }
@@ -280,11 +289,26 @@ enum PRDetect {
         }
     }
 
-    private static func diffStats(cwd: String) -> String? {
-        guard let str = gitOutput(arguments: ["diff", "--shortstat"], cwd: cwd)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        else { return nil }
-        return str.isEmpty ? nil : str
+    static func diffStats(
+        cwd: String,
+        gitPath: String = "/usr/bin/git"
+    ) -> DiffStatsResult {
+        let context: GitContext
+        switch GitDetect.observe(at: cwd, gitPath: gitPath) {
+        case .observed(let observedContext):
+            context = observedContext
+        case .notRepository:
+            return .notApplicable
+        case .failure:
+            return .failure
+        }
+        guard let output = gitOutput(
+            arguments: ["diff", "--shortstat"],
+            cwd: cwd,
+            gitPath: gitPath
+        ) else { return .failure }
+        let stats = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return .observed(context: context, stats: stats.isEmpty ? nil : stats)
     }
 
     private static func diffPaths(cwd: String) -> [String] {
@@ -296,9 +320,13 @@ enum PRDetect {
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
 
-    private static func gitOutput(arguments: [String], cwd: String) -> String? {
+    private static func gitOutput(
+        arguments: [String],
+        cwd: String,
+        gitPath: String = "/usr/bin/git"
+    ) -> String? {
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        proc.executableURL = URL(fileURLWithPath: gitPath)
         proc.arguments = arguments
         proc.currentDirectoryURL = URL(fileURLWithPath: cwd)
 

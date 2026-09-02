@@ -65,6 +65,12 @@ struct PullRequestObservation: Sendable {
     fileprivate let context: GitContext
 }
 
+struct DiffStatsObservation: Sendable {
+    fileprivate let generation: UInt64
+    fileprivate let workingDirectory: String
+    fileprivate let context: GitContext
+}
+
 enum GitContextObservationResult: Equatable {
     case stale
     case unchanged
@@ -100,6 +106,7 @@ final class WorkspaceState {
     private var gitContextObservation: GitContextObservation?
     private var pullRequestObservationGeneration: UInt64 = 0
     private var pullRequestObservation: PullRequestObservation?
+    private var diffStatsObservationGeneration: UInt64 = 0
     var gitBranch: String? { gitContext?.branch }
     var focusedWorkingDirectory: String {
         let column = columns[safe: focusedIndex]
@@ -244,6 +251,7 @@ final class WorkspaceState {
         guard gitContext != context else { return false }
         pullRequestObservationGeneration &+= 1
         pullRequestObservation = nil
+        diffStatsObservationGeneration &+= 1
         let previousContext = gitContext
         gitContext = context
         let sameRevision = previousContext?.branch == context?.branch
@@ -327,6 +335,51 @@ final class WorkspaceState {
         guard isCurrentPullRequestObservation(observation, for: context) else { return false }
         pullRequestObservation = nil
         return applyPullRequestInfo(info, for: context)
+    }
+
+    func beginDiffStatsObservation(
+        at workingDirectory: String,
+        for context: GitContext
+    ) -> DiffStatsObservation? {
+        let workingDirectory = URL(fileURLWithPath: workingDirectory).standardizedFileURL.path
+        let focusedWorkingDirectory = URL(
+            fileURLWithPath: self.focusedWorkingDirectory
+        ).standardizedFileURL.path
+        guard gitContext == context,
+              workingDirectory == focusedWorkingDirectory else { return nil }
+        diffStatsObservationGeneration &+= 1
+        return DiffStatsObservation(
+            generation: diffStatsObservationGeneration,
+            workingDirectory: workingDirectory,
+            context: context
+        )
+    }
+
+    @discardableResult
+    func applyDiffStatsObservation(
+        _ result: PRDetect.DiffStatsResult,
+        observation: DiffStatsObservation
+    ) -> Bool {
+        let focusedWorkingDirectory = URL(
+            fileURLWithPath: self.focusedWorkingDirectory
+        ).standardizedFileURL.path
+        guard observation.generation == diffStatsObservationGeneration,
+              observation.workingDirectory == focusedWorkingDirectory,
+              observation.context == gitContext else { return false }
+        let stats: String?
+        switch result {
+        case .observed(let observedContext, let observedStats):
+            guard preservingKnownUpstreamRepository(in: observedContext)
+                == observation.context else { return false }
+            stats = observedStats
+        case .notApplicable:
+            stats = nil
+        case .failure:
+            return false
+        }
+        guard diffStats != stats else { return false }
+        diffStats = stats
+        return true
     }
 
     private static func isTerminalPullRequest(_ info: PRInfo?) -> Bool {

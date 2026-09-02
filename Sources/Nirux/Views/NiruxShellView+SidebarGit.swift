@@ -447,6 +447,10 @@ extension NiruxShellView {
             let branch = requestedContext.branch
             let cwd = workspace.focusedWorkingDirectory
             guard let observation = workspace.beginPullRequestObservation(for: requestedContext) else { continue }
+            let diffObservation = workspace.beginDiffStatsObservation(
+                at: cwd,
+                for: requestedContext
+            )
             PRDetect.fetchAsync(branch: branch, cwd: cwd) { [weak self, weak workspace] result in
                 guard let workspace else { return }
                 guard !workspace.isInactive else {
@@ -476,11 +480,13 @@ extension NiruxShellView {
                     self?.updateSidebar()
                 }
             }
-            PRDetect.diffStatsAsync(cwd: cwd) { [weak self, weak workspace] stats in
+            guard let diffObservation else { continue }
+            PRDetect.diffStatsAsync(cwd: cwd) { [weak self, weak workspace] result in
                 guard let workspace, !workspace.isInactive,
-                      workspace.gitContext == requestedContext,
-                      workspace.diffStats != stats else { return }
-                workspace.diffStats = stats
+                      workspace.applyDiffStatsObservation(
+                          result,
+                          observation: diffObservation
+                      ) else { return }
                 self?.updateSidebar()
             }
         }

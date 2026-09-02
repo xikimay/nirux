@@ -561,6 +561,111 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertNil(workspace.prInfo)
     }
 
+    func testInaccessibleFocusedEditorDiffFailurePreservesCachedStats() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try initializeGitRepository(at: directory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let workspace = WorkspaceState(title: "context", cwd: directory.path)
+        let context = try XCTUnwrap(GitDetect.context(at: directory.path))
+        XCTAssertTrue(workspace.updateGitContext(context))
+        workspace.diffStats = "1 file changed"
+
+        let inaccessibleEditorRoot = directory.appendingPathComponent(
+            "missing-editor-root",
+            isDirectory: true
+        )
+        workspace.addEditorColumn(workspaceCwd: inaccessibleEditorRoot.path)
+        let observation = try XCTUnwrap(workspace.beginDiffStatsObservation(
+            at: workspace.focusedWorkingDirectory,
+            for: context
+        ))
+        let result = PRDetect.diffStats(cwd: inaccessibleEditorRoot.path)
+
+        XCTAssertEqual(result, .failure)
+        XCTAssertFalse(workspace.applyDiffStatsObservation(result, observation: observation))
+        XCTAssertEqual(workspace.diffStats, "1 file changed")
+    }
+
+    func testSuccessfulCleanDiffClearsCachedStats() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try initializeGitRepository(at: directory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let workspace = WorkspaceState(title: "context", cwd: directory.path)
+        let context = try XCTUnwrap(GitDetect.context(at: directory.path))
+        XCTAssertTrue(workspace.updateGitContext(context))
+        workspace.diffStats = "1 file changed"
+        let observation = try XCTUnwrap(workspace.beginDiffStatsObservation(
+            at: workspace.focusedWorkingDirectory,
+            for: context
+        ))
+        let result = PRDetect.diffStats(cwd: directory.path)
+
+        XCTAssertEqual(result, .observed(context: context, stats: nil))
+        let editorRoot = directory.appendingPathComponent("editor", isDirectory: true)
+        try FileManager.default.createDirectory(at: editorRoot, withIntermediateDirectories: true)
+        workspace.addEditorColumn(workspaceCwd: editorRoot.path)
+        XCTAssertFalse(workspace.applyDiffStatsObservation(result, observation: observation))
+        XCTAssertEqual(workspace.diffStats, "1 file changed")
+
+        workspace.focusedIndex = 0
+        let currentObservation = try XCTUnwrap(workspace.beginDiffStatsObservation(
+            at: workspace.focusedWorkingDirectory,
+            for: context
+        ))
+        XCTAssertTrue(workspace.applyDiffStatsObservation(
+            result,
+            observation: currentObservation
+        ))
+        XCTAssertNil(workspace.diffStats)
+    }
+
+    func testNonRepositoryDiffIsConfirmedNotApplicable() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        XCTAssertEqual(PRDetect.diffStats(cwd: directory.path), .notApplicable)
+    }
+
+    func testDiffFromStaleGitIdentityPreservesCachedStats() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try initializeGitRepository(at: directory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let workspace = WorkspaceState(title: "context", cwd: directory.path)
+        let currentContext = try XCTUnwrap(GitDetect.context(at: directory.path))
+        let staleContext = GitContext(
+            branch: currentContext.branch,
+            identity: GitIdentity(
+                repositoryRoot: currentContext.identity.repositoryRoot,
+                head: "stale-head",
+                isDirty: currentContext.identity.isDirty
+            ),
+            upstreamRepository: currentContext.upstreamRepository
+        )
+        XCTAssertTrue(workspace.updateGitContext(staleContext))
+        workspace.diffStats = "1 file changed"
+        let observation = try XCTUnwrap(workspace.beginDiffStatsObservation(
+            at: workspace.focusedWorkingDirectory,
+            for: staleContext
+        ))
+
+        XCTAssertFalse(workspace.applyDiffStatsObservation(
+            PRDetect.diffStats(cwd: directory.path),
+            observation: observation
+        ))
+        XCTAssertEqual(workspace.diffStats, "1 file changed")
+    }
+
     func testUpstreamReassignmentInvalidatesCachedAndInFlightPullRequest() throws {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         let identity = GitIdentity(repositoryRoot: "/repo", head: "head-a")
