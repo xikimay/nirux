@@ -443,6 +443,24 @@ final class PRDetectTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(fetched).ciStatus, "SUCCESS")
     }
 
+    func testHungGitHubLookupTimesOutAndAllowsRetry() throws {
+        let startedAt = Date()
+        let timedOut = try fetchUsingFakeGitHubCLI(
+            hangingState: "open",
+            timeout: 0.1
+        )
+        XCTAssertLessThan(Date().timeIntervalSince(startedAt), 2)
+        guard case .failure = timedOut else {
+            return XCTFail("Expected hung PR lookup to fail")
+        }
+
+        let retry = try fetchUsingFakeGitHubCLI()
+        guard case .success(_, let pullRequest) = retry else {
+            return XCTFail("Expected later PR lookup to proceed")
+        }
+        XCTAssertNil(pullRequest)
+    }
+
     private func fetchUsingFakeGitHubCLI(
         openJSON: String = "[]",
         cappedOpenJSON: String? = nil,
@@ -451,6 +469,8 @@ final class PRDetectTests: XCTestCase {
         currentHead: String = "current-head",
         isDirty: Bool = false,
         failingState: String? = nil,
+        hangingState: String? = nil,
+        timeout: TimeInterval = 30,
         watchdogDelay: Int = 30,
         upstreamRepository: GitHubRepository? = GitHubRepository(
             host: "example.test",
@@ -493,6 +513,10 @@ final class PRDetectTests: XCTestCase {
                     ;;
             esac
         done
+        if [ "$state" = "\#(hangingState ?? "")" ]; then
+            trap '' TERM
+            while :; do :; done
+        fi
         case "$state" in
             open)
                 if [ "\#(cappedOpenJSON == nil ? "0" : "1")" = "1" ] && [ "$limit" = "100" ]; then
@@ -544,7 +568,8 @@ final class PRDetectTests: XCTestCase {
                     isDirty: isDirty
                 ),
                 upstreamRepository: upstreamRepository
-            )
+            ),
+            timeout: timeout
         )
     }
 
