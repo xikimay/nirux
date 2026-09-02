@@ -51,8 +51,9 @@ struct GitHubRepository: Hashable, Sendable {
     }
 
     private static func normalizedHost(_ host: String) -> String {
-        host.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+        let normalized = host.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
             .lowercased()
+        return normalized == "ssh.github.com" ? "github.com" : normalized
     }
 }
 

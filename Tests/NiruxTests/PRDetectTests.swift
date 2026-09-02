@@ -30,6 +30,10 @@ final class PRDetectTests: XCTestCase {
             GitHubRepository(remoteURL: "ssh://git@GITHUB.COM/XikiMay/Nirux.git"),
             expected
         )
+        XCTAssertEqual(
+            GitHubRepository(remoteURL: "ssh://git@ssh.github.com:443/XikiMay/Nirux.git"),
+            expected
+        )
         XCTAssertNotEqual(
             GitHubRepository(remoteURL: "git@ghe.example.com:XikiMay/Nirux.git"),
             expected
@@ -164,6 +168,24 @@ final class PRDetectTests: XCTestCase {
                 owner: "xikimay",
                 name: "nirux"
             )
+        )
+
+        guard case .success(_, let fetched) = result else {
+            return XCTFail("Expected successful PR lookup")
+        }
+        XCTAssertEqual(try XCTUnwrap(fetched).number, 80)
+    }
+
+    func testOpenPullRequestMatchesGitHubSSHOverHTTPSRemote() throws {
+        let result = try fetchUsingFakeGitHubCLI(
+            openJSON: #"""
+            [
+              {"number":80,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://github.com/xikimay/nirux/pull/80"}
+            ]
+            """#,
+            upstreamRepository: try XCTUnwrap(GitHubRepository(
+                remoteURL: "ssh://git@ssh.github.com:443/xikimay/nirux.git"
+            ))
         )
 
         guard case .success(_, let fetched) = result else {
