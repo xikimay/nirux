@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 enum PRDetect {
@@ -81,6 +80,9 @@ enum PRDetect {
         guard !context.identity.isDirty else {
             return .success(context: context, info: nil)
         }
+        guard let head = context.identity.head else {
+            return .success(context: context, info: nil)
+        }
 
         guard let terminalCandidates = candidates(
             branch: branch,
@@ -94,7 +96,7 @@ enum PRDetect {
             .filter {
                 guard let state = ($0["state"] as? String)?.uppercased() else { return false }
                 return (state == "MERGED" || state == "CLOSED")
-                    && ($0["headRefOid"] as? String) == context.identity.head
+                    && ($0["headRefOid"] as? String) == head
             }
         guard matchingTerminalCandidates.allSatisfy({ repository(for: $0) != nil })
         else { return .failure }
@@ -116,105 +118,19 @@ enum PRDetect {
         repositoryRoot: String,
         timeout: TimeInterval
     ) -> [[String: Any]]? {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: ghPath)
-        proc.arguments = ["pr", "list", "--head", branch,
-                          "--state", state,
-                          "--json", "number,state,headRefOid,headRepositoryOwner,headRepository,isDraft,statusCheckRollup,reviewDecision,mergeable,url,additions,deletions,changedFiles",
-                          "--limit", String(limit)]
-        proc.currentDirectoryURL = URL(fileURLWithPath: repositoryRoot)
-
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = FileHandle.nullDevice
-
-        guard let data = run(proc, output: pipe, timeout: timeout) else { return nil }
-        return try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-    }
-
-    private static func run(
-        _ process: Process,
-        output: Pipe,
-        timeout: TimeInterval
-    ) -> Data? {
-        do {
-            try process.run()
-        } catch {
-            try? output.fileHandleForReading.close()
-            try? output.fileHandleForWriting.close()
-            return nil
-        }
-        try? output.fileHandleForWriting.close()
-
-        let readHandle = output.fileHandleForReading
-        let descriptor = readHandle.fileDescriptor
-        let deadline = ProcessInfo.processInfo.systemUptime + max(0, timeout)
-        var data = Data()
-        var reachedEnd = false
-        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
-
-        while process.isRunning || !reachedEnd {
-            let remaining = deadline - ProcessInfo.processInfo.systemUptime
-            guard remaining > 0 else {
-                terminate(process)
-                try? readHandle.close()
-                return nil
-            }
-
-            if reachedEnd {
-                Thread.sleep(forTimeInterval: min(0.01, remaining))
-                continue
-            }
-
-            var pollDescriptor = pollfd(
-                fd: descriptor,
-                events: Int16(POLLIN | POLLHUP | POLLERR),
-                revents: 0
-            )
-            let waitMilliseconds = Int32(min(max(remaining * 1_000, 1), 50))
-            let pollResult = Darwin.poll(&pollDescriptor, 1, waitMilliseconds)
-            if pollResult < 0 {
-                if errno == EINTR { continue }
-                terminate(process)
-                try? readHandle.close()
-                return nil
-            }
-            guard pollResult > 0 else { continue }
-
-            let bytesRead = buffer.withUnsafeMutableBytes { bytes in
-                Darwin.read(descriptor, bytes.baseAddress, bytes.count)
-            }
-            if bytesRead > 0 {
-                data.append(contentsOf: buffer[..<bytesRead])
-            } else if bytesRead == 0 {
-                reachedEnd = true
-            } else if errno != EINTR {
-                terminate(process)
-                try? readHandle.close()
-                return nil
-            }
-        }
-
-        process.waitUntilExit()
-        try? readHandle.close()
-        guard process.terminationStatus == 0 else { return nil }
-        return data
-    }
-
-    private static func terminate(_ process: Process) {
-        guard process.isRunning else {
-            process.waitUntilExit()
-            return
-        }
-        process.terminate()
-        let graceDeadline = ProcessInfo.processInfo.systemUptime + 0.25
-        while process.isRunning, ProcessInfo.processInfo.systemUptime < graceDeadline {
-            Thread.sleep(forTimeInterval: 0.01)
-        }
-        if process.isRunning {
-            Darwin.kill(process.processIdentifier, SIGKILL)
-        }
-        process.waitUntilExit()
+        let result = BoundedProcess.run(
+            executableURL: URL(fileURLWithPath: ghPath),
+            arguments: ["pr", "list", "--head", branch,
+                        "--state", state,
+                        "--json", "number,state,headRefOid,headRepositoryOwner,headRepository,isDraft,statusCheckRollup,reviewDecision,mergeable,url,additions,deletions,changedFiles",
+                        "--limit", String(limit)],
+            currentDirectoryURL: URL(fileURLWithPath: repositoryRoot),
+            timeout: timeout
+        )
+        guard let result, result.terminationStatus == 0 else { return nil }
+        return try? JSONSerialization.jsonObject(
+            with: result.standardOutput
+        ) as? [[String: Any]]
     }
 
     private static func pullRequestNumberDescending(
@@ -325,23 +241,11 @@ enum PRDetect {
         cwd: String,
         gitPath: String = "/usr/bin/git"
     ) -> String? {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: gitPath)
-        proc.arguments = arguments
-        proc.currentDirectoryURL = URL(fileURLWithPath: cwd)
-
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = FileHandle.nullDevice
-
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-            guard proc.terminationStatus == 0 else { return nil }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8) ?? ""
-        } catch {
-            return nil
-        }
+        guard let result = BoundedProcess.run(
+            executableURL: URL(fileURLWithPath: gitPath),
+            arguments: arguments,
+            currentDirectoryURL: URL(fileURLWithPath: cwd)
+        ), result.terminationStatus == 0 else { return nil }
+        return String(data: result.standardOutput, encoding: .utf8) ?? ""
     }
 }

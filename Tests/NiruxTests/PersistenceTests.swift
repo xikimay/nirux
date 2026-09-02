@@ -169,7 +169,7 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(decoded.blocker, original.blocker)
     }
 
-    func testUnknownWorkspacePhaseFallsBackToAutomatic() throws {
+    func testUnknownWorkspacePhaseSurvivesReencoding() throws {
         let json = Data("""
         {
           "title": "future",
@@ -182,6 +182,12 @@ final class PersistedStateCodingTests: XCTestCase {
 
         let decoded = try JSONDecoder().decode(PersistedWorkspace.self, from: json)
         XCTAssertNil(decoded.phase)
+        XCTAssertEqual(decoded.unknownPhaseRawValue, "shipping")
+
+        let reencoded = try JSONEncoder().encode(decoded)
+        let roundTripped = try JSONDecoder().decode(PersistedWorkspace.self, from: reencoded)
+        XCTAssertNil(roundTripped.phase)
+        XCTAssertEqual(roundTripped.unknownPhaseRawValue, "shipping")
     }
 
     @MainActor

@@ -502,6 +502,9 @@ extension NiruxShellView {
                   self.workspaces.contains(where: { $0 === workspace }) else { return }
             workspace.purpose = WorkspaceState.normalizedContextText(values.purpose)
             workspace.phase = values.phase
+            if values.phase != nil {
+                workspace.unknownPhaseRawValue = nil
+            }
             workspace.nextStep = WorkspaceState.normalizedContextText(values.nextStep)
             workspace.blocker = WorkspaceState.normalizedContextText(values.blocker)
 

@@ -59,20 +59,32 @@ struct GitHubRepository: Hashable, Sendable {
 
 struct GitIdentity: Hashable, Sendable {
     let repositoryRoot: String
-    let head: String
+    let head: String?
     let isDirty: Bool
 
-    init(repositoryRoot: String, head: String, isDirty: Bool = false) {
+    init(repositoryRoot: String, head: String?, isDirty: Bool = false) {
         self.repositoryRoot = repositoryRoot
         self.head = head
         self.isDirty = isDirty
     }
 }
 
+enum UpstreamRepositoryObservation: Hashable, Sendable {
+    case repository(GitHubRepository)
+    case absent
+    case failure
+
+    var repository: GitHubRepository? {
+        guard case .repository(let repository) = self else { return nil }
+        return repository
+    }
+}
+
 struct GitContext: Hashable, Sendable {
     let branch: String
     let identity: GitIdentity
-    let upstreamRepository: GitHubRepository?
+    let upstreamRepositoryObservation: UpstreamRepositoryObservation
+    var upstreamRepository: GitHubRepository? { upstreamRepositoryObservation.repository }
 
     init(
         branch: String,
@@ -81,7 +93,19 @@ struct GitContext: Hashable, Sendable {
     ) {
         self.branch = branch
         self.identity = identity
-        self.upstreamRepository = upstreamRepository
+        self.upstreamRepositoryObservation = upstreamRepository.map {
+            .repository($0)
+        } ?? .absent
+    }
+
+    init(
+        branch: String,
+        identity: GitIdentity,
+        upstreamRepositoryObservation: UpstreamRepositoryObservation
+    ) {
+        self.branch = branch
+        self.identity = identity
+        self.upstreamRepositoryObservation = upstreamRepositoryObservation
     }
 }
 
@@ -99,7 +123,8 @@ enum GitDetect {
 
     static func observe(
         at path: String,
-        gitPath: String = "/usr/bin/git"
+        gitPath: String = "/usr/bin/git",
+        timeout: TimeInterval = 30
     ) -> GitContextDetectionResult {
         let workingDirectory = URL(fileURLWithPath: path).standardizedFileURL.path
         var isDirectory: ObjCBool = false
@@ -108,61 +133,110 @@ enum GitDetect {
             isDirectory: &isDirectory
         ), isDirectory.boolValue else { return .failure }
 
-        guard let revision = gitOutput(
-            arguments: ["rev-parse", "--show-toplevel", "HEAD", "--abbrev-ref", "HEAD"],
+        guard let rootResult = gitOutput(
+            arguments: ["rev-parse", "--show-toplevel"],
             at: workingDirectory,
-            gitPath: gitPath
+            gitPath: gitPath,
+            timeout: timeout
         ) else { return .failure }
-        guard revision.terminationStatus == 0 else {
+        guard rootResult.terminationStatus == 0 else {
             return containsGitMetadata(at: workingDirectory) ? .failure : .notRepository
         }
+        let repositoryRoot = rootResult.standardOutput
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !repositoryRoot.isEmpty else { return .failure }
+
+        guard let branchResult = gitOutput(
+            arguments: ["symbolic-ref", "--quiet", "--short", "HEAD"],
+            at: workingDirectory,
+            gitPath: gitPath,
+            timeout: timeout
+        ) else { return .failure }
+        let branch: String
+        if branchResult.terminationStatus == 0 {
+            branch = branchResult.standardOutput
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !branch.isEmpty else { return .failure }
+        } else if branchResult.terminationStatus == 1 {
+            branch = "HEAD"
+        } else {
+            return .failure
+        }
+
+        guard let headResult = gitOutput(
+            arguments: ["rev-parse", "--verify", "HEAD"],
+            at: workingDirectory,
+            gitPath: gitPath,
+            timeout: timeout
+        ) else { return .failure }
+        let head: String?
+        if headResult.terminationStatus == 0 {
+            let resolvedHead = headResult.standardOutput
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !resolvedHead.isEmpty else { return .failure }
+            head = resolvedHead
+        } else {
+            guard branch != "HEAD",
+                  let branchReference = gitOutput(
+                      arguments: ["show-ref", "--verify", "--quiet", "refs/heads/\(branch)"],
+                      at: workingDirectory,
+                      gitPath: gitPath,
+                      timeout: timeout
+                  ), branchReference.terminationStatus == 1
+            else { return .failure }
+            head = nil
+        }
+
         guard let status = gitOutput(
             arguments: ["status", "--porcelain=v1", "--untracked-files=normal"],
             at: workingDirectory,
-            gitPath: gitPath
+            gitPath: gitPath,
+            timeout: timeout
         ), status.terminationStatus == 0 else { return .failure }
-        let lines = revision.standardOutput
-            .split(whereSeparator: { $0.isNewline })
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-        guard lines.count == 3,
-              lines.allSatisfy({ !$0.isEmpty })
-        else { return .failure }
-        let repositoryRoot = URL(fileURLWithPath: lines[0]).standardizedFileURL.path
-        let branch = lines[2]
+        let canonicalRepositoryRoot = URL(
+            fileURLWithPath: repositoryRoot
+        ).standardizedFileURL.path
         return .observed(GitContext(
             branch: branch,
             identity: GitIdentity(
-                repositoryRoot: repositoryRoot,
-                head: lines[1],
+                repositoryRoot: canonicalRepositoryRoot,
+                head: head,
                 isDirty: !status.standardOutput.isEmpty
             ),
-            upstreamRepository: upstreamRepository(
-                at: repositoryRoot,
+            upstreamRepositoryObservation: upstreamRepositoryObservation(
+                at: canonicalRepositoryRoot,
                 branch: branch,
-                gitPath: gitPath
+                gitPath: gitPath,
+                timeout: timeout
             )
         ))
     }
 
-    static func upstreamRepository(
+    static func upstreamRepositoryObservation(
         at repositoryRoot: String,
         branch: String,
-        gitPath: String = "/usr/bin/git"
-    ) -> GitHubRepository? {
+        gitPath: String = "/usr/bin/git",
+        timeout: TimeInterval = 30
+    ) -> UpstreamRepositoryObservation {
         guard let remoteResult = gitOutput(
-            arguments: ["for-each-ref", "--format=%(upstream:remotename)", "refs/heads/\(branch)"],
+            arguments: ["for-each-ref", "--format=%(push:remotename)", "refs/heads/\(branch)"],
             at: repositoryRoot,
-            gitPath: gitPath
-        ), remoteResult.terminationStatus == 0 else { return nil }
+            gitPath: gitPath,
+            timeout: timeout
+        ) else { return .failure }
+        guard remoteResult.terminationStatus == 0 else { return .failure }
         let remote = remoteResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !remote.isEmpty,
-              let remoteURLResult = gitOutput(
-                  arguments: ["remote", "get-url", remote],
-                  at: repositoryRoot,
-                  gitPath: gitPath
-              ), remoteURLResult.terminationStatus == 0
-        else { return nil }
-        return GitHubRepository(remoteURL: remoteURLResult.standardOutput)
+        guard !remote.isEmpty, remote != "." else { return .absent }
+        guard let remoteURLResult = gitOutput(
+            arguments: ["remote", "get-url", "--push", remote],
+            at: repositoryRoot,
+            gitPath: gitPath,
+            timeout: timeout
+        ) else { return .failure }
+        guard remoteURLResult.terminationStatus == 0 else { return .failure }
+        guard let repository = GitHubRepository(remoteURL: remoteURLResult.standardOutput)
+        else { return .absent }
+        return .repository(repository)
     }
 
     static func contextAsync(
@@ -185,29 +259,20 @@ enum GitDetect {
     private static func gitOutput(
         arguments: [String],
         at path: String,
-        gitPath: String
+        gitPath: String,
+        timeout: TimeInterval
     ) -> CommandOutput? {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: gitPath)
-        proc.arguments = arguments
-        proc.currentDirectoryURL = URL(fileURLWithPath: path)
-
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = FileHandle.nullDevice
-
-        do {
-            try proc.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            proc.waitUntilExit()
-            guard let output = String(data: data, encoding: .utf8) else { return nil }
-            return CommandOutput(
-                standardOutput: output,
-                terminationStatus: proc.terminationStatus
-            )
-        } catch {
-            return nil
-        }
+        guard let result = BoundedProcess.run(
+            executableURL: URL(fileURLWithPath: gitPath),
+            arguments: arguments,
+            currentDirectoryURL: URL(fileURLWithPath: path),
+            timeout: timeout
+        ), let output = String(data: result.standardOutput, encoding: .utf8)
+        else { return nil }
+        return CommandOutput(
+            standardOutput: output,
+            terminationStatus: result.terminationStatus
+        )
     }
 
     private static func containsGitMetadata(at path: String) -> Bool {

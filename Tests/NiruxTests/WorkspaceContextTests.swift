@@ -421,6 +421,32 @@ final class WorkspaceContextTests: XCTestCase {
         }
     }
 
+    func testFocusedEditorDoesNotRewritePersistedWorkspaceCwd() {
+        let workspace = WorkspaceState(title: "context", cwd: "/repo/terminal")
+
+        workspace.addEditorColumn(workspaceCwd: "/repo/editor")
+
+        XCTAssertEqual(workspace.focusedWorkingDirectory, "/repo/editor")
+        XCTAssertEqual(
+            NiruxShellView.persistedWorkspaceCwd(for: workspace),
+            "/repo/terminal"
+        )
+    }
+
+    func testFocusedBrowserRetainsLastObservedRepositoryDirectory() {
+        let workspace = WorkspaceState(title: "context", cwd: "/workspace/home")
+        let context = GitContext(
+            branch: "feature/task",
+            identity: GitIdentity(repositoryRoot: "/repo/terminal", head: "head-a")
+        )
+        XCTAssertTrue(workspace.updateGitContext(context))
+
+        workspace.addColumn(webViewURL: "https://example.test")
+
+        XCTAssertEqual(workspace.focusedWorkingDirectory, "/repo/terminal")
+        XCTAssertEqual(workspace.gitContext, context)
+    }
+
     func testBackgroundTerminalCwdEventDoesNotClaimGitObservation() throws {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         let backgroundTerminal = workspace.columns[0]
@@ -484,11 +510,17 @@ final class WorkspaceContextTests: XCTestCase {
         let fakeGit = directory.appendingPathComponent("git")
         let script = #"""
         #!/bin/sh
-        case "$1" in
-            rev-parse)
-                printf '%s\n%s\n%s\n' "$PWD" "head-a" "feature/task"
+        case "$1 $2" in
+            "rev-parse --show-toplevel")
+                printf '%s\n' "$PWD"
                 ;;
-            status)
+            "symbolic-ref --quiet")
+                printf '%s\n' "feature/task"
+                ;;
+            "rev-parse --verify")
+                printf '%s\n' "head-a"
+                ;;
+            "status --porcelain=v1")
                 exit 75
                 ;;
             *)
@@ -559,6 +591,197 @@ final class WorkspaceContextTests: XCTestCase {
         )
         XCTAssertNil(workspace.gitContext)
         XCTAssertNil(workspace.prInfo)
+    }
+
+    func testUnbornRepositoryInvalidatesPreviousRepositoryContext() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let committedRepository = root.appendingPathComponent("committed", isDirectory: true)
+        let unbornRepository = root.appendingPathComponent("unborn", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: committedRepository,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: unbornRepository,
+            withIntermediateDirectories: true
+        )
+        try initializeGitRepository(at: committedRepository)
+        try runGit(["init", "-q"], at: unbornRepository)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let previousContext = try XCTUnwrap(GitDetect.context(at: committedRepository.path))
+        guard case .observed(let unbornContext) = GitDetect.observe(at: unbornRepository.path)
+        else { return XCTFail("Expected an observed unborn repository") }
+        XCTAssertNil(unbornContext.identity.head)
+        XCTAssertEqual(
+            URL(fileURLWithPath: unbornContext.identity.repositoryRoot).resolvingSymlinksInPath(),
+            unbornRepository.resolvingSymlinksInPath()
+        )
+
+        let workspace = WorkspaceState(title: "context", cwd: committedRepository.path)
+        let pullRequest = PRInfo(
+            number: 42,
+            state: "OPEN",
+            isDraft: false,
+            ciStatus: nil,
+            failedCheckUrl: nil,
+            reviewDecision: nil,
+            mergeable: nil,
+            url: "https://example.test/pull/42",
+            additions: nil,
+            deletions: nil,
+            changedFiles: nil
+        )
+        XCTAssertTrue(workspace.updateGitContext(previousContext))
+        XCTAssertTrue(workspace.applyPullRequestInfo(pullRequest, for: previousContext))
+        workspace.diffStats = "1 file changed"
+        let observation = try XCTUnwrap(
+            workspace.beginGitContextObservation(at: unbornRepository.path)
+        )
+
+        XCTAssertEqual(
+            workspace.applyGitContextObservation(
+                .observed(unbornContext),
+                observation: observation
+            ),
+            .changed
+        )
+        XCTAssertEqual(workspace.gitContext, unbornContext)
+        XCTAssertNil(workspace.prInfo)
+        XCTAssertNil(workspace.diffStats)
+    }
+
+    func testAuthoritativeNonGitHubPushRemoteClearsCachedPullRequest() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try initializeGitRepository(at: directory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let initial = try XCTUnwrap(GitDetect.context(at: directory.path))
+        let branch = initial.branch
+        try runGit(["remote", "add", "origin", "git@github.com:owner/repo.git"], at: directory)
+        try runGit(["update-ref", "refs/remotes/origin/\(branch)", "HEAD"], at: directory)
+        try runGit(["branch", "--set-upstream-to=origin/\(branch)"], at: directory)
+        let repositoryContext = try XCTUnwrap(GitDetect.context(at: directory.path))
+        XCTAssertEqual(
+            repositoryContext.upstreamRepository,
+            GitHubRepository(owner: "owner", name: "repo")
+        )
+
+        let workspace = WorkspaceState(title: "context", cwd: directory.path)
+        let pullRequest = PRInfo(
+            number: 42,
+            state: "OPEN",
+            isDraft: false,
+            ciStatus: nil,
+            failedCheckUrl: nil,
+            reviewDecision: nil,
+            mergeable: nil,
+            url: "https://github.com/owner/repo/pull/42",
+            additions: nil,
+            deletions: nil,
+            changedFiles: nil
+        )
+        XCTAssertTrue(workspace.updateGitContext(repositoryContext))
+        XCTAssertTrue(workspace.applyPullRequestInfo(pullRequest, for: repositoryContext))
+
+        try runGit(
+            ["remote", "set-url", "--push", "origin", directory.path],
+            at: directory
+        )
+        let absentContext = try XCTUnwrap(GitDetect.context(at: directory.path))
+        XCTAssertEqual(absentContext.upstreamRepositoryObservation, .absent)
+
+        XCTAssertTrue(workspace.updateGitContext(absentContext))
+        XCTAssertNil(workspace.prInfo)
+    }
+
+    func testPullRequestIdentityPrefersConfiguredPushRemote() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try initializeGitRepository(at: directory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let branch = try XCTUnwrap(GitDetect.context(at: directory.path)).branch
+        try runGit(
+            ["remote", "add", "company", "git@github.com:company/repo.git"],
+            at: directory
+        )
+        try runGit(
+            ["update-ref", "refs/remotes/company/\(branch)", "HEAD"],
+            at: directory
+        )
+        try runGit(
+            ["branch", "--set-upstream-to=company/\(branch)"],
+            at: directory
+        )
+        try runGit(
+            ["remote", "add", "fork", "git@github.com:developer/repo.git"],
+            at: directory
+        )
+        try runGit(["config", "branch.\(branch).pushRemote", "fork"], at: directory)
+
+        XCTAssertEqual(
+            try XCTUnwrap(GitDetect.context(at: directory.path)).upstreamRepository,
+            GitHubRepository(owner: "developer", name: "repo")
+        )
+    }
+
+    func testHungGitObservationTimesOutAndAllowsRetry() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try initializeGitRepository(at: directory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let fakeGit = directory.appendingPathComponent("hung-git")
+        let script = #"""
+        #!/bin/sh
+        trap '' TERM
+        while :; do :; done
+        """#
+        try script.write(to: fakeGit, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: fakeGit.path
+        )
+        let context = try XCTUnwrap(GitDetect.context(at: directory.path))
+        let workspace = WorkspaceState(title: "context", cwd: directory.path)
+        XCTAssertTrue(workspace.updateGitContext(context))
+
+        let startedAt = Date()
+        let failure = GitDetect.observe(
+            at: directory.path,
+            gitPath: fakeGit.path,
+            timeout: 0.1
+        )
+        XCTAssertLessThan(Date().timeIntervalSince(startedAt), 2)
+        XCTAssertEqual(failure, .failure)
+
+        let failedObservation = try XCTUnwrap(
+            workspace.beginGitContextObservation(at: directory.path)
+        )
+        XCTAssertEqual(
+            workspace.applyGitContextObservation(
+                failure,
+                observation: failedObservation
+            ),
+            .unchanged
+        )
+        let retryObservation = try XCTUnwrap(
+            workspace.beginGitContextObservation(at: directory.path)
+        )
+        XCTAssertEqual(
+            workspace.applyGitContextObservation(
+                GitDetect.observe(at: directory.path),
+                observation: retryObservation
+            ),
+            .unchanged
+        )
+        XCTAssertEqual(workspace.gitContext, context)
     }
 
     func testInaccessibleFocusedEditorDiffFailurePreservesCachedStats() throws {
@@ -724,7 +947,8 @@ final class WorkspaceContextTests: XCTestCase {
         )
         let unknownUpstream = GitContext(
             branch: "feature/task",
-            identity: originalIdentity
+            identity: originalIdentity,
+            upstreamRepositoryObservation: .failure
         )
         let pullRequest = PRInfo(
             number: 42,
@@ -765,7 +989,8 @@ final class WorkspaceContextTests: XCTestCase {
 
         let changedHead = GitContext(
             branch: "feature/task",
-            identity: GitIdentity(repositoryRoot: "/repo", head: "head-b")
+            identity: GitIdentity(repositoryRoot: "/repo", head: "head-b"),
+            upstreamRepositoryObservation: .failure
         )
         let changedHeadObservation = try XCTUnwrap(
             workspace.beginGitContextObservation(at: "/repo")
@@ -876,6 +1101,18 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertTrue(labels.contains("▶ Active"))
         XCTAssertTrue(labels.contains("Explain why this exists"))
         XCTAssertTrue(labels.contains("Persistence is complete"))
+    }
+
+    func testSidebarRendererShowsMissingActivityState() {
+        let result = SidebarWorkspaceCardRenderer(
+            workspace: makeWorkspaceInfo(),
+            sidebarWidth: 260,
+            padding: 20,
+            yOffset: 400
+        ).render()
+        let labels = result.views.compactMap { ($0 as? NSTextField)?.stringValue }
+
+        XCTAssertTrue(labels.contains("No activity yet"))
     }
 
     func testSidebarContextRowPrioritizesBlocker() throws {

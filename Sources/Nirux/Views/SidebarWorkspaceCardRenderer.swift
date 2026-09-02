@@ -159,33 +159,35 @@ final class SidebarWorkspaceCardRenderer {
             color: phaseColor(phase)
         )
         phaseLabel.setAccessibilityLabel("\(phase.displayName) phase")
-        let hasAge = workspace.lastActivityAt != nil
+        let hasActivity = workspace.lastActivityAt != nil
+        let ageWidth: CGFloat = hasActivity ? 54 : 82
         phaseLabel.frame = NSRect(
             x: contentX,
             y: yOffset - SidebarExpandedMetrics.phaseHeight,
-            width: hasAge ? contentW - 56 : contentW,
+            width: contentW - ageWidth - 2,
             height: SidebarExpandedMetrics.phaseHeight
         )
         append(phaseLabel)
 
-        if let lastActivityAt = workspace.lastActivityAt {
-            let ageText = SidebarView.relativeAge(since: lastActivityAt)
-            let ageLabel = textLabel(
-                ageText,
-                font: .monospacedSystemFont(ofSize: 9.5, weight: .regular),
-                color: NSColor.white.withAlphaComponent(0.34)
-            )
-            ageLabel.alignment = .right
-            ageLabel.toolTip = "Last activity \(ageText) ago"
-            ageLabel.setAccessibilityLabel("Last activity \(ageText) ago")
-            ageLabel.frame = NSRect(
-                x: contentX + contentW - 54,
-                y: yOffset - SidebarExpandedMetrics.phaseHeight,
-                width: 54,
-                height: SidebarExpandedMetrics.phaseHeight
-            )
-            append(ageLabel)
-        }
+        let ageText = workspace.lastActivityAt.map {
+            SidebarView.relativeAge(since: $0)
+        } ?? "No activity yet"
+        let ageDescription = hasActivity ? "Last activity \(ageText) ago" : ageText
+        let ageLabel = textLabel(
+            ageText,
+            font: .monospacedSystemFont(ofSize: 9.5, weight: .regular),
+            color: NSColor.white.withAlphaComponent(0.34)
+        )
+        ageLabel.alignment = .right
+        ageLabel.toolTip = ageDescription
+        ageLabel.setAccessibilityLabel(ageDescription)
+        ageLabel.frame = NSRect(
+            x: contentX + contentW - ageWidth,
+            y: yOffset - SidebarExpandedMetrics.phaseHeight,
+            width: ageWidth,
+            height: SidebarExpandedMetrics.phaseHeight
+        )
+        append(ageLabel)
         return yOffset - SidebarExpandedMetrics.phaseAdvance
     }
 

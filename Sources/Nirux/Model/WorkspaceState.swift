@@ -110,6 +110,10 @@ final class WorkspaceState {
     var gitBranch: String? { gitContext?.branch }
     var focusedWorkingDirectory: String {
         let column = columns[safe: focusedIndex]
+        if column?.isWebView == true,
+           let repositoryRoot = gitContext?.identity.repositoryRoot {
+            return repositoryRoot
+        }
         return Self.resolveWorkingDirectory(
             terminalCwd: column?.pty?.childCwd,
             editorCwd: column?.editorColumn?.workspaceCwd,
@@ -130,6 +134,7 @@ final class WorkspaceState {
     var lastActivityAt: TimeInterval?
     var nextStep: String?
     var blocker: String?
+    var unknownPhaseRawValue: String?
 
     var effectivePhase: WorkspacePhase {
         if let phase { return phase }
@@ -257,7 +262,8 @@ final class WorkspaceState {
         let sameRevision = previousContext?.branch == context?.branch
             && previousContext?.identity.repositoryRoot == context?.identity.repositoryRoot
             && previousContext?.identity.head == context?.identity.head
-            && previousContext?.upstreamRepository == context?.upstreamRepository
+            && previousContext?.upstreamRepositoryObservation
+                == context?.upstreamRepositoryObservation
         if !sameRevision || (context?.identity.isDirty == true && Self.isTerminalPullRequest(prInfo)) {
             prInfo = nil
         }
@@ -271,16 +277,15 @@ final class WorkspaceState {
 
     private func preservingKnownUpstreamRepository(in context: GitContext?) -> GitContext? {
         guard let context,
-              context.upstreamRepository == nil,
+              context.upstreamRepositoryObservation == .failure,
               let previousContext = gitContext,
               previousContext.branch == context.branch,
-              previousContext.identity.repositoryRoot == context.identity.repositoryRoot,
-              let upstreamRepository = previousContext.upstreamRepository
+              previousContext.identity.repositoryRoot == context.identity.repositoryRoot
         else { return context }
         return GitContext(
             branch: context.branch,
             identity: context.identity,
-            upstreamRepository: upstreamRepository
+            upstreamRepositoryObservation: previousContext.upstreamRepositoryObservation
         )
     }
 
