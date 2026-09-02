@@ -222,14 +222,21 @@ final class WorkspaceState {
 
     @discardableResult
     func applyGitContextObservation(
-        _ context: GitContext?,
+        _ result: GitContextDetectionResult,
         observation: GitContextObservation
     ) -> GitContextObservationResult {
         guard observation.generation == gitContextObservationGeneration,
               gitContextObservation?.generation == observation.generation
         else { return .stale }
         gitContextObservation = nil
-        return replaceGitContext(context) ? .changed : .unchanged
+        switch result {
+        case .observed(let context):
+            return replaceGitContext(context) ? .changed : .unchanged
+        case .notRepository:
+            return replaceGitContext(nil) ? .changed : .unchanged
+        case .failure:
+            return .unchanged
+        }
     }
 
     private func replaceGitContext(_ context: GitContext?) -> Bool {
@@ -372,11 +379,14 @@ final class WorkspaceState {
             else { return }
             let workingDirectory = self.focusedWorkingDirectory
             guard let observation = self.beginGitContextObservation(at: workingDirectory) else { return }
-            GitDetect.contextAsync(at: workingDirectory) { [weak self] context in
+            GitDetect.contextAsync(at: workingDirectory) { [weak self] result in
                 guard let self else { return }
-                let result = self.applyGitContextObservation(context, observation: observation)
-                guard result != .stale else { return }
-                if result == .unchanged { self.onMetadataChanged?() }
+                let observationResult = self.applyGitContextObservation(
+                    result,
+                    observation: observation
+                )
+                guard observationResult != .stale else { return }
+                if observationResult == .unchanged { self.onMetadataChanged?() }
             }
         }
     }
@@ -435,8 +445,8 @@ final class WorkspaceState {
     func detectGitBranch() {
         let workingDirectory = focusedWorkingDirectory
         guard let observation = beginGitContextObservation(at: workingDirectory) else { return }
-        GitDetect.contextAsync(at: workingDirectory) { [weak self] context in
-            self?.applyGitContextObservation(context, observation: observation)
+        GitDetect.contextAsync(at: workingDirectory) { [weak self] result in
+            self?.applyGitContextObservation(result, observation: observation)
         }
     }
 

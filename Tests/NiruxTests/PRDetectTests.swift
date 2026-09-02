@@ -379,8 +379,8 @@ final class PRDetectTests: XCTestCase {
         XCTAssertNil(pullRequest)
     }
 
-    func testAuthoritativeTerminalPullRequestIsFoundBeyondFirstHundredForks() throws {
-        let foreignCandidates: [[String: Any]] = (100 ... 199).map { number in
+    func testAuthoritativeTerminalPullRequestIsFoundBeyondSearchCap() throws {
+        let foreignCandidates: [[String: Any]] = (2 ... 1001).map { number in
             [
                 "number": number,
                 "state": "CLOSED",
@@ -408,7 +408,7 @@ final class PRDetectTests: XCTestCase {
         )
         let result = try fetchUsingFakeGitHubCLI(
             terminalJSON: try XCTUnwrap(String(data: exhaustiveData, encoding: .utf8)),
-            cappedTerminalJSON: try XCTUnwrap(String(data: cappedData, encoding: .utf8))
+            searchCappedTerminalJSON: try XCTUnwrap(String(data: cappedData, encoding: .utf8))
         )
 
         guard case .success(_, let fetched) = result else {
@@ -447,7 +447,7 @@ final class PRDetectTests: XCTestCase {
         openJSON: String = "[]",
         cappedOpenJSON: String? = nil,
         terminalJSON: String = "[]",
-        cappedTerminalJSON: String? = nil,
+        searchCappedTerminalJSON: String? = nil,
         currentHead: String = "current-head",
         isDirty: Bool = false,
         failingState: String? = nil,
@@ -502,9 +502,8 @@ final class PRDetectTests: XCTestCase {
                 fi
                 ;;
             all)
-                [ "$search" = "\#(currentHead)" ] || exit 69
-                if [ "\#(cappedTerminalJSON == nil ? "0" : "1")" = "1" ] && [ "$limit" = "100" ]; then
-                    payload='\#(cappedTerminalJSON ?? "")'
+                if [ "\#(searchCappedTerminalJSON == nil ? "0" : "1")" = "1" ] && [ -n "$search" ]; then
+                    payload='\#(searchCappedTerminalJSON ?? "")'
                 else
                     payload='\#(terminalJSON)'
                 fi

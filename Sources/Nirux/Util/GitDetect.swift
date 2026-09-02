@@ -85,60 +85,110 @@ struct GitContext: Hashable, Sendable {
     }
 }
 
+enum GitContextDetectionResult: Equatable, Sendable {
+    case observed(GitContext)
+    case notRepository
+    case failure
+}
+
 enum GitDetect {
     static func context(at path: String) -> GitContext? {
-        guard let output = gitOutput(
+        guard case .observed(let context) = observe(at: path) else { return nil }
+        return context
+    }
+
+    static func observe(
+        at path: String,
+        gitPath: String = "/usr/bin/git"
+    ) -> GitContextDetectionResult {
+        let workingDirectory = URL(fileURLWithPath: path).standardizedFileURL.path
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(
+            atPath: workingDirectory,
+            isDirectory: &isDirectory
+        ), isDirectory.boolValue else { return .failure }
+
+        guard let revision = gitOutput(
             arguments: ["rev-parse", "--show-toplevel", "HEAD", "--abbrev-ref", "HEAD"],
-            at: path
-        ), let status = gitOutput(
+            at: workingDirectory,
+            gitPath: gitPath
+        ) else { return .failure }
+        guard revision.terminationStatus == 0 else {
+            return containsGitMetadata(at: workingDirectory) ? .failure : .notRepository
+        }
+        guard let status = gitOutput(
             arguments: ["status", "--porcelain=v1", "--untracked-files=normal"],
-            at: path
-        ) else { return nil }
-        let lines = output
+            at: workingDirectory,
+            gitPath: gitPath
+        ), status.terminationStatus == 0 else { return .failure }
+        let lines = revision.standardOutput
             .split(whereSeparator: { $0.isNewline })
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
         guard lines.count == 3,
               lines.allSatisfy({ !$0.isEmpty })
-        else { return nil }
+        else { return .failure }
         let repositoryRoot = URL(fileURLWithPath: lines[0]).standardizedFileURL.path
         let branch = lines[2]
-        return GitContext(
+        return .observed(GitContext(
             branch: branch,
             identity: GitIdentity(
                 repositoryRoot: repositoryRoot,
                 head: lines[1],
-                isDirty: !status.isEmpty
+                isDirty: !status.standardOutput.isEmpty
             ),
-            upstreamRepository: upstreamRepository(at: repositoryRoot, branch: branch)
-        )
+            upstreamRepository: upstreamRepository(
+                at: repositoryRoot,
+                branch: branch,
+                gitPath: gitPath
+            )
+        ))
     }
 
-    static func upstreamRepository(at repositoryRoot: String, branch: String) -> GitHubRepository? {
-        guard let remote = gitOutput(
+    static func upstreamRepository(
+        at repositoryRoot: String,
+        branch: String,
+        gitPath: String = "/usr/bin/git"
+    ) -> GitHubRepository? {
+        guard let remoteResult = gitOutput(
             arguments: ["for-each-ref", "--format=%(upstream:remotename)", "refs/heads/\(branch)"],
-            at: repositoryRoot
-        )?.trimmingCharacters(in: .whitespacesAndNewlines),
-        !remote.isEmpty,
-        let remoteURL = gitOutput(arguments: ["remote", "get-url", remote], at: repositoryRoot)
+            at: repositoryRoot,
+            gitPath: gitPath
+        ), remoteResult.terminationStatus == 0 else { return nil }
+        let remote = remoteResult.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !remote.isEmpty,
+              let remoteURLResult = gitOutput(
+                  arguments: ["remote", "get-url", remote],
+                  at: repositoryRoot,
+                  gitPath: gitPath
+              ), remoteURLResult.terminationStatus == 0
         else { return nil }
-        return GitHubRepository(remoteURL: remoteURL)
+        return GitHubRepository(remoteURL: remoteURLResult.standardOutput)
     }
 
     static func contextAsync(
         at path: String,
-        completion: @escaping @MainActor @Sendable (GitContext?) -> Void
+        completion: @escaping @MainActor @Sendable (GitContextDetectionResult) -> Void
     ) {
         DispatchQueue.global(qos: .utility).async {
-            let result = context(at: path)
+            let result = observe(at: path)
             DispatchQueue.main.async {
                 completion(result)
             }
         }
     }
 
-    private static func gitOutput(arguments: [String], at path: String) -> String? {
+    private struct CommandOutput {
+        let standardOutput: String
+        let terminationStatus: Int32
+    }
+
+    private static func gitOutput(
+        arguments: [String],
+        at path: String,
+        gitPath: String
+    ) -> CommandOutput? {
         let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        proc.executableURL = URL(fileURLWithPath: gitPath)
         proc.arguments = arguments
         proc.currentDirectoryURL = URL(fileURLWithPath: path)
 
@@ -150,10 +200,27 @@ enum GitDetect {
             try proc.run()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             proc.waitUntilExit()
-            guard proc.terminationStatus == 0 else { return nil }
-            return String(data: data, encoding: .utf8)
+            guard let output = String(data: data, encoding: .utf8) else { return nil }
+            return CommandOutput(
+                standardOutput: output,
+                terminationStatus: proc.terminationStatus
+            )
         } catch {
             return nil
+        }
+    }
+
+    private static func containsGitMetadata(at path: String) -> Bool {
+        var directory = URL(fileURLWithPath: path).standardizedFileURL
+        while true {
+            if FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent(".git").path
+            ) {
+                return true
+            }
+            let parent = directory.deletingLastPathComponent()
+            guard parent.path != directory.path else { return false }
+            directory = parent
         }
     }
 }

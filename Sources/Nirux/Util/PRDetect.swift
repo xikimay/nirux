@@ -51,7 +51,6 @@ enum PRDetect {
         guard let openCandidates = candidates(
             branch: branch,
             state: "open",
-            search: nil,
             limit: Int.max,
             ghPath: ghPath,
             repositoryRoot: context.identity.repositoryRoot
@@ -77,7 +76,6 @@ enum PRDetect {
         guard let terminalCandidates = candidates(
             branch: branch,
             state: "all",
-            search: context.identity.head,
             limit: Int.max,
             ghPath: ghPath,
             repositoryRoot: context.identity.repositoryRoot
@@ -103,19 +101,16 @@ enum PRDetect {
     private static func candidates(
         branch: String,
         state: String,
-        search: String?,
         limit: Int,
         ghPath: String,
         repositoryRoot: String
     ) -> [[String: Any]]? {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: ghPath)
-        var arguments = ["pr", "list", "--head", branch,
-                         "--state", state,
-                         "--json", "number,state,headRefOid,headRepositoryOwner,headRepository,isDraft,statusCheckRollup,reviewDecision,mergeable,url,additions,deletions,changedFiles",
-                         "--limit", String(limit)]
-        if let search { arguments.append(contentsOf: ["--search", search]) }
-        proc.arguments = arguments
+        proc.arguments = ["pr", "list", "--head", branch,
+                          "--state", state,
+                          "--json", "number,state,headRefOid,headRepositoryOwner,headRepository,isDraft,statusCheckRollup,reviewDecision,mergeable,url,additions,deletions,changedFiles",
+                          "--limit", String(limit)]
         proc.currentDirectoryURL = URL(fileURLWithPath: repositoryRoot)
 
         let pipe = Pipe()

@@ -182,7 +182,10 @@ final class WorkspaceContextTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            workspace.applyGitContextObservation(newContext, observation: newerObservation),
+            workspace.applyGitContextObservation(
+                .observed(newContext),
+                observation: newerObservation
+            ),
             .changed
         )
         workspace.prInfo = PRInfo(
@@ -199,7 +202,10 @@ final class WorkspaceContextTests: XCTestCase {
             changedFiles: nil
         )
         XCTAssertEqual(
-            workspace.applyGitContextObservation(oldContext, observation: olderObservation),
+            workspace.applyGitContextObservation(
+                .observed(oldContext),
+                observation: olderObservation
+            ),
             .stale
         )
         XCTAssertEqual(workspace.gitContext, newContext)
@@ -340,12 +346,18 @@ final class WorkspaceContextTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            workspace.applyGitContextObservation(currentContext, observation: currentObservation),
+            workspace.applyGitContextObservation(
+                .observed(currentContext),
+                observation: currentObservation
+            ),
             .changed
         )
         XCTAssertEqual(refreshContexts, [currentContext])
         XCTAssertEqual(
-            workspace.applyGitContextObservation(staleContext, observation: staleObservation),
+            workspace.applyGitContextObservation(
+                .observed(staleContext),
+                observation: staleObservation
+            ),
             .stale
         )
         XCTAssertEqual(refreshContexts, [currentContext])
@@ -354,7 +366,10 @@ final class WorkspaceContextTests: XCTestCase {
             workspace.beginGitContextObservation(at: "/repo/current")
         )
         XCTAssertEqual(
-            workspace.applyGitContextObservation(currentContext, observation: unchangedObservation),
+            workspace.applyGitContextObservation(
+                .observed(currentContext),
+                observation: unchangedObservation
+            ),
             .unchanged
         )
         XCTAssertEqual(refreshContexts, [currentContext])
@@ -423,7 +438,7 @@ final class WorkspaceContextTests: XCTestCase {
 
         XCTAssertEqual(
             workspace.applyGitContextObservation(
-                editorContext,
+                .observed(editorContext),
                 observation: pendingFocusedObservation
             ),
             .unchanged
@@ -444,7 +459,10 @@ final class WorkspaceContextTests: XCTestCase {
         )
         XCTAssertNil(workspace.beginGitContextObservation(at: "/repo"))
         XCTAssertEqual(
-            workspace.applyGitContextObservation(context, observation: gitObservation),
+            workspace.applyGitContextObservation(
+                .observed(context),
+                observation: gitObservation
+            ),
             .changed
         )
         XCTAssertNotNil(workspace.beginGitContextObservation(at: "/repo"))
@@ -455,6 +473,92 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertNil(workspace.beginPullRequestObservation(for: context))
         XCTAssertTrue(workspace.finishPullRequestObservation(pullRequestObservation))
         XCTAssertNotNil(workspace.beginPullRequestObservation(for: context))
+    }
+
+    func testGitObservationFailurePreservesCacheWhileNonRepositoryClearsIt() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let fakeGit = directory.appendingPathComponent("git")
+        let script = #"""
+        #!/bin/sh
+        case "$1" in
+            rev-parse)
+                printf '%s\n%s\n%s\n' "$PWD" "head-a" "feature/task"
+                ;;
+            status)
+                exit 75
+                ;;
+            *)
+                exit 1
+                ;;
+        esac
+        """#
+        try script.write(to: fakeGit, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: fakeGit.path
+        )
+
+        let statusFailure = GitDetect.observe(at: directory.path, gitPath: fakeGit.path)
+        XCTAssertEqual(statusFailure, .failure)
+        XCTAssertEqual(
+            GitDetect.observe(
+                at: directory.path,
+                gitPath: directory.appendingPathComponent("missing-git").path
+            ),
+            .failure
+        )
+        XCTAssertEqual(GitDetect.observe(at: directory.path), .notRepository)
+
+        let workspace = WorkspaceState(title: "context", cwd: directory.path)
+        let context = GitContext(
+            branch: "feature/task",
+            identity: GitIdentity(repositoryRoot: directory.path, head: "head-a")
+        )
+        let pullRequest = PRInfo(
+            number: 42,
+            state: "OPEN",
+            isDraft: false,
+            ciStatus: nil,
+            failedCheckUrl: nil,
+            reviewDecision: nil,
+            mergeable: nil,
+            url: "https://example.test/pull/42",
+            additions: nil,
+            deletions: nil,
+            changedFiles: nil
+        )
+        XCTAssertTrue(workspace.updateGitContext(context))
+        XCTAssertTrue(workspace.applyPullRequestInfo(pullRequest, for: context))
+
+        let failedObservation = try XCTUnwrap(
+            workspace.beginGitContextObservation(at: directory.path)
+        )
+        XCTAssertEqual(
+            workspace.applyGitContextObservation(
+                statusFailure,
+                observation: failedObservation
+            ),
+            .unchanged
+        )
+        XCTAssertEqual(workspace.gitContext, context)
+        XCTAssertEqual(workspace.prInfo, pullRequest)
+
+        let nonRepositoryObservation = try XCTUnwrap(
+            workspace.beginGitContextObservation(at: directory.path)
+        )
+        XCTAssertEqual(
+            workspace.applyGitContextObservation(
+                .notRepository,
+                observation: nonRepositoryObservation
+            ),
+            .changed
+        )
+        XCTAssertNil(workspace.gitContext)
+        XCTAssertNil(workspace.prInfo)
     }
 
     func testUpstreamReassignmentInvalidatesCachedAndInFlightPullRequest() throws {
@@ -542,7 +646,7 @@ final class WorkspaceContextTests: XCTestCase {
 
         XCTAssertEqual(
             workspace.applyGitContextObservation(
-                unknownUpstream,
+                .observed(unknownUpstream),
                 observation: unknownObservation
             ),
             .unchanged
@@ -563,7 +667,7 @@ final class WorkspaceContextTests: XCTestCase {
         )
         XCTAssertEqual(
             workspace.applyGitContextObservation(
-                changedHead,
+                .observed(changedHead),
                 observation: changedHeadObservation
             ),
             .changed
@@ -587,7 +691,7 @@ final class WorkspaceContextTests: XCTestCase {
         )
         XCTAssertEqual(
             workspace.applyGitContextObservation(
-                confirmedReassignment,
+                .observed(confirmedReassignment),
                 observation: reassignmentObservation
             ),
             .changed
