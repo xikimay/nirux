@@ -13,6 +13,10 @@ enum BoundedProcess {
         currentDirectoryURL: URL,
         timeout: TimeInterval = 30
     ) -> BoundedProcessResult? {
+        guard FileManager.default.isExecutableFile(atPath: executableURL.path) else {
+            return nil
+        }
+
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
