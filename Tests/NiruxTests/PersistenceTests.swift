@@ -455,7 +455,7 @@ final class PersistedStateCodingTests: XCTestCase {
     }
 }
 
-extension PersistenceTests {
+extension PersistedStateCodingTests {
     @MainActor
     func testCodexRestoreCommandsNeverGuessTheLastSession() {
         let first = NiruxShellView.codexCommand(

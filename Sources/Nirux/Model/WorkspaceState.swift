@@ -36,6 +36,7 @@ final class WorkspaceState {
     let containerView: NSView  // clips content, acts as viewport
     private let stripView: NSView  // holds all columns, slides horizontally
     var columns: [ColumnState] = []
+    private var resizeHandles: [ColumnResizeHandle] = []
     var focusedIndex: Int = 0 {
         didSet {
             guard focusedIndex != oldValue else { return }
@@ -518,8 +519,6 @@ extension WorkspaceState {
     /// strip subviews. Closures resolve the handle back to its CURRENT
     /// column index at event time, so moveColumn/closeColumn can't leave
     /// them pointing at the wrong column.
-    private var resizeHandles: [ColumnResizeHandle] = []
-
     private func makeResizeHandle() {
         let handle = ColumnResizeHandle()
         handle.onDragStart = { [weak self, weak handle] in
