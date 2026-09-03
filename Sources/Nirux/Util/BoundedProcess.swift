@@ -105,7 +105,6 @@ enum BoundedProcess {
             try? readHandle.close()
             return nil
         }
-        process.waitUntilExit()
         try? readHandle.close()
         return data
     }
@@ -115,7 +114,6 @@ enum BoundedProcess {
         didTerminate: DispatchSemaphore
     ) {
         if didTerminate.wait(timeout: .now()) == .success {
-            process.waitUntilExit()
             return
         }
         process.terminate()
@@ -123,6 +121,5 @@ enum BoundedProcess {
             Darwin.kill(process.processIdentifier, SIGKILL)
             _ = didTerminate.wait(timeout: .now() + 1)
         }
-        process.waitUntilExit()
     }
 }
