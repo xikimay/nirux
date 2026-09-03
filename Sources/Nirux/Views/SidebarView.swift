@@ -158,6 +158,11 @@ final class SidebarView: NSView {
         hasher.combine(lastProfiles)
         hasher.combine(lastInfos)
         hasher.combine(isInactiveSectionCollapsed)
+        for workspace in lastInfos {
+            if let lastActivityAt = workspace.lastActivityAt {
+                hasher.combine(Self.relativeAge(since: lastActivityAt))
+            }
+        }
         hasher.combine(bounds.width)
         hasher.combine(bounds.height)
         return hasher.finalize()
@@ -486,6 +491,9 @@ final class SidebarView: NSView {
         menu.addClosureItem(title: "Close Workspace") { [weak self] in
             self?.onWorkspaceAction?(.close, workspaceIndex)
         }.isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
+        menu.addClosureItem(title: "View/Edit Context…") { [weak self] in
+            self?.onWorkspaceAction?(.editContext, workspaceIndex)
+        }
         menu.addClosureItem(title: "Rename Workspace") { [weak self] in
             self?.onWorkspaceAction?(.rename, workspaceIndex)
         }

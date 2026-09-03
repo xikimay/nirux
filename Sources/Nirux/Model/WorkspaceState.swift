@@ -7,6 +7,28 @@ struct PilotClickableArea {
     let label: NSTextField
 }
 
+struct GitContextObservation: Sendable {
+    fileprivate let generation: UInt64
+    fileprivate let workingDirectory: String
+}
+
+struct PullRequestObservation: Sendable {
+    fileprivate let generation: UInt64
+    fileprivate let context: GitContext
+}
+
+struct DiffStatsObservation: Sendable {
+    fileprivate let generation: UInt64
+    fileprivate let workingDirectory: String
+    fileprivate let context: GitContext
+}
+
+enum GitContextObservationResult: Equatable {
+    case stale
+    case unchanged
+    case changed
+}
+
 /// A workspace contains columns on an infinite horizontal strip
 @MainActor
 final class WorkspaceState {
@@ -14,7 +36,13 @@ final class WorkspaceState {
     let containerView: NSView  // clips content, acts as viewport
     private let stripView: NSView  // holds all columns, slides horizontally
     var columns: [ColumnState] = []
-    var focusedIndex: Int = 0
+    private var resizeHandles: [ColumnResizeHandle] = []
+    var focusedIndex: Int = 0 {
+        didSet {
+            guard focusedIndex != oldValue else { return }
+            onFocusedColumnChanged?()
+        }
+    }
     private var lastCameraX: CGFloat = 0
     let cwd: String
     var title: String
@@ -26,10 +54,50 @@ final class WorkspaceState {
     /// change. Already-running shells retain the environment they launched
     /// with and pick up changes after a new terminal or app restart.
     var missionHandoffsEnabled: Bool
-    var gitBranch: String?
+    private(set) var gitContext: GitContext?
+    private var gitContextObservationGeneration: UInt64 = 0
+    private var gitContextObservation: GitContextObservation?
+    private var pullRequestObservationGeneration: UInt64 = 0
+    private var pullRequestObservation: PullRequestObservation?
+    private var diffStatsObservationGeneration: UInt64 = 0
+    var gitBranch: String? { gitContext?.branch }
+    var focusedWorkingDirectory: String {
+        let column = columns[safe: focusedIndex]
+        if column?.isWebView == true,
+           let repositoryRoot = gitContext?.identity.repositoryRoot {
+            return repositoryRoot
+        }
+        return Self.resolveWorkingDirectory(
+            terminalCwd: column?.pty?.childCwd,
+            editorCwd: column?.editorColumn?.workspaceCwd,
+            workspaceCwd: cwd
+        )
+    }
     var hasNotification: Bool = false
     var prInfo: PRInfo?
     var diffStats: String?
+
+    // Workspace context. Purpose/next step/blocker are always human-owned.
+    // `phase` is a manual override (nil means derive from live state), while
+    // automatic agent summaries are allowed only until the user edits one.
+    var purpose: String?
+    var phase: WorkspacePhase?
+    var lastSummary: String?
+    var lastSummaryIsManual: Bool = false
+    var lastActivityAt: TimeInterval?
+    var nextStep: String?
+    var blocker: String?
+    var unknownPhaseRawValue: String?
+
+    var effectivePhase: WorkspacePhase {
+        if let phase { return phase }
+        return WorkspacePhase.derived(
+            isInactive: isInactive,
+            hasBlocker: Self.normalizedContextText(blocker) != nil,
+            agentStatuses: columns.map { $0.pty?.cachedAgentState ?? .idle },
+            pullRequestState: prInfo?.state
+        )
+    }
 
     // Pilot info panel (per-workspace, shown in pilot mode)
     var pilotPanel: NSView?
@@ -44,6 +112,8 @@ final class WorkspaceState {
 
     /// Called by NiruxShellView to wire up sidebar refresh
     var onMetadataChanged: (() -> Void)?
+    var onFocusedColumnChanged: (() -> Void)?
+    var onGitContextChanged: (() -> Void)?
     var onDiffStatsClicked: (() -> Void)?
     /// A terminal link was cmd-clicked — the shell opens a browser column
     /// in this workspace.
@@ -79,19 +149,257 @@ final class WorkspaceState {
 
         addColumn(agentUUID: initialAgentUUID)
     }
+}
+
+extension WorkspaceState {
+    /// Trim human-entered context and collapse blank values back to nil so
+    /// optional sidebar rows do not consume space for whitespace-only text.
+    static func normalizedContextText(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    static func resolveWorkingDirectory(
+        terminalCwd: String?,
+        editorCwd: String?,
+        workspaceCwd: String
+    ) -> String {
+        terminalCwd ?? editorCwd ?? workspaceCwd
+    }
+
+    @discardableResult
+    func updateGitContext(_ context: GitContext?) -> Bool {
+        gitContextObservationGeneration &+= 1
+        gitContextObservation = nil
+        return replaceGitContext(context)
+    }
+
+    func beginGitContextObservation(at workingDirectory: String) -> GitContextObservation? {
+        let workingDirectory = URL(fileURLWithPath: workingDirectory).standardizedFileURL.path
+        guard gitContextObservation?.workingDirectory != workingDirectory else { return nil }
+        gitContextObservationGeneration &+= 1
+        let observation = GitContextObservation(
+            generation: gitContextObservationGeneration,
+            workingDirectory: workingDirectory
+        )
+        gitContextObservation = observation
+        return observation
+    }
+
+    @discardableResult
+    func applyGitContextObservation(
+        _ result: GitContextDetectionResult,
+        observation: GitContextObservation
+    ) -> GitContextObservationResult {
+        guard observation.generation == gitContextObservationGeneration,
+              gitContextObservation?.generation == observation.generation
+        else { return .stale }
+        gitContextObservation = nil
+        switch result {
+        case .observed(let context):
+            return replaceGitContext(context) ? .changed : .unchanged
+        case .notRepository:
+            return replaceGitContext(nil) ? .changed : .unchanged
+        case .failure:
+            return .unchanged
+        }
+    }
+
+    private func replaceGitContext(_ context: GitContext?) -> Bool {
+        let context = preservingKnownUpstreamRepository(in: context)
+        guard gitContext != context else { return false }
+        pullRequestObservationGeneration &+= 1
+        pullRequestObservation = nil
+        diffStatsObservationGeneration &+= 1
+        let previousContext = gitContext
+        gitContext = context
+        let sameRevision = previousContext?.branch == context?.branch
+            && previousContext?.identity.repositoryRoot == context?.identity.repositoryRoot
+            && previousContext?.identity.head == context?.identity.head
+            && previousContext?.upstreamRepositoryObservation
+                == context?.upstreamRepositoryObservation
+        if !sameRevision || (context?.identity.isDirty == true && Self.isTerminalPullRequest(prInfo)) {
+            prInfo = nil
+        }
+        diffStats = nil
+        if !titleIsManual, let branch = context?.branch, !branch.isEmpty {
+            title = branch
+        }
+        onGitContextChanged?()
+        return true
+    }
+
+    private func preservingKnownUpstreamRepository(in context: GitContext?) -> GitContext? {
+        guard let context,
+              context.upstreamRepositoryObservation == .failure,
+              let previousContext = gitContext,
+              previousContext.branch == context.branch,
+              previousContext.identity.repositoryRoot == context.identity.repositoryRoot
+        else { return context }
+        return GitContext(
+            branch: context.branch,
+            identity: context.identity,
+            upstreamRepositoryObservation: previousContext.upstreamRepositoryObservation
+        )
+    }
+
+    @discardableResult
+    func applyPullRequestInfo(_ info: PRInfo?, for context: GitContext) -> Bool {
+        guard gitContext == context,
+              !(context.identity.isDirty && Self.isTerminalPullRequest(info)),
+              prInfo != info
+        else { return false }
+        prInfo = info
+        return true
+    }
+
+    func beginPullRequestObservation(for context: GitContext) -> PullRequestObservation? {
+        guard gitContext == context,
+              pullRequestObservation?.context != context
+        else { return nil }
+        pullRequestObservationGeneration &+= 1
+        let observation = PullRequestObservation(
+            generation: pullRequestObservationGeneration,
+            context: context
+        )
+        pullRequestObservation = observation
+        return observation
+    }
+
+    func isCurrentPullRequestObservation(
+        _ observation: PullRequestObservation,
+        for context: GitContext
+    ) -> Bool {
+        observation.generation == pullRequestObservationGeneration
+            && pullRequestObservation?.generation == observation.generation
+            && observation.context == context
+            && gitContext == context
+    }
+
+    @discardableResult
+    func finishPullRequestObservation(_ observation: PullRequestObservation) -> Bool {
+        guard observation.generation == pullRequestObservationGeneration,
+              pullRequestObservation?.generation == observation.generation
+        else { return false }
+        pullRequestObservation = nil
+        return true
+    }
+
+    @discardableResult
+    func applyPullRequestInfo(
+        _ info: PRInfo?,
+        for context: GitContext,
+        observation: PullRequestObservation
+    ) -> Bool {
+        guard isCurrentPullRequestObservation(observation, for: context) else { return false }
+        pullRequestObservation = nil
+        return applyPullRequestInfo(info, for: context)
+    }
+
+    func beginDiffStatsObservation(
+        at workingDirectory: String,
+        for context: GitContext
+    ) -> DiffStatsObservation? {
+        let workingDirectory = URL(fileURLWithPath: workingDirectory).standardizedFileURL.path
+        let focusedWorkingDirectory = URL(
+            fileURLWithPath: self.focusedWorkingDirectory
+        ).standardizedFileURL.path
+        guard gitContext == context,
+              workingDirectory == focusedWorkingDirectory else { return nil }
+        diffStatsObservationGeneration &+= 1
+        return DiffStatsObservation(
+            generation: diffStatsObservationGeneration,
+            workingDirectory: workingDirectory,
+            context: context
+        )
+    }
+
+    @discardableResult
+    func applyDiffStatsObservation(
+        _ result: PRDetect.DiffStatsResult,
+        observation: DiffStatsObservation
+    ) -> Bool {
+        let focusedWorkingDirectory = URL(
+            fileURLWithPath: self.focusedWorkingDirectory
+        ).standardizedFileURL.path
+        guard observation.generation == diffStatsObservationGeneration,
+              observation.workingDirectory == focusedWorkingDirectory,
+              observation.context == gitContext else { return false }
+        let stats: String?
+        switch result {
+        case .observed(let observedContext, let observedStats):
+            guard preservingKnownUpstreamRepository(in: observedContext)
+                == observation.context else { return false }
+            stats = observedStats
+        case .notApplicable:
+            stats = nil
+        case .failure:
+            return false
+        }
+        guard diffStats != stats else { return false }
+        diffStats = stats
+        return true
+    }
+
+    private static func isTerminalPullRequest(_ info: PRInfo?) -> Bool {
+        guard let state = info?.state.uppercased() else { return false }
+        return state == "MERGED" || state == "CLOSED"
+    }
+
+    /// Record meaningful agent activity without overwriting a user-edited
+    /// summary. Replayed hook events can be older than persisted context, so
+    /// only the newest event is allowed to replace the automatic summary.
+    @discardableResult
+    func recordAgentActivity(at timestamp: TimeInterval, automaticSummary: String?) -> Bool {
+        let isNewest = lastActivityAt.map { timestamp >= $0 } ?? true
+        var changed = false
+        if lastActivityAt.map({ timestamp > $0 }) ?? true {
+            lastActivityAt = timestamp
+            changed = true
+        }
+        guard isNewest, !lastSummaryIsManual,
+              let automaticSummary = Self.normalizedContextText(automaticSummary)
+        else { return changed }
+
+        let compactSummary = automaticSummary
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard lastSummary != compactSummary else { return changed }
+        lastSummary = compactSummary
+        return true
+    }
+
+    @discardableResult
+    func recordAgentHookActivity(_ event: AgentHookEvent) -> Bool {
+        switch event.name {
+        case .stop, .turnComplete:
+            return recordAgentActivity(at: event.timestamp, automaticSummary: event.detail)
+        case .notification, .sessionStart, .sessionEnd, .userPromptSubmit:
+            return recordAgentActivity(at: event.timestamp, automaticSummary: nil)
+        case .preToolUse:
+            return false
+        }
+    }
 
     // MARK: - CWD / Git / Title Tracking
 
     private func setupCwdTracking(for col: ColumnState) {
-        col.onCwdChanged = { [weak self] path in
-            GitDetect.branchAsync(at: path) { [weak self] branch in
+        col.onCwdChanged = { [weak self, weak col] _ in
+            guard let self, let col,
+                  self.columns[safe: self.focusedIndex] === col
+            else { return }
+            let workingDirectory = self.focusedWorkingDirectory
+            guard let observation = self.beginGitContextObservation(at: workingDirectory) else { return }
+            GitDetect.contextAsync(at: workingDirectory) { [weak self] result in
                 guard let self else { return }
-                self.gitBranch = branch
-                // Auto-name workspace from branch (manual rename takes precedence)
-                if !self.titleIsManual, let branch, !branch.isEmpty {
-                    self.title = branch
-                }
-                self.onMetadataChanged?()
+                let observationResult = self.applyGitContextObservation(
+                    result,
+                    observation: observation
+                )
+                guard observationResult != .stale else { return }
+                if observationResult == .unchanged { self.onMetadataChanged?() }
             }
         }
     }
@@ -148,19 +456,10 @@ final class WorkspaceState {
     }
 
     func detectGitBranch() {
-        // Use the shell's actual cwd (follows cd), not the initial cwd
-        let detectPath: String
-        if let col = columns.first, let realCwd = col.pty?.childCwd {
-            detectPath = realCwd
-        } else {
-            detectPath = cwd
-        }
-        GitDetect.branchAsync(at: detectPath) { [weak self] branch in
-            guard let self else { return }
-            self.gitBranch = branch
-            if !self.titleIsManual, let branch, !branch.isEmpty {
-                self.title = branch
-            }
+        let workingDirectory = focusedWorkingDirectory
+        guard let observation = beginGitContextObservation(at: workingDirectory) else { return }
+        GitDetect.contextAsync(at: workingDirectory) { [weak self] result in
+            self?.applyGitContextObservation(result, observation: observation)
         }
     }
 
@@ -220,8 +519,6 @@ final class WorkspaceState {
     /// strip subviews. Closures resolve the handle back to its CURRENT
     /// column index at event time, so moveColumn/closeColumn can't leave
     /// them pointing at the wrong column.
-    private var resizeHandles: [ColumnResizeHandle] = []
-
     private func makeResizeHandle() {
         let handle = ColumnResizeHandle()
         handle.onDragStart = { [weak self, weak handle] in
@@ -261,15 +558,20 @@ final class WorkspaceState {
     }
 
     func addColumn(agentUUID: String = UUID().uuidString) {
-        let effectiveCwd = columns[safe: focusedIndex]?.pty?.childCwd ?? cwd
-        let col = ColumnState(cwd: effectiveCwd, environment: terminalEnvironment(agentUUID: agentUUID))
+        let col = ColumnState(
+            cwd: focusedWorkingDirectory,
+            environment: terminalEnvironment(agentUUID: agentUUID)
+        )
         setupAllTracking(for: col)
         insertColumn(col)
     }
 
     func addColumn(command: String, agentUUID: String = UUID().uuidString) {
-        let effectiveCwd = columns[safe: focusedIndex]?.pty?.childCwd ?? cwd
-        let col = ColumnState(cwd: effectiveCwd, command: command, environment: terminalEnvironment(agentUUID: agentUUID))
+        let col = ColumnState(
+            cwd: focusedWorkingDirectory,
+            command: command,
+            environment: terminalEnvironment(agentUUID: agentUUID)
+        )
         setupAllTracking(for: col)
         insertColumn(col)
     }
@@ -293,6 +595,8 @@ final class WorkspaceState {
 
     func closeColumn(at index: Int) {
         guard columns.count > 1 else { return }
+        let previouslyFocusedColumn = columns[safe: focusedIndex]
+        let previousFocusedIndex = focusedIndex
         let col = columns.remove(at: index)
         col.view.removeFromSuperview()
         if resizeHandles.indices.contains(index) {
@@ -301,6 +605,10 @@ final class WorkspaceState {
         }
         if focusedIndex >= columns.count {
             focusedIndex = columns.count - 1
+        }
+        if focusedIndex == previousFocusedIndex,
+           columns[safe: focusedIndex] !== previouslyFocusedColumn {
+            onFocusedColumnChanged?()
         }
     }
 

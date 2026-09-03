@@ -106,7 +106,7 @@ extension NiruxShellView {
     }
 
     func openDiffInEditor(for workspace: WorkspaceState) {
-        let cwd = currentWorkspaceCwd(for: workspace)
+        let cwd = workspace.focusedWorkingDirectory
         PRDetect.diffPathsAsync(cwd: cwd) { [weak self, weak workspace] paths in
             guard let self, let workspace else { return }
             guard !paths.isEmpty else {
@@ -426,7 +426,7 @@ extension NiruxShellView {
     /// editor isn't blank on first open.
     func openEditorColumn() {
         guard let workspace = activeWorkspace else { return }
-        let cwd = currentWorkspaceCwd(for: workspace)
+        let cwd = workspace.focusedWorkingDirectory
         let starter = Self.pickStarterFile(in: cwd)
         workspace.addEditorColumn(initialFile: starter, workspaceCwd: cwd)
 
@@ -475,7 +475,7 @@ extension NiruxShellView {
         in targetWorkspace: WorkspaceState? = nil
     ) {
         guard let workspace = targetWorkspace ?? activeWorkspace else { return }
-        let editorRoot = workspaceCwd ?? currentWorkspaceCwd(for: workspace)
+        let editorRoot = workspaceCwd ?? workspace.focusedWorkingDirectory
         let existingEditor = workspace.columns
             .compactMap { $0.editorColumn }
             .first { $0.workspaceCwd == editorRoot }
@@ -637,7 +637,7 @@ extension NiruxShellView {
     /// cwd. Picking a result routes through `openInEditorColumn`.
     func showWorkspaceSearch() {
         guard let workspace = activeWorkspace, let window else { return }
-        let cwd = currentWorkspaceCwd(for: workspace)
+        let cwd = workspace.focusedWorkingDirectory
         if searchPanel == nil { searchPanel = EditorSearchPanel() }
         searchPanel?.show(
             relativeTo: window,
@@ -645,11 +645,6 @@ extension NiruxShellView {
         ) { [weak self] absPath, line in
             self?.openInEditorColumn(path: absPath, line: line, workspaceCwd: cwd)
         }
-    }
-
-    private func currentWorkspaceCwd(for workspace: WorkspaceState) -> String {
-        guard let col = workspace.columns[safe: workspace.focusedIndex] else { return workspace.cwd }
-        return col.pty?.childCwd ?? col.editorColumn?.workspaceCwd ?? workspace.cwd
     }
 
     private static let starterCandidates = [

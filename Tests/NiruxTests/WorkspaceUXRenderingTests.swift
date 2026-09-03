@@ -51,7 +51,13 @@ final class WorkspaceUXRenderingTests: XCTestCase {
                 )
             ],
             prInfo: nil,
-            diffStats: nil
+            diffStats: nil,
+            purpose: nil,
+            nextStep: nil,
+            blocker: nil,
+            phase: isInactive ? .parked : .active,
+            lastSummary: nil,
+            lastActivityAt: nil
         )
     }
 

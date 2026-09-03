@@ -60,6 +60,7 @@ final class SidebarWorkspaceCardRenderer {
 
         currentY -= SidebarExpandedMetrics.workspacePaddingY
         currentY = buildTitleRow(contentX: contentX, contentW: contentW, yOffset: currentY)
+        currentY = buildContextRows(contentX: contentX, contentW: contentW, yOffset: currentY)
         currentY = buildBranchRowIfNeeded(contentX: contentX, contentW: contentW, yOffset: currentY)
         currentY = buildMetadataRows(contentX: contentX, yOffset: currentY)
         currentY -= SidebarExpandedMetrics.columnGap
@@ -83,6 +84,122 @@ final class SidebarWorkspaceCardRenderer {
             menuBadge: menuBadge,
             columnHoverViews: columnHoverViews
         )
+    }
+
+    private func buildContextRows(contentX: CGFloat, contentW: CGFloat, yOffset: CGFloat) -> CGFloat {
+        var currentY = yOffset
+        if let purpose = workspace.purpose {
+            let label = textLabel(
+                purpose,
+                font: .systemFont(ofSize: 11, weight: .medium),
+                color: NSColor.white.withAlphaComponent(workspace.isActive ? 0.72 : 0.52)
+            )
+            label.toolTip = purpose
+            label.frame = NSRect(
+                x: contentX,
+                y: currentY - SidebarExpandedMetrics.purposeHeight,
+                width: contentW,
+                height: SidebarExpandedMetrics.purposeHeight
+            )
+            append(label)
+            currentY -= SidebarExpandedMetrics.purposeAdvance
+        }
+
+        currentY = buildPhaseRow(contentX: contentX, contentW: contentW, yOffset: currentY)
+        currentY = buildActionRowIfNeeded(contentX: contentX, contentW: contentW, yOffset: currentY)
+
+        if let summary = workspace.lastSummary {
+            let label = textLabel(
+                summary,
+                font: .systemFont(ofSize: 10.5, weight: .regular),
+                color: NSColor.white.withAlphaComponent(workspace.isActive ? 0.52 : 0.38)
+            )
+            label.toolTip = summary
+            label.frame = NSRect(
+                x: contentX,
+                y: currentY - SidebarExpandedMetrics.summaryHeight,
+                width: contentW,
+                height: SidebarExpandedMetrics.summaryHeight
+            )
+            append(label)
+            currentY -= SidebarExpandedMetrics.summaryAdvance
+        }
+        return currentY
+    }
+
+    private func buildActionRowIfNeeded(
+        contentX: CGFloat,
+        contentW: CGFloat,
+        yOffset: CGFloat
+    ) -> CGFloat {
+        guard let action = workspace.sidebarAction else { return yOffset }
+        let label = textLabel(
+            action.text,
+            font: .systemFont(ofSize: 10.5, weight: .medium),
+            color: action.isBlocker
+                ? NSColor.systemRed.withAlphaComponent(workspace.isActive ? 0.82 : 0.58)
+                : NSColor.white.withAlphaComponent(workspace.isActive ? 0.58 : 0.42)
+        )
+        label.toolTip = action.text
+        label.frame = NSRect(
+            x: contentX,
+            y: yOffset - SidebarExpandedMetrics.actionHeight,
+            width: contentW,
+            height: SidebarExpandedMetrics.actionHeight
+        )
+        append(label)
+        return yOffset - SidebarExpandedMetrics.actionAdvance
+    }
+
+    private func buildPhaseRow(contentX: CGFloat, contentW: CGFloat, yOffset: CGFloat) -> CGFloat {
+        let phase = workspace.phase
+        let phaseLabel = textLabel(
+            "\(phase.symbol) \(phase.displayName)",
+            font: .monospacedSystemFont(ofSize: 10, weight: .semibold),
+            color: phaseColor(phase)
+        )
+        phaseLabel.setAccessibilityLabel("\(phase.displayName) phase")
+        let hasActivity = workspace.lastActivityAt != nil
+        let ageWidth: CGFloat = hasActivity ? 54 : 82
+        phaseLabel.frame = NSRect(
+            x: contentX,
+            y: yOffset - SidebarExpandedMetrics.phaseHeight,
+            width: contentW - ageWidth - 2,
+            height: SidebarExpandedMetrics.phaseHeight
+        )
+        append(phaseLabel)
+
+        let ageText = workspace.lastActivityAt.map {
+            SidebarView.relativeAge(since: $0)
+        } ?? "No activity yet"
+        let ageDescription = hasActivity ? "Last activity \(ageText) ago" : ageText
+        let ageLabel = textLabel(
+            ageText,
+            font: .monospacedSystemFont(ofSize: 9.5, weight: .regular),
+            color: NSColor.white.withAlphaComponent(0.34)
+        )
+        ageLabel.alignment = .right
+        ageLabel.toolTip = ageDescription
+        ageLabel.setAccessibilityLabel(ageDescription)
+        ageLabel.frame = NSRect(
+            x: contentX + contentW - ageWidth,
+            y: yOffset - SidebarExpandedMetrics.phaseHeight,
+            width: ageWidth,
+            height: SidebarExpandedMetrics.phaseHeight
+        )
+        append(ageLabel)
+        return yOffset - SidebarExpandedMetrics.phaseAdvance
+    }
+
+    private func phaseColor(_ phase: WorkspacePhase) -> NSColor {
+        switch phase {
+        case .active: return .systemGreen
+        case .waiting: return .systemOrange
+        case .blocked: return .systemRed
+        case .review: return .systemPurple
+        case .parked: return NSColor.white.withAlphaComponent(0.38)
+        case .done: return .systemTeal
+        }
     }
 
     private func buildTitleRow(contentX: CGFloat, contentW: CGFloat, yOffset: CGFloat) -> CGFloat {

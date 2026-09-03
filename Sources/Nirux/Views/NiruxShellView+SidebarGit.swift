@@ -61,7 +61,10 @@ extension NiruxShellView {
                           columnCount: workspace.columns.count,
                           focusedColumn: workspace.focusedIndex,
                           gitBranch: workspace.gitBranch, hasNotification: workspace.hasNotification, isActive: index == activeWSIndex,
-                          columns: colInfos, prInfo: workspace.prInfo, diffStats: workspace.diffStats)
+                          columns: colInfos, prInfo: workspace.prInfo, diffStats: workspace.diffStats,
+                          purpose: workspace.purpose, nextStep: workspace.nextStep,
+                          blocker: workspace.blocker, phase: workspace.effectivePhase,
+                          lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt)
         }
         let profileInfos = workspaceStore.navigableProfiles.map { profile in
             let profileWorkspaces = workspaces.filter { $0.profileID == profile.id }
@@ -353,12 +356,18 @@ extension NiruxShellView {
     func applyAgentHookEvents(_ events: [AgentHookCenter.AppliedEvent]) {
         let snapshot = ProcessSnapshot()
         var changed = false
-        for appliedEvent in events where appliedEvent.event.kind == .codex {
-            if appliedEvent.resolution.column.captureCodexSession(
-                sessionID: appliedEvent.event.sessionID,
-                emitterProcess: appliedEvent.event.emitterProcess,
-                snapshot: snapshot
-            ) {
+        for appliedEvent in events {
+            let event = appliedEvent.event
+            if event.kind == .codex,
+               appliedEvent.resolution.column.captureCodexSession(
+                   sessionID: event.sessionID,
+                   emitterProcess: event.emitterProcess,
+                   snapshot: snapshot
+               ) {
+                changed = true
+            }
+
+            if appliedEvent.resolution.workspace.recordAgentHookActivity(event) {
                 changed = true
             }
         }
@@ -414,11 +423,13 @@ extension NiruxShellView {
 
     func refreshGitBranches() {
         for workspace in workspaces {
-            if let col = workspace.columns[safe: workspace.focusedIndex], let cwd = col.pty?.childCwd {
-                GitDetect.branchAsync(at: cwd) { [weak self, weak workspace] branch in
-                    guard let workspace, workspace.gitBranch != branch else { return }
-                    workspace.gitBranch = branch; self?.updateSidebar()
-                }
+            let workingDirectory = workspace.focusedWorkingDirectory
+            guard let observation = workspace.beginGitContextObservation(at: workingDirectory) else { continue }
+            GitDetect.contextAsync(at: workingDirectory) { [weak workspace] result in
+                workspace?.applyGitContextObservation(
+                    result,
+                    observation: observation
+                )
             }
         }
     }
@@ -432,23 +443,50 @@ extension NiruxShellView {
             guard PRDetect.shouldRefresh(
                 isInactive: workspace.isInactive,
                 branch: workspace.gitBranch
-            ), let branch = workspace.gitBranch else { continue }
-            let cwd = workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.cwd
-            PRDetect.fetchAsync(branch: branch, cwd: cwd) { [weak self, weak workspace] info in
-                guard let workspace, !workspace.isInactive, workspace.gitBranch == branch,
-                      workspace.prInfo?.number != info?.number
-                      || workspace.prInfo?.ciStatus != info?.ciStatus
-                      || workspace.prInfo?.reviewDecision != info?.reviewDecision
-                      || workspace.prInfo?.mergeable != info?.mergeable
-                      || workspace.prInfo?.isDraft != info?.isDraft else { return }
-                workspace.prInfo = info
-                self?.updateSidebar()
+            ), let requestedContext = workspace.gitContext else { continue }
+            let branch = requestedContext.branch
+            let cwd = workspace.focusedWorkingDirectory
+            guard let observation = workspace.beginPullRequestObservation(for: requestedContext) else { continue }
+            let diffObservation = workspace.beginDiffStatsObservation(
+                at: cwd,
+                for: requestedContext
+            )
+            PRDetect.fetchAsync(branch: branch, cwd: cwd) { [weak self, weak workspace] result in
+                guard let workspace else { return }
+                guard !workspace.isInactive else {
+                    workspace.finishPullRequestObservation(observation)
+                    return
+                }
+                guard case .success(let queriedContext, let info) = result,
+                      workspace.isCurrentPullRequestObservation(observation, for: queriedContext)
+                else {
+                    workspace.finishPullRequestObservation(observation)
+                    return
+                }
+                let currentCwd = workspace.focusedWorkingDirectory
+                GitDetect.contextAsync(at: currentCwd) { [weak self, weak workspace] result in
+                    guard let workspace else { return }
+                    guard !workspace.isInactive,
+                          case .observed(let currentContext) = result,
+                          currentContext == queriedContext else {
+                        workspace.finishPullRequestObservation(observation)
+                        return
+                    }
+                    guard workspace.applyPullRequestInfo(
+                        info,
+                        for: queriedContext,
+                        observation: observation
+                    ) else { return }
+                    self?.updateSidebar()
+                }
             }
-            PRDetect.diffStatsAsync(cwd: cwd) { [weak self, weak workspace] stats in
+            guard let diffObservation else { continue }
+            PRDetect.diffStatsAsync(cwd: cwd) { [weak self, weak workspace] result in
                 guard let workspace, !workspace.isInactive,
-                      workspace.gitBranch == branch,
-                      workspace.diffStats != stats else { return }
-                workspace.diffStats = stats
+                      workspace.applyDiffStatsObservation(
+                          result,
+                          observation: diffObservation
+                      ) else { return }
                 self?.updateSidebar()
             }
         }

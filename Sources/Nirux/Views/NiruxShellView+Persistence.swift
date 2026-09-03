@@ -32,7 +32,14 @@ extension NiruxShellView {
                 missionHandoffsEnabled: state.settings?.missionHandoffsEnabled == true
             )
             workspace.isInactive = persistedWS.isInactive
-            wireWorkspace(workspace)
+            workspace.purpose = persistedWS.purpose
+            workspace.phase = persistedWS.phase
+            workspace.unknownPhaseRawValue = persistedWS.unknownPhaseRawValue
+            workspace.lastSummary = persistedWS.lastSummary
+            workspace.lastSummaryIsManual = persistedWS.lastSummaryIsManual
+            workspace.lastActivityAt = persistedWS.lastActivityAt
+            workspace.nextStep = persistedWS.nextStep
+            workspace.blocker = persistedWS.blocker
             // Remove the default column created by WorkspaceState.init
             if let first = workspace.columns.first { first.view.removeFromSuperview(); workspace.columns.removeAll() }
             for persistedColumn in persistedWS.columns {
@@ -43,6 +50,7 @@ extension NiruxShellView {
                 )
             }
             workspace.focusedIndex = min(persistedWS.focusedColumnIndex, max(workspace.columns.count - 1, 0))
+            wireWorkspace(workspace)
             workspaces.append(workspace)
             verticalStrip.addSubview(workspace.containerView)
         }
@@ -148,7 +156,7 @@ extension NiruxShellView {
             workspaces: workspaces.map { workspace in
                 PersistedWorkspace(
                     id: workspace.id, title: workspace.title,
-                    cwd: workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.cwd,
+                    cwd: Self.persistedWorkspaceCwd(for: workspace),
                     columns: workspace.columns.map { col -> PersistedColumn in
                         let kind: ColumnKind
                         let webURL: String?
@@ -198,7 +206,15 @@ extension NiruxShellView {
                     focusedColumnIndex: workspace.focusedIndex,
                     profileID: workspace.profileID,
                     isInactive: workspace.isInactive,
-                    missionID: workspace.missionID)
+                    missionID: workspace.missionID,
+                    purpose: workspace.purpose,
+                    phase: workspace.phase,
+                    unknownPhaseRawValue: workspace.unknownPhaseRawValue,
+                    lastSummary: workspace.lastSummary,
+                    lastSummaryIsManual: workspace.lastSummaryIsManual,
+                    lastActivityAt: workspace.lastActivityAt,
+                    nextStep: workspace.nextStep,
+                    blocker: workspace.blocker)
             },
             activeWorkspaceIndex: activeWSIndex,
             settings: settings,
@@ -206,6 +222,10 @@ extension NiruxShellView {
             activeProfileID: activeProfileID,
             activeWorkspaceID: activeWorkspace?.id
         ))
+    }
+
+    static func persistedWorkspaceCwd(for workspace: WorkspaceState) -> String {
+        workspace.columns[safe: workspace.focusedIndex]?.pty?.childCwd ?? workspace.cwd
     }
 
     /// Map a running `claude` process's argv flags back to the launch mode it

@@ -329,6 +329,16 @@ struct PersistedWorkspace: Codable {
     /// Mission owning this child workspace, when the experimental handoff
     /// flow created it. Optional for backward compatibility.
     var missionID: String?
+    var purpose: String?
+    /// Optional manual phase override. Nil keeps the workspace on automatic
+    /// phase derivation.
+    var phase: WorkspacePhase?
+    var unknownPhaseRawValue: String?
+    var lastSummary: String?
+    var lastSummaryIsManual: Bool
+    var lastActivityAt: TimeInterval?
+    var nextStep: String?
+    var blocker: String?
 
     init(
         id: String? = nil,
@@ -338,7 +348,15 @@ struct PersistedWorkspace: Codable {
         focusedColumnIndex: Int,
         profileID: String? = nil,
         isInactive: Bool = false,
-        missionID: String? = nil
+        missionID: String? = nil,
+        purpose: String? = nil,
+        phase: WorkspacePhase? = nil,
+        unknownPhaseRawValue: String? = nil,
+        lastSummary: String? = nil,
+        lastSummaryIsManual: Bool = false,
+        lastActivityAt: TimeInterval? = nil,
+        nextStep: String? = nil,
+        blocker: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -348,10 +366,20 @@ struct PersistedWorkspace: Codable {
         self.profileID = profileID
         self.isInactive = isInactive
         self.missionID = missionID
+        self.purpose = purpose
+        self.phase = phase
+        self.unknownPhaseRawValue = phase == nil ? unknownPhaseRawValue : nil
+        self.lastSummary = lastSummary
+        self.lastSummaryIsManual = lastSummaryIsManual
+        self.lastActivityAt = lastActivityAt
+        self.nextStep = nextStep
+        self.blocker = blocker
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID
+        case purpose, phase, lastSummary, lastSummaryIsManual, lastActivityAt
+        case nextStep, blocker
     }
 
     init(from decoder: Decoder) throws {
@@ -364,6 +392,37 @@ struct PersistedWorkspace: Codable {
         profileID = try container.decodeIfPresent(String.self, forKey: .profileID)
         isInactive = try container.decodeIfPresent(Bool.self, forKey: .isInactive) ?? false
         missionID = try container.decodeIfPresent(String.self, forKey: .missionID)
+        purpose = try container.decodeIfPresent(String.self, forKey: .purpose)
+        let phaseRawValue = try container.decodeIfPresent(String.self, forKey: .phase)
+        phase = phaseRawValue.flatMap(WorkspacePhase.init(rawValue:))
+        unknownPhaseRawValue = phase == nil ? phaseRawValue : nil
+        lastSummary = try container.decodeIfPresent(String.self, forKey: .lastSummary)
+        lastSummaryIsManual = try container.decodeIfPresent(Bool.self, forKey: .lastSummaryIsManual) ?? false
+        lastActivityAt = try container.decodeIfPresent(TimeInterval.self, forKey: .lastActivityAt)
+        nextStep = try container.decodeIfPresent(String.self, forKey: .nextStep)
+        blocker = try container.decodeIfPresent(String.self, forKey: .blocker)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(cwd, forKey: .cwd)
+        try container.encode(columns, forKey: .columns)
+        try container.encode(focusedColumnIndex, forKey: .focusedColumnIndex)
+        try container.encodeIfPresent(profileID, forKey: .profileID)
+        try container.encode(isInactive, forKey: .isInactive)
+        try container.encodeIfPresent(missionID, forKey: .missionID)
+        try container.encodeIfPresent(purpose, forKey: .purpose)
+        try container.encodeIfPresent(
+            phase?.rawValue ?? unknownPhaseRawValue,
+            forKey: .phase
+        )
+        try container.encodeIfPresent(lastSummary, forKey: .lastSummary)
+        try container.encode(lastSummaryIsManual, forKey: .lastSummaryIsManual)
+        try container.encodeIfPresent(lastActivityAt, forKey: .lastActivityAt)
+        try container.encodeIfPresent(nextStep, forKey: .nextStep)
+        try container.encodeIfPresent(blocker, forKey: .blocker)
     }
 }
 

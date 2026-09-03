@@ -59,6 +59,7 @@ final class NiruxShellView: NSView {
 
     // Panel references (stored properties must live in main class declaration)
     var nameInputPanel: NameInputPanel?
+    var workspaceContextPanel: WorkspaceContextPanel?
     var worktreePanel: WorktreePanel?
     var commandPalette: CommandPalette?
     var urlPanel: URLInputPanel?
@@ -163,6 +164,15 @@ final class NiruxShellView: NSView {
     /// init, addWorkspace and session restore.
     func wireWorkspace(_ workspace: WorkspaceState) {
         workspace.onMetadataChanged = { [weak self] in self?.updateSidebar(); self?.refreshTitleBarLabels() }
+        workspace.onFocusedColumnChanged = { [weak workspace] in
+            workspace?.detectGitBranch()
+        }
+        workspace.onGitContextChanged = { [weak self, weak workspace] in
+            guard let self, let workspace else { return }
+            self.updateSidebar()
+            self.refreshTitleBarLabels()
+            self.refreshPRInfo(for: [workspace])
+        }
         workspace.onDiffStatsClicked = { [weak self, weak workspace] in
             guard let workspace else { return }
             self?.openDiffInEditor(for: workspace)
@@ -480,6 +490,52 @@ extension NiruxShellView {
         )
     }
 
+    func showWorkspaceContextPanel(workspaceIndex: Int) {
+        guard let window, let workspace = workspaces[safe: workspaceIndex] else { return }
+        if workspaceContextPanel == nil {
+            workspaceContextPanel = WorkspaceContextPanel()
+        }
+
+        let presentedSummary = WorkspaceState.normalizedContextText(workspace.lastSummary)
+        workspaceContextPanel?.onSave = { [weak self, weak workspace] values in
+            guard let self, let workspace,
+                  self.workspaces.contains(where: { $0 === workspace }) else { return }
+            workspace.purpose = WorkspaceState.normalizedContextText(values.purpose)
+            workspace.phase = values.phase
+            if values.phase != nil {
+                workspace.unknownPhaseRawValue = nil
+            }
+            workspace.nextStep = WorkspaceState.normalizedContextText(values.nextStep)
+            workspace.blocker = WorkspaceState.normalizedContextText(values.blocker)
+
+            let savedSummary = WorkspaceState.normalizedContextText(values.lastSummary)
+            if savedSummary != presentedSummary {
+                workspace.lastSummary = savedSummary
+                workspace.lastSummaryIsManual = savedSummary != nil
+            }
+            self.updateSidebar()
+            self.saveState()
+        }
+
+        let configuration = WorkspaceContextPanelConfiguration(
+            title: workspace.title,
+            cwd: workspace.focusedWorkingDirectory,
+            purpose: workspace.purpose,
+            phaseOverride: workspace.phase,
+            effectivePhase: workspace.effectivePhase,
+            lastSummary: workspace.lastSummary,
+            lastSummaryIsManual: workspace.lastSummaryIsManual,
+            lastActivityAt: workspace.lastActivityAt,
+            nextStep: workspace.nextStep,
+            blocker: workspace.blocker,
+            gitBranch: workspace.gitBranch,
+            diffStats: workspace.diffStats,
+            prInfo: workspace.prInfo,
+            agentStatuses: workspace.columns.map { $0.pty?.cachedAgentState ?? .idle }
+        )
+        workspaceContextPanel?.show(relativeTo: window, configuration: configuration)
+    }
+
     /// Rename a workspace by index; defaults to the active one (main menu,
     /// command palette). The sidebar context menu passes an explicit index.
     func showRenamePanel(workspaceIndex: Int? = nil) {
@@ -517,7 +573,7 @@ extension NiruxShellView {
 
     func showWorktreePanel() {
         guard let window else { return }
-        guard let cwd = activeWorkspace?.columns[safe: activeWorkspace?.focusedIndex ?? 0]?.pty?.childCwd,
+        guard let cwd = activeWorkspace?.focusedWorkingDirectory,
               let repoRoot = GitWorktree.repoRoot(at: cwd)
         else { return }
 
@@ -575,7 +631,7 @@ extension NiruxShellView {
 
     func showWorktreeListPalette() {
         guard let window else { return }
-        guard let cwd = activeWorkspace?.columns[safe: activeWorkspace?.focusedIndex ?? 0]?.pty?.childCwd,
+        guard let cwd = activeWorkspace?.focusedWorkingDirectory,
               let repoRoot = GitWorktree.repoRoot(at: cwd)
         else { return }
 
