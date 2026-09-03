@@ -6,7 +6,7 @@ Nirux is alpha software.
 
 ## Highlights
 
-- Persistent workspaces: name each new task as you create it, stack workspaces vertically, and archive inactive ones in a collapsible sidebar section that does not poll GitHub.
+- Persistent workspaces: keep each task's name and context visible, stack workspaces vertically, and archive inactive ones in a collapsible sidebar section that does not poll GitHub.
 - Horizontal columns: mix Ghostty-backed terminals, WKWebView browser columns, and Monaco editor columns in the same workspace.
 - Agent launchers: start Claude Code or Codex from the command palette with configurable permission and sandbox presets.
 - Attention and Activity: per-column agent status (working / needs attention, with elapsed time) driven by real Claude Code hooks and Codex turn notifications — not output guessing — plus a persistent sidebar feed, edge glows for off-screen attention, native macOS notifications that focus the right workspace and column on click, and a Dock badge counting waiting workspaces.
@@ -48,7 +48,7 @@ xattr -dr com.apple.quarantine /Applications/Nirux.app
 
 Nirux is organized around workspaces.
 
-A workspace is a persistent task context: it has a current directory, a title, a Git branch, and a horizontal strip of columns. Columns can be terminals, browser tabs, or editor views. Workspaces are stacked vertically, so you can keep several tasks alive without mixing their terminals, files, and browser context.
+A workspace is a persistent task context: it has a current directory, a short title, optional task notes, and a horizontal strip of columns. Columns can be terminals, browser tabs, or editor views. Workspaces are stacked vertically, so you can keep several tasks alive without mixing their terminals, files, and browser context.
 
 The intended setup is:
 
@@ -117,6 +117,8 @@ When a shell exits, its terminal shows a restart overlay — press `Enter` to re
 Column widths are freeform: drag the divider between columns to resize (double-click resets to half), or use `Cmd+E` to snap through presets. `Cmd+click` a web URL in a terminal to open it as a browser column in the same workspace; file links open in the editor, while other supported schemes use their macOS handler.
 
 Creating a workspace with `Cmd+N` asks for its task name. Double-click a workspace card in the sidebar, or use `Rename Workspace`, to change that name later.
+
+Use the `⋯` menu on a workspace card and choose `View/Edit Context…` to keep the longer purpose separate from its short title, choose an automatic or manual phase, and record the latest meaningful summary, next step, or blocker. The compact card always shows the effective phase and agent-activity recency, then adds the optional context rows you have populated. Automatic phase follows blocker, agent, archive, and pull-request state. Codex turn completions can update the summary until you edit it; clearing a manual summary resumes automatic updates. The same panel shows the focused path plus Git, diff, pull-request, and agent state as read-only live context. Context fields persist with the workspace across relaunches.
 
 ### Agent status hooks
 

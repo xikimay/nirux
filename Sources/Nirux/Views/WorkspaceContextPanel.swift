@@ -93,28 +93,8 @@ final class WorkspaceContextPanel {
     }
 
     private func createPanel() {
-        let panel = NSPanel(
-            contentRect: NSRect(origin: .zero, size: Self.size),
-            styleMask: [.titled, .fullSizeContentView],
-            backing: .buffered,
-            defer: false
-        )
-        panel.titlebarAppearsTransparent = true
-        panel.titleVisibility = .hidden
-        panel.isMovable = true
-        panel.level = .floating
-        panel.backgroundColor = .clear
-        panel.isOpaque = false
-        panel.hasShadow = true
-        panel.appearance = NSAppearance(named: .darkAqua)
-
-        let container = NSView(frame: NSRect(origin: .zero, size: Self.size))
-        container.wantsLayer = true
-        container.layer?.cornerRadius = 12
-        container.layer?.backgroundColor = NSColor(red: 0.105, green: 0.105, blue: 0.14, alpha: 0.99).cgColor
-        container.layer?.borderWidth = 1
-        container.layer?.borderColor = NSColor.white.withAlphaComponent(0.09).cgColor
-        container.layer?.masksToBounds = true
+        let panel = makePanel()
+        let container = makeContainer()
 
         let heading = NSTextField(labelWithString: "Workspace Context")
         heading.font = .systemFont(ofSize: 13, weight: .semibold)
@@ -200,7 +180,39 @@ final class WorkspaceContextPanel {
         nextStepField = nextStep
         blockerField = blocker
         liveContextLabel = live
+        installShortcutMonitor(for: panel)
+    }
 
+    private func makePanel() -> NSPanel {
+        let panel = NSPanel(
+            contentRect: NSRect(origin: .zero, size: Self.size),
+            styleMask: [.titled, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        panel.titlebarAppearsTransparent = true
+        panel.titleVisibility = .hidden
+        panel.isMovable = true
+        panel.level = .floating
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+        panel.appearance = NSAppearance(named: .darkAqua)
+        return panel
+    }
+
+    private func makeContainer() -> NSView {
+        let container = NSView(frame: NSRect(origin: .zero, size: Self.size))
+        container.wantsLayer = true
+        container.layer?.cornerRadius = 12
+        container.layer?.backgroundColor = NSColor(red: 0.105, green: 0.105, blue: 0.14, alpha: 0.99).cgColor
+        container.layer?.borderWidth = 1
+        container.layer?.borderColor = NSColor.white.withAlphaComponent(0.09).cgColor
+        container.layer?.masksToBounds = true
+        return container
+    }
+
+    private func installShortcutMonitor(for panel: NSPanel) {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak panel] event in
             guard let self, let panel, panel.isVisible,
                   let action = Self.shortcutAction(

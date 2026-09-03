@@ -1,6 +1,12 @@
 import Foundation
 
 enum PRDetect {
+    private struct GitHubCLIContext {
+        let executablePath: String
+        let repositoryRoot: String
+        let timeout: TimeInterval
+    }
+
     enum FetchResult: Sendable {
         case success(context: GitContext, info: PRInfo?)
         case failure
@@ -55,13 +61,16 @@ enum PRDetect {
         timeout: TimeInterval = 30
     ) -> FetchResult {
         guard let upstreamRepository = context.upstreamRepository else { return .failure }
+        let cliContext = GitHubCLIContext(
+            executablePath: ghPath,
+            repositoryRoot: context.identity.repositoryRoot,
+            timeout: timeout
+        )
         guard let openCandidates = candidates(
             branch: branch,
             state: "open",
             limit: Int.max,
-            ghPath: ghPath,
-            repositoryRoot: context.identity.repositoryRoot,
-            timeout: timeout
+            cliContext: cliContext
         ) else { return .failure }
 
         let sortedOpenCandidates = openCandidates
@@ -88,9 +97,7 @@ enum PRDetect {
             branch: branch,
             state: "all",
             limit: Int.max,
-            ghPath: ghPath,
-            repositoryRoot: context.identity.repositoryRoot,
-            timeout: timeout
+            cliContext: cliContext
         ) else { return .failure }
         let matchingTerminalCandidates = terminalCandidates
             .filter {
@@ -114,18 +121,22 @@ enum PRDetect {
         branch: String,
         state: String,
         limit: Int,
-        ghPath: String,
-        repositoryRoot: String,
-        timeout: TimeInterval
+        cliContext: GitHubCLIContext
     ) -> [[String: Any]]? {
+        let fields = [
+            "number", "state", "headRefOid", "headRepositoryOwner",
+            "headRepository", "isDraft", "statusCheckRollup",
+            "reviewDecision", "mergeable", "url", "additions",
+            "deletions", "changedFiles"
+        ].joined(separator: ",")
         let result = BoundedProcess.run(
-            executableURL: URL(fileURLWithPath: ghPath),
+            executableURL: URL(fileURLWithPath: cliContext.executablePath),
             arguments: ["pr", "list", "--head", branch,
                         "--state", state,
-                        "--json", "number,state,headRefOid,headRepositoryOwner,headRepository,isDraft,statusCheckRollup,reviewDecision,mergeable,url,additions,deletions,changedFiles",
+                        "--json", fields,
                         "--limit", String(limit)],
-            currentDirectoryURL: URL(fileURLWithPath: repositoryRoot),
-            timeout: timeout
+            currentDirectoryURL: URL(fileURLWithPath: cliContext.repositoryRoot),
+            timeout: cliContext.timeout
         )
         guard let result, result.terminationStatus == 0 else { return nil }
         return try? JSONSerialization.jsonObject(

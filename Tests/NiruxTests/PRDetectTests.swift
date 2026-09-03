@@ -112,7 +112,12 @@ final class PRDetectTests: XCTestCase {
         let result = try fetchUsingFakeGitHubCLI(
             openJSON: #"""
         [
-          {"number":41,"state":"OPEN","headRefOid":"older-head","headRepositoryOwner":{"login":"XikiMay"},"headRepository":{"name":"Nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/41"}
+          {
+            "number": 41, "state": "OPEN", "headRefOid": "older-head",
+            "headRepositoryOwner": {"login": "XikiMay"},
+            "headRepository": {"name": "Nirux"}, "isDraft": false,
+            "statusCheckRollup": [], "url": "https://example.test/pull/41"
+          }
         ]
         """#,
             terminalJSON: #"""
@@ -144,8 +149,18 @@ final class PRDetectTests: XCTestCase {
     func testOpenPullRequestFromSameNamedForkBranchIsIgnored() throws {
         let result = try fetchUsingFakeGitHubCLI(openJSON: #"""
         [
-          {"number":90,"state":"OPEN","headRefOid":"foreign-head","headRepositoryOwner":{"login":"alice"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/90"},
-          {"number":80,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/80"}
+          {
+            "number": 90, "state": "OPEN", "headRefOid": "foreign-head",
+            "headRepositoryOwner": {"login": "alice"},
+            "headRepository": {"name": "nirux"}, "isDraft": false,
+            "statusCheckRollup": [], "url": "https://example.test/pull/90"
+          },
+          {
+            "number": 80, "state": "OPEN", "headRefOid": "current-head",
+            "headRepositoryOwner": {"login": "xikimay"},
+            "headRepository": {"name": "nirux"}, "isDraft": false,
+            "statusCheckRollup": [], "url": "https://example.test/pull/80"
+          }
         ]
         """#)
 
@@ -159,8 +174,18 @@ final class PRDetectTests: XCTestCase {
         let result = try fetchUsingFakeGitHubCLI(
             openJSON: #"""
             [
-              {"number":90,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://github.com/xikimay/nirux/pull/90"},
-              {"number":80,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://ghe.example.com/xikimay/nirux/pull/80"}
+              {
+                "number": 90, "state": "OPEN", "headRefOid": "current-head",
+                "headRepositoryOwner": {"login": "xikimay"},
+                "headRepository": {"name": "nirux"}, "isDraft": false,
+                "statusCheckRollup": [], "url": "https://github.com/xikimay/nirux/pull/90"
+              },
+              {
+                "number": 80, "state": "OPEN", "headRefOid": "current-head",
+                "headRepositoryOwner": {"login": "xikimay"},
+                "headRepository": {"name": "nirux"}, "isDraft": false,
+                "statusCheckRollup": [], "url": "https://ghe.example.com/xikimay/nirux/pull/80"
+              }
             ]
             """#,
             upstreamRepository: GitHubRepository(
@@ -180,7 +205,12 @@ final class PRDetectTests: XCTestCase {
         let result = try fetchUsingFakeGitHubCLI(
             openJSON: #"""
             [
-              {"number":80,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://github.com/xikimay/nirux/pull/80"}
+              {
+                "number": 80, "state": "OPEN", "headRefOid": "current-head",
+                "headRepositoryOwner": {"login": "xikimay"},
+                "headRepository": {"name": "nirux"}, "isDraft": false,
+                "statusCheckRollup": [], "url": "https://github.com/xikimay/nirux/pull/80"
+              }
             ]
             """#,
             upstreamRepository: try XCTUnwrap(GitHubRepository(
@@ -236,7 +266,12 @@ final class PRDetectTests: XCTestCase {
         let result = try fetchUsingFakeGitHubCLI(
             openJSON: #"""
             [
-              {"number":41,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/41"}
+              {
+                "number": 41, "state": "OPEN", "headRefOid": "current-head",
+                "headRepositoryOwner": {"login": "xikimay"},
+                "headRepository": {"name": "nirux"}, "isDraft": false,
+                "statusCheckRollup": [], "url": "https://example.test/pull/41"
+              }
             ]
             """#,
             upstreamRepository: nil
@@ -262,7 +297,12 @@ final class PRDetectTests: XCTestCase {
         let result = try fetchUsingFakeGitHubCLI(
             openJSON: #"""
             [
-              {"number":1,"state":"OPEN","headRefOid":"reopened-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/1"}
+              {
+                "number": 1, "state": "OPEN", "headRefOid": "reopened-head",
+                "headRepositoryOwner": {"login": "xikimay"},
+                "headRepository": {"name": "nirux"}, "isDraft": false,
+                "statusCheckRollup": [], "url": "https://example.test/pull/1"
+              }
             ]
             """#,
             terminalJSON: terminalJSON
@@ -277,8 +317,18 @@ final class PRDetectTests: XCTestCase {
     func testNewestTerminalPullRequestIsSelectedWhenNoneAreOpen() throws {
         let result = try fetchUsingFakeGitHubCLI(terminalJSON: #"""
         [
-          {"number":42,"state":"MERGED","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/42"},
-          {"number":57,"state":"CLOSED","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/57"}
+          {
+            "number": 42, "state": "MERGED", "headRefOid": "current-head",
+            "headRepositoryOwner": {"login": "xikimay"},
+            "headRepository": {"name": "nirux"}, "isDraft": false,
+            "statusCheckRollup": [], "url": "https://example.test/pull/42"
+          },
+          {
+            "number": 57, "state": "CLOSED", "headRefOid": "current-head",
+            "headRepositoryOwner": {"login": "xikimay"},
+            "headRepository": {"name": "nirux"}, "isDraft": false,
+            "statusCheckRollup": [], "url": "https://example.test/pull/57"
+          }
         ]
         """#)
         guard case .success(_, let fetched) = result else {
@@ -302,8 +352,18 @@ final class PRDetectTests: XCTestCase {
     func testTerminalPullRequestFromSameNamedForkIsIgnored() throws {
         let result = try fetchUsingFakeGitHubCLI(terminalJSON: #"""
         [
-          {"number":90,"state":"CLOSED","headRefOid":"current-head","headRepositoryOwner":{"login":"alice"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/90"},
-          {"number":80,"state":"MERGED","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/80"}
+          {
+            "number": 90, "state": "CLOSED", "headRefOid": "current-head",
+            "headRepositoryOwner": {"login": "alice"},
+            "headRepository": {"name": "nirux"}, "isDraft": false,
+            "statusCheckRollup": [], "url": "https://example.test/pull/90"
+          },
+          {
+            "number": 80, "state": "MERGED", "headRefOid": "current-head",
+            "headRepositoryOwner": {"login": "xikimay"},
+            "headRepository": {"name": "nirux"}, "isDraft": false,
+            "statusCheckRollup": [], "url": "https://example.test/pull/80"
+          }
         ]
         """#)
 
@@ -331,7 +391,12 @@ final class PRDetectTests: XCTestCase {
         let openResult = try fetchUsingFakeGitHubCLI(
             openJSON: #"""
             [
-              {"number":41,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/41"}
+              {
+                "number": 41, "state": "OPEN", "headRefOid": "current-head",
+                "headRepositoryOwner": {"login": "xikimay"},
+                "headRepository": {"name": "nirux"}, "isDraft": false,
+                "statusCheckRollup": [], "url": "https://example.test/pull/41"
+              }
             ]
             """#,
             isDirty: true
@@ -369,7 +434,11 @@ final class PRDetectTests: XCTestCase {
     func testTerminalPullRequestFromReusedBranchNameIsIgnored() throws {
         let result = try fetchUsingFakeGitHubCLI(terminalJSON: #"""
         [
-          {"number":42,"state":"MERGED","headRefOid":"historical-head","isDraft":false,"statusCheckRollup":[],"url":"https://example.test/pull/42"}
+          {
+            "number": 42, "state": "MERGED", "headRefOid": "historical-head",
+            "isDraft": false, "statusCheckRollup": [],
+            "url": "https://example.test/pull/42"
+          }
         ]
         """#, currentHead: "recreated-head")
 
@@ -432,7 +501,15 @@ final class PRDetectTests: XCTestCase {
 
     func testLargeGitHubResponseIsDrainedWhileProcessRuns() throws {
         let padding = String(repeating: "x", count: 512 * 1024)
-        let json = #"[{"number":41,"state":"OPEN","headRefOid":"current-head","headRepositoryOwner":{"login":"xikimay"},"headRepository":{"name":"nirux"},"isDraft":false,"statusCheckRollup":[{"conclusion":"SUCCESS","padding":"\#(padding)"}],"url":"https://example.test/pull/41"}]"#
+        let json = #"""
+        [{
+          "number": 41, "state": "OPEN", "headRefOid": "current-head",
+          "headRepositoryOwner": {"login": "xikimay"},
+          "headRepository": {"name": "nirux"}, "isDraft": false,
+          "statusCheckRollup": [{"conclusion": "SUCCESS", "padding": "\#(padding)"}],
+          "url": "https://example.test/pull/41"
+        }]
+        """#
         let result = try fetchUsingFakeGitHubCLI(
             openJSON: json,
             watchdogDelay: 2
@@ -460,7 +537,9 @@ final class PRDetectTests: XCTestCase {
         }
         XCTAssertNil(pullRequest)
     }
+}
 
+private extension PRDetectTests {
     private func fetchUsingFakeGitHubCLI(
         openJSON: String = "[]",
         cappedOpenJSON: String? = nil,
@@ -484,76 +563,15 @@ final class PRDetectTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let gh = directory.appendingPathComponent("gh")
-        let script = #"""
-        #!/bin/sh
-        state=""
-        limit=0
-        json_fields=""
-        search=""
-        while [ "$#" -gt 0 ]; do
-            case "$1" in
-                --state)
-                    state="$2"
-                    shift 2
-                    ;;
-                --limit)
-                    limit="$2"
-                    shift 2
-                    ;;
-                --json)
-                    json_fields="$2"
-                    shift 2
-                    ;;
-                --search)
-                    search="$2"
-                    shift 2
-                    ;;
-                *)
-                    shift
-                    ;;
-            esac
-        done
-        if [ "$state" = "\#(hangingState ?? "")" ]; then
-            trap '' TERM
-            while :; do :; done
-        fi
-        case "$state" in
-            open)
-                if [ "\#(cappedOpenJSON == nil ? "0" : "1")" = "1" ] && [ "$limit" = "100" ]; then
-                    payload='\#(cappedOpenJSON ?? "")'
-                else
-                    payload='\#(openJSON)'
-                fi
-                ;;
-            all)
-                if [ "\#(searchCappedTerminalJSON == nil ? "0" : "1")" = "1" ] && [ -n "$search" ]; then
-                    payload='\#(searchCappedTerminalJSON ?? "")'
-                else
-                    payload='\#(terminalJSON)'
-                fi
-                ;;
-            *) exit 64 ;;
-        esac
-        [ -n "$limit" ] && [ "$limit" != "0" ] && [ "$limit" != "1" ] || exit 65
-        case ",$json_fields," in
-            *,headRefOid,*) ;;
-            *) exit 66 ;;
-        esac
-        case ",$json_fields," in
-            *,headRepositoryOwner,*) ;;
-            *) exit 67 ;;
-        esac
-        case ",$json_fields," in
-            *,headRepository,*) ;;
-            *) exit 68 ;;
-        esac
-        [ "$state" != "\#(failingState ?? "")" ] || exit 1
-        parent_pid=$$
-        (sleep \#(watchdogDelay); kill -TERM "$parent_pid") >/dev/null 2>&1 &
-        watchdog_pid=$!
-        printf '%s\n' "$payload"
-        kill "$watchdog_pid" 2>/dev/null || true
-        """#
+        let script = fakeGitHubCLIScript(FakeGitHubCLIConfiguration(
+            openJSON: openJSON,
+            cappedOpenJSON: cappedOpenJSON,
+            terminalJSON: terminalJSON,
+            searchCappedTerminalJSON: searchCappedTerminalJSON,
+            failingState: failingState,
+            hangingState: hangingState,
+            watchdogDelay: watchdogDelay
+        ))
         try script.write(to: gh, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: gh.path)
 
@@ -586,4 +604,87 @@ final class PRDetectTests: XCTestCase {
             throw NSError(domain: "PRDetectTests.Git", code: Int(process.terminationStatus))
         }
     }
+}
+
+private struct FakeGitHubCLIConfiguration {
+    let openJSON: String
+    let cappedOpenJSON: String?
+    let terminalJSON: String
+    let searchCappedTerminalJSON: String?
+    let failingState: String?
+    let hangingState: String?
+    let watchdogDelay: Int
+}
+
+private func fakeGitHubCLIScript(_ configuration: FakeGitHubCLIConfiguration) -> String {
+    #"""
+    #!/bin/sh
+    state=""
+    limit=0
+    json_fields=""
+    search=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --state)
+                state="$2"
+                shift 2
+                ;;
+            --limit)
+                limit="$2"
+                shift 2
+                ;;
+            --json)
+                json_fields="$2"
+                shift 2
+                ;;
+            --search)
+                search="$2"
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+    if [ "$state" = "\#(configuration.hangingState ?? "")" ]; then
+        trap '' TERM
+        while :; do :; done
+    fi
+    case "$state" in
+        open)
+            if [ "\#(configuration.cappedOpenJSON == nil ? "0" : "1")" = "1" ] && [ "$limit" = "100" ]; then
+                payload='\#(configuration.cappedOpenJSON ?? "")'
+            else
+                payload='\#(configuration.openJSON)'
+            fi
+            ;;
+        all)
+            if [ "\#(configuration.searchCappedTerminalJSON == nil ? "0" : "1")" = "1" ] && [ -n "$search" ]; then
+                payload='\#(configuration.searchCappedTerminalJSON ?? "")'
+            else
+                payload='\#(configuration.terminalJSON)'
+            fi
+            ;;
+        *) exit 64 ;;
+    esac
+    [ -n "$limit" ] && [ "$limit" != "0" ] && [ "$limit" != "1" ] || exit 65
+    case ",$json_fields," in
+        *,headRefOid,*) ;;
+        *) exit 66 ;;
+    esac
+    case ",$json_fields," in
+        *,headRepositoryOwner,*) ;;
+        *) exit 67 ;;
+    esac
+    case ",$json_fields," in
+        *,headRepository,*) ;;
+        *) exit 68 ;;
+    esac
+    [ "$state" != "\#(configuration.failingState ?? "")" ] || exit 1
+    parent_pid=$$
+    (sleep \#(configuration.watchdogDelay); kill -TERM "$parent_pid") >/dev/null 2>&1 &
+    watchdog_pid=$!
+    printf '%s\n' "$payload"
+    kill "$watchdog_pid" 2>/dev/null || true
+    """#
 }
