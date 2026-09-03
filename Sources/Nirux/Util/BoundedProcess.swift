@@ -19,8 +19,12 @@ enum BoundedProcess {
         process.currentDirectoryURL = currentDirectoryURL
 
         let output = Pipe()
+        let didTerminate = DispatchSemaphore(value: 0)
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
+        process.terminationHandler = { _ in
+            didTerminate.signal()
+        }
 
         do {
             try process.run()
@@ -31,7 +35,12 @@ enum BoundedProcess {
         }
         try? output.fileHandleForWriting.close()
 
-        guard let data = drain(output, from: process, timeout: timeout) else { return nil }
+        guard let data = drain(
+            output,
+            from: process,
+            didTerminate: didTerminate,
+            timeout: timeout
+        ) else { return nil }
         return BoundedProcessResult(
             standardOutput: data,
             terminationStatus: process.terminationStatus
@@ -41,6 +50,7 @@ enum BoundedProcess {
     private static func drain(
         _ output: Pipe,
         from process: Process,
+        didTerminate: DispatchSemaphore,
         timeout: TimeInterval
     ) -> Data? {
         let readHandle = output.fileHandleForReading
@@ -50,17 +60,12 @@ enum BoundedProcess {
         var reachedEnd = false
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
 
-        while process.isRunning || !reachedEnd {
+        while !reachedEnd {
             let remaining = deadline - ProcessInfo.processInfo.systemUptime
             guard remaining > 0 else {
-                terminate(process)
+                terminate(process, didTerminate: didTerminate)
                 try? readHandle.close()
                 return nil
-            }
-
-            if reachedEnd {
-                Thread.sleep(forTimeInterval: min(0.01, remaining))
-                continue
             }
 
             var descriptorState = pollfd(
@@ -72,7 +77,7 @@ enum BoundedProcess {
             let pollResult = Darwin.poll(&descriptorState, 1, waitMilliseconds)
             if pollResult < 0 {
                 if errno == EINTR { continue }
-                terminate(process)
+                terminate(process, didTerminate: didTerminate)
                 try? readHandle.close()
                 return nil
             }
@@ -86,29 +91,37 @@ enum BoundedProcess {
             } else if bytesRead == 0 {
                 reachedEnd = true
             } else if errno != EINTR {
-                terminate(process)
+                terminate(process, didTerminate: didTerminate)
                 try? readHandle.close()
                 return nil
             }
         }
 
+        let remaining = deadline - ProcessInfo.processInfo.systemUptime
+        guard remaining > 0,
+              didTerminate.wait(timeout: .now() + remaining) == .success
+        else {
+            terminate(process, didTerminate: didTerminate)
+            try? readHandle.close()
+            return nil
+        }
         process.waitUntilExit()
         try? readHandle.close()
         return data
     }
 
-    private static func terminate(_ process: Process) {
-        guard process.isRunning else {
+    private static func terminate(
+        _ process: Process,
+        didTerminate: DispatchSemaphore
+    ) {
+        if didTerminate.wait(timeout: .now()) == .success {
             process.waitUntilExit()
             return
         }
         process.terminate()
-        let graceDeadline = ProcessInfo.processInfo.systemUptime + 0.25
-        while process.isRunning, ProcessInfo.processInfo.systemUptime < graceDeadline {
-            Thread.sleep(forTimeInterval: 0.01)
-        }
-        if process.isRunning {
+        if didTerminate.wait(timeout: .now() + 0.25) == .timedOut {
             Darwin.kill(process.processIdentifier, SIGKILL)
+            _ = didTerminate.wait(timeout: .now() + 1)
         }
         process.waitUntilExit()
     }

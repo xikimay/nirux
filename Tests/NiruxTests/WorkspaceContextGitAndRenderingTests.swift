@@ -310,6 +310,7 @@ extension WorkspaceContextTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let workspace = WorkspaceState(title: "context", cwd: directory.path)
+        workspace.addEditorColumn(workspaceCwd: directory.path)
         let context = try XCTUnwrap(GitDetect.context(at: directory.path))
         XCTAssertTrue(workspace.updateGitContext(context))
         workspace.diffStats = "1 file changed"
@@ -326,7 +327,7 @@ extension WorkspaceContextTests {
         XCTAssertFalse(workspace.applyDiffStatsObservation(result, observation: observation))
         XCTAssertEqual(workspace.diffStats, "1 file changed")
 
-        workspace.focusedIndex = 0
+        workspace.focusedIndex = 1
         let currentObservation = try XCTUnwrap(workspace.beginDiffStatsObservation(
             at: workspace.focusedWorkingDirectory,
             for: context
