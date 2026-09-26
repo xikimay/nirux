@@ -99,6 +99,13 @@ final class ColumnState {
     /// workspace routes it into an editor column at the optional line.
     var onOpenFile: ((String, Int?) -> Void)?
 
+    /// Fires (main queue) when the terminal prints a local dev-server URL.
+    /// The workspace decides whether it becomes a proposal chip.
+    var onLocalServerURLDetected: ((LocalServerURL) -> Void)?
+    var onLocalServerChipOpen: ((LocalServerURL) -> Void)?
+    var onLocalServerChipDismiss: ((LocalServerURL) -> Void)?
+    private var localServerChip: LocalServerChipView?
+
     /// Stable identity injected into the terminal environment as
     /// NIRUX_AGENT_UUID — Claude/Codex hook events carry it back so
     /// AgentHookCenter can route them to THIS column. Persisted across
@@ -173,7 +180,7 @@ final class ColumnState {
         if barHeight > 0, let bar = titleBar {
             // Title bar at top of column (NSView: y=0 is bottom)
             bar.frame = NSRect(x: 0, y: height - barHeight, width: width, height: barHeight)
-            titleLabel?.frame = NSRect(x: 12, y: 8, width: width - 24, height: 16)
+            layoutTitleBarContents()
             titleBorder?.frame = NSRect(x: 0, y: 0, width: width, height: 1)
         }
 
@@ -182,6 +189,55 @@ final class ColumnState {
             terminal.frame = NSRect(x: 0, y: 0, width: width, height: height - barHeight)
             shellExitedOverlay?.frame = terminal.frame
         }
+    }
+
+    /// Title label on the left; the dev-server chip, when shown, on the
+    /// right. The chip gets priority up to half the bar, then goes compact.
+    private func layoutTitleBarContents() {
+        guard let bar = titleBar else { return }
+        let width = bar.bounds.width
+        var labelWidth = width - 24
+        if let chip = localServerChip, chip.url != nil {
+            let chipWidth = chip.fittingWidth(maxWidth: max(0, width / 2 - 12))
+            chip.isHidden = chipWidth == 0
+            if chipWidth > 0 {
+                let chipX = width - chipWidth - 8
+                chip.frame = NSRect(
+                    x: chipX,
+                    y: (bar.bounds.height - LocalServerChipView.height) / 2,
+                    width: chipWidth,
+                    height: LocalServerChipView.height
+                )
+                labelWidth = chipX - 12 - 8
+            }
+        }
+        titleLabel?.frame = NSRect(x: 12, y: 8, width: max(0, labelWidth), height: 16)
+    }
+
+    /// Show (or hide, with nil) the "open this dev server" chip.
+    func setLocalServerChip(_ url: LocalServerURL?) {
+        guard let url else {
+            localServerChip?.removeFromSuperview()
+            localServerChip = nil
+            layoutTitleBarContents()
+            return
+        }
+        guard let bar = titleBar else { return }
+        let chip = localServerChip ?? LocalServerChipView(frame: .zero)
+        if localServerChip == nil {
+            chip.onOpen = { [weak self, weak chip] in
+                guard let url = chip?.url else { return }
+                self?.onLocalServerChipOpen?(url)
+            }
+            chip.onDismiss = { [weak self, weak chip] in
+                guard let url = chip?.url else { return }
+                self?.onLocalServerChipDismiss?(url)
+            }
+            bar.addSubview(chip)
+            localServerChip = chip
+        }
+        chip.configure(url: url)
+        layoutTitleBarContents()
     }
 
     /// True if this column is a WebView (not a terminal)
@@ -269,6 +325,10 @@ final class ColumnState {
         // Forward OSC 9 (turn complete for sessions without hook coverage)
         ptySession.onOsc9Received = { [weak self] in
             self?.onAgentAttention?()
+        }
+
+        ptySession.onLocalServerURL = { [weak self] url in
+            self?.onLocalServerURLDetected?(url)
         }
 
         // Shell exit → show the restart overlay over the (still visible)

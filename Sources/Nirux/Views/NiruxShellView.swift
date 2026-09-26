@@ -183,6 +183,7 @@ final class NiruxShellView: NSView {
         workspace.onTerminalOpenFile = { [weak self] targetWorkspace, path, line in
             self?.openInEditorColumn(path: path, line: line, in: targetWorkspace)
         }
+        wireLocalServerProposals(for: workspace)
     }
 
     /// Iterate every editor column across all workspaces. Used by the
@@ -687,6 +688,7 @@ extension NiruxShellView {
                 self?.focusActiveTerminal(in: self?.window)
             }
         }
+        commandPalette?.detectedURLsProvider = { [weak self] in self?.activeWorkspace?.detectedLocalServerURLs ?? [] }
 
         commandPalette?.actions = [
             PaletteAction(icon: "🌐", title: "Open Browser", subtitle: "Open a URL in a new WebView column", shortcut: "⌘B") { [weak self] in

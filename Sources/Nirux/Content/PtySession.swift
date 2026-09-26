@@ -215,6 +215,13 @@ final class PtySession: @unchecked Sendable {
         set { state.onOsc9Received = newValue }
     }
 
+    /// Called on the main queue when the output shows a local dev-server
+    /// URL (`http://localhost:5173/`). Throttled per port.
+    var onLocalServerURL: ((LocalServerURL) -> Void)? {
+        get { state.onLocalServerURL }
+        set { state.onLocalServerURL = newValue }
+    }
+
     /// Called on the main queue when the shell process exits.
     var onProcessExit: (() -> Void)? {
         get { state.onProcessExit }
@@ -543,9 +550,14 @@ private final class PtyState: @unchecked Sendable {
     var onCwdChanged: ((String) -> Void)?
     var onTitleChanged: ((String) -> Void)?
     var onOsc9Received: (() -> Void)?
+    var onLocalServerURL: ((LocalServerURL) -> Void)?
     var onProcessExit: (() -> Void)?
     var machine = AgentStatusMachine()
     let outputBuffer = TerminalOutputBuffer()
+    /// Read-queue only (reset on start, before the read source exists).
+    private var localServerScanner = LocalServerURLScanner()
+    private var localServerLastForwarded: [Int: TimeInterval] = [:]
+    private static let localServerForwardInterval: TimeInterval = 5
 
     func foregroundProcess(snapshot: ProcessSnapshot) -> ForegroundProcess? {
         guard childPid > 0 else { return nil }
@@ -562,6 +574,8 @@ private final class PtyState: @unchecked Sendable {
 
     func markPtyStarted() {
         machine.reset()
+        localServerScanner = LocalServerURLScanner()
+        localServerLastForwarded = [:]
     }
 
     func writeToPty(_ data: Data) {
@@ -664,6 +678,30 @@ private final class PtyState: @unchecked Sendable {
            str.contains("\u{1b}]") {
             parseOscSequences(str)
         }
+        // Same gate as OSC 9: output before the first keystroke is launch
+        // noise — notably `claude --continue` replaying old transcripts.
+        if machine.hasUserInput, onLocalServerURL != nil {
+            detectLocalServerURLs(in: buffer, count: bytesRead)
+        }
+    }
+
+    private func detectLocalServerURLs(in buffer: [UInt8], count: Int) {
+        let urls = buffer.withUnsafeBytes {
+            localServerScanner.scan(UnsafeRawBufferPointer(rebasing: $0[..<count]))
+        }
+        guard !urls.isEmpty, let callback = onLocalServerURL else { return }
+        // TUIs repaint the same URL on every frame; the workspace already
+        // dedupes per port, this just keeps the main queue quiet.
+        let now = ProcessInfo.processInfo.systemUptime
+        let fresh = urls.filter { url in
+            if let last = localServerLastForwarded[url.port],
+               now - last < Self.localServerForwardInterval { return false }
+            if localServerLastForwarded.count >= 64 { localServerLastForwarded.removeAll() }
+            localServerLastForwarded[url.port] = now
+            return true
+        }
+        guard !fresh.isEmpty else { return }
+        DispatchQueue.main.async { fresh.forEach(callback) }
     }
 
     /// Parse OSC sequences from terminal output (cwd, title).

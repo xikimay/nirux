@@ -32,6 +32,10 @@ final class CommandPalette: NSObject {
     var scrollIndicator: NSView?
     var urlSuggestions: [String] = []
     var urlSelectedIndex = 0
+    /// Dev-server URLs detected in the active workspace's terminals —
+    /// listed first in URL mode.
+    var detectedURLsProvider: (() -> [String])?
+    var detectedURLs: Set<String> = []
 
     private var keyMonitor: Any?
     private var clickMonitor: Any?
