@@ -435,6 +435,31 @@ final class AgentHookInstallerTests: XCTestCase {
         XCTAssertEqual(mtime1, try modificationDate(".codex/config.toml"), "no rewrite on relaunch")
     }
 
+    func testCodexAppendsATerminatedLine() {
+        // No [table] to insert before: the entry becomes the last line, and
+        // must never leave the file ending in a bare \r (invalid TOML).
+        let notify = AgentHookInstaller.codexNotifyLine(executablePath: "/Apps/Nirux")
+        let cases = [
+            ("", "\(notify)\n"),
+            ("model = 1\n", "model = 1\n\(notify)\n"),
+            ("model = 1", "model = 1\n\(notify)\n"),
+            ("model = 1\r\n", "model = 1\r\n\(notify)\r\n"),
+            ("model = 1\r\nfoo = 2", "model = 1\r\nfoo = 2\r\n\(notify)\r\n")
+        ]
+        for (original, expected) in cases {
+            write(original, ".codex/config.toml")
+            AgentHookInstaller.installCodexNotify(executablePath: "/Apps/Nirux", home: home)
+            XCTAssertEqual(read(".codex/config.toml"), expected, original.debugDescription)
+        }
+    }
+
+    func testCodexRefreshKeepsTheLinesOwnEnding() {
+        let notify = AgentHookInstaller.codexNotifyLine(executablePath: "/Apps/Nirux")
+        write("model = 1\r\nnotify = [\"/old/Nirux\", \"--hook\", \"codex\"]", ".codex/config.toml")
+        AgentHookInstaller.installCodexNotify(executablePath: "/Apps/Nirux", home: home)
+        XCTAssertEqual(read(".codex/config.toml"), "model = 1\r\n\(notify)", "unterminated last line gets no \\r")
+    }
+
     func testCodexUnreadableConfigUntouched() throws {
         // Not UTF-8: previously treated as missing and replaced wholesale.
         let original = Data([0x6D, 0x6F, 0x64, 0x65, 0x6C, 0x20, 0x3D, 0x20, 0x22, 0xE9, 0x22, 0x0A])

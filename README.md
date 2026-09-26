@@ -219,7 +219,7 @@ NIRUX_STATE_DIR=/tmp/nirux-dev swift run Nirux
 
 `NIRUX_STATE_DIR` moves workspaces, settings, Activity and Mission history, and agent hook events out of `~/Library/Application Support/nirux/` (`HOME` is ignored). URL history, the Keychain (Telegram token), and the `nirux://` scheme stay shared with the installed app.
 
-Only a Nirux running from an `.app` bundle installs the agent hooks, so `swift run` leaves `~/.claude/settings.json` and `~/.codex/config.toml` alone. The hooks the installed app wrote keep working, and agents in the dev build's terminals report into its state directory. To test installer changes, set `NIRUX_FORCE_HOOK_INSTALL=1`; this points the global hooks at the dev binary until the installed app is relaunched. `NIRUX_SKIP_HOOK_INSTALL=1` disables the install for any build, bundles included.
+Only a Nirux running from an `.app` bundle installs the agent hooks, so `swift run` leaves `~/.claude/settings.json` and `~/.codex/config.toml` alone. The hooks the installed app wrote keep working, and agents in the dev build's terminals report into its state directory. To test installer changes, set `NIRUX_FORCE_HOOK_INSTALL=1`; this points the global hooks at the dev binary until the installed app is relaunched. `NIRUX_SKIP_HOOK_INSTALL=1` disables the install for any build; set it when launching a local `bundle.sh` bundle for a smoke test, which would otherwise point the hooks at that bundle.
 
 Create a local app bundle:
 

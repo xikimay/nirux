@@ -133,7 +133,9 @@ enum AgentHookCLI {
     /// "External agent" row in the activity feed. The installed hook
     /// commands already skip launching Nirux then; this drops events from
     /// hook entries written by older builds (until the next launch
-    /// refreshes them) and from manual invocations.
+    /// refreshes them) and from manual invocations. Check it only after
+    /// reading stdin: Claude reports a hook that exits before taking its
+    /// whole payload as failed (EPIPE).
     static func isFromNiruxTerminal(env: [String: String]) -> Bool {
         env["NIRUX_AGENT_UUID"]?.isEmpty == false
     }

@@ -205,10 +205,11 @@ enum AgentHookInstaller {
             return
         }
 
+        // Lines split on \n keep a CRLF file's \r. Every line written here is
+        // followed by \n, so the \r it carries always completes a CRLF — a
+        // bare \r (as the file's last byte) is invalid TOML.
         var lines = text.components(separatedBy: "\n")
-        // Lines split on \n keep a CRLF file's \r: match it, so an
-        // unchanged entry compares equal and a new one fits in.
-        let newLine = notifyLine + (text.contains("\r\n") ? "\r" : "")
+        let cr = text.contains("\r\n") ? "\r" : ""
         let notifyPattern = #"^\s*notify\s*="#
         if let index = lines.firstIndex(where: { $0.range(of: notifyPattern, options: .regularExpression) != nil }) {
             guard isNiruxNotify(lines[index]) else {
@@ -216,19 +217,25 @@ enum AgentHookInstaller {
                 return
             }
             // Ours — refresh the path if the app moved, and the format if an
-            // older build wrote the unguarded one.
-            if lines[index] != newLine {
-                lines[index] = newLine
+            // older build wrote the unguarded one. Keep the line's ending.
+            let refreshed = notifyLine + (lines[index].hasSuffix("\r") ? "\r" : "")
+            if lines[index] != refreshed {
+                lines[index] = refreshed
                 write(lines: lines, to: url)
             }
             return
         }
 
-        // Insert at top level: before the first [table] header, else append.
-        let insertAt = lines.firstIndex(where: {
-            $0.range(of: #"^\s*\["#, options: .regularExpression) != nil
-        }) ?? lines.count
-        lines.insert(newLine, at: insertAt)
+        // Insert at top level: before the first [table] header, else as a
+        // new last line (terminating the current last line if needed).
+        if let table = lines.firstIndex(where: { $0.range(of: #"^\s*\["#, options: .regularExpression) != nil }) {
+            lines.insert(notifyLine + cr, at: table)
+        } else if lines.last == "" {
+            lines.insert(notifyLine + cr, at: lines.count - 1)
+        } else {
+            lines[lines.count - 1] += cr
+            lines += [notifyLine + cr, ""]
+        }
         write(lines: lines, to: url)
     }
 
