@@ -1,6 +1,6 @@
 import AppKit
 
-private struct GitResult {
+struct GitResult {
     let status: Int32
     let stdout: String
     let stderr: String
@@ -173,29 +173,39 @@ enum GitWorktree {
         return gitRunFull(args, cwd: cwd).stdout
     }
 
-    private static func gitRunFull(_ args: [String], cwd: String) -> GitResult {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        proc.arguments = args
-        proc.currentDirectoryURL = URL(fileURLWithPath: cwd)
+    /// Lookups; `repoRoot(at:)` runs on the main thread.
+    private static let queryTimeout: TimeInterval = 10
+    /// Last resort only: killing `worktree add` mid-checkout leaves a
+    /// half-made worktree behind, and draining both pipes already keeps
+    /// large output from wedging it.
+    private static let worktreeAddTimeout: TimeInterval = 3600
 
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        proc.standardOutput = outPipe
-        proc.standardError = errPipe
-
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-            let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+    /// Runs git with both pipes drained while it runs, so large output
+    /// cannot fill a pipe and wedge git before it exits.
+    static func gitRunFull(
+        _ args: [String],
+        cwd: String,
+        gitPath: String = "/usr/bin/git",
+        timeout: TimeInterval? = nil
+    ) -> GitResult {
+        let timeout = timeout ?? (args.starts(with: ["worktree", "add"]) ? worktreeAddTimeout : queryTimeout)
+        guard let result = BoundedProcess.run(
+            executableURL: URL(fileURLWithPath: gitPath),
+            arguments: args,
+            currentDirectoryURL: URL(fileURLWithPath: cwd),
+            timeout: timeout,
+            captureStandardError: true
+        ) else {
             return GitResult(
-                status: proc.terminationStatus,
-                stdout: String(data: outData, encoding: .utf8) ?? "",
-                stderr: String(data: errData, encoding: .utf8) ?? ""
+                status: 1,
+                stdout: "",
+                stderr: "git could not start or timed out after \(String(format: "%g", timeout))s"
             )
-        } catch {
-            return GitResult(status: 1, stdout: "", stderr: error.localizedDescription)
         }
+        return GitResult(
+            status: result.terminationStatus,
+            stdout: String(data: result.standardOutput, encoding: .utf8) ?? "",
+            stderr: String(data: result.standardError, encoding: .utf8) ?? ""
+        )
     }
 }
