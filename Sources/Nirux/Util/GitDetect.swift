@@ -283,8 +283,9 @@ enum GitDetect {
             ) {
                 return true
             }
+            // NSURL-backed URL (before macOS 26) gives "/.." as the parent of "/".
             let parent = directory.deletingLastPathComponent()
-            guard parent.path != directory.path else { return false }
+            guard directory.path != "/", parent.path != directory.path else { return false }
             directory = parent
         }
     }
