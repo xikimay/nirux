@@ -50,7 +50,8 @@ enum WorkspaceClosePolicy {
         case confirm(details: [String])
     }
 
-    /// Mirror of the `closeWorkspace(at:)` guard, used to disable the menu item.
+    /// The `closeWorkspace(at:)` guard (fed the remaining count), also used
+    /// to disable the sidebar's Close Workspace item.
     static func canClose(totalWorkspaceCount: Int) -> Bool {
         totalWorkspaceCount > 1
     }

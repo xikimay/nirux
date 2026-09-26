@@ -163,9 +163,10 @@ extension NiruxShellView {
         }
     }
 
-    /// Return and Escape cancel; closing takes a click or ⌘⌫. The ⌘W that
-    /// opened the alert may be an accident mid-prompt, and the Return meant
-    /// to send that prompt must not confirm the kill.
+    /// Return and Escape cancel; closing takes a click or ⌘D. The ⌘W that
+    /// opened the alert may be an accident mid-prompt, and the keys that
+    /// come next — Return to send, ⌘⌫ to clear the line — must not confirm
+    /// the kill. Plain ⌘D is unbound in Nirux, so no reflex reaches it.
     private func confirmDestructiveClose(message: String, details: [String], confirmTitle: String) -> Bool {
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -175,7 +176,7 @@ extension NiruxShellView {
         cancel.keyEquivalent = "\r"
         let confirm = alert.addButton(withTitle: confirmTitle)
         confirm.hasDestructiveAction = true
-        confirm.keyEquivalent = "\u{8}"
+        confirm.keyEquivalent = "d"
         confirm.keyEquivalentModifierMask = .command
         // A button holds one key equivalent and Cancel's is Return — route
         // Escape to it while the alert is up.

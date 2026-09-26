@@ -138,10 +138,15 @@ final class ProcessSnapshot {
     /// grandchildren, …) that `matches`. Unlike `foregroundProcess`, this
     /// also sees stopped (^Z) and background jobs and processes under a
     /// wrapper (npx, caffeinate) — everything that dies with the PTY.
+    /// Breadth-first, so the shell's own jobs are checked before a big
+    /// foreground build (make -j) can use up the `limit`.
     func firstDescendantName(of rootPID: pid_t, limit: Int = 256, where matches: (String) -> Bool) -> String? {
         var pending = childrenMap[rootPID] ?? []
         var visited = Set<pid_t>()
-        while let pid = pending.popLast(), visited.count < limit {
+        var next = 0
+        while next < pending.count, visited.count < limit {
+            let pid = pending[next]
+            next += 1
             guard visited.insert(pid).inserted else { continue }
             let arguments: [String]
             if let capturedArguments {
@@ -303,7 +308,8 @@ final class PtySession: @unchecked Sendable {
     /// foreground process, or any descendant of the shell — a job suspended
     /// with ^Z, or an agent under a wrapper, dies with the PTY too. Fails
     /// closed: an empty snapshot, or a turn the status machine still sees
-    /// in flight, falls back to the heartbeat's last view of the agent.
+    /// in flight, falls back to the heartbeat's last view of the agent — so
+    /// an agent that exited since the last tick (≤ 2 s) may still prompt.
     func agentProcessName(snapshot: ProcessSnapshot) -> String? {
         guard !hasExited, state.childPid > 0 else { return nil }
         let isAgent = AgentStatusMachine.isRecognizedAgentProcess

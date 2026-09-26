@@ -58,8 +58,27 @@ final class CloseAgentDetectionTests: XCTestCase {
         XCTAssertTrue(ProcessSnapshot(entries: []).isEmpty)
     }
 
+    func testShellJobsAreCheckedBeforeADeepForegroundTree() {
+        // A suspended claude next to a big build: breadth-first reaches it
+        // before the build's workers use up the budget.
+        var entries = [
+            entry(10, parent: 1, group: 10, name: "zsh", ["zsh"]),
+            entry(20, parent: 10, group: 20, name: "2.1.283", ["claude"]),
+            entry(30, parent: 10, group: 30, name: "make", ["make", "-j"])
+        ]
+        for pid in pid_t(100)..<120 {
+            entries.append(entry(pid, parent: 30, group: 30, name: "cc", ["cc"]))
+        }
+        let snapshot = ProcessSnapshot(entries: entries)
+        XCTAssertEqual(snapshot.firstDescendantName(of: 10, limit: 5, where: isAgent), "claude")
+    }
+
+    // MARK: - Real PTY
+
+    /// Runs `body` with NIRUX_STATE_DIR pointed at a scratch directory,
+    /// like every test that starts a real shell.
     @MainActor
-    func testPtyReportsForegroundAndBackgroundAgentsButNotABareShell() async throws {
+    private func withScratchStateDirectory(_ body: (String) async throws -> Void) async throws {
         let stateDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("nirux-close-agent-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
@@ -73,19 +92,30 @@ final class CloseAgentDetectionTests: XCTestCase {
             }
             try? FileManager.default.removeItem(at: stateDirectory)
         }
+        try await body(stateDirectory.path)
+    }
 
+    @MainActor
+    func testPtyReportsForegroundAndBackgroundAgentsButNotABareShell() async throws {
+        try await withScratchStateDirectory { cwd in
+            try await assertAgentsReported(cwd: cwd)
+        }
+    }
+
+    @MainActor
+    private func assertAgentsReported(cwd: String) async throws {
         let foregroundAgent = PtySession()
         let backgroundAgent = PtySession()
         let bareShell = PtySession()
-        foregroundAgent.start(shell: "/bin/zsh", args: ["-f", "-c", "exec -a claude /bin/cat"], cwd: stateDirectory.path)
+        foregroundAgent.start(shell: "/bin/zsh", args: ["-f", "-c", "exec -a claude /bin/cat"], cwd: cwd)
         // No job control under -c: the shell stays the foreground process,
         // the agent only shows up as its descendant.
         backgroundAgent.start(
             shell: "/bin/zsh",
             args: ["-f", "-c", "(exec -a codex /bin/sleep 30) & wait"],
-            cwd: stateDirectory.path
+            cwd: cwd
         )
-        bareShell.start(shell: "/bin/zsh", args: ["-f"], cwd: stateDirectory.path)
+        bareShell.start(shell: "/bin/zsh", args: ["-f"], cwd: cwd)
 
         var names: [String?] = []
         let deadline = Date().addingTimeInterval(3)
@@ -98,5 +128,28 @@ final class CloseAgentDetectionTests: XCTestCase {
         XCTAssertEqual(names, ["claude", "codex", nil])
         // The background agent came from the descendant scan, not the foreground.
         XCTAssertEqual(backgroundAgent.foregroundProcessName(snapshot: ProcessSnapshot()), "zsh")
+    }
+
+    @MainActor
+    func testEmptySnapshotFallsBackToTheHeartbeatsView() async throws {
+        try await withScratchStateDirectory { cwd in
+            let session = PtySession()
+            session.start(shell: "/bin/zsh", args: ["-f"], cwd: cwd)
+            let emptySnapshot = ProcessSnapshot(entries: [])
+            // Nothing seen yet: nothing to fall back on.
+            XCTAssertNil(session.agentProcessName(snapshot: emptySnapshot))
+
+            // The last heartbeat saw claude in the foreground; then the
+            // process-table sysctl fails — fail closed.
+            _ = session.agentStatus(
+                foregroundProcess: ForegroundProcess(
+                    instance: ProcessInstance(pid: 99_999, startedAt: 0), name: "claude", arguments: ["claude"]
+                ),
+                isUserFocused: true
+            )
+            XCTAssertEqual(session.agentProcessName(snapshot: emptySnapshot), "claude")
+            // A snapshot that captured the table wins: the shell runs no agent.
+            XCTAssertNil(session.agentProcessName(snapshot: ProcessSnapshot()))
+        }
     }
 }
