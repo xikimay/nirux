@@ -1,6 +1,6 @@
 import AppKit
 
-private struct GitResult {
+struct GitResult {
     let status: Int32
     let stdout: String
     let stderr: String
@@ -162,8 +162,8 @@ enum GitWorktree {
 
     /// Detect the git repo root from a path
     static func repoRoot(at path: String) -> String? {
-        let output = gitRun(["rev-parse", "--show-toplevel"], cwd: path)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let output = gitRunFull(["rev-parse", "--show-toplevel"], cwd: path, timeout: mainThreadTimeout)
+            .stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return output.isEmpty ? nil : output
     }
 
@@ -173,29 +173,44 @@ enum GitWorktree {
         return gitRunFull(args, cwd: cwd).stdout
     }
 
-    private static func gitRunFull(_ args: [String], cwd: String) -> GitResult {
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        proc.arguments = args
-        proc.currentDirectoryURL = URL(fileURLWithPath: cwd)
+    /// `repoRoot(at:)` runs on the main thread, which this blocks.
+    private static let mainThreadTimeout: TimeInterval = 5
+    /// A last resort, not an expected outcome: killing `worktree add`
+    /// mid-checkout leaves a half-made worktree behind, and draining both
+    /// pipes already keeps large output from wedging git.
+    private static let defaultTimeout: TimeInterval = 3600
 
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        proc.standardOutput = outPipe
-        proc.standardError = errPipe
-
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-            let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-            return GitResult(
-                status: proc.terminationStatus,
-                stdout: String(data: outData, encoding: .utf8) ?? "",
-                stderr: String(data: errData, encoding: .utf8) ?? ""
-            )
-        } catch {
-            return GitResult(status: 1, stdout: "", stderr: error.localizedDescription)
+    /// Runs git with both pipes drained while it runs, so large output
+    /// cannot fill a pipe and wedge git before it exits.
+    static func gitRunFull(
+        _ args: [String],
+        cwd: String,
+        gitPath: String = "/usr/bin/git",
+        timeout: TimeInterval = defaultTimeout
+    ) -> GitResult {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: cwd, isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else {
+            return GitResult(status: 1, stdout: "", stderr: "No such directory: \(cwd)")
         }
+        guard let result = BoundedProcess.run(
+            executableURL: URL(fileURLWithPath: gitPath),
+            arguments: args,
+            currentDirectoryURL: URL(fileURLWithPath: cwd),
+            timeout: timeout,
+            captureStandardError: true
+        ) else {
+            return GitResult(
+                status: 1,
+                stdout: "",
+                stderr: "git could not start or timed out after \(String(format: "%g", timeout))s"
+            )
+        }
+        return GitResult(
+            status: result.terminationStatus,
+            stdout: String(data: result.standardOutput, encoding: .utf8) ?? "",
+            stderr: String(data: result.standardError, encoding: .utf8) ?? ""
+        )
     }
 }
