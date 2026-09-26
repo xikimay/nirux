@@ -113,7 +113,12 @@ enum Persistence {
     /// atomic write it doesn't carry the unreadable permissions over.
     private static func replaceUnreadable(_ url: URL, with data: Data, in dir: URL) throws {
         let staged = stagingURL(in: dir)
-        try data.write(to: staged)
+        do {
+            try data.write(to: staged)
+        } catch {
+            try? FileManager.default.removeItem(at: staged)
+            throw error
+        }
         guard rename(staged.path, url.path) == 0 else {
             let code = POSIXErrorCode(rawValue: errno) ?? .EIO
             try? FileManager.default.removeItem(at: staged)
