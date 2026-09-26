@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Recovery copies live next to it:
 /// - `state.backup.1…5.json`: 1 mirrors the last state written, 2…5 are the
-///   distinct states before it.
+///   distinct states before it (including any another build wrote).
 /// - `state.daily.YYYY-MM-DD.json`: the first save of each day, kept for a
 ///   week, because an active session cycles through the backups in a minute.
 /// - `state.corrupt.<timestamp>.json`: a state.json this build could not
@@ -49,8 +49,10 @@ enum Persistence {
     }
 
     /// Writes state.json only when its bytes change, so the 10 s heartbeat
-    /// doesn't cycle identical copies through the backups. `now` picks the
-    /// daily snapshot's date.
+    /// doesn't cycle identical copies through the backups. What it replaces
+    /// is kept: a decodable file sits in the backups (pushed first if another
+    /// build or a hand edit wrote it), one this build can't read or decode
+    /// goes to state.corrupt.*. `now` picks the daily snapshot's date.
     @discardableResult
     static func save(_ state: PersistedState, now: Date = Date()) -> Bool {
         let url = stateURL
@@ -61,8 +63,10 @@ enum Persistence {
             let data = try encoder.encode(state)
             let existing = try? Data(contentsOf: url)
             if existing != data {
-                guard prepareToReplace(url, existing: existing, with: data, now: now) else { return false }
-                try data.write(to: url, options: .atomic)
+                guard try replaceState(at: url, existing: existing, with: data, now: now) else { return false }
+                // Only after a successful write, so failing retries (disk
+                // full) can't cycle the history out.
+                pushBackup(data)
             }
             writeDailySnapshotIfNeeded(data, now: now)
             return true
@@ -72,47 +76,53 @@ enum Persistence {
         }
     }
 
-    /// A decodable state.json (or none yet) goes through the backups. One
-    /// this build can't read or decode is set aside instead and the backups
-    /// stay untouched, so it can never push a good backup out. False when it
-    /// couldn't be set aside: then it must not be replaced.
-    private static func prepareToReplace(_ url: URL, existing: Data?, with data: Data, now: Date) -> Bool {
-        guard let existing else {
-            if FileManager.default.fileExists(atPath: url.path) {
-                return setAsideUnusable(url, contents: nil, now: now)
+    /// False, with state.json untouched, when what it holds couldn't be kept.
+    private static func replaceState(at url: URL, existing: Data?, with data: Data, now: Date) throws -> Bool {
+        let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        if let existing {
+            let decodable = loadCache.lookup(path: url.path, contents: existing)?.decodedFromContents
+                ?? (decode(existing, name: url.lastPathComponent) != nil)
+            if decodable {
+                // backup.1 mirrors our last write; anything else is kept first.
+                let mirrored = existing == (try? Data(contentsOf: backupURL(1)))
+                if !mirrored, !pushBackup(existing) { return false }
+            } else if !setAsideUnusable(url, contents: existing, now: now) {
+                return false
             }
-            updateBackups(with: data, previous: nil)
+        } else if fm.fileExists(atPath: url.path, isDirectory: &isDirectory) {
+            // Can't be read, so can't be copied: rename it aside (no read
+            // access needed) once the new state is staged, so a failed write
+            // never leaves state.json missing.
+            guard !isDirectory.boolValue else {
+                NSLog("[Nirux Persistence] state.json is a directory — not replacing it")
+                return false
+            }
+            let staged = url.deletingLastPathComponent().appendingPathComponent("state.pending.json")
+            try data.write(to: staged, options: .atomic)
+            guard setAsideUnusable(url, contents: nil, now: now) else {
+                try? fm.removeItem(at: staged)
+                return false
+            }
+            try fm.moveItem(at: staged, to: url)
             return true
         }
-        let decodable = loadCache.lookup(path: url.path, contents: existing)?.decodedFromContents
-            ?? (decode(existing, name: url.lastPathComponent) != nil)
-        guard decodable else { return setAsideUnusable(url, contents: existing, now: now) }
-        updateBackups(with: data, previous: existing)
+        try data.write(to: url, options: .atomic)
         return true
     }
 
-    /// Keeps state.backup.1 equal to the state being written, so recovering
-    /// from it loses nothing, and 2…5 the distinct states before it.
-    /// `previous` (state.json as found) is pushed too when backup.1 doesn't
-    /// already hold it, e.g. after another build wrote it.
-    private static func updateBackups(with data: Data, previous: Data?) {
-        let newest = try? Data(contentsOf: backupURL(1))
-        // Already current: a retry after the state.json write failed.
-        guard newest != data else { return }
-        if let previous, previous != newest { pushBackup(previous) }
-        pushBackup(data)
-    }
-
-    /// Shift state.backup.N.json → N+1 and put `data` in 1. Staged first, so
-    /// a write that fails (disk full) leaves the chain as it was.
-    private static func pushBackup(_ data: Data) {
+    /// Shift state.backup.N.json → N+1 and put `data` in 1, so backup.1
+    /// mirrors the last write and 2…5 are the distinct states before it.
+    /// Staged first: a write that fails leaves the chain as it was.
+    @discardableResult
+    private static func pushBackup(_ data: Data) -> Bool {
         let fm = FileManager.default
         let staged = stateDirectory.appendingPathComponent("state.backup.pending.json")
         do {
             try data.write(to: staged, options: .atomic)
         } catch {
             NSLog("[Nirux Persistence] Failed to write backup: %@", error.localizedDescription)
-            return
+            return false
         }
         for index in stride(from: maxBackups - 1, through: 1, by: -1) {
             let src = backupURL(index)
@@ -123,6 +133,7 @@ enum Persistence {
         }
         try? fm.removeItem(at: backupURL(1))
         try? fm.moveItem(at: staged, to: backupURL(1))
+        return true
     }
 
     static func load() -> PersistedState? {

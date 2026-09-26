@@ -37,8 +37,10 @@ final class PersistenceBackupTests: XCTestCase {
         XCTAssertNil(contents("state.backup.2.json"))
 
         XCTAssertTrue(Persistence.save(state("two"), now: date(day: 1)))
+        let written = try fileNumber("state.json")
         XCTAssertTrue(Persistence.save(state("two"), now: date(day: 1)))
 
+        XCTAssertEqual(try fileNumber("state.json"), written, "identical save rewrote state.json")
         XCTAssertEqual(contents("state.backup.1.json"), contents("state.json"))
         XCTAssertEqual(contents("state.backup.2.json"), first)
         XCTAssertNil(contents("state.backup.3.json"))
@@ -55,13 +57,16 @@ final class PersistenceBackupTests: XCTestCase {
         XCTAssertNil(contents("state.backup.6.json"))
     }
 
-    func testRetryAfterAFailedWriteDoesNotRotateAgain() throws {
+    func testFailedSavesLeaveTheBackupsAlone() throws {
+        try XCTSkipIf(getuid() == 0, "root writes regardless of mode")
         XCTAssertTrue(Persistence.save(state("a"), now: date(day: 1)))
         XCTAssertTrue(Persistence.save(state("b"), now: date(day: 1)))
-        // As if the state.json write had failed after the backups moved on.
-        try write(try XCTUnwrap(contents("state.backup.2.json")), "state.json")
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path) }
 
-        XCTAssertTrue(Persistence.save(state("b"), now: date(day: 1)))
+        for attempt in 1...3 {
+            XCTAssertFalse(Persistence.save(state("c\(attempt)"), now: date(day: 1)))
+        }
 
         XCTAssertEqual(try title("state.json"), "b")
         XCTAssertEqual(try title("state.backup.1.json"), "b")
@@ -73,11 +78,12 @@ final class PersistenceBackupTests: XCTestCase {
         XCTAssertTrue(Persistence.save(state("ours"), now: date(day: 1)))
         try write(try encoded("theirs"), "state.json")
 
-        XCTAssertTrue(Persistence.save(state("next"), now: date(day: 1)))
+        // Our own state is unchanged: only theirs is new.
+        XCTAssertTrue(Persistence.save(state("ours"), now: date(day: 1)))
 
-        XCTAssertEqual(try title("state.backup.1.json"), "next")
+        XCTAssertEqual(try title("state.json"), "ours")
+        XCTAssertEqual(try title("state.backup.1.json"), "ours")
         XCTAssertEqual(try title("state.backup.2.json"), "theirs")
-        XCTAssertEqual(try title("state.backup.3.json"), "ours")
     }
 
     // MARK: - Daily snapshots
@@ -182,7 +188,7 @@ final class PersistenceBackupTests: XCTestCase {
 
     // MARK: - Unusable state.json
 
-    func testSaveSetsUndecodableStateAsideAndLeavesBackupsUntouched() throws {
+    func testSaveSetsUndecodableStateAsideAndKeepsEveryBackup() throws {
         try write(unreadable, "state.json")
         try write(encoded("backup 1"), "state.backup.1.json")
         try write(encoded("backup 2"), "state.backup.2.json")
@@ -193,15 +199,11 @@ final class PersistenceBackupTests: XCTestCase {
         XCTAssertTrue(Persistence.save(state("recovered"), now: date(day: 3, hour: 14, minute: 5, second: 9)))
 
         XCTAssertEqual(contents("state.corrupt.2026-03-03-140509.json"), unreadable)
-        XCTAssertEqual([contents("state.backup.1.json"), contents("state.backup.2.json")], backups)
-        XCTAssertNil(contents("state.backup.3.json"))
+        // The undecodable file takes no backup slot; the backups only shift.
+        XCTAssertEqual(try title("state.backup.1.json"), "recovered")
+        XCTAssertEqual([contents("state.backup.2.json"), contents("state.backup.3.json")], backups)
+        XCTAssertNil(contents("state.backup.4.json"))
         XCTAssertEqual(Persistence.load()?.workspaces.first?.title, "recovered")
-
-        // Once state.json decodes again, saves rotate as usual.
-        XCTAssertTrue(Persistence.save(state("next"), now: date(day: 3)))
-        XCTAssertEqual(try title("state.backup.1.json"), "next")
-        XCTAssertEqual(try title("state.backup.2.json"), "recovered")
-        XCTAssertEqual(try title("state.backup.3.json"), "backup 1")
     }
 
     func testIdenticalUndecodableStateIsSetAsideOnce() throws {
@@ -247,8 +249,20 @@ final class PersistenceBackupTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: asideURL.path)
         XCTAssertEqual(contents(asideURL.lastPathComponent), unreadable)
         XCTAssertEqual(try title("state.json"), "fresh")
-        XCTAssertEqual(try title("state.backup.1.json"), "backup 1")
-        XCTAssertNil(contents("state.backup.2.json"))
+        XCTAssertEqual(try title("state.backup.1.json"), "fresh")
+        XCTAssertEqual(try title("state.backup.2.json"), "backup 1")
+        XCTAssertNil(contents("state.pending.json"))
+    }
+
+    func testDirectoryNamedStateIsNeverReplaced() throws {
+        let stateDir = directory.appendingPathComponent("state.json")
+        try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+        try write(Data("keep".utf8), "state.json/inside")
+
+        XCTAssertFalse(Persistence.save(state("fresh"), now: date(day: 1)))
+
+        XCTAssertEqual(contents("state.json/inside"), Data("keep".utf8))
+        XCTAssertEqual(files(prefix: "state.corrupt."), [])
     }
 
     // MARK: - Helpers
@@ -282,6 +296,11 @@ final class PersistenceBackupTests: XCTestCase {
     private func title(_ name: String) throws -> String? {
         let data = try XCTUnwrap(contents(name), "\(name) missing")
         return try JSONDecoder().decode(PersistedState.self, from: data).workspaces.first?.title
+    }
+
+    private func fileNumber(_ name: String) throws -> Int? {
+        let path = directory.appendingPathComponent(name).path
+        return try FileManager.default.attributesOfItem(atPath: path)[.systemFileNumber] as? Int
     }
 
     private func files(prefix: String) -> [String] {
