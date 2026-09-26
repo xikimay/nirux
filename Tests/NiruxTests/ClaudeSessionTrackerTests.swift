@@ -127,6 +127,79 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         XCTAssertEqual(restore(), .resume("parent"))
     }
 
+    func testShimChildBindsThenNestedJobMembersAreRejected() {
+        let shim = ForegroundProcess(
+            instance: ProcessInstance(pid: 720, startedAt: 72),
+            name: "claude",
+            arguments: ["claude"]
+        )
+        let child = ProcessInstance(pid: 721, startedAt: 73)
+        let mcpClaude = ProcessInstance(pid: 723, startedAt: 74)
+        _ = admit(.sessionStart, "session", from: child, inForegroundJob: true, asChild: true, foreground: shim)
+
+        XCTAssertEqual(admit(.stop, "mcp", from: mcpClaude, inForegroundJob: true, foreground: shim), .rejected)
+        XCTAssertEqual(tracker.restore(for: shim), .resume("session"))
+    }
+
+    func testANewForegroundLetsItsChildBindAgain() {
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
+        let shim = ForegroundProcess(
+            instance: ProcessInstance(pid: 730, startedAt: 90),
+            name: "claude",
+            arguments: ["claude"]
+        )
+        let child = ProcessInstance(pid: 731, startedAt: 91)
+
+        XCTAssertEqual(
+            admit(.sessionStart, "next", from: child, inForegroundJob: true, asChild: true, foreground: shim),
+            .restoreChanged
+        )
+        XCTAssertEqual(tracker.restore(for: shim), .resume("next"))
+    }
+
+    func testEmitterPlacement() {
+        // zsh 10 → claude 20 (foreground group 20) → child 21 → grandchild
+        // 22; the Bash tool's detached group 30 runs a nested claude 31.
+        let snapshot = ProcessSnapshot(entries: [
+            .init(pid: 10, parentPID: 1, processGroupID: 10, terminalForegroundProcessGroupID: 20,
+                  name: "zsh", startedAt: 10, arguments: ["zsh"]),
+            .init(pid: 20, parentPID: 10, processGroupID: 20, terminalForegroundProcessGroupID: 20,
+                  name: "claude", startedAt: 20, arguments: ["claude"]),
+            .init(pid: 21, parentPID: 20, processGroupID: 20, terminalForegroundProcessGroupID: 20,
+                  name: "claude", startedAt: 21, arguments: ["claude"]),
+            .init(pid: 22, parentPID: 21, processGroupID: 20, terminalForegroundProcessGroupID: 20,
+                  name: "node", startedAt: 22, arguments: ["node", "server.js"]),
+            .init(pid: 30, parentPID: 20, processGroupID: 30, terminalForegroundProcessGroupID: 0,
+                  name: "zsh", startedAt: 30, arguments: ["/bin/zsh", "-c", "claude -p hi"]),
+            .init(pid: 31, parentPID: 30, processGroupID: 30, terminalForegroundProcessGroupID: 0,
+                  name: "claude", startedAt: 31, arguments: ["claude", "-p", "hi"])
+        ])
+        let foreground = snapshot.foregroundProcess(shellPID: 10)
+        func place(_ pid: pid_t?, startedAt: TimeInterval? = nil) -> ClaudeSessionTracker.Emitter {
+            ClaudeSessionTracker.Emitter.placing(
+                pid.map { ProcessInstance(pid: $0, startedAt: startedAt ?? TimeInterval($0)) },
+                foreground: foreground,
+                shellPID: 10,
+                snapshot: snapshot
+            )
+        }
+
+        XCTAssertEqual(foreground?.instance.pid, 20)
+        XCTAssertEqual(place(nil), .unknown)
+        XCTAssertEqual(place(20), .foregroundProcess)
+        XCTAssertEqual(place(21), .foregroundChild)
+        XCTAssertEqual(place(22), .foregroundJob)
+        XCTAssertEqual(place(31), .elsewhere)
+        XCTAssertEqual(place(21, startedAt: 5), .elsewhere, "exited, pid reused")
+    }
+
+    func testCodexHooksUnderAnotherAgentAreNested() {
+        XCTAssertTrue(AgentHookCenter.isNestedCodexHook(foregroundName: "claude"))
+        XCTAssertFalse(AgentHookCenter.isNestedCodexHook(foregroundName: "codex"))
+        XCTAssertFalse(AgentHookCenter.isNestedCodexHook(foregroundName: "zsh"))
+        XCTAssertFalse(AgentHookCenter.isNestedCodexHook(foregroundName: nil))
+    }
+
     func testSuspendingClaudeKeepsItsBinding() {
         _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
         let shell = ForegroundProcess(

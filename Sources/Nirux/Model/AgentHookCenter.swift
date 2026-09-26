@@ -189,10 +189,7 @@ final class AgentHookCenter {
                     claudeRestoreChanged = true
                 }
             case .codex:
-                // A `codex exec` launched by the column's Claude agent.
-                if let foregroundProcess,
-                   AgentStatusMachine.isRecognizedAgentProcess(foregroundProcess.name),
-                   foregroundProcess.name != "codex" { return nil }
+                if Self.isNestedCodexHook(foregroundName: foregroundProcess?.name) { return nil }
             }
         }
         onEventReceived?(event, resolution)
@@ -205,6 +202,13 @@ final class AgentHookCenter {
         return resolution.map {
             AppliedEvent(event: event, resolution: $0, claudeRestoreChanged: claudeRestoreChanged)
         }
+    }
+
+    /// A Codex hook while another agent owns the terminal came from a
+    /// `codex exec` that agent launched.
+    nonisolated static func isNestedCodexHook(foregroundName: String?) -> Bool {
+        guard let foregroundName, AgentStatusMachine.isRecognizedAgentProcess(foregroundName) else { return false }
+        return foregroundName != "codex"
     }
 
     func stop() {

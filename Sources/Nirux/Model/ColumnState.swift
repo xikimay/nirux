@@ -49,8 +49,9 @@ final class ColumnState {
 
     private var codexSessionTracker = CodexSessionTracker()
     private var claudeSessionTracker = ClaudeSessionTracker()
-    /// State this agent column was restored from — saved as-is until its
-    /// shell starts and the running agent can be inspected.
+    /// State this agent column was restored from — saved as-is while its
+    /// launch command hasn't started the agent yet (see
+    /// `NiruxShellView.isLaunchingRestoredAgent`), then dropped.
     var restoredColumn: PersistedColumn?
 
     /// Terminal title from OSC 0/2 (agent context, vim filename, etc.)
@@ -354,19 +355,12 @@ final class ColumnState {
         foregroundProcess: ForegroundProcess?,
         snapshot: ProcessSnapshot
     ) -> ClaudeSessionTracker.Admission {
-        let emitter: ClaudeSessionTracker.Emitter
-        if let process = event.emitterProcess {
-            if process == foregroundProcess?.instance {
-                emitter = .foregroundProcess
-            } else if pty?.isProcessInForegroundJob(process, snapshot: snapshot) == true {
-                let isChild = foregroundProcess.map { snapshot.isProcess(process, childOf: $0.instance.pid) } ?? false
-                emitter = isChild ? .foregroundChild : .foregroundJob
-            } else {
-                emitter = .elsewhere
-            }
-        } else {
-            emitter = .unknown
-        }
+        let emitter = ClaudeSessionTracker.Emitter.placing(
+            event.emitterProcess,
+            foreground: foregroundProcess,
+            shellPID: pty?.shellPID ?? 0,
+            snapshot: snapshot
+        )
         return claudeSessionTracker.admit(
             event.name,
             sessionID: event.sessionID,

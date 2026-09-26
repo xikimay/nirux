@@ -223,12 +223,19 @@ extension NiruxShellView {
         snapshot: ProcessSnapshot
     ) -> PersistedColumn {
         let foregroundProcess = col.pty?.foregroundProcess(snapshot: snapshot)
-        // A restored agent column whose shell hasn't started yet (a save
-        // while queued hooks replay at launch) has nothing running to
-        // inspect: keep what it was restored from, IDs included.
-        if foregroundProcess == nil, col.pty?.hasExited == false, var restored = col.restoredColumn {
-            restored.widthPreset = Double(col.widthFraction)
-            return restored
+        if var restored = col.restoredColumn {
+            // Nothing to inspect yet (a save while queued hooks replay at
+            // launch, or while rc files load): keep the restored state.
+            if Self.isLaunchingRestoredAgent(
+                foreground: foregroundProcess,
+                shellPID: col.pty?.shellPID ?? 0,
+                hasExited: col.pty?.hasExited ?? true
+            ) {
+                restored.widthPreset = Double(col.widthFraction)
+                restored.agentUUID = col.agentUUID
+                return restored
+            }
+            col.restoredColumn = nil
         }
         let kind: ColumnKind
         let webURL: String?
@@ -277,6 +284,19 @@ extension NiruxShellView {
             claudeSessionIsUnprompted: claudeRestore == .fresh ? true : nil,
             agentUUID: col.agentUUID
         )
+    }
+
+    /// A restored agent column is still launching while its shell hasn't
+    /// started, or is itself still running the `-c` launch command (the
+    /// agent's exit `exec`s a plain interactive shell, dropping `-c`).
+    static func isLaunchingRestoredAgent(
+        foreground: ForegroundProcess?,
+        shellPID: pid_t,
+        hasExited: Bool
+    ) -> Bool {
+        guard !hasExited else { return false }
+        guard let foreground else { return true }
+        return foreground.instance.pid == shellPID && foreground.hasFlag("-c")
     }
 
     static func persistedWorkspaceCwd(for workspace: WorkspaceState) -> String {

@@ -142,6 +142,21 @@ struct ClaudeSessionTracker {
         /// Outside the foreground job: the Bash tool's detached process
         /// groups, or a process that already exited.
         case elsewhere
+
+        static func placing(
+            _ process: ProcessInstance?,
+            foreground: ForegroundProcess?,
+            shellPID: pid_t,
+            snapshot: ProcessSnapshot
+        ) -> Emitter {
+            guard let process else { return .unknown }
+            if process == foreground?.instance { return .foregroundProcess }
+            guard shellPID > 0, snapshot.isProcess(process, inForegroundProcessGroupOf: shellPID) else {
+                return .elsewhere
+            }
+            let isChild = foreground.map { snapshot.isProcess(process, childOf: $0.instance.pid) } ?? false
+            return isChild ? .foregroundChild : .foregroundJob
+        }
     }
 
     enum Admission: Equatable {
@@ -254,6 +269,9 @@ struct ClaudeSessionTracker {
             hookFiringForeground = foreground
             return nil
         case .foregroundChild where hookFiringForeground != foreground:
+            // A child firing before the foreground `claude`'s own first hook
+            // (a `claude mcp serve` racing its SessionStart) may bind
+            // briefly; the parent's SessionStart rebinds.
             return nil
         case .unknown:
             // Without emitter identity nothing is provable: route, never bind.

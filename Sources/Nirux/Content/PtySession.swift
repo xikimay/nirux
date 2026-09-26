@@ -256,6 +256,8 @@ final class PtySession: @unchecked Sendable {
     /// with another `start(...)` call — the terminal surface (and its
     /// scrollback) survives.
     var hasExited: Bool { state.hasExited }
+    /// The column's shell; 0 before it starts and after it exits.
+    var shellPID: pid_t { state.childPid }
 
     /// Last applied grid size — the right starting size for a restart.
     var lastSize: (cols: Int, rows: Int) { (state.lastCols, state.lastRows) }
