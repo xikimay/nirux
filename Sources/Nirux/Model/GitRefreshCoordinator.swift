@@ -218,7 +218,10 @@ final class GitRefreshCoordinator {
             return false
         }
         GitDetect.contextAsync(at: workingDirectory) { [weak workspace] result in
-            workspace?.applyGitContextObservation(result, observation: observation)
+            // A superseded read's outcome says nothing about the current one.
+            guard let workspace,
+                  workspace.applyGitContextObservation(result, observation: observation) != .stale
+            else { return }
             completion(result)
         }
         return true
@@ -264,7 +267,15 @@ final class GitRefreshCoordinator {
             return
         }
         if let root, root == entry.watcherFailedRoot,
-           let retryAfter = entry.watcherRetryAfter, clock() < retryAfter { return }
+           let retryAfter = entry.watcherRetryAfter, clock() < retryAfter {
+            // Back to the failed repository during its backoff: drop any
+            // watcher or pending setup for the repository just left.
+            entry.watcher?.stop()
+            entry.watcher = nil
+            entry.watchedRoot = nil
+            entry.watcherGeneration &+= 1
+            return
+        }
         entry.watcher?.stop()
         entry.watcher = nil
         entry.watchedRoot = root
