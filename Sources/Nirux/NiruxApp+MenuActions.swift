@@ -127,6 +127,11 @@ extension NiruxApp {
         )
         checkUpdate.target = self
         appMenu.addItem(checkUpdate)
+        let autoInstall = NSMenuItem(
+            title: "Install Updates Automatically", action: #selector(toggleAutomaticUpdates(_:)), keyEquivalent: ""
+        )
+        autoInstall.target = self
+        appMenu.addItem(autoInstall)
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Settings...", action: #selector(showSettings(_:)), keyEquivalent: ",")
         appMenu.addItem(NSMenuItem.separator())

@@ -14,6 +14,9 @@ permissions:
 
 jobs:
   build:
+    # Publishing ships to every Nirux install through Sparkle, so only main may
+    # publish, even from a manual dispatch.
+    if: github.ref == 'refs/heads/main'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v5
@@ -82,9 +85,16 @@ jobs:
         run: |
           VERSION="nightly-$(date +%Y.%m.%d)"
           BUILD_NUMBER=$(date +%Y%m%d%H%M)
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
-          echo "Building $VERSION (build $BUILD_NUMBER)"
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
+          # One immutable release per built commit, kept for rollbacks.
+          RELEASE_TAG="$VERSION-$SHORT_SHA"
+          {
+            echo "VERSION=$VERSION"
+            echo "BUILD_NUMBER=$BUILD_NUMBER"
+            echo "SHORT_SHA=$SHORT_SHA"
+            echo "RELEASE_TAG=$RELEASE_TAG"
+          } >> "$GITHUB_ENV"
+          echo "Building $VERSION (build $BUILD_NUMBER, release $RELEASE_TAG)"
 
       - name: Run tests
         run: swift test
@@ -134,47 +144,104 @@ jobs:
           echo "Signature: $SIGNATURE"
           echo "Length: $LENGTH"
 
-          ./scripts/generate-appcast.sh "$VERSION" "$BUILD_NUMBER" "$SIGNATURE" "$LENGTH"
+          ./scripts/generate-appcast.sh "$VERSION" "$BUILD_NUMBER" "$SIGNATURE" "$LENGTH" "$RELEASE_TAG"
 
-      - name: Update nightly release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Write release notes
         run: |
-          # Capture the previous nightly's commit BEFORE deleting the tag —
+          # Capture the previous nightly's commit BEFORE the rolling tag moves —
           # the changelog diffs against it.
-          PREV_SHA=$(git rev-parse nightly^{commit} 2>/dev/null || echo "")
-
-          # Delete existing nightly release if it exists
-          gh release delete nightly --yes 2>/dev/null || true
-          git tag -d nightly 2>/dev/null || true
-          git push origin :refs/tags/nightly 2>/dev/null || true
-
-          # Build release notes from the commits since the previous nightly
+          PREV_SHA=$(git rev-parse -q --verify 'nightly^{commit}' || echo "")
           if [ -n "$PREV_SHA" ]; then
             RANGE="$PREV_SHA..HEAD"
           else
             RANGE="HEAD~20..HEAD"
           fi
-          CHANGELOG=$(git log --pretty=format:'- %s (%h)' --no-merges $RANGE || echo "- maintenance")
+          CHANGELOG=$(git log --pretty=format:'- %s (%h)' --no-merges "$RANGE" || echo "- maintenance")
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="- maintenance"
+          fi
 
-          # Create new nightly release
-          gh release create nightly \
-            --title "Nightly ($VERSION)" \
-            --notes "Automated nightly build from main branch.
+          NOTES_FILE="$RUNNER_TEMP/nightly-notes.md"
+          echo "NOTES_FILE=$NOTES_FILE" >> "$GITHUB_ENV"
+          cat > "$NOTES_FILE" <<EOF
+          Automated nightly build from main branch.
 
           **Version:** $VERSION
           **Build:** $BUILD_NUMBER
-          **Commit:** $(git rev-parse --short HEAD)
+          **Commit:** $SHORT_SHA
+          **Release:** [$RELEASE_TAG](https://github.com/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG)
 
           ## Changes
           $CHANGELOG
 
           This build is Developer ID signed, notarized by Apple, and signed for Sparkle updates.
 
-          Download \`Nirux.app.zip\`, unzip, and move \`Nirux.app\` to /Applications." \
+          Download \`Nirux.app.zip\`, unzip, and move \`Nirux.app\` to /Applications.
+          Earlier builds stay available as dated \`nightly-*\` releases; see docs/release-signing.md to roll back.
+          EOF
+
+      - name: Publish dated nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Published before the rolling release: the rolling appcast points at
+          # this release's zip. A re-run of the same commit replaces its own
+          # dated release and never touches another one.
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release delete "$RELEASE_TAG" --cleanup-tag --yes
+          fi
+
+          gh release create "$RELEASE_TAG" \
+            --target "$GITHUB_SHA" \
+            --title "$RELEASE_TAG (build $BUILD_NUMBER)" \
+            --notes-file "$NOTES_FILE" \
             --prerelease \
             Nirux.app.zip \
             appcast.xml
+
+      - name: Update rolling nightly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # `nightly` is what SUFeedURL and the README point at. It always holds
+          # the newest build, alongside that build's dated release.
+          gh release delete nightly --yes 2>/dev/null || true
+          git tag -d nightly 2>/dev/null || true
+          git push origin :refs/tags/nightly 2>/dev/null || true
+
+          gh release create nightly \
+            --target "$GITHUB_SHA" \
+            --title "Nightly ($VERSION)" \
+            --notes-file "$NOTES_FILE" \
+            --prerelease \
+            Nirux.app.zip \
+            appcast.xml
+
+      - name: Prune old dated nightly releases
+        # The new build is already published; a failed cleanup must not turn
+        # the run red, only leave more dated releases behind.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP_DATED_RELEASES: 20
+        run: |
+          set -o pipefail
+          # Only tags this workflow creates match; `nightly` itself never does.
+          # Sort by publish time: a release's createdAt is its commit's date.
+          gh release list --limit 200 --json tagName,publishedAt \
+            | jq -r --argjson keep "$KEEP_DATED_RELEASES" '
+                [.[] | select(.tagName | test("^nightly-[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}-[0-9a-f]{7,40}$"))]
+                | sort_by(.publishedAt) | reverse | .[$keep:] | .[].tagName' \
+            > "$RUNNER_TEMP/prune-tags.txt"
+
+          while read -r tag; do
+            if [ "$tag" = "$RELEASE_TAG" ]; then
+              continue
+            fi
+            echo "Deleting $tag"
+            gh release delete "$tag" --cleanup-tag --yes \
+              || echo "::warning::Could not delete old nightly release $tag"
+          done < "$RUNNER_TEMP/prune-tags.txt"
 
       - name: Clean up signing keychain
         if: always()

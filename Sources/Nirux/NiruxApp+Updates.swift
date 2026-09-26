@@ -51,7 +51,18 @@ extension NiruxApp {
         if menuItem.action == #selector(manualCheckForUpdates(_:)) {
             return updaterReady
         }
+        if menuItem.action == #selector(toggleAutomaticUpdates(_:)) {
+            return AutomaticUpdatesMenu.validate(menuItem, setting: automaticUpdatesSetting)
+        }
         return true
+    }
+
+    @objc func toggleAutomaticUpdates(_ sender: Any?) {
+        AutomaticUpdatesMenu.toggle(automaticUpdatesSetting)
+    }
+
+    private var automaticUpdatesSetting: AutomaticUpdatesSetting? {
+        updaterReady ? updaterController?.updater : nil
     }
 
     @objc func manualCheckForUpdates(_ sender: Any?) {
@@ -72,5 +83,39 @@ extension NiruxApp {
             alert.alertStyle = .warning
             alert.runModal()
         }
+    }
+}
+
+// MARK: - Install Updates Automatically
+
+/// The slice of Sparkle's updater behind the "Install Updates Automatically"
+/// menu item, so the toggle is testable without a running `SPUUpdater`.
+@MainActor
+protocol AutomaticUpdatesSetting: AnyObject {
+    var automaticallyDownloadsUpdates: Bool { get set }
+    var allowsAutomaticUpdates: Bool { get }
+}
+
+extension SPUUpdater: AutomaticUpdatesSetting {}
+
+/// Unchecking the item keeps a manually installed (rolled-back) build from
+/// being replaced by the next nightly: Sparkle then asks before installing.
+/// Sparkle persists the choice in user defaults (`SUAutomaticallyUpdate`),
+/// which take precedence over the Info.plist default.
+@MainActor
+enum AutomaticUpdatesMenu {
+    /// Mirrors the setting as the item's checkmark; returns whether it is enabled.
+    static func validate(_ menuItem: NSMenuItem, setting: AutomaticUpdatesSetting?) -> Bool {
+        guard let setting else {
+            menuItem.state = .off
+            return false
+        }
+        menuItem.state = setting.automaticallyDownloadsUpdates ? .on : .off
+        return setting.allowsAutomaticUpdates
+    }
+
+    static func toggle(_ setting: AutomaticUpdatesSetting?) {
+        guard let setting, setting.allowsAutomaticUpdates else { return }
+        setting.automaticallyDownloadsUpdates.toggle()
     }
 }
