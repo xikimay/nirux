@@ -98,7 +98,7 @@ struct CodexSessionTracker {
         foregroundProcess: ForegroundProcess?
     ) -> Bool {
         guard let sessionID, !sessionID.isEmpty,
-              let foregroundProcess, foregroundProcess.name == "codex",
+              let foregroundProcess, foregroundProcess.name == session.processName,
               emitterBelongsToForegroundJob else {
             return false
         }
@@ -115,15 +115,17 @@ struct CodexSessionTracker {
     }
 }
 
-/// Which Claude conversation a column's top-level `claude` runs, and which
+/// Which Claude conversation a column's foreground `claude` runs, and which
 /// hook events belong to it.
 ///
 /// Every process started from a column inherits its NIRUX_AGENT_UUID, so a
 /// `claude -p` launched by the column's agent (Bash tool, scripts, review
 /// pipelines) reports hooks under the same UUID with its own session_id.
-/// Hooks run as children of the `claude` that fired them; the receiver
-/// records that nearest `claude` ancestor as `emitterProcess`, and only the
-/// column's foreground `claude` may drive the column or bind its session.
+/// The receiver records the process that fired each hook (see
+/// `ProcessInstance.hookEmitter`); only the column's foreground `claude`
+/// may bind its session, and nothing outside the terminal's foreground job
+/// — the Bash tool runs commands in detached process groups — may drive
+/// the column.
 struct ClaudeSessionTracker {
     enum Admission: Equatable {
         /// Another Claude process under this column (a nested `claude -p`,
@@ -136,51 +138,92 @@ struct ClaudeSessionTracker {
         case adopted
     }
 
+    /// How a restore brings the column's Claude back.
+    enum Restore: Equatable {
+        case resume(String)
+        /// The bound session has no transcript yet (never prompted, or just
+        /// cleared): nothing to resume, and `--resume` would fail.
+        case fresh
+
+        var sessionID: String? {
+            if case .resume(let sessionID) = self { return sessionID }
+            return nil
+        }
+    }
+
     private var session = AgentSessionBinding(processName: "claude", resumeArgument: "--resume")
+    /// Transcript the hooks reported for the bound session. Claude writes
+    /// it on the first message, not at SessionStart.
+    private var transcript: (sessionID: String, path: String)?
 
     mutating func prepareResume(sessionID: String) {
         session.prepareResume(sessionID: sessionID)
     }
 
+    // swiftlint:disable:next function_parameter_count
     mutating func admit(
         _ name: AgentHookEvent.Name,
         sessionID: String?,
+        transcriptPath: String?,
         emitter: ProcessInstance?,
+        emitterInForegroundJob: Bool,
         foregroundProcess: ForegroundProcess?
     ) -> Admission {
-        // No `claude` in the foreground: a nested session cannot outlive its
-        // parent, so this is the column's own finished run (a quick
-        // top-level `claude -p`) or a replay queued while Nirux was closed.
-        // Route it as before, but there is no live process to bind.
-        guard let foregroundProcess, foregroundProcess.name == "claude" else { return .accepted }
+        // No agent in the foreground: this is the column's own finished run
+        // (a quick top-level `claude -p`) or a replay queued while Nirux was
+        // closed. Route it as before; there is no live process to bind.
+        guard let foregroundProcess,
+              AgentStatusMachine.isRecognizedAgentProcess(foregroundProcess.name) else { return .accepted }
+        // A Claude hook under a Codex column comes from a `claude` Codex ran.
+        guard foregroundProcess.name == "claude" else { return .rejected }
         let sessionID = sessionID.flatMap { $0.isEmpty ? nil : $0 }
         let boundSessionID = session.sessionID(boundTo: foregroundProcess.instance)
 
-        guard let emitter else {
-            // Queued by a receiver predating emitter identity: ownership is
-            // unprovable, so only drop what contradicts a verified binding.
+        guard emitter == foregroundProcess.instance else {
+            // Outside the foreground job: nested. A legacy queue entry (no
+            // emitter) or another member of the job (a launcher's child, an
+            // MCP server's `claude`) can't prove ownership, so it is routed
+            // unless it contradicts the verified binding — and never binds.
+            guard emitter == nil || emitterInForegroundJob else { return .rejected }
             if let boundSessionID, let sessionID, sessionID != boundSessionID { return .rejected }
             return .accepted
         }
-        guard emitter == foregroundProcess.instance else { return .rejected }
-        guard let sessionID, sessionID != boundSessionID else { return .accepted }
+        guard let sessionID else { return .accepted }
+        if sessionID == boundSessionID {
+            if let transcriptPath { transcript = (sessionID, transcriptPath) }
+            return .accepted
+        }
         // The foreground `claude` reports another conversation. /clear,
-        // /resume and /branch switch through SessionStart (and a hookless
-        // start is recovered by its first prompt or turn end). A SessionEnd
-        // is the straggler of the session it left, and PreToolUse may come
-        // from an in-process subagent — neither may rebind.
+        // /resume and /branch switch through SessionStart. Turn events only
+        // adopt a column nothing is bound to yet: once bound, a different ID
+        // there may be an in-process teammate's. A SessionEnd is the
+        // straggler of the session just left, and PreToolUse may come from a
+        // subagent — neither binds.
         switch name {
+        case .sessionStart:
+            break
+        case .userPromptSubmit, .notification, .stop:
+            guard boundSessionID == nil else { return .accepted }
         case .sessionEnd, .preToolUse, .turnComplete:
             return .accepted
-        case .sessionStart, .userPromptSubmit, .notification, .stop:
-            return session.bind(sessionID: sessionID, process: foregroundProcess.instance)
-                ? .adopted
-                : .accepted
         }
+        let changed = session.bind(sessionID: sessionID, process: foregroundProcess.instance)
+        transcript = transcriptPath.map { (sessionID, $0) }
+        return changed ? .adopted : .accepted
     }
 
-    mutating func sessionID(for foregroundProcess: ForegroundProcess?) -> String? {
-        session.sessionID(for: foregroundProcess)
+    /// Nil when no session is bound to this foreground process — restore
+    /// then asks through the picker. An unknown transcript (a restored
+    /// session not yet re-announced by its hooks) counts as present.
+    mutating func restore(
+        for foregroundProcess: ForegroundProcess?,
+        transcriptExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> Restore? {
+        guard let sessionID = session.sessionID(for: foregroundProcess) else { return nil }
+        if let transcript, transcript.sessionID == sessionID, !transcriptExists(transcript.path) {
+            return .fresh
+        }
+        return .resume(sessionID)
     }
 
     @discardableResult
@@ -190,19 +233,31 @@ struct ClaudeSessionTracker {
 }
 
 extension ProcessInstance {
-    /// Nearest ancestor of `pid` (inclusive) whose executable is `name`,
-    /// named the way the foreground-process scan names it. Claude runs
-    /// each hook under a detached `sh -c` child, so the receiver's parent
-    /// is a transient shell and the `claude` that fired the hook sits
-    /// above it.
-    static func nearestAncestor(named name: String, from pid: pid_t, maxDepth: Int = 8) -> ProcessInstance? {
+    /// The agent process that fired the hook this receiver serves. Codex
+    /// runs `notify` directly. Claude runs each hook under a detached
+    /// `sh -c`, so its emitter is the first ancestor that is not a shell —
+    /// found by position rather than by name, so a nested Claude whose argv
+    /// doesn't read `claude` (an Agent SDK `node cli.js`) is still told
+    /// apart from the column's own.
+    static func hookEmitter(for kind: AgentHookEvent.Kind) -> ProcessInstance? {
+        switch kind {
+        case .codex: return running(pid: getppid())
+        case .claude: return firstNonShellAncestor(from: getppid())
+        }
+    }
+
+    private static let shellNames: Set<String> = ["sh", "bash", "zsh", "dash", "ksh", "mksh", "fish", "tcsh", "csh"]
+
+    /// `pid` itself when it is not a shell. Nil once the walk reaches
+    /// launchd — an orphaned hook shell whose emitter already exited.
+    static func firstNonShellAncestor(from pid: pid_t, maxDepth: Int = 8) -> ProcessInstance? {
         var current = pid
         for _ in 0..<maxDepth {
             guard current > 1, let entry = kernelEntry(pid: current) else { return nil }
-            let arguments = ProcessSnapshot.arguments(of: current, maxArgs: 2)
-            if (ProcessSnapshot.execName(from: arguments) ?? entry.name) == name {
-                return entry.instance
-            }
+            let name = ProcessSnapshot.execName(from: ProcessSnapshot.arguments(of: current, maxArgs: 2))
+                ?? entry.name
+            let isShell = shellNames.contains(name.hasPrefix("-") ? String(name.dropFirst()) : name)
+            if !isShell { return entry.instance }
             current = entry.parentPID
         }
         return nil

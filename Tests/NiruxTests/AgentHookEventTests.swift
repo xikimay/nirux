@@ -126,9 +126,21 @@ final class AgentHookEventTests: XCTestCase {
         XCTAssertNil(AgentHookEvent(kind: .claude, payload: stop, env: env, now: 1)?.source)
     }
 
+    func testClaudeTranscriptPathCaptured() {
+        let payload: [String: Any] = [
+            "hook_event_name": "Stop", "session_id": "s",
+            "transcript_path": "/Users/me/.claude/projects/-tmp-p/s.jsonl"
+        ]
+        XCTAssertEqual(
+            AgentHookEvent(kind: .claude, payload: payload, env: env, now: 1)?.transcriptPath,
+            "/Users/me/.claude/projects/-tmp-p/s.jsonl"
+        )
+    }
+
     func testClaudeEmitterAndSourceRoundTripThroughJSONLine() throws {
         let payload: [String: Any] = [
-            "hook_event_name": "SessionStart", "session_id": "s1", "source": "resume"
+            "hook_event_name": "SessionStart", "session_id": "s1", "source": "resume",
+            "transcript_path": "/t/s1.jsonl"
         ]
         let event = try XCTUnwrap(AgentHookEvent(
             kind: .claude,
@@ -150,6 +162,7 @@ final class AgentHookEventTests: XCTestCase {
 
         XCTAssertEqual(decoded.sessionID, "s")
         XCTAssertNil(decoded.source)
+        XCTAssertNil(decoded.transcriptPath)
         XCTAssertNil(decoded.emitterProcess)
     }
 

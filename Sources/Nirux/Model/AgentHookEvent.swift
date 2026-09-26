@@ -28,10 +28,10 @@ struct AgentHookEvent: Codable, Equatable {
     let workspaceID: String?
     /// Claude session_id / Codex thread-id.
     let sessionID: String?
-    /// Agent process that fired the hook: the Codex receiver's parent, or
-    /// the nearest `claude` above the Claude receiver. Its identity proves
-    /// the event comes from the column's foreground agent rather than a
-    /// nested one sharing its NIRUX_AGENT_UUID. Legacy queue entries omit it.
+    /// Agent process that fired the hook (`ProcessInstance.hookEmitter`).
+    /// Its identity proves the event comes from the column's foreground
+    /// agent rather than a nested one sharing its NIRUX_AGENT_UUID. Legacy
+    /// queue entries omit it.
     let emitterProcess: ProcessInstance?
     let cwd: String?
     /// Tool name (PreToolUse), notification message (Notification), or final
@@ -39,6 +39,9 @@ struct AgentHookEvent: Codable, Equatable {
     let detail: String?
     /// Claude SessionStart `source`: startup, resume, clear, compact, fork.
     let source: String?
+    /// Claude `transcript_path` — written on the session's first message,
+    /// so its absence means there is no conversation to resume.
+    let transcriptPath: String?
     /// Receiver-side timestamp (epoch seconds) — the emitter's clock and
     /// timezone are irrelevant.
     let timestamp: TimeInterval
@@ -74,6 +77,7 @@ struct AgentHookEvent: Codable, Equatable {
             sessionID = payload["session_id"] as? String
             cwd = payload["cwd"] as? String
             source = name == .sessionStart ? payload["source"] as? String : nil
+            transcriptPath = payload["transcript_path"] as? String
             if name == .preToolUse {
                 detail = payload["tool_name"] as? String
             } else if name == .notification {
@@ -89,6 +93,7 @@ struct AgentHookEvent: Codable, Equatable {
             sessionID = payload["thread-id"] as? String
             cwd = payload["cwd"] as? String
             source = nil
+            transcriptPath = nil
             let message = payload["last-assistant-message"] as? String
             detail = message.map { String($0.prefix(500)) }
         }
@@ -118,13 +123,7 @@ enum AgentHookCLI {
 
         let env = ProcessInfo.processInfo.environment
         guard isFromNiruxTerminal(env: env) else { return 0 }
-        let emitterProcess: ProcessInstance?
-        switch kind {
-        case .codex:
-            emitterProcess = ProcessInstance.running(pid: getppid())
-        case .claude:
-            emitterProcess = ProcessInstance.nearestAncestor(named: "claude", from: getppid())
-        }
+        let emitterProcess = ProcessInstance.hookEmitter(for: kind)
         guard let event = AgentHookEvent(
             kind: kind,
             payload: raw,

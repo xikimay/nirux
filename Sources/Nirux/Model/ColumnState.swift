@@ -184,7 +184,7 @@ final class ColumnState {
         self.init(cwd: cwd, shellArgs: ["-l"], environment: environment)
     }
 
-    /// Init for a terminal that runs a command immediately (e.g. claude --continue).
+    /// Init for a terminal that runs a command immediately (e.g. claude --resume <id>).
     /// When the command exits, drops into an interactive shell.
     convenience init(cwd: String, command: String, environment: [String: String] = [:]) {
         // Match a normal terminal launch: interactive + login shell. This
@@ -350,16 +350,21 @@ final class ColumnState {
         _ event: AgentHookEvent,
         snapshot: ProcessSnapshot
     ) -> ClaudeSessionTracker.Admission {
-        claudeSessionTracker.admit(
+        let emitterInForegroundJob = event.emitterProcess.map {
+            pty?.isProcessInForegroundJob($0, snapshot: snapshot) ?? false
+        } ?? false
+        return claudeSessionTracker.admit(
             event.name,
             sessionID: event.sessionID,
+            transcriptPath: event.transcriptPath,
             emitter: event.emitterProcess,
+            emitterInForegroundJob: emitterInForegroundJob,
             foregroundProcess: pty?.foregroundProcess(snapshot: snapshot)
         )
     }
 
-    func persistedClaudeSessionID(foregroundProcess: ForegroundProcess?) -> String? {
-        claudeSessionTracker.sessionID(for: foregroundProcess)
+    func persistedClaudeRestore(foregroundProcess: ForegroundProcess?) -> ClaudeSessionTracker.Restore? {
+        claudeSessionTracker.restore(for: foregroundProcess)
     }
 
     /// Drop Codex/Claude session bindings whose process was replaced, so

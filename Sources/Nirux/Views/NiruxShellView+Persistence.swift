@@ -89,8 +89,9 @@ extension NiruxShellView {
             workspace.addColumn(webViewURL: persistedColumn.webViewURL ?? "about:blank")
         case .claudeCode:
             let mode = persistedColumn.claudeLaunchMode ?? .default
-            let resumeTarget = Self.agentRestoreTarget(
+            let resumeTarget = Self.claudeRestoreTarget(
                 sessionID: persistedColumn.claudeSessionID,
+                sessionIsEmpty: persistedColumn.claudeSessionIsEmpty == true,
                 claimedSessionIDs: &claimedSessionIDs.claude
             )
             workspace.addColumn(
@@ -147,16 +148,27 @@ extension NiruxShellView {
         )
     }
 
-    /// Claim an exact session once per restore pass. Missing, empty and
-    /// duplicate IDs require explicit selection instead of guessing.
+    /// Claim an exact session once per restore pass. Missing, malformed and
+    /// duplicate IDs require explicit selection instead of guessing. Both
+    /// agents use UUIDs; anything else (a hand-edited `--flag`) would be
+    /// parsed as an option.
     static func agentRestoreTarget(
         sessionID: String?, claimedSessionIDs: inout Set<String>
     ) -> AgentResumeTarget {
-        guard let sessionID, !sessionID.isEmpty,
+        guard let sessionID, UUID(uuidString: sessionID) != nil,
               claimedSessionIDs.insert(sessionID).inserted else {
             return .picker
         }
         return .session(sessionID)
+    }
+
+    /// Nil launches a fresh `claude`: the column's last session was never
+    /// prompted, so there is nothing to resume or to pick.
+    static func claudeRestoreTarget(
+        sessionID: String?, sessionIsEmpty: Bool, claimedSessionIDs: inout Set<String>
+    ) -> AgentResumeTarget? {
+        if sessionID == nil, sessionIsEmpty { return nil }
+        return agentRestoreTarget(sessionID: sessionID, claimedSessionIDs: &claimedSessionIDs)
     }
 
     func saveState(snapshot: ProcessSnapshot? = nil) {
@@ -176,6 +188,7 @@ extension NiruxShellView {
                         var editorOpenFiles: [String]?
                         var editorActiveFile: String?
                         var claudeMode: ClaudeLaunchMode?
+                        var claudeRestore: ClaudeSessionTracker.Restore?
                         var codexMode: CodexLaunchMode?
                         let foregroundProcess = col.pty?.foregroundProcess(snapshot: snapshot)
                         if col.isEditor {
@@ -193,6 +206,7 @@ extension NiruxShellView {
                             case "claude":
                                 kind = .claudeCode; webURL = nil
                                 claudeMode = detectClaudeLaunchMode(process: foregroundProcess)
+                                claudeRestore = col.persistedClaudeRestore(foregroundProcess: foregroundProcess)
                             case "codex":
                                 kind = .codex; webURL = nil
                                 codexMode = detectCodexLaunchMode(process: foregroundProcess)
@@ -213,9 +227,8 @@ extension NiruxShellView {
                             codexSessionID: kind == .codex
                                 ? col.persistedCodexSessionID(foregroundProcess: foregroundProcess)
                                 : nil,
-                            claudeSessionID: kind == .claudeCode
-                                ? col.persistedClaudeSessionID(foregroundProcess: foregroundProcess)
-                                : nil,
+                            claudeSessionID: claudeRestore?.sessionID,
+                            claudeSessionIsEmpty: claudeRestore == .fresh ? true : nil,
                             agentUUID: col.agentUUID
                         )
                     },

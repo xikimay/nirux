@@ -17,8 +17,8 @@ extension NiruxShellView {
     }
 
     /// Build a `claude …` shell command for the given launch mode.
-    /// Restores use either an exact session ID or Claude's interactive
-    /// picker; they deliberately never guess with `--continue`.
+    /// Restores use an exact session ID, Claude's interactive picker, or a
+    /// fresh session (nil); they deliberately never guess with `--continue`.
     /// `handoverPrompt` is appended as a single-quoted positional argument
     /// (used by the worktree handover flow).
     ///

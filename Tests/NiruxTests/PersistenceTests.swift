@@ -567,7 +567,18 @@ extension PersistedStateCodingTests {
             from: JSONEncoder().encode(column)
         )
         XCTAssertEqual(decoded.claudeSessionID, "5f0c8a52-6a0e-4d7c-9f0e-2b1f6d1c9a11")
+        XCTAssertNil(decoded.claudeSessionIsEmpty)
         XCTAssertNil(decoded.codexSessionID)
+
+        let empty = PersistedColumn(
+            widthPreset: 0.5, cwd: "/tmp/project",
+            columnType: .claudeCode, webViewURL: nil,
+            claudeLaunchMode: nil, codexLaunchMode: nil,
+            claudeSessionIsEmpty: true
+        )
+        let decodedEmpty = try JSONDecoder().decode(PersistedColumn.self, from: JSONEncoder().encode(empty))
+        XCTAssertEqual(decodedEmpty.claudeSessionIsEmpty, true)
+        XCTAssertNil(decodedEmpty.claudeSessionID)
 
         let legacy = try JSONDecoder().decode(
             PersistedColumn.self,
@@ -576,6 +587,27 @@ extension PersistedStateCodingTests {
         XCTAssertEqual(legacy.resolvedType, .claudeCode)
         XCTAssertEqual(legacy.claudeLaunchMode, .plan)
         XCTAssertNil(legacy.claudeSessionID)
+        XCTAssertNil(legacy.claudeSessionIsEmpty)
+    }
+
+    @MainActor
+    func testUnpromptedClaudeSessionRestoresFresh() {
+        var claimed = Set<String>()
+        let session = "5f0c8a52-6a0e-4d7c-9f0e-2b1f6d1c9a11"
+
+        let fresh = NiruxShellView.claudeRestoreTarget(
+            sessionID: nil, sessionIsEmpty: true, claimedSessionIDs: &claimed
+        )
+        XCTAssertNil(fresh)
+        XCTAssertEqual(NiruxShellView.claudeCommand(resume: fresh, mode: .auto), "command claude --permission-mode auto")
+        XCTAssertEqual(
+            NiruxShellView.claudeRestoreTarget(sessionID: session, sessionIsEmpty: false, claimedSessionIDs: &claimed),
+            .session(session)
+        )
+        XCTAssertEqual(
+            NiruxShellView.claudeRestoreTarget(sessionID: nil, sessionIsEmpty: false, claimedSessionIDs: &claimed),
+            .picker
+        )
     }
 
     @MainActor
@@ -601,17 +633,19 @@ extension PersistedStateCodingTests {
     @MainActor
     func testCodexRestoreClaimsEachExactSessionOnlyOnce() {
         var claimed = Set<String>()
+        let threadA = "01999999-1111-7222-8333-444444444444"
+        let threadB = "01999999-5555-7666-8777-888888888888"
 
         XCTAssertEqual(
-            NiruxShellView.agentRestoreTarget(sessionID: "thread-a", claimedSessionIDs: &claimed),
-            .session("thread-a")
+            NiruxShellView.agentRestoreTarget(sessionID: threadA, claimedSessionIDs: &claimed),
+            .session(threadA)
         )
         XCTAssertEqual(
-            NiruxShellView.agentRestoreTarget(sessionID: "thread-b", claimedSessionIDs: &claimed),
-            .session("thread-b")
+            NiruxShellView.agentRestoreTarget(sessionID: threadB, claimedSessionIDs: &claimed),
+            .session(threadB)
         )
         XCTAssertEqual(
-            NiruxShellView.agentRestoreTarget(sessionID: "thread-a", claimedSessionIDs: &claimed),
+            NiruxShellView.agentRestoreTarget(sessionID: threadA, claimedSessionIDs: &claimed),
             .picker
         )
         XCTAssertEqual(
@@ -622,6 +656,19 @@ extension PersistedStateCodingTests {
             NiruxShellView.agentRestoreTarget(sessionID: "", claimedSessionIDs: &claimed),
             .picker
         )
+    }
+
+    @MainActor
+    func testMalformedSessionIDsNeverReachTheCommandLine() {
+        var claimed = Set<String>()
+        for sessionID in ["--dangerously-skip-permissions", "thread-a", "-r"] {
+            XCTAssertEqual(
+                NiruxShellView.agentRestoreTarget(sessionID: sessionID, claimedSessionIDs: &claimed),
+                .picker,
+                sessionID
+            )
+        }
+        XCTAssertTrue(claimed.isEmpty)
     }
 
     func testCodexSessionTrackerInvalidatesReplacementBeforeQuit() {

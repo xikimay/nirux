@@ -206,7 +206,7 @@ final class ProcessSnapshot {
         while i < size && buf[i] == 0 { i += 1 }
         // Read argv entries
         var args: [String] = []
-        let limit = min(Int(argc), maxArgs)
+        let limit = max(0, min(Int(argc), maxArgs))
         for _ in 0..<limit {
             guard i < size else { break }
             var end = i
