@@ -239,11 +239,7 @@ final class ColumnState {
         }
 
         let terminal = TerminalView(frame: .zero)
-        terminal.controller = TerminalController {
-            $0.withCustom("term", "xterm-256color")
-            $0.withBackground("#1a1b26")
-            $0.withForeground("#c0caf5")
-        }
+        terminal.controller = TerminalAppearance.makeController()
         terminal.configuration = TerminalSurfaceOptions(
             backend: .inMemory(ptySession.terminalSession),
             workingDirectory: cwd
