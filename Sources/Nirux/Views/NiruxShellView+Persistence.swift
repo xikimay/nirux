@@ -96,8 +96,10 @@ extension NiruxShellView {
             )
             workspace.addColumn(
                 command: NiruxShellView.claudeCommand(resume: resumeTarget, mode: mode),
-                agentUUID: persistedColumn.agentUUID ?? UUID().uuidString
+                agentUUID: persistedColumn.agentUUID ?? UUID().uuidString,
+                cwd: Self.existingDirectory(persistedColumn.cwd)
             )
+            workspace.columns.last?.restoredColumn = persistedColumn
             if case .session(let sessionID) = resumeTarget {
                 workspace.columns.last?.prepareClaudeResume(sessionID: sessionID)
             }
@@ -109,8 +111,10 @@ extension NiruxShellView {
             )
             workspace.addColumn(
                 command: NiruxShellView.codexCommand(resume: resumeTarget, mode: mode),
-                agentUUID: persistedColumn.agentUUID ?? UUID().uuidString
+                agentUUID: persistedColumn.agentUUID ?? UUID().uuidString,
+                cwd: Self.existingDirectory(persistedColumn.cwd)
             )
+            workspace.columns.last?.restoredColumn = persistedColumn
             if case .session(let sessionID) = resumeTarget {
                 workspace.columns.last?.prepareCodexResume(sessionID: sessionID)
             }
@@ -148,6 +152,15 @@ extension NiruxShellView {
         )
     }
 
+    /// An agent resumes in the directory it ran in — its conversation's
+    /// project — unless that directory is gone (a removed worktree).
+    static func existingDirectory(_ path: String) -> String? {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+            ? path
+            : nil
+    }
+
     /// Claim an exact session once per restore pass. Missing, malformed and
     /// duplicate IDs require explicit selection instead of guessing. Both
     /// agents use UUIDs; anything else (a hand-edited `--flag`) would be
@@ -182,56 +195,7 @@ extension NiruxShellView {
                 PersistedWorkspace(
                     id: workspace.id, title: workspace.title,
                     cwd: Self.persistedWorkspaceCwd(for: workspace),
-                    columns: workspace.columns.map { col -> PersistedColumn in
-                        let kind: ColumnKind
-                        let webURL: String?
-                        var editorOpenFiles: [String]?
-                        var editorActiveFile: String?
-                        var claudeMode: ClaudeLaunchMode?
-                        var claudeRestore: ClaudeSessionTracker.Restore?
-                        var codexMode: CodexLaunchMode?
-                        let foregroundProcess = col.pty?.foregroundProcess(snapshot: snapshot)
-                        if col.isEditor {
-                            kind = .editor
-                            webURL = nil
-                            if let editor = col.editorColumn {
-                                editorOpenFiles = editor.openPaths.isEmpty ? nil : editor.openPaths
-                                editorActiveFile = editor.activePath
-                            }
-                        } else if col.isWebView {
-                            kind = .webView
-                            webURL = col.webViewColumn?.currentURL
-                        } else if let foregroundProcess {
-                            switch foregroundProcess.name {
-                            case "claude":
-                                kind = .claudeCode; webURL = nil
-                                claudeMode = detectClaudeLaunchMode(process: foregroundProcess)
-                                claudeRestore = col.persistedClaudeRestore(foregroundProcess: foregroundProcess)
-                            case "codex":
-                                kind = .codex; webURL = nil
-                                codexMode = detectCodexLaunchMode(process: foregroundProcess)
-                            default: kind = .terminal; webURL = nil
-                            }
-                        } else {
-                            kind = .terminal; webURL = nil
-                        }
-                        return PersistedColumn(
-                            widthPreset: Double(col.widthFraction),
-                            cwd: col.editorColumn?.workspaceCwd ?? col.pty?.childCwd ?? workspace.cwd,
-                            columnType: kind,
-                            webViewURL: webURL,
-                            editorOpenFiles: editorOpenFiles,
-                            editorActiveFile: editorActiveFile,
-                            claudeLaunchMode: claudeMode,
-                            codexLaunchMode: codexMode,
-                            codexSessionID: kind == .codex
-                                ? col.persistedCodexSessionID(foregroundProcess: foregroundProcess)
-                                : nil,
-                            claudeSessionID: claudeRestore?.sessionID,
-                            claudeSessionIsUnprompted: claudeRestore == .fresh ? true : nil,
-                            agentUUID: col.agentUUID
-                        )
-                    },
+                    columns: workspace.columns.map { persistedColumn($0, in: workspace, snapshot: snapshot) },
                     focusedColumnIndex: workspace.focusedIndex,
                     profileID: workspace.profileID,
                     isInactive: workspace.isInactive,
@@ -251,6 +215,68 @@ extension NiruxShellView {
             activeProfileID: activeProfileID,
             activeWorkspaceID: activeWorkspace?.id
         ))
+    }
+
+    private func persistedColumn(
+        _ col: ColumnState,
+        in workspace: WorkspaceState,
+        snapshot: ProcessSnapshot
+    ) -> PersistedColumn {
+        let foregroundProcess = col.pty?.foregroundProcess(snapshot: snapshot)
+        // A restored agent column whose shell hasn't started yet (a save
+        // while queued hooks replay at launch) has nothing running to
+        // inspect: keep what it was restored from, IDs included.
+        if foregroundProcess == nil, col.pty?.hasExited == false, var restored = col.restoredColumn {
+            restored.widthPreset = Double(col.widthFraction)
+            return restored
+        }
+        let kind: ColumnKind
+        let webURL: String?
+        var editorOpenFiles: [String]?
+        var editorActiveFile: String?
+        var claudeMode: ClaudeLaunchMode?
+        var claudeRestore: ClaudeSessionTracker.Restore?
+        var codexMode: CodexLaunchMode?
+        if col.isEditor {
+            kind = .editor
+            webURL = nil
+            if let editor = col.editorColumn {
+                editorOpenFiles = editor.openPaths.isEmpty ? nil : editor.openPaths
+                editorActiveFile = editor.activePath
+            }
+        } else if col.isWebView {
+            kind = .webView
+            webURL = col.webViewColumn?.currentURL
+        } else if let foregroundProcess {
+            switch foregroundProcess.name {
+            case "claude":
+                kind = .claudeCode; webURL = nil
+                claudeMode = detectClaudeLaunchMode(process: foregroundProcess)
+                claudeRestore = col.persistedClaudeRestore(foregroundProcess: foregroundProcess)
+            case "codex":
+                kind = .codex; webURL = nil
+                codexMode = detectCodexLaunchMode(process: foregroundProcess)
+            default: kind = .terminal; webURL = nil
+            }
+        } else {
+            kind = .terminal; webURL = nil
+        }
+        return PersistedColumn(
+            widthPreset: Double(col.widthFraction),
+            cwd: col.editorColumn?.workspaceCwd ?? col.pty?.childCwd ?? workspace.cwd,
+            columnType: kind,
+            webViewURL: webURL,
+            editorOpenFiles: editorOpenFiles,
+            editorActiveFile: editorActiveFile,
+            claudeLaunchMode: claudeMode,
+            codexLaunchMode: codexMode,
+            codexSessionID: kind == .codex
+                ? col.persistedCodexSessionID(foregroundProcess: foregroundProcess)
+                : nil,
+            claudeSessionID: claudeRestore?.sessionID,
+            claudeSessionIsUnprompted: claudeRestore == .fresh ? true : nil,
+            agentUUID: col.agentUUID
+        )
     }
 
     static func persistedWorkspaceCwd(for workspace: WorkspaceState) -> String {

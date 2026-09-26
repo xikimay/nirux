@@ -49,6 +49,9 @@ final class ColumnState {
 
     private var codexSessionTracker = CodexSessionTracker()
     private var claudeSessionTracker = ClaudeSessionTracker()
+    /// State this agent column was restored from — saved as-is until its
+    /// shell starts and the running agent can be inspected.
+    var restoredColumn: PersistedColumn?
 
     /// Terminal title from OSC 0/2 (agent context, vim filename, etc.)
     var terminalTitle: String? {
@@ -348,18 +351,28 @@ final class ColumnState {
     /// (see ClaudeSessionTracker) — and bind the session it reports.
     func admitClaudeHook(
         _ event: AgentHookEvent,
+        foregroundProcess: ForegroundProcess?,
         snapshot: ProcessSnapshot
     ) -> ClaudeSessionTracker.Admission {
-        let emitterInForegroundJob = event.emitterProcess.map {
-            pty?.isProcessInForegroundJob($0, snapshot: snapshot) ?? false
-        } ?? false
+        let emitter: ClaudeSessionTracker.Emitter
+        if let process = event.emitterProcess {
+            if process == foregroundProcess?.instance {
+                emitter = .foregroundProcess
+            } else if pty?.isProcessInForegroundJob(process, snapshot: snapshot) == true {
+                let isChild = foregroundProcess.map { snapshot.isProcess(process, childOf: $0.instance.pid) } ?? false
+                emitter = isChild ? .foregroundChild : .foregroundJob
+            } else {
+                emitter = .elsewhere
+            }
+        } else {
+            emitter = .unknown
+        }
         return claudeSessionTracker.admit(
             event.name,
             sessionID: event.sessionID,
             source: event.source,
-            emitter: event.emitterProcess,
-            emitterInForegroundJob: emitterInForegroundJob,
-            foregroundProcess: pty?.foregroundProcess(snapshot: snapshot)
+            emitter: emitter,
+            foregroundProcess: foregroundProcess
         )
     }
 

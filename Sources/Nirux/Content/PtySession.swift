@@ -11,18 +11,7 @@ struct ProcessInstance: Codable, Equatable {
     let startedAt: TimeInterval
 
     static func running(pid: pid_t) -> ProcessInstance? {
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
-        var process = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.size
-        guard sysctl(&mib, 4, &process, &size, nil, 0) == 0,
-              size == MemoryLayout<kinfo_proc>.size,
-              process.kp_proc.p_pid == pid else { return nil }
-        let startTime = process.kp_proc.p_starttime
-        return ProcessInstance(
-            pid: pid,
-            startedAt: TimeInterval(startTime.tv_sec)
-                + TimeInterval(startTime.tv_usec) / 1_000_000
-        )
+        kernelEntry(pid: pid)?.instance
     }
 }
 
@@ -159,6 +148,10 @@ final class ProcessSnapshot {
             pending.append(contentsOf: childrenMap[pid] ?? [])
         }
         return nil
+    }
+
+    func isProcess(_ process: ProcessInstance, childOf parentPID: pid_t) -> Bool {
+        instanceMap[process.pid] == process && childrenMap[parentPID]?.contains(process.pid) == true
     }
 
     func isProcess(

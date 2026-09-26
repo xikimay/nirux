@@ -127,6 +127,23 @@ struct CodexSessionTracker {
 /// — the Bash tool runs commands in detached process groups — may drive
 /// the column.
 struct ClaudeSessionTracker {
+    /// Where the process that fired a hook sits in the column's terminal.
+    enum Emitter: Equatable {
+        /// Not reported: an older Nirux build is still the hook command.
+        case unknown
+        /// The terminal's foreground process itself.
+        case foregroundProcess
+        /// A direct child of the foreground process, in its job: the real
+        /// `claude` under a launcher that spawns instead of exec'ing (a
+        /// Volta shim) — as long as the launcher never fires hooks itself.
+        case foregroundChild
+        /// Another member of the foreground job (an MCP server's `claude`).
+        case foregroundJob
+        /// Outside the foreground job: the Bash tool's detached process
+        /// groups, or a process that already exited.
+        case elsewhere
+    }
+
     enum Admission: Equatable {
         /// Another Claude process under this column (a nested `claude -p`,
         /// or a session the foreground `claude` already left). Must not
@@ -158,22 +175,23 @@ struct ClaudeSessionTracker {
     /// session resumed from another directory reports a path that doesn't
     /// exist yet.
     private var unpromptedSessionID: String?
-    /// Bound session the foreground `claude` itself confirmed through a
-    /// hook. From then on, another member of its job reporting a different
-    /// session is nested (an MCP server running `claude -p`).
+    /// Bound session the column's `claude` confirmed through a hook. From
+    /// then on, another member of its job reporting a different session is
+    /// nested (an MCP server running `claude -p`).
     private var confirmedSessionID: String?
+    /// Foreground process seen firing hooks itself: its children are then
+    /// ordinary job members, not a launcher's real `claude`.
+    private var hookFiringForeground: ProcessInstance?
 
     mutating func prepareResume(sessionID: String) {
         session.prepareResume(sessionID: sessionID)
     }
 
-    // swiftlint:disable:next function_parameter_count
     mutating func admit(
         _ name: AgentHookEvent.Name,
         sessionID: String?,
         source: String?,
-        emitter: ProcessInstance?,
-        emitterInForegroundJob: Bool,
+        emitter: Emitter,
         foregroundProcess: ForegroundProcess?
     ) -> Admission {
         // No agent in the foreground: this is the column's own finished run
@@ -185,17 +203,10 @@ struct ClaudeSessionTracker {
         guard foregroundProcess.name == "claude" else { return .rejected }
         let sessionID = sessionID.flatMap { $0.isEmpty ? nil : $0 }
         let boundSessionID = session.sessionID(boundTo: foregroundProcess.instance)
-        guard emitter == foregroundProcess.instance else {
-            // A receiver without emitter identity (an older Nirux build still
-            // registered as the hook command) can't prove anything: route,
-            // never bind. Outside the foreground job is nested. Another
-            // member of the job (a launcher's child, an MCP server's
-            // `claude`) routes unless it contradicts a confirmed session.
-            guard let emitter else { return .accepted }
-            guard emitterInForegroundJob else { return .rejected }
-            if let boundSessionID, boundSessionID == confirmedSessionID,
-               let sessionID, sessionID != boundSessionID { return .rejected }
-            return .accepted
+        if let admission = admitUnproven(
+            emitter, sessionID: sessionID, boundSessionID: boundSessionID, foreground: foregroundProcess.instance
+        ) {
+            return admission
         }
         guard let sessionID else { return .accepted }
         if sessionID == boundSessionID {
@@ -230,6 +241,32 @@ struct ClaudeSessionTracker {
         return changed ? .restoreChanged : .accepted
     }
 
+    /// Nil when the emitter is the column's `claude` itself, which may
+    /// bind; otherwise the admission for an emitter that cannot.
+    private mutating func admitUnproven(
+        _ emitter: Emitter,
+        sessionID: String?,
+        boundSessionID: String?,
+        foreground: ProcessInstance
+    ) -> Admission? {
+        switch emitter {
+        case .foregroundProcess:
+            hookFiringForeground = foreground
+            return nil
+        case .foregroundChild where hookFiringForeground != foreground:
+            return nil
+        case .unknown:
+            // Without emitter identity nothing is provable: route, never bind.
+            return .accepted
+        case .elsewhere:
+            return .rejected
+        case .foregroundChild, .foregroundJob:
+            if let boundSessionID, boundSessionID == confirmedSessionID,
+               let sessionID, sessionID != boundSessionID { return .rejected }
+            return .accepted
+        }
+    }
+
     /// Nil when no session is bound to this foreground process — restore
     /// then asks through the picker.
     mutating func restore(for foregroundProcess: ForegroundProcess?) -> Restore? {
@@ -237,9 +274,13 @@ struct ClaudeSessionTracker {
         return sessionID == unpromptedSessionID ? .fresh : .resume(sessionID)
     }
 
+    /// Only another `claude` replaces the binding: a shell in the foreground
+    /// may just mean this one is suspended (Ctrl-Z), and saves never ask for
+    /// a Claude session while no `claude` is in the foreground.
     @discardableResult
     mutating func invalidateBinding(ifProcessChangedTo foregroundProcess: ForegroundProcess?) -> Bool {
-        session.invalidateBinding(ifProcessChangedTo: foregroundProcess)
+        guard foregroundProcess?.name == session.processName else { return false }
+        return session.invalidateBinding(ifProcessChangedTo: foregroundProcess)
     }
 }
 
@@ -274,7 +315,8 @@ extension ProcessInstance {
         return nil
     }
 
-    private static func kernelEntry(pid: pid_t) -> (instance: ProcessInstance, parentPID: pid_t, name: String)? {
+    /// One process's identity, parent and `p_comm` from the kernel.
+    static func kernelEntry(pid: pid_t) -> (instance: ProcessInstance, parentPID: pid_t, name: String)? {
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
         var process = kinfo_proc()
         var size = MemoryLayout<kinfo_proc>.size

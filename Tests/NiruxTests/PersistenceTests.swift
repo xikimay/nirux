@@ -591,6 +591,20 @@ extension PersistedStateCodingTests {
     }
 
     @MainActor
+    func testAgentColumnsResumeInTheirOwnDirectoryWhileItExists() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nirux-restore-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("file")
+        try Data().write(to: file)
+
+        XCTAssertEqual(NiruxShellView.existingDirectory(directory.path), directory.path)
+        XCTAssertNil(NiruxShellView.existingDirectory(file.path))
+        XCTAssertNil(NiruxShellView.existingDirectory(directory.appendingPathComponent("gone").path))
+    }
+
+    @MainActor
     func testUnpromptedClaudeSessionRestoresFresh() {
         var claimed = Set<String>()
         let session = "5f0c8a52-6a0e-4d7c-9f0e-2b1f6d1c9a11"

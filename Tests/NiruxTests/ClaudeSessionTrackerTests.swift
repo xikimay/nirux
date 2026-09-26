@@ -16,18 +16,24 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         _ name: AgentHookEvent.Name,
         _ sessionID: String?,
         from emitter: ProcessInstance?,
-        inForegroundJob: Bool? = nil,
+        inForegroundJob: Bool = false,
+        asChild: Bool = false,
         foreground: ForegroundProcess?,
         source: String? = nil
     ) -> ClaudeSessionTracker.Admission {
-        tracker.admit(
-            name,
-            sessionID: sessionID,
-            source: source,
-            emitter: emitter,
-            emitterInForegroundJob: inForegroundJob ?? (emitter != nil && emitter == foreground?.instance),
-            foregroundProcess: foreground
-        )
+        let placement: ClaudeSessionTracker.Emitter
+        if let emitter {
+            if emitter == foreground?.instance {
+                placement = .foregroundProcess
+            } else if inForegroundJob {
+                placement = asChild ? .foregroundChild : .foregroundJob
+            } else {
+                placement = .elsewhere
+            }
+        } else {
+            placement = .unknown
+        }
+        return tracker.admit(name, sessionID: sessionID, source: source, emitter: placement, foregroundProcess: foreground)
     }
 
     private func restore() -> ClaudeSessionTracker.Restore? {
@@ -91,20 +97,47 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         XCTAssertEqual(restore(), .resume("parent"))
     }
 
-    func testLauncherChildRoutesWhenTheLeaderNeverConfirmed() {
-        // A launcher that forks the real `claude`: the leader never fires
-        // hooks, so its child's events route (but cannot bind).
-        let restored = ForegroundProcess(
+    func testLauncherChildIsTheColumnsAgent() {
+        // A launcher that spawns the real `claude` (a Volta shim) is the
+        // foreground process but never fires hooks; its child does.
+        let shim = ForegroundProcess(
             instance: ProcessInstance(pid: 720, startedAt: 72),
             name: "claude",
-            arguments: ["claude", "--resume", "restored"]
+            arguments: ["claude"]
         )
         let child = ProcessInstance(pid: 721, startedAt: 73)
-        tracker.prepareResume(sessionID: "restored")
-        XCTAssertEqual(tracker.restore(for: restored), .resume("restored"))
 
-        XCTAssertEqual(admit(.sessionStart, "cleared", from: child, inForegroundJob: true, foreground: restored), .accepted)
-        XCTAssertEqual(tracker.restore(for: restored), .resume("restored"))
+        XCTAssertEqual(
+            admit(.sessionStart, "session", from: child, inForegroundJob: true, asChild: true, foreground: shim, source: "startup"),
+            .restoreChanged
+        )
+        _ = admit(.userPromptSubmit, "session", from: child, inForegroundJob: true, asChild: true, foreground: shim)
+        XCTAssertEqual(tracker.restore(for: shim), .resume("session"))
+        XCTAssertEqual(admit(.stop, "nested", from: nil, foreground: shim), .accepted)
+    }
+
+    func testChildrenOfAHookFiringForegroundAreJobMembers() {
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
+        let mcpServer = ProcessInstance(pid: 702, startedAt: 72)
+
+        XCTAssertEqual(
+            admit(.sessionStart, "mcp", from: mcpServer, inForegroundJob: true, asChild: true, foreground: parent),
+            .rejected
+        )
+        XCTAssertEqual(restore(), .resume("parent"))
+    }
+
+    func testSuspendingClaudeKeepsItsBinding() {
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
+        let shell = ForegroundProcess(
+            instance: ProcessInstance(pid: 600, startedAt: 60),
+            name: "zsh",
+            arguments: ["-zsh"]
+        )
+
+        // Ctrl-Z hands the terminal to the shell; `fg` brings the same claude back.
+        XCTAssertFalse(tracker.invalidateBinding(ifProcessChangedTo: shell))
+        XCTAssertEqual(restore(), .resume("parent"))
     }
 
     func testClearRebindsAndDropsTheLeftSessionsEnd() {
@@ -162,7 +195,7 @@ final class ClaudeSessionTrackerTests: XCTestCase {
             var tracker = ClaudeSessionTracker()
             _ = tracker.admit(
                 .sessionStart, sessionID: source, source: source,
-                emitter: parent.instance, emitterInForegroundJob: true, foregroundProcess: parent
+                emitter: .foregroundProcess, foregroundProcess: parent
             )
             XCTAssertEqual(tracker.restore(for: parent), .resume(source), source)
         }
@@ -259,7 +292,10 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         shell.arguments = ["-c", "read line; true"]
         shell.standardInput = Pipe()
         try shell.run()
-        defer { shell.terminate() }
+        defer {
+            shell.terminate()
+            shell.waitUntilExit()
+        }
 
         XCTAssertEqual(ProcessInstance.firstNonShellAncestor(from: shell.processIdentifier), me)
         XCTAssertNil(ProcessInstance.firstNonShellAncestor(from: 1))

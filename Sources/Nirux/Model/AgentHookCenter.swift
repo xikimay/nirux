@@ -167,23 +167,32 @@ final class AgentHookCenter {
         return dispatch(event, snapshot: &snapshot)
     }
 
-    /// `snapshot` is taken on the first Claude event and shared by the rest
+    /// `snapshot` is taken on the first routed event and shared by the rest
     /// of the drain — one process-table scan per burst, not per event.
     private func dispatch(_ event: AgentHookEvent, snapshot: inout ProcessSnapshot?) -> AppliedEvent? {
         let resolution = event.agentUUID.flatMap { resolver?($0) }
         var claudeRestoreChanged = false
-        if let resolution, event.kind == .claude {
+        if let resolution, let pty = resolution.column.pty {
             let processes = snapshot ?? ProcessSnapshot()
             snapshot = processes
-            switch resolution.column.admitClaudeHook(event, snapshot: processes) {
-            case .rejected:
-                // Not the column's agent (a nested `claude -p` inheriting its
-                // UUID, a `claude` under Codex) or a session it already left.
-                return nil
-            case .accepted:
-                break
-            case .restoreChanged:
-                claudeRestoreChanged = true
+            let foregroundProcess = pty.foregroundProcess(snapshot: processes)
+            switch event.kind {
+            case .claude:
+                switch resolution.column.admitClaudeHook(event, foregroundProcess: foregroundProcess, snapshot: processes) {
+                case .rejected:
+                    // Not the column's agent (a nested `claude -p` inheriting
+                    // its UUID, a `claude` under Codex) or a session it left.
+                    return nil
+                case .accepted:
+                    break
+                case .restoreChanged:
+                    claudeRestoreChanged = true
+                }
+            case .codex:
+                // A `codex exec` launched by the column's Claude agent.
+                if let foregroundProcess,
+                   AgentStatusMachine.isRecognizedAgentProcess(foregroundProcess.name),
+                   foregroundProcess.name != "codex" { return nil }
             }
         }
         onEventReceived?(event, resolution)
