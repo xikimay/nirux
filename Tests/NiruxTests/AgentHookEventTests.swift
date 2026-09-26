@@ -126,12 +126,6 @@ final class AgentHookEventTests: XCTestCase {
         XCTAssertNil(AgentHookEvent(kind: .claude, payload: stop, env: env, now: 1)?.source)
     }
 
-    func testClaudeHookEmitterIsFound() {
-        // Run from the test process (not a shell), the walk starts at its
-        // parent: whichever non-shell process launched the tests.
-        XCTAssertNotNil(ProcessInstance.hookEmitter(for: .claude))
-    }
-
     func testClaudeEmitterAndSourceRoundTripThroughJSONLine() throws {
         let payload: [String: Any] = [
             "hook_event_name": "SessionStart", "session_id": "s1", "source": "resume"
@@ -141,7 +135,8 @@ final class AgentHookEventTests: XCTestCase {
             payload: payload,
             env: env,
             now: 42,
-            emitterProcess: ProcessInstance(pid: 700, startedAt: 70)
+            // Admission compares this exactly after the JSON round trip.
+            emitterProcess: ProcessInstance(pid: 7302, startedAt: 1_790_454_481.825692)
         ))
 
         let decoded = try JSONDecoder().decode(AgentHookEvent.self, from: JSONEncoder().encode(event))

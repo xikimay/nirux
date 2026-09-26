@@ -32,9 +32,9 @@ final class AgentHookCenter {
     struct AppliedEvent {
         let event: AgentHookEvent
         let resolution: Resolution
-        /// The column's Claude session binding changed (new conversation,
-        /// /clear, /resume) — the state file must learn the new ID.
-        var claudeSessionChanged = false
+        /// What the column's Claude would restore to changed (another
+        /// session, or its first prompt) — the state file must learn it.
+        var claudeRestoreChanged = false
     }
 
     /// Given NIRUX_AGENT_UUID, locate the owning column. Set by the shell.
@@ -171,19 +171,19 @@ final class AgentHookCenter {
     /// of the drain — one process-table scan per burst, not per event.
     private func dispatch(_ event: AgentHookEvent, snapshot: inout ProcessSnapshot?) -> AppliedEvent? {
         let resolution = event.agentUUID.flatMap { resolver?($0) }
-        var claudeSessionChanged = false
+        var claudeRestoreChanged = false
         if let resolution, event.kind == .claude {
             let processes = snapshot ?? ProcessSnapshot()
             snapshot = processes
             switch resolution.column.admitClaudeHook(event, snapshot: processes) {
             case .rejected:
-                // A nested `claude -p` inherited this column's UUID: its turn
-                // ends and SessionEnd are not the column's.
+                // Not the column's agent (a nested `claude -p` inheriting its
+                // UUID, a `claude` under Codex) or a session it already left.
                 return nil
             case .accepted:
                 break
-            case .adopted:
-                claudeSessionChanged = true
+            case .restoreChanged:
+                claudeRestoreChanged = true
             }
         }
         onEventReceived?(event, resolution)
@@ -194,7 +194,7 @@ final class AgentHookCenter {
             }
         }
         return resolution.map {
-            AppliedEvent(event: event, resolution: $0, claudeSessionChanged: claudeSessionChanged)
+            AppliedEvent(event: event, resolution: $0, claudeRestoreChanged: claudeRestoreChanged)
         }
     }
 

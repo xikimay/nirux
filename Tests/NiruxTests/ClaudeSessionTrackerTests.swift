@@ -35,7 +35,7 @@ final class ClaudeSessionTrackerTests: XCTestCase {
     }
 
     func testColumnAgentBindsItsSession() {
-        XCTAssertEqual(admit(.sessionStart, "parent", from: parent.instance, foreground: parent), .adopted)
+        XCTAssertEqual(admit(.sessionStart, "parent", from: parent.instance, foreground: parent), .restoreChanged)
         XCTAssertEqual(admit(.userPromptSubmit, "parent", from: parent.instance, foreground: parent), .accepted)
         XCTAssertEqual(restore(), .resume("parent"))
     }
@@ -68,18 +68,43 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         XCTAssertEqual(admit(.stop, "legacy", from: nil, foreground: codex), .rejected)
     }
 
-    func testUnprovenEmittersRouteButNeverBind() {
-        // A launcher's forked `claude`, or an MCP server's, shares the
-        // terminal's foreground process group without being its leader; an
-        // older receiver build reports no emitter at all.
-        let member = ProcessInstance(pid: 701, startedAt: 71)
+    func testReceiverWithoutEmitterRoutesButNeverBinds() {
+        // An older Nirux build still registered as the hook command.
         _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
         _ = admit(.userPromptSubmit, "parent", from: parent.instance, foreground: parent)
 
-        XCTAssertEqual(admit(.sessionStart, "other", from: member, inForegroundJob: true, foreground: parent), .accepted)
         XCTAssertEqual(admit(.sessionStart, "legacy", from: nil, foreground: parent), .accepted)
         XCTAssertEqual(admit(.stop, "legacy", from: nil, foreground: parent), .accepted)
         XCTAssertEqual(restore(), .resume("parent"))
+    }
+
+    func testForegroundJobMemberIsNestedOnceTheSessionIsConfirmed() {
+        // An MCP server's `claude -p` shares the terminal's foreground
+        // process group without being its leader.
+        let member = ProcessInstance(pid: 701, startedAt: 71)
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
+
+        for name in [.sessionStart, .stop, .sessionEnd] as [AgentHookEvent.Name] {
+            XCTAssertEqual(admit(name, "mcp", from: member, inForegroundJob: true, foreground: parent), .rejected, "\(name)")
+        }
+        XCTAssertEqual(admit(.stop, "parent", from: member, inForegroundJob: true, foreground: parent), .accepted)
+        XCTAssertEqual(restore(), .resume("parent"))
+    }
+
+    func testLauncherChildRoutesWhenTheLeaderNeverConfirmed() {
+        // A launcher that forks the real `claude`: the leader never fires
+        // hooks, so its child's events route (but cannot bind).
+        let restored = ForegroundProcess(
+            instance: ProcessInstance(pid: 720, startedAt: 72),
+            name: "claude",
+            arguments: ["claude", "--resume", "restored"]
+        )
+        let child = ProcessInstance(pid: 721, startedAt: 73)
+        tracker.prepareResume(sessionID: "restored")
+        XCTAssertEqual(tracker.restore(for: restored), .resume("restored"))
+
+        XCTAssertEqual(admit(.sessionStart, "cleared", from: child, inForegroundJob: true, foreground: restored), .accepted)
+        XCTAssertEqual(tracker.restore(for: restored), .resume("restored"))
     }
 
     func testClearRebindsAndDropsTheLeftSessionsEnd() {
@@ -87,7 +112,7 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         _ = admit(.userPromptSubmit, "parent", from: parent.instance, foreground: parent)
 
         // The new session's SessionStart may land before the old SessionEnd.
-        XCTAssertEqual(admit(.sessionStart, "cleared", from: parent.instance, foreground: parent, source: "clear"), .adopted)
+        XCTAssertEqual(admit(.sessionStart, "cleared", from: parent.instance, foreground: parent, source: "clear"), .restoreChanged)
         XCTAssertEqual(admit(.sessionEnd, "parent", from: parent.instance, foreground: parent), .rejected)
         XCTAssertEqual(restore(), .fresh, "nothing was said in the cleared session yet")
 
@@ -106,20 +131,30 @@ final class ClaudeSessionTrackerTests: XCTestCase {
 
     func testTurnEventsAdoptAnUnboundColumn() {
         XCTAssertEqual(admit(.preToolUse, "parent", from: parent.instance, foreground: parent), .accepted)
-        XCTAssertEqual(admit(.userPromptSubmit, "parent", from: parent.instance, foreground: parent), .adopted)
+        XCTAssertEqual(admit(.userPromptSubmit, "parent", from: parent.instance, foreground: parent), .restoreChanged)
         XCTAssertEqual(restore(), .resume("parent"))
     }
 
     func testUnpromptedSessionRestoresFresh() {
-        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent, source: "startup")
+        XCTAssertEqual(admit(.sessionStart, "parent", from: parent.instance, foreground: parent, source: "startup"), .restoreChanged)
         XCTAssertEqual(restore(), .fresh)
 
-        // Ending or re-announcing the session says nothing was prompted.
+        // Ending the session or notifying says nothing was prompted.
         _ = admit(.sessionEnd, "parent", from: parent.instance, foreground: parent)
+        _ = admit(.notification, "parent", from: parent.instance, foreground: parent)
         XCTAssertEqual(restore(), .fresh)
 
-        _ = admit(.stop, "parent", from: parent.instance, foreground: parent)
+        // The first prompt changes what restore does: persist it now.
+        XCTAssertEqual(admit(.userPromptSubmit, "parent", from: parent.instance, foreground: parent), .restoreChanged)
+        XCTAssertEqual(admit(.stop, "parent", from: parent.instance, foreground: parent), .accepted)
         XCTAssertEqual(restore(), .resume("parent"))
+    }
+
+    func testUnpromptedLeadAdoptsTheSessionItFirstPromptsIn() {
+        _ = admit(.sessionStart, "announced", from: parent.instance, foreground: parent, source: "startup")
+
+        XCTAssertEqual(admit(.userPromptSubmit, "actual", from: parent.instance, foreground: parent), .restoreChanged)
+        XCTAssertEqual(restore(), .resume("actual"))
     }
 
     func testResumedForkedAndCompactedSessionsHaveAConversation() {
@@ -148,7 +183,7 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         )
 
         // SIGKILL left no SessionEnd; the new process still binds.
-        XCTAssertEqual(admit(.sessionStart, "new", from: restarted.instance, foreground: restarted), .adopted)
+        XCTAssertEqual(admit(.sessionStart, "new", from: restarted.instance, foreground: restarted), .restoreChanged)
         XCTAssertEqual(tracker.restore(for: restarted), .resume("new"))
         XCTAssertEqual(admit(.sessionEnd, "parent", from: parent.instance, foreground: restarted), .rejected)
     }
@@ -186,7 +221,7 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         )
         tracker.prepareResume(sessionID: "restored")
 
-        XCTAssertEqual(admit(.sessionStart, "forked", from: restored.instance, foreground: restored), .adopted)
+        XCTAssertEqual(admit(.sessionStart, "forked", from: restored.instance, foreground: restored), .restoreChanged)
         XCTAssertEqual(tracker.restore(for: restored), .resume("forked"))
     }
 
@@ -217,15 +252,21 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         let me = try XCTUnwrap(ProcessInstance.running(pid: getpid()))
         XCTAssertEqual(ProcessInstance.firstNonShellAncestor(from: getpid()), me)
 
-        // `; true` keeps sh from exec'ing sleep: a live shell whose parent
-        // (this test) fired it, like Claude's `sh -c <hook command>`.
+        // A live shell whose parent (this test) fired it, like Claude's
+        // `sh -c <hook command>`. `read` is a builtin: no grandchild to leak.
         let shell = Process()
         shell.executableURL = URL(fileURLWithPath: "/bin/sh")
-        shell.arguments = ["-c", "sleep 5; true"]
+        shell.arguments = ["-c", "read line; true"]
+        shell.standardInput = Pipe()
         try shell.run()
         defer { shell.terminate() }
 
         XCTAssertEqual(ProcessInstance.firstNonShellAncestor(from: shell.processIdentifier), me)
         XCTAssertNil(ProcessInstance.firstNonShellAncestor(from: 1))
+    }
+
+    func testHookEmitterWiring() {
+        XCTAssertEqual(ProcessInstance.hookEmitter(for: .claude), ProcessInstance.firstNonShellAncestor(from: getppid()))
+        XCTAssertEqual(ProcessInstance.hookEmitter(for: .codex), ProcessInstance.running(pid: getppid()))
     }
 }

@@ -134,8 +134,9 @@ struct ClaudeSessionTracker {
         case rejected
         /// The column's agent — route it.
         case accepted
-        /// Accepted, and the column's bound session changed: persist it.
-        case adopted
+        /// Accepted, and what restore would do changed (another session,
+        /// or its first prompt): persist it.
+        case restoreChanged
     }
 
     /// How a restore brings the column's Claude back.
@@ -157,6 +158,10 @@ struct ClaudeSessionTracker {
     /// session resumed from another directory reports a path that doesn't
     /// exist yet.
     private var unpromptedSessionID: String?
+    /// Bound session the foreground `claude` itself confirmed through a
+    /// hook. From then on, another member of its job reporting a different
+    /// session is nested (an MCP server running `claude -p`).
+    private var confirmedSessionID: String?
 
     mutating func prepareResume(sessionID: String) {
         session.prepareResume(sessionID: sessionID)
@@ -178,38 +183,51 @@ struct ClaudeSessionTracker {
               AgentStatusMachine.isRecognizedAgentProcess(foregroundProcess.name) else { return .accepted }
         // A Claude hook under a Codex column comes from a `claude` Codex ran.
         guard foregroundProcess.name == "claude" else { return .rejected }
-        guard emitter == foregroundProcess.instance else {
-            // Outside the foreground job: nested. A receiver without emitter
-            // identity (an older Nirux build still registered as the hook)
-            // or another member of the job (a launcher's child, an MCP
-            // server's `claude`) can't prove ownership: route, never bind.
-            return emitter == nil || emitterInForegroundJob ? .accepted : .rejected
-        }
-        guard let sessionID = sessionID.flatMap({ $0.isEmpty ? nil : $0 }) else { return .accepted }
+        let sessionID = sessionID.flatMap { $0.isEmpty ? nil : $0 }
         let boundSessionID = session.sessionID(boundTo: foregroundProcess.instance)
-        if sessionID == boundSessionID {
-            if name != .sessionEnd, name != .sessionStart || source == "compact" {
-                unpromptedSessionID = nil
-            }
+        guard emitter == foregroundProcess.instance else {
+            // A receiver without emitter identity (an older Nirux build still
+            // registered as the hook command) can't prove anything: route,
+            // never bind. Outside the foreground job is nested. Another
+            // member of the job (a launcher's child, an MCP server's
+            // `claude`) routes unless it contradicts a confirmed session.
+            guard let emitter else { return .accepted }
+            guard emitterInForegroundJob else { return .rejected }
+            if let boundSessionID, boundSessionID == confirmedSessionID,
+               let sessionID, sessionID != boundSessionID { return .rejected }
             return .accepted
+        }
+        guard let sessionID else { return .accepted }
+        if sessionID == boundSessionID {
+            confirmedSessionID = sessionID
+            let isPrompted = name == .userPromptSubmit || name == .stop || name == .preToolUse
+                || (name == .sessionStart && source == "compact")
+            guard isPrompted, unpromptedSessionID == sessionID else { return .accepted }
+            unpromptedSessionID = nil
+            return .restoreChanged
         }
         // The foreground `claude` reports another conversation. /clear,
         // /resume and /branch switch through SessionStart. Turn events only
-        // adopt a column nothing is bound to yet: once bound, a different ID
-        // there may be an in-process teammate's. PreToolUse may come from a
-        // subagent. A SessionEnd is the straggler of the session just left.
+        // adopt a column that is unbound or was never prompted: otherwise a
+        // different ID there may be an in-process teammate's. PreToolUse may
+        // come from a subagent. A SessionEnd is the straggler of the session
+        // just left.
         switch name {
         case .sessionStart:
-            unpromptedSessionID = source == "startup" || source == "clear" ? sessionID : nil
+            break
         case .userPromptSubmit, .notification, .stop:
-            guard boundSessionID == nil else { return .accepted }
-            unpromptedSessionID = nil
+            guard boundSessionID == nil || boundSessionID == unpromptedSessionID else { return .accepted }
         case .sessionEnd:
             return boundSessionID == nil ? .accepted : .rejected
         case .preToolUse, .turnComplete:
             return .accepted
         }
-        return session.bind(sessionID: sessionID, process: foregroundProcess.instance) ? .adopted : .accepted
+        let changed = session.bind(sessionID: sessionID, process: foregroundProcess.instance)
+        confirmedSessionID = sessionID
+        unpromptedSessionID = name == .sessionStart && (source == "startup" || source == "clear")
+            ? sessionID
+            : nil
+        return changed ? .restoreChanged : .accepted
     }
 
     /// Nil when no session is bound to this foreground process — restore

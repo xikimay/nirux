@@ -358,7 +358,7 @@ extension NiruxShellView {
         var changed = false
         for appliedEvent in events {
             let event = appliedEvent.event
-            if appliedEvent.claudeSessionChanged { changed = true }
+            if appliedEvent.claudeRestoreChanged { changed = true }
             if event.kind == .codex,
                appliedEvent.resolution.column.captureCodexSession(
                    sessionID: event.sessionID,

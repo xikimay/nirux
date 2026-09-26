@@ -172,6 +172,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Apply hooks still inside the drain debounce (a first prompt just
+        // sent) so the saved Claude restore targets are current.
+        AgentHookCenter.shared.drain()
         shell?.saveState(snapshot: ProcessSnapshot())
         telegramRemoteAccessController?.shutdown()
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)

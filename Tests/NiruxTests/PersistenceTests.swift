@@ -567,18 +567,18 @@ extension PersistedStateCodingTests {
             from: JSONEncoder().encode(column)
         )
         XCTAssertEqual(decoded.claudeSessionID, "5f0c8a52-6a0e-4d7c-9f0e-2b1f6d1c9a11")
-        XCTAssertNil(decoded.claudeSessionIsEmpty)
+        XCTAssertNil(decoded.claudeSessionIsUnprompted)
         XCTAssertNil(decoded.codexSessionID)
 
-        let empty = PersistedColumn(
+        let unprompted = PersistedColumn(
             widthPreset: 0.5, cwd: "/tmp/project",
             columnType: .claudeCode, webViewURL: nil,
             claudeLaunchMode: nil, codexLaunchMode: nil,
-            claudeSessionIsEmpty: true
+            claudeSessionIsUnprompted: true
         )
-        let decodedEmpty = try JSONDecoder().decode(PersistedColumn.self, from: JSONEncoder().encode(empty))
-        XCTAssertEqual(decodedEmpty.claudeSessionIsEmpty, true)
-        XCTAssertNil(decodedEmpty.claudeSessionID)
+        let decodedUnprompted = try JSONDecoder().decode(PersistedColumn.self, from: JSONEncoder().encode(unprompted))
+        XCTAssertEqual(decodedUnprompted.claudeSessionIsUnprompted, true)
+        XCTAssertNil(decodedUnprompted.claudeSessionID)
 
         let legacy = try JSONDecoder().decode(
             PersistedColumn.self,
@@ -587,7 +587,7 @@ extension PersistedStateCodingTests {
         XCTAssertEqual(legacy.resolvedType, .claudeCode)
         XCTAssertEqual(legacy.claudeLaunchMode, .plan)
         XCTAssertNil(legacy.claudeSessionID)
-        XCTAssertNil(legacy.claudeSessionIsEmpty)
+        XCTAssertNil(legacy.claudeSessionIsUnprompted)
     }
 
     @MainActor
@@ -596,16 +596,16 @@ extension PersistedStateCodingTests {
         let session = "5f0c8a52-6a0e-4d7c-9f0e-2b1f6d1c9a11"
 
         let fresh = NiruxShellView.claudeRestoreTarget(
-            sessionID: nil, sessionIsEmpty: true, claimedSessionIDs: &claimed
+            sessionID: nil, sessionIsUnprompted: true, claimedSessionIDs: &claimed
         )
         XCTAssertNil(fresh)
         XCTAssertEqual(NiruxShellView.claudeCommand(resume: fresh, mode: .auto), "command claude --permission-mode auto")
         XCTAssertEqual(
-            NiruxShellView.claudeRestoreTarget(sessionID: session, sessionIsEmpty: false, claimedSessionIDs: &claimed),
+            NiruxShellView.claudeRestoreTarget(sessionID: session, sessionIsUnprompted: false, claimedSessionIDs: &claimed),
             .session(session)
         )
         XCTAssertEqual(
-            NiruxShellView.claudeRestoreTarget(sessionID: nil, sessionIsEmpty: false, claimedSessionIDs: &claimed),
+            NiruxShellView.claudeRestoreTarget(sessionID: nil, sessionIsUnprompted: false, claimedSessionIDs: &claimed),
             .picker
         )
     }

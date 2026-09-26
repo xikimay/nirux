@@ -91,7 +91,7 @@ extension NiruxShellView {
             let mode = persistedColumn.claudeLaunchMode ?? .default
             let resumeTarget = Self.claudeRestoreTarget(
                 sessionID: persistedColumn.claudeSessionID,
-                sessionIsEmpty: persistedColumn.claudeSessionIsEmpty == true,
+                sessionIsUnprompted: persistedColumn.claudeSessionIsUnprompted == true,
                 claimedSessionIDs: &claimedSessionIDs.claude
             )
             workspace.addColumn(
@@ -165,9 +165,9 @@ extension NiruxShellView {
     /// Nil launches a fresh `claude`: the column's last session was never
     /// prompted, so there is nothing to resume or to pick.
     static func claudeRestoreTarget(
-        sessionID: String?, sessionIsEmpty: Bool, claimedSessionIDs: inout Set<String>
+        sessionID: String?, sessionIsUnprompted: Bool, claimedSessionIDs: inout Set<String>
     ) -> AgentResumeTarget? {
-        if sessionID == nil, sessionIsEmpty { return nil }
+        if sessionID == nil, sessionIsUnprompted { return nil }
         return agentRestoreTarget(sessionID: sessionID, claimedSessionIDs: &claimedSessionIDs)
     }
 
@@ -228,7 +228,7 @@ extension NiruxShellView {
                                 ? col.persistedCodexSessionID(foregroundProcess: foregroundProcess)
                                 : nil,
                             claudeSessionID: claudeRestore?.sessionID,
-                            claudeSessionIsEmpty: claudeRestore == .fresh ? true : nil,
+                            claudeSessionIsUnprompted: claudeRestore == .fresh ? true : nil,
                             agentUUID: col.agentUUID
                         )
                     },

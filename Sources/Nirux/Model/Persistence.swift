@@ -568,7 +568,7 @@ struct PersistedColumn: Codable {
     var claudeSessionID: String?
     /// The column's Claude session was never prompted (a fresh start or
     /// /clear): there is nothing to resume, so restore starts a new one.
-    var claudeSessionIsEmpty: Bool?
+    var claudeSessionIsUnprompted: Bool?
     /// Stable hook-routing identity (NIRUX_AGENT_UUID) for terminal columns.
     var agentUUID: String?
 
@@ -584,7 +584,7 @@ struct PersistedColumn: Codable {
         codexLaunchMode: CodexLaunchMode?,
         codexSessionID: String? = nil,
         claudeSessionID: String? = nil,
-        claudeSessionIsEmpty: Bool? = nil,
+        claudeSessionIsUnprompted: Bool? = nil,
         agentUUID: String? = nil
     ) {
         self.widthPreset = widthPreset
@@ -597,7 +597,7 @@ struct PersistedColumn: Codable {
         self.codexLaunchMode = codexLaunchMode
         self.codexSessionID = codexSessionID
         self.claudeSessionID = claudeSessionID
-        self.claudeSessionIsEmpty = claudeSessionIsEmpty
+        self.claudeSessionIsUnprompted = claudeSessionIsUnprompted
         self.agentUUID = agentUUID
     }
 
@@ -609,7 +609,7 @@ struct PersistedColumn: Codable {
         case codexLaunchMode
         case codexSessionID
         case claudeSessionID
-        case claudeSessionIsEmpty
+        case claudeSessionIsUnprompted
         case agentUUID
         case claudeBypassPermissions // legacy
     }
@@ -648,7 +648,7 @@ struct PersistedColumn: Codable {
         codexLaunchMode = try? container.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)
         codexSessionID = try? container.decodeIfPresent(String.self, forKey: .codexSessionID)
         claudeSessionID = try? container.decodeIfPresent(String.self, forKey: .claudeSessionID)
-        claudeSessionIsEmpty = try? container.decodeIfPresent(Bool.self, forKey: .claudeSessionIsEmpty)
+        claudeSessionIsUnprompted = try? container.decodeIfPresent(Bool.self, forKey: .claudeSessionIsUnprompted)
         agentUUID = try? container.decodeIfPresent(String.self, forKey: .agentUUID)
     }
 
@@ -667,7 +667,7 @@ struct PersistedColumn: Codable {
         try container.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
         try container.encodeIfPresent(codexSessionID, forKey: .codexSessionID)
         try container.encodeIfPresent(claudeSessionID, forKey: .claudeSessionID)
-        try container.encodeIfPresent(claudeSessionIsEmpty, forKey: .claudeSessionIsEmpty)
+        try container.encodeIfPresent(claudeSessionIsUnprompted, forKey: .claudeSessionIsUnprompted)
         try container.encodeIfPresent(agentUUID, forKey: .agentUUID)
     }
 }
