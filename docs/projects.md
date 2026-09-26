@@ -24,8 +24,9 @@ question: why not connect Nirux to claude.ai instead?
 - **Routing is sticky.** A workspace stays in the project it was assigned to,
   even if its shell later `cd`s into another repository.
 - **The Project view is a dedicated column type.**
-- **Only fresh launches are named.** A restore never overwrites a name the user
-  set by hand.
+- **Names never overwrite a name the user set by hand.** `-n` names fresh
+  launches. A later PR names restored sessions through the SessionStart hook,
+  only when they have no explicit title.
 
 ## Summary
 
@@ -108,11 +109,10 @@ truncate.
      `titleIsManual` can't tell this apart: every new workspace gets a
      placeholder title ("ws N") marked manual, and the flag isn't persisted.
      This PR adds a persisted "renamed by the user" flag.
-  2. The current branch, if it isn't the repository's default branch and HEAD
-     isn't detached. It is read with one git call at launch. Worktree
-     workspaces match here from their first launch.
-  3. Otherwise no `-n`: a session on the main checkout keeps its prompt-based
-     title rather than becoming one more "main · Nirux".
+  2. The branch of a worktree Nirux created, taken from the `new-worktree`
+     request. No git call is needed, and it covers every handover launch.
+  3. Otherwise no `-n`. This includes the main checkout, even on a feature
+     branch: its branch changes, and a name would freeze a stale title.
 - **Project** is the space name until Projects exist. It is left out for the
   default space while it still has its default name ("main"), and when it
   equals the label.
@@ -128,12 +128,13 @@ truncate.
 - **Codex:** no launch-time name flag (only `/rename` in the TUI), and its
   sessions don't reach claude.ai. Out of scope.
 
-Possible follow-up, for the user to decide: a SessionStart hook can return
+**Follow-up PR: restored sessions.** A SessionStart hook can return
 `sessionTitle`, with the same effect as `/rename`, on `startup`, `resume` and
 `fork`. Its input carries `session_title`, "the current session title if one is
 already set, for example via `--name` or `/rename`", so a hook can name a
-restored session without overwriting a title the user set ([hooks][hooks]). That
-would also fix sessions restored with a handover title. To verify first:
+restored session without overwriting a title the user set ([hooks][hooks]). The
+hook applies the same label rule, only when `session_title` is empty. It also
+fixes sessions restored with a handover title. To verify first:
 whether an auto-generated title counts as "already set". It needs the hook
 receiver to write JSON to stdout, so it waits for in-flight work on the hook
 receiver.
@@ -172,8 +173,12 @@ It is the source of truth.
 - It has a `schemaVersion` and decodes leniently: every field is optional with
   a default, and unknown anchor kinds are kept as-is rather than failing the
   whole file. So a nightly can read a file written by a newer one.
-- It is backed up and rotated like `state.json`. A file Nirux can't read is set
-  aside and never overwritten. Nirux does not silently rebuild projects over it.
+- Reading isn't a lossless round trip, though. A build that finds a newer
+  `schemaVersion` treats projects as read-only, with a banner saying a newer
+  Nirux saved them, so it can't drop fields it doesn't know.
+- It is backed up and rotated like `state.json`, plus one daily backup outside
+  that per-save rotation. A file Nirux can't read is set aside and never
+  overwritten. Nirux does not silently rebuild projects over it.
 - It is written with mode `0600`, re-applied after every atomic write and to
   the backups, because it can hold env values.
 
@@ -216,6 +221,9 @@ roll back.
   terminal env, it is fixed when a shell starts, so it goes stale after a move.
   A worktree child therefore takes its parent's *current* project, looked up
   from the parent workspace id. The `profile=` parameter is only a fallback.
+  Today the worktree skill sends `parentWorkspace` only when mission handoffs
+  are on. It must always send it, and installed copies of the skill must be
+  refreshed when Nirux changes its text.
 
 ## 3. Routing
 
@@ -226,8 +234,15 @@ today; `--show-toplevel` returns the worktree's own folder instead.
 
 Routing runs once, **before** the workspace is created, so the first agent
 starts with the right project, env and brief. Git detection today is
-asynchronous and slower than the 1 s agent launch. Routing makes one bounded
-`rev-parse` call on the target folder instead.
+asynchronous and slower than the 1 s agent launch, so routing makes its own
+`rev-parse` call on the target folder:
+
+- off the main thread, with a limit of about 300 ms;
+- on timeout, it falls back to the active project;
+- worktree creation already runs in the background, so it does the call there.
+
+The repository fingerprint is computed once, when anchoring, never while
+routing.
 
 A workspace's project is decided in this order:
 
@@ -255,9 +270,16 @@ Anchoring:
   `.git/modules`), so they are separate repositories. Anchor them separately,
   or cover them with a `folder` anchor.
 
-Side effect worth fixing separately: `GitWorktree.create` names worktrees after
-the current worktree's folder, so a worktree created from a worktree nests
-names (`nirux-public.feat-projects.feat-x`). Using the common dir fixes it.
+Two side effects worth fixing separately, in the worktree creation code:
+
+- `GitWorktree.create` names worktrees after the current worktree's folder, so
+  a worktree created from a worktree nests names
+  (`nirux-public.feat-projects.feat-x`). Using the common dir fixes it.
+- Handover files stay untracked in every worktree. They block
+  `git worktree remove` and can be committed by a `git add -A`. Adding their
+  names to `<common dir>/info/exclude` covers every worktree, without touching
+  the repository. To verify: that ignored files don't block
+  `git worktree remove`.
 
 ## 4. Brief
 
@@ -265,7 +287,9 @@ A short, personal text per project: goals, priorities, workflow rules, links.
 It is not `CLAUDE.md` or `AGENTS.md`, which are repository rules shared through
 git. The brief is never written into the repository. It is also not a handover:
 a handover describes one workspace's task, while the brief is what every
-workspace of the project should know.
+workspace of the project should know. And it is not Claude Code's auto memory,
+which Claude writes itself and which Codex never sees. A rule should live in
+the brief or in memory, not both, or the two copies drift apart.
 
 Typical content is the block of shared rules that parallel-worktree handovers
 repeat today, copied into each one. A brief states it once, for example:
@@ -278,8 +302,9 @@ repeat today, copied into each one. A brief states it once, for example:
   confirmation review.
 ```
 
-**Storage.** The user edits `<state dir>/projects/<id>/brief.md` in Nirux's
-editor column. Before each launch, Nirux regenerates
+**Storage.** The brief lives in `<state dir>/projects/<id>/brief.md`. The id
+is the space id, which projects keep, so the brief can ship before the Project
+model. Before each launch, Nirux regenerates
 `<state dir>/projects/<id>/brief.injected.md`, which wraps the brief in a short
 header:
 
@@ -293,6 +318,19 @@ precedence; if they conflict, ask.
 The brief is sent with every request, so the editor warns above about 4,000
 characters (roughly 1,000 tokens). The hard cap is 16,000 characters, the limit
 claude.ai uses for Claude Code Project instructions.
+
+**Editing.** A brief nobody can find is a brief nobody keeps up to date.
+
+- "Edit brief…" in the space menu opens it in the editor column.
+- A brief chip on workspace cards shows that a brief exists.
+- Terminals export `NIRUX_PROJECT_BRIEF`, the file's path. The skill Nirux
+  installs tells agents they may update it when the user asks ("add this to the
+  project brief"). That also works from the phone, through any Remote Control
+  session.
+- Because agents can write it, Nirux flags the brief as changed until the user
+  has looked at it.
+- Nirux records a hash of the injected brief with each launch. The Project view
+  shows how many open sessions run on an older version.
 
 **Claude.** Nirux passes `--append-system-prompt-file <absolute path>` on
 *every* launch: fresh, restore and Resume ([CLI reference][cli]). The path is
@@ -342,10 +380,11 @@ but:
 - Codex requires the user to trust each hook;
 - Codex caps hook output at roughly 2,500 tokens.
 
-**Optional claude.ai doc.** A project can also store the link to a claude.ai
-doc, and the injected brief then tells Claude to read it through the Claude
-Docs connector. The doc is editable from the phone, but Nirux can't display it
-and Codex can't read it. The local file stays the source of truth.
+**Optional claude.ai doc (deferred).** A project could also store the link to a
+claude.ai doc, and the injected brief would tell Claude to read it through the
+Claude Docs connector. Nirux couldn't display it and Codex couldn't read it.
+Since any agent can already edit the brief on request, including from the
+phone, this option is deferred. The local file stays the source of truth.
 
 ## 5. Defaults
 
@@ -355,7 +394,7 @@ and Codex can't read it. The local file stays the source of truth.
 | Claude permission mode | A Claude column launches | `ClaudeLaunchMode.cliArgs` |
 | Codex mode | A Codex column launches | `CodexLaunchMode.cliArgs` |
 | Environment variables | A shell starts in the project | `makeTerminalEnvironment` |
-| Post-worktree setup script | After a worktree workspace is created, before the agent starts | `sh '<script path>' && <agent command>` |
+| Post-worktree setup script | After a worktree workspace is created, before the agent starts | `sh '<script path>'; <agent command>` |
 | Pinned URLs | On demand | Project view and command palette; open as web columns |
 
 Rules:
@@ -367,7 +406,8 @@ Rules:
   workspace, affects new shells only.
 - **Setup scripts** are stored as files in the project's state folder. They
   must be idempotent: `GitWorktree.create` can reuse an existing folder, so a
-  script may run twice.
+  script may run twice. A failing script doesn't stop the agent from starting;
+  Nirux posts a notification instead, so the failure shows on the phone too.
 - **Setup scripts and project env are applied only to workspaces Nirux can
   attribute to the user**: created from the UI, or from a `nirux://` request
   authenticated as coming from a Nirux terminal.
@@ -391,9 +431,12 @@ Instead Nirux keeps its own **session ledger**, from hook events it receives.
 - **Codex:** thread ids only arrive through `notify`, after the first completed
   turn.
 - **Renames** made with `/rename` or from the phone aren't seen.
-- **Only real session events** are recorded. Nirux keeps SessionStart and Stop
-  from the column's own agent, and ignores tools like CI pipelines that run
-  `claude -p` inside a Nirux shell and inherit its env.
+- **Only real session events** are recorded: SessionStart and Stop from the
+  column's own agent. Tools that run `claude -p` inside a Nirux shell, such as
+  review pipelines, inherit its env and would otherwise flood the ledger. Codex
+  events already carry their emitting process, checked against the column's
+  foreground job. The hook receiver records it for Claude events too, and the
+  same check applies.
 - **Pruning:** Claude entries go when their transcript is gone (default
   retention: 30 days). Codex entries go by age. Each project keeps at most a few
   hundred entries.
@@ -430,6 +473,10 @@ workspace, three rows tall, and covers only the active space.
 - **Recent sessions** from the ledger, with Resume.
 - **Later: "Finish".** When a workspace's PR is merged, it removes the
   worktree, deletes the branch and closes the workspace, after confirmation.
+  - It never uses `--force`.
+  - It deletes the branch with `-D` only when the local HEAD equals the merged
+    PR's head commit. Otherwise it keeps the branch, since there may be unpushed
+    work.
 
 The data sources already exist (`GitDetect`, `PRDetect`, `GitWorktree.list`,
 workspace context). Sections backed by later PRs (brief, pinned URLs, sessions)
@@ -438,21 +485,23 @@ stay hidden until those PRs land.
 ## 8. Plan
 
 Each PR is reviewable on its own. Several touch code that other in-flight
-branches also change; those wait for them to merge, or rebase after.
+branches also change; those wait for them to merge.
 
-| # | PR | Depends on | Overlaps with in-flight work on |
+| # | PR | Depends on | Waits for in-flight work on |
 | --- | --- | --- | --- |
-| 1 | Name Claude sessions | none | launch commands, worktree creation |
-| 2 | Project model, `projects.json`, migration, management UI | none | state persistence and backups, restore |
-| 3 | Routing and anchors | 2 | worktree creation, git detection |
-| 4 | Brief: storage, editing, Claude and Codex injection | 2 | launch commands, restore |
-| 5 | Per-project defaults | 2, 4 | settings, terminal env, `nirux://` handling |
-| 6 | Session ledger and resume | 2, 3 | hook events, restore |
-| 7 | Project view column | 2, 3 | git and PR polling |
-| 8 | "Finish" (PR merged, then remove worktree) | 7 | none |
+| 1 | Name fresh Claude launches (`-n`) | none | launch commands, worktree creation |
+| 2 | Brief per space: storage, editing, Claude and Codex injection | none | launch commands, restore |
+| 3 | Name restored sessions (SessionStart `sessionTitle`) | 1 | hook receiver |
+| 4 | Project model, `projects.json`, migration, management UI | none | state persistence and backups, restore |
+| 5 | Routing and anchors | 4 | worktree creation, git detection |
+| 6 | Per-project defaults | 2, 4 | settings, terminal env, `nirux://` handling |
+| 7 | Session ledger and resume | 4, 5 | hook events, restore |
+| 8 | Project view column | 4, 5 | git and PR polling |
+| 9 | "Finish" (PR merged, then remove worktree) | 8 | worktree creation |
 
-PR 1 needs no project model and can start now. It will likely rebase over
-in-flight changes to the Claude launch command.
+PRs 1 to 4 are the core: names, brief, and projects that persist. PRs 5 to 9
+start only if projects get used. PRs 1 and 2 need no project model and can
+start now; both will rebase over in-flight changes to the launch commands.
 
 ## Sources
 
