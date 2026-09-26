@@ -68,7 +68,7 @@ extension WorkspaceState {
     private func noteLocalServerURL(_ url: LocalServerURL, in col: ColumnState) {
         guard columns.contains(where: { $0 === col }),
               localServers.book.noteDetected(
-                url,
+                url.proposalTarget,
                 in: col.id,
                 browserPorts: localServerBrowserPorts,
                 now: ProcessInfo.processInfo.systemUptime
@@ -98,12 +98,24 @@ extension WorkspaceState {
         localServers.scanTimer = nil
         guard localServers.book.nextScanDelay != nil else { return }
         localServers.scanInFlight = true
+        let ownShells = columns.compactMap { $0.pty?.shellPID }
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let listening = LocalListeners.listeningPorts()
+            let listening = Self.listeningPorts(ownShells: ownShells)
             DispatchQueue.main.async { [weak self] in
                 self?.applyLocalServerScan(listening)
             }
         }
+    }
+
+    /// Listening ports, minus those served only from another workspace's
+    /// terminals. Every terminal shell is a child of this process.
+    private nonisolated static func listeningPorts(ownShells: [pid_t]) -> Set<Int> {
+        let listeners = LocalListeners.listeners()
+        guard !listeners.isEmpty else { return [] }
+        let snapshot = ProcessSnapshot()
+        let ownProcesses = ownShells.reduce(into: Set<pid_t>()) { $0.formUnion(snapshot.descendants(of: $1)) }
+        let otherTerminalProcesses = snapshot.descendants(of: getpid()).subtracting(ownProcesses)
+        return LocalListeners.ports(listeners, excluding: otherTerminalProcesses)
     }
 
     private func applyLocalServerScan(_ listening: Set<Int>) {

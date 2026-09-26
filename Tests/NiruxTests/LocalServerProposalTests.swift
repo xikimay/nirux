@@ -184,7 +184,31 @@ final class LocalServerProposalTests: XCTestCase {
         XCTAssertEqual(book.proposal(for: "web")?.url.port, 5173)
     }
 
+    // MARK: - Proposal target
+
+    func testProposalOpensTheServerRoot() {
+        // An agent's curl must not become a one-click GET.
+        XCTAssertEqual(url(3000, path: "/api/admin/reset").proposalTarget.urlString, "http://localhost:3000/")
+        XCTAssertEqual(url(5173, path: "/app/?x=1").proposalTarget.urlString, "http://localhost:5173/")
+        XCTAssertEqual(url(3000, path: "").proposalTarget.urlString, "http://localhost:3000")
+        XCTAssertEqual(url(3000, path: "/").proposalTarget.urlString, "http://localhost:3000/")
+    }
+
+    func testProposalKeepsATokenQuery() {
+        let jupyter = url(8888, host: "127.0.0.1", path: "/tree?token=0123abcd")
+        XCTAssertEqual(jupyter.proposalTarget, jupyter)
+        XCTAssertEqual(url(8888, path: "?access_token=x").proposalTarget.path, "?access_token=x")
+    }
+
     // MARK: - ⌘B suggestions
+
+    func testDefaultSelectionStaysOnTheLastURL() {
+        let suggestions = ["http://localhost:5173/", "https://github.com", "http://localhost:3000"]
+        XCTAssertEqual(CommandPalette.defaultURLSelection(in: suggestions, history: ["https://github.com"]), 1)
+        // The last URL is the detected one — select it where it sits.
+        XCTAssertEqual(CommandPalette.defaultURLSelection(in: suggestions, history: ["http://localhost:5173"]), 0)
+        XCTAssertEqual(CommandPalette.defaultURLSelection(in: suggestions, history: []), 0)
+    }
 
     func testURLSuggestionsListDetectedFirstWithoutDuplicates() {
         let suggestions = CommandPalette.urlSuggestions(
@@ -204,15 +228,44 @@ final class LocalServerProposalTests: XCTestCase {
 
     func testListenerScanSeesALoopbackListenerAndItsClosing() throws {
         let (fd, port) = try listen(family: AF_INET)
-        XCTAssertTrue(LocalListeners.listeningPorts().contains(port))
+        XCTAssertEqual(LocalListeners.listeners(maxAge: 0)[port], [getpid()])
         close(fd)
-        XCTAssertFalse(LocalListeners.listeningPorts().contains(port))
+        XCTAssertNil(LocalListeners.listeners(maxAge: 0)[port])
     }
 
     func testListenerScanSeesIPv6Listeners() throws {
         let (fd, port) = try listen(family: AF_INET6)
         defer { close(fd) }
-        XCTAssertTrue(LocalListeners.listeningPorts().contains(port))
+        XCTAssertEqual(LocalListeners.listeners(maxAge: 0)[port], [getpid()])
+    }
+
+    func testPortsServedOnlyByAnotherWorkspacesTerminalAreExcluded() {
+        let listeners: [Int: Set<pid_t>] = [
+            5173: [101],        // Vite in another workspace's terminal
+            5174: [201],        // this workspace's own server
+            8080: [301],        // Docker / another terminal app
+            3000: [102, 401]    // shared: also held outside that workspace
+        ]
+        XCTAssertEqual(
+            LocalListeners.ports(listeners, excluding: [100, 101, 102]),
+            [5174, 8080, 3000]
+        )
+    }
+
+    func testSnapshotDescendantsFollowTheWholeTree() {
+        func entry(_ pid: pid_t, parent: pid_t) -> ProcessSnapshot.Entry {
+            ProcessSnapshot.Entry(
+                pid: pid, parentPID: parent, processGroupID: pid, terminalForegroundProcessGroupID: 0,
+                name: "p\(pid)", startedAt: 0, arguments: []
+            )
+        }
+        // nirux(1) → shell(10) → claude(11) → npm(12) → node(13); unrelated(20)
+        let snapshot = ProcessSnapshot(entries: [
+            entry(10, parent: 1), entry(11, parent: 10), entry(12, parent: 11),
+            entry(13, parent: 12), entry(20, parent: 0)
+        ])
+        XCTAssertEqual(snapshot.descendants(of: 10), [10, 11, 12, 13])
+        XCTAssertEqual(snapshot.descendants(of: 13), [13])
     }
 
     func testSystemServicesAreNotDevServers() {

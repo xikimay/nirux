@@ -41,10 +41,11 @@ extension CommandPalette {
     /// Switch palette to URL input mode
     func switchToURLMode() {
         mode = .urlInput
-        urlSelectedIndex = 0
         let detected = Self.detectedURLsProvider?() ?? []
+        let history = URLHistory.load()
         detectedURLs = Set(detected)
-        urlSuggestions = Self.urlSuggestions(detected: detected, history: URLHistory.load())
+        urlSuggestions = Self.urlSuggestions(detected: detected, history: history)
+        urlSelectedIndex = Self.defaultURLSelection(in: urlSuggestions, history: history)
         searchField?.placeholderString = "Enter URL or search..."
         searchField?.stringValue = ""
         rebuildURLList()
@@ -119,6 +120,13 @@ extension CommandPalette {
     ) -> [String] {
         var seen = Set<String>()
         return (detected + history + defaults).filter { seen.insert(normalizedSuggestionKey($0)).inserted }
+    }
+
+    /// ⌘B ↩ on an empty field keeps reopening the last URL: detected rows
+    /// sit above it but don't take the selection.
+    nonisolated static func defaultURLSelection(in suggestions: [String], history: [String]) -> Int {
+        guard let last = history.first.map(normalizedSuggestionKey) else { return 0 }
+        return suggestions.firstIndex { normalizedSuggestionKey($0) == last } ?? 0
     }
 
     /// "http://localhost:5173/" and "http://localhost:5173" are one entry.

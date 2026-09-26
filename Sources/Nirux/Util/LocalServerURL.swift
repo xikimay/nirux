@@ -16,6 +16,17 @@ struct LocalServerURL: Equatable, Hashable, Sendable {
     /// Short label for the title-bar chip.
     var displayName: String { "\(host):\(port)" }
 
+    /// What a proposal opens: the server root. The first URL printed for a
+    /// port is often an agent's `curl …/api/admin/reset`, and a chip labeled
+    /// "localhost:3000" must not fire that GET. Only a token-bearing query
+    /// (Jupyter's `/tree?token=…`) is kept — the root alone would ask for it.
+    var proposalTarget: LocalServerURL {
+        let query = path.firstIndex(of: "?").map { path[path.index(after: $0)...] }
+        let keepsPath = query?.localizedCaseInsensitiveContains("token") == true
+        guard !keepsPath, !path.isEmpty, path != "/" else { return self }
+        return LocalServerURL(isSecure: isSecure, host: host, port: port, path: "/")
+    }
+
     /// Hosts accepted after the scheme, as printed (lowercased).
     static let loopbackHosts: Set<String> = ["localhost", "127.0.0.1", "0.0.0.0", "[::1]", "[::]"]
 

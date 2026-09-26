@@ -109,6 +109,18 @@ final class ProcessSnapshot {
         instanceMap[entry.pid] = ProcessInstance(pid: entry.pid, startedAt: entry.startedAt)
     }
 
+    /// `pid` and every process below it.
+    func descendants(of pid: pid_t) -> Set<pid_t> {
+        var result: Set<pid_t> = [pid]
+        var queue = [pid]
+        while let next = queue.popLast() {
+            for child in childrenMap[next] ?? [] where result.insert(child).inserted {
+                queue.append(child)
+            }
+        }
+        return result
+    }
+
     func foregroundProcess(shellPID: pid_t) -> ForegroundProcess? {
         let processGroupID = terminalForegroundProcessGroupMap[shellPID]
             .flatMap { $0 > 0 ? $0 : nil }
@@ -235,6 +247,9 @@ final class PtySession: @unchecked Sendable {
 
     /// Last applied grid size — the right starting size for a restart.
     var lastSize: (cols: Int, rows: Int) { (state.lastCols, state.lastRows) }
+
+    /// The shell's pid while it runs.
+    var shellPID: pid_t? { state.childPid > 0 ? state.childPid : nil }
 
     /// When the current foreground process took over (drives the "working
     /// · 12m" display in the sidebar). Nil while the idle shell runs.

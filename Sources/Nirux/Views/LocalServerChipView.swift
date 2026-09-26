@@ -71,6 +71,9 @@ final class LocalServerChipView: NSView {
         return 0
     }
 
+    // The title bar drags the window; the chip, padding included, must not.
+    override var mouseDownCanMoveWindow: Bool { false }
+
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: .pointingHand)
     }

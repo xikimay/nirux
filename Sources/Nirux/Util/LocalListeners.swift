@@ -1,4 +1,4 @@
-import Darwin
+import Foundation
 
 /// TCP ports with a LISTEN socket in one of the user's own processes, read
 /// through libproc like `lsof` does. No connection is ever made, so dev
@@ -7,16 +7,49 @@ import Darwin
 /// (`sudo`, root-owned helpers) aren't visible. About 2 ms for ~750
 /// processes; blocking — call it off the main thread.
 enum LocalListeners {
-    static func listeningPorts() -> Set<Int> {
-        let uid = getuid()
-        var ports = Set<Int>()
-        for pid in allPIDs() where pid > 0 && owner(of: pid) == uid {
-            let pidPorts = listeningPorts(of: pid)
-            if !pidPorts.isEmpty, !isSystemService(pid) {
-                ports.formUnion(pidPorts)
+    /// Listening ports and the pids holding them. Workspaces scan on their
+    /// own timers; a result younger than `maxAge` is shared between them.
+    static func listeners(maxAge: TimeInterval = 0.9) -> [Int: Set<pid_t>] {
+        cache.value(maxAge: maxAge) {
+            let uid = getuid()
+            var listeners: [Int: Set<pid_t>] = [:]
+            for pid in allPIDs() where pid > 0 && owner(of: pid) == uid {
+                let pidPorts = listeningPorts(of: pid)
+                guard !pidPorts.isEmpty, !isSystemService(pid) else { continue }
+                for port in pidPorts { listeners[port, default: []].insert(pid) }
             }
+            return listeners
         }
-        return ports
+    }
+
+    /// Ports worth proposing to one workspace: a port served only by
+    /// processes of *another* workspace's terminals belongs to that
+    /// workspace (its Vite on :5173 isn't this one's, even if Claude here
+    /// mentions the URL). Servers outside Nirux — Docker, other terminal
+    /// apps — count everywhere.
+    static func ports(_ listeners: [Int: Set<pid_t>], excluding otherTerminalProcesses: Set<pid_t>) -> Set<Int> {
+        Set(listeners.compactMap { port, pids in
+            pids.isSubset(of: otherTerminalProcesses) ? nil : port
+        })
+    }
+
+    private static let cache = ScanCache()
+
+    private final class ScanCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var scannedAt: TimeInterval = -.infinity
+        private var result: [Int: Set<pid_t>] = [:]
+
+        func value(maxAge: TimeInterval, scan: () -> [Int: Set<pid_t>]) -> [Int: Set<pid_t>] {
+            lock.lock()
+            defer { lock.unlock() }
+            let now = ProcessInfo.processInfo.systemUptime
+            if now - scannedAt >= maxAge {
+                result = scan()
+                scannedAt = now
+            }
+            return result
+        }
     }
 
     /// macOS services that listen on dev-looking ports — AirPlay Receiver
