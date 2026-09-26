@@ -1,0 +1,102 @@
+import XCTest
+@testable import Nirux
+
+/// Which agents the close confirmation sees: anything that dies with the
+/// PTY, not just the foreground process the status machine tracks.
+final class CloseAgentDetectionTests: XCTestCase {
+    private let isAgent = AgentStatusMachine.isRecognizedAgentProcess
+
+    private func entry(
+        _ pid: pid_t, parent: pid_t, group: pid_t, foreground: pid_t = 10,
+        name: String, _ arguments: [String]
+    ) -> ProcessSnapshot.Entry {
+        .init(
+            pid: pid, parentPID: parent, processGroupID: group,
+            terminalForegroundProcessGroupID: foreground,
+            name: name, startedAt: TimeInterval(pid), arguments: arguments
+        )
+    }
+
+    func testSuspendedAgentIsFoundBehindTheShell() {
+        // ^Z: the shell is back in the foreground, the stopped claude job
+        // still dies with the PTY.
+        let snapshot = ProcessSnapshot(entries: [
+            entry(10, parent: 1, group: 10, name: "zsh", ["zsh"]),
+            entry(20, parent: 10, group: 20, name: "2.1.283", ["claude", "--continue"])
+        ])
+        XCTAssertEqual(snapshot.foregroundProcess(shellPID: 10)?.name, "zsh")
+        XCTAssertEqual(snapshot.firstDescendantName(of: 10, where: isAgent), "claude")
+    }
+
+    func testAgentUnderAWrapperIsFound() {
+        let snapshot = ProcessSnapshot(entries: [
+            entry(10, parent: 1, group: 10, foreground: 20, name: "zsh", ["zsh"]),
+            entry(20, parent: 10, group: 20, foreground: 20, name: "caffeinate", ["caffeinate", "-i", "claude"]),
+            entry(30, parent: 20, group: 20, foreground: 20, name: "2.1.283", ["claude"])
+        ])
+        XCTAssertEqual(snapshot.foregroundProcess(shellPID: 10)?.name, "caffeinate")
+        XCTAssertEqual(snapshot.firstDescendantName(of: 10, where: isAgent), "claude")
+    }
+
+    func testNodeWrappedCodexIsFound() {
+        let snapshot = ProcessSnapshot(entries: [
+            entry(10, parent: 1, group: 10, name: "zsh", ["zsh"]),
+            entry(20, parent: 10, group: 20, name: "npx", ["npx", "codex"]),
+            entry(30, parent: 20, group: 20, name: "node", ["node", "/usr/local/lib/node_modules/.bin/codex"])
+        ])
+        XCTAssertEqual(snapshot.firstDescendantName(of: 10, where: isAgent), "codex")
+    }
+
+    func testShellWithoutAgentFindsNothing() {
+        let snapshot = ProcessSnapshot(entries: [
+            entry(10, parent: 1, group: 10, name: "zsh", ["zsh"]),
+            entry(20, parent: 10, group: 20, name: "vim", ["vim", "claude.md"]),
+            entry(30, parent: 1, group: 30, name: "2.1.283", ["claude"]) // another terminal's agent
+        ])
+        XCTAssertNil(snapshot.firstDescendantName(of: 10, where: isAgent))
+        XCTAssertFalse(snapshot.isEmpty)
+        XCTAssertTrue(ProcessSnapshot(entries: []).isEmpty)
+    }
+
+    @MainActor
+    func testPtyReportsForegroundAndBackgroundAgentsButNotABareShell() async throws {
+        let stateDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nirux-close-agent-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
+        let previousStateDirectory = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
+        setenv("NIRUX_STATE_DIR", stateDirectory.path, 1)
+        defer {
+            if let previousStateDirectory {
+                setenv("NIRUX_STATE_DIR", previousStateDirectory, 1)
+            } else {
+                unsetenv("NIRUX_STATE_DIR")
+            }
+            try? FileManager.default.removeItem(at: stateDirectory)
+        }
+
+        let foregroundAgent = PtySession()
+        let backgroundAgent = PtySession()
+        let bareShell = PtySession()
+        foregroundAgent.start(shell: "/bin/zsh", args: ["-f", "-c", "exec -a claude /bin/cat"], cwd: stateDirectory.path)
+        // No job control under -c: the shell stays the foreground process,
+        // the agent only shows up as its descendant.
+        backgroundAgent.start(
+            shell: "/bin/zsh",
+            args: ["-f", "-c", "(exec -a codex /bin/sleep 30) & wait"],
+            cwd: stateDirectory.path
+        )
+        bareShell.start(shell: "/bin/zsh", args: ["-f"], cwd: stateDirectory.path)
+
+        var names: [String?] = []
+        let deadline = Date().addingTimeInterval(3)
+        repeat {
+            let snapshot = ProcessSnapshot()
+            names = [foregroundAgent, backgroundAgent, bareShell].map { $0.agentProcessName(snapshot: snapshot) }
+            if names == ["claude", "codex", nil] { break }
+            try await Task.sleep(for: .milliseconds(20))
+        } while Date() < deadline
+        XCTAssertEqual(names, ["claude", "codex", nil])
+        // The background agent came from the descendant scan, not the foreground.
+        XCTAssertEqual(backgroundAgent.foregroundProcessName(snapshot: ProcessSnapshot()), "zsh")
+    }
+}

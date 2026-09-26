@@ -4,7 +4,7 @@ import XCTest
 final class WorkspaceClosePolicyTests: XCTestCase {
     private typealias LiveAgent = WorkspaceClosePolicy.LiveAgent
 
-    private func agent(_ name: String = "claude", _ status: AgentStatus = .idle) -> LiveAgent {
+    private func agent(_ name: String = "claude", _ status: AgentStatus? = .idle) -> LiveAgent {
         LiveAgent(processName: name, status: status)
     }
 
@@ -87,21 +87,25 @@ final class WorkspaceClosePolicyTests: XCTestCase {
     // MARK: - Column
 
     func testColumnWithoutAgentClosesWithoutConfirmation() {
-        XCTAssertEqual(WorkspaceClosePolicy.columnDecision(agent: nil), .close)
+        XCTAssertNil(WorkspaceClosePolicy.columnConfirmation(for: nil))
     }
 
     func testColumnWithLiveAgentRequiresConfirmationInEveryStatus() {
         XCTAssertEqual(
-            details(WorkspaceClosePolicy.columnDecision(agent: agent("claude", .idle))),
+            WorkspaceClosePolicy.columnConfirmation(for: agent("claude", .idle)),
             ["Claude is idle — closing the column ends its session."]
         )
         XCTAssertEqual(
-            details(WorkspaceClosePolicy.columnDecision(agent: agent("codex", .working))),
+            WorkspaceClosePolicy.columnConfirmation(for: agent("codex", .working)),
             ["Codex is working — closing the column ends its session."]
         )
         XCTAssertEqual(
-            details(WorkspaceClosePolicy.columnDecision(agent: agent("claude", .needsAttention))),
+            WorkspaceClosePolicy.columnConfirmation(for: agent("claude", .needsAttention)),
             ["Claude is waiting for you — closing the column ends its session."]
+        )
+        XCTAssertEqual(
+            WorkspaceClosePolicy.columnConfirmation(for: agent("codex", nil)),
+            ["Codex is running — closing the column ends its session."]
         )
     }
 
@@ -109,5 +113,55 @@ final class WorkspaceClosePolicyTests: XCTestCase {
         XCTAssertEqual(agent("claude").displayName, "Claude")
         XCTAssertEqual(agent("codex").displayName, "Codex")
         XCTAssertEqual(agent("aider").displayName, "aider")
+    }
+
+    // MARK: - Status trust
+
+    func testIdleIsOnlyTrustedWhenClaudeHooksDriveIt() {
+        // Hook-driven Claude: idle means its turn ended.
+        XCTAssertEqual(LiveAgent(processName: "claude", machineStatus: .idle, hookKind: "claude").status, .idle)
+        // Output fallback: idle until the first keystroke, even while an
+        // agent launched with a handover prompt works — don't claim idle.
+        XCTAssertNil(LiveAgent(processName: "claude", machineStatus: .idle, hookKind: nil).status)
+        XCTAssertNil(LiveAgent(processName: "codex", machineStatus: .idle, hookKind: "codex").status)
+        // Busy states are kept — overstating activity only adds caution.
+        XCTAssertEqual(LiveAgent(processName: "codex", machineStatus: .working, hookKind: nil).status, .working)
+        XCTAssertEqual(
+            LiveAgent(processName: "claude", machineStatus: .needsAttention, hookKind: "claude").status,
+            .needsAttention
+        )
+    }
+
+    // MARK: - Workspaces with a close in flight
+
+    @MainActor
+    private func makeStore(_ ids: [String]) -> WorkspaceStore {
+        let store = WorkspaceStore()
+        for id in ids {
+            store.appendWorkspace(WorkspaceState(id: id, title: id, cwd: "/tmp/\(id)"), activate: false)
+        }
+        return store
+    }
+
+    @MainActor
+    func testClosingWorkspacesDoNotCountAsRemaining() {
+        // Regression: closeWorkspace keeps the workspace in the store for its
+        // 0.35 s exit animation, so a quick second ⌘W saw two workspaces and
+        // closed the last one too.
+        let store = makeStore(["a", "b"])
+        XCTAssertEqual(store.remainingWorkspaceCount, 2)
+        store.workspaces[0].isClosing = true
+        XCTAssertEqual(store.remainingWorkspaceCount, 1)
+        XCTAssertFalse(WorkspaceClosePolicy.canClose(totalWorkspaceCount: store.remainingWorkspaceCount))
+    }
+
+    @MainActor
+    func testFallbackSelectionSkipsClosingWorkspaces() {
+        let store = makeStore(["a", "b", "c"])
+        store.workspaces[0].isClosing = true
+        // Closing "b": the previous neighbour "a" is on its way out too.
+        XCTAssertEqual(store.fallbackIndexAfterClosingWorkspace(at: 1), 2)
+        store.workspaces[2].isClosing = true
+        XCTAssertNil(store.fallbackIndexAfterClosingWorkspace(at: 1))
     }
 }

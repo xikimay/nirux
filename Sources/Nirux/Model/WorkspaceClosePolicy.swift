@@ -6,11 +6,13 @@ import Foundation
 /// or idle at its prompt — is never killed without confirmation; a bare
 /// shell closes without ceremony.
 enum WorkspaceClosePolicy {
-    /// A recognized agent process (claude/codex) in a column's foreground.
+    /// A recognized agent process (claude/codex) that closing would kill.
     struct LiveAgent: Equatable {
-        /// Foreground process name, e.g. "claude".
+        /// Process name, e.g. "claude".
         var processName: String
-        var status: AgentStatus
+        /// nil when the status can't be trusted — the alert then only says
+        /// the agent is running.
+        var status: AgentStatus?
 
         var displayName: String {
             switch processName {
@@ -25,6 +27,7 @@ enum WorkspaceClosePolicy {
             case .working: return "working"
             case .needsAttention: return "waiting for you"
             case .idle: return "idle"
+            case nil: return "running"
             }
         }
     }
@@ -32,7 +35,7 @@ enum WorkspaceClosePolicy {
     struct Context: Equatable {
         var totalWorkspaceCount: Int
         var columnCount: Int
-        /// Agents in the foreground of the workspace's columns, any status.
+        /// Agents in the workspace's columns, any status.
         var liveAgents: [LiveAgent]
         /// Workspace cwd is a linked git worktree checkout.
         var isWorktreeBacked: Bool
@@ -41,7 +44,7 @@ enum WorkspaceClosePolicy {
     enum Decision: Equatable {
         /// Last remaining workspace — closing is not allowed.
         case blocked
-        /// Nothing live would be lost — close without ceremony.
+        /// No agent session or other column at stake — close without ceremony.
         case close
         /// Ask first; `details` are the informative lines for the alert.
         case confirm(details: [String])
@@ -55,8 +58,8 @@ enum WorkspaceClosePolicy {
     static func decision(for context: Context) -> Decision {
         guard canClose(totalWorkspaceCount: context.totalWorkspaceCount) else { return .blocked }
         var details: [String] = []
-        if let agentLine = agentDetail(context.liveAgents, closing: "workspace") {
-            details.append(agentLine)
+        if !context.liveAgents.isEmpty {
+            details.append(agentDetail(context.liveAgents, closing: "workspace"))
         }
         if context.columnCount > 1 {
             details.append("All \(context.columnCount) columns will be closed.")
@@ -68,23 +71,31 @@ enum WorkspaceClosePolicy {
         return .confirm(details: details)
     }
 
-    /// Closing one column of a workspace that keeps other columns. The
-    /// last column closes the workspace instead — see `decision(for:)`.
-    static func columnDecision(agent: LiveAgent?) -> Decision {
-        guard let agent, let agentLine = agentDetail([agent], closing: "column") else { return .close }
-        return .confirm(details: [agentLine])
+    /// Closing one column of a workspace that keeps other columns: the
+    /// alert lines, or nil to close without asking. The last column closes
+    /// the workspace instead — see `decision(for:)`.
+    static func columnConfirmation(for agent: LiveAgent?) -> [String]? {
+        agent.map { [agentDetail([$0], closing: "column")] }
     }
 
-    private static func agentDetail(_ agents: [LiveAgent], closing target: String) -> String? {
-        switch agents.count {
-        case 0:
-            return nil
-        case 1:
+    private static func agentDetail(_ agents: [LiveAgent], closing target: String) -> String {
+        if agents.count == 1 {
             let agent = agents[0]
             return "\(agent.displayName) is \(agent.statusDescription) — closing the \(target) ends its session."
-        default:
-            let list = agents.map { "\($0.displayName) \($0.statusDescription)" }.joined(separator: ", ")
-            return "\(agents.count) agents are running (\(list)) — closing the \(target) ends their sessions."
         }
+        let list = agents.map { "\($0.displayName) \($0.statusDescription)" }.joined(separator: ", ")
+        return "\(agents.count) agents are running (\(list)) — closing the \(target) ends their sessions."
+    }
+}
+
+extension WorkspaceClosePolicy.LiveAgent {
+    /// Status from the agent's status machine. Idle is only trusted when
+    /// Claude's hooks drive it: the output-activity fallback (Codex,
+    /// hook-less Claude) reads idle until the first keystroke — an agent
+    /// launched with a handover prompt works while showing idle — and
+    /// through silent tool calls.
+    init(processName: String, machineStatus: AgentStatus, hookKind: String?) {
+        let hookDriven = processName == "claude" && hookKind == "claude"
+        self.init(processName: processName, status: machineStatus == .idle && !hookDriven ? nil : machineStatus)
     }
 }

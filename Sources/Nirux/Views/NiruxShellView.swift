@@ -411,40 +411,6 @@ extension NiruxShellView {
         focusActiveTerminal(in: window)
     }
 
-    func closeActiveColumn() {
-        guard let workspace = activeWorkspace else { return }
-        // Last column closes the workspace — same confirmation as the sidebar.
-        guard workspace.columns.count > 1 else { return requestCloseWorkspace(at: activeWSIndex) }
-        let closingColumn = workspace.columns[workspace.focusedIndex]
-        guard confirmCloseColumn(closingColumn, in: workspace) else { return }
-        let closingView = closingColumn.view
-        // Animate out, then remove
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.2
-            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
-            closingView.animator().alphaValue = 0
-            closingView.layer?.setAffineTransform(CGAffineTransform(scaleX: 0.92, y: 0.92))
-        }, completionHandler: {
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                closingView.layer?.setAffineTransform(.identity)
-                // By identity: a second ⌘W during the animation targets the
-                // same column, and a stale index would close its neighbor.
-                guard let closingIndex = workspace.columns.firstIndex(where: { $0 === closingColumn }) else { return }
-                workspace.closeColumn(at: closingIndex)
-                self.relayout(animated: false)
-                // Animate remaining columns sliding into place
-                workspace.layoutAndScroll(
-                    viewportWidth: self.viewport.frame.width,
-                    height: workspace.containerView.frame.height,
-                    animated: true, pilotMode: self.isPilotMode
-                )
-                self.updateSidebar()
-                self.focusActiveTerminal(in: self.window)
-            }
-        })
-    }
-
     enum HDir { case left, right }
     func focusColumn(_ dir: HDir) {
         guard let workspace = activeWorkspace else { return }
