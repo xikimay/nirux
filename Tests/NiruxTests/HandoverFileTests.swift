@@ -137,6 +137,13 @@ final class HandoverFileTests: XCTestCase {
         XCTAssertEqual(try String(contentsOfFile: destination, encoding: .utf8), "filled by the agent")
     }
 
+    func testEmptyFileIsNotADeliveredHandover() throws {
+        let source = tmpPath()
+        try write("", to: source)
+        XCTAssertEqual(failure(source), .empty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination))
+    }
+
     func testReplacesStaleHandover() throws {
         try write("stale", to: destination)
         let source = tmpPath()

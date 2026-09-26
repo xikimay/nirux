@@ -116,12 +116,33 @@ final class NiruxURLRequestTests: XCTestCase {
         XCTAssertEqual(request.disposition(expectedLaunchID: "abc123"), .confirm)
     }
 
-    func testOpenEditorIsRoutedWithoutConfirmation() {
-        let request = parse("nirux://open-editor?file=/tmp/a.swift")
-        XCTAssertEqual(request?.action, .openEditor)
-        XCTAssertEqual(request?.disposition(expectedLaunchID: "abc123"), .openEditor)
-        XCTAssertEqual(request?.hasValidLaunchID(expected: "abc123"), false)
-        XCTAssertEqual(parse("nirux://open-editor?file=/tmp/a.swift&launch=abc123")?.hasValidLaunchID(expected: "abc123"), true)
+    func testOpenEditorNeedsTheLaunchIDOrAConfirmationToo() throws {
+        let request = try XCTUnwrap(parse("nirux://open-editor?file=%2FUsers%2Fme%2F.ssh%2Fid_ed25519&line=1"))
+        guard case .openEditor(let query, let target) = request.action else { return XCTFail("open-editor") }
+        XCTAssertNil(target, "validated later, off the main actor")
+        XCTAssertEqual(query.first { $0.name == "line" }?.value, "1")
+        XCTAssertEqual(request.disposition(expectedLaunchID: "abc123"), .confirm)
+        let withID = try XCTUnwrap(parse("nirux://open-editor?file=/tmp/a.swift&launch=abc123"))
+        XCTAssertEqual(withID.disposition(expectedLaunchID: "abc123"), .perform)
+
+        let text = request.confirmation(claudeMode: .auto, codexMode: .default)
+        XCTAssertEqual(text.message, "Show a file in the Nirux editor?")
+        XCTAssertTrue(text.details.contains("File: /Users/me/.ssh/id_ed25519"))
+        XCTAssertNil(parse("nirux://open-editor?file=relative.swift"))
+        XCTAssertNil(parse("nirux://open-editor?line=3"))
+    }
+
+    func testResolvingAnEditorRequestValidatesTheFile() throws {
+        let request = try XCTUnwrap(parse("nirux://open-editor?file=/tmp/a.swift&line=4"))
+        let target = OpenEditorRequest(
+            queryItems: [URLQueryItem(name: "file", value: "/tmp/a.swift"), URLQueryItem(name: "line", value: "4")],
+            canonicalize: { $0 },
+            isOpenableFile: { _ in true }
+        )
+        let resolved = request.resolvingPaths(editorTarget: { _ in target })
+        guard case .openEditor(_, let resolvedTarget)? = resolved?.action else { return XCTFail("open-editor") }
+        XCTAssertEqual(resolvedTarget, target)
+        XCTAssertNil(request.resolvingPaths(editorTarget: { _ in nil }))
     }
 
     // MARK: - Path resolution
@@ -226,19 +247,22 @@ final class NiruxURLRequestTests: XCTestCase {
         }
     }
 
-    func testConfirmedRequestsCannotLinkToAParentMission() throws {
+    func testConfirmedRequestsCannotLinkToAMissionOrPickASpace() throws {
         let request = try XCTUnwrap(parse(
             "nirux://new-worktree?branch=x&repo=/r&agent=claude&parentWorkspace=W&parentAgent=A&profile=p"
         ))
-        guard case .newWorktree(let stripped) = request.droppingMissionLink().action else {
+        let restricted = request.restrictedForConfirmation()
+        guard case .newWorktree(let stripped) = restricted.action else {
             return XCTFail("still a worktree request")
         }
         XCTAssertNil(stripped.parentWorkspaceID)
         XCTAssertNil(stripped.parentAgentUUID)
         XCTAssertEqual(stripped.branch, "x")
-        XCTAssertEqual(request.droppingMissionLink().profileID, "p")
-        let workspace = try XCTUnwrap(parse("nirux://new-workspace?cwd=/tmp"))
-        XCTAssertEqual(workspace.droppingMissionLink(), workspace)
+        XCTAssertEqual(stripped.agent, .claude)
+        XCTAssertNil(restricted.profileID)
+        let workspace = try XCTUnwrap(parse("nirux://new-workspace?cwd=/tmp&profile=p"))
+        XCTAssertNil(workspace.restrictedForConfirmation().profileID)
+        XCTAssertEqual(workspace.restrictedForConfirmation().action, workspace.action)
     }
 
     func testLaunchIDIsReadEvenFromUnparseableURLs() throws {
@@ -255,11 +279,6 @@ final class NiruxURLRequestTests: XCTestCase {
         XCTAssertEqual(text.message, "Create a worktree?")
         XCTAssertTrue(text.details.contains("Agent: none (plain shell)"))
         XCTAssertFalse(text.details.contains("the agent is told"))
-    }
-
-    func testOpenEditorHasNoConfirmation() throws {
-        let request = try XCTUnwrap(parse("nirux://open-editor?file=/tmp/a.swift"))
-        XCTAssertNil(request.confirmation(claudeMode: .default, codexMode: .default))
     }
 
     func testConfirmationNeutralizesControlCharactersAndCapsLength() throws {
@@ -367,6 +386,25 @@ final class NiruxURLRequestTests: XCTestCase {
             queue.finish(confirmed: false, now: now)
             now += URLConfirmationQueue.maxCooldown
         }
+    }
+
+    // MARK: - In-app tickets
+
+    @MainActor
+    func testInAppTicketAuthorizesItsOwnWorktreeRequestOnce() throws {
+        let path = "/tmp/nirux-handover-claude-\(UUID().uuidString).md"
+        let encoded = path.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? path
+        let request = try XCTUnwrap(parse("nirux://new-worktree?branch=x&repo=/r&handover=\(encoded)"))
+        XCTAssertFalse(InAppWorktreeTickets.redeem(request, now: 0), "no ticket issued yet")
+
+        InAppWorktreeTickets.issue(handoverPath: path, now: 100)
+        let other = try XCTUnwrap(parse("nirux://new-worktree?branch=x&repo=/r&handover=/tmp/nirux-handover-x"))
+        XCTAssertFalse(InAppWorktreeTickets.redeem(other, now: 101))
+        XCTAssertTrue(InAppWorktreeTickets.redeem(request, now: 101))
+        XCTAssertFalse(InAppWorktreeTickets.redeem(request, now: 102), "one-time")
+
+        InAppWorktreeTickets.issue(handoverPath: path, now: 200)
+        XCTAssertFalse(InAppWorktreeTickets.redeem(request, now: 200 + InAppWorktreeTickets.lifetime + 1), "expired")
     }
 
     // MARK: - Senders

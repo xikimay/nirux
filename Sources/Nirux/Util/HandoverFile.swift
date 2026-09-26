@@ -22,6 +22,7 @@ enum HandoverFile {
         case notOwnedByUser
         case multipleLinks
         case tooLarge
+        case empty
         case readFailed(Int32)
         case writeFailed(Int32)
 
@@ -38,6 +39,7 @@ enum HandoverFile {
             case .notOwnedByUser: return "The handover file belongs to another user."
             case .multipleLinks: return "The handover file is a hard link to another file."
             case .tooLarge: return "The handover file is larger than 1 MB."
+            case .empty: return "The handover file is empty: the agent didn’t write it."
             case .readFailed(let code), .writeFailed(let code):
                 return "Copying the handover failed (\(String(cString: strerror(code))))."
             }
@@ -100,6 +102,9 @@ enum HandoverFile {
         case .success(let data): content = data
         case .failure(let error): return .failure(error)
         }
+        // An empty file (e.g. the in-app flow's pre-created one, never filled)
+        // must not count as delivered: the agent would be told to follow it.
+        guard !content.isEmpty else { return .failure(.empty) }
 
         let destination = (destinationDirectory as NSString).appendingPathComponent(filename)
         if case .failure(let error) = writeNew(content, to: destination) {

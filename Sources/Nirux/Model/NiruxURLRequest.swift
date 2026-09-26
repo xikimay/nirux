@@ -52,7 +52,7 @@ enum NiruxLaunchAuthorization {
 /// Parsed `nirux://` request. `init(url:)` is pure so the routing rules can
 /// be tested; `resolvingPaths()` does the filesystem part (off the main
 /// actor), and the remaining checks happen where the action is performed
-/// (`OpenEditorRequest`, `HandoverFile`, `GitWorktree.create`).
+/// (`HandoverFile`, `GitWorktree.create`).
 struct NiruxURLRequest: Equatable, Sendable {
     enum Action: Equatable, Sendable {
         /// nirux://new-workspace?cwd=...&title=...&agent=claude|codex&profile=...
@@ -60,29 +60,29 @@ struct NiruxURLRequest: Equatable, Sendable {
         /// nirux://new-worktree?branch=...&repo=...&agent=...&handover=...&profile=...
         case newWorktree(NewWorktree)
         /// nirux://open-editor?file=...&line=...&endLine=...&workspace=...
-        /// Parsed separately by `OpenEditorRequest`, which needs file I/O.
-        case openEditor
+        /// `target` is filled by `resolvingPaths()`: validating the file
+        /// needs I/O (see `OpenEditorRequest`).
+        case openEditor(query: [URLQueryItem], target: OpenEditorRequest?)
     }
 
     struct NewWorktree: Equatable, Sendable {
-        let branch: String
-        let repo: String
-        let agent: NiruxApp.WorkspaceAgent?
+        var branch: String
+        var repo: String
+        var agent: NiruxApp.WorkspaceAgent?
         /// Kept even when it breaks the handover rules: only the handover is
         /// dropped then (see `HandoverFile.transfer`), not the whole request.
-        let handoverPath: String?
-        let parentWorkspaceID: String?
-        let parentAgentUUID: String?
+        var handoverPath: String?
+        var parentWorkspaceID: String?
+        var parentAgentUUID: String?
     }
 
     enum Disposition: Equatable {
         case perform
         case confirm
-        case openEditor
     }
 
-    let action: Action
-    let profileID: String?
+    var action: Action
+    var profileID: String?
     let launchID: String?
 
     init(action: Action, profileID: String?, launchID: String?) {
@@ -117,12 +117,13 @@ struct NiruxURLRequest: Equatable, Sendable {
                 parentAgentUUID: value("parentAgent")
             ))
         case "open-editor":
-            action = .openEditor
+            guard let file = value("file"), file.hasPrefix("/") else { return nil }
+            action = .openEditor(query: items, target: nil)
         default:
             return nil
         }
         profileID = ["profile", "profileID", "space"].lazy.compactMap(value).first
-        launchID = Self.launchID(in: url)
+        launchID = value(NiruxLaunchAuthorization.queryItemName)
     }
 
     /// First `launch=` value, also read for URLs that fail to parse so a
@@ -138,79 +139,61 @@ struct NiruxURLRequest: Equatable, Sendable {
         NiruxLaunchAuthorization.isValid(launchID, expected: expected)
     }
 
-    /// The security gate. Starting a shell or an agent needs this launch's
-    /// ID or the user's confirmation. `open-editor` only displays a
-    /// size-capped text file and never executes anything, so it keeps
-    /// working without the ID (it just doesn't bring Nirux to the front).
+    /// The security gate: every action needs this launch's ID or the user's
+    /// confirmation. That includes `open-editor`, which runs nothing but
+    /// would otherwise let a web page put any text file (say, a private
+    /// key) on screen.
     func disposition(expectedLaunchID: String = NiruxLaunchAuthorization.launchID) -> Disposition {
-        switch action {
-        case .openEditor:
-            return .openEditor
-        case .newWorkspace, .newWorktree:
-            return hasValidLaunchID(expected: expectedLaunchID) ? .perform : .confirm
-        }
+        hasValidLaunchID(expected: expectedLaunchID) ? .perform : .confirm
     }
 
     /// Replace `cwd`/`repo` with their realpath, so the confirmation shows
     /// exactly the folder the action will use (no `/./` padding or `..`
-    /// tricks). Nil when the folder doesn't exist. Blocking file-system
-    /// calls: run off the main actor.
+    /// tricks), and validate an editor target. Nil when the folder or file
+    /// isn't usable. Blocking file-system calls: run off the main actor.
     func resolvingPaths(
         realPath: (String) -> String? = { $0.realPath },
-        isDirectory: (String) -> Bool = NiruxURLRequest.directoryExists
+        isDirectory: (String) -> Bool = NiruxURLRequest.directoryExists,
+        editorTarget: ([URLQueryItem]) -> OpenEditorRequest? = { OpenEditorRequest(queryItems: $0) }
     ) -> NiruxURLRequest? {
         func resolve(_ path: String) -> String? {
             guard let resolved = realPath(path), isDirectory(resolved) else { return nil }
             return resolved
         }
+        var resolved = self
         switch action {
         case let .newWorkspace(cwd, title, agent):
             var resolvedCwd: String?
             if let cwd {
-                guard let resolved = resolve(cwd) else { return nil }
-                resolvedCwd = resolved
+                guard let folder = resolve(cwd) else { return nil }
+                resolvedCwd = folder
             }
-            return NiruxURLRequest(
-                action: .newWorkspace(cwd: resolvedCwd, title: title, agent: agent),
-                profileID: profileID,
-                launchID: launchID
-            )
-        case .newWorktree(let request):
+            resolved.action = .newWorkspace(cwd: resolvedCwd, title: title, agent: agent)
+        case .newWorktree(var request):
             guard let repo = resolve(request.repo) else { return nil }
-            return NiruxURLRequest(
-                action: .newWorktree(NewWorktree(
-                    branch: request.branch,
-                    repo: repo,
-                    agent: request.agent,
-                    handoverPath: request.handoverPath,
-                    parentWorkspaceID: request.parentWorkspaceID,
-                    parentAgentUUID: request.parentAgentUUID
-                )),
-                profileID: profileID,
-                launchID: launchID
-            )
-        case .openEditor:
-            return self
+            request.repo = repo
+            resolved.action = .newWorktree(request)
+        case .openEditor(let query, _):
+            guard let target = editorTarget(query) else { return nil }
+            resolved.action = .openEditor(query: query, target: target)
         }
+        return resolved
     }
 
-    /// A request the user confirmed (no valid launch ID) must not link the
-    /// new agent to a live parent agent's Mission mailbox: the sheet doesn't
-    /// show that link, and it would give an outside caller a channel to it.
-    func droppingMissionLink() -> NiruxURLRequest {
-        guard case .newWorktree(let request) = action else { return self }
-        return NiruxURLRequest(
-            action: .newWorktree(NewWorktree(
-                branch: request.branch,
-                repo: request.repo,
-                agent: request.agent,
-                handoverPath: request.handoverPath,
-                parentWorkspaceID: nil,
-                parentAgentUUID: nil
-            )),
-            profileID: profileID,
-            launchID: launchID
-        )
+    /// What a request the user confirmed (no valid launch ID) may still do.
+    /// It must not link the new agent to a live parent agent's Mission
+    /// mailbox (that would give an outside caller a channel to it), and it
+    /// opens in the space the user is looking at rather than one the caller
+    /// picked. Neither is shown on the sheet.
+    func restrictedForConfirmation() -> NiruxURLRequest {
+        var restricted = self
+        restricted.profileID = nil
+        if case .newWorktree(var request) = action {
+            request.parentWorkspaceID = nil
+            request.parentAgentUUID = nil
+            restricted.action = .newWorktree(request)
+        }
+        return restricted
     }
 
     static func directoryExists(_ path: String) -> Bool {
@@ -230,7 +213,7 @@ struct NiruxURLRequest: Equatable, Sendable {
     /// launch ID. Everything the action will do is spelled out, including
     /// the agent's permission mode: a request from a web page would inherit
     /// it. Call it on a request that went through `resolvingPaths()`.
-    func confirmation(claudeMode: ClaudeLaunchMode, codexMode: CodexLaunchMode) -> Confirmation? {
+    func confirmation(claudeMode: ClaudeLaunchMode, codexMode: CodexLaunchMode) -> Confirmation {
         // One wording whether the launch ID is missing or stale: a caller
         // could add a fake `launch=` to pick a more reassuring text.
         let intro = "This request didn’t come from a current Nirux terminal. That happens with an agent "
@@ -281,8 +264,13 @@ struct NiruxURLRequest: Equatable, Sendable {
                 details: intro + "\n\n" + lines.joined(separator: "\n") + "\n\n" + gitNote,
                 confirmButton: "Create Worktree"
             )
-        case .openEditor:
-            return nil
+        case let .openEditor(query, target):
+            let file = target?.file ?? query.first(where: { $0.name == "file" })?.value ?? ""
+            return Confirmation(
+                message: "Show a file in the Nirux editor?",
+                details: intro + "\n\nFile: \(Self.displaySafe(file))",
+                confirmButton: "Show File"
+            )
         }
     }
 
@@ -321,7 +309,7 @@ struct NiruxURLRequest: Equatable, Sendable {
 struct URLConfirmationQueue {
     static let capacity = 4
     static let cooldown: TimeInterval = 5
-    static let maxCooldown: TimeInterval = 300
+    static let maxCooldown: TimeInterval = 60
 
     private(set) var pending: [NiruxURLRequest] = []
     private(set) var isPresenting = false
@@ -360,5 +348,32 @@ struct URLConfirmationQueue {
         consecutiveCancels += 1
         let delay = Self.cooldown * pow(2, Double(min(consecutiveCancels - 1, 16)))
         cooldownUntil = now + min(delay, Self.maxCooldown)
+    }
+}
+
+/// One-time authorization for the worktree request that Nirux's own
+/// worktree panel asks the running agent to send, keyed by the handover file
+/// Nirux pre-created under an unguessable name. It lets that request through
+/// even when the agent's shell has no current NIRUX_LAUNCH_ID (a tmux
+/// session from before a restart) or the confirmation queue is cooling down.
+@MainActor
+enum InAppWorktreeTickets {
+    static let lifetime: TimeInterval = 30 * 60
+
+    private static var expiries: [String: TimeInterval] = [:]
+
+    static func issue(handoverPath: String, now: TimeInterval) {
+        expiries = expiries.filter { $0.value > now }
+        expiries[handoverPath] = now + lifetime
+    }
+
+    /// True once per issued ticket, for a worktree request carrying its
+    /// handover path before it expires.
+    static func redeem(_ request: NiruxURLRequest, now: TimeInterval) -> Bool {
+        guard case .newWorktree(let worktree) = request.action,
+              let path = worktree.handoverPath,
+              let expiry = expiries.removeValue(forKey: path)
+        else { return false }
+        return expiry > now
     }
 }

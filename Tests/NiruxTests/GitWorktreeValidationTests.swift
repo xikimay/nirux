@@ -82,7 +82,9 @@ final class GitWorktreeValidationTests: XCTestCase {
     func testRejectsRepoThatIsNotAGitTopLevel() throws {
         let plain = root + "/plain"
         try FileManager.default.createDirectory(atPath: plain, withIntermediateDirectories: true)
-        XCTAssertNil(GitWorktree.create(branch: "feat/x", repoRoot: plain).path)
+        let notARepo = GitWorktree.create(branch: "feat/x", repoRoot: plain)
+        XCTAssertNil(notARepo.path)
+        XCTAssertTrue(notARepo.error?.contains("not a git repository") == true, "keeps git's own message")
         XCTAssertFalse(FileManager.default.fileExists(atPath: root + "/plain.feat-x"))
 
         let subdirectory = repo + "/sub"

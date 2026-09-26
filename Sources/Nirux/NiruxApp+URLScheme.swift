@@ -57,8 +57,7 @@ extension NiruxApp {
             if launchURLBacklog.count < 8 { launchURLBacklog.append(url) }
             return
         }
-        let arrivedAt = ProcessInfo.processInfo.systemUptime
-        let restoreApp = appToRestoreOnCancel(now: arrivedAt)
+        let restoreApp = appToRestoreOnCancel(now: ProcessInfo.processInfo.systemUptime)
         guard let request = NiruxURLRequest(url: url) else {
             NSLog("[URL] Ignored malformed or unknown nirux:// request (host: \(url.host ?? "none"))")
             if NiruxLaunchAuthorization.isValid(NiruxURLRequest.launchID(in: url)) {
@@ -69,20 +68,16 @@ extension NiruxApp {
             }
             return
         }
-        if request.disposition() == .openEditor {
-            openEditor(from: url, activate: request.hasValidLaunchID())
-            return
-        }
-        // realpath/stat can block on a dead network mount: resolve off the
-        // main actor, then gate on the resolved request so the confirmation
-        // shows exactly the folder the action will use.
+        // realpath/stat and the editor file checks can block on a dead
+        // network mount: resolve off the main actor, then gate on the
+        // resolved request so a confirmation shows exactly what will be used.
         Task { [weak self] in
             let resolved = await Task.detached { request.resolvingPaths() }.value
             guard let self else { return }
             guard let resolved else {
-                NSLog("[URL] Ignored nirux:// request: folder not found")
+                NSLog("[URL] Ignored nirux:// request: folder or file not usable")
                 if request.hasValidLaunchID() {
-                    self.shell?.presentProblem("Nirux couldn’t open that folder", "It doesn’t exist or isn’t a folder.")
+                    self.shell?.presentProblem(Self.unusableTargetMessage(for: request.action), "")
                 }
                 return
             }
@@ -90,21 +85,28 @@ extension NiruxApp {
         }
     }
 
-    private func route(_ request: NiruxURLRequest, restoreApp: NSRunningApplication?) {
-        switch request.disposition() {
-        case .perform:
-            perform(request)
-        case .confirm:
-            let wasIdle = urlConfirmations.isIdle
-            guard urlConfirmations.enqueue(request.droppingMissionLink(), now: ProcessInfo.processInfo.systemUptime) else {
-                NSLog("[URL] Dropped an unconfirmed nirux:// request (queue full or just cancelled)")
-                return
-            }
-            if wasIdle { urlConfirmationRestoreApp = restoreApp }
-            presentNextURLConfirmation()
+    private static func unusableTargetMessage(for action: NiruxURLRequest.Action) -> String {
+        switch action {
+        case .newWorkspace, .newWorktree:
+            return "Nirux couldn’t open that folder: it doesn’t exist or isn’t a folder."
         case .openEditor:
-            break
+            return "Nirux couldn’t show that file: it’s missing, not a text file, or larger than 5 MB."
         }
+    }
+
+    private func route(_ request: NiruxURLRequest, restoreApp: NSRunningApplication?) {
+        let now = ProcessInfo.processInfo.systemUptime
+        if InAppWorktreeTickets.redeem(request, now: now) || request.disposition() == .perform {
+            perform(request)
+            return
+        }
+        let wasIdle = urlConfirmations.isIdle
+        guard urlConfirmations.enqueue(request.restrictedForConfirmation(), now: now) else {
+            NSLog("[URL] Dropped an unconfirmed nirux:// request (queue full or just cancelled)")
+            return
+        }
+        if wasIdle { urlConfirmationRestoreApp = restoreApp }
+        presentNextURLConfirmation()
     }
 
     private func perform(_ request: NiruxURLRequest) {
@@ -121,8 +123,9 @@ extension NiruxApp {
                 parentWorkspaceID: worktree.parentWorkspaceID,
                 parentAgentUUID: worktree.parentAgentUUID
             )
-        case .openEditor:
-            return
+        case .openEditor(_, let target):
+            guard let target else { return }
+            shell?.openEditorFromURL(target)
         }
         NSApp.activate(ignoringOtherApps: true)
         mainWindow?.makeKeyAndOrderFront(nil)
@@ -133,14 +136,11 @@ extension NiruxApp {
     private func presentNextURLConfirmation() {
         guard let window = mainWindow else { return }
         guard let request = urlConfirmations.startNext() else { return }
-        guard let text = request.confirmation(
-            claudeMode: NiruxShellView.currentClaudeLaunchMode(),
-            codexMode: NiruxShellView.currentCodexLaunchMode()
-        ) else {
-            urlConfirmations.finish(confirmed: true, now: ProcessInfo.processInfo.systemUptime)
-            presentNextURLConfirmation()
-            return
-        }
+        let settings = Persistence.load()?.settings
+        let text = request.confirmation(
+            claudeMode: settings?.claudeLaunchMode ?? .default,
+            codexMode: settings?.codexLaunchMode ?? .default
+        )
 
         let alert = NSAlert()
         alert.alertStyle = .warning
@@ -150,27 +150,29 @@ extension NiruxApp {
         let cancel = alert.addButton(withTitle: "Cancel")
         // No default button: a stray Return must not approve an action that
         // someone else requested (Escape still cancels). Cancel takes the
-        // initial focus so Space with keyboard navigation declines too, and
-        // the confirm button arms a beat after the sheet actually appears
-        // (it may wait behind another sheet), so a click aimed at whatever
-        // was there before can't land on it.
+        // initial focus so Space with keyboard navigation declines too. The
+        // confirm button arms a beat after the sheet is on screen with Nirux
+        // active (it may wait behind another sheet, and activation can be
+        // refused), so a click aimed at whatever was there can't land on it.
         confirm.keyEquivalent = ""
         confirm.isEnabled = false
         alert.layout()
         alert.window.initialFirstResponder = cancel
         let sheet = alert.window
+        let lifetime = SheetLifetime()
         Task { @MainActor in
-            while !sheet.isVisible {
+            while !lifetime.ended, !(sheet.isVisible && NSApp.isActive) {
                 try? await Task.sleep(for: .milliseconds(100))
             }
             try? await Task.sleep(for: .milliseconds(750))
-            confirm.isEnabled = true
+            if !lifetime.ended { confirm.isEnabled = true }
         }
 
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         alert.beginSheetModal(for: window) { [weak self] response in
             MainActor.assumeIsolated {
+                lifetime.ended = true
                 guard let self else { return }
                 let confirmed = response == .alertFirstButtonReturn
                 // A Cancel also drops whatever else was queued.
@@ -186,29 +188,10 @@ extension NiruxApp {
             }
         }
     }
+}
 
-    // nirux://open-editor?file=<absolute path>&line=42&endLine=57&workspace=<id>
-    // Validation stats (and prefix-reads) the file, which can block on a dead
-    // network mount — run it off the main actor, then hop back. Activation is
-    // gated on acceptance so a rejected request can't be used to yank Nirux
-    // frontmost, and on the launch ID so a web page can't raise a file it
-    // picked (say, a credentials file) over whatever is on screen.
-    private func openEditor(from url: URL, activate: Bool) {
-        let urlString = url.absoluteString
-        Task { [weak self] in
-            let request = await Task.detached {
-                OpenEditorRequest(queryItems: URLComponents(string: urlString)?.queryItems)
-            }.value
-            guard let request else {
-                NSLog("[OpenEditor] rejected open-editor URL (missing/non-regular/oversized/binary file?)")
-                return
-            }
-            guard let self else { return }
-            self.shell?.openEditorFromURL(request)
-            if activate {
-                NSApp.activate(ignoringOtherApps: true)
-                self.mainWindow?.makeKeyAndOrderFront(nil)
-            }
-        }
-    }
+/// Lets the arming task stop once its sheet has been answered.
+@MainActor
+private final class SheetLifetime {
+    var ended = false
 }

@@ -34,6 +34,14 @@ extension NiruxShellView {
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
+                // An agent retrying the same `open` (its handover is already
+                // gone): focus the workspace the first request opened instead
+                // of adding a duplicate agent in the same folder.
+                if let path, handoverError == .cannotOpen(ENOENT),
+                   let existing = self.workspaces.first(where: { $0.cwd.realPath == path.realPath }) {
+                    self.focusWorkspace(id: existing.id)
+                    return
+                }
                 if let handoverPath, let handoverError {
                     NSLog("[Worktree] Ignored handover \(handoverPath): \(handoverError)")
                     self.presentProblem(

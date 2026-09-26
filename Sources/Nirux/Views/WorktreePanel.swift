@@ -90,8 +90,8 @@ enum GitWorktree {
     /// otherwise be parsed as a git option), and an existing directory at the
     /// target path is only reused when git lists it as a worktree of the repo.
     static func create(branch: String, repoRoot: String) -> (path: String?, error: String?) {
-        guard isRepositoryTopLevel(repoRoot) else {
-            return (nil, "Not the top level of a git repository: \(repoRoot)")
+        if let problem = repositoryTopLevelProblem(repoRoot) {
+            return (nil, problem)
         }
         guard isValidBranchName(branch, repoRoot: repoRoot) else {
             return (nil, "Invalid branch name: \(branch)")
@@ -188,11 +188,21 @@ enum GitWorktree {
     }
 
     static func isRepositoryTopLevel(_ path: String) -> Bool {
-        guard path.hasPrefix("/"), let resolved = path.realPath else { return false }
+        repositoryTopLevelProblem(path) == nil
+    }
+
+    /// Nil when `path` is the top level of a git work tree; otherwise why
+    /// not, keeping git's own message (e.g. its safe.directory advice).
+    static func repositoryTopLevelProblem(_ path: String) -> String? {
+        let notTopLevel = "Not the top level of a git repository: \(path)"
+        guard path.hasPrefix("/"), let resolved = path.realPath else { return notTopLevel }
         let result = gitRunFull(["rev-parse", "--show-toplevel"], cwd: resolved)
         let topLevel = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard result.status == 0, !topLevel.isEmpty else { return false }
-        return topLevel.realPath == resolved
+        guard result.status == 0, !topLevel.isEmpty else {
+            let gitError = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            return gitError.isEmpty ? notTopLevel : gitError
+        }
+        return topLevel.realPath == resolved ? nil : notTopLevel
     }
 
     static func isValidBranchName(_ branch: String, repoRoot: String) -> Bool {

@@ -599,9 +599,11 @@ extension NiruxShellView {
                     // Pre-created (O_EXCL, unguessable name) so the agent writes
                     // into a file the user owns, never through a planted symlink.
                     guard let handoverPath = HandoverFile.makeEmptySource(agent: runningAgent.rawValue) else {
-                        NSSound.beep()
+                        self.presentProblem("Couldn’t create a handover file in /tmp", "The worktree opens without one.")
+                        self.addWorkspace(title: branch, cwd: path, agent: runningAgent)
                         return
                     }
+                    InAppWorktreeTickets.issue(handoverPath: handoverPath, now: ProcessInfo.processInfo.systemUptime)
                     let isMission = Self.currentMissionHandoffsEnabled()
                     let url = Self.inAppWorktreeURL(for: NiruxURLRequest.NewWorktree(
                         branch: branch, repo: repoRoot, agent: runningAgent, handoverPath: handoverPath,

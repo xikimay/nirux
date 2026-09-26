@@ -308,7 +308,7 @@ extension NiruxShellView {
            - `workspace=$NIRUX_WORKSPACE_ID` makes Nirux switch to this session's
              workspace before opening; keep it in the command.
            - `launch=${NIRUX_LAUNCH_ID:-}` proves the request comes from a Nirux
-             terminal, which lets Nirux come to the front; keep it in the command.
+             terminal; without it Nirux asks the user to confirm. Keep it in the command.
         3. **Still answer in the terminal**, one line: what it is and where, e.g.
            `AgentHookCenter.swift:44 — parsing du workspaceID`. The editor shows the
            code; the reply gives the pointer.
