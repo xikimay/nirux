@@ -223,6 +223,14 @@ NIRUX_CODESIGN_IDENTITY="Developer ID Application: Example Name (ABCDE12345)" \
   ./scripts/bundle.sh "dev" "1"
 ```
 
+### Fingerprint mismatch for libghostty-spm
+
+If SwiftPM fails with `Revision be4e5b6… for libghostty-spm … version 1.3.1 does not match previously recorded value b093032…`, your machine recorded the `1.3.1` tag before upstream re-tagged it onto an identical source tree. Clear the stale fingerprint once:
+
+```bash
+rm ~/Library/org.swift.swiftpm/security/fingerprints/libghostty-spm-*.json
+```
+
 ## Architecture
 
 Nirux is a Swift Package with an AppKit executable target:
