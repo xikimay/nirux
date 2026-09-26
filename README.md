@@ -160,13 +160,15 @@ Only appearance keys are honored:
 - colors: `theme`, `background`, `foreground`, `palette`, `palette-generate`, `palette-harmonious`, `bold-color`, `minimum-contrast`, `faint-opacity`, `alpha-blending`, `window-colorspace`, `selection-*` and `search-*` colors, and the deprecated `bold-is-bright`, `cursor-invert-fg-bg`, and `selection-invert-fg-bg`;
 - cursor: `cursor-color`, `cursor-text`, `cursor-opacity`, `cursor-style`, `cursor-style-blink`.
 
-Everything else, including keybinds, window and macOS options, padding, opacity, and shell or command settings, is ignored: Nirux handles input, layout, and shells itself. Settings you don't set keep Nirux's defaults: 14pt, a blinking block cursor, and the Afterglow palette.
+Everything else, including keybinds, window and macOS options, padding, opacity, and shell or command settings, is ignored: Nirux handles input, layout, and shells itself. Settings you don't set keep Nirux's defaults: 14pt, a blinking block cursor, and the Afterglow palette. If you set your own `background` or `foreground`, Afterglow's cursor and selection colors are dropped too, so they stay visible against your colors.
 
 `theme` accepts a theme name, an absolute path, or a `light:…,dark:…` pair. Nirux always uses the dark variant, because its window is always dark. Names are looked up in `~/.config/ghostty/themes`, then in the themes bundled with Ghostty.app when it is installed. A theme that can't be found is ignored. Only the theme's appearance settings are used. As in Ghostty, a theme overrides the defaults, and your explicit settings override the theme. When a theme is set, Nirux's default colors are left out.
 
 Invalid lines, in your config or in its theme, are skipped individually instead of invalidating the whole config; look for `[GhosttyConfig]` messages in Console.app.
 
 The configuration is read each time a terminal opens, so a change applies to terminals you open afterwards. Terminals that are already open keep their settings.
+
+To make Nirux ignore your Ghostty configuration, run `defaults write com.xikimay.nirux IgnoreGhosttyConfig -bool true` (`defaults delete com.xikimay.nirux IgnoreGhosttyConfig` undoes it).
 
 ## Worktrees And URL Scheme
 

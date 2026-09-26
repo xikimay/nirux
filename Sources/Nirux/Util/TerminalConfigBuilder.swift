@@ -159,12 +159,29 @@ enum TerminalConfigBuilder {
         return nil
     }
 
-    /// Full config text for the given user lines. Nirux's colors are left
-    /// out when a theme is used: like in Ghostty, keys the theme doesn't
-    /// set fall back to Ghostty's defaults.
+    /// Afterglow keys that only suit Afterglow's own background.
+    static let backgroundBoundColorKeys: Set<String> = ["cursor-color", "selection-background"]
+
+    /// Nirux's lines before the user's. Nirux's colors are left out when a
+    /// theme is used: like in Ghostty, keys the theme doesn't set fall back
+    /// to Ghostty's defaults. When the user sets their own background or
+    /// foreground, Afterglow's cursor and selection colors are left out
+    /// too, as they could vanish against it.
+    static func baseLines(for user: [UserLine]) -> [String] {
+        if user.contains(where: \.isTheme) { return niruxDefaults }
+        guard user.contains(where: { $0.entry.key == "background" || $0.entry.key == "foreground" }) else {
+            return niruxDefaults + niruxColors
+        }
+        let colors = niruxColors.filter { line in
+            let key = line.prefix { $0 != "=" }.trimmingCharacters(in: .whitespaces)
+            return !backgroundBoundColorKeys.contains(key)
+        }
+        return niruxDefaults + colors
+    }
+
+    /// Full config text for the given user lines.
     static func render(_ user: [UserLine]) -> String {
-        let colors = user.contains(where: \.isTheme) ? [] : niruxColors
-        return (niruxDefaults + colors + user.map(\.text) + enforced).joined(separator: "\n") + "\n"
+        (baseLines(for: user) + user.map(\.text) + enforced).joined(separator: "\n") + "\n"
     }
 
     /// Drops the user lines libghostty rejects — a single invalid line
@@ -180,7 +197,7 @@ enum TerminalConfigBuilder {
         var dropped: [UserLine] = []
         while !kept.isEmpty, let report = diagnostics(render(kept)) {
             // Line numbers index into the rendered text; map them to `kept`.
-            let userStart = niruxDefaults.count + (kept.contains(where: \.isTheme) ? 0 : niruxColors.count)
+            let userStart = baseLines(for: kept).count
             let rejected = Set(rejectedLineNumbers(in: report).map { $0 - 1 - userStart })
                 .filter(kept.indices.contains)
             guard !rejected.isEmpty else {
@@ -216,6 +233,11 @@ enum TerminalConfigBuilder {
 /// terminals opened afterwards.
 @MainActor
 enum TerminalAppearance {
+    /// Hidden off switch: `defaults write com.xikimay.nirux
+    /// IgnoreGhosttyConfig -bool true` makes terminals ignore the Ghostty
+    /// config.
+    static let ignoreGhosttyConfigKey = "IgnoreGhosttyConfig"
+
     /// Last config validated against libghostty, keyed by its input, so
     /// opening terminals doesn't re-validate an unchanged config.
     private static var lastSanitized: (input: [TerminalConfigBuilder.UserLine], contents: String)?
@@ -234,6 +256,9 @@ enum TerminalAppearance {
     }
 
     static func currentConfig() -> String {
+        guard !UserDefaults.standard.bool(forKey: ignoreGhosttyConfigKey) else {
+            return TerminalConfigBuilder.render([])
+        }
         let environment = ProcessInfo.processInfo.environment
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let entries = GhosttyConfigFile.load(

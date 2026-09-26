@@ -77,6 +77,17 @@ final class TerminalConfigBuilderTests: XCTestCase {
         XCTAssertEqual(lines.last, "term = xterm-256color")
     }
 
+    func testOwnBackgroundDropsAfterglowCursorAndSelection() {
+        let lines = renderedLines(userLines("background = #2e3440").lines)
+        XCTAssertFalse(lines.contains { $0.hasPrefix("cursor-color") || $0.hasPrefix("selection-background") })
+        XCTAssertTrue(lines.contains("palette = 1=#AC4142"), "the Afterglow palette stays")
+        XCTAssertTrue(lines.contains("foreground = D0D0D0"))
+
+        let foregroundOnly = renderedLines(userLines("foreground = #eceff4").lines)
+        XCTAssertFalse(foregroundOnly.contains { $0.hasPrefix("selection-background") })
+        XCTAssertTrue(renderedLines(userLines("font-size = 15").lines).contains("selection-background = 303030"))
+    }
+
     // MARK: - Themes
 
     func testThemeIsInlinedBetweenDefaultsAndUserSettings() {
@@ -192,6 +203,16 @@ final class TerminalConfigBuilderTests: XCTestCase {
         XCTAssertTrue(result.contents.contains("font-size = 15"))
     }
 
+    func testSanitizeMapsLinesWhenAfterglowIsTrimmed() {
+        // An own background shortens Nirux's lines: numbering must follow,
+        // and dropping that background brings the full Afterglow back.
+        let user = userLines("background = #zz\nfont-size = abc\nfont-size = 15").lines
+        let result = Builder.sanitize(user, diagnostics: fakeDiagnostics { $0.contains("#zz") || $0.contains("abc") })
+        XCTAssertEqual(result.dropped.map(\.entry.lineNumber), [1, 2])
+        XCTAssertEqual(result.contents, Builder.render([user[2]]))
+        XCTAssertTrue(result.contents.contains("selection-background = 303030"))
+    }
+
     func testSanitizeFallsBackToDefaultsOnUnlocatedErrors() {
         let user = userLines("font-size = 15\nfont-family = Menlo").lines
         let result = Builder.sanitize(user) { _ in Builder.diagnosticsPrefix + "something went wrong" }
@@ -239,6 +260,13 @@ final class TerminalConfigLibghosttyTests: XCTestCase {
 
     func testDefaultsAreAccepted() {
         XCTAssertNil(diagnostics(TerminalConfigBuilder.render([])))
+    }
+
+    func testOffSwitchIgnoresTheGhosttyConfig() {
+        let key = TerminalAppearance.ignoreGhosttyConfigKey
+        UserDefaults.standard.set(true, forKey: key)
+        defer { UserDefaults.standard.removeObject(forKey: key) }
+        XCTAssertEqual(TerminalAppearance.currentConfig(), TerminalConfigBuilder.render([]))
     }
 
     func testReportFormatIsUnderstood() throws {
