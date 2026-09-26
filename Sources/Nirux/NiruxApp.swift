@@ -20,6 +20,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     weak var settingsTelegramStatusLabel: NSTextField?
     weak var settingsTelegramPairButton: NSButton?
     var telegramRemoteAccessController: TelegramRemoteAccessController?
+    /// Keychain access used by the Settings panel; tests stub it.
+    var telegramTokenLoader: () throws -> String? = { try TelegramTokenStore.load() }
+    var telegramTokenSaver: (String) throws -> Void = { try TelegramTokenStore.save($0) }
     var isManualUpdateCheck = false
     var updaterReady = false
 
