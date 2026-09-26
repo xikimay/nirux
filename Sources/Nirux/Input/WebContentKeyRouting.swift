@@ -13,13 +13,18 @@ enum WebContentKeyRouting {
         modifierFlags: NSEvent.ModifierFlags
     ) -> Bool {
         let modifiers = modifierFlags.intersection([.command, .option, .control, .shift])
-        let typed = [characters, charactersIgnoringModifiers].compactMap { $0?.lowercased() }
+        func types(_ letter: String, ansiKeyCode: UInt16) -> Bool {
+            typesLetter(
+                letter, ansiKeyCode: ansiKeyCode,
+                characters: characters, charactersIgnoringModifiers: charactersIgnoringModifiers, keyCode: keyCode
+            )
+        }
 
         // Cmd+Z / Shift+Cmd+Z: Monaco keeps its own undo stack and web apps
         // handle undo in JavaScript. Edit > Undo/Redo only serves panel text
         // fields (PanelTextUndo), and a disabled menu item still swallows its
         // chord, so the menu must not see these first.
-        if types("z", ansiKeyCode: 0x06, typed: typed, keyCode: keyCode),
+        if types("z", ansiKeyCode: 0x06),
            modifiers == [.command] || modifiers == [.command, .shift] {
             return true
         }
@@ -27,7 +32,7 @@ enum WebContentKeyRouting {
 
         // Cmd+P: Monaco rebinds it to the workspace file picker. The command
         // palette stays reachable in the editor through Shift+Cmd+P.
-        if types("p", ansiKeyCode: 0x23, typed: typed, keyCode: keyCode), modifiers == [.command] {
+        if types("p", ansiKeyCode: 0x23), modifiers == [.command] {
             return true
         }
         // Cmd+Opt+Return: Monaco resolves this chord itself — "Replace All"
@@ -39,11 +44,20 @@ enum WebContentKeyRouting {
         return false
     }
 
-    /// Whether the key event means `letter` the way AppKit matches menu key
-    /// equivalents: by the typed character (`characters` follows layouts such
-    /// as Dvorak-QWERTY⌘ that switch while Cmd is held), or by the ANSI key
-    /// position when the layout types no Latin character (Russian, Greek…).
-    private static func types(_ letter: String, ansiKeyCode: UInt16, typed: [String], keyCode: UInt16) -> Bool {
+    /// Whether a Cmd key event means `letter`, the way AppKit matches menu key
+    /// equivalents. `characters` follows the layout's Cmd key table, which on
+    /// Apple's non-Latin layouts (Russian, Greek, Hebrew…) and Dvorak-QWERTY⌘
+    /// types the QWERTY letter even when `charactersIgnoringModifiers` does
+    /// not. The ANSI key position is a last resort for layouts without a
+    /// Latin Cmd table.
+    static func typesLetter(
+        _ letter: String,
+        ansiKeyCode: UInt16,
+        characters: String?,
+        charactersIgnoringModifiers: String?,
+        keyCode: UInt16
+    ) -> Bool {
+        let typed = [characters, charactersIgnoringModifiers].compactMap { $0?.lowercased() }
         if typed.contains(letter) { return true }
         let typesLatin = typed.contains { $0.unicodeScalars.allSatisfy(\.isASCII) }
         return !typesLatin && keyCode == ansiKeyCode

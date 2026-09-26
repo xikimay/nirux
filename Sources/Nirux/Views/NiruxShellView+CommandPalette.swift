@@ -82,7 +82,7 @@ extension NiruxShellView {
                 self?.togglePilotMode()
             },
             PaletteAction(
-                icon: "◧", title: "Show/Hide Sidebar", subtitle: "Show or hide the workspace sidebar",
+                icon: "◧", title: "Show/Hide Sidebar", subtitle: "Toggle the workspace sidebar",
                 shortcut: .toggleSidebar
             ) { [weak self] in
                 self?.toggleSidebar()
