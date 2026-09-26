@@ -50,4 +50,13 @@ final class GitWorktreeTests: XCTestCase {
         XCTAssertEqual(result.stdout, "")
         XCTAssertEqual(result.stderr, "git could not start or timed out after 0.1s")
     }
+
+    func testGitRunFullReportsMissingDirectory() {
+        let missing = directory.appendingPathComponent("gone").path
+
+        let result = GitWorktree.gitRunFull(["status"], cwd: missing)
+
+        XCTAssertNotEqual(result.status, 0)
+        XCTAssertEqual(result.stderr, "No such directory: \(missing)")
+    }
 }

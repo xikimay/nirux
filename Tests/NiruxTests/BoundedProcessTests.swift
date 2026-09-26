@@ -85,12 +85,33 @@ final class BoundedProcessTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: marker.path))
     }
 
-    func testDescendantWritingForeverIsNotBufferedWithoutBound() throws {
+    func testOutputLeftAtExitIsKeptWhileDescendantHoldsPipes() throws {
         let pidFile = directory.appendingPathComponent("descendant.pid")
         let script = try makeScript("""
-        printf out
+        sleep 30 &
+        printf '%s' "$!" > '\(pidFile.path)'
+        head -c 60000 /dev/zero | tr '\\0' o
+        exit 0
+        """)
+        defer { killDescendant(recordedIn: pidFile) }
+
+        let result = try XCTUnwrap(BoundedProcess.run(
+            executableURL: script,
+            arguments: [],
+            currentDirectoryURL: directory,
+            timeout: 20
+        ))
+
+        XCTAssertEqual(result.terminationStatus, 0)
+        XCTAssertEqual(result.standardOutput, Data(repeating: UInt8(ascii: "o"), count: 60000))
+    }
+
+    func testRunawayDescendantIsNeitherBufferedNorKeptAlive() throws {
+        let pidFile = directory.appendingPathComponent("descendant.pid")
+        let script = try makeScript("""
         yes &
         printf '%s' "$!" > '\(pidFile.path)'
+        printf out
         exit 0
         """)
         defer { killDescendant(recordedIn: pidFile) }
@@ -105,8 +126,14 @@ final class BoundedProcessTests: XCTestCase {
 
         XCTAssertLessThan(Date().timeIntervalSince(startedAt), 5)
         XCTAssertEqual(result.terminationStatus, 0)
-        XCTAssertTrue(result.standardOutput.starts(with: Data("out".utf8)))
         XCTAssertLessThan(result.standardOutput.count, 4 << 20)
+        // Past the discard allowance the pipe is closed on it.
+        let pid = try XCTUnwrap(pid_t(String(contentsOf: pidFile, encoding: .utf8)))
+        let deadline = Date().addingTimeInterval(10)
+        while kill(pid, 0) == 0, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        XCTAssertNotEqual(kill(pid, 0), 0, "runaway descendant is still alive")
     }
 
     func testHungProcessWithCapturedStandardErrorTimesOut() throws {

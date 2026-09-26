@@ -162,8 +162,8 @@ enum GitWorktree {
 
     /// Detect the git repo root from a path
     static func repoRoot(at path: String) -> String? {
-        let output = gitRun(["rev-parse", "--show-toplevel"], cwd: path)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let output = gitRunFull(["rev-parse", "--show-toplevel"], cwd: path, timeout: mainThreadTimeout)
+            .stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return output.isEmpty ? nil : output
     }
 
@@ -173,12 +173,12 @@ enum GitWorktree {
         return gitRunFull(args, cwd: cwd).stdout
     }
 
-    /// Lookups; `repoRoot(at:)` runs on the main thread.
-    private static let queryTimeout: TimeInterval = 10
-    /// Last resort only: killing `worktree add` mid-checkout leaves a
-    /// half-made worktree behind, and draining both pipes already keeps
-    /// large output from wedging it.
-    private static let worktreeAddTimeout: TimeInterval = 3600
+    /// `repoRoot(at:)` runs on the main thread, which this blocks.
+    private static let mainThreadTimeout: TimeInterval = 5
+    /// A last resort, not an expected outcome: killing `worktree add`
+    /// mid-checkout leaves a half-made worktree behind, and draining both
+    /// pipes already keeps large output from wedging git.
+    private static let defaultTimeout: TimeInterval = 3600
 
     /// Runs git with both pipes drained while it runs, so large output
     /// cannot fill a pipe and wedge git before it exits.
@@ -186,9 +186,14 @@ enum GitWorktree {
         _ args: [String],
         cwd: String,
         gitPath: String = "/usr/bin/git",
-        timeout: TimeInterval? = nil
+        timeout: TimeInterval = defaultTimeout
     ) -> GitResult {
-        let timeout = timeout ?? (args.starts(with: ["worktree", "add"]) ? worktreeAddTimeout : queryTimeout)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: cwd, isDirectory: &isDirectory),
+              isDirectory.boolValue
+        else {
+            return GitResult(status: 1, stdout: "", stderr: "No such directory: \(cwd)")
+        }
         guard let result = BoundedProcess.run(
             executableURL: URL(fileURLWithPath: gitPath),
             arguments: args,

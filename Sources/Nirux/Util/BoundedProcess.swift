@@ -27,6 +27,11 @@ enum BoundedProcess {
 
         let output = Pipe()
         let errorOutput = captureStandardError ? Pipe() : nil
+        // Keep terminals forked meanwhile (forkpty) from inheriting a write
+        // end and holding the pipe open for their whole lifetime.
+        for pipe in [output, errorOutput].compactMap({ $0 }) {
+            setCloseOnExec(pipe)
+        }
         let didTerminate = DispatchSemaphore(value: 0)
         process.standardOutput = output
         process.standardError = errorOutput ?? FileHandle.nullDevice
@@ -46,46 +51,62 @@ enum BoundedProcess {
         try? output.fileHandleForWriting.close()
         try? errorOutput?.fileHandleForWriting.close()
 
-        guard let data = drain(
-            [output, errorOutput].compactMap { $0 },
+        guard let (standardOutput, standardError) = drain(
+            output: output,
+            errorOutput: errorOutput,
             from: process,
             didTerminate: didTerminate,
             timeout: timeout
         ) else { return nil }
         return BoundedProcessResult(
-            standardOutput: data[0],
-            standardError: data.count > 1 ? data[1] : Data(),
+            standardOutput: standardOutput,
+            standardError: standardError,
             terminationStatus: process.terminationStatus
         )
     }
 
-    /// Caps what is still read once the process has exited. Its own output
-    /// is already buffered by then (one pipe buffer at most per pipe), so
-    /// anything past that comes from descendants writing to inherited pipes.
-    private static let postExitReadLimit = 1 << 20
+    /// Darwin's FIONREAD, `_IOR('f', 127, int)`; Swift does not import it.
+    private static let bytesBufferedRequest: UInt = 0x4004_667F
+
+    /// How much a descendant still holding a pipe may write, after the
+    /// process exits, before the pipe is closed on it. Enough for a hook's
+    /// background job, not for a runaway writer to burn CPU indefinitely.
+    private static let descendantDiscardLimit = 8 << 20
 
     private static let discardQueue = DispatchQueue(
         label: "BoundedProcess.discard",
         qos: .utility
     )
 
+    private static func setCloseOnExec(_ pipe: Pipe) {
+        for descriptor in [
+            pipe.fileHandleForReading.fileDescriptor,
+            pipe.fileHandleForWriting.fileDescriptor
+        ] {
+            _ = fcntl(descriptor, F_SETFD, fcntl(descriptor, F_GETFD) | FD_CLOEXEC)
+        }
+    }
+
     /// Reads every pipe until EOF, polling them together so a child that
-    /// fills one pipe while another is being read can never stall.
+    /// fills one pipe while another is being read can never stall. Once the
+    /// process has exited, only what it left buffered is taken: later bytes
+    /// come from descendants still holding the pipe, and waiting for their
+    /// EOF would wait on them (a hook's background job, say).
     private static func drain(
-        _ pipes: [Pipe],
+        output: Pipe,
+        errorOutput: Pipe?,
         from process: Process,
         didTerminate: DispatchSemaphore,
         timeout: TimeInterval
-    ) -> [Data]? {
-        let readHandles = pipes.map(\.fileHandleForReading)
+    ) -> (standardOutput: Data, standardError: Data)? {
+        let readHandles = [output, errorOutput].compactMap { $0?.fileHandleForReading }
         let deadline = ProcessInfo.processInfo.systemUptime + max(0, timeout)
         var data = [Data](repeating: Data(), count: readHandles.count)
         var openIndices = Array(readHandles.indices)
         var hasExited = false
-        var postExitBytes = 0
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
 
-        func fail() -> [Data]? {
+        func fail() -> (standardOutput: Data, standardError: Data)? {
             // After exit the semaphore is spent and the pid may be reused.
             if !hasExited {
                 terminate(process, didTerminate: didTerminate)
@@ -97,20 +118,18 @@ enum BoundedProcess {
         }
 
         while !openIndices.isEmpty {
-            if !hasExited, didTerminate.wait(timeout: .now()) == .success {
+            if didTerminate.wait(timeout: .now()) == .success {
                 hasExited = true
+                guard readLeftovers(
+                    readHandles,
+                    openIndices: &openIndices,
+                    into: &data,
+                    buffer: &buffer
+                ) else { return fail() }
+                break
             }
-            let waitMilliseconds: Int32
-            if hasExited {
-                // Take only what is already buffered; waiting for EOF would
-                // wait on descendants (a hook's background job, say).
-                guard postExitBytes < postExitReadLimit else { break }
-                waitMilliseconds = 0
-            } else {
-                let remaining = deadline - ProcessInfo.processInfo.systemUptime
-                guard remaining > 0 else { return fail() }
-                waitMilliseconds = Int32(min(max(remaining * 1_000, 1), 50))
-            }
+            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            guard remaining > 0 else { return fail() }
 
             var descriptorStates = openIndices.map { index in
                 pollfd(
@@ -119,6 +138,7 @@ enum BoundedProcess {
                     revents: 0
                 )
             }
+            let waitMilliseconds = Int32(min(max(remaining * 1_000, 1), 50))
             let pollResult = Darwin.poll(
                 &descriptorStates,
                 nfds_t(descriptorStates.count),
@@ -128,18 +148,14 @@ enum BoundedProcess {
                 if errno == EINTR { continue }
                 return fail()
             }
-            guard pollResult > 0 else {
-                if hasExited { break }
-                continue
-            }
+            guard pollResult > 0 else { continue }
 
-            guard let bytesRead = readReadyPipes(
+            guard readReadyPipes(
                 descriptorStates,
                 openIndices: &openIndices,
                 into: &data,
                 buffer: &buffer
             ) else { return fail() }
-            if hasExited { postExitBytes += bytesRead }
         }
 
         if !hasExited {
@@ -150,23 +166,22 @@ enum BoundedProcess {
         }
         for index in readHandles.indices {
             if openIndices.contains(index) {
-                discardUntilEndOfFile(readHandles[index])
+                discardDescendantOutput(readHandles[index])
             } else {
                 try? readHandles[index].close()
             }
         }
-        return data
+        return (data[0], data.count > 1 ? data[1] : Data())
     }
 
     /// Reads once from each pipe `poll` reported ready, dropping pipes at
-    /// EOF. Returns the bytes read, or nil on a read error.
+    /// EOF. Returns false on a read error.
     private static func readReadyPipes(
         _ descriptorStates: [pollfd],
         openIndices: inout [Int],
         into data: inout [Data],
         buffer: inout [UInt8]
-    ) -> Int? {
-        var totalBytesRead = 0
+    ) -> Bool {
         var reachedEnd: Set<Int> = []
         for (slot, index) in openIndices.enumerated()
         where descriptorStates[slot].revents != 0 {
@@ -176,32 +191,74 @@ enum BoundedProcess {
             }
             if bytesRead > 0 {
                 data[index].append(contentsOf: buffer[..<bytesRead])
-                totalBytesRead += bytesRead
             } else if bytesRead == 0 {
                 reachedEnd.insert(index)
             } else if errno != EINTR {
-                return nil
+                return false
             }
         }
         openIndices.removeAll { reachedEnd.contains($0) }
-        return totalBytesRead
+        return true
     }
 
-    /// Keeps reading a pipe that descendants still hold open, so their
-    /// writes never fail with SIGPIPE, without making the caller wait.
-    private static func discardUntilEndOfFile(_ handle: FileHandle) {
+    /// After exit: reads exactly the bytes each pipe held at that moment,
+    /// then drops pipes that are at EOF (readable, nothing buffered).
+    /// Returns false on a read error.
+    private static func readLeftovers(
+        _ readHandles: [FileHandle],
+        openIndices: inout [Int],
+        into data: inout [Data],
+        buffer: inout [UInt8]
+    ) -> Bool {
+        var reachedEnd: Set<Int> = []
+        for index in openIndices {
+            let descriptor = readHandles[index].fileDescriptor
+            var buffered: Int32 = 0
+            guard ioctl(descriptor, bytesBufferedRequest, &buffered) == 0 else { return false }
+            var remaining = Int(buffered)
+            while remaining > 0 {
+                let bytesRead = buffer.withUnsafeMutableBytes { bytes in
+                    Darwin.read(descriptor, bytes.baseAddress, min(remaining, bytes.count))
+                }
+                if bytesRead > 0 {
+                    data[index].append(contentsOf: buffer[..<bytesRead])
+                    remaining -= bytesRead
+                } else if bytesRead == 0 {
+                    break
+                } else if errno != EINTR {
+                    return false
+                }
+            }
+            var state = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+            if Darwin.poll(&state, 1, 0) > 0,
+               ioctl(descriptor, bytesBufferedRequest, &buffered) == 0,
+               buffered == 0 {
+                reachedEnd.insert(index)
+            }
+        }
+        openIndices.removeAll { reachedEnd.contains($0) }
+        return true
+    }
+
+    /// Keeps reading, and dropping, what descendants still write to a pipe
+    /// after the process exits, so their writes don't fail with SIGPIPE,
+    /// without making the caller wait. Past `descendantDiscardLimit` the
+    /// pipe is closed so a runaway writer cannot spin forever.
+    private static func discardDescendantOutput(_ handle: FileHandle) {
         let descriptor = handle.fileDescriptor
         let source = DispatchSource.makeReadSource(
             fileDescriptor: descriptor,
             queue: discardQueue
         )
-        // The handler retains the source until it cancels itself at EOF.
+        var scratch = [UInt8](repeating: 0, count: 16 * 1024)
+        var allowance = descendantDiscardLimit
+        // The handler retains the source until it cancels itself.
         source.setEventHandler {
-            var scratch = [UInt8](repeating: 0, count: 16 * 1024)
             let bytesRead = scratch.withUnsafeMutableBytes { bytes in
                 Darwin.read(descriptor, bytes.baseAddress, bytes.count)
             }
-            if bytesRead == 0 || (bytesRead < 0 && errno != EINTR) {
+            if bytesRead > 0 { allowance -= bytesRead }
+            if bytesRead == 0 || (bytesRead < 0 && errno != EINTR) || allowance <= 0 {
                 source.cancel()
             }
         }
