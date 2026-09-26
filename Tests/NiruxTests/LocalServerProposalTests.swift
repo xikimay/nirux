@@ -54,14 +54,14 @@ final class LocalServerProposalTests: XCTestCase {
     func testDetectionWaitsForItsPortThenExpires() {
         var book = Book()
         XCTAssertTrue(book.noteDetected(url(8000), in: "term", browserPorts: [], now: 10))
-        XCTAssertEqual(book.nextScanDelay, Book.pendingScanInterval)
+        XCTAssertEqual(book.nextScanDelay(now: 10.3), Book.pendingScanInterval)
         scan(&book, listening: [], at: 10.3)
         scan(&book, listening: [], at: 11.3)
         XCTAssertNotNil(book.pending[8000])
         scan(&book, listening: [], at: 10 + Book.pendingWindow)
         XCTAssertTrue(book.pending.isEmpty)
         XCTAssertTrue(book.proposals.isEmpty)
-        XCTAssertNil(book.nextScanDelay)
+        XCTAssertNil(book.nextScanDelay(now: 14))
         // A later print (server restarted) starts over.
         XCTAssertTrue(book.noteDetected(url(8000), in: "term", browserPorts: [], now: 20))
     }
@@ -72,7 +72,7 @@ final class LocalServerProposalTests: XCTestCase {
         scan(&book, listening: [], at: 0.3)
         scan(&book, listening: [8000], at: 1.3)
         XCTAssertEqual(book.proposal(for: "term")?.url.port, 8000)
-        XCTAssertEqual(book.nextScanDelay, Book.livenessScanInterval)
+        XCTAssertEqual(book.nextScanDelay(now: 1.3), Book.slowScanInterval)
     }
 
     func testOneScanResolvesEveryPendingPortNewestFirst() {
@@ -92,6 +92,16 @@ final class LocalServerProposalTests: XCTestCase {
     }
 
     // MARK: - Browser columns
+
+    func testPortShownInABrowserColumnStaysHandledAfterItCloses() {
+        var book = Book()
+        propose(&book, url(5173))
+        // Opened from ⌘B (or ⌘-click): the browser column shows the port.
+        book.prune(browserPorts: [5173], liveColumns: ["term"])
+        XCTAssertNil(book.proposal(for: "term"))
+        // The column closed; the TUI repaints the URL.
+        XCTAssertFalse(book.noteDetected(url(5173), in: "term", browserPorts: [], now: 9))
+    }
 
     func testPortAlreadyShownInABrowserColumnIsNotProposed() {
         var book = Book()
@@ -124,7 +134,7 @@ final class LocalServerProposalTests: XCTestCase {
         XCTAssertNil(book.proposal(for: "term"))
         XCTAssertFalse(book.noteDetected(url(5173), in: "term", browserPorts: [], now: 5))
         XCTAssertFalse(book.noteDetected(url(3000), in: "other", browserPorts: [], now: 5))
-        XCTAssertNil(book.nextScanDelay)
+        XCTAssertNil(book.nextScanDelay(now: 5))
     }
 
     // MARK: - Liveness + columns
@@ -164,7 +174,30 @@ final class LocalServerProposalTests: XCTestCase {
         XCTAssertTrue(book.prune(browserPorts: [], liveColumns: ["term"]))
         XCTAssertTrue(book.proposals.isEmpty)
         XCTAssertTrue(book.pending.isEmpty)
-        XCTAssertNil(book.nextScanDelay)
+        XCTAssertNil(book.nextScanDelay(now: 2))
+    }
+
+    func testClosedTerminalsProposalNoLongerBlocksANewPrintOncePruned() {
+        var book = Book()
+        propose(&book, url(5173), in: "gone")
+        XCTAssertFalse(book.noteDetected(url(5173), in: "term", browserPorts: [], now: 1))
+        book.prune(browserPorts: [], liveColumns: ["term"])
+        XCTAssertTrue(book.noteDetected(url(5173), in: "term", browserPorts: [], now: 1))
+    }
+
+    func testRepaintedDeadURLDropsToTheSlowCadenceThenExpires() {
+        var book = Book()
+        XCTAssertTrue(book.noteDetected(url(9999), in: "term", browserPorts: [], now: 0))
+        // A TUI keeps repainting it; nothing ever listens.
+        for now in stride(from: 1.0, through: 20, by: 1) {
+            XCTAssertFalse(book.noteDetected(url(9999), in: "term", browserPorts: [], now: now))
+            scan(&book, listening: [], at: now + 0.3)
+        }
+        XCTAssertNotNil(book.pending[9999])
+        XCTAssertEqual(book.nextScanDelay(now: 20.3), Book.slowScanInterval)
+        // Repaints stop: it expires.
+        scan(&book, listening: [], at: 20 + Book.pendingWindow)
+        XCTAssertNil(book.nextScanDelay(now: 24))
     }
 
     func testEachColumnShowsItsMostRecentProposal() {
@@ -194,10 +227,14 @@ final class LocalServerProposalTests: XCTestCase {
         XCTAssertEqual(url(3000, path: "/").proposalTarget.urlString, "http://localhost:3000/")
     }
 
-    func testProposalKeepsATokenQuery() {
-        let jupyter = url(8888, host: "127.0.0.1", path: "/tree?token=0123abcd")
-        XCTAssertEqual(jupyter.proposalTarget, jupyter)
-        XCTAssertEqual(url(8888, path: "?access_token=x").proposalTarget.path, "?access_token=x")
+    func testProposalKeepsOnlyJupyterTokenLinks() {
+        for path in ["/tree?token=0123abcd", "/lab?token=0123abcd", "/?token=0123abcd", "?token=0123abcd"] {
+            let jupyter = url(8888, host: "127.0.0.1", path: path)
+            XCTAssertEqual(jupyter.proposalTarget, jupyter, path)
+        }
+        // A one-time token elsewhere is exactly what a click must not spend.
+        XCTAssertEqual(url(3000, path: "/api/admin/reset?token=dev").proposalTarget.path, "/")
+        XCTAssertEqual(url(3000, path: "/auth/confirm?token=abc").proposalTarget.path, "/")
     }
 
     // MARK: - ⌘B suggestions
@@ -228,7 +265,8 @@ final class LocalServerProposalTests: XCTestCase {
 
     func testListenerScanSeesALoopbackListenerAndItsClosing() throws {
         let (fd, port) = try listen(family: AF_INET)
-        XCTAssertEqual(LocalListeners.listeners(maxAge: 0)[port], [getpid()])
+        // The test runner plays Nirux here: its own listeners are never proposed.
+        XCTAssertEqual(LocalListeners.listeners(maxAge: 0)[port], [.nirux])
         close(fd)
         XCTAssertNil(LocalListeners.listeners(maxAge: 0)[port])
     }
@@ -236,36 +274,32 @@ final class LocalServerProposalTests: XCTestCase {
     func testListenerScanSeesIPv6Listeners() throws {
         let (fd, port) = try listen(family: AF_INET6)
         defer { close(fd) }
-        XCTAssertEqual(LocalListeners.listeners(maxAge: 0)[port], [getpid()])
+        XCTAssertEqual(LocalListeners.listeners(maxAge: 0)[port], [.nirux])
+    }
+
+    func testListenerOwnerIsTheTerminalShellBelowNirux() {
+        // launchd(1) → nirux(50) → shell(60) → claude(61) → npm(62) → node(63);
+        // docker(70) under launchd.
+        let parents: [pid_t: pid_t] = [50: 1, 60: 50, 61: 60, 62: 61, 63: 62, 70: 1]
+        func owner(_ pid: pid_t) -> LocalListeners.Owner {
+            LocalListeners.owner(ofListener: pid, niruxPID: 50) { parents[$0] }
+        }
+        XCTAssertEqual(owner(63), .terminal(shell: 60))
+        XCTAssertEqual(owner(60), .terminal(shell: 60))
+        XCTAssertEqual(owner(70), .outsideNirux)
+        XCTAssertEqual(owner(50), .nirux)
+        XCTAssertEqual(owner(99), .outsideNirux)
     }
 
     func testPortsServedOnlyByAnotherWorkspacesTerminalAreExcluded() {
-        let listeners: [Int: Set<pid_t>] = [
-            5173: [101],        // Vite in another workspace's terminal
-            5174: [201],        // this workspace's own server
-            8080: [301],        // Docker / another terminal app
-            3000: [102, 401]    // shared: also held outside that workspace
+        let listeners: [Int: Set<LocalListeners.Owner>] = [
+            5173: [.terminal(shell: 100)],                  // Vite in another workspace
+            5174: [.terminal(shell: 200)],                  // this workspace's own server
+            8080: [.outsideNirux],                          // Docker / another terminal app
+            3000: [.terminal(shell: 100), .outsideNirux],   // also held outside Nirux
+            9000: [.nirux]
         ]
-        XCTAssertEqual(
-            LocalListeners.ports(listeners, excluding: [100, 101, 102]),
-            [5174, 8080, 3000]
-        )
-    }
-
-    func testSnapshotDescendantsFollowTheWholeTree() {
-        func entry(_ pid: pid_t, parent: pid_t) -> ProcessSnapshot.Entry {
-            ProcessSnapshot.Entry(
-                pid: pid, parentPID: parent, processGroupID: pid, terminalForegroundProcessGroupID: 0,
-                name: "p\(pid)", startedAt: 0, arguments: []
-            )
-        }
-        // nirux(1) → shell(10) → claude(11) → npm(12) → node(13); unrelated(20)
-        let snapshot = ProcessSnapshot(entries: [
-            entry(10, parent: 1), entry(11, parent: 10), entry(12, parent: 11),
-            entry(13, parent: 12), entry(20, parent: 0)
-        ])
-        XCTAssertEqual(snapshot.descendants(of: 10), [10, 11, 12, 13])
-        XCTAssertEqual(snapshot.descendants(of: 13), [13])
+        XCTAssertEqual(LocalListeners.ports(listeners, ownShells: [200, 201]), [5174, 8080, 3000])
     }
 
     func testSystemServicesAreNotDevServers() {

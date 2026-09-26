@@ -55,10 +55,12 @@ extension WorkspaceState {
 
     // MARK: - Detection → scan → proposal
 
+    private static func loopbackPort(of col: ColumnState) -> Int? {
+        col.webViewColumn.flatMap { LocalServerURL.loopbackPort(of: $0.currentURL) }
+    }
+
     private var localServerBrowserPorts: Set<Int> {
-        Set(columns.compactMap { col in
-            col.webViewColumn.flatMap { LocalServerURL.loopbackPort(of: $0.currentURL) }
-        })
+        Set(columns.compactMap(Self.loopbackPort(of:)))
     }
 
     private var localServerTerminalColumns: Set<UUID> {
@@ -66,8 +68,10 @@ extension WorkspaceState {
     }
 
     private func noteLocalServerURL(_ url: LocalServerURL, in col: ColumnState) {
-        guard columns.contains(where: { $0 === col }),
-              localServers.book.noteDetected(
+        guard columns.contains(where: { $0 === col }) else { return }
+        // A proposal left by a closed terminal must not swallow this print.
+        pruneLocalServerProposals()
+        guard localServers.book.noteDetected(
                 url.proposalTarget,
                 in: col.id,
                 browserPorts: localServerBrowserPorts,
@@ -96,26 +100,17 @@ extension WorkspaceState {
 
     private func runLocalServerScan() {
         localServers.scanTimer = nil
-        guard localServers.book.nextScanDelay != nil else { return }
+        guard localServers.book.nextScanDelay(now: ProcessInfo.processInfo.systemUptime) != nil else { return }
         localServers.scanInFlight = true
-        let ownShells = columns.compactMap { $0.pty?.shellPID }
+        let ownShells = Set(columns.compactMap { $0.pty?.shellPID })
+        let notBefore = localServers.book.newestDetectionAt ?? -.infinity
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let listening = Self.listeningPorts(ownShells: ownShells)
+            let listeners = LocalListeners.listeners(notBefore: notBefore)
+            let listening = LocalListeners.ports(listeners, ownShells: ownShells)
             DispatchQueue.main.async { [weak self] in
                 self?.applyLocalServerScan(listening)
             }
         }
-    }
-
-    /// Listening ports, minus those served only from another workspace's
-    /// terminals. Every terminal shell is a child of this process.
-    private nonisolated static func listeningPorts(ownShells: [pid_t]) -> Set<Int> {
-        let listeners = LocalListeners.listeners()
-        guard !listeners.isEmpty else { return [] }
-        let snapshot = ProcessSnapshot()
-        let ownProcesses = ownShells.reduce(into: Set<pid_t>()) { $0.formUnion(snapshot.descendants(of: $1)) }
-        let otherTerminalProcesses = snapshot.descendants(of: getpid()).subtracting(ownProcesses)
-        return LocalListeners.ports(listeners, excluding: otherTerminalProcesses)
     }
 
     private func applyLocalServerScan(_ listening: Set<Int>) {
@@ -132,7 +127,7 @@ extension WorkspaceState {
         }
         if changed {
             localServerProposalsChanged()
-        } else if let delay = localServers.book.nextScanDelay {
+        } else if let delay = localServers.book.nextScanDelay(now: ProcessInfo.processInfo.systemUptime) {
             scheduleLocalServerScan(after: delay)
         }
     }
@@ -143,9 +138,7 @@ extension WorkspaceState {
         localServers.book.markHandled(port: url.port)
         localServerProposalsChanged()
         // Never a second browser column for the same server.
-        if let existing = columns.firstIndex(where: { column in
-            column.webViewColumn.flatMap { LocalServerURL.loopbackPort(of: $0.currentURL) } == url.port
-        }) {
+        if let existing = columns.firstIndex(where: { Self.loopbackPort(of: $0) == url.port }) {
             onRevealColumn?(self, existing)
             return
         }
@@ -163,7 +156,7 @@ extension WorkspaceState {
         for col in columns where col.pty != nil {
             col.setLocalServerChip(localServers.book.proposal(for: col.id)?.url)
         }
-        if let delay = localServers.book.nextScanDelay {
+        if let delay = localServers.book.nextScanDelay(now: ProcessInfo.processInfo.systemUptime) {
             scheduleLocalServerScan(after: delay)
         } else {
             localServers.scanTimer?.invalidate()

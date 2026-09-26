@@ -11,6 +11,8 @@ extension NiruxShellView {
             self.focusColumnByIndex(index)
         }
         // ⌘B lists the active workspace's detected dev servers first.
+        // App-wide: the first workspace wired sets it.
+        guard CommandPalette.detectedURLsProvider == nil else { return }
         CommandPalette.detectedURLsProvider = { [weak self] in
             self?.activeWorkspace?.detectedLocalServerURLs ?? []
         }

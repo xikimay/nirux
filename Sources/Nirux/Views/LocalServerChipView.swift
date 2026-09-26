@@ -6,14 +6,20 @@ import AppKit
 final class LocalServerChipView: NSView {
     static let height: CGFloat = 20
 
-    var onOpen: (() -> Void)?
-    var onDismiss: (() -> Void)?
+    /// Called with the URL the chip showed when clicked.
+    var onOpen: ((LocalServerURL) -> Void)?
+    var onDismiss: ((LocalServerURL) -> Void)?
 
     private(set) var url: LocalServerURL?
     private let openButton = NSButton(title: "", target: nil, action: nil)
     private let dismissButton = NSButton(title: "✕", target: nil, action: nil)
     private var fullTitle = NSAttributedString()
     private var compactTitle = NSAttributedString()
+    private var fullWidth: CGFloat = 0
+    private var compactWidth: CGFloat = 0
+    /// Which title the button shows (its getter returns a restyled copy,
+    /// so comparing titles never matches).
+    private var showsCompactTitle: Bool?
 
     private static let horizontalPadding: CGFloat = 8
     private static let dismissWidth: CGFloat = 16
@@ -25,6 +31,7 @@ final class LocalServerChipView: NSView {
         layer?.backgroundColor = NSColor.niruxAccent.withAlphaComponent(0.14).cgColor
         layer?.borderWidth = 1
         layer?.borderColor = NSColor.niruxAccent.withAlphaComponent(0.35).cgColor
+        isHidden = true
 
         openButton.isBordered = false
         openButton.bezelStyle = .inline
@@ -46,29 +53,30 @@ final class LocalServerChipView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func configure(url: LocalServerURL) {
+    /// Show `url`, or clear the chip with nil. The view stays in the title
+    /// bar either way: removing it could free a button mid-click.
+    func configure(url: LocalServerURL?) {
         guard url != self.url else { return }
         self.url = url
+        guard let url else {
+            isHidden = true
+            return
+        }
         fullTitle = Self.title(url.displayName)
         compactTitle = Self.title(":\(url.port)")
-        openButton.attributedTitle = fullTitle
+        fullWidth = Self.width(for: fullTitle)
+        compactWidth = Self.width(for: compactTitle)
+        showsCompactTitle = nil
         openButton.toolTip = "Open \(url.urlString) in a browser column"
         openButton.setAccessibilityLabel("Open \(url.urlString) in a browser column")
         needsLayout = true
     }
 
-    /// Width the chip takes within `maxWidth`, switching to the compact
-    /// ":5173" label when the full host doesn't fit. Zero when even that
-    /// doesn't fit — the caller hides the chip.
-    func fittingWidth(maxWidth: CGFloat) -> CGFloat {
-        for title in [fullTitle, compactTitle] {
-            let width = Self.width(for: title)
-            if width <= maxWidth {
-                if openButton.attributedTitle != title { openButton.attributedTitle = title }
-                return width
-            }
-        }
-        return 0
+    /// Width the chip takes within `maxWidth`: full label, else the compact
+    /// ":5173" one, else zero (the caller hides the chip).
+    func width(fitting maxWidth: CGFloat) -> CGFloat {
+        if fullWidth <= maxWidth { return fullWidth }
+        return compactWidth <= maxWidth ? compactWidth : 0
     }
 
     // The title bar drags the window; the chip, padding included, must not.
@@ -78,22 +86,35 @@ final class LocalServerChipView: NSView {
         addCursorRect(bounds, cursor: .pointingHand)
     }
 
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        needsLayout = true
+    }
+
     override func layout() {
         super.layout()
+        let compact = bounds.width < fullWidth
+        if compact != showsCompactTitle {
+            showsCompactTitle = compact
+            openButton.attributedTitle = compact ? compactTitle : fullTitle
+        }
         let height = bounds.height
         let dismissX = bounds.width - Self.dismissWidth - Self.horizontalPadding / 2
         dismissButton.frame = NSRect(x: dismissX, y: 0, width: Self.dismissWidth, height: height)
         openButton.frame = NSRect(x: Self.horizontalPadding, y: 0, width: max(0, dismissX - Self.horizontalPadding), height: height)
     }
 
-    // Deferred one turn: both actions remove this chip from the title bar,
-    // which must not happen inside the button's own mouse-tracking loop.
+    // Deferred one turn: both actions remove the proposal, which must not
+    // happen inside the button's own mouse-tracking loop. The URL is the
+    // one shown at click time, even if a scan swaps it meanwhile.
     @objc private func openClicked() {
-        DispatchQueue.main.async { [weak self] in self?.onOpen?() }
+        guard let url else { return }
+        DispatchQueue.main.async { [weak self] in self?.onOpen?(url) }
     }
 
     @objc private func dismissClicked() {
-        DispatchQueue.main.async { [weak self] in self?.onDismiss?() }
+        guard let url else { return }
+        DispatchQueue.main.async { [weak self] in self?.onDismiss?(url) }
     }
 
     private static func width(for title: NSAttributedString) -> CGFloat {

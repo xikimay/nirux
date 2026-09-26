@@ -200,7 +200,7 @@ final class ColumnState {
         let width = bar.bounds.width
         var labelWidth = width - 24
         if let chip = localServerChip, chip.url != nil {
-            let chipWidth = chip.fittingWidth(maxWidth: max(0, width / 2 - 12))
+            let chipWidth = chip.width(fitting: max(0, width / 2 - 12))
             chip.isHidden = chipWidth == 0
             if chipWidth > 0 {
                 let chipX = width - chipWidth - 8
@@ -218,27 +218,15 @@ final class ColumnState {
 
     /// Show (or hide, with nil) the "open this dev server" chip.
     func setLocalServerChip(_ url: LocalServerURL?) {
-        guard let url else {
-            localServerChip?.removeFromSuperview()
-            localServerChip = nil
-            layoutTitleBarContents()
-            return
-        }
-        guard let bar = titleBar else { return }
-        let chip = localServerChip ?? LocalServerChipView(frame: .zero)
         if localServerChip == nil {
-            chip.onOpen = { [weak self, weak chip] in
-                guard let url = chip?.url else { return }
-                self?.onLocalServerChipOpen?(url)
-            }
-            chip.onDismiss = { [weak self, weak chip] in
-                guard let url = chip?.url else { return }
-                self?.onLocalServerChipDismiss?(url)
-            }
+            guard url != nil, let bar = titleBar else { return }
+            let chip = LocalServerChipView(frame: .zero)
+            chip.onOpen = { [weak self] url in self?.onLocalServerChipOpen?(url) }
+            chip.onDismiss = { [weak self] url in self?.onLocalServerChipDismiss?(url) }
             bar.addSubview(chip)
             localServerChip = chip
         }
-        chip.configure(url: url)
+        localServerChip?.configure(url: url)
         layoutTitleBarContents()
     }
 

@@ -109,18 +109,6 @@ final class ProcessSnapshot {
         instanceMap[entry.pid] = ProcessInstance(pid: entry.pid, startedAt: entry.startedAt)
     }
 
-    /// `pid` and every process below it.
-    func descendants(of pid: pid_t) -> Set<pid_t> {
-        var result: Set<pid_t> = [pid]
-        var queue = [pid]
-        while let next = queue.popLast() {
-            for child in childrenMap[next] ?? [] where result.insert(child).inserted {
-                queue.append(child)
-            }
-        }
-        return result
-    }
-
     func foregroundProcess(shellPID: pid_t) -> ForegroundProcess? {
         let processGroupID = terminalForegroundProcessGroupMap[shellPID]
             .flatMap { $0 > 0 ? $0 : nil }
@@ -570,9 +558,12 @@ private final class PtyState: @unchecked Sendable {
     var onProcessExit: (() -> Void)?
     var machine = AgentStatusMachine()
     let outputBuffer = TerminalOutputBuffer()
-    /// Read-queue only (reset on start, before the read source exists).
+    /// Read-queue only. A (re)start sets `localServerStateIsStale` from
+    /// main instead of resetting them, so a straggling read handler of the
+    /// previous shell never sees them replaced mid-scan.
     private var localServerScanner = LocalServerURLScanner()
     private var localServerLastForwarded: [Int: TimeInterval] = [:]
+    private var localServerStateIsStale = false
     private static let localServerForwardInterval: TimeInterval = 1
     /// Something reached the PTY through `sendRaw` — keystrokes (including
     /// the Enter after a ⌘V paste, which itself goes through ghostty),
@@ -605,8 +596,7 @@ private final class PtyState: @unchecked Sendable {
 
     func markPtyStarted() {
         machine.reset()
-        localServerScanner = LocalServerURLScanner()
-        localServerLastForwarded = [:]
+        localServerStateIsStale = true
         hasTypedInput = false
     }
 
@@ -718,6 +708,11 @@ private final class PtyState: @unchecked Sendable {
     }
 
     private func detectLocalServerURLs(in buffer: [UInt8], count: Int) {
+        if localServerStateIsStale {
+            localServerStateIsStale = false
+            localServerScanner = LocalServerURLScanner()
+            localServerLastForwarded = [:]
+        }
         let urls = buffer.withUnsafeBytes {
             localServerScanner.scan(UnsafeRawBufferPointer(rebasing: $0[..<count]))
         }

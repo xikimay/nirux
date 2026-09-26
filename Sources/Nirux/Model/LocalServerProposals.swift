@@ -6,9 +6,10 @@ import Foundation
 ///
 /// A detected URL waits for listener scans (see `LocalListeners`) and
 /// becomes a proposal once its port is listening. One proposal per port:
-/// a port the user opened or dismissed is never proposed again in the
-/// workspace — TUIs like Claude Code repaint old URLs constantly, so
-/// anything less would bring a handled chip straight back.
+/// a port the user opened, dismissed, or shows in a browser column of the
+/// workspace is never proposed again there — TUIs like Claude Code
+/// repaint old URLs constantly, so anything less would bring a handled
+/// chip straight back.
 struct LocalServerProposalBook<ColumnID: Hashable> {
     struct Proposal: Equatable {
         let url: LocalServerURL
@@ -22,57 +23,70 @@ struct LocalServerProposalBook<ColumnID: Hashable> {
         let url: LocalServerURL
         let column: ColumnID
         let detectedAt: TimeInterval
+        /// Repaints of the same URL keep the detection alive.
+        var lastSeenAt: TimeInterval
     }
 
     /// First scan after a detection — also the debounce that lets the
     /// server finish binding.
     static var firstScanDelay: TimeInterval { 0.3 }
-    /// Rescan cadence while detections are pending.
+    /// Rescan cadence while a detection is fresh.
     static var pendingScanInterval: TimeInterval { 1 }
-    /// How long a detection may wait for its port to start listening
-    /// (Django prints its URL before binding).
+    /// How long a printed URL waits for its port to start listening
+    /// (Django prints its URL before binding), counted from its last print.
     static var pendingWindow: TimeInterval { 4 }
-    /// Rescan cadence while proposals are live, to notice stopped servers.
-    static var livenessScanInterval: TimeInterval { 3 }
+    /// Rescan cadence while proposals are live (to notice stopped servers)
+    /// or a TUI keeps repainting a URL nothing listens on yet.
+    static var slowScanInterval: TimeInterval { 3 }
     /// A proposal survives its port being unbound this long: restarts
     /// (Django autoreload, Vite config reload) briefly unbind it without
     /// reprinting the URL. In seconds, not scans — scans run faster while
-    /// a detection is pending.
+    /// a detection is fresh.
     static var removalGrace: TimeInterval { 3 }
     /// Output listing hundreds of ports shouldn't queue hundreds of detections.
     static var maxPending: Int { 16 }
 
-    /// Detections waiting for a scan, by port.
+    /// Detections waiting for their port to listen, by port.
     private(set) var pending: [Int: PendingDetection] = [:]
     /// Live proposals, most recent first.
     private(set) var proposals: [Proposal] = []
-    /// Ports opened or dismissed from a proposal.
+    /// Ports opened, dismissed, or shown in a browser column.
     private(set) var handledPorts: Set<Int> = []
 
-    /// When the next listener scan should run, relative to now; nil when
-    /// nothing needs one.
-    var nextScanDelay: TimeInterval? {
-        if !pending.isEmpty { return Self.pendingScanInterval }
-        if !proposals.isEmpty { return Self.livenessScanInterval }
+    /// Delay before the next listener scan; nil when nothing needs one.
+    func nextScanDelay(now: TimeInterval) -> TimeInterval? {
+        if pending.values.contains(where: { now - $0.detectedAt < Self.pendingWindow }) {
+            return Self.pendingScanInterval
+        }
+        if !pending.isEmpty || !proposals.isEmpty { return Self.slowScanInterval }
         return nil
     }
 
-    /// A terminal printed `url`. Returns true when it is now waiting for a
-    /// scan — the caller should scan within `firstScanDelay`.
+    /// Scans must not reuse a listener snapshot older than this.
+    var newestDetectionAt: TimeInterval? {
+        pending.values.map(\.detectedAt).max()
+    }
+
+    /// A terminal printed `url`. Returns true when it is new and waiting
+    /// for a scan — the caller should scan within `firstScanDelay`.
     mutating func noteDetected(
         _ url: LocalServerURL,
         in column: ColumnID,
         browserPorts: Set<Int>,
         now: TimeInterval
     ) -> Bool {
+        handledPorts.formUnion(browserPorts)
         let port = url.port
-        guard pending[port] == nil,
-              pending.count < Self.maxPending,
+        if var waiting = pending[port] {
+            waiting.lastSeenAt = now
+            pending[port] = waiting
+            return false
+        }
+        guard pending.count < Self.maxPending,
               !proposals.contains(where: { $0.url.port == port }),
-              !handledPorts.contains(port),
-              !browserPorts.contains(port)
+              !handledPorts.contains(port)
         else { return false }
-        pending[port] = PendingDetection(url: url, column: column, detectedAt: now)
+        pending[port] = PendingDetection(url: url, column: column, detectedAt: now, lastSeenAt: now)
         return true
     }
 
@@ -86,6 +100,7 @@ struct LocalServerProposalBook<ColumnID: Hashable> {
         now: TimeInterval
     ) -> Bool {
         let before = proposals.map(\.url)
+        handledPorts.formUnion(browserPorts)
         for index in proposals.indices {
             if listeningPorts.contains(proposals[index].url.port) {
                 proposals[index].missingSince = nil
@@ -95,18 +110,18 @@ struct LocalServerProposalBook<ColumnID: Hashable> {
         }
         proposals.removeAll {
             $0.missingSince.map { now - $0 >= Self.removalGrace } == true
-                || browserPorts.contains($0.url.port)
+                || handledPorts.contains($0.url.port)
                 || !liveColumns.contains($0.column)
         }
         // Oldest detections first, so the newest ends up first in `proposals`.
         for detection in pending.values.sorted(by: { $0.detectedAt < $1.detectedAt }) {
             let port = detection.url.port
-            if browserPorts.contains(port) || !liveColumns.contains(detection.column) {
+            if handledPorts.contains(port) || !liveColumns.contains(detection.column) {
                 pending[port] = nil
             } else if listeningPorts.contains(port) {
                 pending[port] = nil
                 proposals.insert(Proposal(url: detection.url, column: detection.column), at: 0)
-            } else if now - detection.detectedAt >= Self.pendingWindow {
+            } else if now - detection.lastSeenAt >= Self.pendingWindow {
                 pending[port] = nil
             }
         }
@@ -117,9 +132,10 @@ struct LocalServerProposalBook<ColumnID: Hashable> {
     /// shows the port, the printing terminal closed) without a scan.
     @discardableResult
     mutating func prune(browserPorts: Set<Int>, liveColumns: Set<ColumnID>) -> Bool {
-        pending = pending.filter { !browserPorts.contains($0.key) && liveColumns.contains($0.value.column) }
+        handledPorts.formUnion(browserPorts)
+        pending = pending.filter { !handledPorts.contains($0.key) && liveColumns.contains($0.value.column) }
         let before = proposals.count
-        proposals.removeAll { browserPorts.contains($0.url.port) || !liveColumns.contains($0.column) }
+        proposals.removeAll { handledPorts.contains($0.url.port) || !liveColumns.contains($0.column) }
         return proposals.count != before
     }
 

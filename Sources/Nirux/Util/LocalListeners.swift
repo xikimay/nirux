@@ -7,49 +7,65 @@ import Foundation
 /// (`sudo`, root-owned helpers) aren't visible. About 2 ms for ~750
 /// processes; blocking — call it off the main thread.
 enum LocalListeners {
-    /// Listening ports and the pids holding them. Workspaces scan on their
-    /// own timers; a result younger than `maxAge` is shared between them.
-    static func listeners(maxAge: TimeInterval = 0.9) -> [Int: Set<pid_t>] {
-        cache.value(maxAge: maxAge) {
+    /// Who holds a listening socket, relative to this app.
+    enum Owner: Hashable {
+        /// Docker, another terminal app, a daemonized server…
+        case outsideNirux
+        /// A process in the Nirux terminal whose shell is `shell`.
+        case terminal(shell: pid_t)
+        /// Nirux itself.
+        case nirux
+    }
+
+    /// Listening ports and who holds them. Workspaces scan on their own
+    /// timers and share a result younger than `maxAge`, unless it predates
+    /// `notBefore` (a detection the scan must postdate). Uptime seconds.
+    static func listeners(
+        maxAge: TimeInterval = 0.9,
+        notBefore: TimeInterval = -.infinity
+    ) -> [Int: Set<Owner>] {
+        cache.value(maxAge: maxAge, notBefore: notBefore) {
             let uid = getuid()
-            var listeners: [Int: Set<pid_t>] = [:]
-            for pid in allPIDs() where pid > 0 && owner(of: pid) == uid {
+            let niruxPID = getpid()
+            var listeners: [Int: Set<Owner>] = [:]
+            for pid in allPIDs() where pid > 0 && bsdInfo(of: pid)?.pbsi_uid == uid {
                 let pidPorts = listeningPorts(of: pid)
                 guard !pidPorts.isEmpty, !isSystemService(pid) else { continue }
-                for port in pidPorts { listeners[port, default: []].insert(pid) }
+                let owner = owner(ofListener: pid, niruxPID: niruxPID) { bsdInfo(of: $0).map { pid_t($0.pbsi_ppid) } }
+                for port in pidPorts { listeners[port, default: []].insert(owner) }
             }
             return listeners
         }
     }
 
-    /// Ports worth proposing to one workspace: a port served only by
-    /// processes of *another* workspace's terminals belongs to that
-    /// workspace (its Vite on :5173 isn't this one's, even if Claude here
-    /// mentions the URL). Servers outside Nirux — Docker, other terminal
-    /// apps — count everywhere.
-    static func ports(_ listeners: [Int: Set<pid_t>], excluding otherTerminalProcesses: Set<pid_t>) -> Set<Int> {
-        Set(listeners.compactMap { port, pids in
-            pids.isSubset(of: otherTerminalProcesses) ? nil : port
+    /// Ports worth proposing to the workspace whose terminal shells are
+    /// `ownShells`: a port held only from *another* workspace's terminals
+    /// belongs to that workspace (its Vite on :5173 isn't this one's, even
+    /// if Claude here mentions the URL). Servers outside Nirux — Docker,
+    /// other terminal apps — count everywhere.
+    static func ports(_ listeners: [Int: Set<Owner>], ownShells: Set<pid_t>) -> Set<Int> {
+        Set(listeners.compactMap { port, owners in
+            owners.contains { owner in
+                switch owner {
+                case .outsideNirux: true
+                case .terminal(let shell): ownShells.contains(shell)
+                case .nirux: false
+                }
+            } ? port : nil
         })
     }
 
-    private static let cache = ScanCache()
-
-    private final class ScanCache: @unchecked Sendable {
-        private let lock = NSLock()
-        private var scannedAt: TimeInterval = -.infinity
-        private var result: [Int: Set<pid_t>] = [:]
-
-        func value(maxAge: TimeInterval, scan: () -> [Int: Set<pid_t>]) -> [Int: Set<pid_t>] {
-            lock.lock()
-            defer { lock.unlock() }
-            let now = ProcessInfo.processInfo.systemUptime
-            if now - scannedAt >= maxAge {
-                result = scan()
-                scannedAt = now
-            }
-            return result
+    /// Every terminal shell is a child of this process, so walking up from
+    /// a listener finds its terminal — or leaves the app entirely.
+    static func owner(ofListener pid: pid_t, niruxPID: pid_t, parentOf: (pid_t) -> pid_t?) -> Owner {
+        guard pid != niruxPID else { return .nirux }
+        var current = pid
+        for _ in 0..<64 {
+            guard let parent = parentOf(current), parent > 1 else { return .outsideNirux }
+            if parent == niruxPID { return .terminal(shell: current) }
+            current = parent
         }
+        return .outsideNirux
     }
 
     /// macOS services that listen on dev-looking ports — AirPlay Receiver
@@ -67,6 +83,29 @@ enum LocalListeners {
         "/usr/sbin/"
     ]
 
+    private static let cache = ScanCache()
+
+    private final class ScanCache: @unchecked Sendable {
+        private let lock = NSLock()
+        private var scannedAt: TimeInterval = -.infinity
+        private var result: [Int: Set<Owner>] = [:]
+
+        func value(
+            maxAge: TimeInterval,
+            notBefore: TimeInterval,
+            scan: () -> [Int: Set<Owner>]
+        ) -> [Int: Set<Owner>] {
+            lock.lock()
+            defer { lock.unlock() }
+            let now = ProcessInfo.processInfo.systemUptime
+            if now - scannedAt >= maxAge || scannedAt < notBefore {
+                result = scan()
+                scannedAt = now
+            }
+            return result
+        }
+    }
+
     private static func allPIDs() -> [pid_t] {
         let estimate = proc_listallpids(nil, 0)
         guard estimate > 0 else { return [] }
@@ -76,11 +115,11 @@ enum LocalListeners {
         return Array(pids.prefix(Int(count)))
     }
 
-    private static func owner(of pid: pid_t) -> uid_t? {
+    private static func bsdInfo(of pid: pid_t) -> proc_bsdshortinfo? {
         var info = proc_bsdshortinfo()
         let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
         guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &info, size) == size else { return nil }
-        return info.pbsi_uid
+        return info
     }
 
     private static func listeningPorts(of pid: pid_t) -> Set<Int> {

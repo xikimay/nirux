@@ -18,14 +18,19 @@ struct LocalServerURL: Equatable, Hashable, Sendable {
 
     /// What a proposal opens: the server root. The first URL printed for a
     /// port is often an agent's `curl …/api/admin/reset`, and a chip labeled
-    /// "localhost:3000" must not fire that GET. Only a token-bearing query
-    /// (Jupyter's `/tree?token=…`) is kept — the root alone would ask for it.
+    /// "localhost:3000" must not fire that GET. The only exception is
+    /// Jupyter's login link (`/?token=`, `/tree?token=`, `/lab?token=`):
+    /// its root would just ask for that token.
     var proposalTarget: LocalServerURL {
-        let query = path.firstIndex(of: "?").map { path[path.index(after: $0)...] }
-        let keepsPath = query?.localizedCaseInsensitiveContains("token") == true
-        guard !keepsPath, !path.isEmpty, path != "/" else { return self }
+        guard !path.isEmpty, path != "/" else { return self }
+        let parts = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        if parts.count == 2, Self.tokenLoginRoutes.contains(String(parts[0])), parts[1].contains("token=") {
+            return self
+        }
         return LocalServerURL(isSecure: isSecure, host: host, port: port, path: "/")
     }
+
+    private static let tokenLoginRoutes: Set<String> = ["", "/", "/tree", "/lab"]
 
     /// Hosts accepted after the scheme, as printed (lowercased).
     static let loopbackHosts: Set<String> = ["localhost", "127.0.0.1", "0.0.0.0", "[::1]", "[::]"]
