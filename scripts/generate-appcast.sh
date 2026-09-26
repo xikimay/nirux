@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:?Usage: generate-appcast.sh <version> <build-number> <ed-signature> <length>}"
-BUILD_NUMBER="${2:?Usage: generate-appcast.sh <version> <build-number> <ed-signature> <length>}"
-SIGNATURE="${3:?Usage: generate-appcast.sh <version> <build-number> <ed-signature> <length>}"
-LENGTH="${4:?Usage: generate-appcast.sh <version> <build-number> <ed-signature> <length>}"
+USAGE="Usage: generate-appcast.sh <version> <build-number> <ed-signature> <length> <release-tag>"
+VERSION="${1:?$USAGE}"
+BUILD_NUMBER="${2:?$USAGE}"
+SIGNATURE="${3:?$USAGE}"
+LENGTH="${4:?$USAGE}"
+# The enclosure points at the dated release's zip, not the rolling `nightly`
+# one: the feed then never references a zip that is being replaced, and every
+# dated release's appcast stays valid if it is republished to roll back.
+RELEASE_TAG="${5:?$USAGE}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
@@ -20,7 +25,7 @@ cat > "$ROOT/appcast.xml" <<EOF
       <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <enclosure
-        url="https://github.com/xikimay/nirux/releases/download/nightly/Nirux.app.zip"
+        url="https://github.com/xikimay/nirux/releases/download/${RELEASE_TAG}/Nirux.app.zip"
         type="application/octet-stream"
         sparkle:edSignature="${SIGNATURE}"
         length="${LENGTH}"
