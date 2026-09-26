@@ -536,27 +536,90 @@ extension PersistedStateCodingTests {
     }
 
     @MainActor
+    func testClaudeRestoreCommandsNeverContinueTheLastSession() {
+        let exact = NiruxShellView.claudeCommand(
+            resume: .session("5f0c8a52-6a0e-4d7c-9f0e-2b1f6d1c9a11"),
+            mode: .skipPermissions
+        )
+        let picker = NiruxShellView.claudeCommand(resume: .picker, mode: .acceptEdits)
+        let fresh = NiruxShellView.claudeCommand(mode: .default)
+
+        XCTAssertEqual(
+            exact,
+            "command claude --resume '5f0c8a52-6a0e-4d7c-9f0e-2b1f6d1c9a11' --dangerously-skip-permissions"
+        )
+        XCTAssertEqual(picker, "command claude --resume --permission-mode acceptEdits")
+        XCTAssertEqual(fresh, "command claude")
+        for command in [exact, picker, fresh] {
+            XCTAssertFalse(command.contains("--continue"))
+        }
+    }
+
+    func testClaudeSessionIDRoundTripsAndLegacyColumnsOmitIt() throws {
+        let column = PersistedColumn(
+            widthPreset: 0.5, cwd: "/tmp/project",
+            columnType: .claudeCode, webViewURL: nil,
+            claudeLaunchMode: .auto, codexLaunchMode: nil,
+            claudeSessionID: "5f0c8a52-6a0e-4d7c-9f0e-2b1f6d1c9a11"
+        )
+        let decoded = try JSONDecoder().decode(
+            PersistedColumn.self,
+            from: JSONEncoder().encode(column)
+        )
+        XCTAssertEqual(decoded.claudeSessionID, "5f0c8a52-6a0e-4d7c-9f0e-2b1f6d1c9a11")
+        XCTAssertNil(decoded.codexSessionID)
+
+        let legacy = try JSONDecoder().decode(
+            PersistedColumn.self,
+            from: Data(#"{"widthPreset":0.5,"cwd":"/tmp/project","columnType":"claudeCode","claudeLaunchMode":"plan"}"#.utf8)
+        )
+        XCTAssertEqual(legacy.resolvedType, .claudeCode)
+        XCTAssertEqual(legacy.claudeLaunchMode, .plan)
+        XCTAssertNil(legacy.claudeSessionID)
+    }
+
+    @MainActor
+    func testLegacyAndDuplicateClaudeColumnsRestoreThroughThePicker() {
+        var claimed = Set<String>()
+        let session = "5f0c8a52-6a0e-4d7c-9f0e-2b1f6d1c9a11"
+
+        let first = NiruxShellView.agentRestoreTarget(sessionID: session, claimedSessionIDs: &claimed)
+        let duplicate = NiruxShellView.agentRestoreTarget(sessionID: session, claimedSessionIDs: &claimed)
+        let legacy = NiruxShellView.agentRestoreTarget(sessionID: nil, claimedSessionIDs: &claimed)
+
+        XCTAssertEqual(first, .session(session))
+        XCTAssertEqual(
+            NiruxShellView.claudeCommand(resume: duplicate, mode: .default),
+            "command claude --resume"
+        )
+        XCTAssertEqual(
+            NiruxShellView.claudeCommand(resume: legacy, mode: .plan),
+            "command claude --resume --permission-mode plan"
+        )
+    }
+
+    @MainActor
     func testCodexRestoreClaimsEachExactSessionOnlyOnce() {
         var claimed = Set<String>()
 
         XCTAssertEqual(
-            NiruxShellView.codexRestoreTarget(sessionID: "thread-a", claimedSessionIDs: &claimed),
+            NiruxShellView.agentRestoreTarget(sessionID: "thread-a", claimedSessionIDs: &claimed),
             .session("thread-a")
         )
         XCTAssertEqual(
-            NiruxShellView.codexRestoreTarget(sessionID: "thread-b", claimedSessionIDs: &claimed),
+            NiruxShellView.agentRestoreTarget(sessionID: "thread-b", claimedSessionIDs: &claimed),
             .session("thread-b")
         )
         XCTAssertEqual(
-            NiruxShellView.codexRestoreTarget(sessionID: "thread-a", claimedSessionIDs: &claimed),
+            NiruxShellView.agentRestoreTarget(sessionID: "thread-a", claimedSessionIDs: &claimed),
             .picker
         )
         XCTAssertEqual(
-            NiruxShellView.codexRestoreTarget(sessionID: nil, claimedSessionIDs: &claimed),
+            NiruxShellView.agentRestoreTarget(sessionID: nil, claimedSessionIDs: &claimed),
             .picker
         )
         XCTAssertEqual(
-            NiruxShellView.codexRestoreTarget(sessionID: "", claimedSessionIDs: &claimed),
+            NiruxShellView.agentRestoreTarget(sessionID: "", claimedSessionIDs: &claimed),
             .picker
         )
     }

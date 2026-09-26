@@ -115,6 +115,44 @@ final class AgentHookEventTests: XCTestCase {
         XCTAssertEqual(event, decoded)
     }
 
+    func testClaudeSessionStartSourceCaptured() {
+        let start: [String: Any] = [
+            "hook_event_name": "SessionStart", "session_id": "s", "source": "compact"
+        ]
+        let stop: [String: Any] = [
+            "hook_event_name": "Stop", "session_id": "s", "source": "compact"
+        ]
+        XCTAssertEqual(AgentHookEvent(kind: .claude, payload: start, env: env, now: 1)?.source, "compact")
+        XCTAssertNil(AgentHookEvent(kind: .claude, payload: stop, env: env, now: 1)?.source)
+    }
+
+    func testClaudeEmitterAndSourceRoundTripThroughJSONLine() throws {
+        let payload: [String: Any] = [
+            "hook_event_name": "SessionStart", "session_id": "s1", "source": "resume"
+        ]
+        let event = try XCTUnwrap(AgentHookEvent(
+            kind: .claude,
+            payload: payload,
+            env: env,
+            now: 42,
+            emitterProcess: ProcessInstance(pid: 700, startedAt: 70)
+        ))
+
+        let decoded = try JSONDecoder().decode(AgentHookEvent.self, from: JSONEncoder().encode(event))
+
+        XCTAssertEqual(event, decoded)
+    }
+
+    func testLegacyClaudeEventDecodesWithoutSourceOrEmitter() throws {
+        let data = Data(#"{"kind":"claude","name":"sessionStart","sessionID":"s","timestamp":42}"#.utf8)
+
+        let decoded = try JSONDecoder().decode(AgentHookEvent.self, from: data)
+
+        XCTAssertEqual(decoded.sessionID, "s")
+        XCTAssertNil(decoded.source)
+        XCTAssertNil(decoded.emitterProcess)
+    }
+
     func testLegacyCodexEventDecodesWithoutEmitter() throws {
         let data = Data(#"{"kind":"codex","name":"turnComplete","timestamp":42}"#.utf8)
 

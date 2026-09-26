@@ -8,9 +8,10 @@ extension NiruxShellView {
         for workspace in workspaces { workspace.containerView.removeFromSuperview() }
         workspaces.removeAll()
         // A corrupt/hand-edited state file (or an older collision) may map
-        // several columns to one thread. Codex permits one writer, so only
-        // the first occurrence may auto-resume; duplicates use the picker.
-        var claimedCodexSessionIDs = Set<String>()
+        // several columns to one conversation. Two agents appending to one
+        // transcript corrupt it, so only the first occurrence may
+        // auto-resume; duplicates use the picker.
+        var claimedSessionIDs = ClaimedSessionIDs()
 
         let restoredProfiles = state.workspaceProfiles?.isEmpty == false
             ? state.workspaceProfiles!
@@ -46,7 +47,7 @@ extension NiruxShellView {
                 restoreColumn(
                     persistedColumn,
                     in: workspace,
-                    claimedCodexSessionIDs: &claimedCodexSessionIDs
+                    claimedSessionIDs: &claimedSessionIDs
                 )
             }
             workspace.focusedIndex = min(persistedWS.focusedColumnIndex, max(workspace.columns.count - 1, 0))
@@ -73,25 +74,37 @@ extension NiruxShellView {
         sidebar.setInactiveSectionCollapsed(settings?.inactiveWorkspacesCollapsed ?? true)
     }
 
+    private struct ClaimedSessionIDs {
+        var claude = Set<String>()
+        var codex = Set<String>()
+    }
+
     private func restoreColumn(
         _ persistedColumn: PersistedColumn,
         in workspace: WorkspaceState,
-        claimedCodexSessionIDs: inout Set<String>
+        claimedSessionIDs: inout ClaimedSessionIDs
     ) {
         switch persistedColumn.resolvedType {
         case .webView:
             workspace.addColumn(webViewURL: persistedColumn.webViewURL ?? "about:blank")
         case .claudeCode:
             let mode = persistedColumn.claudeLaunchMode ?? .default
+            let resumeTarget = Self.agentRestoreTarget(
+                sessionID: persistedColumn.claudeSessionID,
+                claimedSessionIDs: &claimedSessionIDs.claude
+            )
             workspace.addColumn(
-                command: NiruxShellView.claudeCommand(continueSession: true, mode: mode),
+                command: NiruxShellView.claudeCommand(resume: resumeTarget, mode: mode),
                 agentUUID: persistedColumn.agentUUID ?? UUID().uuidString
             )
+            if case .session(let sessionID) = resumeTarget {
+                workspace.columns.last?.prepareClaudeResume(sessionID: sessionID)
+            }
         case .codex:
             let mode = persistedColumn.codexLaunchMode ?? .default
-            let resumeTarget = Self.codexRestoreTarget(
+            let resumeTarget = Self.agentRestoreTarget(
                 sessionID: persistedColumn.codexSessionID,
-                claimedSessionIDs: &claimedCodexSessionIDs
+                claimedSessionIDs: &claimedSessionIDs.codex
             )
             workspace.addColumn(
                 command: NiruxShellView.codexCommand(resume: resumeTarget, mode: mode),
@@ -134,11 +147,11 @@ extension NiruxShellView {
         )
     }
 
-    /// Claim an exact thread once per restore pass. Missing, empty and
+    /// Claim an exact session once per restore pass. Missing, empty and
     /// duplicate IDs require explicit selection instead of guessing.
-    static func codexRestoreTarget(
+    static func agentRestoreTarget(
         sessionID: String?, claimedSessionIDs: inout Set<String>
-    ) -> CodexResumeTarget {
+    ) -> AgentResumeTarget {
         guard let sessionID, !sessionID.isEmpty,
               claimedSessionIDs.insert(sessionID).inserted else {
             return .picker
@@ -199,6 +212,9 @@ extension NiruxShellView {
                             codexLaunchMode: codexMode,
                             codexSessionID: kind == .codex
                                 ? col.persistedCodexSessionID(foregroundProcess: foregroundProcess)
+                                : nil,
+                            claudeSessionID: kind == .claudeCode
+                                ? col.persistedClaudeSessionID(foregroundProcess: foregroundProcess)
                                 : nil,
                             agentUUID: col.agentUUID
                         )

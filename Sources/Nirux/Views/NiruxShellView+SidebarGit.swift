@@ -6,17 +6,17 @@ extension NiruxShellView {
     func updateSidebar(snapshot: ProcessSnapshot? = nil) {
         let snapshot = snapshot ?? ProcessSnapshot()
         var foregroundProcesses: [ObjectIdentifier: ForegroundProcess] = [:]
-        var invalidatedCodexBinding = false
+        var invalidatedSessionBinding = false
         for workspace in workspaces {
             for column in workspace.columns {
                 let foregroundProcess = column.pty?.foregroundProcess(snapshot: snapshot)
                 if let foregroundProcess {
                     foregroundProcesses[ObjectIdentifier(column)] = foregroundProcess
                 }
-                if column.invalidateCodexSessionIfProcessChanged(
+                if column.invalidateAgentSessionsIfProcessChanged(
                     foregroundProcess: foregroundProcess
                 ) {
-                    invalidatedCodexBinding = true
+                    invalidatedSessionBinding = true
                 }
             }
         }
@@ -82,7 +82,7 @@ extension NiruxShellView {
         }
         sidebar.update(profiles: profileInfos, workspaces: infos)
         updateSidebarAttention(infos: infos)
-        if invalidatedCodexBinding { saveState(snapshot: snapshot) }
+        if invalidatedSessionBinding { saveState(snapshot: snapshot) }
         scheduleActivityReadMark()
     }
 
@@ -358,6 +358,7 @@ extension NiruxShellView {
         var changed = false
         for appliedEvent in events {
             let event = appliedEvent.event
+            if appliedEvent.claudeSessionChanged { changed = true }
             if event.kind == .codex,
                appliedEvent.resolution.column.captureCodexSession(
                    sessionID: event.sessionID,

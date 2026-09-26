@@ -57,8 +57,17 @@ struct AgentStatusMachine {
     /// True when a hook event should flip the column to `.needsAttention`:
     /// the transition into attention fires a callback (dock bounce, sidebar
     /// badge); already-attention stays quiet.
-    mutating func applyHook(_ name: AgentHookEvent.Name, kind: AgentHookEvent.Kind, isUserFocused: Bool) -> Bool {
+    /// `source` is Claude's SessionStart source; a compaction (auto mid-turn,
+    /// or /compact) continues the same conversation and ends no turn.
+    mutating func applyHook(
+        _ name: AgentHookEvent.Name,
+        kind: AgentHookEvent.Kind,
+        source: String? = nil,
+        isUserFocused: Bool
+    ) -> Bool {
         switch name {
+        case .sessionStart where source == "compact":
+            hookKind = kind.rawValue
         case .sessionStart:
             hookKind = kind.rawValue
             hookWorking = false

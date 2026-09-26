@@ -175,7 +175,7 @@ final class ProcessSnapshot {
         "node", "python", "python3", "ruby", "perl", "java", "deno", "bun"
     ]
 
-    fileprivate static func execName(from argv: [String]) -> String? {
+    static func execName(from argv: [String]) -> String? {
         guard let first = argv.first else { return nil }
         let name0 = (first as NSString).lastPathComponent
         // If argv[0] is a known runtime, try argv[1] for the real command name
@@ -305,7 +305,9 @@ final class PtySession: @unchecked Sendable {
     /// fires the workspace-level notification path.
     @discardableResult
     func applyAgentHook(_ event: AgentHookEvent, isUserFocused: Bool) -> Bool {
-        state.machine.applyHook(event.name, kind: event.kind, isUserFocused: isUserFocused)
+        state.machine.applyHook(
+            event.name, kind: event.kind, source: event.source, isUserFocused: isUserFocused
+        )
     }
 
     /// Last computed agent state (no snapshot needed — read from persistent state)

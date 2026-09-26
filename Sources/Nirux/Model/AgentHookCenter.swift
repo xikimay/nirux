@@ -32,6 +32,9 @@ final class AgentHookCenter {
     struct AppliedEvent {
         let event: AgentHookEvent
         let resolution: Resolution
+        /// The column's Claude session binding changed (new conversation,
+        /// /clear, /resume) — the state file must learn the new ID.
+        var claudeSessionChanged = false
     }
 
     /// Given NIRUX_AGENT_UUID, locate the owning column. Set by the shell.
@@ -146,9 +149,10 @@ final class AgentHookCenter {
 
         let decoder = JSONDecoder()
         var appliedEvents: [AppliedEvent] = []
+        var snapshot: ProcessSnapshot?
         for line in slice.split(separator: 0x0A) {
             guard let event = try? decoder.decode(AgentHookEvent.self, from: Data(line)) else { continue }
-            if let appliedEvent = dispatch(event) { appliedEvents.append(appliedEvent) }
+            if let appliedEvent = dispatch(event, snapshot: &snapshot) { appliedEvents.append(appliedEvent) }
         }
         // One sidebar refresh per drain, not per event: updateSidebar does a
         // full process-table scan, and a PreToolUse storm (or launch replay
@@ -159,7 +163,29 @@ final class AgentHookCenter {
 
     @discardableResult
     func dispatch(_ event: AgentHookEvent) -> AppliedEvent? {
+        var snapshot: ProcessSnapshot?
+        return dispatch(event, snapshot: &snapshot)
+    }
+
+    /// `snapshot` is taken on the first Claude event and shared by the rest
+    /// of the drain — one process-table scan per burst, not per event.
+    private func dispatch(_ event: AgentHookEvent, snapshot: inout ProcessSnapshot?) -> AppliedEvent? {
         let resolution = event.agentUUID.flatMap { resolver?($0) }
+        var claudeSessionChanged = false
+        if let resolution, event.kind == .claude {
+            let processes = snapshot ?? ProcessSnapshot()
+            snapshot = processes
+            switch resolution.column.admitClaudeHook(event, snapshot: processes) {
+            case .rejected:
+                // A nested `claude -p` inherited this column's UUID: its turn
+                // ends and SessionEnd are not the column's.
+                return nil
+            case .accepted:
+                break
+            case .adopted:
+                claudeSessionChanged = true
+            }
+        }
         onEventReceived?(event, resolution)
         if let resolution, let pty = resolution.column.pty {
             let firedAttention = pty.applyAgentHook(event, isUserFocused: resolution.isUserFocused)
@@ -167,7 +193,9 @@ final class AgentHookCenter {
                 resolution.column.notifyAgentAttention()
             }
         }
-        return resolution.map { AppliedEvent(event: event, resolution: $0) }
+        return resolution.map {
+            AppliedEvent(event: event, resolution: $0, claudeSessionChanged: claudeSessionChanged)
+        }
     }
 
     func stop() {
