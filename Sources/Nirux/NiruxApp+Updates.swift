@@ -98,9 +98,10 @@ protocol AutomaticUpdatesSetting: AnyObject {
 
 extension SPUUpdater: AutomaticUpdatesSetting {}
 
-/// Unchecking the item keeps a manually installed (rolled-back) build from
-/// being replaced by the next nightly: Sparkle then asks before installing.
-/// Sparkle persists the choice in user defaults (`SUAutomaticallyUpdate`),
+/// Unchecking the item stops Sparkle from silently downloading newer builds, so
+/// a manually installed (rolled-back) build stays put: Sparkle asks first
+/// instead. An update it already downloaded may still install when the app
+/// quits. Sparkle persists the choice in user defaults (`SUAutomaticallyUpdate`),
 /// which take precedence over the Info.plist default.
 @MainActor
 enum AutomaticUpdatesMenu {

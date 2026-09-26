@@ -5,8 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Main keeps its group; a manual dispatch from any other branch (whose job is
+# skipped below) gets its own, so it cannot cancel a publish from main.
 concurrency:
-  group: nightly-release
+  group: ${{ github.ref == 'refs/heads/main' && 'nightly-release' || format('nightly-release-{0}', github.ref) }}
   cancel-in-progress: true
 
 permissions:
@@ -83,11 +85,12 @@ jobs:
           fi
       - name: Extract version info
         run: |
-          VERSION="nightly-$(date +%Y.%m.%d)"
           BUILD_NUMBER=$(date +%Y%m%d%H%M)
+          VERSION="nightly-${BUILD_NUMBER:0:4}.${BUILD_NUMBER:4:2}.${BUILD_NUMBER:6:2}"
           SHORT_SHA=$(git rev-parse --short=7 HEAD)
-          # One immutable release per built commit, kept for rollbacks.
-          RELEASE_TAG="$VERSION-$SHORT_SHA"
+          # One immutable release per build, kept for rollbacks. The time keeps a
+          # re-run of the same commit from colliding with its earlier release.
+          RELEASE_TAG="$VERSION-${BUILD_NUMBER:8:4}-$SHORT_SHA"
           {
             echo "VERSION=$VERSION"
             echo "BUILD_NUMBER=$BUILD_NUMBER"
@@ -180,17 +183,22 @@ jobs:
           Earlier builds stay available as dated \`nightly-*\` releases; see docs/release-signing.md to roll back.
           EOF
 
+      - name: Refuse to publish a stale commit
+        run: |
+          # Re-running an old run keeps its original commit; publishing it would
+          # ship older code under a newer build number to every install.
+          MAIN_SHA=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$MAIN_SHA" != "$GITHUB_SHA" ]; then
+            echo "::error::$GITHUB_SHA is no longer the head of main ($MAIN_SHA); not publishing."
+            exit 1
+          fi
+
       - name: Publish dated nightly release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Published before the rolling release: the rolling appcast points at
-          # this release's zip. A re-run of the same commit replaces its own
-          # dated release and never touches another one.
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release delete "$RELEASE_TAG" --cleanup-tag --yes
-          fi
-
+          # Published before the rolling release, whose appcast points at this
+          # release's zip. Never replaced: a tag collision fails the run instead.
           gh release create "$RELEASE_TAG" \
             --target "$GITHUB_SHA" \
             --title "$RELEASE_TAG (build $BUILD_NUMBER)" \
@@ -203,19 +211,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # `nightly` is what SUFeedURL and the README point at. It always holds
-          # the newest build, alongside that build's dated release.
-          gh release delete nightly --yes 2>/dev/null || true
-          git tag -d nightly 2>/dev/null || true
-          git push origin :refs/tags/nightly 2>/dev/null || true
-
-          gh release create nightly \
-            --target "$GITHUB_SHA" \
-            --title "Nightly ($VERSION)" \
-            --notes-file "$NOTES_FILE" \
-            --prerelease \
-            Nirux.app.zip \
-            appcast.xml
+          # `nightly` is what SUFeedURL and the README point at. Update it in
+          # place: its appcast only references dated zips, so replacing the zip
+          # first and the appcast last keeps the feed valid at every step, even
+          # if the run is cancelled midway.
+          git push --force origin "$GITHUB_SHA:refs/tags/nightly"
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release edit nightly \
+              --title "Nightly ($VERSION)" \
+              --notes-file "$NOTES_FILE" \
+              --prerelease
+            gh release upload nightly Nirux.app.zip --clobber
+            gh release upload nightly appcast.xml --clobber
+          else
+            gh release create nightly \
+              --title "Nightly ($VERSION)" \
+              --notes-file "$NOTES_FILE" \
+              --prerelease \
+              Nirux.app.zip \
+              appcast.xml
+          fi
 
       - name: Prune old dated nightly releases
         # The new build is already published; a failed cleanup must not turn
@@ -230,7 +245,7 @@ jobs:
           # Sort by publish time: a release's createdAt is its commit's date.
           gh release list --limit 200 --json tagName,publishedAt \
             | jq -r --argjson keep "$KEEP_DATED_RELEASES" '
-                [.[] | select(.tagName | test("^nightly-[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}-[0-9a-f]{7,40}$"))]
+                [.[] | select(.tagName | test("^nightly-[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}-[0-9]{4}-[0-9a-f]{7,40}$"))]
                 | sort_by(.publishedAt) | reverse | .[$keep:] | .[].tagName' \
             > "$RUNNER_TEMP/prune-tags.txt"
 

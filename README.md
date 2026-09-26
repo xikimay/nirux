@@ -261,7 +261,7 @@ The nightly GitHub Actions workflow runs on pushes to `main` and on manual dispa
 5. Submits to Apple notarization and staples the result.
 6. Re-zips the app.
 7. Signs the update archive for Sparkle.
-8. Publishes `Nirux.app.zip` and `appcast.xml` to an immutable `nightly-YYYY.MM.DD-<sha>` release (the 20 most recent are kept) and to the rolling `nightly` release, with a changelog generated from the commits since the previous nightly.
+8. Publishes `Nirux.app.zip` and `appcast.xml` to an immutable `nightly-YYYY.MM.DD-HHMM-<sha>` release (the 20 most recent are kept) and to the rolling `nightly` release, with a changelog generated from the commits since the previous nightly.
 
 Sparkle reads updates from:
 

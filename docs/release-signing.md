@@ -114,10 +114,10 @@ ditto -c -k --keepParent Nirux.app Nirux.app.zip
 
 Every push to `main` publishes two prereleases from the same build:
 
-- `nightly-YYYY.MM.DD-<sha>`: one immutable release per built commit, holding
+- `nightly-YYYY.MM.DD-HHMM-<sha>`: one immutable release per build, holding
   `Nirux.app.zip` and an `appcast.xml` whose enclosure points at that same zip.
   The workflow keeps the 20 most recent and deletes older ones, with their tags.
-- `nightly`: the rolling release, recreated on every build. Sparkle's
+- `nightly`: the rolling release, updated in place on every build. Sparkle's
   `SUFeedURL` reads `nightly/appcast.xml`, which points at the newest dated
   release's zip.
 
@@ -125,9 +125,9 @@ Each dated release's title carries the build number that `About Nirux` shows in
 parentheses, so you can match an installed build to its release.
 
 Sparkle checks for updates every hour. With `Nirux > Install Updates
-Automatically` checked (the default), it downloads and installs new builds
-silently. Uncheck it to have Sparkle ask first; the choice is kept in user
-defaults and survives updates.
+Automatically` checked (the default), it downloads a new build silently and
+installs it when Nirux quits. Uncheck it to have Sparkle ask first; the choice
+is kept in user defaults and survives updates.
 
 ## Rolling Back A Broken Nightly
 
@@ -137,43 +137,73 @@ install moves past the broken one.
 
 ### 1. Pin a good build on your Mac
 
-1. Uncheck `Nirux > Install Updates Automatically`. Otherwise Sparkle
-   reinstalls the newest nightly within the hour. If the broken build does not
-   launch or predates that menu item, run instead:
+Run these commands in Terminal.app, not in a Nirux terminal: quitting Nirux
+ends its shells.
+
+1. Uncheck `Nirux > Install Updates Automatically`. Otherwise Sparkle downloads
+   the newest nightly again within the hour and installs it the next time
+   Nirux quits. If the broken build does not launch or predates that menu
+   item, run instead:
 
    ```bash
    defaults write com.xikimay.nirux SUAutomaticallyUpdate -bool false
    ```
 
-2. Pick the last good build among the dated releases:
+2. Pick the last good build among the dated releases and download it:
 
    ```bash
    gh release list --repo xikimay/nirux
-   ```
-
-3. Back up your state first: an older build ignores state fields it does not
-   know about and drops them on its next save.
-
-   ```bash
-   ditto ~/Library/Application\ Support/nirux ~/nirux-state-backup-$(date +%Y%m%d%H%M)
-   ```
-
-4. Quit Nirux, then install the chosen build. Moving the broken app aside
-   keeps it around for debugging:
-
-   ```bash
-   TAG=nightly-YYYY.MM.DD-<sha>
+   TAG=nightly-YYYY.MM.DD-HHMM-<sha>
    DIR=$(mktemp -d)
    gh release download "$TAG" --repo xikimay/nirux --pattern Nirux.app.zip --dir "$DIR"
    ditto -x -k "$DIR/Nirux.app.zip" "$DIR"
-   mv /Applications/Nirux.app "/Applications/Nirux-broken-$(date +%Y%m%d%H%M).app"
-   ditto "$DIR/Nirux.app" /Applications/Nirux.app
    ```
 
+3. Quit Nirux and wait a few seconds: if Sparkle had already downloaded the
+   broken build, it may still install it as Nirux quits. Then back up its
+   state. An older build can fail to read state written by a newer one (for
+   example a setting value it does not know) and start empty, overwriting
+   `state.json` and its rotating backups on its first save. Unknown fields are
+   dropped either way. Note the printed path.
+
+   ```bash
+   STATE_BACKUP="$HOME/nirux-state-backup-$(date +%Y%m%d%H%M)"
+   ditto "$HOME/Library/Application Support/nirux" "$STATE_BACKUP" && echo "$STATE_BACKUP"
+   ```
+
+4. Archive the broken build outside `/Applications`, then install the good one.
+   Do not leave the broken copy in `/Applications`: it carries the highest
+   version, so Launch Services may open it for `nirux://` links. If `rm` fails
+   with `Permission denied` (the bundle belongs to another macOS account), run
+   the same chain with `sudo rm -rf`.
+
+   ```bash
+   ditto -c -k --keepParent /Applications/Nirux.app "$HOME/Nirux-broken-$(date +%Y%m%d%H%M).zip" &&
+     rm -rf /Applications/Nirux.app &&
+     ditto "$DIR/Nirux.app" /Applications/Nirux.app &&
+     open /Applications/Nirux.app
+   ```
+
+5. Check the build number in `About Nirux` against the release title.
+
 Sparkle still reports the newer build; choose `Skip This Version` or `Remind
-Me Later`. Once a fixed nightly is out, check `Install Updates Automatically`
-again, or run `defaults delete com.xikimay.nirux SUAutomaticallyUpdate` to
-return to the default.
+Me Later`. Do not use the `Install` button in the Nirux status bar until the
+fix ships: it checks again and offers the broken build, skipped or not. Once a
+fixed nightly is out, check `Install Updates Automatically` again, or run
+`defaults delete com.xikimay.nirux SUAutomaticallyUpdate` to return to the
+default.
+
+If the older build opened without your workspaces, restore the backup after
+the fixed build is installed, with Nirux quit. Use the path step 3 printed;
+the state the older build wrote is moved aside, not deleted:
+
+```bash
+STATE_BACKUP="$HOME/nirux-state-backup-YYYYMMDDHHMM"
+STATE="$HOME/Library/Application Support/nirux"
+test -d "$STATE_BACKUP" &&
+  mv "$STATE" "$STATE-replaced-$(date +%Y%m%d%H%M)" &&
+  ditto "$STATE_BACKUP" "$STATE"
+```
 
 ### 2. Fix forward for every install
 
@@ -184,14 +214,19 @@ This is the only way to move installs that already took the broken build.
 ### 3. Optional: stop the broken build from spreading
 
 While the fix builds, point the rolling feed back at the last good build.
-Installs older than it update to it; installs already on the broken build see
-nothing newer and stay put. The next push to `main` replaces both files.
+Installs older than it update to it; installs that have not yet seen the broken
+build no longer get it. It does not help installs already on the broken build,
+nor those that already downloaded it: Sparkle installs a downloaded update on
+the next quit without reading the feed again. The next push to `main` replaces
+both files.
 
 ```bash
-TAG=nightly-YYYY.MM.DD-<sha>
+TAG=nightly-YYYY.MM.DD-HHMM-<sha>
 DIR=$(mktemp -d)
 gh release download "$TAG" --repo xikimay/nirux --pattern appcast.xml --pattern Nirux.app.zip --dir "$DIR"
 gh release upload nightly "$DIR/appcast.xml" "$DIR/Nirux.app.zip" --repo xikimay/nirux --clobber
 ```
 
-The `nightly` release notes keep describing the broken build until then.
+The `nightly` release notes keep describing the broken build until then. Do
+not delete the broken dated release instead: the rolling feed points at its
+zip, so every update check would fail until the next push.

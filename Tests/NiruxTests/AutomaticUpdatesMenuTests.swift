@@ -47,6 +47,24 @@ final class AutomaticUpdatesMenuTests: XCTestCase {
         XCTAssertFalse(setting.automaticallyDownloadsUpdates)
     }
 
+    func testAppMenuWiresToggleThroughAppValidation() throws {
+        let application = NSApplication.shared
+        let previousMenu = application.mainMenu
+        defer { application.mainMenu = previousMenu }
+
+        let app = NiruxApp()
+        app.setupMenus()
+        let appMenu = try XCTUnwrap(application.mainMenu?.items.first?.submenu)
+        let item = try XCTUnwrap(appMenu.items.first { $0.action == #selector(NiruxApp.toggleAutomaticUpdates(_:)) })
+        XCTAssertEqual(item.title, "Install Updates Automatically")
+        XCTAssertTrue(item.target === app)
+
+        // Tests run without an SUFeedURL, so no updater is running.
+        item.state = .on
+        XCTAssertFalse(app.validateMenuItem(item))
+        XCTAssertEqual(item.state, .off)
+    }
+
     func testToggleFlipsSettingBothWays() {
         let setting = FakeSetting(downloads: true)
         AutomaticUpdatesMenu.toggle(setting)
