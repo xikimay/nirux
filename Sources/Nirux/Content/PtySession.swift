@@ -352,12 +352,13 @@ final class PtySession: @unchecked Sendable {
     /// Used for keys that ghostty's inMemory backend doesn't route correctly
     /// (e.g. Enter when Claude Code enables kitty keyboard protocol).
     func sendRaw(_ data: Data) {
+        state.noteTypedInput(data)
         state.writeToPty(data)
     }
 
     func sendRaw(_ string: String) {
         if let data = string.data(using: .utf8) {
-            state.writeToPty(data)
+            sendRaw(data)
         }
     }
 
@@ -557,7 +558,19 @@ private final class PtyState: @unchecked Sendable {
     /// Read-queue only (reset on start, before the read source exists).
     private var localServerScanner = LocalServerURLScanner()
     private var localServerLastForwarded: [Int: TimeInterval] = [:]
-    private static let localServerForwardInterval: TimeInterval = 5
+    private static let localServerForwardInterval: TimeInterval = 1
+    /// Something reached the PTY through `sendRaw` — keystrokes, pastes,
+    /// remote prompts, commands Nirux types. Unlike `machine.hasUserInput`
+    /// it ignores ghostty's own writes (replies to the terminal queries
+    /// Claude Code sends at startup) and the lone Ctrl+L redraw nudge.
+    private var hasTypedInput = false
+
+    func noteTypedInput(_ data: Data) {
+        guard !hasTypedInput, data != Self.redrawNudge else { return }
+        hasTypedInput = true
+    }
+
+    private static let redrawNudge = Data([0x0C])
 
     func foregroundProcess(snapshot: ProcessSnapshot) -> ForegroundProcess? {
         guard childPid > 0 else { return nil }
@@ -576,6 +589,7 @@ private final class PtyState: @unchecked Sendable {
         machine.reset()
         localServerScanner = LocalServerURLScanner()
         localServerLastForwarded = [:]
+        hasTypedInput = false
     }
 
     func writeToPty(_ data: Data) {
@@ -678,9 +692,9 @@ private final class PtyState: @unchecked Sendable {
            str.contains("\u{1b}]") {
             parseOscSequences(str)
         }
-        // Same gate as OSC 9: output before the first keystroke is launch
-        // noise — notably `claude --continue` replaying old transcripts.
-        if machine.hasUserInput, onLocalServerURL != nil {
+        // Output before the first typed input is launch noise — notably
+        // `claude --continue` replaying old transcripts.
+        if hasTypedInput, onLocalServerURL != nil {
             detectLocalServerURLs(in: buffer, count: bytesRead)
         }
     }
@@ -690,8 +704,9 @@ private final class PtyState: @unchecked Sendable {
             localServerScanner.scan(UnsafeRawBufferPointer(rebasing: $0[..<count]))
         }
         guard !urls.isEmpty, let callback = onLocalServerURL else { return }
-        // TUIs repaint the same URL on every frame; the workspace already
-        // dedupes per port, this just keeps the main queue quiet.
+        // TUIs repaint the same URL on every frame; the workspace dedupes
+        // per port, this just keeps the main queue quiet. Short enough not
+        // to swallow the reprint of a quick server restart.
         let now = ProcessInfo.processInfo.systemUptime
         let fresh = urls.filter { url in
             if let last = localServerLastForwarded[url.port],

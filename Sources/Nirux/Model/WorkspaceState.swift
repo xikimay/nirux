@@ -584,6 +584,8 @@ extension WorkspaceState {
     func addColumn(webViewURL: String) {
         let col = ColumnState(url: webViewURL)
         insertColumn(col)
+        // A browser column on a proposed port makes that proposal moot.
+        col.webViewColumn?.onURLChanged = { [weak self] in self?.pruneLocalServerProposals() }
         pruneLocalServerProposals()
     }
 

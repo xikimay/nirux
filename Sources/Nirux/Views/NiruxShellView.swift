@@ -688,7 +688,6 @@ extension NiruxShellView {
                 self?.focusActiveTerminal(in: self?.window)
             }
         }
-        commandPalette?.detectedURLsProvider = { [weak self] in self?.activeWorkspace?.detectedLocalServerURLs ?? [] }
 
         commandPalette?.actions = [
             PaletteAction(icon: "🌐", title: "Open Browser", subtitle: "Open a URL in a new WebView column", shortcut: "⌘B") { [weak self] in

@@ -9,15 +9,28 @@ final class LocalServerProposalTests: XCTestCase {
         LocalServerURL(isSecure: false, host: host, port: port, path: path)
     }
 
-    private func propose(_ book: inout Book, _ server: LocalServerURL, in column: String = "term") {
-        XCTAssertTrue(book.noteDetected(server, in: column, browserPorts: []))
-        XCTAssertEqual(
-            book.probeFinished(port: server.port, isListening: true, browserPorts: [], liveColumns: [column]),
-            .proposed
-        )
+    private func scan(
+        _ book: inout Book,
+        listening: Set<Int>,
+        browser: Set<Int> = [],
+        columns: Set<String> = ["term"],
+        at now: TimeInterval = 1
+    ) {
+        book.applyScan(listeningPorts: listening, browserPorts: browser, liveColumns: columns, now: now)
     }
 
-    // MARK: - Detection → probe
+    private func propose(_ book: inout Book, _ server: LocalServerURL, in column: String = "term") {
+        XCTAssertTrue(book.noteDetected(server, in: column, browserPorts: [], now: 0))
+        // Servers proposed earlier are still up.
+        XCTAssertTrue(book.applyScan(
+            listeningPorts: Set(book.proposals.map(\.url.port)).union([server.port]),
+            browserPorts: [],
+            liveColumns: [column, "term", "api", "web", "other"],
+            now: 0.3
+        ))
+    }
+
+    // MARK: - Detection → scan
 
     func testListeningServerBecomesTheColumnsProposal() {
         var book = Book()
@@ -29,65 +42,65 @@ final class LocalServerProposalTests: XCTestCase {
 
     func testOneProposalPerPort() {
         var book = Book()
-        XCTAssertTrue(book.noteDetected(url(3000), in: "term", browserPorts: []))
-        // Same port again while probing — "Local" + "Network" lines, 127.0.0.1 vs localhost.
-        XCTAssertFalse(book.noteDetected(url(3000, host: "127.0.0.1"), in: "term", browserPorts: []))
-        _ = book.probeFinished(port: 3000, isListening: true, browserPorts: [], liveColumns: ["term"])
+        XCTAssertTrue(book.noteDetected(url(3000), in: "term", browserPorts: [], now: 0))
+        // Same port again before the scan — "Local" + "Network", 127.0.0.1 vs localhost.
+        XCTAssertFalse(book.noteDetected(url(3000, host: "127.0.0.1"), in: "term", browserPorts: [], now: 0.1))
+        scan(&book, listening: [3000])
         // ...and once proposed, even from another terminal.
-        XCTAssertFalse(book.noteDetected(url(3000), in: "other", browserPorts: []))
+        XCTAssertFalse(book.noteDetected(url(3000), in: "other", browserPorts: [], now: 2))
         XCTAssertEqual(book.proposals.count, 1)
     }
 
-    func testClosedPortIsRetriedThenDropped() {
+    func testDetectionWaitsForItsPortThenExpires() {
         var book = Book()
-        XCTAssertTrue(book.noteDetected(url(8000), in: "term", browserPorts: []))
-        let delays = Book.probeDelays
-        XCTAssertEqual(
-            book.probeFinished(port: 8000, isListening: false, browserPorts: [], liveColumns: ["term"]),
-            .retry(after: delays[1])
-        )
-        XCTAssertEqual(
-            book.probeFinished(port: 8000, isListening: false, browserPorts: [], liveColumns: ["term"]),
-            .retry(after: delays[2])
-        )
-        XCTAssertEqual(
-            book.probeFinished(port: 8000, isListening: false, browserPorts: [], liveColumns: ["term"]),
-            .dropped
-        )
+        XCTAssertTrue(book.noteDetected(url(8000), in: "term", browserPorts: [], now: 10))
+        XCTAssertEqual(book.nextScanDelay, Book.pendingScanInterval)
+        scan(&book, listening: [], at: 10.3)
+        scan(&book, listening: [], at: 11.3)
+        XCTAssertNotNil(book.pending[8000])
+        scan(&book, listening: [], at: 10 + Book.pendingWindow)
         XCTAssertTrue(book.pending.isEmpty)
         XCTAssertTrue(book.proposals.isEmpty)
+        XCTAssertNil(book.nextScanDelay)
         // A later print (server restarted) starts over.
-        XCTAssertTrue(book.noteDetected(url(8000), in: "term", browserPorts: []))
+        XCTAssertTrue(book.noteDetected(url(8000), in: "term", browserPorts: [], now: 20))
     }
 
-    func testRetryThatFindsTheServerProposesIt() {
+    func testServerThatBindsAfterPrintingIsProposed() {
         var book = Book()
-        XCTAssertTrue(book.noteDetected(url(8000), in: "term", browserPorts: []))
-        _ = book.probeFinished(port: 8000, isListening: false, browserPorts: [], liveColumns: ["term"])
-        XCTAssertEqual(
-            book.probeFinished(port: 8000, isListening: true, browserPorts: [], liveColumns: ["term"]),
-            .proposed
-        )
+        XCTAssertTrue(book.noteDetected(url(8000), in: "term", browserPorts: [], now: 0))
+        scan(&book, listening: [], at: 0.3)
+        scan(&book, listening: [8000], at: 1.3)
+        XCTAssertEqual(book.proposal(for: "term")?.url.port, 8000)
+        XCTAssertEqual(book.nextScanDelay, Book.livenessScanInterval)
     }
 
-    func testUnknownProbeIsDropped() {
+    func testOneScanResolvesEveryPendingPortNewestFirst() {
         var book = Book()
-        XCTAssertEqual(book.probeFinished(port: 1234, isListening: true, browserPorts: [], liveColumns: ["term"]), .dropped)
-        XCTAssertTrue(book.proposals.isEmpty)
+        XCTAssertTrue(book.noteDetected(url(3000), in: "term", browserPorts: [], now: 0))
+        XCTAssertTrue(book.noteDetected(url(5173), in: "term", browserPorts: [], now: 0.1))
+        scan(&book, listening: [3000, 5173])
+        XCTAssertEqual(book.proposals.map(\.url.port), [5173, 3000])
+    }
+
+    func testPendingDetectionsAreCapped() {
+        var book = Book()
+        for port in 1...Book.maxPending {
+            XCTAssertTrue(book.noteDetected(url(port), in: "term", browserPorts: [], now: 0))
+        }
+        XCTAssertFalse(book.noteDetected(url(9999), in: "term", browserPorts: [], now: 0))
     }
 
     // MARK: - Browser columns
 
     func testPortAlreadyShownInABrowserColumnIsNotProposed() {
         var book = Book()
-        XCTAssertFalse(book.noteDetected(url(5173), in: "term", browserPorts: [5173]))
-        // A browser column opened on the port while probing.
-        XCTAssertTrue(book.noteDetected(url(3000), in: "term", browserPorts: []))
-        XCTAssertEqual(
-            book.probeFinished(port: 3000, isListening: true, browserPorts: [3000], liveColumns: ["term"]),
-            .dropped
-        )
+        XCTAssertFalse(book.noteDetected(url(5173), in: "term", browserPorts: [5173], now: 0))
+        // A browser column opened on the port before the scan.
+        XCTAssertTrue(book.noteDetected(url(3000), in: "term", browserPorts: [], now: 0))
+        scan(&book, listening: [3000], browser: [3000])
         XCTAssertTrue(book.proposals.isEmpty)
+        XCTAssertTrue(book.pending.isEmpty)
     }
 
     func testBrowserColumnOnThePortPrunesTheProposal() {
@@ -100,42 +113,43 @@ final class LocalServerProposalTests: XCTestCase {
 
     // MARK: - User actions
 
-    func testDismissedPortIsNeverProposedAgain() {
+    func testHandledPortIsNeverProposedAgain() {
         var book = Book()
         propose(&book, url(5173))
-        book.dismiss(port: 5173)
+        propose(&book, url(3000))
+        // Dismissed...
+        book.markHandled(port: 5173)
+        // ...or opened: TUIs keep repainting the URL, so neither may come back.
+        book.markHandled(port: 3000)
         XCTAssertNil(book.proposal(for: "term"))
-        XCTAssertFalse(book.noteDetected(url(5173), in: "term", browserPorts: []))
-        XCTAssertFalse(book.noteDetected(url(5173), in: "other", browserPorts: []))
-    }
-
-    func testOpenedPortCanBeProposedAgainAfterARestart() {
-        var book = Book()
-        propose(&book, url(5173))
-        book.markOpened(port: 5173)
-        XCTAssertNil(book.proposal(for: "term"))
-        XCTAssertTrue(book.noteDetected(url(5173), in: "term", browserPorts: []))
+        XCTAssertFalse(book.noteDetected(url(5173), in: "term", browserPorts: [], now: 5))
+        XCTAssertFalse(book.noteDetected(url(3000), in: "other", browserPorts: [], now: 5))
+        XCTAssertNil(book.nextScanDelay)
     }
 
     // MARK: - Liveness + columns
 
-    func testStoppedServerIsPrunedOthersStay() {
+    func testStoppedServerIsRemovedAfterTwoEmptyScans() {
         var book = Book()
         propose(&book, url(3000))
         propose(&book, url(5173))
-        XCTAssertTrue(book.prune(stoppedPorts: [3000], browserPorts: [], liveColumns: ["term"]))
+        // A restart unbinds the port briefly: one empty scan is forgiven.
+        XCTAssertFalse(book.applyScan(listeningPorts: [5173], browserPorts: [], liveColumns: ["term"], now: 3))
+        XCTAssertFalse(book.applyScan(listeningPorts: [3000, 5173], browserPorts: [], liveColumns: ["term"], now: 6))
+        XCTAssertFalse(book.applyScan(listeningPorts: [5173], browserPorts: [], liveColumns: ["term"], now: 9))
+        XCTAssertTrue(book.applyScan(listeningPorts: [5173], browserPorts: [], liveColumns: ["term"], now: 12))
         XCTAssertEqual(book.proposals.map(\.url.port), [5173])
-        XCTAssertFalse(book.prune(stoppedPorts: [], browserPorts: [], liveColumns: ["term"]))
     }
 
-    func testClosedTerminalDropsItsProposalsAndPendingProbes() {
+    func testClosedTerminalDropsItsProposalsAndPendingDetections() {
         var book = Book()
         propose(&book, url(3000), in: "gone")
-        XCTAssertTrue(book.noteDetected(url(4000), in: "gone", browserPorts: []))
-        XCTAssertEqual(book.probeFinished(port: 4000, isListening: true, browserPorts: [], liveColumns: ["term"]), .dropped)
+        XCTAssertTrue(book.noteDetected(url(4000), in: "gone", browserPorts: [], now: 1))
         XCTAssertTrue(book.liveProposals(browserPorts: [], liveColumns: ["term"]).isEmpty)
         XCTAssertTrue(book.prune(browserPorts: [], liveColumns: ["term"]))
         XCTAssertTrue(book.proposals.isEmpty)
+        XCTAssertTrue(book.pending.isEmpty)
+        XCTAssertNil(book.nextScanDelay)
     }
 
     func testEachColumnShowsItsMostRecentProposal() {
@@ -150,8 +164,8 @@ final class LocalServerProposalTests: XCTestCase {
             book.liveProposals(browserPorts: [], liveColumns: ["api", "web"]).map(\.url.port),
             [6006, 5173, 3000]
         )
-        // Dismissing the chip reveals the column's previous proposal.
-        book.dismiss(port: 6006)
+        // Handling the chip reveals the column's previous proposal.
+        book.markHandled(port: 6006)
         XCTAssertEqual(book.proposal(for: "web")?.url.port, 5173)
     }
 
@@ -171,22 +185,33 @@ final class LocalServerProposalTests: XCTestCase {
         ])
     }
 
-    // MARK: - Probe
+    // MARK: - Listener scan
 
-    func testProbeSeesAListeningLoopbackSocketAndItsClosing() throws {
+    func testListenerScanSeesALoopbackListenerAndItsClosing() throws {
         let (fd, port) = try listen(family: AF_INET)
-        XCTAssertTrue(LocalPortProbe.isListening(url(port, host: "127.0.0.1")))
-        XCTAssertTrue(LocalPortProbe.isListening(url(port, host: "localhost")))
+        XCTAssertTrue(LocalListeners.listeningPorts().contains(port))
         close(fd)
-        XCTAssertFalse(LocalPortProbe.isListening(url(port, host: "127.0.0.1")))
-        XCTAssertFalse(LocalPortProbe.isListening(url(port, host: "localhost")))
+        XCTAssertFalse(LocalListeners.listeningPorts().contains(port))
     }
 
-    func testProbeTriesIPv6ForLocalhost() throws {
+    func testListenerScanSeesIPv6Listeners() throws {
         let (fd, port) = try listen(family: AF_INET6)
         defer { close(fd) }
-        XCTAssertTrue(LocalPortProbe.isListening(url(port, host: "[::1]")))
-        XCTAssertTrue(LocalPortProbe.isListening(url(port, host: "localhost")))
+        XCTAssertTrue(LocalListeners.listeningPorts().contains(port))
+    }
+
+    func testSystemServicesAreNotDevServers() {
+        // AirPlay Receiver holds :5000 and :7000.
+        XCTAssertTrue(LocalListeners.isSystemExecutable(
+            "/System/Library/CoreServices/ControlCenter.app/Contents/MacOS/ControlCenter"
+        ))
+        XCTAssertTrue(LocalListeners.isSystemExecutable("/usr/libexec/rapportd"))
+        XCTAssertFalse(LocalListeners.isSystemExecutable("/opt/homebrew/Cellar/node/22.0.0/bin/node"))
+        XCTAssertFalse(LocalListeners.isSystemExecutable("/usr/local/bin/php"))
+        // The system Ruby can still serve a Jekyll site.
+        XCTAssertFalse(LocalListeners.isSystemExecutable(
+            "/System/Library/Frameworks/Ruby.framework/Versions/2.6/usr/bin/ruby"
+        ))
     }
 
     /// A loopback listener on an ephemeral port.

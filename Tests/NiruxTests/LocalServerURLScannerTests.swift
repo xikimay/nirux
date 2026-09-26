@@ -91,6 +91,15 @@ final class LocalServerURLScannerTests: XCTestCase {
         XCTAssertEqual(scan("at http://localhost:3000, then\n"), ["http://localhost:3000"])
     }
 
+    func testTruecolorSGRInsideTheURLIsSkipped() {
+        let sgr = "\u{1B}[0;1;38;2;255;255;255;48;2;1;2;3m"
+        XCTAssertEqual(scan("http://localhost:\(sgr)3000\u{1B}[0m/\n"), ["http://localhost:3000/"])
+    }
+
+    func testLoneTrailingQuestionMarkIsTrimmed() {
+        XCTAssertEqual(scan("is it at http://localhost:3000?\n"), ["http://localhost:3000"])
+    }
+
     func testNonSGREscapeEndsTheURL() {
         XCTAssertEqual(scan("http://localhost:3000\u{1B}[K\n"), ["http://localhost:3000"])
         // A cursor move means the next bytes belong elsewhere on screen.

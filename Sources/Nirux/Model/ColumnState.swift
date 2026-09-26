@@ -76,6 +76,8 @@ struct CodexSessionTracker {
 /// A single column in a workspace — terminal or webview
 @MainActor
 final class ColumnState {
+    /// Stable identity (unlike ObjectIdentifier, never reused after close).
+    let id = UUID()
     let view: NSView
     var terminalView: TerminalView?
     var webViewColumn: WebViewColumn?

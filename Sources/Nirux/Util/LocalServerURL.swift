@@ -41,7 +41,9 @@ struct LocalServerURL: Equatable, Hashable, Sendable {
 /// `memchr` sweep over ':' bytes: only a "://" preceded by "http"/"https"
 /// starts a real parse. SGR sequences inside a URL are skipped (Vite prints
 /// the port in bold); any other escape ends it. A URL cut by the read
-/// boundary is carried over and completed by the next chunk.
+/// boundary is carried over and completed by the next chunk, so results
+/// don't depend on where reads split the stream — for candidates up to
+/// `maxCandidateLength`; longer ones are offered as the server root.
 struct LocalServerURLScanner {
     /// Longest candidate carried across chunks; longer ones are dropped.
     static let maxCandidateLength = 512
@@ -252,7 +254,8 @@ struct LocalServerURLScanner {
         guard start + 1 < buf.count else { return .truncated }
         guard buf[start + 1] == UInt8(ascii: "[") else { return .notSGR }
         var cursor = start + 2
-        while cursor < buf.count, cursor - start < 32 {
+        // Truecolor SGRs ("\e[0;1;38;2;255;255;255;48;2;…m") run past 32 bytes.
+        while cursor < buf.count, cursor - start < 64 {
             let byte = buf[cursor]
             if (0x40...0x7E).contains(byte) {
                 return byte == UInt8(ascii: "m") ? .skipped(next: cursor + 1) : .notSGR
@@ -291,7 +294,7 @@ struct LocalServerURLScanner {
     /// punctuation and closing brackets aren't part of the URL.
     private static func trimTrailingPunctuation(_ path: [UInt8]) -> [UInt8] {
         var end = path.count
-        while end > 1, ".,;:!?)]}".utf8.contains(path[end - 1]) { end -= 1 }
+        while end > 0, ".,;:!?)]}".utf8.contains(path[end - 1]) { end -= 1 }
         return Array(path[..<end])
     }
 }

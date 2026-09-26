@@ -1,8 +1,8 @@
 import AppKit
 
 /// Terminal title-bar chip offering to open a dev server that the terminal
-/// printed: "● localhost:5173 ↗  ×". Clicking the label opens it in a
-/// browser column; × dismisses the proposal.
+/// printed: "● localhost:5173 ↗  ✕". Clicking the label opens it in a
+/// browser column; ✕ dismisses the proposal.
 final class LocalServerChipView: NSView {
     static let height: CGFloat = 20
 
@@ -11,7 +11,7 @@ final class LocalServerChipView: NSView {
 
     private(set) var url: LocalServerURL?
     private let openButton = NSButton(title: "", target: nil, action: nil)
-    private let dismissButton = NSButton(title: "×", target: nil, action: nil)
+    private let dismissButton = NSButton(title: "✕", target: nil, action: nil)
     private var fullTitle = NSAttributedString()
     private var compactTitle = NSAttributedString()
 
@@ -34,7 +34,7 @@ final class LocalServerChipView: NSView {
 
         dismissButton.isBordered = false
         dismissButton.bezelStyle = .inline
-        dismissButton.font = .systemFont(ofSize: 13, weight: .regular)
+        dismissButton.font = .systemFont(ofSize: 10, weight: .regular)
         dismissButton.contentTintColor = NSColor.white.withAlphaComponent(0.45)
         dismissButton.target = self
         dismissButton.action = #selector(dismissClicked)
@@ -71,19 +71,31 @@ final class LocalServerChipView: NSView {
         return 0
     }
 
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
     override func layout() {
         super.layout()
         let height = bounds.height
-        let dismissX = bounds.width - Self.dismissWidth - 4
+        let dismissX = bounds.width - Self.dismissWidth - Self.horizontalPadding / 2
         dismissButton.frame = NSRect(x: dismissX, y: 0, width: Self.dismissWidth, height: height)
         openButton.frame = NSRect(x: Self.horizontalPadding, y: 0, width: max(0, dismissX - Self.horizontalPadding), height: height)
     }
 
-    @objc private func openClicked() { onOpen?() }
-    @objc private func dismissClicked() { onDismiss?() }
+    // Deferred one turn: both actions remove this chip from the title bar,
+    // which must not happen inside the button's own mouse-tracking loop.
+    @objc private func openClicked() {
+        DispatchQueue.main.async { [weak self] in self?.onOpen?() }
+    }
+
+    @objc private func dismissClicked() {
+        DispatchQueue.main.async { [weak self] in self?.onDismiss?() }
+    }
 
     private static func width(for title: NSAttributedString) -> CGFloat {
-        ceil(title.size().width) + horizontalPadding + dismissWidth + 8
+        // + 4: NSButton insets its title a little beyond the text width.
+        ceil(title.size().width) + 4 + horizontalPadding + dismissWidth + horizontalPadding / 2
     }
 
     private static func title(_ text: String) -> NSAttributedString {

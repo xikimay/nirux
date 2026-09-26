@@ -1,76 +1,122 @@
 import Foundation
 
 /// Per-workspace rules for "open this dev server in a browser column?"
-/// proposals. Pure state so the rules are unit-testable; probing, timers
+/// proposals. Pure state so the rules are unit-testable; scanning, timers
 /// and UI live in WorkspaceState+LocalServers.swift.
 ///
-/// A detected URL becomes a proposal only once its port accepts
-/// connections. There is at most one proposal per port, and a dismissed
-/// port is never proposed again in the workspace. Opening a proposal isn't
-/// sticky: after that browser column closes, a fresh print (a server
-/// restart) proposes the port again.
+/// A detected URL waits for listener scans (see `LocalListeners`) and
+/// becomes a proposal once its port is listening. One proposal per port:
+/// a port the user opened or dismissed is never proposed again in the
+/// workspace — TUIs like Claude Code repaint old URLs constantly, so
+/// anything less would bring a handled chip straight back.
 struct LocalServerProposalBook<ColumnID: Hashable> {
     struct Proposal: Equatable {
         let url: LocalServerURL
         /// The terminal column that printed the URL; its title bar shows the chip.
         let column: ColumnID
+        /// Consecutive scans that found nothing listening.
+        var misses = 0
     }
 
-    struct PendingProbe: Equatable {
+    struct PendingDetection: Equatable {
         let url: LocalServerURL
         let column: ColumnID
-        var attempts: Int
+        let detectedAt: TimeInterval
     }
 
-    enum ProbeDecision: Equatable {
-        case proposed
-        case retry(after: TimeInterval)
-        case dropped
-    }
+    /// First scan after a detection — also the debounce that lets the
+    /// server finish binding.
+    static var firstScanDelay: TimeInterval { 0.3 }
+    /// Rescan cadence while detections are pending.
+    static var pendingScanInterval: TimeInterval { 1 }
+    /// How long a detection may wait for its port to start listening
+    /// (Django prints its URL before binding).
+    static var pendingWindow: TimeInterval { 4 }
+    /// Rescan cadence while proposals are live, to notice stopped servers.
+    static var livenessScanInterval: TimeInterval { 3 }
+    /// A proposal survives one empty scan: restarts (Django autoreload,
+    /// Vite config reload) briefly unbind the port without reprinting it.
+    static var missesBeforeRemoval: Int { 2 }
+    /// Output listing hundreds of ports shouldn't queue hundreds of detections.
+    static var maxPending: Int { 16 }
 
-    /// Delay before each listening probe. The first one doubles as the
-    /// debounce; the retries cover servers that print their URL just
-    /// before binding (Django's runserver).
-    static var probeDelays: [TimeInterval] { [0.3, 1.0, 3.0] }
-
-    /// Detected URLs awaiting a listening probe, by port.
-    private(set) var pending: [Int: PendingProbe] = [:]
+    /// Detections waiting for a scan, by port.
+    private(set) var pending: [Int: PendingDetection] = [:]
     /// Live proposals, most recent first.
     private(set) var proposals: [Proposal] = []
-    private(set) var dismissedPorts: Set<Int> = []
+    /// Ports opened or dismissed from a proposal.
+    private(set) var handledPorts: Set<Int> = []
 
-    /// A terminal printed `url`. Returns true when the caller should run the
-    /// first listening probe after `probeDelays[0]`.
-    mutating func noteDetected(_ url: LocalServerURL, in column: ColumnID, browserPorts: Set<Int>) -> Bool {
+    /// When the next listener scan should run, relative to now; nil when
+    /// nothing needs one.
+    var nextScanDelay: TimeInterval? {
+        if !pending.isEmpty { return Self.pendingScanInterval }
+        if !proposals.isEmpty { return Self.livenessScanInterval }
+        return nil
+    }
+
+    /// A terminal printed `url`. Returns true when it is now waiting for a
+    /// scan — the caller should scan within `firstScanDelay`.
+    mutating func noteDetected(
+        _ url: LocalServerURL,
+        in column: ColumnID,
+        browserPorts: Set<Int>,
+        now: TimeInterval
+    ) -> Bool {
         let port = url.port
         guard pending[port] == nil,
+              pending.count < Self.maxPending,
               !proposals.contains(where: { $0.url.port == port }),
-              !dismissedPorts.contains(port),
+              !handledPorts.contains(port),
               !browserPorts.contains(port)
         else { return false }
-        pending[port] = PendingProbe(url: url, column: column, attempts: 0)
+        pending[port] = PendingDetection(url: url, column: column, detectedAt: now)
         return true
     }
 
-    mutating func probeFinished(
-        port: Int,
-        isListening: Bool,
+    /// Apply one listener scan to pending detections and live proposals.
+    /// Returns true when the proposals changed.
+    @discardableResult
+    mutating func applyScan(
+        listeningPorts: Set<Int>,
         browserPorts: Set<Int>,
-        liveColumns: Set<ColumnID>
-    ) -> ProbeDecision {
-        guard var probe = pending.removeValue(forKey: port) else { return .dropped }
-        guard !dismissedPorts.contains(port),
-              !browserPorts.contains(port),
-              liveColumns.contains(probe.column)
-        else { return .dropped }
-        if isListening {
-            proposals.insert(Proposal(url: probe.url, column: probe.column), at: 0)
-            return .proposed
+        liveColumns: Set<ColumnID>,
+        now: TimeInterval
+    ) -> Bool {
+        let before = proposals.map(\.url)
+        for index in proposals.indices {
+            proposals[index].misses = listeningPorts.contains(proposals[index].url.port)
+                ? 0
+                : proposals[index].misses + 1
         }
-        probe.attempts += 1
-        guard probe.attempts < Self.probeDelays.count else { return .dropped }
-        pending[port] = probe
-        return .retry(after: Self.probeDelays[probe.attempts])
+        proposals.removeAll {
+            $0.misses >= Self.missesBeforeRemoval
+                || browserPorts.contains($0.url.port)
+                || !liveColumns.contains($0.column)
+        }
+        // Oldest detections first, so the newest ends up first in `proposals`.
+        for detection in pending.values.sorted(by: { $0.detectedAt < $1.detectedAt }) {
+            let port = detection.url.port
+            if browserPorts.contains(port) || !liveColumns.contains(detection.column) {
+                pending[port] = nil
+            } else if listeningPorts.contains(port) {
+                pending[port] = nil
+                proposals.insert(Proposal(url: detection.url, column: detection.column), at: 0)
+            } else if now - detection.detectedAt >= Self.pendingWindow {
+                pending[port] = nil
+            }
+        }
+        return proposals.map(\.url) != before
+    }
+
+    /// Drops what the current columns made stale (a browser column now
+    /// shows the port, the printing terminal closed) without a scan.
+    @discardableResult
+    mutating func prune(browserPorts: Set<Int>, liveColumns: Set<ColumnID>) -> Bool {
+        pending = pending.filter { !browserPorts.contains($0.key) && liveColumns.contains($0.value.column) }
+        let before = proposals.count
+        proposals.removeAll { browserPorts.contains($0.url.port) || !liveColumns.contains($0.column) }
+        return proposals.count != before
     }
 
     /// The chip for a terminal column: the most recent proposal it printed.
@@ -84,26 +130,10 @@ struct LocalServerProposalBook<ColumnID: Hashable> {
         proposals.filter { !browserPorts.contains($0.url.port) && liveColumns.contains($0.column) }
     }
 
-    mutating func dismiss(port: Int) {
+    /// The user opened or dismissed the proposal for `port`.
+    mutating func markHandled(port: Int) {
         proposals.removeAll { $0.url.port == port }
-        dismissedPorts.insert(port)
-    }
-
-    mutating func markOpened(port: Int) {
-        proposals.removeAll { $0.url.port == port }
-    }
-
-    /// Drops proposals whose server stopped (`stoppedPorts` holds only
-    /// ports that were probed), whose port a browser column now shows, or
-    /// whose terminal column is gone. Returns true when anything changed.
-    @discardableResult
-    mutating func prune(stoppedPorts: Set<Int> = [], browserPorts: Set<Int>, liveColumns: Set<ColumnID>) -> Bool {
-        let before = proposals.count
-        proposals.removeAll {
-            stoppedPorts.contains($0.url.port)
-                || browserPorts.contains($0.url.port)
-                || !liveColumns.contains($0.column)
-        }
-        return proposals.count != before
+        pending[port] = nil
+        handledPorts.insert(port)
     }
 }

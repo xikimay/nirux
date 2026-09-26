@@ -42,7 +42,7 @@ extension CommandPalette {
     func switchToURLMode() {
         mode = .urlInput
         urlSelectedIndex = 0
-        let detected = detectedURLsProvider?() ?? []
+        let detected = Self.detectedURLsProvider?() ?? []
         detectedURLs = Set(detected)
         urlSuggestions = Self.urlSuggestions(detected: detected, history: URLHistory.load())
         searchField?.placeholderString = "Enter URL or search..."
