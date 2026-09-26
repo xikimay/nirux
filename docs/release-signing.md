@@ -162,9 +162,9 @@ ends its shells.
 3. Quit Nirux and wait a few seconds: if Sparkle had already downloaded the
    broken build, it may still install it as Nirux quits. Then back up its
    state. An older build can fail to read state written by a newer one (for
-   example a setting value it does not know) and start empty, overwriting
-   `state.json` and its rotating backups on its first save. Unknown fields are
-   dropped either way. Note the printed path.
+   example a setting value it does not know) and start empty: it then
+   overwrites `state.json` on its first save and its rotating backups within
+   a few saves. Unknown fields are dropped either way. Note the printed path.
 
    ```bash
    STATE_BACKUP="$HOME/nirux-state-backup-$(date +%Y%m%d%H%M)"
@@ -200,6 +200,7 @@ the state the older build wrote is moved aside, not deleted:
 ```bash
 STATE_BACKUP="$HOME/nirux-state-backup-YYYYMMDDHHMM"
 STATE="$HOME/Library/Application Support/nirux"
+test -d "$STATE_BACKUP" || echo "No backup at $STATE_BACKUP"
 test -d "$STATE_BACKUP" &&
   mv "$STATE" "$STATE-replaced-$(date +%Y%m%d%H%M)" &&
   ditto "$STATE_BACKUP" "$STATE"

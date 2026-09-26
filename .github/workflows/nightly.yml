@@ -213,9 +213,9 @@ jobs:
         run: |
           # `nightly` is what SUFeedURL and the README point at. Update it in
           # place: its appcast only references dated zips, so replacing the zip
-          # first and the appcast last keeps the feed valid at every step, even
-          # if the run is cancelled midway.
-          git push --force origin "$GITHUB_SHA:refs/tags/nightly"
+          # first and the appcast last leaves the feed missing only while the
+          # small appcast re-uploads. The tag, which the next changelog diffs
+          # against, moves only once the release holds this build.
           if gh release view nightly >/dev/null 2>&1; then
             gh release edit nightly \
               --title "Nightly ($VERSION)" \
@@ -223,7 +223,9 @@ jobs:
               --prerelease
             gh release upload nightly Nirux.app.zip --clobber
             gh release upload nightly appcast.xml --clobber
+            git push --force origin "$GITHUB_SHA:refs/tags/nightly"
           else
+            git push --force origin "$GITHUB_SHA:refs/tags/nightly"
             gh release create nightly \
               --title "Nightly ($VERSION)" \
               --notes-file "$NOTES_FILE" \
