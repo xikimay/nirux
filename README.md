@@ -86,13 +86,19 @@ Typical command palette actions:
 - Import Browser Cookies
 - New Workspace
 - Pilot Mode
+- Toggle Sidebar
 - Rename Workspace
+- Close Column
+- Cycle Width
+- Toggle Web Inspector
+- Settings
 
 Useful shortcuts:
 
 | Shortcut | Action |
 | --- | --- |
-| `Cmd+P` | Command palette (fuzzy matching) |
+| `Cmd+P` | Command palette (fuzzy matching); in the editor, the workspace file picker |
+| `Shift+Cmd+P` | Command palette, including from the editor |
 | `Cmd+T` | New terminal column |
 | `Cmd+B` | Open browser URL flow |
 | `Cmd+W` | Close editor tab, column, or workspace depending on context — asks first when a Claude or Codex session is running (Return cancels, ⌘D closes) |
@@ -102,12 +108,20 @@ Useful shortcuts:
 | `Cmd+E` | Cycle focused column width through presets |
 | `Cmd+N` | New workspace |
 | `Cmd+Up` / `Cmd+Down` | Switch workspace |
+| `Alt+Cmd+Left` / `Alt+Cmd+Right` | Switch to the previous or next space (the workspace group named in the sidebar header) |
 | `Cmd+O` | Toggle Pilot Mode |
-| `Cmd+S` | Toggle sidebar |
+| `Ctrl+Cmd+S` | Toggle sidebar |
+| `Ctrl+Cmd+F` | Enter or exit full screen |
+| `Cmd+M` | Minimize the window |
+| `Cmd+,` | Settings |
+| `Cmd+Z` / `Shift+Cmd+Z` | Undo / redo in the editor and in panel text fields (palette, rename, settings) |
 | `Shift+Cmd+F` | Search workspace |
 | `Cmd+F` | Find in editor |
+| `Cmd+S` / `Alt+Cmd+S` | Save the active editor file / save all |
 | `Shift+Cmd+D` | Toggle editor diff |
 | `Alt+Cmd+Z` | Toggle word wrap in editor |
+| `Shift+Cmd+M` | Toggle minimap in editor |
+| `Alt+Cmd+Return` | Send the editor selection to the agent terminal |
 | `Cmd+=` / `Cmd+-` / `Cmd+0` | Editor font zoom in / out / reset |
 | `Cmd+L` | Focus browser address bar |
 | `Cmd+[` / `Cmd+]` | Browser back / forward |

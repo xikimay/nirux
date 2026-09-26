@@ -103,18 +103,33 @@ extension NiruxApp {
         shell?.togglePilotMode()
     }
 
-    @objc func toggleSidebar(_ sender: Any?) {
+    // Not `toggleSidebar(_:)`: NSWindow answers that AppKit selector first,
+    // so a nil-target menu item would resolve to the window and stay disabled.
+    @objc func toggleWorkspaceSidebar(_ sender: Any?) {
         shell?.toggleSidebar()
     }
 
     @MainActor
     func setupMenus() {
+        // Single-window app: keep AppKit from adding native window-tab items
+        // (Show Tab Bar, Merge All Windows…) to the View and Window menus.
+        NSWindow.allowsAutomaticWindowTabbing = false
+        let mainMenu = makeMainMenu()
+        NSApp.mainMenu = mainMenu
+        // Lets AppKit list open windows and add its tiling items.
+        NSApp.windowsMenu = mainMenu.items.first { $0.submenu?.title == "Window" }?.submenu
+    }
+
+    @MainActor
+    func makeMainMenu() -> NSMenu {
         let mainMenu = NSMenu()
         mainMenu.addItem(applicationMenuItem())
         mainMenu.addItem(editMenuItem())
+        mainMenu.addItem(viewMenuItem())
         mainMenu.addItem(columnsMenuItem())
         mainMenu.addItem(workspacesMenuItem())
-        NSApp.mainMenu = mainMenu
+        mainMenu.addItem(windowMenuItem())
+        return mainMenu
     }
 
     @MainActor
@@ -123,7 +138,7 @@ extension NiruxApp {
         let appMenu = NSMenu(title: "Nirux")
         appMenu.addItem(withTitle: "About Nirux", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         let checkUpdate = NSMenuItem(
-            title: "Check for Updates...", action: #selector(manualCheckForUpdates(_:)), keyEquivalent: ""
+            title: "Check for Updates…", action: #selector(manualCheckForUpdates(_:)), keyEquivalent: ""
         )
         checkUpdate.target = self
         appMenu.addItem(checkUpdate)
@@ -133,7 +148,7 @@ extension NiruxApp {
         autoInstall.target = self
         appMenu.addItem(autoInstall)
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Settings...", action: #selector(showSettings(_:)), keyEquivalent: ",")
+        appMenu.addItem(withTitle: "Settings…", action: #selector(showSettings(_:)), shortcut: .settings)
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Quit Nirux", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let appItem = NSMenuItem()
@@ -143,36 +158,24 @@ extension NiruxApp {
 
     @MainActor
     private func editMenuItem() -> NSMenuItem {
-        // Edit menu (needed for Cmd+C/V/X/A in text fields and WebViews)
+        // Edit menu (needed for Cmd+Z/X/C/V/A in text fields and WebViews)
         let editMenu = NSMenu(title: "Edit")
+        let undoItem = editMenu.addItem(withTitle: "Undo", action: #selector(PanelTextUndo.undo(_:)), keyEquivalent: "z")
+        undoItem.target = PanelTextUndo.shared
+        let redoItem = editMenu.addItem(withTitle: "Redo", action: #selector(PanelTextUndo.redo(_:)), keyEquivalent: "z")
+        redoItem.keyEquivalentModifierMask = [.command, .shift]
+        redoItem.target = PanelTextUndo.shared
+        editMenu.addItem(NSMenuItem.separator())
         editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(NSMenuItem.separator())
-        let searchItem = NSMenuItem(
-            title: "Search Workspace…",
+        editMenu.addItem(
+            withTitle: "Search Workspace…",
             action: #selector(showWorkspaceSearch(_:)),
-            keyEquivalent: "f"
+            shortcut: .searchWorkspace
         )
-        searchItem.keyEquivalentModifierMask = [.command, .shift]
-        editMenu.addItem(searchItem)
-
-        let diffItem = NSMenuItem(
-            title: "Toggle Editor Diff",
-            action: #selector(toggleEditorDiff(_:)),
-            keyEquivalent: "d"
-        )
-        diffItem.keyEquivalentModifierMask = [.command, .shift]
-        editMenu.addItem(diffItem)
-
-        let wrapItem = NSMenuItem(
-            title: "Toggle Word Wrap",
-            action: #selector(toggleWordWrap(_:)),
-            keyEquivalent: "z"
-        )
-        wrapItem.keyEquivalentModifierMask = [.command, .option]
-        editMenu.addItem(wrapItem)
 
         let sendSelectionItem = NSMenuItem(
             title: "Send Selection to Agent",
@@ -189,6 +192,30 @@ extension NiruxApp {
         )
         saveAllItem.keyEquivalentModifierMask = [.command, .option]
         editMenu.addItem(saveAllItem)
+        let editItem = NSMenuItem()
+        editItem.submenu = editMenu
+        return editItem
+    }
+
+    @MainActor
+    private func viewMenuItem() -> NSMenuItem {
+        let viewMenu = NSMenu(title: "View")
+        viewMenu.addItem(withTitle: "Toggle Sidebar", action: #selector(toggleWorkspaceSidebar(_:)), shortcut: .toggleSidebar)
+        viewMenu.addItem(withTitle: "Pilot Mode", action: #selector(togglePilotMode(_:)), shortcut: .pilotMode)
+        viewMenu.addItem(NSMenuItem.separator())
+        viewMenu.addItem(
+            withTitle: "Toggle Editor Diff",
+            action: #selector(toggleEditorDiff(_:)),
+            shortcut: .toggleEditorDiff
+        )
+
+        let wrapItem = NSMenuItem(
+            title: "Toggle Word Wrap",
+            action: #selector(toggleWordWrap(_:)),
+            keyEquivalent: "z"
+        )
+        wrapItem.keyEquivalentModifierMask = [.command, .option]
+        viewMenu.addItem(wrapItem)
 
         let minimapItem = NSMenuItem(
             title: "Toggle Minimap",
@@ -196,24 +223,37 @@ extension NiruxApp {
             keyEquivalent: "m"
         )
         minimapItem.keyEquivalentModifierMask = [.command, .shift]
-        editMenu.addItem(minimapItem)
-        let editItem = NSMenuItem()
-        editItem.submenu = editMenu
-        return editItem
+        viewMenu.addItem(minimapItem)
+        viewMenu.addItem(NSMenuItem.separator())
+
+        // AppKit retitles this item to "Exit Full Screen" while in full screen.
+        let fullScreenItem = viewMenu.addItem(
+            withTitle: "Enter Full Screen",
+            action: #selector(NSWindow.toggleFullScreen(_:)),
+            keyEquivalent: "f"
+        )
+        fullScreenItem.keyEquivalentModifierMask = [.command, .control]
+
+        let viewItem = NSMenuItem()
+        viewItem.submenu = viewMenu
+        return viewItem
     }
 
     @MainActor
     private func columnsMenuItem() -> NSMenuItem {
         // Columns menu
         let colMenu = NSMenu(title: "Columns")
-        colMenu.addItem(withTitle: "Command Palette", action: #selector(showCommandPalette(_:)), keyEquivalent: "p")
-        colMenu.addItem(NSMenuItem.separator())
-        colMenu.addItem(
-            withTitle: "New Terminal",
-            action: #selector(newTerminalColumn(_:)),
-            keyEquivalent: NiruxShortcuts.newTerminalKey
+        colMenu.addItem(withTitle: "Command Palette", action: #selector(showCommandPalette(_:)), shortcut: .commandPalette)
+        // Shown in place of the item above while Shift is held.
+        let paletteAlternate = colMenu.addItem(
+            withTitle: "Command Palette",
+            action: #selector(showCommandPalette(_:)),
+            shortcut: .commandPaletteAlternate
         )
-        colMenu.addItem(withTitle: "Open Browser", action: #selector(openBrowser(_:)), keyEquivalent: "b")
+        paletteAlternate.isAlternate = true
+        colMenu.addItem(NSMenuItem.separator())
+        colMenu.addItem(withTitle: "New Terminal", action: #selector(newTerminalColumn(_:)), shortcut: .newTerminal)
+        colMenu.addItem(withTitle: "Open Browser", action: #selector(openBrowser(_:)), shortcut: .openBrowser)
 
         // Cmd+1…9: jump straight to column N (iTerm-style tab switching).
         for number in 1...9 {
@@ -227,13 +267,11 @@ extension NiruxApp {
         }
         colMenu.addItem(NSMenuItem.separator())
 
-        let devToolsItem = NSMenuItem(title: "Toggle Web Inspector", action: #selector(toggleDevTools(_:)), keyEquivalent: "i")
-        devToolsItem.keyEquivalentModifierMask = [.command, .option]
-        colMenu.addItem(devToolsItem)
+        colMenu.addItem(withTitle: "Toggle Web Inspector", action: #selector(toggleDevTools(_:)), shortcut: .webInspector)
 
         colMenu.addItem(withTitle: "Focus Address Bar", action: #selector(focusAddressBar(_:)), keyEquivalent: "l")
 
-        colMenu.addItem(withTitle: "Close Column", action: #selector(closeColumn(_:)), keyEquivalent: "w")
+        colMenu.addItem(withTitle: "Close Column", action: #selector(closeColumn(_:)), shortcut: .closeColumn)
         colMenu.addItem(NSMenuItem.separator())
 
         let focusLeftItem = NSMenuItem(title: "Focus Left", action: #selector(focusLeft(_:)), keyEquivalent: "\u{F702}")
@@ -256,9 +294,7 @@ extension NiruxApp {
         colMenu.addItem(moveRightItem)
 
         colMenu.addItem(NSMenuItem.separator())
-        colMenu.addItem(withTitle: "Cycle Width", action: #selector(cycleWidth(_:)), keyEquivalent: "e")
-        colMenu.addItem(withTitle: "Pilot Mode", action: #selector(togglePilotMode(_:)), keyEquivalent: "o")
-        colMenu.addItem(withTitle: "Toggle Sidebar", action: #selector(toggleSidebar(_:)), keyEquivalent: "s")
+        colMenu.addItem(withTitle: "Cycle Width", action: #selector(cycleWidth(_:)), shortcut: .cycleWidth)
 
         let colItem = NSMenuItem()
         colItem.submenu = colMenu
@@ -269,11 +305,7 @@ extension NiruxApp {
     private func workspacesMenuItem() -> NSMenuItem {
         // Workspaces menu
         let workspacesMenu = NSMenu(title: "Workspaces")
-        workspacesMenu.addItem(
-            withTitle: "New Workspace",
-            action: #selector(newWorkspace(_:)),
-            keyEquivalent: NiruxShortcuts.newWorkspaceKey
-        )
+        workspacesMenu.addItem(withTitle: "New Workspace", action: #selector(newWorkspace(_:)), shortcut: .newWorkspace)
         workspacesMenu.addItem(withTitle: "Rename Workspace", action: #selector(renameWorkspace(_:)), keyEquivalent: "")
         workspacesMenu.addItem(NSMenuItem.separator())
 
@@ -302,5 +334,26 @@ extension NiruxApp {
         let workspacesItem = NSMenuItem()
         workspacesItem.submenu = workspacesMenu
         return workspacesItem
+    }
+
+    @MainActor
+    private func windowMenuItem() -> NSMenuItem {
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(NSMenuItem.separator())
+        windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        let windowItem = NSMenuItem()
+        windowItem.submenu = windowMenu
+        return windowItem
+    }
+}
+
+private extension NSMenu {
+    @discardableResult
+    func addItem(withTitle title: String, action: Selector, shortcut: NiruxShortcuts) -> NSMenuItem {
+        let item = addItem(withTitle: title, action: action, keyEquivalent: shortcut.chord.key)
+        item.keyEquivalentModifierMask = shortcut.chord.modifiers
+        return item
     }
 }
