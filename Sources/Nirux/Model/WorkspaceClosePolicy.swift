@@ -1,14 +1,39 @@
 import Foundation
 
-/// Pure decision logic for the sidebar "Close Workspace" action. Closing
-/// kills live PTY/agent sessions, so anything beyond a plain single-column
-/// shell asks for confirmation first.
+/// Pure decision logic for the close paths that kill live PTY sessions:
+/// ⌘W on a column, ⌘W on a workspace's last column, and the sidebar's
+/// Close Column / Close Workspace items. A live agent — working, waiting,
+/// or idle at its prompt — is never killed without confirmation; a bare
+/// shell closes without ceremony.
 enum WorkspaceClosePolicy {
+    /// A recognized agent process (claude/codex) in a column's foreground.
+    struct LiveAgent: Equatable {
+        /// Foreground process name, e.g. "claude".
+        var processName: String
+        var status: AgentStatus
+
+        var displayName: String {
+            switch processName {
+            case "claude": return "Claude"
+            case "codex": return "Codex"
+            default: return processName
+            }
+        }
+
+        fileprivate var statusDescription: String {
+            switch status {
+            case .working: return "working"
+            case .needsAttention: return "waiting for you"
+            case .idle: return "idle"
+            }
+        }
+    }
+
     struct Context: Equatable {
         var totalWorkspaceCount: Int
         var columnCount: Int
-        /// Any column whose agent is working or needs attention.
-        var hasBusyAgent: Bool
+        /// Agents in the foreground of the workspace's columns, any status.
+        var liveAgents: [LiveAgent]
         /// Workspace cwd is a linked git worktree checkout.
         var isWorktreeBacked: Bool
     }
@@ -16,7 +41,7 @@ enum WorkspaceClosePolicy {
     enum Decision: Equatable {
         /// Last remaining workspace — closing is not allowed.
         case blocked
-        /// Plain empty-shell workspace — close without ceremony.
+        /// Nothing live would be lost — close without ceremony.
         case close
         /// Ask first; `details` are the informative lines for the alert.
         case confirm(details: [String])
@@ -30,8 +55,8 @@ enum WorkspaceClosePolicy {
     static func decision(for context: Context) -> Decision {
         guard canClose(totalWorkspaceCount: context.totalWorkspaceCount) else { return .blocked }
         var details: [String] = []
-        if context.hasBusyAgent {
-            details.append("An agent is still running — closing the workspace ends its session.")
+        if let agentLine = agentDetail(context.liveAgents, closing: "workspace") {
+            details.append(agentLine)
         }
         if context.columnCount > 1 {
             details.append("All \(context.columnCount) columns will be closed.")
@@ -41,5 +66,25 @@ enum WorkspaceClosePolicy {
             details.append("The git worktree stays on disk.")
         }
         return .confirm(details: details)
+    }
+
+    /// Closing one column of a workspace that keeps other columns. The
+    /// last column closes the workspace instead — see `decision(for:)`.
+    static func columnDecision(agent: LiveAgent?) -> Decision {
+        guard let agent, let agentLine = agentDetail([agent], closing: "column") else { return .close }
+        return .confirm(details: [agentLine])
+    }
+
+    private static func agentDetail(_ agents: [LiveAgent], closing target: String) -> String? {
+        switch agents.count {
+        case 0:
+            return nil
+        case 1:
+            let agent = agents[0]
+            return "\(agent.displayName) is \(agent.statusDescription) — closing the \(target) ends its session."
+        default:
+            let list = agents.map { "\($0.displayName) \($0.statusDescription)" }.joined(separator: ", ")
+            return "\(agents.count) agents are running (\(list)) — closing the \(target) ends their sessions."
+        }
     }
 }

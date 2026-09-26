@@ -95,7 +95,7 @@ Useful shortcuts:
 | `Cmd+P` | Command palette (fuzzy matching) |
 | `Cmd+T` | New terminal column |
 | `Cmd+B` | Open browser URL flow |
-| `Cmd+W` | Close editor tab, column, or workspace depending on context |
+| `Cmd+W` | Close editor tab, column, or workspace depending on context — asks first when a Claude or Codex session is running |
 | `Cmd+1…9` | Focus column N |
 | `Cmd+Left` / `Cmd+Right` | Focus previous or next column |
 | `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column |

@@ -332,15 +332,16 @@ extension NiruxShellView {
         saveState()
     }
 
-    /// Sidebar-menu close path: unlike the last-column ⌘W fallthrough, a
-    /// menu click is one careless gesture away — confirm before killing
-    /// live agent sessions or multi-column workspaces.
+    /// Close-workspace entry point for the sidebar menu and for ⌘W on a
+    /// workspace's last column: confirm before killing live agent sessions
+    /// or multi-column workspaces.
     func requestCloseWorkspace(at index: Int) {
         guard let workspace = workspaces[safe: index] else { return }
+        let snapshot = ProcessSnapshot()
         let context = WorkspaceClosePolicy.Context(
             totalWorkspaceCount: workspaces.count,
             columnCount: workspace.columns.count,
-            hasBusyAgent: workspace.columns.contains { ($0.pty?.cachedAgentState ?? .idle) != .idle },
+            liveAgents: workspace.columns.compactMap { $0.liveAgent(snapshot: snapshot) },
             isWorktreeBacked: GitWorktree.isLinkedWorktree(at: workspace.cwd)
         )
         switch WorkspaceClosePolicy.decision(for: context) {
@@ -364,14 +365,42 @@ extension NiruxShellView {
         }
     }
 
+    /// Confirmation gate for closing one column of a multi-column workspace
+    /// (⌘W, sidebar Close Column). True when the column runs no live agent,
+    /// or the user confirmed and the column is still there to close —
+    /// main-queue work keeps running under the modal alert.
+    func confirmCloseColumn(_ column: ColumnState, in workspace: WorkspaceState) -> Bool {
+        let agent = column.liveAgent(snapshot: ProcessSnapshot())
+        switch WorkspaceClosePolicy.columnDecision(agent: agent) {
+        case .blocked:
+            return false
+        case .close:
+            return true
+        case .confirm(let details):
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Close column running \(agent?.displayName ?? "an agent")?"
+            alert.informativeText = details.joined(separator: "\n")
+            alert.addButton(withTitle: "Close Column")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return false }
+            return workspaces.contains { $0 === workspace }
+                && workspace.columns.count > 1
+                && workspace.columns.contains { $0 === column }
+        }
+    }
+
     /// Close a specific column of a specific workspace (sidebar context
     /// menu). The ⌘W path only reaches the focused column of the active
     /// workspace; this mirrors its non-animated bookkeeping.
     func closeColumn(workspaceIndex: Int, columnIndex: Int) {
         guard let workspace = workspaces[safe: workspaceIndex],
               workspace.columns.count > 1,
-              workspace.columns.indices.contains(columnIndex) else { return }
-        workspace.closeColumn(at: columnIndex)
+              let column = workspace.columns[safe: columnIndex],
+              confirmCloseColumn(column, in: workspace),
+              let currentIndex = workspace.columns.firstIndex(where: { $0 === column })
+        else { return }
+        workspace.closeColumn(at: currentIndex)
         relayout(animated: false)
         workspace.layoutAndScroll(
             viewportWidth: viewport.frame.width,
@@ -740,5 +769,19 @@ extension NiruxShellView {
         pilotOverlays.append(pilotActiveHighlight!)
 
         statusBar.setPilotHints("\u{2318}\u{2191}\u{2193} workspace  \u{2318}\u{2190}\u{2192} column  \u{2318}T new  \u{2318}O exit pilot")
+    }
+}
+
+private extension ColumnState {
+    /// The recognized agent in this column's foreground, from a fresh
+    /// process snapshot: the heartbeat's cached foreground lags behind an
+    /// agent launched or exited since the last tick. The status is the
+    /// machine's last computed state.
+    func liveAgent(snapshot: ProcessSnapshot) -> WorkspaceClosePolicy.LiveAgent? {
+        guard let pty,
+              let name = pty.foregroundProcessName(snapshot: snapshot),
+              AgentStatusMachine.isRecognizedAgentProcess(name)
+        else { return nil }
+        return WorkspaceClosePolicy.LiveAgent(processName: name, status: pty.cachedAgentState)
     }
 }
