@@ -48,6 +48,7 @@ enum BoundedProcess {
             try? errorOutput?.fileHandleForWriting.close()
             return nil
         }
+        PollingDiagnostics.recordLaunch(executableURL: executableURL)
         try? output.fileHandleForWriting.close()
         try? errorOutput?.fileHandleForWriting.close()
 
