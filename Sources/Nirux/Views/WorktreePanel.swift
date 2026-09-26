@@ -106,10 +106,14 @@ enum GitWorktree {
             .path
 
         // Reuse an existing checkout only if it really is one of this repo's
-        // worktrees; any other directory would get a handover and an agent.
+        // worktrees, on the requested branch ("a/b" and "a-b" share a folder
+        // name); any other directory would get a handover and an agent.
         if FileManager.default.fileExists(atPath: worktreePath) {
-            guard isWorktree(worktreePath, of: repoRoot) else {
+            guard let existing = worktree(at: worktreePath, of: repoRoot) else {
                 return (nil, "\(worktreePath) already exists and is not a worktree of \(repoRoot)")
+            }
+            guard existing.branch == branch else {
+                return (nil, "\(worktreePath) already exists on \(existing.branch ?? "a detached HEAD"), not \(branch)")
             }
             return (worktreePath, nil)
         }
@@ -196,9 +200,9 @@ enum GitWorktree {
         return gitRunFull(["check-ref-format", "refs/heads/\(branch)"], cwd: repoRoot).status == 0
     }
 
-    static func isWorktree(_ path: String, of repoRoot: String) -> Bool {
-        guard let resolved = path.realPath else { return false }
-        return list(repoRoot: repoRoot).contains { $0.path.realPath == resolved }
+    static func worktree(at path: String, of repoRoot: String) -> WorktreeEntry? {
+        guard let resolved = path.realPath else { return nil }
+        return list(repoRoot: repoRoot).first { $0.path.realPath == resolved }
     }
 
     // MARK: - Helpers

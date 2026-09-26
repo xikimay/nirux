@@ -209,13 +209,43 @@ final class NiruxURLRequestTests: XCTestCase {
         XCTAssertTrue(text.details.contains("Handover: /tmp/nirux-handover-codex-feat-x.md"))
     }
 
-    func testConfirmationExplainsMissingVersusExpiredLaunchID() throws {
+    func testConfirmationWordingDoesNotDependOnAFakeLaunchID() throws {
         let missing = try XCTUnwrap(parse("nirux://new-workspace?cwd=/tmp")?.confirmation(claudeMode: .auto, codexMode: .default))
         XCTAssertTrue(missing.details.contains("outdated Nirux skill"))
         XCTAssertTrue(missing.details.contains("Install Agent Skills"))
-        let expired = try XCTUnwrap(parse("nirux://new-workspace?cwd=/tmp&launch=old")?
+        XCTAssertTrue(missing.details.contains("web page"))
+        let fake = try XCTUnwrap(parse("nirux://new-workspace?cwd=/tmp&launch=old")?
             .confirmation(claudeMode: .auto, codexMode: .default))
-        XCTAssertTrue(expired.details.contains("expired Nirux launch ID"))
+        XCTAssertEqual(fake, missing)
+    }
+
+    func testConfirmationWarnsThatGitRunsInTheFolder() throws {
+        for url in ["nirux://new-workspace?cwd=/tmp", "nirux://new-worktree?branch=x&repo=/r"] {
+            let text = try XCTUnwrap(parse(url)?.confirmation(claudeMode: .auto, codexMode: .default))
+            XCTAssertTrue(text.details.contains("Nirux runs git in this folder"), url)
+        }
+    }
+
+    func testConfirmedRequestsCannotLinkToAParentMission() throws {
+        let request = try XCTUnwrap(parse(
+            "nirux://new-worktree?branch=x&repo=/r&agent=claude&parentWorkspace=W&parentAgent=A&profile=p"
+        ))
+        guard case .newWorktree(let stripped) = request.droppingMissionLink().action else {
+            return XCTFail("still a worktree request")
+        }
+        XCTAssertNil(stripped.parentWorkspaceID)
+        XCTAssertNil(stripped.parentAgentUUID)
+        XCTAssertEqual(stripped.branch, "x")
+        XCTAssertEqual(request.droppingMissionLink().profileID, "p")
+        let workspace = try XCTUnwrap(parse("nirux://new-workspace?cwd=/tmp"))
+        XCTAssertEqual(workspace.droppingMissionLink(), workspace)
+    }
+
+    func testLaunchIDIsReadEvenFromUnparseableURLs() throws {
+        let url = try XCTUnwrap(URL(string: "nirux://new-worktree?repo=relative&launch=abc&launch=def"))
+        XCTAssertNil(NiruxURLRequest(url: url))
+        XCTAssertEqual(NiruxURLRequest.launchID(in: url), "abc")
+        XCTAssertNil(NiruxURLRequest.launchID(in: try XCTUnwrap(URL(string: "nirux://x?launch="))))
     }
 
     func testWorktreeWithoutAgentDoesNotClaimAnAgentFollowsTheHandover() throws {
@@ -250,6 +280,16 @@ final class NiruxURLRequestTests: XCTestCase {
         XCTAssertEqual(NiruxURLRequest.displaySafe("a\u{00A0}b\u{3000}c"), "a b c")
     }
 
+    func testDisplaySafeCapsCombiningMarkFloods() {
+        let flood = "a" + String(repeating: "\u{0301}", count: 5_000)
+        XCTAssertEqual(NiruxURLRequest.displaySafe(flood).unicodeScalars.count, 301)
+    }
+
+    func testDisplaySafeLinesKeepsComposedLineBreaksOnly() {
+        let message = "The worktree opens without it.\n\nfeat\u{2028}Agent: none"
+        XCTAssertEqual(NiruxURLRequest.displaySafeLines(message), "The worktree opens without it.\n\nfeat\u{FFFD}Agent: none")
+    }
+
     func testDisplaySafeKeepsBothEndsOfLongValues() {
         let value = "/Users/me/trusted" + String(repeating: "x", count: 400) + "/Downloads/evil"
         let shown = NiruxURLRequest.displaySafe(value, limit: 100)
@@ -261,21 +301,72 @@ final class NiruxURLRequestTests: XCTestCase {
 
     // MARK: - Confirmation queue
 
-    func testConfirmationQueueIsBoundedSerialAndCoolsDownAfterCancel() throws {
+    func testConfirmationQueueIsBoundedAndSerial() throws {
         let request = try XCTUnwrap(parse("nirux://new-workspace"))
         var queue = URLConfirmationQueue()
+        XCTAssertTrue(queue.isIdle)
         for _ in 0..<URLConfirmationQueue.capacity {
             XCTAssertTrue(queue.enqueue(request, now: 0))
         }
         XCTAssertFalse(queue.enqueue(request, now: 0), "bounded")
-
         XCTAssertNotNil(queue.startNext())
         XCTAssertNil(queue.startNext(), "one sheet at a time")
+        queue.finish(confirmed: true, now: 1)
+        XCTAssertEqual(queue.pending.count, URLConfirmationQueue.capacity - 1, "a confirm keeps the rest")
+        XCTAssertTrue(queue.enqueue(request, now: 1), "no cooldown after a confirm")
+    }
+
+    func testCancelDropsTheQueueAndBacksOffExponentially() throws {
+        let request = try XCTUnwrap(parse("nirux://new-workspace"))
+        var queue = URLConfirmationQueue()
+        XCTAssertTrue(queue.enqueue(request, now: 0))
+        XCTAssertTrue(queue.enqueue(request, now: 0))
+        XCTAssertNotNil(queue.startNext())
         queue.finish(confirmed: false, now: 10)
-        XCTAssertFalse(queue.enqueue(request, now: 12), "cooling down after a Cancel")
-        XCTAssertNotNil(queue.startNext(), "already-queued requests still get asked")
-        queue.finish(confirmed: true, now: 20)
-        XCTAssertTrue(queue.enqueue(request, now: 10 + URLConfirmationQueue.cooldown))
+        XCTAssertTrue(queue.isIdle, "a Cancel drops what was queued behind it")
+
+        XCTAssertFalse(queue.enqueue(request, now: 14))
+        XCTAssertTrue(queue.enqueue(request, now: 15), "5 s after the first Cancel")
+        XCTAssertNotNil(queue.startNext())
+        queue.finish(confirmed: false, now: 20)
+        XCTAssertFalse(queue.enqueue(request, now: 29))
+        XCTAssertTrue(queue.enqueue(request, now: 30), "10 s after the second Cancel")
+
+        XCTAssertNotNil(queue.startNext())
+        queue.finish(confirmed: true, now: 40)
+        XCTAssertTrue(queue.enqueue(request, now: 40))
+        XCTAssertNotNil(queue.startNext())
+        queue.finish(confirmed: false, now: 50)
+        XCTAssertTrue(queue.enqueue(request, now: 55), "a confirm resets the back-off")
+    }
+
+    func testBackOffResetsAfterAQuietSpell() throws {
+        let request = try XCTUnwrap(parse("nirux://new-workspace"))
+        var queue = URLConfirmationQueue()
+        var now: TimeInterval = 0
+        for _ in 0..<6 {
+            XCTAssertTrue(queue.enqueue(request, now: now))
+            XCTAssertNotNil(queue.startNext())
+            queue.finish(confirmed: false, now: now)
+            now += URLConfirmationQueue.maxCooldown
+        }
+        now += URLConfirmationQueue.maxCooldown * 3
+        XCTAssertTrue(queue.enqueue(request, now: now))
+        XCTAssertNotNil(queue.startNext())
+        queue.finish(confirmed: false, now: now)
+        XCTAssertTrue(queue.enqueue(request, now: now + URLConfirmationQueue.cooldown), "back to the base cooldown")
+    }
+
+    func testCooldownIsCapped() throws {
+        let request = try XCTUnwrap(parse("nirux://new-workspace"))
+        var queue = URLConfirmationQueue()
+        var now: TimeInterval = 0
+        for _ in 0..<40 {
+            XCTAssertTrue(queue.enqueue(request, now: now))
+            XCTAssertNotNil(queue.startNext())
+            queue.finish(confirmed: false, now: now)
+            now += URLConfirmationQueue.maxCooldown
+        }
     }
 
     // MARK: - Senders

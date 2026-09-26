@@ -17,14 +17,56 @@ extension NiruxApp {
         backlog.forEach(handleURL)
     }
 
+    /// macOS usually activates Nirux itself when it hands over a URL, so the
+    /// app to return to after a Cancel has to be remembered beforehand.
+    /// Nirux's own activation is observed synchronously (NSApp posts it on
+    /// the main thread) so its timestamp is current when the URL is handled.
+    func startTrackingFrontmostApp() {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: NSApp, queue: nil
+        ) { [weak self] _ in
+            let now = ProcessInfo.processInfo.systemUptime
+            MainActor.assumeIsolated { self?.niruxActivatedAt = now }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] notification in
+            let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            MainActor.assumeIsolated {
+                guard let app, app != NSRunningApplication.current else { return }
+                self?.lastExternalApp = app
+            }
+        }
+    }
+
+    /// The app the user was in when the request arrived, or nil if they were
+    /// already working in Nirux (then a Cancel simply leaves them there).
+    private func appToRestoreOnCancel(now: TimeInterval) -> NSRunningApplication? {
+        guard NSApp.isActive else {
+            // LaunchServices may already have switched to Nirux without
+            // Nirux having processed its activation yet.
+            let front = NSWorkspace.shared.frontmostApplication
+            return front == nil || front == NSRunningApplication.current ? lastExternalApp : front
+        }
+        return now - niruxActivatedAt < 2 ? lastExternalApp : nil
+    }
+
     private func handleURL(_ url: URL) {
         guard url.scheme == "nirux" else { return }
         guard shell != nil, mainWindow != nil else {
-            if launchURLBacklog.count < URLConfirmationQueue.capacity { launchURLBacklog.append(url) }
+            if launchURLBacklog.count < 8 { launchURLBacklog.append(url) }
             return
         }
+        let arrivedAt = ProcessInfo.processInfo.systemUptime
+        let restoreApp = appToRestoreOnCancel(now: arrivedAt)
         guard let request = NiruxURLRequest(url: url) else {
             NSLog("[URL] Ignored malformed or unknown nirux:// request (host: \(url.host ?? "none"))")
+            if NiruxLaunchAuthorization.isValid(NiruxURLRequest.launchID(in: url)) {
+                shell?.presentProblem(
+                    "Nirux ignored a nirux:// request",
+                    "“\(url.host ?? "")” is unknown, or a required parameter is missing or not an absolute path."
+                )
+            }
             return
         }
         if request.disposition() == .openEditor {
@@ -44,20 +86,21 @@ extension NiruxApp {
                 }
                 return
             }
-            self.route(resolved)
+            self.route(resolved, restoreApp: restoreApp)
         }
     }
 
-    private func route(_ request: NiruxURLRequest) {
+    private func route(_ request: NiruxURLRequest, restoreApp: NSRunningApplication?) {
         switch request.disposition() {
         case .perform:
             perform(request)
         case .confirm:
-            let now = ProcessInfo.processInfo.systemUptime
-            guard urlConfirmations.enqueue(request, now: now) else {
+            let wasIdle = urlConfirmations.isIdle
+            guard urlConfirmations.enqueue(request.droppingMissionLink(), now: ProcessInfo.processInfo.systemUptime) else {
                 NSLog("[URL] Dropped an unconfirmed nirux:// request (queue full or just cancelled)")
                 return
             }
+            if wasIdle { urlConfirmationRestoreApp = restoreApp }
             presentNextURLConfirmation()
         case .openEditor:
             break
@@ -99,10 +142,6 @@ extension NiruxApp {
             return
         }
 
-        // Give focus back to whatever the user was in if they decline.
-        let previousApp = NSWorkspace.shared.frontmostApplication
-            .flatMap { $0 == NSRunningApplication.current ? nil : $0 }
-
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = text.message
@@ -112,13 +151,18 @@ extension NiruxApp {
         // No default button: a stray Return must not approve an action that
         // someone else requested (Escape still cancels). Cancel takes the
         // initial focus so Space with keyboard navigation declines too, and
-        // the confirm button arms after a beat so a click aimed at whatever
-        // was under the pointer can't land on it.
+        // the confirm button arms a beat after the sheet actually appears
+        // (it may wait behind another sheet), so a click aimed at whatever
+        // was there before can't land on it.
         confirm.keyEquivalent = ""
         confirm.isEnabled = false
         alert.layout()
         alert.window.initialFirstResponder = cancel
+        let sheet = alert.window
         Task { @MainActor in
+            while !sheet.isVisible {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
             try? await Task.sleep(for: .milliseconds(750))
             confirm.isEnabled = true
         }
@@ -129,12 +173,15 @@ extension NiruxApp {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 let confirmed = response == .alertFirstButtonReturn
+                // A Cancel also drops whatever else was queued.
                 self.urlConfirmations.finish(confirmed: confirmed, now: ProcessInfo.processInfo.systemUptime)
                 if confirmed {
                     self.perform(request)
                 } else {
-                    previousApp?.activate()
+                    // Give focus back to whatever the user was in.
+                    self.urlConfirmationRestoreApp?.activate()
                 }
+                if self.urlConfirmations.isIdle { self.urlConfirmationRestoreApp = nil }
                 self.presentNextURLConfirmation()
             }
         }

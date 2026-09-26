@@ -23,7 +23,10 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var isManualUpdateCheck = false
     var updaterReady = false
     var urlConfirmations = URLConfirmationQueue()
+    var urlConfirmationRestoreApp: NSRunningApplication?
     var launchURLBacklog: [URL] = []
+    var lastExternalApp: NSRunningApplication?
+    var niruxActivatedAt: TimeInterval = 0
 
     static func main() {
         // Hook-receiver mode: `Nirux --hook claude|codex [payload-json]`.
@@ -157,6 +160,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
 
         NSApp.activate(ignoringOtherApps: true)
+        startTrackingFrontmostApp()
         drainLaunchURLBacklog()
     }
 

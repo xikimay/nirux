@@ -9,8 +9,9 @@ import Security
 ///
 /// Exported to every terminal as `NIRUX_LAUNCH_ID`; the installed skills and
 /// the in-app worktree flow pass it back as `launch=${NIRUX_LAUNCH_ID}`, left
-/// for the agent's shell to expand so the value never appears in a prompt,
-/// a transcript or the scrollback. The names avoid TOKEN/KEY/SECRET, which
+/// for the agent's shell to expand so the value stays out of prompts,
+/// transcripts and the scrollback (unless `open` itself fails and echoes the
+/// URL back). The names avoid TOKEN/KEY/SECRET, which
 /// agent CLIs can strip from tool environments (e.g. Claude Code's
 /// CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).
 ///
@@ -121,7 +122,16 @@ struct NiruxURLRequest: Equatable, Sendable {
             return nil
         }
         profileID = ["profile", "profileID", "space"].lazy.compactMap(value).first
-        launchID = value(NiruxLaunchAuthorization.queryItemName)
+        launchID = Self.launchID(in: url)
+    }
+
+    /// First `launch=` value, also read for URLs that fail to parse so a
+    /// broken request from a Nirux terminal can still be reported.
+    static func launchID(in url: URL) -> String? {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        guard let raw = items.first(where: { $0.name == NiruxLaunchAuthorization.queryItemName })?.value,
+              !raw.isEmpty else { return nil }
+        return raw
     }
 
     func hasValidLaunchID(expected: String = NiruxLaunchAuthorization.launchID) -> Bool {
@@ -184,6 +194,25 @@ struct NiruxURLRequest: Equatable, Sendable {
         }
     }
 
+    /// A request the user confirmed (no valid launch ID) must not link the
+    /// new agent to a live parent agent's Mission mailbox: the sheet doesn't
+    /// show that link, and it would give an outside caller a channel to it.
+    func droppingMissionLink() -> NiruxURLRequest {
+        guard case .newWorktree(let request) = action else { return self }
+        return NiruxURLRequest(
+            action: .newWorktree(NewWorktree(
+                branch: request.branch,
+                repo: request.repo,
+                agent: request.agent,
+                handoverPath: request.handoverPath,
+                parentWorkspaceID: nil,
+                parentAgentUUID: nil
+            )),
+            profileID: profileID,
+            launchID: launchID
+        )
+    }
+
     static func directoryExists(_ path: String) -> Bool {
         var isDirectory: ObjCBool = false
         return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
@@ -202,16 +231,15 @@ struct NiruxURLRequest: Equatable, Sendable {
     /// the agent's permission mode: a request from a web page would inherit
     /// it. Call it on a request that went through `resolvingPaths()`.
     func confirmation(claudeMode: ClaudeLaunchMode, codexMode: CodexLaunchMode) -> Confirmation? {
-        let intro: String
-        if launchID != nil {
-            intro = "This request carries an expired Nirux launch ID: Nirux has restarted since the terminal "
-                + "that sent it was opened (for example inside tmux). It may also come from a web page or "
-                + "another app. Only continue if you started it."
-        } else {
-            intro = "This request did not come from a Nirux terminal. It may come from a web page, a "
-                + "document or another app, or from an agent using an outdated Nirux skill (run "
-                + "“Install Agent Skills” from the command palette to update it). Only continue if you started it."
-        }
+        // One wording whether the launch ID is missing or stale: a caller
+        // could add a fake `launch=` to pick a more reassuring text.
+        let intro = "This request didn’t come from a current Nirux terminal. That happens with an agent "
+            + "using an outdated Nirux skill (run “Install Agent Skills” from the command palette), or a "
+            + "terminal started before Nirux last restarted (for example inside tmux). It may also come "
+            + "from a web page, a document or another app. Only continue if you started it."
+        // Confirming runs git in the folder (worktree creation, sidebar status),
+        // and a repository's own hooks and config can execute code.
+        let gitNote = "Nirux runs git in this folder: a repository you don’t trust can run code that way."
         func agentLine(_ agent: NiruxApp.WorkspaceAgent?) -> String {
             switch agent {
             case .claude: return "Agent: Claude Code — \(claudeMode.displayName)"
@@ -228,7 +256,7 @@ struct NiruxURLRequest: Equatable, Sendable {
             if let title { lines.append("Title: \(Self.displaySafe(title))") }
             return Confirmation(
                 message: agent == nil ? "Open a new workspace?" : "Open a new workspace and start an agent?",
-                details: intro + "\n\n" + lines.joined(separator: "\n"),
+                details: intro + "\n\n" + lines.joined(separator: "\n") + "\n\n" + gitNote,
                 confirmButton: "Open Workspace"
             )
         case let .newWorktree(request):
@@ -250,7 +278,7 @@ struct NiruxURLRequest: Equatable, Sendable {
             return Confirmation(
                 message: request.agent == nil
                     ? "Create a worktree?" : "Create a worktree and start an agent?",
-                details: intro + "\n\n" + lines.joined(separator: "\n"),
+                details: intro + "\n\n" + lines.joined(separator: "\n") + "\n\n" + gitNote,
                 confirmButton: "Create Worktree"
             )
         case .openEditor:
@@ -269,22 +297,39 @@ struct NiruxURLRequest: Equatable, Sendable {
             if CharacterSet.whitespaces.contains(scalar) { return " " }
             return scalar
         }
-        let cleaned = String(String.UnicodeScalarView(scalars))
-        guard cleaned.count > limit else { return cleaned }
+        // Count scalars, not characters: one letter carrying thousands of
+        // combining marks is a single Character but draws over nearby lines.
+        guard scalars.count > limit else { return String(String.UnicodeScalarView(scalars)) }
         let head = limit / 3
-        return String(cleaned.prefix(head)) + "…" + String(cleaned.suffix(limit - head))
+        let kept = scalars.prefix(head) + ["…"] + scalars.suffix(limit - head)
+        return String(String.UnicodeScalarView(kept))
+    }
+
+    /// `displaySafe` per line, for multi-line text Nirux composes itself
+    /// (git errors, explanations) that embeds caller-controlled values.
+    static func displaySafeLines(_ value: String, limit: Int = 300) -> String {
+        value.split(separator: "\n", omittingEmptySubsequences: false)
+            .prefix(20)
+            .map { displaySafe(String($0), limit: limit) }
+            .joined(separator: "\n")
     }
 }
 
-/// Pending confirmations. Bounded, one sheet at a time, and a short cooldown
-/// after a Cancel so a page re-sending the URL can't queue prompts forever.
+/// Pending confirmations. Bounded, one sheet at a time. A Cancel drops the
+/// rest of the queue and starts a cooldown that doubles with each consecutive
+/// Cancel, so a page re-sending the URL can't keep the window covered.
 struct URLConfirmationQueue {
     static let capacity = 4
     static let cooldown: TimeInterval = 5
+    static let maxCooldown: TimeInterval = 300
 
     private(set) var pending: [NiruxURLRequest] = []
-    var isPresenting = false
+    private(set) var isPresenting = false
     private var cooldownUntil: TimeInterval = 0
+    private var consecutiveCancels = 0
+    private var lastCancelAt: TimeInterval = -.infinity
+
+    var isIdle: Bool { !isPresenting && pending.isEmpty }
 
     /// False when the request was dropped (queue full or cooling down).
     mutating func enqueue(_ request: NiruxURLRequest, now: TimeInterval) -> Bool {
@@ -303,6 +348,17 @@ struct URLConfirmationQueue {
 
     mutating func finish(confirmed: Bool, now: TimeInterval) {
         isPresenting = false
-        if !confirmed { cooldownUntil = now + Self.cooldown }
+        guard !confirmed else {
+            consecutiveCancels = 0
+            return
+        }
+        pending.removeAll()
+        // The back-off only escalates within a burst; after a long quiet
+        // spell a single Cancel starts from the base cooldown again.
+        if now - lastCancelAt > Self.maxCooldown * 2 { consecutiveCancels = 0 }
+        lastCancelAt = now
+        consecutiveCancels += 1
+        let delay = Self.cooldown * pow(2, Double(min(consecutiveCancels - 1, 16)))
+        cooldownUntil = now + min(delay, Self.maxCooldown)
     }
 }

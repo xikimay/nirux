@@ -94,7 +94,7 @@ extension NiruxShellView {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = NiruxURLRequest.displaySafe(title)
-        alert.informativeText = NiruxURLRequest.displaySafe(message, limit: 600)
+        alert.informativeText = NiruxURLRequest.displaySafeLines(message)
         if let window {
             alert.beginSheetModal(for: window)
         } else {

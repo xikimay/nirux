@@ -58,6 +58,14 @@ final class GitWorktreeValidationTests: XCTestCase {
         XCTAssertNotNil(result.error)
     }
 
+    func testRefusesToReuseAWorktreeOnAnotherBranch() throws {
+        // "a/b" and "a-b" share the folder name repo.a-b.
+        XCTAssertNil(GitWorktree.create(branch: "a/b", repoRoot: repo).error)
+        let clash = GitWorktree.create(branch: "a-b", repoRoot: repo)
+        XCTAssertNil(clash.path)
+        XCTAssertNotNil(clash.error)
+    }
+
     func testRefusesWorktreeOfAnotherRepository() throws {
         let other = root + "/other"
         try FileManager.default.createDirectory(atPath: other, withIntermediateDirectories: true)
