@@ -14,6 +14,9 @@ import Foundation
 enum Persistence {
     private static let maxBackups = 5
     private static let loadCache = PersistenceLoadCache()
+    /// Prefix of the uniquely named files a save stages before renaming them
+    /// into place; crash leftovers are swept once a day.
+    static let stagingPrefix = "state.tmp-"
 
     private static var stateURL: URL {
         // Development escape hatch: a debug launch restores AND re-saves the
@@ -62,7 +65,11 @@ enum Persistence {
             let existing = try? Data(contentsOf: url)
             if existing != data {
                 guard keepCurrentState(at: url, contents: existing, now: now) else { return false }
-                try data.write(to: url, options: .atomic)
+                if existing == nil, FileManager.default.fileExists(atPath: url.path) {
+                    try replaceUnreadable(url, with: data, in: dir)
+                } else {
+                    try data.write(to: url, options: .atomic)
+                }
                 // A state recovered for bytes that may come back is stale now.
                 loadCache.clear()
                 // Only after a successful write, so failing retries (disk
@@ -101,38 +108,54 @@ enum Persistence {
         return contents == (try? Data(contentsOf: backupURL(1, in: dir))) || pushBackup(contents, in: dir)
     }
 
+    /// Swaps new contents in for a state.json that can't be read. rename(2)
+    /// replaces it atomically, like the usual write, but unlike Data's
+    /// atomic write it doesn't carry the unreadable permissions over.
+    private static func replaceUnreadable(_ url: URL, with data: Data, in dir: URL) throws {
+        let staged = stagingURL(in: dir)
+        try data.write(to: staged)
+        guard rename(staged.path, url.path) == 0 else {
+            let code = POSIXErrorCode(rawValue: errno) ?? .EIO
+            try? FileManager.default.removeItem(at: staged)
+            throw POSIXError(code)
+        }
+    }
+
+    /// Unique per call: other processes may share the state directory.
+    private static func stagingURL(in dir: URL) -> URL {
+        dir.appendingPathComponent("\(stagingPrefix)\(UUID().uuidString).json")
+    }
+
     /// Shift state.backup.N.json → N+1 and put `data` in 1, so backup.1
     /// mirrors the last write and 2…5 are the distinct states before it.
-    /// Staged first, under a unique name since other processes may share the
-    /// directory, so a write that fails leaves the chain as it was. False
-    /// when `data` didn't land in backup.1.
+    /// backup.1 moves out of the way first: when it can't (immutable, a
+    /// directory), nothing else has moved, so retries can't drain the chain.
+    /// False when `data` didn't land in backup.1.
     @discardableResult
     private static func pushBackup(_ data: Data, in dir: URL) -> Bool {
         let fm = FileManager.default
-        let staged = dir.appendingPathComponent("state.backup.pending-\(UUID().uuidString).json")
-        do {
-            try data.write(to: staged, options: .atomic)
-        } catch {
-            NSLog("[Nirux Persistence] Failed to write backup: %@", error.localizedDescription)
-            return false
-        }
-        for index in stride(from: maxBackups - 1, through: 1, by: -1) {
-            let src = backupURL(index, in: dir)
-            let dst = backupURL(index + 1, in: dir)
-            guard fm.fileExists(atPath: src.path) else { continue }
-            try? fm.removeItem(at: dst)
-            try? fm.moveItem(at: src, to: dst)
-        }
         let newest = backupURL(1, in: dir)
-        try? fm.removeItem(at: newest)
+        let staged = stagingURL(in: dir)
+        let displaced = stagingURL(in: dir)
         do {
-            try fm.moveItem(at: staged, to: newest)
-            return true
+            try data.write(to: staged)
+            if fm.fileExists(atPath: newest.path) { try fm.moveItem(at: newest, to: displaced) }
         } catch {
             try? fm.removeItem(at: staged)
             NSLog("[Nirux Persistence] Failed to update %@: %@", newest.lastPathComponent, error.localizedDescription)
             return false
         }
+        // rename(2) replaces its destination atomically; a failed one keeps it.
+        for index in stride(from: maxBackups - 1, through: 2, by: -1)
+        where fm.fileExists(atPath: backupURL(index, in: dir).path) {
+            rename(backupURL(index, in: dir).path, backupURL(index + 1, in: dir).path)
+        }
+        if fm.fileExists(atPath: displaced.path) { rename(displaced.path, backupURL(2, in: dir).path) }
+        guard rename(staged.path, newest.path) == 0 else {
+            try? fm.removeItem(at: staged)
+            return false
+        }
+        return true
     }
 
     /// `now` decides which daily snapshots are dated in the future.

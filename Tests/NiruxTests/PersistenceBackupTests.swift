@@ -10,7 +10,11 @@ final class PersistenceBackupTests: XCTestCase {
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        directory = FileManager.default.temporaryDirectory
+        // Not the system temp directory: there Foundation's atomic write
+        // drops an existing file's permissions, while in ~/Library (where
+        // state.json lives) it keeps them, which once hid a bug.
+        directory = try FileManager.default
+            .url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent("nirux-backups-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         previousStateDirectory = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
@@ -89,16 +93,21 @@ final class PersistenceBackupTests: XCTestCase {
     }
 
     func testSaveRefusesWhenAnotherBuildsStateCannotBeBackedUp() throws {
-        XCTAssertTrue(Persistence.save(state("ours"), now: date(day: 1)))
+        for index in 1...5 {
+            XCTAssertTrue(Persistence.save(state("s\(index)"), now: date(day: 1)))
+        }
         try write(try encoded("theirs"), "state.json")
         let newestBackup = directory.appendingPathComponent("state.backup.1.json").path
         try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: newestBackup)
         defer { try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: newestBackup) }
 
-        XCTAssertFalse(Persistence.save(state("next"), now: date(day: 1)))
+        for attempt in 1...3 {
+            XCTAssertFalse(Persistence.save(state("next \(attempt)"), now: date(day: 1)))
+        }
 
         XCTAssertEqual(try title("state.json"), "theirs")
-        XCTAssertEqual(files(prefix: "state.backup.pending"), [])
+        XCTAssertEqual(try (1...5).map { try title("state.backup.\($0).json") }, ["s5", "s4", "s3", "s2", "s1"])
+        XCTAssertEqual(files(prefix: Persistence.stagingPrefix), [])
     }
 
     // MARK: - Daily snapshots
@@ -145,6 +154,19 @@ final class PersistenceBackupTests: XCTestCase {
             try write(unreadable, "state.backup.\(index).json")
         }
         XCTAssertEqual(Persistence.load(now: date(day: 5))?.workspaces.first?.title, "day 5")
+    }
+
+    func testDailySnapshotSweepsStagingFilesLeftByACrash() throws {
+        let stale = directory.appendingPathComponent("\(Persistence.stagingPrefix)crashed.json")
+        let recent = directory.appendingPathComponent("\(Persistence.stagingPrefix)in-flight.json")
+        try Data("stale".utf8).write(to: stale)
+        try Data("recent".utf8).write(to: recent)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(-7_200)], ofItemAtPath: stale.path)
+
+        XCTAssertTrue(Persistence.save(state("today"), now: date(day: 1)))
+
+        XCTAssertEqual(files(prefix: Persistence.stagingPrefix), [recent.lastPathComponent])
     }
 
     // MARK: - Load fallback
@@ -213,7 +235,7 @@ final class PersistenceBackupTests: XCTestCase {
         try write(encoded("first"), "state.backup.1.json")
         XCTAssertEqual(Persistence.load()?.workspaces.first?.title, "first")
 
-        let other = FileManager.default.temporaryDirectory
+        let other = directory.deletingLastPathComponent()
             .appendingPathComponent("nirux-backups-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: other) }
@@ -305,7 +327,26 @@ final class PersistenceBackupTests: XCTestCase {
         XCTAssertEqual(try title("state.json"), "fresh")
         XCTAssertEqual(try title("state.backup.1.json"), "fresh")
         XCTAssertEqual(try title("state.backup.2.json"), "backup 1")
-        XCTAssertEqual(files(prefix: "state.backup.pending"), [])
+        XCTAssertEqual(files(prefix: Persistence.stagingPrefix), [])
+
+        // The new state.json doesn't inherit the unreadable mode.
+        XCTAssertTrue(Persistence.save(state("fresh 2"), now: date(day: 1, hour: 13)))
+        XCTAssertEqual(files(prefix: "state.corrupt."), [asideURL.lastPathComponent])
+        XCTAssertEqual(try title("state.backup.2.json"), "fresh")
+    }
+
+    func testSavingOverStateNothingCanRecoverKeepsItAside() throws {
+        try write(unreadable, "state.json")
+        for index in 1...5 {
+            try write(Data("newer build \(index)".utf8), "state.backup.\(index).json")
+        }
+        XCTAssertNil(Persistence.load())
+
+        // What Settings does when load() finds nothing: save an otherwise empty state.
+        XCTAssertTrue(Persistence.save(PersistedState(workspaces: [], activeWorkspaceIndex: 0), now: date(day: 1)))
+
+        XCTAssertEqual(contents("state.corrupt.2026-03-01-120000.json"), unreadable)
+        XCTAssertEqual(contents("state.backup.2.json"), Data("newer build 1".utf8))
     }
 
     func testDirectoryNamedStateIsNeverReplaced() throws {

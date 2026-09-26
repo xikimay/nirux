@@ -20,6 +20,14 @@ extension Persistence {
         for stale in dailySnapshotURLs(in: dir, now: now).dropFirst(maxDailySnapshots) where stale != url {
             try? fm.removeItem(at: stale)
         }
+        // Once a day, sweep staging files a crash left behind. Real time, not
+        // `now`: it's compared with modification dates.
+        let hourAgo = Date().addingTimeInterval(-3_600)
+        for name in fileNames(in: dir) where name.hasPrefix(stagingPrefix) {
+            let staged = dir.appendingPathComponent(name)
+            let modified = (try? fm.attributesOfItem(atPath: staged.path))?[.modificationDate] as? Date
+            if let modified, modified < hourAgo { try? fm.removeItem(at: staged) }
+        }
     }
 
     /// Keeps a state.json this build can't use before a save replaces it.
