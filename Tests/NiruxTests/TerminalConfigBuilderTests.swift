@@ -133,11 +133,18 @@ final class TerminalConfigBuilderTests: XCTestCase {
 
     func testDarkThemeName() {
         XCTAssertEqual(Builder.darkThemeName("TokyoNight"), "TokyoNight")
+        XCTAssertEqual(Builder.darkThemeName(" Nord\t"), "Nord")
         XCTAssertEqual(Builder.darkThemeName("light:Catppuccin Latte,dark:Catppuccin Mocha"), "Catppuccin Mocha")
-        XCTAssertEqual(Builder.darkThemeName(" dark: B , light: A ,"), "B")
+        XCTAssertEqual(Builder.darkThemeName(" dark: B , light: A ,"), "B", "one trailing comma is fine")
         XCTAssertEqual(Builder.darkThemeName("light:\"Rose Pine Dawn\",dark:\"Rose, Pine\""), "Rose, Pine")
+        XCTAssertEqual(Builder.darkThemeName("light:,dark:Mocha"), "Mocha", "an empty variant parses")
+        XCTAssertEqual(Builder.darkThemeName("light:A,dark:"), "")
         XCTAssertNil(Builder.darkThemeName("dark:B"))
         XCTAssertNil(Builder.darkThemeName("light:A,dark:B,dusk:C"))
+        XCTAssertNil(Builder.darkThemeName("light:A,,dark:B"))
+        XCTAssertNil(Builder.darkThemeName(",light:A,dark:B"))
+        XCTAssertNil(Builder.darkThemeName("light:A,dark:\"B"), "unclosed quote")
+        XCTAssertNil(Builder.darkThemeName("light:A,dark:B\\"), "dangling escape")
         XCTAssertNil(Builder.darkThemeName("light=A,dark=B"))
         XCTAssertNil(Builder.darkThemeName(""))
     }
@@ -234,6 +241,11 @@ final class TerminalConfigBuilderTests: XCTestCase {
             + "/t/theme:3:palette: invalid value | theme \"X\" not found | \(file):7:bogus: unknown field"
         XCTAssertEqual(Builder.rejectedLineNumbers(in: report), [2, 7])
         XCTAssertEqual(Builder.rejectedLineNumbers(in: "failed to write generated ghostty config: \(file):2:"), [])
+
+        // An echoed value containing " | " can't smuggle in another file.
+        let fake = "/t/ghostty-config-00000000-0000-0000-0000-000000000000.conf"
+        let injected = Builder.diagnosticsPrefix + "\(file):25:cursor-style: invalid value \"x | \(fake):30:\""
+        XCTAssertEqual(Builder.rejectedLineNumbers(in: injected), [25])
     }
 }
 
@@ -262,11 +274,53 @@ final class TerminalConfigLibghosttyTests: XCTestCase {
         XCTAssertNil(diagnostics(TerminalConfigBuilder.render([])))
     }
 
-    func testOffSwitchIgnoresTheGhosttyConfig() {
-        let key = TerminalAppearance.ignoreGhosttyConfigKey
-        UserDefaults.standard.set(true, forKey: key)
-        defer { UserDefaults.standard.removeObject(forKey: key) }
-        XCTAssertEqual(TerminalAppearance.currentConfig(), TerminalConfigBuilder.render([]))
+    /// A temporary home with `files` under `~/.config/ghostty/`.
+    private func makeHome(_ files: [String: String]) throws -> String {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-home-\(UUID().uuidString)")
+        let ghostty = home.appendingPathComponent(".config/ghostty")
+        try FileManager.default.createDirectory(at: ghostty.appendingPathComponent("themes"), withIntermediateDirectories: true)
+        for (name, contents) in files {
+            try contents.write(to: ghostty.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        addTeardownBlock { try? FileManager.default.removeItem(at: home) }
+        return home.path
+    }
+
+    private func makeDefaults() throws -> UserDefaults {
+        let suite = "nirux-tests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { UserDefaults().removePersistentDomain(forName: suite) }
+        return defaults
+    }
+
+    func testOffSwitchIgnoresTheGhosttyConfig() throws {
+        let home = try makeHome(["config": "font-size = 15\n"])
+        let defaults = try makeDefaults()
+        XCTAssertTrue(TerminalAppearance.currentConfig(environment: [:], home: home, defaults: defaults)
+            .contains("font-size = 15"))
+
+        defaults.set(true, forKey: TerminalAppearance.ignoreGhosttyConfigKey)
+        XCTAssertEqual(
+            TerminalAppearance.currentConfig(environment: [:], home: home, defaults: defaults),
+            TerminalConfigBuilder.render([])
+        )
+    }
+
+    func testThemeEditsReachTheNextTerminal() throws {
+        let home = try makeHome(["config": "theme = Mine\n", "themes/Mine": "background = #111111\n"])
+        let defaults = try makeDefaults()
+        let config = { TerminalAppearance.currentConfig(environment: [:], home: home, defaults: defaults) }
+        XCTAssertTrue(config().contains("background = #111111"))
+
+        try "background = #222222\n".write(toFile: home + "/.config/ghostty/themes/Mine", atomically: true, encoding: .utf8)
+        XCTAssertTrue(config().contains("background = #222222"))
+    }
+
+    func testDeprecatedAndColorspaceKeysAreAccepted() {
+        let result = sanitize("bold-is-bright = true\ncursor-invert-fg-bg = true\nselection-invert-fg-bg = true\n"
+            + "window-colorspace = display-p3\n")
+        XCTAssertTrue(result.dropped.isEmpty)
+        XCTAssertNil(diagnostics(result.contents))
     }
 
     func testReportFormatIsUnderstood() throws {

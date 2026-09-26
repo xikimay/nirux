@@ -162,7 +162,7 @@ Only appearance keys are honored:
 
 Everything else, including keybinds, window and macOS options, padding, opacity, and shell or command settings, is ignored: Nirux handles input, layout, and shells itself. Settings you don't set keep Nirux's defaults: 14pt, a blinking block cursor, and the Afterglow palette. If you set your own `background` or `foreground`, Afterglow's cursor and selection colors are dropped too, so they stay visible against your colors.
 
-`theme` accepts a theme name, an absolute path, or a `light:…,dark:…` pair. Nirux always uses the dark variant, because its window is always dark. Names are looked up in `~/.config/ghostty/themes`, then in the themes bundled with Ghostty.app when it is installed. A theme that can't be found is ignored. Only the theme's appearance settings are used. As in Ghostty, a theme overrides the defaults, and your explicit settings override the theme. When a theme is set, Nirux's default colors are left out.
+`theme` accepts a theme name, an absolute path, or a `light:…,dark:…` pair. Nirux always uses the dark variant, because its window is always dark. Names are looked up in `$XDG_CONFIG_HOME/ghostty/themes` (`~/.config/ghostty/themes` by default), then in the themes bundled with Ghostty.app when it is installed. A theme that can't be found is ignored. Only the theme's appearance settings are used. As in Ghostty, a theme overrides the defaults, and your explicit settings override the theme. Nirux's default colors are left out as soon as the theme contributes any setting.
 
 Invalid lines, in your config or in its theme, are skipped individually instead of invalidating the whole config; look for `[GhosttyConfig]` messages in Console.app.
 

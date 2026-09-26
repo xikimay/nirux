@@ -98,45 +98,57 @@ enum TerminalConfigBuilder {
 
     /// The theme Nirux renders with. Nirux forces a dark appearance, so a
     /// `light:A,dark:B` pair resolves to B, as it would in Ghostty. Returns
-    /// nil for a value Ghostty would reject.
+    /// nil for a value Ghostty would reject (Theme.parseCLI and
+    /// parseAutoStruct in ghostty/src).
     static func darkThemeName(_ value: String) -> String? {
-        // Same pair detection as Ghostty's Theme.parseCLI.
+        let whitespace = CharacterSet(charactersIn: " \t")
         guard value.contains(",") || value.contains(":") || value.contains("=") else {
-            return value.isEmpty ? nil : value
+            return value.isEmpty ? nil : value.trimmingCharacters(in: whitespace)
         }
+        guard let parts = splitOutsideQuotes(value) else { return nil }
         var variants: [String: String] = [:]
-        for part in splitOutsideQuotes(value) {
+        for part in parts {
             guard let separator = part.firstIndex(of: ":") else { return nil }
-            let name = part[..<separator].trimmingCharacters(in: .whitespaces)
+            let name = part[..<separator].trimmingCharacters(in: whitespace)
             guard name == "light" || name == "dark" else { return nil }
-            var theme = part[part.index(after: separator)...].trimmingCharacters(in: .whitespaces)
+            var theme = part[part.index(after: separator)...].trimmingCharacters(in: whitespace)
             if theme.count >= 2, theme.hasPrefix("\""), theme.hasSuffix("\"") {
                 theme = String(theme.dropFirst().dropLast())
             }
             variants[name] = theme
         }
-        guard variants["light"]?.isEmpty == false, let dark = variants["dark"], !dark.isEmpty else {
-            return nil
-        }
-        return dark
+        guard variants["light"] != nil else { return nil }
+        return variants["dark"]
     }
 
-    /// Non-blank comma-separated parts, ignoring commas inside double
-    /// quotes (Ghostty's CommaSplitter).
-    private static func splitOutsideQuotes(_ value: String) -> [Substring] {
+    /// Comma-separated parts, ignoring commas inside double quotes or
+    /// escaped with a backslash; a trailing comma ends the list (Ghostty's
+    /// CommaSplitter). Nil on an unclosed quote or a dangling backslash.
+    private static func splitOutsideQuotes(_ value: String) -> [Substring]? {
         var parts: [Substring] = []
         var start = value.startIndex
+        var index = value.startIndex
         var quoted = false
-        for index in value.indices {
-            if value[index] == "\"" {
+        while index < value.endIndex {
+            switch value[index] {
+            case "\\":
+                index = value.index(after: index)
+                guard index < value.endIndex else { return nil }
+            case "\"":
                 quoted.toggle()
-            } else if value[index] == ",", !quoted {
+            case "," where !quoted:
                 parts.append(value[start..<index])
                 start = value.index(after: index)
+            default:
+                break
             }
+            index = value.index(after: index)
         }
-        parts.append(value[start...])
-        return parts.filter { !$0.allSatisfy(\.isWhitespace) }
+        guard !quoted else { return nil }
+        if start < value.endIndex {
+            parts.append(value[start...])
+        }
+        return parts
     }
 
     /// Resolves a theme the way Ghostty's themepkg.open does: an absolute
@@ -217,14 +229,20 @@ enum TerminalConfigBuilder {
 
     /// Line numbers of the diagnostics located in the config text
     /// libghostty-spm generated (`…/ghostty-config-<UUID>.conf:<line>:…`).
-    /// Each diagnostic is matched from its start, so a rejected value that
-    /// looks like a location can't point at another line.
+    /// Each diagnostic is matched from its start, and must name the same
+    /// file as the first one, so a rejected value echoed in a message can't
+    /// point at another line.
     static func rejectedLineNumbers(in report: String) -> [Int] {
         guard report.hasPrefix(diagnosticsPrefix) else { return [] }
-        let location = /[^:|]*\/ghostty-config-[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\.conf:(\d+):/
+        let location = /([^:|]*\/ghostty-config-[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}\.conf):(\d+):/
+        var file: Substring?
         return report.dropFirst(diagnosticsPrefix.count)
             .split(separator: " | ")
-            .compactMap { $0.prefixMatch(of: location).flatMap { Int($0.output.1) } }
+            .compactMap { diagnostic in
+                guard let match = diagnostic.prefixMatch(of: location) else { return nil }
+                file = file ?? match.output.1
+                return match.output.1 == file ? Int(match.output.2) : nil
+            }
     }
 }
 
@@ -255,12 +273,14 @@ enum TerminalAppearance {
         return controller
     }
 
-    static func currentConfig() -> String {
-        guard !UserDefaults.standard.bool(forKey: ignoreGhosttyConfigKey) else {
+    static func currentConfig(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        home: String = FileManager.default.homeDirectoryForCurrentUser.path,
+        defaults: UserDefaults = .standard
+    ) -> String {
+        guard !defaults.bool(forKey: ignoreGhosttyConfigKey) else {
             return TerminalConfigBuilder.render([])
         }
-        let environment = ProcessInfo.processInfo.environment
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
         let entries = GhosttyConfigFile.load(
             paths: GhosttyConfigFile.defaultPaths(environment: environment, home: home),
             home: home

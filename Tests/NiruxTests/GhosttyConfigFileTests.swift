@@ -37,12 +37,14 @@ final class GhosttyConfigFileTests: XCTestCase {
     }
 
     func testLineOverGhosttysBufferEndsTheFile() {
-        let long = "font-family = " + String(repeating: "x", count: GhosttyConfigFile.maxLineBytes)
-        let entries = GhosttyConfigFile.parse("font-size = 12\n\(long)\nfont-size = 20\n", source: "c")
-        XCTAssertEqual(entries.map(\.line), ["font-size = 12"])
+        let limit = GhosttyConfigFile.maxLineBytes
+        let long = Data(("font-size = 12\r\n" + String(repeating: "x", count: limit + 1) + "\nfont-size = 20\n").utf8)
+        XCTAssertEqual(GhosttyConfigFile.truncatedAtOverlongLine(long), Data("font-size = 12\r\n".utf8))
 
-        let fits = "font-family = " + String(repeating: "x", count: GhosttyConfigFile.maxLineBytes - 14)
-        XCTAssertEqual(GhosttyConfigFile.parse("\(fits)\nfont-size = 20", source: "c").count, 2)
+        let fits = Data((String(repeating: "x", count: limit) + "\nfont-size = 20").utf8)
+        XCTAssertEqual(GhosttyConfigFile.truncatedAtOverlongLine(fits), fits)
+        let lastLine = Data(("font-size = 20\n" + String(repeating: "x", count: limit + 1)).utf8)
+        XCTAssertEqual(GhosttyConfigFile.truncatedAtOverlongLine(lastLine), Data("font-size = 20\n".utf8))
     }
 
     func testParseHandlesCRLF() {
@@ -171,6 +173,14 @@ final class GhosttyConfigFileTests: XCTestCase {
         try Data([0xEF, 0xBB, 0xBF] + Array("# caf".utf8) + [0xE9] + Array("\nfont-size = 20\n".utf8)).write(to: file)
         let entries = GhosttyConfigFile.parse(GhosttyConfigFile.readRegularFile(file.path) ?? "", source: "c")
         XCTAssertEqual(entries.map(\.line), ["font-size = 20"])
+
+        // The limit counts raw bytes: invalid bytes that widen once
+        // decoded don't end the file.
+        let widening = dir.appendingPathComponent("widening")
+        let invalid = [UInt8](repeating: 0xFF, count: GhosttyConfigFile.maxLineBytes - 2)
+        try Data(Array("# ".utf8) + invalid + Array("\nfont-size = 21\n".utf8)).write(to: widening)
+        let wide = GhosttyConfigFile.parse(GhosttyConfigFile.readRegularFile(widening.path) ?? "", source: "c")
+        XCTAssertEqual(wide.map(\.line), ["font-size = 21"])
 
         let link = dir.appendingPathComponent("link")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: file)

@@ -49,7 +49,8 @@ enum GhosttyConfigFile {
     /// Parses Ghostty's `key = value` format (LineIterator in
     /// ghostty/src/cli/args.zig): lines are split on `\n` and trimmed of
     /// spaces, tabs and `\r`; blank lines and lines starting with `#` are
-    /// skipped; a line longer than `maxLineBytes` stops the file.
+    /// skipped. (Its line length limit applies to raw bytes, so
+    /// `readRegularFile` enforces it.)
     static func parse(_ contents: String, source: String) -> [GhosttyConfigEntry] {
         let whitespace = CharacterSet(charactersIn: " \t\r")
         // Swift treats "\r\n" as a single Character, so split on the
@@ -60,7 +61,6 @@ enum GhosttyConfigFile {
 
         var entries: [GhosttyConfigEntry] = []
         for (index, rawLine) in rawLines.enumerated() {
-            guard rawLine.utf8.count <= maxLineBytes else { break }
             let line = rawLine.trimmingCharacters(in: whitespace)
             guard !line.isEmpty, !line.hasPrefix("#") else { continue }
 
@@ -149,9 +149,10 @@ enum GhosttyConfigFile {
         return (path as NSString).standardizingPath
     }
 
-    /// Contents of a regular file, nil otherwise. Decoded leniently, as
-    /// Ghostty reads bytes: an invalid UTF-8 sequence only garbles its own
-    /// line instead of discarding the file.
+    /// Contents of a regular file, nil otherwise, cut before the first
+    /// line longer than `maxLineBytes` as Ghostty stops reading there.
+    /// Decoded leniently, as Ghostty reads bytes: an invalid UTF-8 sequence
+    /// only garbles its own line instead of discarding the file.
     static func readRegularFile(_ path: String) -> String? {
         guard isRegularFile(path) else { return nil }
         guard let data = FileManager.default.contents(atPath: path) else {
@@ -159,8 +160,18 @@ enum GhosttyConfigFile {
             return nil
         }
         // Lossy on purpose: invalid bytes become U+FFFD.
-        let contents = String(decoding: data, as: UTF8.self) // swiftlint:disable:this optional_data_string_conversion
+        let contents = String(decoding: truncatedAtOverlongLine(data), as: UTF8.self) // swiftlint:disable:this optional_data_string_conversion
         return contents.hasPrefix("\u{FEFF}") ? String(contents.dropFirst()) : contents
+    }
+
+    /// `data` up to the first line longer than `maxLineBytes`.
+    static func truncatedAtOverlongLine(_ data: Data) -> Data {
+        var lineStart = data.startIndex
+        for index in data.indices where data[index] == UInt8(ascii: "\n") {
+            if index - lineStart > maxLineBytes { return data[..<lineStart] }
+            lineStart = index + 1
+        }
+        return data.endIndex - lineStart > maxLineBytes ? data[..<lineStart] : data
     }
 
     /// True for a regular file, following symlinks. Rejects FIFOs and
