@@ -88,6 +88,19 @@ final class PersistenceBackupTests: XCTestCase {
         XCTAssertEqual(try title("state.backup.2.json"), "theirs")
     }
 
+    func testSaveRefusesWhenAnotherBuildsStateCannotBeBackedUp() throws {
+        XCTAssertTrue(Persistence.save(state("ours"), now: date(day: 1)))
+        try write(try encoded("theirs"), "state.json")
+        let newestBackup = directory.appendingPathComponent("state.backup.1.json").path
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: newestBackup)
+        defer { try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: newestBackup) }
+
+        XCTAssertFalse(Persistence.save(state("next"), now: date(day: 1)))
+
+        XCTAssertEqual(try title("state.json"), "theirs")
+        XCTAssertEqual(files(prefix: "state.backup.pending"), [])
+    }
+
     // MARK: - Daily snapshots
 
     func testDailySnapshotKeepsTheFirstSaveOfEachDayForAWeek() throws {
@@ -111,16 +124,27 @@ final class PersistenceBackupTests: XCTestCase {
         XCTAssertNil(contents("state.backup.2.json"))
     }
 
-    func testDailySnapshotSurvivesAClockSetBack() throws {
+    func testDailySnapshotsFromBeforeTheClockWentBackArePrunedFirst() throws {
         for day in 20...26 {
-            try write(try encoded("later"), "state.daily.2026-03-\(day).json")
+            try write(try encoded("before the clock went back"), "state.daily.2026-03-\(day).json")
         }
 
-        XCTAssertTrue(Persistence.save(state("now"), now: date(day: 1)))
-        XCTAssertTrue(Persistence.save(state("now"), now: date(day: 1, hour: 13)))
+        for day in 1...5 {
+            XCTAssertTrue(Persistence.save(state("day \(day)"), now: date(day: day)))
+            XCTAssertTrue(Persistence.save(state("day \(day)"), now: date(day: day, hour: 13)))
+        }
 
-        XCTAssertEqual(try title("state.daily.2026-03-01.json"), "now")
-        XCTAssertEqual(files(prefix: "state.daily.").count, 8)
+        XCTAssertEqual(files(prefix: "state.daily."), [
+            "state.daily.2026-03-01.json", "state.daily.2026-03-02.json", "state.daily.2026-03-03.json",
+            "state.daily.2026-03-04.json", "state.daily.2026-03-05.json",
+            "state.daily.2026-03-25.json", "state.daily.2026-03-26.json"
+        ])
+        // Recovery tries the real days before the future-dated ones.
+        try write(unreadable, "state.json")
+        for index in 1...5 {
+            try write(unreadable, "state.backup.\(index).json")
+        }
+        XCTAssertEqual(Persistence.load(now: date(day: 5))?.workspaces.first?.title, "day 5")
     }
 
     // MARK: - Load fallback
@@ -132,6 +156,18 @@ final class PersistenceBackupTests: XCTestCase {
         try write(unreadable, "state.json")
 
         XCTAssertEqual(Persistence.load()?.workspaces.first?.title, "b")
+    }
+
+    func testLoadDoesNotServeARecoveryMadeBeforeTheLastSave() throws {
+        try write(unreadable, "state.json")
+        try write(encoded("old backup"), "state.backup.1.json")
+        XCTAssertEqual(Persistence.load()?.workspaces.first?.title, "old backup")
+        XCTAssertTrue(Persistence.save(state("saved"), now: date(day: 1)))
+
+        // The same unreadable bytes come back, e.g. another build rewrites them.
+        try write(unreadable, "state.json")
+
+        XCTAssertEqual(Persistence.load()?.workspaces.first?.title, "saved")
     }
 
     func testLoadRecoversFromTheNewestReadableBackupFirst() throws {
@@ -238,7 +274,23 @@ final class PersistenceBackupTests: XCTestCase {
         XCTAssertEqual(contents("state.corrupt.2026-03-02-120000.json"), unreadable)
     }
 
-    func testStateThatCannotBeReadIsRenamedAsideBeforeSaving() throws {
+    func testSetAsideCopiesFromTheSameSecondArePrunedOldestFirst() throws {
+        try write(Data("first".utf8), "state.corrupt.2026-03-01-120000.json")
+        for suffix in 2...10 {
+            try write(Data("copy \(suffix)".utf8), "state.corrupt.2026-03-01-120000-\(suffix).json")
+        }
+        try write(unreadable, "state.json")
+
+        XCTAssertTrue(Persistence.save(state("fresh"), now: date(day: 1)))
+
+        let copies = files(prefix: "state.corrupt.")
+        XCTAssertEqual(copies.count, 10)
+        XCTAssertFalse(copies.contains("state.corrupt.2026-03-01-120000.json"))
+        XCTAssertTrue(copies.contains("state.corrupt.2026-03-01-120000-10.json"))
+        XCTAssertEqual(contents("state.corrupt.2026-03-01-120000-11.json"), unreadable)
+    }
+
+    func testStateThatCannotBeReadIsLinkedAsideBeforeSaving() throws {
         try XCTSkipIf(getuid() == 0, "root reads files regardless of mode")
         try write(unreadable, "state.json")
         try write(encoded("backup 1"), "state.backup.1.json")
@@ -253,7 +305,7 @@ final class PersistenceBackupTests: XCTestCase {
         XCTAssertEqual(try title("state.json"), "fresh")
         XCTAssertEqual(try title("state.backup.1.json"), "fresh")
         XCTAssertEqual(try title("state.backup.2.json"), "backup 1")
-        XCTAssertNil(contents("state.pending.json"))
+        XCTAssertEqual(files(prefix: "state.backup.pending"), [])
     }
 
     func testDirectoryNamedStateIsNeverReplaced() throws {

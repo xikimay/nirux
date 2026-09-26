@@ -27,4 +27,10 @@ final class PersistenceLoadCache: @unchecked Sendable {
         entry = newEntry
         lock.unlock()
     }
+
+    func clear() {
+        lock.lock()
+        entry = nil
+        lock.unlock()
+    }
 }
