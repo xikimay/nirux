@@ -22,7 +22,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var telegramRemoteAccessController: TelegramRemoteAccessController?
     var isManualUpdateCheck = false
     var updaterReady = false
-    var isConfirmingURLRequest = false
+    var urlConfirmations = URLConfirmationQueue()
+    var launchURLBacklog: [URL] = []
 
     static func main() {
         // Hook-receiver mode: `Nirux --hook claude|codex [payload-json]`.
@@ -156,6 +157,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
 
         NSApp.activate(ignoringOtherApps: true)
+        drainLaunchURLBacklog()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

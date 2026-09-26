@@ -24,6 +24,24 @@ enum HandoverFile {
         case tooLarge
         case readFailed(Int32)
         case writeFailed(Int32)
+
+        /// One sentence for the user-facing "handover ignored" sheet.
+        var explanation: String {
+            switch self {
+            case .notAllowedPath:
+                return "Nirux only accepts a handover created directly in /tmp with a name starting with “nirux-handover-”."
+            case .cannotOpen(let code):
+                if code == ELOOP { return "The handover path is a symbolic link." }
+                if code == ENOENT { return "The handover file doesn’t exist." }
+                return "The handover file couldn’t be opened (\(String(cString: strerror(code))))."
+            case .notRegularFile: return "The handover path is not a regular file."
+            case .notOwnedByUser: return "The handover file belongs to another user."
+            case .multipleLinks: return "The handover file is a hard link to another file."
+            case .tooLarge: return "The handover file is larger than 1 MB."
+            case .readFailed(let code), .writeFailed(let code):
+                return "Copying the handover failed (\(String(cString: strerror(code))))."
+            }
+        }
     }
 
     /// Lexical gate, applied when the URL is parsed: an absolute path whose
@@ -36,6 +54,19 @@ enum HandoverFile {
             && name.hasPrefix(filenamePrefix)
             && name.count > filenamePrefix.count
             && !path.hasSuffix("/")
+    }
+
+    /// Create an empty handover file for an agent to fill (the in-app
+    /// worktree flow). Created here with O_EXCL under an unguessable name, so
+    /// another account can't plant a symlink that the agent's write would
+    /// follow; the agent then writes into a file the user already owns.
+    static func makeEmptySource(agent: String) -> String? {
+        let safeAgent = agent.filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        let path = "/tmp/\(filenamePrefix)\(safeAgent)-\(UUID().uuidString).md"
+        let descriptor = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { return nil }
+        close(descriptor)
+        return path
     }
 
     /// Move `source` to `destinationDirectory/filename`. On success the

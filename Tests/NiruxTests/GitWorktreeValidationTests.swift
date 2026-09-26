@@ -17,7 +17,7 @@ final class GitWorktreeValidationTests: XCTestCase {
         try "x\n".write(toFile: repo + "/tracked.txt", atomically: true, encoding: .utf8)
         try git(["add", "tracked.txt"], at: repo)
         try git(["-c", "user.name=Nirux Tests", "-c", "user.email=nirux@example.test",
-                 "commit", "-qm", "initial"], at: repo)
+                 "-c", "commit.gpgsign=false", "commit", "-qm", "initial"], at: repo)
     }
 
     override func tearDown() {
@@ -63,7 +63,7 @@ final class GitWorktreeValidationTests: XCTestCase {
         try FileManager.default.createDirectory(atPath: other, withIntermediateDirectories: true)
         try git(["init", "-q"], at: other)
         try git(["-c", "user.name=Nirux Tests", "-c", "user.email=nirux@example.test",
-                 "commit", "-q", "--allow-empty", "-m", "initial"], at: other)
+                 "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "initial"], at: other)
         try git(["worktree", "add", "-q", root + "/repo.feat-x"], at: other)
 
         let result = GitWorktree.create(branch: "feat/x", repoRoot: repo)
@@ -88,6 +88,16 @@ final class GitWorktreeValidationTests: XCTestCase {
         let alias = root + "/alias"
         try FileManager.default.createSymbolicLink(atPath: alias, withDestinationPath: repo)
         XCTAssertTrue(GitWorktree.isRepositoryTopLevel(alias))
+    }
+
+    func testLinkedWorktreeIsStillAcceptedAsRepo() throws {
+        // Agents running in a worktree pass its own top level (unchanged
+        // behavior; resolving the main repo is a separate change).
+        let created = try XCTUnwrap(GitWorktree.create(branch: "feat/x", repoRoot: repo).path)
+        XCTAssertTrue(GitWorktree.isRepositoryTopLevel(created))
+        let nested = GitWorktree.create(branch: "feat/y", repoRoot: created)
+        XCTAssertNil(nested.error)
+        XCTAssertEqual(nested.path, root + "/repo.feat-x.feat-y")
     }
 
     func testRejectsInvalidBranchNames() {
