@@ -130,6 +130,8 @@ Nirux installs lightweight lifecycle hooks so agent status is exact instead of g
 
 Each event carries the column's stable `NIRUX_AGENT_UUID`, so status and attention signals are attributed to the exact column that emitted them — across restarts. Agents launched outside Nirux (or before the hooks were installed) fall back to simple output-activity detection. To remove the hooks, delete the marked entries from those two files.
 
+Both files are global, so every Claude Code and Codex session on the Mac runs these hooks. They are guarded on `NIRUX_AGENT_UUID`, which only Nirux terminals set: a session started anywhere else stops at a shell test and never launches Nirux. Symlinked config files (dotfiles) are updated in place; the link is kept.
+
 ### Telegram Remote Access
 
 Telegram Remote Access is disabled by default. It uses outbound Bot API `getUpdates` long polling, so Nirux does not open a listening port and you do not need a public webhook. Nirux and the Mac must remain running and online for the bot to respond.
@@ -208,6 +210,14 @@ Run from SwiftPM:
 ```bash
 swift run Nirux
 ```
+
+A development build otherwise shares the installed app's state and rewrites the agent hooks in `~/.claude/settings.json` and `~/.codex/config.toml` to point at its own binary. Isolate smoke runs:
+
+```bash
+NIRUX_STATE_DIR=/tmp/nirux-dev NIRUX_SKIP_HOOK_INSTALL=1 swift run Nirux
+```
+
+`NIRUX_STATE_DIR` replaces `~/Library/Application Support/nirux/` (`HOME` is ignored). `NIRUX_SKIP_HOOK_INSTALL=1` leaves both agent configs untouched; the hooks the installed app wrote keep reporting, and agents in the dev build's terminals report into its state directory.
 
 Create a local app bundle:
 
