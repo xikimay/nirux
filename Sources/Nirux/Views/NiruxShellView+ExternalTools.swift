@@ -148,7 +148,7 @@ extension NiruxShellView {
     // MARK: - Worktree Skill
 
     // Generated shell commands must stay on one line in the installed skill.
-    private static let worktreeSkillContent = """
+    static let worktreeSkillContent = """
         ---
         name: nirux-worktree
         description: >
@@ -179,10 +179,16 @@ extension NiruxShellView {
            ```bash
            git rev-parse --show-toplevel
            ```
-        3. **Write a session handover** to a temp file so the new workspace inherits context.
-           Use the current agent name (`claude` or `codex`) in the temp filename:
+        3. **Write a session handover** so the new workspace inherits context. First create the
+           file with `mktemp`, using the current agent name (`claude` or `codex`); it prints the
+           path. `mktemp` creates the file privately under a random name, so nothing else can
+           redirect the write:
            ```bash
-           cat > /tmp/nirux-handover-<agent>-<branch-with-slashes-replaced-by-dashes>.md << 'HANDOVER'
+           mktemp /tmp/nirux-handover-<agent>-XXXXXX
+           ```
+           Then write the handover into that exact printed path:
+           ```bash
+           cat > <path-printed-by-mktemp> << 'HANDOVER'
            # Session Handover
            ## Goal
            <what the user is trying to accomplish>
@@ -195,13 +201,19 @@ extension NiruxShellView {
            HANDOVER
            ```
            Keep the handover concise but include enough context for a fresh session to continue
-           without asking.
+           without asking. Nirux only accepts a handover that sits directly in `/tmp` with the
+           `nirux-handover-` prefix and belongs to the user; anything else is ignored.
         4. **Open the worktree in Nirux** — Nirux handles git worktree creation, moves the handover
            file into the worktree as `.claude-handover.md` or `.codex-handover.md`, and launches
            the same agent. Nirux terminals expose `NIRUX_PROFILE_ID`; preserve it in the URL so
            the new workspace opens in the same Nirux session/space even if the user has focused a
-           different one:
+           different one. They also expose `NIRUX_LAUNCH_ID`, which proves the request comes from
+           a Nirux terminal; without it Nirux asks the user to confirm before doing anything:
            ```bash
+           launch_query=""
+           if [ -n "${NIRUX_LAUNCH_ID:-}" ]; then
+             launch_query="&launch=${NIRUX_LAUNCH_ID}"
+           fi
            profile_query=""
            if [ -n "${NIRUX_PROFILE_ID:-}" ]; then
              profile_query="&profile=${NIRUX_PROFILE_ID}"
@@ -214,7 +226,7 @@ extension NiruxShellView {
              mission_query="&parentWorkspace=${NIRUX_WORKSPACE_ID}&parentAgent=${NIRUX_AGENT_UUID}"
            fi
            open "nirux://new-worktree?branch=<url-encoded-branch>&repo=<url-encoded-repo-root>\
-        &agent=<claude-or-codex>&handover=<url-encoded-temp-path>${profile_query}${mission_query}"
+        &agent=<claude-or-codex>&handover=<path-printed-by-mktemp>${launch_query}${profile_query}${mission_query}"
            ```
            Nirux moves the handover file into the worktree on launch; no manual cleanup is needed.
 
@@ -245,7 +257,7 @@ extension NiruxShellView {
 
     // MARK: - Show-Code Skill
 
-    private static let showCodeSkillContent = """
+    static let showCodeSkillContent = """
         ---
         name: nirux-show-code
         description: >
@@ -281,12 +293,12 @@ extension NiruxShellView {
 
         1. **Locate the code** with Grep/Read: absolute file path, start line, and end
            line of the relevant snippet. Verify the file exists (`[ -f "$path" ]`) —
-           Nirux silently ignores requests for missing files, so a bad path would
-           leave the user staring at nothing.
+           Nirux refuses requests for missing files, so a bad path would leave
+           the user with an error instead of the code.
         2. **Open it in the editor**:
            ```bash
            encoded=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$abs_path")
-           open "nirux://open-editor?file=${encoded}&line=<start>&endLine=<end>&workspace=$NIRUX_WORKSPACE_ID"
+           open "nirux://open-editor?file=${encoded}&line=<start>&endLine=<end>&workspace=$NIRUX_WORKSPACE_ID&launch=${NIRUX_LAUNCH_ID:-}"
            ```
            - `file` is required and must be an **absolute** path, URL-encoded. Files
              larger than 5 MB are refused — quote the snippet in the reply instead.
@@ -295,6 +307,8 @@ extension NiruxShellView {
              both so the user sees the snippet boundaries.
            - `workspace=$NIRUX_WORKSPACE_ID` makes Nirux switch to this session's
              workspace before opening; keep it in the command.
+           - `launch=${NIRUX_LAUNCH_ID:-}` proves the request comes from a Nirux
+             terminal; without it Nirux asks the user to confirm. Keep it in the command.
         3. **Still answer in the terminal**, one line: what it is and where, e.g.
            `AgentHookCenter.swift:44 — parsing du workspaceID`. The editor shows the
            code; the reply gives the pointer.
