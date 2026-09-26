@@ -255,7 +255,8 @@ enum PRDetect {
         guard let result = BoundedProcess.run(
             executableURL: URL(fileURLWithPath: gitPath),
             arguments: arguments,
-            currentDirectoryURL: URL(fileURLWithPath: cwd)
+            currentDirectoryURL: URL(fileURLWithPath: cwd),
+            environment: GitDetect.readOnlyEnvironment
         ), result.terminationStatus == 0 else { return nil }
         return String(data: result.standardOutput, encoding: .utf8) ?? ""
     }

@@ -13,6 +13,7 @@ enum BoundedProcess {
         executableURL: URL,
         arguments: [String],
         currentDirectoryURL: URL,
+        environment: [String: String] = [:],
         timeout: TimeInterval = 30,
         captureStandardError: Bool = false
     ) -> BoundedProcessResult? {
@@ -24,6 +25,10 @@ enum BoundedProcess {
         process.executableURL = executableURL
         process.arguments = arguments
         process.currentDirectoryURL = currentDirectoryURL
+        if !environment.isEmpty {
+            process.environment = ProcessInfo.processInfo.environment
+                .merging(environment) { _, override in override }
+        }
 
         let output = Pipe()
         let errorOutput = captureStandardError ? Pipe() : nil
