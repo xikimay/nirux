@@ -58,11 +58,13 @@ final class PersistenceBackupTests: XCTestCase {
     }
 
     func testFailedSavesLeaveTheBackupsAlone() throws {
-        try XCTSkipIf(getuid() == 0, "root writes regardless of mode")
         XCTAssertTrue(Persistence.save(state("a"), now: date(day: 1)))
         XCTAssertTrue(Persistence.save(state("b"), now: date(day: 1)))
-        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
-        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path) }
+        // Only state.json refuses writes; the backups next to it still could
+        // be written, so nothing but the save order protects them.
+        let statePath = directory.appendingPathComponent("state.json").path
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: statePath)
+        defer { try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: statePath) }
 
         for attempt in 1...3 {
             XCTAssertFalse(Persistence.save(state("c\(attempt)"), now: date(day: 1)))
