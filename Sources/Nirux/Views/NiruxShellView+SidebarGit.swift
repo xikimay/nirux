@@ -490,6 +490,8 @@ extension NiruxShellView {
         let tiers = gitRefreshTiers
         gitRefresh.tick(tiers)
         refreshPRInfo(for: gitRefresh.pullRequestsDue(tiers))
+        // After the PR pass, which recomputes diff stats for what it touched.
+        refreshDiffStats(for: gitRefresh.diffStatsDue(tiers))
     }
 
     /// Focus, a focused-column switch or an unarchive: read now instead of
@@ -517,10 +519,7 @@ extension NiruxShellView {
             let cwd = workspace.focusedWorkingDirectory
             guard let observation = workspace.beginPullRequestObservation(for: requestedContext) else { continue }
             gitRefresh.notePullRequestRefresh(workspace)
-            let diffObservation = workspace.beginDiffStatsObservation(
-                at: cwd,
-                for: requestedContext
-            )
+            startDiffStatsRefresh(for: workspace, at: cwd, context: requestedContext)
             PRDetect.fetchAsync(branch: branch, cwd: cwd) { [weak self, weak workspace] result in
                 guard let workspace else { return }
                 guard !workspace.isInactive else {
@@ -550,15 +549,29 @@ extension NiruxShellView {
                     self?.scheduleMetadataRefresh()
                 }
             }
-            guard let diffObservation else { continue }
-            PRDetect.diffStatsAsync(cwd: cwd) { [weak self, weak workspace] result in
-                guard let workspace, !workspace.isInactive,
-                      workspace.applyDiffStatsObservation(
-                          result,
-                          observation: diffObservation
-                      ) else { return }
-                self?.scheduleMetadataRefresh()
-            }
+        }
+    }
+
+    /// `git diff --shortstat` alone, between PR refreshes: the dirty bit
+    /// does not move while an agent keeps editing a dirty tree.
+    func refreshDiffStats(for candidates: [WorkspaceState]) {
+        for workspace in candidates {
+            guard PRDetect.shouldRefresh(
+                isInactive: workspace.isInactive,
+                branch: workspace.gitBranch
+            ), let context = workspace.gitContext else { continue }
+            startDiffStatsRefresh(for: workspace, at: workspace.focusedWorkingDirectory, context: context)
+        }
+    }
+
+    private func startDiffStatsRefresh(for workspace: WorkspaceState, at cwd: String, context: GitContext) {
+        guard let observation = workspace.beginDiffStatsObservation(at: cwd, for: context) else { return }
+        gitRefresh.noteDiffStatsRefresh(workspace)
+        PRDetect.diffStatsAsync(cwd: cwd) { [weak self, weak workspace] result in
+            guard let workspace, !workspace.isInactive,
+                  workspace.applyDiffStatsObservation(result, observation: observation)
+            else { return }
+            self?.scheduleMetadataRefresh()
         }
     }
 

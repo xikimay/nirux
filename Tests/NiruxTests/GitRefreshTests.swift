@@ -1,7 +1,8 @@
-import CoreServices
 import XCTest
 @testable import Nirux
 
+/// Refresh scheduling: the git and pull-request policies and the
+/// per-workspace coordinator, driven by an injected clock.
 @MainActor
 final class GitRefreshTests: XCTestCase {
     // MARK: - GitRefreshPolicy
@@ -26,6 +27,22 @@ final class GitRefreshTests: XCTestCase {
             lastRefresh: 0,
             now: 86_400
         ))
+    }
+
+    func testArchivedWorkspaceWithoutContextIsRetriedSlowly() {
+        func isDue(hasContext: Bool, after elapsed: TimeInterval) -> Bool {
+            GitRefreshPolicy.isDue(
+                tier: .archived,
+                pendingChange: nil,
+                workingDirectoryChanged: false,
+                lastRefresh: 0,
+                hasContext: hasContext,
+                now: elapsed
+            )
+        }
+        XCTAssertFalse(isDue(hasContext: false, after: 119))
+        XCTAssertTrue(isDue(hasContext: false, after: 120))
+        XCTAssertFalse(isDue(hasContext: true, after: 86_400))
     }
 
     func testFocusedThrottlesFollowTheKindOfChange() {
@@ -65,6 +82,19 @@ final class GitRefreshTests: XCTestCase {
         ))
     }
 
+    func testDiffStatsFollowChangesAtTheTierCadence() {
+        func isDue(_ tier: GitRefreshTier, changed: Bool, last: TimeInterval?, now: TimeInterval) -> Bool {
+            GitRefreshPolicy.isDiffStatsDue(tier: tier, changedSinceLastRefresh: changed, lastRefresh: last, now: now)
+        }
+        XCTAssertFalse(isDue(.focused, changed: false, last: nil, now: 0))
+        XCTAssertTrue(isDue(.focused, changed: true, last: nil, now: 0))
+        XCTAssertFalse(isDue(.focused, changed: true, last: 0, now: 9))
+        XCTAssertTrue(isDue(.focused, changed: true, last: 0, now: 10))
+        XCTAssertFalse(isDue(.background, changed: true, last: 0, now: 59))
+        XCTAssertTrue(isDue(.background, changed: true, last: 0, now: 60))
+        XCTAssertFalse(isDue(.archived, changed: true, last: nil, now: 0))
+    }
+
     // MARK: - PullRequestRefreshPolicy
 
     func testPullRequestCadenceTracksPendingChecksAndTier() {
@@ -85,151 +115,29 @@ final class GitRefreshTests: XCTestCase {
         XCTAssertTrue(PullRequestRefreshPolicy.isDue(tier: .focused, pullRequest: settled, lastRefresh: 0, now: 120))
     }
 
-    // MARK: - GitRepositoryLayout
-
-    func testLayoutResolvesPlainCheckoutAndLinkedWorktree() throws {
-        let root = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let main = root.appendingPathComponent("main", isDirectory: true)
-        let linked = root.appendingPathComponent("linked", isDirectory: true)
-        try FileManager.default.createDirectory(at: main, withIntermediateDirectories: true)
-        try initializeRepository(at: main)
-        try git(["worktree", "add", "-q", "-b", "feature/x", linked.path], at: main)
-
-        let mainPath = GitRepositoryLayout.canonicalPath(main.path)
-        let mainLayout = GitRepositoryLayout.resolve(worktreeRoot: main.path)
-        XCTAssertEqual(mainLayout.worktreeRoot, mainPath)
-        XCTAssertEqual(mainLayout.gitDirectory, mainPath + "/.git")
-        XCTAssertEqual(mainLayout.commonDirectory, mainPath + "/.git")
-        XCTAssertEqual(mainLayout.watchedPaths, [mainPath])
-
-        let linkedLayout = GitRepositoryLayout.resolve(worktreeRoot: linked.path)
-        XCTAssertEqual(linkedLayout.worktreeRoot, GitRepositoryLayout.canonicalPath(linked.path))
-        XCTAssertEqual(linkedLayout.gitDirectory, mainPath + "/.git/worktrees/linked")
-        XCTAssertEqual(linkedLayout.commonDirectory, mainPath + "/.git")
-        // The private git dir lives inside the common one: one watch covers both.
-        XCTAssertEqual(linkedLayout.watchedPaths, [linkedLayout.worktreeRoot, mainPath + "/.git"])
-
-        let plain = GitRepositoryLayout.resolve(worktreeRoot: root.path)
-        XCTAssertNil(plain.gitDirectory)
-        XCTAssertNil(plain.commonDirectory)
-    }
-
-    func testCanonicalPathKeepsPrivatePrefixReportedByFSEvents() {
-        XCTAssertEqual(GitRepositoryLayout.canonicalPath("/tmp"), "/private/tmp")
-    }
-
-    func testPlainCheckoutClassification() {
-        let layout = GitRepositoryLayout(
-            worktreeRoot: "/repo",
-            gitDirectory: "/repo/.git",
-            commonDirectory: "/repo/.git"
-        )
-        func classify(_ path: String, branch: String? = "main") -> GitRepositoryChange? {
-            layout.classify(path, branch: branch)
+    func testRunningChecksKeepTheRollupPending() {
+        func ciStatus(_ rollup: [[String: Any]]) -> String? {
+            PRDetect.pullRequestInfo(from: [
+                "number": 1, "state": "OPEN", "url": "https://example.test/pull/1",
+                "statusCheckRollup": rollup
+            ]).ciStatus
         }
-        XCTAssertEqual(classify("/repo/Sources/app.swift"), .worktree)
-        XCTAssertEqual(classify("/repo/.git/HEAD"), .metadata)
-        XCTAssertEqual(classify("/repo/.git/index"), .metadata)
-        XCTAssertEqual(classify("/repo/.git/refs/heads/main"), .metadata)
-        XCTAssertEqual(classify("/repo/.git/packed-refs"), .metadata)
-        XCTAssertEqual(classify("/repo/.git/config"), .metadata)
-        XCTAssertNil(classify("/repo/.git/refs/heads/other"))
-        XCTAssertNil(classify("/repo/.git/refs/remotes/origin/main"))
-        XCTAssertNil(classify("/repo/.git/refs/tags/v1"))
-        XCTAssertNil(classify("/repo/.git/objects/ab/cdef"))
-        XCTAssertNil(classify("/repo/.git/logs/HEAD"))
-        XCTAssertNil(classify("/repo/.git/index.lock"))
-        XCTAssertNil(classify("/repo/.git/FETCH_HEAD"))
-        XCTAssertNil(classify("/repo/.git/worktrees/other/HEAD"))
-        XCTAssertEqual(classify("/repo/.git/refs/heads/feature/x", branch: "feature/x"), .metadata)
-        XCTAssertEqual(classify("/repo/.git/refs/heads/anything", branch: nil), .metadata)
-        XCTAssertEqual(classify("/repository-sibling/file"), .worktree)
-    }
-
-    func testLinkedWorktreeIgnoresTheMainCheckoutsHeadAndIndex() {
-        let layout = GitRepositoryLayout(
-            worktreeRoot: "/wt",
-            gitDirectory: "/repo/.git/worktrees/wt",
-            commonDirectory: "/repo/.git"
-        )
-        func classify(_ path: String) -> GitRepositoryChange? {
-            layout.classify(path, branch: "feature/x")
-        }
-        XCTAssertEqual(classify("/wt/README.md"), .worktree)
-        XCTAssertEqual(classify("/repo/.git/worktrees/wt/HEAD"), .metadata)
-        XCTAssertEqual(classify("/repo/.git/worktrees/wt/index"), .metadata)
-        XCTAssertEqual(classify("/repo/.git/refs/heads/feature/x"), .metadata)
-        XCTAssertEqual(classify("/repo/.git/config"), .metadata)
-        XCTAssertNil(classify("/repo/.git/HEAD"))
-        XCTAssertNil(classify("/repo/.git/index"))
-        XCTAssertNil(classify("/repo/.git/worktrees/other/index"))
-        XCTAssertNil(classify("/repo/.git/refs/heads/main"))
-    }
-
-    func testDroppedOrRescannedEventsCountAsMetadata() {
-        let layout = GitRepositoryLayout(worktreeRoot: "/repo", gitDirectory: nil, commonDirectory: nil)
-        let rescan = FSEventStreamEventFlags(kFSEventStreamEventFlagMustScanSubDirs)
-        XCTAssertEqual(
-            GitRepositoryWatcher.change(for: "/repo/.git/objects/x", flags: rescan, layout: layout, branch: nil),
-            .metadata
-        )
-    }
-
-    // MARK: - GitRepositoryWatcher
-
-    func testWatcherReportsWorktreeAndMetadataChanges() throws {
-        let root = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
-        try initializeRepository(at: root)
-        let layout = GitRepositoryLayout.resolve(worktreeRoot: root.path)
-        var changes: [GitRepositoryChange] = []
-        let watcher = try XCTUnwrap(GitRepositoryWatcher(layout: layout, branch: nil, latency: 0.05) {
-            changes.append($0)
-        })
-        defer { watcher.stop() }
-        // Let the stream settle so setup writes are not reported.
-        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
-        changes.removeAll()
-
-        try "edited\n".write(to: root.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
-        XCTAssertTrue(waitUntil { changes.contains(.worktree) }, "no worktree event: \(changes)")
-
-        try git(["add", "tracked.txt"], at: root)
-        XCTAssertTrue(waitUntil { changes.contains(.metadata) }, "no metadata event: \(changes)")
-    }
-
-    // MARK: - Read-only git observation
-
-    func testObservationDoesNotRewriteTheIndex() throws {
-        let root = try makeTemporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: root) }
-        try initializeRepository(at: root)
-        let index = root.appendingPathComponent(".git/index").path
-        // Stale stat data: plain `git status` would refresh and rewrite the index.
-        try FileManager.default.setAttributes(
-            [.modificationDate: Date().addingTimeInterval(60)],
-            ofItemAtPath: root.appendingPathComponent("tracked.txt").path
-        )
-        let before = try inode(of: index)
-
-        guard case .observed(let context) = GitDetect.observe(at: root.path) else {
-            return XCTFail("expected an observed repository")
-        }
-        XCTAssertFalse(context.identity.isDirty)
-        XCTAssertEqual(try inode(of: index), before, "GitDetect rewrote .git/index")
-
-        try git(["status", "--porcelain"], at: root)
-        XCTAssertNotEqual(try inode(of: index), before, "precondition: plain git status refreshes the index")
+        let passed: [String: Any] = ["status": "COMPLETED", "conclusion": "SUCCESS"]
+        XCTAssertEqual(ciStatus([passed, ["status": "IN_PROGRESS", "conclusion": ""]]), "PENDING")
+        XCTAssertEqual(ciStatus([passed, ["status": "COMPLETED", "conclusion": "NEUTRAL"]]), "SUCCESS")
+        XCTAssertEqual(ciStatus([["status": "COMPLETED", "conclusion": "FAILURE"], ["status": "QUEUED", "conclusion": ""]]), "FAILURE")
+        XCTAssertEqual(ciStatus([passed, ["state": "PENDING"]]), "PENDING")
+        XCTAssertEqual(ciStatus([passed, ["state": "SUCCESS"]]), "SUCCESS")
+        XCTAssertNil(ciStatus([]))
     }
 
     // MARK: - GitRefreshCoordinator
 
     func testCoordinatorReadsEachWorkspaceOnceThenFollowsItsTier() {
         let harness = CoordinatorHarness()
-        let focused = WorkspaceState(title: "focused", cwd: NSTemporaryDirectory())
-        let background = WorkspaceState(title: "background", cwd: NSTemporaryDirectory())
-        let archived = WorkspaceState(title: "archived", cwd: NSTemporaryDirectory())
+        let focused = makeWorkspace("focused")
+        let background = makeWorkspace("background")
+        let archived = makeWorkspace("archived")
         let tiers: [(workspace: WorkspaceState, tier: GitRefreshTier)] = [
             (focused, .focused), (background, .background), (archived, .archived)
         ]
@@ -314,6 +222,28 @@ final class GitRefreshTests: XCTestCase {
         XCTAssertEqual(harness.reads, ["archived", "archived"])
     }
 
+    func testArchivedWorkspaceIsRetriedWhileItHasNoContext() {
+        let harness = CoordinatorHarness()
+        let archived = WorkspaceState(title: "archived", cwd: NSTemporaryDirectory())
+        let tiers: [(workspace: WorkspaceState, tier: GitRefreshTier)] = [(archived, .archived)]
+        harness.coordinator.tick(tiers)
+        harness.advance(119)
+        harness.coordinator.tick(tiers)
+        XCTAssertEqual(harness.reads.count, 1)
+        harness.advance(1)
+        harness.coordinator.tick(tiers)
+        XCTAssertEqual(harness.reads.count, 2)
+
+        archived.updateGitContext(GitContext(
+            branch: "main",
+            identity: GitIdentity(repositoryRoot: NSTemporaryDirectory(), head: "abc")
+        ))
+        harness.advance(1_000)
+        harness.coordinator.tick(tiers)
+        XCTAssertEqual(harness.reads.count, 2)
+        XCTAssertEqual(harness.watcherAttempts, 0, "archived workspaces are never watched")
+    }
+
     func testDroppedWorkspaceStopsBeingFollowed() {
         let harness = CoordinatorHarness()
         let dropped = WorkspaceState(title: "dropped", cwd: NSTemporaryDirectory())
@@ -322,6 +252,65 @@ final class GitRefreshTests: XCTestCase {
         harness.advance(60)
         harness.coordinator.noteChange(.metadata, for: dropped)
         XCTAssertEqual(harness.reads, ["dropped"])
+    }
+
+    func testFailedWatcherIsRetriedWithBackoff() {
+        let harness = CoordinatorHarness()
+        let focused = makeWorkspace("focused")
+        let tiers: [(workspace: WorkspaceState, tier: GitRefreshTier)] = [(focused, .focused)]
+        harness.coordinator.tick(tiers)
+        XCTAssertEqual(harness.watcherAttempts, 1)
+        harness.advance(29)
+        harness.coordinator.tick(tiers)
+        XCTAssertEqual(harness.watcherAttempts, 1)
+        harness.advance(1)
+        harness.coordinator.tick(tiers)
+        XCTAssertEqual(harness.watcherAttempts, 2)
+    }
+
+    func testNewWatcherReadsOnceMoreToCoverItsStartGap() throws {
+        let root = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let harness = CoordinatorHarness()
+        harness.makesRealWatchers = true
+        let focused = WorkspaceState(title: "focused", cwd: root.path)
+        let tiers: [(workspace: WorkspaceState, tier: GitRefreshTier)] = [(focused, .focused)]
+        harness.coordinator.tick(tiers)
+        XCTAssertEqual(harness.reads, ["focused"])
+
+        // The read's result names the repository: the watcher starts after it.
+        focused.updateGitContext(GitContext(
+            branch: "main",
+            identity: GitIdentity(repositoryRoot: root.path, head: "abc")
+        ))
+        harness.coordinator.gitContextChanged(focused)
+        XCTAssertEqual(harness.watcherAttempts, 1)
+        harness.advance(1)
+        harness.coordinator.tick(tiers)
+        XCTAssertEqual(harness.reads, ["focused", "focused"])
+        harness.advance(1)
+        harness.coordinator.tick(tiers)
+        XCTAssertEqual(harness.reads.count, 2)
+        harness.coordinator.tick([])
+    }
+
+    func testDiffStatsAreRefreshedOnlyAfterChanges() {
+        let harness = CoordinatorHarness()
+        let focused = makeWorkspace("focused")
+        let tiers: [(workspace: WorkspaceState, tier: GitRefreshTier)] = [(focused, .focused)]
+        harness.coordinator.tick(tiers)
+        XCTAssertTrue(harness.coordinator.diffStatsDue(tiers).isEmpty)
+
+        harness.coordinator.noteChange(.worktree, for: focused)
+        XCTAssertEqual(harness.coordinator.diffStatsDue(tiers).map(\.title), ["focused"])
+        harness.coordinator.noteDiffStatsRefresh(focused)
+        XCTAssertTrue(harness.coordinator.diffStatsDue(tiers).isEmpty)
+
+        harness.advance(5)
+        harness.coordinator.noteChange(.worktree, for: focused)
+        XCTAssertTrue(harness.coordinator.diffStatsDue(tiers).isEmpty, "focused diff cadence is 10 s")
+        harness.advance(5)
+        XCTAssertEqual(harness.coordinator.diffStatsDue(tiers).map(\.title), ["focused"])
     }
 
     func testPullRequestsDueFollowTierAndLastRefresh() {
@@ -349,7 +338,42 @@ final class GitRefreshTests: XCTestCase {
         XCTAssertEqual(harness.coordinator.pullRequestsDue(tiers).map(\.title), ["focused", "background"])
     }
 
+    func testPushFollowsThePullRequestClosely() {
+        let harness = CoordinatorHarness()
+        let focused = makeWorkspace("focused")
+        let tiers: [(workspace: WorkspaceState, tier: GitRefreshTier)] = [(focused, .focused)]
+        harness.coordinator.tick(tiers)
+        harness.coordinator.notePullRequestRefresh(focused)
+        XCTAssertTrue(harness.coordinator.pullRequestsDue(tiers).isEmpty)
+
+        harness.coordinator.noteChange(.remoteBranch, for: focused)
+        XCTAssertEqual(harness.reads, ["focused"], "a push does not change the local context")
+        harness.advance(9)
+        XCTAssertTrue(harness.coordinator.pullRequestsDue(tiers).isEmpty, "GitHub needs a moment")
+        harness.advance(1)
+        XCTAssertEqual(harness.coordinator.pullRequestsDue(tiers).map(\.title), ["focused"])
+
+        harness.coordinator.notePullRequestRefresh(focused)
+        harness.advance(30)
+        XCTAssertEqual(harness.coordinator.pullRequestsDue(tiers).map(\.title), ["focused"])
+
+        harness.advance(300)
+        harness.coordinator.notePullRequestRefresh(focused)
+        harness.advance(30)
+        XCTAssertTrue(harness.coordinator.pullRequestsDue(tiers).isEmpty, "follow-up window is over")
+        XCTAssertEqual(PullRequestRefreshPolicy.interval(for: .background, pullRequest: nil, recentlyPushed: true), 120)
+    }
+
     // MARK: - Helpers
+
+    private func makeWorkspace(_ title: String) -> WorkspaceState {
+        let workspace = WorkspaceState(title: title, cwd: NSTemporaryDirectory())
+        workspace.updateGitContext(GitContext(
+            branch: "feature/\(title)",
+            identity: GitIdentity(repositoryRoot: "/repo/\(title)", head: "abc")
+        ))
+        return workspace
+    }
 
     @MainActor
     private final class CoordinatorHarness {
@@ -357,17 +381,26 @@ final class GitRefreshTests: XCTestCase {
         var reads: [String] = []
         var attempts = 0
         var acceptsReads = true
+        var watcherAttempts = 0
+        var makesRealWatchers = false
         private(set) var coordinator: GitRefreshCoordinator!
 
         init() {
             coordinator = GitRefreshCoordinator(
                 clock: { [unowned self] in self.now },
-                makeWatcher: { _, _, _ in nil },
+                makeWatcher: { [unowned self] layout, branch, onChange in
+                    self.watcherAttempts += 1
+                    guard self.makesRealWatchers else { return nil }
+                    return GitRepositoryWatcher(layout: layout, branch: branch, onChange: onChange)
+                },
                 startObservation: { [unowned self] workspace, _ in
                     self.attempts += 1
                     guard self.acceptsReads else { return false }
                     self.reads.append(workspace.title)
                     return true
+                },
+                resolveLayout: { root, completion in
+                    completion(GitRepositoryLayout(worktreeRoot: root, gitDirectory: nil, commonDirectory: nil))
                 }
             )
         }
@@ -398,47 +431,5 @@ final class GitRefreshTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
-    }
-
-    private func initializeRepository(at directory: URL) throws {
-        try git(["init", "-q"], at: directory)
-        try "context\n".write(
-            to: directory.appendingPathComponent("tracked.txt"),
-            atomically: true,
-            encoding: .utf8
-        )
-        try git(["add", "tracked.txt"], at: directory)
-        try git([
-            "-c", "user.name=Nirux Tests",
-            "-c", "user.email=nirux@example.test",
-            "commit", "-qm", "initial"
-        ], at: directory)
-    }
-
-    private func git(_ arguments: [String], at directory: URL) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = arguments
-        process.currentDirectoryURL = directory
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw NSError(domain: "GitRefreshTests.Git", code: Int(process.terminationStatus))
-        }
-    }
-
-    private func inode(of path: String) throws -> UInt64 {
-        let attributes = try FileManager.default.attributesOfItem(atPath: path)
-        return try XCTUnwrap((attributes[.systemFileNumber] as? NSNumber)?.uint64Value)
-    }
-
-    private func waitUntil(timeout: TimeInterval = 10, _ condition: () -> Bool) -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        }
-        return condition()
     }
 }

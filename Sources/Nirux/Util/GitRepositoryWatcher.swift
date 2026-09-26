@@ -8,6 +8,10 @@ enum GitRepositoryChange: Int, Comparable, Sendable {
     /// HEAD, the index, the checked-out branch ref or the repository config
     /// changed: branch, head, dirty bit or upstream may all have moved.
     case metadata
+    /// The remote-tracking ref of the checked-out branch moved (a push or a
+    /// fetch): the local context is unchanged, but its pull request and CI
+    /// status are about to change on GitHub.
+    case remoteBranch
 
     static func < (lhs: GitRepositoryChange, rhs: GitRepositoryChange) -> Bool {
         lhs.rawValue < rhs.rawValue
@@ -39,7 +43,9 @@ struct GitRepositoryLayout: Equatable, Sendable {
             return GitRepositoryLayout(worktreeRoot: root, gitDirectory: nil, commonDirectory: nil)
         }
         if isDirectory.boolValue {
-            return GitRepositoryLayout(worktreeRoot: root, gitDirectory: dotGit, commonDirectory: dotGit)
+            // FSEvents reports resolved paths: follow a symlinked `.git`.
+            let gitDirectory = canonicalPath(dotGit)
+            return GitRepositoryLayout(worktreeRoot: root, gitDirectory: gitDirectory, commonDirectory: gitDirectory)
         }
         // Linked worktree or submodule: `.git` is a "gitdir: <path>" file,
         // and a linked worktree's git dir names the shared one in `commondir`.
@@ -72,8 +78,11 @@ struct GitRepositoryLayout: Equatable, Sendable {
 
     /// Classify one event path. `nil` means the event cannot change this
     /// checkout's git context (object writes, reflogs, other worktrees'
-    /// HEAD/index, other branches' refs, lock files).
+    /// HEAD/index, other branches' refs, lock files) or is written by git's
+    /// own reads (fsmonitor/watchman cookies), which would otherwise make
+    /// every read schedule the next one.
     func classify(_ path: String, branch: String?) -> GitRepositoryChange? {
+        if (path as NSString).lastPathComponent.hasPrefix(".watchman-cookie-") { return nil }
         if let gitDirectory, let entry = Self.relativePath(path, in: gitDirectory) {
             let isShared = gitDirectory == commonDirectory
             return Self.classifyGitEntry(entry, branch: branch, ownsCheckout: true, ownsSharedState: isShared)
@@ -94,26 +103,45 @@ struct GitRepositoryLayout: Equatable, Sendable {
         if entry.hasSuffix(".lock") { return nil }
         let components = entry.split(separator: "/", omittingEmptySubsequences: true)
         guard let first = components.first else { return .metadata }
+        if first.hasPrefix("fsmonitor--daemon") { return nil }
         switch first {
         case "objects", "logs", "hooks", "lfs", "modules", "worktrees",
              "FETCH_HEAD", "ORIG_HEAD", "COMMIT_EDITMSG", "gc.log", "gc.pid":
             return nil
         case "refs":
             guard ownsSharedState else { return nil }
-            guard components.count > 2, components[1] == "heads" else {
-                // A bare `refs` or `refs/heads` directory event may hide a
-                // branch update; tags, remotes and notes never matter.
-                return components.count == 1 || (components.count == 2 && components[1] == "heads")
-                    ? .metadata : nil
-            }
-            guard let branch else { return .metadata }
-            return components.dropFirst(2).joined(separator: "/") == branch ? .metadata : nil
+            return classifyRef(components, branch: branch)
         case "packed-refs", "config", "info":
             return ownsSharedState ? .metadata : nil
         default:
             // HEAD, index, config.worktree, rebase/merge state: private to
             // the checkout that owns this git dir.
             return ownsCheckout ? .metadata : nil
+        }
+    }
+
+    private static func classifyRef(_ components: [Substring], branch: String?) -> GitRepositoryChange? {
+        // `symbolic-ref --short` says "heads/main" when a tag is also named
+        // "main": accept both spellings of the checked-out branch.
+        func isBranch(_ name: [Substring]) -> Bool {
+            guard let branch else { return false }
+            let joined = name.joined(separator: "/")
+            return joined == branch || "heads/" + joined == branch
+        }
+        guard components.count > 2 else {
+            // A bare `refs` or `refs/heads` directory event may hide a
+            // branch update.
+            return components.count == 1 || components[1] == "heads" ? .metadata : nil
+        }
+        switch components[1] {
+        case "heads":
+            return branch == nil || isBranch(Array(components.dropFirst(2))) ? .metadata : nil
+        case "remotes":
+            // refs/remotes/<remote>/<branch>; tags, notes and other
+            // branches never matter.
+            return components.count > 3 && isBranch(Array(components.dropFirst(3))) ? .remoteBranch : nil
+        default:
+            return nil
         }
     }
 
@@ -153,7 +181,8 @@ struct GitRepositoryLayout: Equatable, Sendable {
 }
 
 /// FSEvents stream over one repository layout. Batches are classified on
-/// the main queue and forwarded as the strongest change they contain.
+/// the main queue and forwarded as the strongest local change they contain,
+/// plus `.remoteBranch` when the branch's remote-tracking ref moved.
 @MainActor
 final class GitRepositoryWatcher {
     let layout: GitRepositoryLayout
@@ -187,15 +216,8 @@ final class GitRepositoryWatcher {
         var context = FSEventStreamContext(
             version: 0,
             info: Unmanaged.passUnretained(self).toOpaque(),
-            retain: { info in
-                guard let info else { return nil }
-                _ = Unmanaged<GitRepositoryWatcher>.fromOpaque(info).retain()
-                return info
-            },
-            release: { info in
-                guard let info else { return }
-                Unmanaged<GitRepositoryWatcher>.fromOpaque(info).release()
-            },
+            retain: retainWatcher,
+            release: releaseWatcher,
             copyDescription: nil
         )
         let flags = FSEventStreamCreateFlags(
@@ -206,16 +228,7 @@ final class GitRepositoryWatcher {
         )
         guard let stream = FSEventStreamCreate(
             kCFAllocatorDefault,
-            { _, info, count, eventPaths, eventFlags, _ in
-                guard let info else { return }
-                let watcher = Unmanaged<GitRepositoryWatcher>.fromOpaque(info).takeUnretainedValue()
-                let paths = Unmanaged<CFArray>.fromOpaque(eventPaths)
-                    .takeUnretainedValue() as? [String] ?? []
-                let flags = Array(UnsafeBufferPointer(start: eventFlags, count: count))
-                MainActor.assumeIsolated {
-                    watcher.handle(paths: paths, flags: flags)
-                }
-            },
+            watcherCallback,
             &context,
             layout.watchedPaths as CFArray,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
@@ -245,20 +258,58 @@ final class GitRepositoryWatcher {
         layout: GitRepositoryLayout,
         branch: String?
     ) -> GitRepositoryChange? {
+        if flags & FSEventStreamEventFlags(kFSEventStreamEventFlagHistoryDone) != 0 { return nil }
         if flags & rescanFlags != 0 { return .metadata }
         return layout.classify(path, branch: branch)
     }
 
-    private func handle(paths: [String], flags: [FSEventStreamEventFlags]) {
+    fileprivate func handle(paths: [String], flags: [FSEventStreamEventFlags]) {
         guard stream != nil else { return }
         var strongest: GitRepositoryChange?
+        var remoteBranchMoved = false
         for (path, flag) in zip(paths, flags) {
-            guard let change = Self.change(for: path, flags: flag, layout: layout, branch: branch) else {
-                continue
+            switch Self.change(for: path, flags: flag, layout: layout, branch: branch) {
+            case nil: continue
+            case .remoteBranch: remoteBranchMoved = true
+            case let change?: strongest = max(strongest ?? change, change)
             }
-            strongest = max(strongest ?? change, change)
-            if strongest == .metadata { break }
+            if strongest == .metadata, remoteBranchMoved { break }
         }
+        if remoteBranchMoved { onChange(.remoteBranch) }
         if let strongest { onChange(strongest) }
+    }
+}
+
+// FSEvents callbacks are plain C functions kept nonisolated: CoreServices
+// decides which thread calls them. The stream is scheduled on the main
+// queue, which is what makes `assumeIsolated` hold for events.
+
+private func retainWatcher(_ info: UnsafeRawPointer?) -> UnsafeRawPointer? {
+    guard let info else { return nil }
+    _ = Unmanaged<AnyObject>.fromOpaque(info).retain()
+    return info
+}
+
+private func releaseWatcher(_ info: UnsafeRawPointer?) {
+    guard let info else { return }
+    Unmanaged<AnyObject>.fromOpaque(info).release()
+}
+
+// swiftlint:disable:next function_parameter_count
+private func watcherCallback(
+    _ stream: ConstFSEventStreamRef,
+    _ info: UnsafeMutableRawPointer?,
+    _ count: Int,
+    _ eventPaths: UnsafeMutableRawPointer,
+    _ eventFlags: UnsafePointer<FSEventStreamEventFlags>,
+    _ eventIds: UnsafePointer<FSEventStreamEventId>
+) {
+    guard let info else { return }
+    let paths = Unmanaged<CFArray>.fromOpaque(eventPaths).takeUnretainedValue() as? [String] ?? []
+    let flags = Array(UnsafeBufferPointer(start: eventFlags, count: count))
+    nonisolated(unsafe) let watcherPointer = info
+    MainActor.assumeIsolated {
+        Unmanaged<GitRepositoryWatcher>.fromOpaque(watcherPointer).takeUnretainedValue()
+            .handle(paths: paths, flags: flags)
     }
 }
