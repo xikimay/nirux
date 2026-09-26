@@ -3,6 +3,7 @@ import XCTest
 
 final class AgentHookInstallerTests: XCTestCase {
     private var home: URL!
+    private let niruxEnv = ["NIRUX_AGENT_UUID": "uuid-1"]
 
     override func setUp() {
         super.setUp()
@@ -24,6 +25,11 @@ final class AgentHookInstallerTests: XCTestCase {
 
     private func read(_ relative: String) -> String {
         (try? String(contentsOf: home.appendingPathComponent(relative), encoding: .utf8)) ?? ""
+    }
+
+    private func modificationDate(_ relative: String) throws -> Date {
+        let path = home.appendingPathComponent(relative).path
+        return try XCTUnwrap(FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date)
     }
 
     private func symlink(_ relative: String, to destination: String) throws {
@@ -60,31 +66,40 @@ final class AgentHookInstallerTests: XCTestCase {
         let url = home.appendingPathComponent("My Apps/Ni'rux")
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let output = AgentHookInstaller.shellQuoted(receiverOutput.path)
         try """
         #!/bin/sh
-        { printf '%s\\n' "$@"; echo "ppid=$PPID"; cat; } > '\(receiverOutput.path)'
+        { printf '%s\\n' "$@"; echo "ppid=$PPID"; cat; } > \(output)
         """.write(to: url, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
         return url.path
     }
 
     /// Runs argv the way the agents do (no shell of our own), with `env` as
-    /// the whole environment and `stdin` from a file. Returns the exit status.
-    private func run(_ argv: [String], env: [String: String], stdin: String = "") throws -> Int32 {
+    /// the whole environment and `stdin` from a file. Returns the exit
+    /// status, or -1 if the process hangs.
+    private func runHook(_ argv: [String], env: [String: String], stdin: String = "") throws -> Int32 {
         let input = home.appendingPathComponent("stdin-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         try stdin.write(to: input, atomically: true, encoding: .utf8)
+        let inputHandle = try FileHandle(forReadingFrom: input)
+        defer { try? inputHandle.close() }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: argv[0])
         process.arguments = Array(argv.dropFirst())
         process.environment = env.merging(["PATH": "/usr/bin:/bin"]) { current, _ in current }
-        process.standardInput = try FileHandle(forReadingFrom: input)
+        process.standardInput = inputHandle
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
         try process.run()
-        process.waitUntilExit()
+        guard exited.wait(timeout: .now() + 20) == .success else {
+            process.terminate()
+            XCTFail("\(argv) hung")
+            return -1
+        }
         return process.terminationStatus
     }
-
-    private let niruxEnv = ["NIRUX_AGENT_UUID": "uuid-1"]
 
     // MARK: - Claude
 
@@ -103,7 +118,8 @@ final class AgentHookInstallerTests: XCTestCase {
     func testClaudeHookCommandFormat() {
         XCTAssertEqual(
             AgentHookInstaller.claudeHookCommand(executablePath: "/Apps/Nirux"),
-            #"if [ -n "$NIRUX_AGENT_UUID" ] && [ -x '/Apps/Nirux' ]; then '/Apps/Nirux' --hook claude; fi"#
+            #"if [ -n "$NIRUX_AGENT_UUID" ] && [ -x '/Apps/Nirux' ]; then '/Apps/Nirux' --hook claude; "#
+                + "else /bin/cat >/dev/null; fi"
         )
     }
 
@@ -112,15 +128,15 @@ final class AgentHookInstallerTests: XCTestCase {
         let command = AgentHookInstaller.claudeHookCommand(executablePath: receiver)
         let payload = #"{"hook_event_name":"Stop"}"#
 
-        XCTAssertEqual(try run(["/bin/sh", "-c", command], env: [:], stdin: payload), 0)
+        XCTAssertEqual(try runHook(["/bin/sh", "-c", command], env: [:], stdin: payload), 0)
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: receiverOutput.path),
             "outside Nirux the binary must not even launch"
         )
-        XCTAssertEqual(try run(["/bin/sh", "-c", command], env: ["NIRUX_AGENT_UUID": ""], stdin: payload), 0)
+        XCTAssertEqual(try runHook(["/bin/sh", "-c", command], env: ["NIRUX_AGENT_UUID": ""], stdin: payload), 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: receiverOutput.path))
 
-        XCTAssertEqual(try run(["/bin/sh", "-c", command], env: niruxEnv, stdin: payload), 0)
+        XCTAssertEqual(try runHook(["/bin/sh", "-c", command], env: niruxEnv, stdin: payload), 0)
         let output = try String(contentsOf: receiverOutput, encoding: .utf8)
         XCTAssertTrue(output.hasPrefix("--hook\nclaude\n"), output)
         XCTAssertTrue(output.hasSuffix(payload), "payload reaches the receiver on stdin")
@@ -129,7 +145,19 @@ final class AgentHookInstallerTests: XCTestCase {
     func testClaudeHookCommandIsSilentNoOpWhenBinaryMissing() throws {
         let command = AgentHookInstaller.claudeHookCommand(
             executablePath: home.appendingPathComponent("gone/Nirux").path)
-        XCTAssertEqual(try run(["/bin/sh", "-c", command], env: niruxEnv), 0)
+        XCTAssertEqual(try runHook(["/bin/sh", "-c", command], env: niruxEnv), 0)
+    }
+
+    func testClaudeHookCommandDrainsLargePayloadWhenSkipping() throws {
+        // Claude reports a hook that closes stdin before its payload is fully
+        // written (EPIPE) as failed. Past the 64 KB pipe buffer the writer
+        // blocks, so a skipping hook must still read everything: `head` dies
+        // of SIGPIPE (pipefail status 141) otherwise.
+        let command = AgentHookInstaller.claudeHookCommand(
+            executablePath: home.appendingPathComponent("gone/Nirux").path)
+        let pipeline = #"set -o pipefail; head -c 300000 /dev/zero | /bin/sh -c "$1""#
+        XCTAssertEqual(try runHook(["/bin/bash", "-c", pipeline, "_", command], env: [:]), 0, "outside Nirux")
+        XCTAssertEqual(try runHook(["/bin/bash", "-c", pipeline, "_", command], env: niruxEnv), 0, "binary missing")
     }
 
     func testClaudePreservesUserHooksAndRefreshesStalePath() {
@@ -164,10 +192,14 @@ final class AgentHookInstallerTests: XCTestCase {
         )
     }
 
-    func testClaudeReplacesUnguardedCommandFromOlderBuilds() {
-        let legacy = #"if [ -x \"/Apps/Nirux\" ]; then \"/Apps/Nirux\" --hook claude; fi"#
+    func testClaudeReplacesEveryOlderNiruxFormat() {
+        let legacy = [
+            #"\"/Apps/Nirux\" --hook claude"#,
+            #"if [ -x \"/Apps/Nirux\" ]; then \"/Apps/Nirux\" --hook claude; fi"#,
+            #"if [ -n \"$NIRUX_AGENT_UUID\" ] && [ -x '/Old/Nirux' ]; then '/Old/Nirux' --hook claude; fi"#
+        ].map { #"{"type": "command", "command": "\#($0)"}"# }
         let groups = AgentHookInstaller.claudeHookEvents.map {
-            #""\#($0)": [{"matcher": "", "hooks": [{"type": "command", "command": "\#(legacy)"}]}]"#
+            #""\#($0)": [{"matcher": "", "hooks": [\#(legacy.joined(separator: ", "))]}]"#
         }
         write(#"{"hooks": {\#(groups.joined(separator: ", "))}}"#, ".claude/settings.json")
 
@@ -182,18 +214,28 @@ final class AgentHookInstallerTests: XCTestCase {
         }
     }
 
+    func testClaudeKeepsOtherToolsHookClaudeCommands() {
+        write("""
+        {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "/usr/local/bin/othertool --hook claude"}]}]}}
+        """, ".claude/settings.json")
+        AgentHookInstaller.installClaudeHooks(executablePath: "/Apps/Nirux", home: home)
+        XCTAssertEqual(
+            hookCommands(claudeSettings(), event: "Stop"),
+            [
+                "/usr/local/bin/othertool --hook claude",
+                AgentHookInstaller.claudeHookCommand(executablePath: "/Apps/Nirux")
+            ]
+        )
+    }
+
     func testClaudeInstallIsIdempotent() throws {
         AgentHookInstaller.installClaudeHooks(executablePath: "/Apps/Nirux", home: home)
         let first = read(".claude/settings.json")
-        let settingsPath = home.appendingPathComponent(".claude/settings.json").path
-        let mtime1 = try XCTUnwrap(
-            FileManager.default.attributesOfItem(atPath: settingsPath)[.modificationDate] as? Date)
+        let mtime1 = try modificationDate(".claude/settings.json")
         Thread.sleep(forTimeInterval: 0.01)
         AgentHookInstaller.installClaudeHooks(executablePath: "/Apps/Nirux", home: home)
-        let mtime2 = try XCTUnwrap(
-            FileManager.default.attributesOfItem(atPath: settingsPath)[.modificationDate] as? Date)
         XCTAssertEqual(first, read(".claude/settings.json"))
-        XCTAssertEqual(mtime1, mtime2, "no rewrite when nothing changed")
+        XCTAssertEqual(mtime1, try modificationDate(".claude/settings.json"), "no rewrite when nothing changed")
     }
 
     func testClaudeOutputIsDeterministicWithUnescapedSlashes() throws {
@@ -214,6 +256,7 @@ final class AgentHookInstallerTests: XCTestCase {
     }
 
     func testClaudeUnreadableSettingsUntouched() throws {
+        try XCTSkipIf(geteuid() == 0, "root reads mode-000 files")
         write(#"{"model": "opus"}"#, ".claude/settings.json")
         let path = home.appendingPathComponent(".claude/settings.json").path
         try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: path)
@@ -279,8 +322,8 @@ final class AgentHookInstallerTests: XCTestCase {
         AgentHookInstaller.installCodexNotify(executablePath: "/Apps/Nirux", home: home)
         XCTAssertEqual(
             read(".codex/config.toml"),
-            #"notify = ["/bin/sh", "-c", 'if [ -n "$NIRUX_AGENT_UUID" ] && [ -x "$0" ]; then exec "$0" --hook codex "$@"; fi', "/Apps/Nirux"]"#
-                + "\n"
+            #"notify = ["/bin/sh", "-c", 'if [ -n "$NIRUX_AGENT_UUID" ] && [ -x "$0" ]; "#
+                + #"then exec "$0" --hook codex "$@"; fi', "/Apps/Nirux"]"# + "\n"
         )
     }
 
@@ -297,15 +340,17 @@ final class AgentHookInstallerTests: XCTestCase {
         let payload = #"{"type":"agent-turn-complete"}"#
         let argv = ["/bin/sh", "-c", AgentHookInstaller.codexNotifyScript, receiver, payload]
 
-        XCTAssertEqual(try run(argv, env: [:]), 0)
+        XCTAssertEqual(try runHook(argv, env: [:]), 0)
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: receiverOutput.path),
             "outside Nirux the binary must not even launch"
         )
 
-        XCTAssertEqual(try run(argv, env: niruxEnv), 0)
+        XCTAssertEqual(try runHook(argv, env: niruxEnv), 0)
         let lines = try String(contentsOf: receiverOutput, encoding: .utf8).components(separatedBy: "\n")
         XCTAssertEqual(Array(lines.prefix(3)), ["--hook", "codex", payload])
+        // Catches a missing `exec` only where /bin/sh is bash (macOS and CI):
+        // zsh and dash exec a trailing command on their own.
         XCTAssertEqual(
             lines.dropFirst(3).first, "ppid=\(ProcessInfo.processInfo.processIdentifier)",
             "exec: the receiver's parent must be the agent, not an intermediate shell"
@@ -317,7 +362,7 @@ final class AgentHookInstallerTests: XCTestCase {
             "/bin/sh", "-c", AgentHookInstaller.codexNotifyScript,
             home.appendingPathComponent("gone/Nirux").path, "{}"
         ]
-        XCTAssertEqual(try run(argv, env: niruxEnv), 0)
+        XCTAssertEqual(try runHook(argv, env: niruxEnv), 0)
     }
 
     func testCodexInsertsBeforeFirstTable() {
@@ -331,19 +376,63 @@ final class AgentHookInstallerTests: XCTestCase {
     }
 
     func testCodexForeignNotifyUntouched() {
-        let original = "notify = [\"/usr/local/bin/my-notify\"]\n"
+        for original in [
+            "notify = [\"/usr/local/bin/my-notify\"]\n",
+            // Mentions `--hook` and lives under ~/.codex, but isn't Nirux's.
+            "notify = [\"/Users/me/.codex/notify.sh\", \"--hook-kind\", \"turn\"]\n"
+        ] {
+            write(original, ".codex/config.toml")
+            AgentHookInstaller.installCodexNotify(executablePath: "/Apps/Nirux", home: home)
+            XCTAssertEqual(read(".codex/config.toml"), original)
+        }
+    }
+
+    func testCodexWrappedNotifyUntouched() {
+        // Replacing only the first line of a wrapped array would leave the
+        // rest dangling and Codex unable to parse its config.
+        let original = """
+        notify = ["/bin/sh", "-c", 'if [ -n "$NIRUX_AGENT_UUID" ] && [ -x "$0" ]; then exec "$0" --hook codex "$@"; fi',
+          "/old/Nirux"]
+
+        """
         write(original, ".codex/config.toml")
         AgentHookInstaller.installCodexNotify(executablePath: "/Apps/Nirux", home: home)
         XCTAssertEqual(read(".codex/config.toml"), original)
     }
 
     func testCodexRefreshesStaleNiruxPath() {
-        write("model = \"gpt-5\"\nnotify = [\"/old/Nirux\", \"--hook\", \"codex\"]\n", ".codex/config.toml")
-        AgentHookInstaller.installCodexNotify(executablePath: "/new/Nirux", home: home)
-        XCTAssertEqual(
-            read(".codex/config.toml"),
-            "model = \"gpt-5\"\n" + AgentHookInstaller.codexNotifyLine(executablePath: "/new/Nirux") + "\n"
-        )
+        let newLine = AgentHookInstaller.codexNotifyLine(executablePath: "/new/Nirux")
+        for stale in [
+            "notify = [\"/old/Nirux\", \"--hook\", \"codex\"]",
+            AgentHookInstaller.codexNotifyLine(executablePath: "/old/Nirux")
+        ] {
+            write("model = \"gpt-5\"\n\(stale)\n", ".codex/config.toml")
+            AgentHookInstaller.installCodexNotify(executablePath: "/new/Nirux", home: home)
+            XCTAssertEqual(read(".codex/config.toml"), "model = \"gpt-5\"\n\(newLine)\n", stale)
+        }
+    }
+
+    func testCodexInstallIsIdempotent() throws {
+        write("model = \"gpt-5\"\n", ".codex/config.toml")
+        AgentHookInstaller.installCodexNotify(executablePath: "/Apps/Nirux", home: home)
+        let first = read(".codex/config.toml")
+        let mtime1 = try modificationDate(".codex/config.toml")
+        Thread.sleep(forTimeInterval: 0.01)
+        AgentHookInstaller.installCodexNotify(executablePath: "/Apps/Nirux", home: home)
+        XCTAssertEqual(first, read(".codex/config.toml"))
+        XCTAssertEqual(mtime1, try modificationDate(".codex/config.toml"), "no rewrite when nothing changed")
+    }
+
+    func testCodexKeepsCRLFLineEndings() throws {
+        write("model = \"gpt-5\"\r\nnotify = [\"/old/Nirux\", \"--hook\", \"codex\"]\r\n", ".codex/config.toml")
+        AgentHookInstaller.installCodexNotify(executablePath: "/Apps/Nirux", home: home)
+        let newLine = AgentHookInstaller.codexNotifyLine(executablePath: "/Apps/Nirux")
+        XCTAssertEqual(read(".codex/config.toml"), "model = \"gpt-5\"\r\n\(newLine)\r\n")
+
+        let mtime1 = try modificationDate(".codex/config.toml")
+        Thread.sleep(forTimeInterval: 0.01)
+        AgentHookInstaller.installCodexNotify(executablePath: "/Apps/Nirux", home: home)
+        XCTAssertEqual(mtime1, try modificationDate(".codex/config.toml"), "no rewrite on relaunch")
     }
 
     func testCodexUnreadableConfigUntouched() throws {
@@ -368,22 +457,81 @@ final class AgentHookInstallerTests: XCTestCase {
             read("dotfiles/codex.toml").contains(AgentHookInstaller.codexNotifyLine(executablePath: "/Apps/Nirux")))
     }
 
-    // MARK: - Opt-out
+    // MARK: - When to install
 
-    func testSkipEnvLeavesConfigsUntouched() {
-        AgentHookInstaller.installAll(
-            executablePath: "/Apps/Nirux", home: home, environment: ["NIRUX_SKIP_HOOK_INSTALL": "1"])
-        XCTAssertFalse(FileManager.default.fileExists(atPath: home.appendingPathComponent(".claude").path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: home.appendingPathComponent(".codex").path))
+    private let appBundle = URL(fileURLWithPath: "/Applications/Nirux.app")
+    private let devBuild = URL(fileURLWithPath: "/src/nirux/.build/arm64-apple-macosx/debug")
+
+    func testOnlyAppBundlesInstallByDefault() {
+        XCTAssertTrue(AgentHookInstaller.shouldInstall(environment: [:], bundleURL: appBundle))
+        XCTAssertFalse(AgentHookInstaller.shouldInstall(environment: [:], bundleURL: devBuild), "swift run")
     }
 
-    func testSkipEnvZeroOrEmptyStillInstalls() {
-        XCTAssertFalse(AgentHookInstaller.isInstallDisabled(environment: [:]))
-        XCTAssertFalse(AgentHookInstaller.isInstallDisabled(environment: ["NIRUX_SKIP_HOOK_INSTALL": ""]))
-        XCTAssertFalse(AgentHookInstaller.isInstallDisabled(environment: ["NIRUX_SKIP_HOOK_INSTALL": "0"]))
-        AgentHookInstaller.installAll(
-            executablePath: "/Apps/Nirux", home: home, environment: ["NIRUX_SKIP_HOOK_INSTALL": "0"])
+    func testInstallFlags() {
+        let force = ["NIRUX_FORCE_HOOK_INSTALL": "1"]
+        XCTAssertTrue(AgentHookInstaller.shouldInstall(environment: force, bundleURL: devBuild))
+        XCTAssertFalse(
+            AgentHookInstaller.shouldInstall(environment: ["NIRUX_FORCE_HOOK_INSTALL": "0"], bundleURL: devBuild))
+        for value in ["1", "true", "YES"] {
+            XCTAssertFalse(
+                AgentHookInstaller.shouldInstall(environment: ["NIRUX_SKIP_HOOK_INSTALL": value], bundleURL: appBundle),
+                value
+            )
+        }
+        for value in ["", "0", "false", "no"] {
+            XCTAssertTrue(
+                AgentHookInstaller.shouldInstall(environment: ["NIRUX_SKIP_HOOK_INSTALL": value], bundleURL: appBundle),
+                value
+            )
+        }
+        XCTAssertFalse(
+            AgentHookInstaller.shouldInstall(
+                environment: force.merging(["NIRUX_SKIP_HOOK_INSTALL": "1"]) { $1 }, bundleURL: devBuild),
+            "an explicit opt-out wins"
+        )
+    }
+
+    func testInstallAllLeavesConfigsUntouchedWhenSkipped() {
+        AgentHookInstaller.installAll(executablePath: "/Apps/Nirux", home: home, environment: [:], bundleURL: devBuild)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: home.appendingPathComponent(".claude").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: home.appendingPathComponent(".codex").path))
+
+        AgentHookInstaller.installAll(executablePath: "/Apps/Nirux", home: home, environment: [:], bundleURL: appBundle)
         XCTAssertFalse(read(".claude/settings.json").isEmpty)
         XCTAssertFalse(read(".codex/config.toml").isEmpty)
+    }
+
+    // MARK: - Receiver (end to end)
+
+    /// `swift test` builds the app executable next to the test bundle.
+    private func niruxExecutable() throws -> String {
+        let url = Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("Nirux")
+        return try XCTUnwrap(
+            FileManager.default.isExecutableFile(atPath: url.path) ? url.path : nil,
+            "Nirux executable not found at \(url.path)"
+        )
+    }
+
+    func testReceiverQueuesOnlyEventsFromNiruxTerminals() throws {
+        let nirux = try niruxExecutable()
+        let stateDir = home.appendingPathComponent("state")
+        let events = stateDir.appendingPathComponent("hook-events.jsonl")
+        let state = ["NIRUX_STATE_DIR": stateDir.path]
+        let claudePayload = #"{"hook_event_name":"Stop","session_id":"s1"}"#
+        let codexPayload = #"{"type":"agent-turn-complete","thread-id":"t1"}"#
+
+        // Hook entries from older builds launch the receiver unguarded.
+        XCTAssertEqual(try runHook([nirux, "--hook", "claude"], env: state, stdin: claudePayload), 0)
+        XCTAssertEqual(try runHook([nirux, "--hook", "codex", codexPayload], env: state), 0)
+        XCTAssertEqual((try? String(contentsOf: events, encoding: .utf8)) ?? "", "", "no UUID, nothing queued")
+
+        let inNirux = state.merging(niruxEnv) { $1 }
+        XCTAssertEqual(try runHook([nirux, "--hook", "claude"], env: inNirux, stdin: claudePayload), 0)
+        XCTAssertEqual(try runHook([nirux, "--hook", "codex", codexPayload], env: inNirux), 0)
+        let queued = try String(contentsOf: events, encoding: .utf8)
+            .split(separator: "\n")
+            .map { try JSONDecoder().decode(AgentHookEvent.self, from: Data($0.utf8)) }
+        XCTAssertEqual(queued.map(\.name), [.stop, .turnComplete])
+        XCTAssertEqual(queued.map(\.agentUUID), ["uuid-1", "uuid-1"])
     }
 }

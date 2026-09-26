@@ -10,18 +10,21 @@ import Foundation
 ///
 /// Both configs are global, so every agent session on the machine runs
 /// these hooks. The commands are shell-guarded on NIRUX_AGENT_UUID, which
-/// only Nirux terminals export: sessions anywhere else never launch the
-/// Nirux binary (it links AppKit and WebKit).
+/// Nirux terminals export (and processes started from them inherit):
+/// sessions anywhere else never launch the Nirux binary (it links AppKit
+/// and WebKit).
 ///
 /// Idempotent and non-destructive: user-defined hooks are preserved, stale
 /// Nirux entries (old app path, older command format) are refreshed,
 /// foreign Codex `notify` configs are left untouched (with a log line), and
 /// symlinked configs (dotfiles) are written through, not replaced. Runs at
-/// every launch — cheap (a few KB of I/O) and self-healing after app
-/// updates/moves. `NIRUX_SKIP_HOOK_INSTALL=1` turns it off.
+/// every launch of the app bundle — cheap (a few KB of I/O) and
+/// self-healing after app updates/moves. See `shouldInstall` for dev builds.
 enum AgentHookInstaller {
-    /// Substring identifying Nirux-owned hook commands in existing configs.
-    private static let claudeMarker = "--hook claude"
+    /// Identifies Nirux-owned Claude hook commands in existing configs, in
+    /// every format Nirux has written: `"<path>/Nirux" --hook claude`, and
+    /// the guarded forms with the path in double or single quotes.
+    private static let claudeCommandPattern = #"/Nirux["']? --hook claude"#
 
     /// Absolute path the hook commands invoke. Inside the app bundle this is
     /// the bundle executable; fall back to the standard install location.
@@ -29,21 +32,29 @@ enum AgentHookInstaller {
         Bundle.main.executableURL?.path ?? "/Applications/Nirux.app/Contents/MacOS/Nirux"
     }
 
-    /// NIRUX_SKIP_HOOK_INSTALL: any value but empty or "0" leaves the agent
-    /// configs alone. Dev smoke runs use it so a debug build doesn't point
-    /// the real hooks at its own binary.
-    static func isInstallDisabled(environment: [String: String]) -> Bool {
-        guard let value = environment["NIRUX_SKIP_HOOK_INSTALL"] else { return false }
-        return !value.isEmpty && value != "0"
+    /// Only a Nirux running from an app bundle installs the hooks. A dev
+    /// build (`swift run`, `.build/debug/Nirux`) would point every agent
+    /// session on the machine at a binary that goes away with its worktree.
+    /// NIRUX_FORCE_HOOK_INSTALL=1 opts a dev build in (to test installer
+    /// changes); NIRUX_SKIP_HOOK_INSTALL=1 opts any build out.
+    static func shouldInstall(environment: [String: String], bundleURL: URL) -> Bool {
+        if isEnabled(environment["NIRUX_SKIP_HOOK_INSTALL"]) { return false }
+        return bundleURL.pathExtension == "app" || isEnabled(environment["NIRUX_FORCE_HOOK_INSTALL"])
+    }
+
+    private static func isEnabled(_ flag: String?) -> Bool {
+        guard let flag else { return false }
+        return ["1", "true", "yes"].contains(flag.lowercased())
     }
 
     static func installAll(
         executablePath: String = defaultExecutablePath,
         home: URL = URL(fileURLWithPath: NSHomeDirectory()),
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        bundleURL: URL = Bundle.main.bundleURL
     ) {
-        if isInstallDisabled(environment: environment) {
-            NSLog("[AgentHooks] NIRUX_SKIP_HOOK_INSTALL set — leaving agent configs untouched")
+        guard shouldInstall(environment: environment, bundleURL: bundleURL) else {
+            NSLog("[AgentHooks] dev build or NIRUX_SKIP_HOOK_INSTALL — leaving agent configs untouched")
             return
         }
         installClaudeHooks(executablePath: executablePath, home: home)
@@ -66,13 +77,16 @@ enum AgentHookInstaller {
     ]
 
     /// The command claude runs (via `sh -c`) on every hook event. The
-    /// NIRUX_AGENT_UUID guard makes it a shell builtin test outside Nirux
-    /// terminals; `test -x` makes a deleted/moved binary (app uninstalled,
-    /// dev build cleaned) a silent no-op instead of an error on every tool
-    /// call. `if` rather than `&&` so a false guard still exits 0.
+    /// NIRUX_AGENT_UUID guard skips the binary outside Nirux terminals;
+    /// `test -x` makes a deleted/moved binary (app uninstalled, dev build
+    /// cleaned) a silent no-op instead of an error on every tool call. When
+    /// skipping, `/bin/cat` (PATH-independent) still drains the payload:
+    /// claude reports a hook that closes stdin before a large payload (over
+    /// the 64 KB pipe buffer) is written as failed. `if` rather than `&&` so
+    /// a false guard exits 0.
     static func claudeHookCommand(executablePath: String) -> String {
         let path = shellQuoted(executablePath)
-        return #"if [ -n "$NIRUX_AGENT_UUID" ] && [ -x \#(path) ]; then \#(path) --hook claude; fi"#
+        return #"if [ -n "$NIRUX_AGENT_UUID" ] && [ -x \#(path) ]; then \#(path) --hook claude; else /bin/cat >/dev/null; fi"#
     }
 
     static func installClaudeHooks(
@@ -81,7 +95,7 @@ enum AgentHookInstaller {
     ) {
         let dir = home.appendingPathComponent(".claude")
         guard let url = resolvingSymlinks(dir.appendingPathComponent("settings.json")) else {
-            NSLog("[AgentHooks] ~/.claude/settings.json is a symlink loop — skipping hook install")
+            NSLog("[AgentHooks] ~/.claude/settings.json: symlink loop or chain too long — skipping hook install")
             return
         }
         let command = claudeHookCommand(executablePath: executablePath)
@@ -108,7 +122,9 @@ enum AgentHookInstaller {
             // left empty by that removal. User hooks in mixed groups survive.
             for index in groups.indices.reversed() {
                 var list = groups[index]["hooks"] as? [[String: Any]] ?? []
-                list.removeAll { ($0["command"] as? String)?.contains(claudeMarker) == true }
+                list.removeAll {
+                    ($0["command"] as? String)?.range(of: claudeCommandPattern, options: .regularExpression) != nil
+                }
                 if list.isEmpty {
                     groups.remove(at: index)
                 } else {
@@ -129,15 +145,15 @@ enum AgentHookInstaller {
 
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            // Sorted keys: deterministic output, so relaunches never churn
-            // a settings file kept under version control.
+            // Sorted keys keep the output deterministic (the check above
+            // already skips rewriting an unchanged file).
             let data = try JSONSerialization.data(
                 withJSONObject: root,
                 options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
             )
             try data.write(to: url, options: .atomic)
         } catch {
-            NSLog("[AgentHooks] failed to write ~/.claude/settings.json: %@", error.localizedDescription)
+            NSLog("[AgentHooks] failed to write %@: %@", url.path, error.localizedDescription)
         }
     }
 
@@ -168,7 +184,7 @@ enum AgentHookInstaller {
     ) {
         let dir = home.appendingPathComponent(".codex")
         guard let url = resolvingSymlinks(dir.appendingPathComponent("config.toml")) else {
-            NSLog("[AgentHooks] ~/.codex/config.toml is a symlink loop — skipping notify install")
+            NSLog("[AgentHooks] ~/.codex/config.toml: symlink loop or chain too long — skipping notify install")
             return
         }
         let notifyLine = codexNotifyLine(executablePath: executablePath)
@@ -179,7 +195,7 @@ enum AgentHookInstaller {
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 try (notifyLine + "\n").write(to: url, atomically: true, encoding: .utf8)
             } catch {
-                NSLog("[AgentHooks] failed to create ~/.codex/config.toml: %@", error.localizedDescription)
+                NSLog("[AgentHooks] failed to create %@: %@", url.path, error.localizedDescription)
             }
             return
         }
@@ -190,17 +206,20 @@ enum AgentHookInstaller {
         }
 
         var lines = text.components(separatedBy: "\n")
+        // Lines split on \n keep a CRLF file's \r: match it, so an
+        // unchanged entry compares equal and a new one fits in.
+        let newLine = notifyLine + (text.contains("\r\n") ? "\r" : "")
         let notifyPattern = #"^\s*notify\s*="#
         if let index = lines.firstIndex(where: { $0.range(of: notifyPattern, options: .regularExpression) != nil }) {
-            if lines[index].contains("--hook") && lines[index].contains("codex") {
-                // Ours — refresh the path if the app moved, and the format
-                // if an older build wrote the unguarded one.
-                if lines[index] != notifyLine {
-                    lines[index] = notifyLine
-                    write(lines: lines, to: url)
-                }
-            } else {
-                NSLog("[AgentHooks] ~/.codex/config.toml already has a foreign notify — turn-complete status for codex stays heuristic")
+            guard isNiruxNotify(lines[index]) else {
+                NSLog("[AgentHooks] ~/.codex/config.toml has a foreign or multi-line notify — codex turn status stays heuristic")
+                return
+            }
+            // Ours — refresh the path if the app moved, and the format if an
+            // older build wrote the unguarded one.
+            if lines[index] != newLine {
+                lines[index] = newLine
+                write(lines: lines, to: url)
             }
             return
         }
@@ -209,8 +228,18 @@ enum AgentHookInstaller {
         let insertAt = lines.firstIndex(where: {
             $0.range(of: #"^\s*\["#, options: .regularExpression) != nil
         }) ?? lines.count
-        lines.insert(notifyLine, at: insertAt)
+        lines.insert(newLine, at: insertAt)
         write(lines: lines, to: url)
+    }
+
+    /// Whether a `notify` line is one Nirux wrote: the unguarded
+    /// `["<path>", "--hook", "codex"]` of older builds or the guarded form,
+    /// whole on one line. A wrapped array counts as foreign: replacing its
+    /// first line alone would leave invalid TOML behind.
+    static func isNiruxNotify(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix("]") else { return false }
+        return trimmed.hasSuffix(#""--hook", "codex"]"#) || trimmed.contains(#"exec "$0" --hook codex "$@""#)
     }
 
     private static func write(lines: [String], to url: URL) {
@@ -233,7 +262,8 @@ enum AgentHookInstaller {
     /// renames a temp file over the path it's given, which would replace the
     /// link with a plain file — so follow the link chain to the real file.
     /// Unlike `resolvingSymlinksInPath()`, also follows a dangling link (the
-    /// write then creates its target). Nil on a symlink loop.
+    /// write then creates its target if the target's directory exists). Nil
+    /// on a symlink loop or an implausibly long chain.
     static func resolvingSymlinks(_ url: URL) -> URL? {
         var current = url
         for _ in 0..<32 {
