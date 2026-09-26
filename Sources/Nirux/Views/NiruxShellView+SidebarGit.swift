@@ -568,7 +568,9 @@ extension NiruxShellView {
         guard let observation = workspace.beginDiffStatsObservation(at: cwd, for: context) else { return }
         gitRefresh.noteDiffStatsRefresh(workspace)
         PRDetect.diffStatsAsync(cwd: cwd) { [weak self, weak workspace] result in
-            guard let workspace, !workspace.isInactive,
+            guard let workspace else { return }
+            self?.gitRefresh.finishDiffStatsRefresh(workspace)
+            guard !workspace.isInactive,
                   workspace.applyDiffStatsObservation(result, observation: observation)
             else { return }
             self?.scheduleMetadataRefresh()

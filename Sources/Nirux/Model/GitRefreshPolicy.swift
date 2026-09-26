@@ -28,8 +28,8 @@ enum GitRefreshPolicy {
         let diffStats: TimeInterval
     }
 
-    /// An archived workspace whose one read produced no context (read
-    /// failure, volume not mounted yet) is retried this slowly.
+    /// An archived workspace whose one read failed (timeout, volume not
+    /// mounted yet) is retried this slowly; "not a repository" is final.
     static let archivedRetryInterval: TimeInterval = 120
 
     static func intervals(for tier: GitRefreshTier) -> Intervals? {
@@ -45,12 +45,12 @@ enum GitRefreshPolicy {
         pendingChange: GitRepositoryChange?,
         workingDirectoryChanged: Bool,
         lastRefresh: TimeInterval?,
-        hasContext: Bool = true,
+        lastReadFailed: Bool = false,
         now: TimeInterval
     ) -> Bool {
         guard let lastRefresh else { return true }
         guard let intervals = intervals(for: tier) else {
-            return !hasContext && now - lastRefresh >= archivedRetryInterval
+            return lastReadFailed && now - lastRefresh >= archivedRetryInterval
         }
         if workingDirectoryChanged { return true }
         let elapsed = now - lastRefresh

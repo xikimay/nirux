@@ -29,20 +29,20 @@ final class GitRefreshTests: XCTestCase {
         ))
     }
 
-    func testArchivedWorkspaceWithoutContextIsRetriedSlowly() {
-        func isDue(hasContext: Bool, after elapsed: TimeInterval) -> Bool {
+    func testArchivedWorkspaceIsRetriedSlowlyOnlyAfterAFailedRead() {
+        func isDue(lastReadFailed: Bool, after elapsed: TimeInterval) -> Bool {
             GitRefreshPolicy.isDue(
                 tier: .archived,
                 pendingChange: nil,
                 workingDirectoryChanged: false,
                 lastRefresh: 0,
-                hasContext: hasContext,
+                lastReadFailed: lastReadFailed,
                 now: elapsed
             )
         }
-        XCTAssertFalse(isDue(hasContext: false, after: 119))
-        XCTAssertTrue(isDue(hasContext: false, after: 120))
-        XCTAssertFalse(isDue(hasContext: true, after: 86_400))
+        XCTAssertFalse(isDue(lastReadFailed: true, after: 119))
+        XCTAssertTrue(isDue(lastReadFailed: true, after: 120))
+        XCTAssertFalse(isDue(lastReadFailed: false, after: 86_400))
     }
 
     func testFocusedThrottlesFollowTheKindOfChange() {
@@ -222,8 +222,9 @@ final class GitRefreshTests: XCTestCase {
         XCTAssertEqual(harness.reads, ["archived", "archived"])
     }
 
-    func testArchivedWorkspaceIsRetriedWhileItHasNoContext() {
+    func testArchivedWorkspaceIsRetriedUntilItsReadSucceeds() {
         let harness = CoordinatorHarness()
+        harness.readResult = .failure
         let archived = WorkspaceState(title: "archived", cwd: NSTemporaryDirectory())
         let tiers: [(workspace: WorkspaceState, tier: GitRefreshTier)] = [(archived, .archived)]
         harness.coordinator.tick(tiers)
@@ -234,13 +235,14 @@ final class GitRefreshTests: XCTestCase {
         harness.coordinator.tick(tiers)
         XCTAssertEqual(harness.reads.count, 2)
 
-        archived.updateGitContext(GitContext(
-            branch: "main",
-            identity: GitIdentity(repositoryRoot: NSTemporaryDirectory(), head: "abc")
-        ))
+        // "Not a repository" (an archived $HOME) is an answer, not a failure.
+        harness.readResult = .notRepository
+        harness.advance(120)
+        harness.coordinator.tick(tiers)
+        XCTAssertEqual(harness.reads.count, 3)
         harness.advance(1_000)
         harness.coordinator.tick(tiers)
-        XCTAssertEqual(harness.reads.count, 2)
+        XCTAssertEqual(harness.reads.count, 3)
         XCTAssertEqual(harness.watcherAttempts, 0, "archived workspaces are never watched")
     }
 
@@ -266,6 +268,15 @@ final class GitRefreshTests: XCTestCase {
         harness.advance(1)
         harness.coordinator.tick(tiers)
         XCTAssertEqual(harness.watcherAttempts, 2)
+
+        // The backoff belongs to the failed repository: a cd into another
+        // one is watched right away.
+        focused.updateGitContext(GitContext(
+            branch: "main",
+            identity: GitIdentity(repositoryRoot: "/repo/other", head: "def")
+        ))
+        harness.coordinator.gitContextChanged(focused)
+        XCTAssertEqual(harness.watcherAttempts, 3)
     }
 
     func testNewWatcherReadsOnceMoreToCoverItsStartGap() throws {
@@ -304,12 +315,20 @@ final class GitRefreshTests: XCTestCase {
         harness.coordinator.noteChange(.worktree, for: focused)
         XCTAssertEqual(harness.coordinator.diffStatsDue(tiers).map(\.title), ["focused"])
         harness.coordinator.noteDiffStatsRefresh(focused)
+        harness.coordinator.finishDiffStatsRefresh(focused)
         XCTAssertTrue(harness.coordinator.diffStatsDue(tiers).isEmpty)
 
         harness.advance(5)
         harness.coordinator.noteChange(.worktree, for: focused)
         XCTAssertTrue(harness.coordinator.diffStatsDue(tiers).isEmpty, "focused diff cadence is 10 s")
         harness.advance(5)
+        XCTAssertEqual(harness.coordinator.diffStatsDue(tiers).map(\.title), ["focused"])
+
+        harness.coordinator.noteDiffStatsRefresh(focused)
+        harness.advance(60)
+        harness.coordinator.noteChange(.worktree, for: focused)
+        XCTAssertTrue(harness.coordinator.diffStatsDue(tiers).isEmpty, "a slow diff is still running")
+        harness.coordinator.finishDiffStatsRefresh(focused)
         XCTAssertEqual(harness.coordinator.diffStatsDue(tiers).map(\.title), ["focused"])
     }
 
@@ -382,6 +401,7 @@ final class GitRefreshTests: XCTestCase {
         var attempts = 0
         var acceptsReads = true
         var watcherAttempts = 0
+        var readResult: GitContextDetectionResult = .notRepository
         var makesRealWatchers = false
         private(set) var coordinator: GitRefreshCoordinator!
 
@@ -393,10 +413,11 @@ final class GitRefreshTests: XCTestCase {
                     guard self.makesRealWatchers else { return nil }
                     return GitRepositoryWatcher(layout: layout, branch: branch, onChange: onChange)
                 },
-                startObservation: { [unowned self] workspace, _ in
+                startObservation: { [unowned self] workspace, _, completion in
                     self.attempts += 1
                     guard self.acceptsReads else { return false }
                     self.reads.append(workspace.title)
+                    completion(self.readResult)
                     return true
                 },
                 resolveLayout: { root, completion in

@@ -12,8 +12,13 @@ final class GitRefreshCoordinator {
         _ onChange: @escaping @MainActor (GitRepositoryChange) -> Void
     ) -> GitRepositoryWatcher?
     /// Starts an asynchronous git-context read of `workspace` at the given
-    /// working directory; false when one is already in flight.
-    typealias ObservationStarter = @MainActor (_ workspace: WorkspaceState, _ workingDirectory: String) -> Bool
+    /// working directory and reports its outcome; false when one is already
+    /// in flight.
+    typealias ObservationStarter = @MainActor (
+        _ workspace: WorkspaceState,
+        _ workingDirectory: String,
+        _ completion: @escaping @MainActor @Sendable (GitContextDetectionResult) -> Void
+    ) -> Bool
     /// Resolves a repository's layout (filesystem reads: may block on a
     /// sleeping or network volume) and delivers it on the main actor.
     typealias LayoutResolver = @MainActor (
@@ -34,13 +39,16 @@ final class GitRefreshCoordinator {
         var watchedRoot: String?
         var watcherGeneration: UInt64 = 0
         var watcherRetryAfter: TimeInterval?
+        var watcherFailedRoot: String?
         var pendingChange: GitRepositoryChange?
         var lastGitRefresh: TimeInterval?
         var lastGitDirectory: String?
         var lastPullRequestRefresh: TimeInterval?
         var pushFollowUpUntil: TimeInterval?
         var pullRequestNotBefore: TimeInterval?
+        var lastReadFailed = false
         var changedSinceDiffStats = false
+        var diffStatsInFlight = 0
         var lastDiffStatsRefresh: TimeInterval?
 
         init(workspace: WorkspaceState) {
@@ -139,6 +147,8 @@ final class GitRefreshCoordinator {
             guard PRDetect.shouldRefresh(isInactive: workspace.isInactive, branch: workspace.gitBranch),
                   let entry = entries[ObjectIdentifier(workspace)]
             else { return nil }
+            // A slow repository must not pile up overlapping diffs.
+            guard entry.diffStatsInFlight == 0 else { return nil }
             return GitRefreshPolicy.isDiffStatsDue(
                 tier: tier,
                 changedSinceLastRefresh: entry.changedSinceDiffStats,
@@ -152,6 +162,12 @@ final class GitRefreshCoordinator {
         let entry = entry(for: workspace)
         entry.changedSinceDiffStats = false
         entry.lastDiffStatsRefresh = clock()
+        entry.diffStatsInFlight += 1
+    }
+
+    func finishDiffStatsRefresh(_ workspace: WorkspaceState) {
+        guard let entry = entries[ObjectIdentifier(workspace)] else { return }
+        entry.diffStatsInFlight = max(0, entry.diffStatsInFlight - 1)
     }
 
     /// Watcher callback, also the seam unit tests drive.
@@ -193,12 +209,17 @@ final class GitRefreshCoordinator {
         }
     }
 
-    static func observeGitContext(of workspace: WorkspaceState, at workingDirectory: String) -> Bool {
+    static func observeGitContext(
+        of workspace: WorkspaceState,
+        at workingDirectory: String,
+        completion: @escaping @MainActor @Sendable (GitContextDetectionResult) -> Void
+    ) -> Bool {
         guard let observation = workspace.beginGitContextObservation(at: workingDirectory) else {
             return false
         }
         GitDetect.contextAsync(at: workingDirectory) { [weak workspace] result in
             workspace?.applyGitContextObservation(result, observation: observation)
+            completion(result)
         }
         return true
     }
@@ -214,21 +235,23 @@ final class GitRefreshCoordinator {
 
     private func refreshIfDue(_ entry: Entry, workspace: WorkspaceState, now: TimeInterval, force: Bool) {
         // Archived workspaces are read once so their card isn't blank,
-        // then left alone: skip even the working-directory lookup.
-        let hasContext = workspace.gitContext != nil
-        if !force, entry.tier == .archived, entry.lastGitRefresh != nil, hasContext { return }
+        // then left alone (retried only if that read failed): skip even the
+        // working-directory lookup.
+        if !force, entry.tier == .archived, entry.lastGitRefresh != nil, !entry.lastReadFailed { return }
         let directory = URL(fileURLWithPath: workspace.focusedWorkingDirectory).standardizedFileURL.path
         let isDue = force || GitRefreshPolicy.isDue(
             tier: entry.tier,
             pendingChange: entry.pendingChange,
             workingDirectoryChanged: directory != entry.lastGitDirectory,
             lastRefresh: entry.lastGitRefresh,
-            hasContext: hasContext,
+            lastReadFailed: entry.lastReadFailed,
             now: now
         )
         // An in-flight read may predate the pending change: keep it pending
         // and retry on the next tick.
-        guard isDue, startObservation(workspace, directory) else { return }
+        guard isDue, startObservation(workspace, directory, { [weak entry] result in
+            entry?.lastReadFailed = result == .failure
+        }) else { return }
         entry.pendingChange = nil
         entry.lastGitRefresh = now
         entry.lastGitDirectory = directory
@@ -240,7 +263,8 @@ final class GitRefreshCoordinator {
             entry.watcher?.branch = workspace.gitContext?.branch
             return
         }
-        if root != nil, let retryAfter = entry.watcherRetryAfter, clock() < retryAfter { return }
+        if let root, root == entry.watcherFailedRoot,
+           let retryAfter = entry.watcherRetryAfter, clock() < retryAfter { return }
         entry.watcher?.stop()
         entry.watcher = nil
         entry.watchedRoot = root
@@ -251,20 +275,27 @@ final class GitRefreshCoordinator {
             // The target may have moved on while the layout was resolved.
             guard let self, let entry, entry.watcherGeneration == generation,
                   let workspace = entry.workspace else { return }
-            self.startWatcher(entry, workspace: workspace, layout: layout)
+            self.startWatcher(entry, workspace: workspace, root: root, layout: layout)
         }
     }
 
-    private func startWatcher(_ entry: Entry, workspace: WorkspaceState, layout: GitRepositoryLayout) {
+    private func startWatcher(
+        _ entry: Entry,
+        workspace: WorkspaceState,
+        root: String,
+        layout: GitRepositoryLayout
+    ) {
         let onChange: @MainActor (GitRepositoryChange) -> Void = { [weak self, weak workspace] change in
             guard let self, let workspace else { return }
             self.noteChange(change, for: workspace)
         }
         guard let watcher = makeWatcher(layout, workspace.gitContext?.branch, onChange) else {
             entry.watchedRoot = nil
+            entry.watcherFailedRoot = root
             entry.watcherRetryAfter = clock() + Self.watcherRetryInterval
             return
         }
+        entry.watcherFailedRoot = nil
         entry.watcherRetryAfter = nil
         entry.watcher = watcher
         // Changes between the read that found this repository and the
