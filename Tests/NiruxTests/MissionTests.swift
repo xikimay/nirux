@@ -67,9 +67,11 @@ final class MissionTests: XCTestCase {
             agentUUID: childAgentUUID,
             missionID: missionID,
             missionHandoffsEnabled: false,
-            executablePath: "/Applications/Nirux.app/Contents/MacOS/Nirux"
+            executablePath: "/Applications/Nirux.app/Contents/MacOS/Nirux",
+            launchID: "launch-id"
         )
         XCTAssertEqual(disabled["NIRUX_WORKSPACE_ID"], childWorkspaceID)
+        XCTAssertEqual(disabled["NIRUX_LAUNCH_ID"], "launch-id")
         XCTAssertNil(disabled["NIRUX_MISSION_HANDOFFS"])
         XCTAssertNil(disabled["NIRUX_MISSION_ID"])
         XCTAssertNil(disabled["NIRUX_CLI_PATH"])
@@ -80,7 +82,8 @@ final class MissionTests: XCTestCase {
             agentUUID: childAgentUUID,
             missionID: missionID,
             missionHandoffsEnabled: true,
-            executablePath: "/Applications/Nirux.app/Contents/MacOS/Nirux"
+            executablePath: "/Applications/Nirux.app/Contents/MacOS/Nirux",
+            launchID: "launch-id"
         )
         XCTAssertEqual(enabled["NIRUX_MISSION_HANDOFFS"], "1")
         XCTAssertEqual(enabled["NIRUX_MISSION_ID"], missionID)

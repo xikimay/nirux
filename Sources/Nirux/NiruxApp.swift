@@ -25,6 +25,11 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var telegramTokenSaver: (String) throws -> Void = { try TelegramTokenStore.save($0) }
     var isManualUpdateCheck = false
     var updaterReady = false
+    var urlConfirmations = URLConfirmationQueue()
+    var urlConfirmationRestoreApp: NSRunningApplication?
+    var launchURLBacklog: [URL] = []
+    var lastExternalApp: NSRunningApplication?
+    var niruxActivatedAt: TimeInterval = 0
 
     static func main() {
         // Hook-receiver mode: `Nirux --hook claude|codex [payload-json]`.
@@ -158,6 +163,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
 
         NSApp.activate(ignoringOtherApps: true)
+        startTrackingFrontmostApp()
+        drainLaunchURLBacklog()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -177,76 +184,6 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
 
     enum WorkspaceAgent: String {
         case claude, codex
-    }
-
-    func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls {
-            guard url.scheme == "nirux" else { continue }
-            let params = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
-            let profileID = workspaceProfileID(from: params)
-            switch url.host {
-
-            // nirux://new-workspace?cwd=...&title=...&agent=claude|codex&profile=...
-            case "new-workspace":
-                let cwd = params?.first(where: { $0.name == "cwd" })?.value
-                let title = params?.first(where: { $0.name == "title" })?.value
-                let agent = params?.first(where: { $0.name == "agent" })?.value
-                    .flatMap { WorkspaceAgent(rawValue: $0) }
-                shell?.addWorkspace(title: title, cwd: cwd, agent: agent, profileID: profileID)
-
-            // nirux://new-worktree?branch=...&repo=...&agent=claude|codex&handover=/tmp/file.md&profile=...
-            case "new-worktree":
-                let branch = params?.first(where: { $0.name == "branch" })?.value
-                let repo = params?.first(where: { $0.name == "repo" })?.value
-                let agent = params?.first(where: { $0.name == "agent" })?.value
-                    .flatMap { WorkspaceAgent(rawValue: $0) }
-                let handover = params?.first(where: { $0.name == "handover" })?.value
-                let parentWorkspaceID = params?.first(where: { $0.name == "parentWorkspace" })?.value
-                let parentAgentUUID = params?.first(where: { $0.name == "parentAgent" })?.value
-                if let branch, let repo {
-                    shell?.createWorktreeWorkspace(
-                        branch: branch,
-                        repoRoot: repo,
-                        agent: agent,
-                        handoverPath: handover,
-                        profileID: profileID,
-                        parentWorkspaceID: parentWorkspaceID,
-                        parentAgentUUID: parentAgentUUID
-                    )
-                }
-
-            // nirux://open-editor?file=<absolute path>&line=42&endLine=57&workspace=<id>
-            // Validation stats (and prefix-reads) the file, which can block
-            // on a dead network mount — run it off the main actor, then hop
-            // back. Activation is gated on acceptance so a rejected request
-            // can't be used to yank Nirux frontmost.
-            case "open-editor":
-                let urlString = url.absoluteString
-                Task { [weak self] in
-                    let request = await Task.detached {
-                        OpenEditorRequest(queryItems: URLComponents(string: urlString)?.queryItems)
-                    }.value
-                    guard let request else {
-                        NSLog("[OpenEditor] rejected open-editor URL (missing/non-regular/oversized/binary file?)")
-                        return
-                    }
-                    guard let self else { return }
-                    self.shell?.openEditorFromURL(request)
-                    NSApp.activate(ignoringOtherApps: true)
-                    self.mainWindow?.makeKeyAndOrderFront(nil)
-                }
-                continue
-
-            default:
-                break
-            }
-            NSApp.activate(ignoringOtherApps: true)
-            mainWindow?.makeKeyAndOrderFront(nil)
-        }
-    }
-
-    private func workspaceProfileID(from queryItems: [URLQueryItem]?) -> String? {
-        queryItems?.first(where: { ["profile", "profileID", "space"].contains($0.name) })?.value
     }
 
     // MARK: - NSMenuItemValidation
