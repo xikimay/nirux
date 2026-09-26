@@ -65,7 +65,8 @@ extension NiruxApp {
                     // menu items: menu items would also consume Cmd+[/] in
                     // EDITOR columns, killing Monaco's indent/outdent-line
                     // shortcuts with a no-op action.
-                    if col.isWebView, event.modifierFlags == [.command],
+                    if col.isWebView,
+                       event.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command],
                        let chars = event.charactersIgnoringModifiers {
                         if chars == "[" {
                             col.webViewColumn?.goBack()
@@ -78,6 +79,7 @@ extension NiruxApp {
                     }
                     if WebContentKeyRouting.passesToWebContent(
                         isEditor: col.isEditor,
+                        characters: event.characters,
                         charactersIgnoringModifiers: event.charactersIgnoringModifiers,
                         keyCode: event.keyCode,
                         modifierFlags: event.modifierFlags

@@ -86,12 +86,11 @@ Typical command palette actions:
 - Import Browser Cookies
 - New Workspace
 - Pilot Mode
-- Toggle Sidebar
+- Show/Hide Sidebar
 - Rename Workspace
-- Close Column
-- Cycle Width
+- Resize Column (Cycle Width)
 - Toggle Web Inspector
-- Settings
+- Open Settings
 
 Useful shortcuts:
 
@@ -101,7 +100,7 @@ Useful shortcuts:
 | `Shift+Cmd+P` | Command palette, including from the editor |
 | `Cmd+T` | New terminal column |
 | `Cmd+B` | Open browser URL flow |
-| `Cmd+W` | Close editor tab, column, or workspace depending on context — asks first when a Claude or Codex session is running (Return cancels, ⌘D closes) |
+| `Cmd+W` | Close editor tab, column, or workspace depending on context — asks first when a Claude or Codex session is running (Return cancels, ⌘D closes); with Settings or a detached Web Inspector in front, closes that window instead |
 | `Cmd+1…9` | Focus column N |
 | `Cmd+Left` / `Cmd+Right` | Focus previous or next column |
 | `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column |

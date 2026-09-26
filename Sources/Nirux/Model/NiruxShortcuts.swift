@@ -24,6 +24,7 @@ struct KeyChord: Hashable, Sendable {
         return result + key.uppercased()
     }
 
+    // Written out because NSEvent.ModifierFlags is Equatable but not Hashable.
     static func == (lhs: KeyChord, rhs: KeyChord) -> Bool {
         lhs.key == rhs.key && lhs.modifiers.rawValue == rhs.modifiers.rawValue
     }

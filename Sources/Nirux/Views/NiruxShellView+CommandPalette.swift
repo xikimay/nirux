@@ -21,13 +21,7 @@ extension NiruxShellView {
                 self?.addColumn()
             },
             PaletteAction(
-                icon: "✕", title: "Close Column", subtitle: "Close the focused column",
-                shortcut: .closeColumn
-            ) { [weak self] in
-                self?.closeActiveColumn()
-            },
-            PaletteAction(
-                icon: "↔", title: "Cycle Width", subtitle: "Snap the focused column through width presets",
+                icon: "↔", title: "Resize Column (Cycle Width)", subtitle: "Snap the focused column through width presets",
                 shortcut: .cycleWidth
             ) { [weak self] in
                 self?.cycleActiveColumnWidth()
@@ -88,7 +82,7 @@ extension NiruxShellView {
                 self?.togglePilotMode()
             },
             PaletteAction(
-                icon: "◧", title: "Toggle Sidebar", subtitle: "Show or hide the workspace sidebar",
+                icon: "◧", title: "Show/Hide Sidebar", subtitle: "Show or hide the workspace sidebar",
                 shortcut: .toggleSidebar
             ) { [weak self] in
                 self?.toggleSidebar()
@@ -105,7 +99,7 @@ extension NiruxShellView {
                 self?.installAgentSkills()
             },
             PaletteAction(
-                icon: "🛠", title: "Settings", subtitle: "Agent launch modes, remote access and experiments",
+                icon: "🛠", title: "Open Settings", subtitle: "Agent launch modes, remote access and experiments",
                 shortcut: .settings
             ) {
                 NSApp.sendAction(#selector(NiruxApp.showSettings(_:)), to: nil, from: nil)

@@ -70,4 +70,52 @@ final class PanelTextUndoTests: XCTestCase {
         undo.undo(nil)
         XCTAssertFalse(probe.undone)
     }
+
+    /// NSAlert text prompts (New File, Rename, mission replies) run modally:
+    /// Undo must stay enabled there and see the alert window as a panel.
+    @MainActor
+    func testUndoWorksInModalAlertPanels() {
+        _ = NSApplication.shared
+        XCTAssertTrue(PanelTextUndo.shared.worksWhenModal)
+        XCTAssertTrue(NSAlert().window is NSPanel)
+    }
+
+    // MARK: - Workspace Context panel
+
+    @MainActor
+    private func contextConfiguration(purpose: String) -> WorkspaceContextPanelConfiguration {
+        WorkspaceContextPanelConfiguration(
+            title: "Workspace", cwd: "/tmp", purpose: purpose, phaseOverride: nil, effectivePhase: .active,
+            lastSummary: "", lastSummaryIsManual: false, lastActivityAt: nil, nextStep: nil, blocker: nil,
+            gitBranch: nil, diffStats: nil, prInfo: nil, agentStatuses: []
+        )
+    }
+
+    /// The panel is reused across workspaces; undo recorded for workspace A
+    /// must not replay onto B's text (it threw NSRangeException or silently
+    /// corrupted B), and each editor keeps its own stack.
+    @MainActor
+    func testContextPanelDropsUndoFromThePreviousWorkspace() {
+        _ = NSApplication.shared
+        let host = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 700), styleMask: [.titled], backing: .buffered, defer: true)
+        let contextPanel = WorkspaceContextPanel()
+        contextPanel.show(relativeTo: host, configuration: contextConfiguration(purpose: "Workspace A purpose"))
+        defer { contextPanel.purposeEditor?.window?.orderOut(nil) }
+
+        guard let purposeUndo = contextPanel.purposeEditor?.undoManager,
+              let summaryUndo = contextPanel.summaryEditor?.undoManager
+        else { return XCTFail("context editors have no undo manager") }
+        XCTAssertFalse(purposeUndo === summaryUndo)
+
+        let probe = UndoProbe()
+        purposeUndo.groupsByEvent = false
+        purposeUndo.beginUndoGrouping()
+        purposeUndo.registerUndo(withTarget: probe, selector: #selector(UndoProbe.revert(_:)), object: nil)
+        purposeUndo.endUndoGrouping()
+        XCTAssertTrue(purposeUndo.canUndo)
+        XCTAssertFalse(summaryUndo.canUndo)
+
+        contextPanel.show(relativeTo: host, configuration: contextConfiguration(purpose: "B"))
+        XCTAssertFalse(purposeUndo.canUndo)
+    }
 }

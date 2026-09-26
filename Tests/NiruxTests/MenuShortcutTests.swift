@@ -92,6 +92,9 @@ final class MenuShortcutTests: XCTestCase {
         XCTAssertEqual(minimize.compactMap(chord(of:)), [KeyChord("m")])
         XCTAssertEqual(fullScreen.compactMap(chord(of:)), [KeyChord("f", [.command, .control])])
         XCTAssertEqual(items(withAction: #selector(NSWindow.performZoom(_:))).count, 1)
+        // setupMenus hands this submenu to NSApp.windowsMenu.
+        let windowMenu = NiruxApp().makeMainMenu().item(withTag: NiruxApp.windowMenuTag)?.submenu
+        XCTAssertTrue(windowMenu?.items.contains { $0.action == #selector(NSWindow.performMiniaturize(_:)) } == true)
     }
 
     // MARK: - Nirux chords

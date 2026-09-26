@@ -8,6 +8,13 @@ extension NiruxApp {
     }
 
     @objc func closeColumn(_ sender: Any?) {
+        // Cmd+W closes the window in front, as elsewhere on macOS: with a
+        // panel (Settings, Workspace Context…) or a detached Web Inspector
+        // key, the column behind it must stay open.
+        if let keyWindow = NSApp.keyWindow, keyWindow !== mainWindow {
+            keyWindow.performClose(sender)
+            return
+        }
         shell?.closeActiveColumn()
     }
 
@@ -117,7 +124,7 @@ extension NiruxApp {
         let mainMenu = makeMainMenu()
         NSApp.mainMenu = mainMenu
         // Lets AppKit list open windows and add its tiling items.
-        NSApp.windowsMenu = mainMenu.items.first { $0.submenu?.title == "Window" }?.submenu
+        NSApp.windowsMenu = mainMenu.item(withTag: Self.windowMenuTag)?.submenu
     }
 
     @MainActor
@@ -336,6 +343,8 @@ extension NiruxApp {
         return workspacesItem
     }
 
+    static let windowMenuTag = 1
+
     @MainActor
     private func windowMenuItem() -> NSMenuItem {
         let windowMenu = NSMenu(title: "Window")
@@ -344,6 +353,7 @@ extension NiruxApp {
         windowMenu.addItem(NSMenuItem.separator())
         windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         let windowItem = NSMenuItem()
+        windowItem.tag = Self.windowMenuTag
         windowItem.submenu = windowMenu
         return windowItem
     }
