@@ -30,7 +30,8 @@ final class TerminalConfigBuilderTests: XCTestCase {
 
     func testWithoutUserConfigNiruxKeepsItsCurrentLook() {
         // What Nirux rendered before reading the Ghostty config: the
-        // libghostty-spm defaults plus its Afterglow dark palette.
+        // libghostty-spm defaults plus its Afterglow dark palette. Compared
+        // with the pinned library's own Afterglow, which Nirux writes out.
         let lines = renderedLines([])
         XCTAssertEqual(Array(lines.prefix(4)), [
             "cursor-style = block", "cursor-style-blink = true", "font-size = 14", "font-thicken = true"
@@ -149,21 +150,43 @@ final class TerminalConfigBuilderTests: XCTestCase {
         XCTAssertNil(Builder.darkThemeName(""))
     }
 
+    func testDarkThemeNameFollowsZigEscapes() {
+        // Quoted values are decoded as Zig string literals...
+        XCTAssertEqual(Builder.darkThemeName("light:A,dark:\"Rose\\x20Pine\""), "Rose Pine")
+        XCTAssertEqual(Builder.darkThemeName("light:A,dark:\"Ros\\u{e9}\""), "Rosé")
+        XCTAssertEqual(Builder.darkThemeName("light:A,dark:\"a\\\"b\""), "a\"b")
+        // ...unquoted ones keep their (valid) escapes as written...
+        XCTAssertEqual(Builder.darkThemeName("light:A,dark:B\\\"C"), "B\\\"C")
+        // ...and an illegal escape, even of a comma, rejects the value.
+        XCTAssertNil(Builder.darkThemeName("light:A,dark:B\\,C"))
+        XCTAssertNil(Builder.darkThemeName("light:A,dark:B\\ C"))
+        XCTAssertNil(Builder.darkThemeName("light:A,dark:\"B\\q\""))
+        XCTAssertNil(Builder.darkThemeName("light:A,dark:\"B\\x4\""))
+        XCTAssertNil(Builder.darkThemeName("light:A,dark:\"B\\u{}\""))
+        XCTAssertNil(Builder.darkThemeName("light:A,dark:\"a\"b\""))
+        XCTAssertEqual(Builder.selectedTheme(in: entries("theme = Nord\ntheme = light:A,dark:B\\ C"))?.value, "Nord")
+    }
+
     func testResolveThemeSearchesDirectoriesInOrderAndLazily() {
         let files: Set<String> = ["/user/themes/Mine", "/app/themes/Mine", "/app/themes/Builtin", "/abs/theme"]
+        let directories: Set<String> = ["/user/themes/Folder", "/app/themes/Folder"]
         var appLookups = 0
-        let directories: [() -> String?] = [{ "/user/themes" }, { appLookups += 1; return "/app/themes" }]
+        let searchDirectories: [() -> String?] = [{ "/user/themes" }, { appLookups += 1; return "/app/themes" }]
         let resolve = { (name: String) in
-            Builder.resolveTheme(name, searchDirectories: directories) { files.contains($0) }
+            Builder.resolveTheme(name, searchDirectories: searchDirectories) { path in
+                files.contains(path) ? .regularFile : directories.contains(path) ? .other : .missing
+            }
         }
         XCTAssertEqual(resolve("Mine"), "/user/themes/Mine")
         XCTAssertEqual(resolve("/abs/theme"), "/abs/theme")
         XCTAssertEqual(appLookups, 0)
         XCTAssertEqual(resolve("Builtin"), "/app/themes/Builtin")
+        // Like Ghostty, a non-file entry ends the search.
+        XCTAssertNil(resolve("Folder"))
         XCTAssertNil(resolve("/abs/missing"))
         XCTAssertNil(resolve("sub/Mine"))
         XCTAssertNil(resolve("Missing"))
-        XCTAssertNil(Builder.resolveTheme("Mine", searchDirectories: [{ nil }]) { _ in true })
+        XCTAssertNil(Builder.resolveTheme("Mine", searchDirectories: [{ nil }]) { _ in .regularFile })
     }
 
     // MARK: - Sanitizing

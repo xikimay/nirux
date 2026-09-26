@@ -29,7 +29,8 @@ enum GhosttyConfigFile {
     /// Default config files in Ghostty's load order (see `loadDefaultFiles`
     /// in ghostty/src/config/Config.zig): the legacy `config` then
     /// `config.ghostty`, first under `$XDG_CONFIG_HOME/ghostty`, then under
-    /// Ghostty's Application Support directory.
+    /// Ghostty's Application Support directory. `home` is the account's
+    /// home directory, which Application Support derives from.
     static func defaultPaths(environment: [String: String], home: String) -> [String] {
         let appSupport = (home as NSString).appendingPathComponent("Library/Application Support/com.mitchellh.ghostty")
         let xdg = (xdgConfigHome(environment: environment, home: home) as NSString).appendingPathComponent("ghostty")
@@ -38,12 +39,28 @@ enum GhosttyConfigFile {
         }
     }
 
-    /// `$XDG_CONFIG_HOME`, or `~/.config` when unset or not absolute.
+    /// The home Ghostty uses for XDG paths and `~`: `$HOME` when set, like
+    /// its homedir.home, else the account's.
+    static func ghosttyHome(environment: [String: String], home: String) -> String {
+        guard let value = environment["HOME"], !value.isEmpty else { return home }
+        return value
+    }
+
+    /// `$XDG_CONFIG_HOME` when set (relative to the current directory if
+    /// relative, as in Ghostty), else `.config` in Ghostty's home.
     static func xdgConfigHome(environment: [String: String], home: String) -> String {
-        if let value = environment["XDG_CONFIG_HOME"], value.hasPrefix("/") {
-            return value
+        if let value = environment["XDG_CONFIG_HOME"], !value.isEmpty {
+            return value.hasPrefix("/")
+                ? value
+                : (FileManager.default.currentDirectoryPath as NSString).appendingPathComponent(value)
         }
-        return (home as NSString).appendingPathComponent(".config")
+        return (ghosttyHome(environment: environment, home: home) as NSString).appendingPathComponent(".config")
+    }
+
+    /// `value` without one pair of surrounding double quotes.
+    static func unquoted(_ value: String) -> String {
+        guard value.count >= 2, value.hasPrefix("\""), value.hasSuffix("\"") else { return value }
+        return String(value.dropFirst().dropLast())
     }
 
     /// Parses Ghostty's `key = value` format (LineIterator in
@@ -68,10 +85,7 @@ enum GhosttyConfigFile {
             var value = ""
             if let equals = line.firstIndex(of: "=") {
                 key = line[..<equals].trimmingCharacters(in: whitespace)
-                value = line[line.index(after: equals)...].trimmingCharacters(in: whitespace)
-                if value.count >= 2, value.hasPrefix("\""), value.hasSuffix("\"") {
-                    value = String(value.dropFirst().dropLast())
-                }
+                value = unquoted(line[line.index(after: equals)...].trimmingCharacters(in: whitespace))
             } else {
                 key = line
             }
@@ -136,10 +150,7 @@ enum GhosttyConfigFile {
     /// expand), or nil when empty. Optional (`?`) and required includes are
     /// treated alike: a missing file is skipped either way.
     static func includePath(_ value: String, relativeTo directory: String, home: String) -> String? {
-        var path = value.hasPrefix("?") ? String(value.dropFirst()) : value
-        if path.count >= 2, path.hasPrefix("\""), path.hasSuffix("\"") {
-            path = String(path.dropFirst().dropLast())
-        }
+        var path = unquoted(value.hasPrefix("?") ? String(value.dropFirst()) : value)
         guard !path.isEmpty else { return nil }
         if path.hasPrefix("~/") {
             path = (home as NSString).appendingPathComponent(String(path.dropFirst(2)))
@@ -149,19 +160,22 @@ enum GhosttyConfigFile {
         return (path as NSString).standardizingPath
     }
 
-    /// Contents of a regular file, nil otherwise, cut before the first
-    /// line longer than `maxLineBytes` as Ghostty stops reading there.
-    /// Decoded leniently, as Ghostty reads bytes: an invalid UTF-8 sequence
-    /// only garbles its own line instead of discarding the file.
+    /// Contents of a regular file, nil otherwise. As in Ghostty's
+    /// loadFsFile, a UTF-8 byte order mark is skipped, and the file is cut
+    /// before the first line longer than `maxLineBytes`. Decoded leniently,
+    /// as Ghostty reads bytes: an invalid UTF-8 sequence only garbles its
+    /// own line instead of discarding the file.
     static func readRegularFile(_ path: String) -> String? {
         guard isRegularFile(path) else { return nil }
-        guard let data = FileManager.default.contents(atPath: path) else {
+        guard var data = FileManager.default.contents(atPath: path) else {
             NSLog("[GhosttyConfig] cannot read %@", path)
             return nil
         }
+        if data.starts(with: [0xEF, 0xBB, 0xBF]) {
+            data = data.dropFirst(3)
+        }
         // Lossy on purpose: invalid bytes become U+FFFD.
-        let contents = String(decoding: truncatedAtOverlongLine(data), as: UTF8.self) // swiftlint:disable:this optional_data_string_conversion
-        return contents.hasPrefix("\u{FEFF}") ? String(contents.dropFirst()) : contents
+        return String(decoding: truncatedAtOverlongLine(data), as: UTF8.self) // swiftlint:disable:this optional_data_string_conversion
     }
 
     /// `data` up to the first line longer than `maxLineBytes`.
@@ -174,10 +188,22 @@ enum GhosttyConfigFile {
         return data.endIndex - lineStart > maxLineBytes ? data[..<lineStart] : data
     }
 
-    /// True for a regular file, following symlinks. Rejects FIFOs and
-    /// devices, which could block or never end.
-    static func isRegularFile(_ path: String) -> Bool {
+    enum PathKind: Equatable {
+        case missing, regularFile, other
+    }
+
+    /// What `path` is, following symlinks. `.other` covers directories,
+    /// FIFOs and devices (which could block or never end) and paths that
+    /// can't be examined.
+    static func pathKind(_ path: String) -> PathKind {
         var info = stat()
-        return stat(path, &info) == 0 && info.st_mode & S_IFMT == S_IFREG
+        guard stat(path, &info) == 0 else {
+            return errno == ENOENT || errno == ENOTDIR ? .missing : .other
+        }
+        return info.st_mode & S_IFMT == S_IFREG ? .regularFile : .other
+    }
+
+    static func isRegularFile(_ path: String) -> Bool {
+        pathKind(path) == .regularFile
     }
 }

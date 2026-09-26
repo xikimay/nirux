@@ -33,17 +33,24 @@ enum TerminalConfigBuilder {
     ]
 
     /// Nirux's look when the Ghostty config doesn't override it:
-    /// libghostty-spm's `TerminalConfiguration.default`, written out so a
-    /// library update can't silently change it, and its Afterglow palette.
-    /// Both are what Nirux terminals have always rendered with (the window
-    /// is forced to dark appearance, which selects Afterglow).
+    /// libghostty-spm's `TerminalConfiguration.default` and its Afterglow
+    /// palette, which Nirux terminals have always rendered with (the window
+    /// is forced to dark appearance, which selects Afterglow). Written out
+    /// so a library update can't silently change them.
     static let niruxDefaults = [
         "cursor-style = block",
         "cursor-style-blink = true",
         "font-size = 14",
         "font-thicken = true"
     ]
-    static let niruxColors = TerminalConfiguration.afterglow.rendered.split(separator: "\n").map(String.init)
+    static let niruxColors = [
+        "background = 212121",
+        "foreground = D0D0D0",
+        "cursor-color = D0D0D0",
+        "selection-background = 303030"
+    ] + ["#151515", "#AC4142", "#7E8E50", "#E4B567", "#6C99BB", "#9F4E86", "#7DD5CF", "#D0D0D0",
+         "#505050", "#AC4142", "#7E8E50", "#E4B567", "#6C99BB", "#9F4E86", "#7DD5CF", "#F5F5F5"]
+        .enumerated().map { "palette = \($0.offset)=\($0.element)" }
     /// Applied last so nothing overrides them.
     static let enforced = ["term = xterm-256color"]
 
@@ -111,62 +118,125 @@ enum TerminalConfigBuilder {
             guard let separator = part.firstIndex(of: ":") else { return nil }
             let name = part[..<separator].trimmingCharacters(in: whitespace)
             guard name == "light" || name == "dark" else { return nil }
-            var theme = part[part.index(after: separator)...].trimmingCharacters(in: whitespace)
+            let theme = part[part.index(after: separator)...].trimmingCharacters(in: whitespace)
             if theme.count >= 2, theme.hasPrefix("\""), theme.hasSuffix("\"") {
-                theme = String(theme.dropFirst().dropLast())
+                guard let decoded = decodeQuoted(theme) else { return nil }
+                variants[name] = decoded
+            } else {
+                variants[name] = theme
             }
-            variants[name] = theme
         }
         guard variants["light"] != nil else { return nil }
         return variants["dark"]
     }
 
     /// Comma-separated parts, ignoring commas inside double quotes or
-    /// escaped with a backslash; a trailing comma ends the list (Ghostty's
-    /// CommaSplitter). Nil on an unclosed quote or a dangling backslash.
-    private static func splitOutsideQuotes(_ value: String) -> [Substring]? {
-        var parts: [Substring] = []
-        var start = value.startIndex
-        var index = value.startIndex
+    /// escaped with a backslash; a trailing comma ends the list. Like
+    /// Ghostty's CommaSplitter, escapes are validated but kept as written,
+    /// and an unclosed quote or illegal escape fails.
+    private static func splitOutsideQuotes(_ value: String) -> [String]? {
+        let scalars = Array(value.unicodeScalars)
+        var parts: [String] = []
+        var current = String.UnicodeScalarView()
         var quoted = false
-        while index < value.endIndex {
-            switch value[index] {
-            case "\\":
-                index = value.index(after: index)
-                guard index < value.endIndex else { return nil }
-            case "\"":
-                quoted.toggle()
-            case "," where !quoted:
-                parts.append(value[start..<index])
-                start = value.index(after: index)
-            default:
-                break
+        var index = 0
+        while index < scalars.count {
+            let scalar = scalars[index]
+            if scalar == "\\" {
+                guard let escape = scanEscape(scalars, from: index + 1) else { return nil }
+                current.append(contentsOf: scalars[index..<escape.end])
+                index = escape.end
+                continue
             }
-            index = value.index(after: index)
+            if scalar == ",", !quoted {
+                parts.append(String(current))
+                current = String.UnicodeScalarView()
+            } else {
+                if scalar == "\"" { quoted.toggle() }
+                current.append(scalar)
+            }
+            index += 1
         }
         guard !quoted else { return nil }
-        if start < value.endIndex {
-            parts.append(value[start...])
+        if !current.isEmpty {
+            parts.append(String(current))
         }
         return parts
     }
 
+    /// Decodes a double-quoted value as a Zig string literal, as Ghostty's
+    /// parseAutoStruct does. Nil when malformed.
+    private static func decodeQuoted(_ value: String) -> String? {
+        let scalars = Array(value.unicodeScalars.dropFirst().dropLast())
+        var decoded = ""
+        var index = 0
+        while index < scalars.count {
+            switch scalars[index] {
+            case "\\":
+                guard let escape = scanEscape(scalars, from: index + 1) else { return nil }
+                decoded += escape.text
+                index = escape.end
+            case "\"":
+                return nil
+            default:
+                decoded.unicodeScalars.append(scalars[index])
+                index += 1
+            }
+        }
+        return decoded
+    }
+
+    /// The Zig escape sequence starting at `start`, right after a
+    /// backslash: `\n`, `\r`, `\t`, `\\`, `\'`, `\"`, `\xNN` or `\u{N…}`.
+    /// Returns its decoded text and the index after it, or nil if illegal.
+    private static func scanEscape(_ scalars: [Unicode.Scalar], from start: Int) -> (text: String, end: Int)? {
+        guard start < scalars.count else { return nil }
+        let hexScalar = { (digits: ArraySlice<Unicode.Scalar>) -> Unicode.Scalar? in
+            guard !digits.isEmpty, digits.allSatisfy(\.properties.isASCIIHexDigit),
+                  let value = UInt32(String(String.UnicodeScalarView(digits)), radix: 16)
+            else { return nil }
+            return Unicode.Scalar(value)
+        }
+        switch scalars[start] {
+        case "n": return ("\n", start + 1)
+        case "r": return ("\r", start + 1)
+        case "t": return ("\t", start + 1)
+        case "\\", "'", "\"": return (String(scalars[start]), start + 1)
+        case "x":
+            guard start + 3 <= scalars.count, let scalar = hexScalar(scalars[(start + 1)..<(start + 3)]) else { return nil }
+            return (String(scalar), start + 3)
+        case "u":
+            guard start + 2 <= scalars.count, scalars[start + 1] == "{",
+                  let close = scalars[(start + 2)...].firstIndex(of: "}"),
+                  let scalar = hexScalar(scalars[(start + 2)..<close])
+            else { return nil }
+            return (String(scalar), close + 1)
+        default:
+            return nil
+        }
+    }
+
     /// Resolves a theme the way Ghostty's themepkg.open does: an absolute
     /// path is used as is; a bare name is looked up in each directory of
-    /// `searchDirectories`, in order (evaluated lazily).
+    /// `searchDirectories`, in order (evaluated lazily), and the search
+    /// stops at an entry that exists but isn't a regular file.
     static func resolveTheme(
         _ name: String,
         searchDirectories: [() -> String?],
-        isFile: (String) -> Bool = GhosttyConfigFile.isRegularFile
+        pathKind: (String) -> GhosttyConfigFile.PathKind = GhosttyConfigFile.pathKind
     ) -> String? {
         if name.hasPrefix("/") {
-            return isFile(name) ? name : nil
+            return pathKind(name) == .regularFile ? name : nil
         }
         guard !name.contains("/") else { return nil }
         for directory in searchDirectories {
             guard let directory = directory() else { continue }
             let path = (directory as NSString).appendingPathComponent(name)
-            if isFile(path) { return path }
+            switch pathKind(path) {
+            case .regularFile: return path
+            case .other: return nil
+            case .missing: continue
+            }
         }
         return nil
     }
@@ -264,13 +334,15 @@ enum TerminalAppearance {
         // An empty theme: libghostty-spm's default one would be appended
         // after the user's colors and override them.
         let controller = TerminalController(configSource: .generated(currentConfig()), theme: TerminalTheme())
-        if let issue = controller.lastConfigurationIssue {
-            // libghostty-spm fell back to its own defaults; validate again
-            // for the next terminal.
-            NSLog("[GhosttyConfig] terminal config rejected: %@", issue)
-            lastSanitized = nil
-        }
-        return controller
+        guard let issue = controller.lastConfigurationIssue else { return controller }
+        NSLog("[GhosttyConfig] terminal config rejected: %@", issue)
+        // A failure that isn't the config's (e.g. writing libghostty-spm's
+        // temporary file) would recur whatever the config.
+        guard issue.hasPrefix(TerminalConfigBuilder.diagnosticsPrefix) else { return controller }
+        // libghostty-spm fell back to its own defaults: use Nirux's look
+        // instead, and validate the config again for the next terminal.
+        lastSanitized = nil
+        return TerminalController(configSource: .generated(TerminalConfigBuilder.render([])), theme: TerminalTheme())
     }
 
     static func currentConfig(
@@ -283,12 +355,12 @@ enum TerminalAppearance {
         }
         let entries = GhosttyConfigFile.load(
             paths: GhosttyConfigFile.defaultPaths(environment: environment, home: home),
-            home: home
+            home: GhosttyConfigFile.ghosttyHome(environment: environment, home: home)
         )
         let userThemes = (GhosttyConfigFile.xdgConfigHome(environment: environment, home: home) as NSString)
             .appendingPathComponent("ghostty/themes")
         let (user, unresolvedTheme) = TerminalConfigBuilder.userLines(from: entries) {
-            TerminalConfigBuilder.resolveTheme($0, searchDirectories: [{ userThemes }, { ghosttyAppThemesDirectory }])
+            TerminalConfigBuilder.resolveTheme($0, searchDirectories: [{ userThemes }, ghosttyAppThemesDirectory])
         }
         if let lastSanitized, lastSanitized.input == user {
             return lastSanitized.contents
@@ -318,10 +390,17 @@ enum TerminalAppearance {
         return issue?.hasPrefix(TerminalConfigBuilder.diagnosticsPrefix) == true ? issue : nil
     }
 
-    /// Themes bundled with Ghostty.app, when it is installed. Looked up on
-    /// first use only: most configs never need it.
-    private static let ghosttyAppThemesDirectory: String? = {
+    private static var cachedGhosttyAppThemesDirectory: String?
+
+    /// Themes bundled with Ghostty.app, when it is installed. Only needed
+    /// for bundled theme names; the Launch Services lookup is repeated
+    /// until it finds the app, and when the app moves.
+    private static func ghosttyAppThemesDirectory() -> String? {
+        if let cached = cachedGhosttyAppThemesDirectory, FileManager.default.fileExists(atPath: cached) {
+            return cached
+        }
         let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.mitchellh.ghostty")
-        return app?.appendingPathComponent("Contents/Resources/ghostty/themes").path
-    }()
+        cachedGhosttyAppThemesDirectory = app?.appendingPathComponent("Contents/Resources/ghostty/themes").path
+        return cachedGhosttyAppThemesDirectory
+    }
 }

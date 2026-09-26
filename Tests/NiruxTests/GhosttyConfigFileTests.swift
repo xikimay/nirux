@@ -64,11 +64,22 @@ final class GhosttyConfigFileTests: XCTestCase {
         ])
     }
 
-    func testDefaultPathsHonorAbsoluteXDGConfigHome() {
-        let paths = GhosttyConfigFile.defaultPaths(environment: ["XDG_CONFIG_HOME": "/xdg"], home: "/Users/me")
-        XCTAssertEqual(paths.first, "/xdg/ghostty/config")
-        let relative = GhosttyConfigFile.defaultPaths(environment: ["XDG_CONFIG_HOME": "xdg"], home: "/Users/me")
-        XCTAssertEqual(relative.first, "/Users/me/.config/ghostty/config")
+    func testDefaultPathsFollowGhosttysXDGAndHome() {
+        let paths = { (environment: [String: String]) in
+            GhosttyConfigFile.defaultPaths(environment: environment, home: "/Users/me")
+        }
+        XCTAssertEqual(paths(["XDG_CONFIG_HOME": "/xdg"]).first, "/xdg/ghostty/config")
+        XCTAssertEqual(paths(["XDG_CONFIG_HOME": ""]).first, "/Users/me/.config/ghostty/config")
+        let cwd = FileManager.default.currentDirectoryPath
+        XCTAssertEqual(paths(["XDG_CONFIG_HOME": "xdg"]).first, (cwd as NSString).appendingPathComponent("xdg/ghostty/config"))
+        // $HOME moves the XDG files but not Application Support, as in Ghostty.
+        XCTAssertEqual(paths(["HOME": "/tmp/h"]), [
+            "/tmp/h/.config/ghostty/config",
+            "/tmp/h/.config/ghostty/config.ghostty",
+            "/Users/me/Library/Application Support/com.mitchellh.ghostty/config",
+            "/Users/me/Library/Application Support/com.mitchellh.ghostty/config.ghostty"
+        ])
+        XCTAssertEqual(GhosttyConfigFile.ghosttyHome(environment: ["HOME": ""], home: "/Users/me"), "/Users/me")
     }
 
     // MARK: - Loading
@@ -182,6 +193,13 @@ final class GhosttyConfigFileTests: XCTestCase {
         let wide = GhosttyConfigFile.parse(GhosttyConfigFile.readRegularFile(widening.path) ?? "", source: "c")
         XCTAssertEqual(wide.map(\.line), ["font-size = 21"])
 
+        // The byte order mark doesn't count toward the first line's limit.
+        let marked = dir.appendingPathComponent("marked")
+        let longest = "font-family = " + String(repeating: "x", count: GhosttyConfigFile.maxLineBytes - 14)
+        try Data([0xEF, 0xBB, 0xBF] + Array("\(longest)\nfont-size = 22\n".utf8)).write(to: marked)
+        let markedLines = GhosttyConfigFile.parse(GhosttyConfigFile.readRegularFile(marked.path) ?? "", source: "c")
+        XCTAssertEqual(markedLines.map(\.key), ["font-family", "font-size"])
+
         let link = dir.appendingPathComponent("link")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: file)
         XCTAssertTrue(GhosttyConfigFile.isRegularFile(link.path))
@@ -192,5 +210,9 @@ final class GhosttyConfigFileTests: XCTestCase {
         XCTAssertNil(GhosttyConfigFile.readRegularFile(fifo.path))
         XCTAssertNil(GhosttyConfigFile.readRegularFile(dir.path))
         XCTAssertNil(GhosttyConfigFile.readRegularFile(dir.appendingPathComponent("missing").path))
+        XCTAssertEqual(GhosttyConfigFile.pathKind(dir.appendingPathComponent("missing").path), .missing)
+        XCTAssertEqual(GhosttyConfigFile.pathKind(file.appendingPathComponent("under-a-file").path), .missing)
+        XCTAssertEqual(GhosttyConfigFile.pathKind(dir.path), .other)
+        XCTAssertEqual(GhosttyConfigFile.pathKind(link.path), .regularFile)
     }
 }
