@@ -148,7 +148,7 @@ extension NiruxShellView {
     // MARK: - Worktree Skill
 
     // Generated shell commands must stay on one line in the installed skill.
-    private static let worktreeSkillContent = """
+    static let worktreeSkillContent = """
         ---
         name: nirux-worktree
         description: >
@@ -200,8 +200,13 @@ extension NiruxShellView {
            file into the worktree as `.claude-handover.md` or `.codex-handover.md`, and launches
            the same agent. Nirux terminals expose `NIRUX_PROFILE_ID`; preserve it in the URL so
            the new workspace opens in the same Nirux session/space even if the user has focused a
-           different one:
+           different one. They also expose `NIRUX_LAUNCH_ID`, which proves the request comes from
+           a Nirux terminal; without it Nirux asks the user to confirm before doing anything:
            ```bash
+           launch_query=""
+           if [ -n "${NIRUX_LAUNCH_ID:-}" ]; then
+             launch_query="&launch=${NIRUX_LAUNCH_ID}"
+           fi
            profile_query=""
            if [ -n "${NIRUX_PROFILE_ID:-}" ]; then
              profile_query="&profile=${NIRUX_PROFILE_ID}"
@@ -214,9 +219,11 @@ extension NiruxShellView {
              mission_query="&parentWorkspace=${NIRUX_WORKSPACE_ID}&parentAgent=${NIRUX_AGENT_UUID}"
            fi
            open "nirux://new-worktree?branch=<url-encoded-branch>&repo=<url-encoded-repo-root>\
-        &agent=<claude-or-codex>&handover=<url-encoded-temp-path>${profile_query}${mission_query}"
+        &agent=<claude-or-codex>&handover=<url-encoded-temp-path>${launch_query}${profile_query}${mission_query}"
            ```
            Nirux moves the handover file into the worktree on launch; no manual cleanup is needed.
+           The handover must stay directly in `/tmp` with the `nirux-handover-` prefix: Nirux
+           rejects any other path.
 
         When `mission_query` is present, Nirux records the parent/child link and starts the child
         with explicit mailbox instructions. The child asks and waits without PTY injection:

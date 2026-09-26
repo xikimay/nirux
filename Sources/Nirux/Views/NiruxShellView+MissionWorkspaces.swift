@@ -17,11 +17,18 @@ extension NiruxShellView {
         let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
         DispatchQueue.global(qos: .userInitiated).async {
             let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot)
-            // Move handover file into the worktree if provided
-            if let path, let handoverPath, FileManager.default.fileExists(atPath: handoverPath) {
-                let dest = path + "/\(Self.handoverFilename(for: agent ?? .claude))"
-                try? FileManager.default.removeItem(atPath: dest)
-                try? FileManager.default.moveItem(atPath: handoverPath, toPath: dest)
+            // Move handover file into the worktree if provided. The path comes
+            // from a URL: HandoverFile only accepts the user's own regular file
+            // directly in /tmp, never a symlink or hard link.
+            if let path, let handoverPath {
+                let result = HandoverFile.transfer(
+                    from: handoverPath,
+                    toDirectory: path,
+                    filename: Self.handoverFilename(for: agent ?? .claude)
+                )
+                if case .failure(let error) = result {
+                    NSLog("[Worktree] Ignored handover \(handoverPath): \(error)")
+                }
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }

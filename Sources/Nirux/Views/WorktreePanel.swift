@@ -84,7 +84,19 @@ final class WorktreePanel {
 enum GitWorktree {
     /// Create a worktree for the given branch. Auto-detects existing vs new branch.
     /// Returns (path, nil) on success or (nil, errorMessage) on failure.
+    /// Both inputs can come from a `nirux://new-worktree` URL, so they are
+    /// validated here rather than trusted: `repoRoot` must be the top level
+    /// of a git work tree, `branch` a valid branch name (a leading "-" would
+    /// otherwise be parsed as a git option), and an existing directory at the
+    /// target path is only reused when git lists it as a worktree of the repo.
     static func create(branch: String, repoRoot: String) -> (path: String?, error: String?) {
+        guard isRepositoryTopLevel(repoRoot) else {
+            return (nil, "Not the top level of a git repository: \(repoRoot)")
+        }
+        guard isValidBranchName(branch, repoRoot: repoRoot) else {
+            return (nil, "Invalid branch name: \(branch)")
+        }
+
         // Sanitize branch name for directory path
         let dirName = branch.replacingOccurrences(of: "/", with: "-")
         let repoName = URL(fileURLWithPath: repoRoot).lastPathComponent
@@ -93,8 +105,12 @@ enum GitWorktree {
             .appendingPathComponent("\(repoName).\(dirName)")
             .path
 
-        // Check if worktree path already exists
+        // Reuse an existing checkout only if it really is one of this repo's
+        // worktrees; any other directory would get a handover and an agent.
         if FileManager.default.fileExists(atPath: worktreePath) {
+            guard isWorktree(worktreePath, of: repoRoot) else {
+                return (nil, "\(worktreePath) already exists and is not a worktree of \(repoRoot)")
+            }
             return (worktreePath, nil)
         }
 
@@ -165,6 +181,24 @@ enum GitWorktree {
         let output = gitRunFull(["rev-parse", "--show-toplevel"], cwd: path, timeout: mainThreadTimeout)
             .stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return output.isEmpty ? nil : output
+    }
+
+    static func isRepositoryTopLevel(_ path: String) -> Bool {
+        guard path.hasPrefix("/"), let resolved = path.realPath else { return false }
+        let result = gitRunFull(["rev-parse", "--show-toplevel"], cwd: resolved)
+        let topLevel = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard result.status == 0, !topLevel.isEmpty else { return false }
+        return topLevel.realPath == resolved
+    }
+
+    static func isValidBranchName(_ branch: String, repoRoot: String) -> Bool {
+        guard !branch.isEmpty, !branch.hasPrefix("-") else { return false }
+        return gitRunFull(["check-ref-format", "refs/heads/\(branch)"], cwd: repoRoot).status == 0
+    }
+
+    static func isWorktree(_ path: String, of repoRoot: String) -> Bool {
+        guard let resolved = path.realPath else { return false }
+        return list(repoRoot: repoRoot).contains { $0.path.realPath == resolved }
     }
 
     // MARK: - Helpers

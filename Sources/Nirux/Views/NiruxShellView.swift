@@ -600,7 +600,8 @@ extension NiruxShellView {
                     let dirName = branch.replacingOccurrences(of: "/", with: "-")
                     let handoverFileName = Self.handoverFilename(for: runningAgent)
                     let handoverTmp = "/tmp/nirux-handover-\(runningAgent.rawValue)-\(dirName).md"
-                    let queryAllowed = CharacterSet.urlQueryAllowed
+                    // "&", "=", "+" are legal in branch names: encode them so a branch can't add params.
+                    let queryAllowed = CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&=+"))
                     let missionQuery: String = {
                         guard Self.currentMissionHandoffsEnabled(),
                               let workspaceID = self.activeWorkspace?.id,
@@ -615,6 +616,7 @@ extension NiruxShellView {
                         + "&handover=\(handoverTmp.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? handoverTmp)"
                         + "&profile=\(profileID.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? profileID)"
                         + missionQuery
+                        + "&\(NiruxLaunchAuthorization.queryItemName)=${\(NiruxLaunchAuthorization.environmentKey)}"
                     let prompt = "Write a concise session handover to \(handoverTmp) "
                         + "(sections: Goal, Context, Done so far, Next steps). "
                         + "Nirux will move it into the new worktree as \(handoverFileName). "
