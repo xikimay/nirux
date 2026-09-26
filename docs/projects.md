@@ -26,7 +26,8 @@ question: why not connect Nirux to claude.ai instead?
 - **The Project view is a dedicated column type.**
 - **Names never overwrite a name the user set by hand.** `-n` names fresh
   launches. A later PR names restored sessions through the SessionStart hook,
-  only when they have no explicit title.
+  only when they have no explicit title, and only if two checks on Claude Code
+  pass (section 1).
 
 ## Summary
 
@@ -123,21 +124,44 @@ truncate.
   columns in one workspace), Claude Code keeps the first and gives the second a
   suffixed variant ([sessions][sessions]).
 - **Restores don't pass `-n`**, so they never overwrite a name set with
-  `/rename` or from the phone. Sessions already titled ".claude-handover.md"
-  keep that title.
+  `/rename` or from the phone. With this PR alone, sessions already titled
+  ".claude-handover.md" keep that title.
+- **Handover prompt.** The prompt `launchAgent` types today starts with "Read
+  .claude-handover.md". It will start with the branch instead, for example
+  "feat/projects: read .claude-handover.md…". That also helps sessions that get
+  no name, including Codex's.
 - **Codex:** no launch-time name flag (only `/rename` in the TUI), and its
-  sessions don't reach claude.ai. Out of scope.
+  sessions don't reach claude.ai. Nothing more for Codex.
+- **One source for the name.** The app computes the name whenever its inputs
+  change (workspace rename, project rename) and writes it to a small file per
+  column in the state directory. `-n` and the follow-up hook both read it.
 
 **Follow-up PR: restored sessions.** A SessionStart hook can return
 `sessionTitle`, with the same effect as `/rename`, on `startup`, `resume` and
 `fork`. Its input carries `session_title`, "the current session title if one is
 already set, for example via `--name` or `/rename`", so a hook can name a
-restored session without overwriting a title the user set ([hooks][hooks]). The
-hook applies the same label rule, only when `session_title` is empty. It also
-fixes sessions restored with a handover title. To verify first:
-whether an auto-generated title counts as "already set". It needs the hook
-receiver to write JSON to stdout, so it waits for in-flight work on the hook
-receiver.
+restored session without overwriting a title the user set ([hooks][hooks]).
+
+- **Scope.** The hook handles `resume` only; fresh launches keep `-n`. It emits
+  a title only when:
+  - `session_title` is empty;
+  - `NIRUX_AGENT_UUID` is set;
+  - the event comes from the column's own agent (section 6).
+
+  Nirux installs the hook globally, so this keeps it from naming Claude
+  sessions in other terminals, or `claude -p` pipelines inside a Nirux shell.
+- **No git call.** The hook reads the per-column name file, so it doesn't slow
+  down session start.
+- **Two checks before building it.** This PR is useful only if both hold on the
+  current Claude Code; otherwise it is dropped:
+  - an auto-generated title leaves `session_title` empty, or restored handover
+    sessions are never renamed;
+  - a rename made from the phone shows up in `session_title`, or the hook would
+    overwrite it.
+- **Waits for:**
+  - restoring columns by exact session id. Today `--continue` resumes the most
+    recent session in the column's folder, which may belong to another column;
+  - in-flight work on the hook receiver, which must write JSON to stdout.
 
 Rejected: typing `/rename` into the agent (it races with the handover prompt and
 lands in the user's input), and `--remote-control <name>` (it also forces
@@ -158,9 +182,13 @@ struct Project: Codable, Equatable {
 
 enum ProjectAnchor: Codable, Equatable {
     case gitRepository(commonDir: String, fingerprint: RepoFingerprint)
-    case folder(path: String)
+    case folder(commonDir: String?, path: String) // path relative to the repo when commonDir is set
+    case unknown(raw: Data)                       // kind written by a newer build, kept as-is
 }
 ```
+
+Decoding is written by hand, not synthesized, so that missing fields get
+defaults and unknown anchor kinds survive a round trip.
 
 `RepoFingerprint` is the origin URL and root commit, used to notice a
 repository that moved (section 3). `ProjectBrief` and `ProjectDefaults` are
@@ -177,12 +205,18 @@ It is the source of truth.
   `schemaVersion` treats projects as read-only, with a banner saying a newer
   Nirux saved them, so it can't drop fields it doesn't know.
 - It is backed up and rotated like `state.json`, plus one daily backup outside
-  that per-save rotation. A file Nirux can't read is set aside and never
-  overwritten. Nirux does not silently rebuild projects over it.
+  that per-save rotation.
+- **An unreadable file is set aside and never overwritten.** Setting it aside
+  must not trigger the migration below. When the `state.json` marker says
+  projects exist, Nirux restores the newest readable backup, or asks the user.
+- **Write order.** `projects.json` is written before `state.json`. A crash in
+  between leaves the new projects with an old mirror, which the marker rule
+  handles.
 - It is written with mode `0600`, re-applied after every atomic write and to
   the backups, because it can hold env values.
 
-**Migration.** If `projects.json` doesn't exist, it is built from `state.json`'s
+**Migration.** If `projects.json` doesn't exist and `state.json` has no
+marker (a first launch after the update), it is built from `state.json`'s
 `workspaceProfiles`, keeping the same ids. `WorkspaceState.profileID` keeps its
 persisted name, so no workspace needs rewriting.
 
@@ -249,7 +283,10 @@ A workspace's project is decided in this order:
 1. **Explicit parent.** A worktree or mission child joins its parent's current
    project.
 2. **Anchor match.** The most specific matching anchor wins: a `folder` anchor
-   inside a repository beats that repository's anchor.
+   inside a repository beats that repository's anchor. A folder anchor inside a
+   repository is stored relative to the repository, so it also matches in every
+   worktree. Paths are compared by whole components, so `/a/web` doesn't match
+   `/a/web2`.
 3. **The active project**, which is today's behavior for every new workspace.
 
 After that the assignment is sticky. It only changes when the user moves the
@@ -304,9 +341,8 @@ repeat today, copied into each one. A brief states it once, for example:
 
 **Storage.** The brief lives in `<state dir>/projects/<id>/brief.md`. The id
 is the space id, which projects keep, so the brief can ship before the Project
-model. Before each launch, Nirux regenerates
-`<state dir>/projects/<id>/brief.injected.md`, which wraps the brief in a short
-header:
+model. Nirux regenerates `<state dir>/projects/<id>/brief.injected.md` atomically on
+every save and before each launch. It wraps the brief in a short header:
 
 ```text
 # Project brief: <Project name> (from Nirux)
@@ -343,8 +379,10 @@ Support").
   ([resumed conversations][cli-resume]).
 - So a restore must pass the flag too. Otherwise a restored session would lose
   its brief at its first compaction.
-- The editor says: "applies to new sessions; open ones pick it up after
-  compaction".
+- A running process keeps the text it read at launch. So the editor says:
+  "applies to new sessions, and to restored ones after their next compaction".
+- Restores rely on the in-flight exact-id resume work. `--continue` can pick
+  another column's session, which would then get this workspace's brief.
 - `--system-prompt-snapshot off` (2.1.257+) would rebuild the prompt on every
   request. It is documented as a tool for iterating on prompt text, and its
   effect on prompt caching is unknown, so it is not used.
@@ -404,6 +442,11 @@ Rules:
   passes a single set of flags.
 - **Env is fixed when a shell starts.** Changing a project's env, or moving a
   workspace, affects new shells only.
+- **Env values are literal.** They go into `makeTerminalEnvironment`, which does
+  no shell expansion, so `PATH=$PATH:/x` doesn't work. Extend `PATH` in the
+  setup script or the shell's own config instead.
+- **`NIRUX_*` keys are reserved.** A project can't set or override them, since
+  hook routing and missions depend on them.
 - **Setup scripts** are stored as files in the project's state folder. They
   must be idempotent: `GitWorktree.create` can reuse an existing folder, so a
   script may run twice. A failing script doesn't stop the agent from starting;
@@ -411,8 +454,9 @@ Rules:
 - **Setup scripts and project env are applied only to workspaces Nirux can
   attribute to the user**: created from the UI, or from a `nirux://` request
   authenticated as coming from a Nirux terminal.
-- **Secrets.** Env values may hold secrets. The UI suggests referencing a secret
-  manager (`op run …`) over pasting values.
+- **Secrets.** Env values may hold secrets, hence the `0600` file. The UI
+  suggests fetching secrets in the setup script, from the Keychain or a secret
+  manager's CLI, rather than pasting them.
 
 ## 6. History
 
@@ -490,11 +534,11 @@ branches also change; those wait for them to merge.
 | # | PR | Depends on | Waits for in-flight work on |
 | --- | --- | --- | --- |
 | 1 | Name fresh Claude launches (`-n`) | none | launch commands, worktree creation |
-| 2 | Brief per space: storage, editing, Claude and Codex injection | none | launch commands, restore |
-| 3 | Name restored sessions (SessionStart `sessionTitle`) | 1 | hook receiver |
+| 2 | Brief per space: storage, editing, Claude and Codex injection | none | launch commands, exact-id restore |
+| 3 | Name restored sessions (SessionStart `sessionTitle`), if its two checks pass | 1 | hook receiver, exact-id restore |
 | 4 | Project model, `projects.json`, migration, management UI | none | state persistence and backups, restore |
 | 5 | Routing and anchors | 4 | worktree creation, git detection |
-| 6 | Per-project defaults | 2, 4 | settings, terminal env, `nirux://` handling |
+| 6 | Per-project defaults | 2, 4 | settings, terminal env, `nirux://` request handling (hard requirement for setup scripts) |
 | 7 | Session ledger and resume | 4, 5 | hook events, restore |
 | 8 | Project view column | 4, 5 | git and PR polling |
 | 9 | "Finish" (PR merged, then remove worktree) | 8 | worktree creation |
