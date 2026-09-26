@@ -18,6 +18,12 @@ final class GhosttyConfigFileTests: XCTestCase {
         XCTAssertEqual(entry?.line, "font-family =   JetBrains Mono")
     }
 
+    func testQuotesAreComparedByScalar() {
+        // A combining mark after the opening quote doesn't hide it.
+        XCTAssertEqual(GhosttyConfigFile.unquoted("\"\u{301}x\""), "\u{301}x")
+        XCTAssertEqual(GhosttyConfigFile.unquoted("\""), "\"")
+    }
+
     func testParseStripsOnePairOfQuotes() {
         let entries = GhosttyConfigFile.parse("font-family = \"Fira Code\"\nfont-family = \"\"\n", source: "c")
         XCTAssertEqual(entries.map(\.value), ["Fira Code", ""])
@@ -79,7 +85,7 @@ final class GhosttyConfigFileTests: XCTestCase {
             "/Users/me/Library/Application Support/com.mitchellh.ghostty/config",
             "/Users/me/Library/Application Support/com.mitchellh.ghostty/config.ghostty"
         ])
-        XCTAssertEqual(GhosttyConfigFile.ghosttyHome(environment: ["HOME": ""], home: "/Users/me"), "/Users/me")
+        XCTAssertEqual(GhosttyConfigFile.ghosttyHome(environment: [:], home: "/Users/me"), "/Users/me")
     }
 
     // MARK: - Loading
@@ -211,7 +217,7 @@ final class GhosttyConfigFileTests: XCTestCase {
         XCTAssertNil(GhosttyConfigFile.readRegularFile(dir.path))
         XCTAssertNil(GhosttyConfigFile.readRegularFile(dir.appendingPathComponent("missing").path))
         XCTAssertEqual(GhosttyConfigFile.pathKind(dir.appendingPathComponent("missing").path), .missing)
-        XCTAssertEqual(GhosttyConfigFile.pathKind(file.appendingPathComponent("under-a-file").path), .missing)
+        XCTAssertEqual(GhosttyConfigFile.pathKind(file.appendingPathComponent("under-a-file").path), .other)
         XCTAssertEqual(GhosttyConfigFile.pathKind(dir.path), .other)
         XCTAssertEqual(GhosttyConfigFile.pathKind(link.path), .regularFile)
     }

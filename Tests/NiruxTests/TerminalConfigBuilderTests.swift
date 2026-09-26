@@ -163,13 +163,21 @@ final class TerminalConfigBuilderTests: XCTestCase {
         XCTAssertNil(Builder.darkThemeName("light:A,dark:\"B\\q\""))
         XCTAssertNil(Builder.darkThemeName("light:A,dark:\"B\\x4\""))
         XCTAssertNil(Builder.darkThemeName("light:A,dark:\"B\\u{}\""))
-        XCTAssertNil(Builder.darkThemeName("light:A,dark:\"a\"b\""))
+        XCTAssertNil(Builder.darkThemeName("light:A,dark:\"a\"b\""), "unclosed quote")
+        // \xNN is a raw byte, and an unescaped quote ends the literal.
+        XCTAssertEqual(Builder.darkThemeName("light:A,dark:\"Ros\\xc3\\xa9 Pine\""), "Rosé Pine")
+        XCTAssertEqual(Builder.darkThemeName("light:A,dark:\"a\" \"b\""), "a")
+        // Unquoted, \u{…} is only checked, not decoded.
+        XCTAssertEqual(Builder.darkThemeName("light:A,dark:B\\u{d800}"), "B\\u{d800}")
+        XCTAssertNil(Builder.darkThemeName("light:A,dark:\"B\\u{d800}\""))
         XCTAssertEqual(Builder.selectedTheme(in: entries("theme = Nord\ntheme = light:A,dark:B\\ C"))?.value, "Nord")
     }
 
     func testResolveThemeSearchesDirectoriesInOrderAndLazily() {
-        let files: Set<String> = ["/user/themes/Mine", "/app/themes/Mine", "/app/themes/Builtin", "/abs/theme"]
-        let directories: Set<String> = ["/user/themes/Folder", "/app/themes/Folder"]
+        let files: Set<String> = [
+            "/user/themes/Mine", "/app/themes/Mine", "/app/themes/Builtin", "/app/themes/Folder", "/abs/theme"
+        ]
+        let directories: Set<String> = ["/user/themes/Folder"]
         var appLookups = 0
         let searchDirectories: [() -> String?] = [{ "/user/themes" }, { appLookups += 1; return "/app/themes" }]
         let resolve = { (name: String) in
@@ -181,7 +189,8 @@ final class TerminalConfigBuilderTests: XCTestCase {
         XCTAssertEqual(resolve("/abs/theme"), "/abs/theme")
         XCTAssertEqual(appLookups, 0)
         XCTAssertEqual(resolve("Builtin"), "/app/themes/Builtin")
-        // Like Ghostty, a non-file entry ends the search.
+        // Like Ghostty, a non-file entry ends the search, even though the
+        // next directory has a match.
         XCTAssertNil(resolve("Folder"))
         XCTAssertNil(resolve("/abs/missing"))
         XCTAssertNil(resolve("sub/Mine"))

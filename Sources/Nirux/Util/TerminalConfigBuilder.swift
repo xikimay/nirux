@@ -119,7 +119,7 @@ enum TerminalConfigBuilder {
             let name = part[..<separator].trimmingCharacters(in: whitespace)
             guard name == "light" || name == "dark" else { return nil }
             let theme = part[part.index(after: separator)...].trimmingCharacters(in: whitespace)
-            if theme.count >= 2, theme.hasPrefix("\""), theme.hasSuffix("\"") {
+            if GhosttyConfigFile.isQuoted(theme) {
                 guard let decoded = decodeQuoted(theme) else { return nil }
                 variants[name] = decoded
             } else {
@@ -132,7 +132,7 @@ enum TerminalConfigBuilder {
 
     /// Comma-separated parts, ignoring commas inside double quotes or
     /// escaped with a backslash; a trailing comma ends the list. Like
-    /// Ghostty's CommaSplitter, escapes are validated but kept as written,
+    /// Ghostty's CommaSplitter, escapes are checked but kept as written,
     /// and an unclosed quote or illegal escape fails.
     private static func splitOutsideQuotes(_ value: String) -> [String]? {
         let scalars = Array(value.unicodeScalars)
@@ -143,9 +143,9 @@ enum TerminalConfigBuilder {
         while index < scalars.count {
             let scalar = scalars[index]
             if scalar == "\\" {
-                guard let escape = scanEscape(scalars, from: index + 1) else { return nil }
-                current.append(contentsOf: scalars[index..<escape.end])
-                index = escape.end
+                guard let end = escapeEnd(scalars, from: index + 1) else { return nil }
+                current.append(contentsOf: scalars[index..<end])
+                index = end
                 continue
             }
             if scalar == ",", !quoted {
@@ -164,56 +164,69 @@ enum TerminalConfigBuilder {
         return parts
     }
 
-    /// Decodes a double-quoted value as a Zig string literal, as Ghostty's
-    /// parseAutoStruct does. Nil when malformed.
-    private static func decodeQuoted(_ value: String) -> String? {
-        let scalars = Array(value.unicodeScalars.dropFirst().dropLast())
-        var decoded = ""
-        var index = 0
-        while index < scalars.count {
-            switch scalars[index] {
-            case "\\":
-                guard let escape = scanEscape(scalars, from: index + 1) else { return nil }
-                decoded += escape.text
-                index = escape.end
-            case "\"":
-                return nil
-            default:
-                decoded.unicodeScalars.append(scalars[index])
+    /// End index of the escape sequence starting at `start`, right after a
+    /// backslash, as CommaSplitter validates it: `\n`, `\r`, `\t`, `\\`,
+    /// `\'`, `\"`, `\x` and two hex digits, or `\u{…}` with hex digits
+    /// (bounded by CommaSplitter's own value check). Nil if illegal.
+    private static func escapeEnd(_ scalars: [Unicode.Scalar], from start: Int) -> Int? {
+        guard start < scalars.count else { return nil }
+        switch scalars[start] {
+        case "n", "r", "t", "\\", "'", "\"":
+            return start + 1
+        case "x":
+            let digits = scalars.dropFirst(start + 1).prefix(2)
+            return digits.count == 2 && digits.allSatisfy(\.properties.isASCIIHexDigit) ? start + 3 : nil
+        case "u":
+            guard start + 1 < scalars.count, scalars[start + 1] == "{" else { return nil }
+            // CommaSplitter maps a-f to 0-5 in this check; kept for parity.
+            var value = 0
+            var index = start + 2
+            while index < scalars.count, scalars[index] != "}" {
+                guard scalars[index].properties.isASCIIHexDigit else { return nil }
+                let digit = Int(scalars[index].value)
+                value = value << 4 + (digit >= 0x61 ? digit - 0x61 : digit >= 0x41 ? digit - 0x41 : digit - 0x30)
+                guard value <= 0x10FFFF else { return nil }
                 index += 1
             }
-        }
-        return decoded
-    }
-
-    /// The Zig escape sequence starting at `start`, right after a
-    /// backslash: `\n`, `\r`, `\t`, `\\`, `\'`, `\"`, `\xNN` or `\u{N…}`.
-    /// Returns its decoded text and the index after it, or nil if illegal.
-    private static func scanEscape(_ scalars: [Unicode.Scalar], from start: Int) -> (text: String, end: Int)? {
-        guard start < scalars.count else { return nil }
-        let hexScalar = { (digits: ArraySlice<Unicode.Scalar>) -> Unicode.Scalar? in
-            guard !digits.isEmpty, digits.allSatisfy(\.properties.isASCIIHexDigit),
-                  let value = UInt32(String(String.UnicodeScalarView(digits)), radix: 16)
-            else { return nil }
-            return Unicode.Scalar(value)
-        }
-        switch scalars[start] {
-        case "n": return ("\n", start + 1)
-        case "r": return ("\r", start + 1)
-        case "t": return ("\t", start + 1)
-        case "\\", "'", "\"": return (String(scalars[start]), start + 1)
-        case "x":
-            guard start + 3 <= scalars.count, let scalar = hexScalar(scalars[(start + 1)..<(start + 3)]) else { return nil }
-            return (String(scalar), start + 3)
-        case "u":
-            guard start + 2 <= scalars.count, scalars[start + 1] == "{",
-                  let close = scalars[(start + 2)...].firstIndex(of: "}"),
-                  let scalar = hexScalar(scalars[(start + 2)..<close])
-            else { return nil }
-            return (String(scalar), close + 1)
+            guard index < scalars.count, index > start + 2 else { return nil }
+            return index + 1
         default:
             return nil
         }
+    }
+
+    /// Decodes a double-quoted value as a Zig string literal, as Ghostty's
+    /// parseAutoStruct does: `\xNN` is a raw byte, and decoding stops at
+    /// an unescaped quote. Nil when an escape is malformed.
+    private static func decodeQuoted(_ value: String) -> String? {
+        let scalars = Array(value.unicodeScalars.dropFirst())
+        var bytes: [UInt8] = []
+        var index = 0
+        while index < scalars.count, scalars[index] != "\"" {
+            guard scalars[index] == "\\" else {
+                bytes += Array(String(scalars[index]).utf8)
+                index += 1
+                continue
+            }
+            let start = index + 1
+            guard let end = escapeEnd(scalars, from: start) else { return nil }
+            let body = String(String.UnicodeScalarView(scalars[(start + 1)..<end]))
+            switch scalars[start] {
+            case "n": bytes.append(0x0A)
+            case "r": bytes.append(0x0D)
+            case "t": bytes.append(0x09)
+            case "x": bytes.append(UInt8(body, radix: 16) ?? 0)
+            case "u":
+                guard let value = UInt32(body.dropFirst().dropLast(), radix: 16),
+                      let scalar = Unicode.Scalar(value)
+                else { return nil }
+                bytes += Array(String(scalar).utf8)
+            default: bytes += Array(String(scalars[start]).utf8)
+            }
+            index = end
+        }
+        // Lossy: a byte sequence that isn't UTF-8 can't name a theme file.
+        return String(decoding: bytes, as: UTF8.self) // swiftlint:disable:this optional_data_string_conversion
     }
 
     /// Resolves a theme the way Ghostty's themepkg.open does: an absolute

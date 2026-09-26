@@ -39,11 +39,10 @@ enum GhosttyConfigFile {
         }
     }
 
-    /// The home Ghostty uses for XDG paths and `~`: `$HOME` when set, like
-    /// its homedir.home, else the account's.
+    /// The home Ghostty uses for XDG paths and `~`: `$HOME` whenever it is
+    /// set, like its homedir.home, else the account's.
     static func ghosttyHome(environment: [String: String], home: String) -> String {
-        guard let value = environment["HOME"], !value.isEmpty else { return home }
-        return value
+        environment["HOME"] ?? home
     }
 
     /// `$XDG_CONFIG_HOME` when set (relative to the current directory if
@@ -57,10 +56,17 @@ enum GhosttyConfigFile {
         return (ghosttyHome(environment: environment, home: home) as NSString).appendingPathComponent(".config")
     }
 
+    /// Whether `value` is wrapped in double quotes, compared by scalar as
+    /// Ghostty compares bytes (a combining mark can't merge with a quote).
+    static func isQuoted(_ value: String) -> Bool {
+        let scalars = value.unicodeScalars
+        return scalars.count >= 2 && scalars.first == "\"" && scalars.last == "\""
+    }
+
     /// `value` without one pair of surrounding double quotes.
     static func unquoted(_ value: String) -> String {
-        guard value.count >= 2, value.hasPrefix("\""), value.hasSuffix("\"") else { return value }
-        return String(value.dropFirst().dropLast())
+        guard isQuoted(value) else { return value }
+        return String(String.UnicodeScalarView(value.unicodeScalars.dropFirst().dropLast()))
     }
 
     /// Parses Ghostty's `key = value` format (LineIterator in
@@ -198,7 +204,8 @@ enum GhosttyConfigFile {
     static func pathKind(_ path: String) -> PathKind {
         var info = stat()
         guard stat(path, &info) == 0 else {
-            return errno == ENOENT || errno == ENOTDIR ? .missing : .other
+            // Only a missing entry lets Ghostty's theme search continue.
+            return errno == ENOENT ? .missing : .other
         }
         return info.st_mode & S_IFMT == S_IFREG ? .regularFile : .other
     }
