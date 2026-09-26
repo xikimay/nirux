@@ -33,7 +33,7 @@ question: why not connect Nirux to claude.ai instead?
 
 | Part | What it gives | Main mechanism |
 | --- | --- | --- |
-| Session names | Readable titles on claude.ai, the phone and `claude --resume` | `claude -n "<branch> · <project>"` |
+| Session names | Readable titles on claude.ai, the phone and `claude --resume` | `claude -n "<label> · <project>"` |
 | Model | Projects persist, carry settings, survive with zero workspaces | `projects.json`, migrated from `workspaceProfiles` |
 | Routing | New workspaces land in the right project automatically | Repo identity via `git rev-parse --git-common-dir` |
 | Brief | Every agent starts with the project's goals, priorities and rules | `--append-system-prompt-file` (Claude), `developer_instructions` (Codex) |
@@ -110,8 +110,11 @@ truncate.
      `titleIsManual` can't tell this apart: every new workspace gets a
      placeholder title ("ws N") marked manual, and the flag isn't persisted.
      This PR adds a persisted "renamed by the user" flag.
-  2. The branch of a worktree Nirux created, taken from the `new-worktree`
-     request. No git call is needed, and it covers every handover launch.
+  2. The branch of a worktree Nirux created. It comes from the `new-worktree`
+     request and is persisted with the workspace, since the request is gone
+     after a restart. When `GitWorktree.create` reuses an existing folder, the
+     actual branch is read once, in the background step of worktree creation.
+     This covers every handover launch.
   3. Otherwise no `-n`. This includes the main checkout, even on a feature
      branch: its branch changes, and a name would freeze a stale title.
 - **Project** is the space name until Projects exist. It is left out for the
@@ -215,10 +218,12 @@ It is the source of truth.
 - It is written with mode `0600`, re-applied after every atomic write and to
   the backups, because it can hold env values.
 
-**Migration.** If `projects.json` doesn't exist and `state.json` has no
-marker (a first launch after the update), it is built from `state.json`'s
-`workspaceProfiles`, keeping the same ids. `WorkspaceState.profileID` keeps its
-persisted name, so no workspace needs rewriting.
+**Migration.** On a first launch after the update, `projects.json` is built
+from `state.json`'s `workspaceProfiles`, keeping the same ids. That is the case
+when `projects.json` doesn't exist, `state.json` has no marker, and there is
+neither a set-aside copy nor a projects backup. Otherwise it is a recovery, not
+a migration. `WorkspaceState.profileID` keeps its persisted name, so no
+workspace needs rewriting.
 
 **Rollback to an older nightly.** Nirux ships nightlies with Sparkle and can
 roll back.
@@ -275,8 +280,9 @@ asynchronous and slower than the 1 s agent launch, so routing makes its own
 - on timeout, it falls back to the active project;
 - worktree creation already runs in the background, so it does the call there.
 
-The repository fingerprint is computed once, when anchoring, never while
-routing.
+The repository fingerprint is never computed on the routing path. It is
+computed when anchoring, and in the background check for moved repositories
+below.
 
 A workspace's project is decided in this order:
 
@@ -300,9 +306,9 @@ Anchoring:
 - After migration, a space whose workspaces all share one repository gets a
   one-click "Anchor to `<repo>`?" suggestion. Nothing is anchored silently.
 - An anchor belongs to at most one project.
-- **Moved repositories.** If an anchor's folder disappears, Nirux looks for a
-  repository with the same fingerprint when routing a new workspace, and offers
-  to re-anchor.
+- **Moved repositories.** When an anchor's folder has disappeared, Nirux checks
+  each newly routed workspace's repository in the background, after routing.
+  If its fingerprint matches, Nirux offers to re-anchor.
 - **Submodules** have their own common dir (inside the superproject's
   `.git/modules`), so they are separate repositories. Anchor them separately,
   or cover them with a `folder` anchor.
@@ -341,8 +347,9 @@ repeat today, copied into each one. A brief states it once, for example:
 
 **Storage.** The brief lives in `<state dir>/projects/<id>/brief.md`. The id
 is the space id, which projects keep, so the brief can ship before the Project
-model. Nirux regenerates `<state dir>/projects/<id>/brief.injected.md` atomically on
-every save and before each launch. It wraps the brief in a short header:
+model. Nirux regenerates `<state dir>/projects/<id>/brief.injected.md`
+atomically on every save and before each launch. It wraps the brief in a short
+header:
 
 ```text
 # Project brief: <Project name> (from Nirux)
@@ -362,11 +369,14 @@ claude.ai uses for Claude Code Project instructions.
 - Terminals export `NIRUX_PROJECT_BRIEF`, the file's path. The skill Nirux
   installs tells agents they may update it when the user asks ("add this to the
   project brief"). That also works from the phone, through any Remote Control
-  session.
+  session. Like `NIRUX_PROFILE_ID`, the variable is fixed when the shell starts:
+  after a move, only new shells get the new project's path.
 - Because agents can write it, Nirux flags the brief as changed until the user
   has looked at it.
-- Nirux records a hash of the injected brief with each launch. The Project view
-  shows how many open sessions run on an older version.
+- Nirux records the hash of the brief each conversation actually runs on. That
+  is the brief at a fresh launch, and the one passed at the latest launch once
+  a SessionStart `compact` event arrives. The Project view shows how many open
+  sessions run on an older version.
 
 **Claude.** Nirux passes `--append-system-prompt-file <absolute path>` on
 *every* launch: fresh, restore and Resume ([CLI reference][cli]). The path is
@@ -432,7 +442,7 @@ phone, this option is deferred. The local file stays the source of truth.
 | Claude permission mode | A Claude column launches | `ClaudeLaunchMode.cliArgs` |
 | Codex mode | A Codex column launches | `CodexLaunchMode.cliArgs` |
 | Environment variables | A shell starts in the project | `makeTerminalEnvironment` |
-| Post-worktree setup script | After a worktree workspace is created, before the agent starts | `sh '<script path>'; <agent command>` |
+| Post-worktree setup script | After a worktree workspace is created, before the agent starts | Typed before the agent command (see below) |
 | Pinned URLs | On demand | Project view and command palette; open as web columns |
 
 Rules:
@@ -444,19 +454,23 @@ Rules:
   workspace, affects new shells only.
 - **Env values are literal.** They go into `makeTerminalEnvironment`, which does
   no shell expansion, so `PATH=$PATH:/x` doesn't work. Extend `PATH` in the
-  setup script or the shell's own config instead.
+  shell's own config instead. The setup script runs in a child shell, so it
+  can't change the agent's env either.
 - **`NIRUX_*` keys are reserved.** A project can't set or override them, since
   hook routing and missions depend on them.
 - **Setup scripts** are stored as files in the project's state folder. They
   must be idempotent: `GitWorktree.create` can reuse an existing folder, so a
-  script may run twice. A failing script doesn't stop the agent from starting;
-  Nirux posts a notification instead, so the failure shows on the phone too.
-- **Setup scripts and project env are applied only to workspaces Nirux can
-  attribute to the user**: created from the UI, or from a `nirux://` request
-  authenticated as coming from a Nirux terminal.
+  script may run twice. A failing script doesn't stop the agent from starting.
+  The typed command is `sh '<script>' || '<Nirux executable>' --setup-failed
+  <workspace id>; <agent command>`. Nirux knows its own path when it builds the
+  command, and turns that call into a notification, so the failure shows on the
+  phone too.
+- **Setup scripts and project env are applied only to workspaces the user
+  started**: from the Nirux UI, or from a Nirux terminal (for example through
+  the worktree skill).
 - **Secrets.** Env values may hold secrets, hence the `0600` file. The UI
-  suggests fetching secrets in the setup script, from the Keychain or a secret
-  manager's CLI, rather than pasting them.
+  suggests keeping secrets out of Nirux: tools can read them from the Keychain
+  or a secret manager themselves.
 
 ## 6. History
 
@@ -476,11 +490,20 @@ Instead Nirux keeps its own **session ledger**, from hook events it receives.
   turn.
 - **Renames** made with `/rename` or from the phone aren't seen.
 - **Only real session events** are recorded: SessionStart and Stop from the
-  column's own agent. Tools that run `claude -p` inside a Nirux shell, such as
-  review pipelines, inherit its env and would otherwise flood the ledger. Codex
-  events already carry their emitting process, checked against the column's
-  foreground job. The hook receiver records it for Claude events too, and the
-  same check applies.
+  column's own Claude agent, and `notify` from its Codex agent. Tools that run
+  `claude -p` inside a Nirux shell, such as review pipelines, inherit its env
+  and would otherwise flood the ledger.
+  - Codex events already carry their emitting process, but today's check only
+    tests membership in the column's foreground process group. A `claude -p`
+    started by the agent passes it too.
+  - For Claude, the hook command runs through a short-lived `sh`, so the
+    receiver's parent process is useless. The receiver records its nearest
+    `claude` ancestor instead, as pid plus start time.
+  - Nirux compares that process exactly with the column's foreground agent
+    process. The hook of PR 3 has to decide inside the CLI, so the app also
+    writes the agent's process identity into the per-column name file.
+  - Claude emitter recording ships with PR 3, or with the ledger (PR 7) if
+    PR 3 is dropped.
 - **Pruning:** Claude entries go when their transcript is gone (default
   retention: 30 days). Codex entries go by age. Each project keeps at most a few
   hundred entries.
@@ -538,14 +561,15 @@ branches also change; those wait for them to merge.
 | 3 | Name restored sessions (SessionStart `sessionTitle`), if its two checks pass | 1 | hook receiver, exact-id restore |
 | 4 | Project model, `projects.json`, migration, management UI | none | state persistence and backups, restore |
 | 5 | Routing and anchors | 4 | worktree creation, git detection |
-| 6 | Per-project defaults | 2, 4 | settings, terminal env, `nirux://` request handling (hard requirement for setup scripts) |
+| 6 | Per-project defaults | 2, 4 | settings, terminal env, `nirux://` request handling |
 | 7 | Session ledger and resume | 4, 5 | hook events, restore |
 | 8 | Project view column | 4, 5 | git and PR polling |
-| 9 | "Finish" (PR merged, then remove worktree) | 8 | worktree creation |
+| 9 | "Finish" (PR merged, then remove worktree), with handover files added to `info/exclude` | 8 | worktree creation |
 
 PRs 1 to 4 are the core: names, brief, and projects that persist. PRs 5 to 9
 start only if projects get used. PRs 1 and 2 need no project model and can
-start now; both will rebase over in-flight changes to the launch commands.
+start now; both will rebase over in-flight changes to the launch commands. PR
+2's restore part waits for exact-id restore.
 
 ## Sources
 
