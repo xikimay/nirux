@@ -78,9 +78,16 @@ struct LocalServerProposalBook<ColumnID: Hashable> {
         handledPorts.formUnion(browserPorts)
         let port = url.port
         if var waiting = pending[port] {
-            waiting.lastSeenAt = now
-            pending[port] = waiting
-            return false
+            // Same terminal: a repaint keeps it alive. Another terminal
+            // (the server's own banner while Claude repaints its mention):
+            // that print takes over and gets a prompt scan.
+            guard waiting.column != column else {
+                waiting.lastSeenAt = now
+                pending[port] = waiting
+                return false
+            }
+            pending[port] = PendingDetection(url: url, column: column, detectedAt: now, lastSeenAt: now)
+            return true
         }
         guard pending.count < Self.maxPending,
               !proposals.contains(where: { $0.url.port == port }),

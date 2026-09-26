@@ -24,7 +24,8 @@ struct LocalServerURL: Equatable, Hashable, Sendable {
     var proposalTarget: LocalServerURL {
         guard !path.isEmpty, path != "/" else { return self }
         let parts = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
-        if parts.count == 2, Self.tokenLoginRoutes.contains(String(parts[0])), parts[1].contains("token=") {
+        if parts.count == 2, Self.tokenLoginRoutes.contains(String(parts[0])),
+           parts[1].split(separator: "&").contains(where: { $0.hasPrefix("token=") }) {
             return self
         }
         return LocalServerURL(isSecure: isSecure, host: host, port: port, path: "/")

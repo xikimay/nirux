@@ -235,6 +235,20 @@ final class LocalServerProposalTests: XCTestCase {
         // A one-time token elsewhere is exactly what a click must not spend.
         XCTAssertEqual(url(3000, path: "/api/admin/reset?token=dev").proposalTarget.path, "/")
         XCTAssertEqual(url(3000, path: "/auth/confirm?token=abc").proposalTarget.path, "/")
+        XCTAssertEqual(url(3000, path: "/?reset_token=abc").proposalTarget.path, "/")
+        XCTAssertEqual(url(8888, path: "/lab?x=1&token=abc").proposalTarget.path, "/lab?x=1&token=abc")
+    }
+
+    func testServersOwnPrintTakesOverARepaintedMention() {
+        var book = Book()
+        // Claude in "claude" keeps repainting a mention of :5173.
+        XCTAssertTrue(book.noteDetected(url(5173), in: "claude", browserPorts: [], now: 0))
+        XCTAssertFalse(book.noteDetected(url(5173), in: "claude", browserPorts: [], now: 1))
+        // Vite starts in "vite" and prints its banner: prompt scan, chip on "vite".
+        XCTAssertTrue(book.noteDetected(url(5173), in: "vite", browserPorts: [], now: 10))
+        scan(&book, listening: [5173], columns: ["claude", "vite"], at: 10.3)
+        XCTAssertEqual(book.proposal(for: "vite")?.url.port, 5173)
+        XCTAssertNil(book.proposal(for: "claude"))
     }
 
     // MARK: - ⌘B suggestions
