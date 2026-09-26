@@ -293,8 +293,8 @@ extension NiruxShellView {
 
         1. **Locate the code** with Grep/Read: absolute file path, start line, and end
            line of the relevant snippet. Verify the file exists (`[ -f "$path" ]`) —
-           Nirux silently ignores requests for missing files, so a bad path would
-           leave the user staring at nothing.
+           Nirux refuses requests for missing files, so a bad path would leave
+           the user with an error instead of the code.
         2. **Open it in the editor**:
            ```bash
            encoded=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$abs_path")

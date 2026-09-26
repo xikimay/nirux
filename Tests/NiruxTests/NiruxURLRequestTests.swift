@@ -265,6 +265,23 @@ final class NiruxURLRequestTests: XCTestCase {
         XCTAssertEqual(workspace.restrictedForConfirmation().action, workspace.action)
     }
 
+    func testConfirmedEditorRequestCannotSwitchWorkspace() throws {
+        let request = try XCTUnwrap(parse("nirux://open-editor?file=/tmp/a.swift&workspace=W&line=2"))
+        let target = OpenEditorRequest(
+            queryItems: [URLQueryItem(name: "file", value: "/tmp/a.swift"), URLQueryItem(name: "workspace", value: "W")],
+            canonicalize: { $0 },
+            isOpenableFile: { _ in true }
+        )
+        XCTAssertEqual(target?.workspaceID, "W")
+        let resolved = try XCTUnwrap(request.resolvingPaths(editorTarget: { _ in target }))
+        guard case .openEditor(let query, let restrictedTarget) = resolved.restrictedForConfirmation().action else {
+            return XCTFail("open-editor")
+        }
+        XCTAssertNil(restrictedTarget?.workspaceID)
+        XCTAssertFalse(query.contains { $0.name == "workspace" })
+        XCTAssertEqual(query.first { $0.name == "line" }?.value, "2")
+    }
+
     func testLaunchIDIsReadEvenFromUnparseableURLs() throws {
         let url = try XCTUnwrap(URL(string: "nirux://new-worktree?repo=relative&launch=abc&launch=def"))
         XCTAssertNil(NiruxURLRequest(url: url))
@@ -391,20 +408,33 @@ final class NiruxURLRequestTests: XCTestCase {
     // MARK: - In-app tickets
 
     @MainActor
-    func testInAppTicketAuthorizesItsOwnWorktreeRequestOnce() throws {
+    func testInAppTicketAuthorizesExactlyItsOwnWorktreeRequestOnce() throws {
         let path = "/tmp/nirux-handover-claude-\(UUID().uuidString).md"
-        let encoded = path.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? path
-        let request = try XCTUnwrap(parse("nirux://new-worktree?branch=x&repo=/r&handover=\(encoded)"))
-        XCTAssertFalse(InAppWorktreeTickets.redeem(request, now: 0), "no ticket issued yet")
+        let issued = NiruxURLRequest.NewWorktree(
+            branch: "feat/x", repo: "/r", agent: .claude, handoverPath: path,
+            parentWorkspaceID: "W", parentAgentUUID: "A"
+        )
+        func request(_ worktree: NiruxURLRequest.NewWorktree, profile: String? = "p") throws -> NiruxURLRequest {
+            let url = NiruxShellView.inAppWorktreeURL(for: worktree, profileID: profile ?? "")
+                .replacingOccurrences(of: "${NIRUX_LAUNCH_ID}", with: "stale")
+            return try XCTUnwrap(NiruxURLRequest(url: try XCTUnwrap(URL(string: url))))
+        }
+        XCTAssertFalse(InAppWorktreeTickets.redeem(try request(issued), now: 0), "no ticket issued yet")
 
-        InAppWorktreeTickets.issue(handoverPath: path, now: 100)
-        let other = try XCTUnwrap(parse("nirux://new-worktree?branch=x&repo=/r&handover=/tmp/nirux-handover-x"))
-        XCTAssertFalse(InAppWorktreeTickets.redeem(other, now: 101))
-        XCTAssertTrue(InAppWorktreeTickets.redeem(request, now: 101))
-        XCTAssertFalse(InAppWorktreeTickets.redeem(request, now: 102), "one-time")
+        InAppWorktreeTickets.issue(for: issued, profileID: "p", now: 100)
+        var otherRepo = issued
+        otherRepo.repo = "/elsewhere"
+        var otherParent = issued
+        otherParent.parentAgentUUID = "B"
+        XCTAssertFalse(InAppWorktreeTickets.redeem(try request(otherRepo), now: 101))
+        XCTAssertFalse(InAppWorktreeTickets.redeem(try request(otherParent), now: 101))
+        XCTAssertFalse(InAppWorktreeTickets.redeem(try request(issued, profile: "q"), now: 101))
+        XCTAssertTrue(InAppWorktreeTickets.matches(try request(issued), now: 101))
+        XCTAssertTrue(InAppWorktreeTickets.redeem(try request(issued), now: 101))
+        XCTAssertFalse(InAppWorktreeTickets.redeem(try request(issued), now: 102), "one-time")
 
-        InAppWorktreeTickets.issue(handoverPath: path, now: 200)
-        XCTAssertFalse(InAppWorktreeTickets.redeem(request, now: 200 + InAppWorktreeTickets.lifetime + 1), "expired")
+        InAppWorktreeTickets.issue(for: issued, profileID: "p", now: 200)
+        XCTAssertFalse(InAppWorktreeTickets.redeem(try request(issued), now: 200 + InAppWorktreeTickets.lifetime + 1), "expired")
     }
 
     // MARK: - Senders

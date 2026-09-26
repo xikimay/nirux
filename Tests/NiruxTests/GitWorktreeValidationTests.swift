@@ -97,14 +97,14 @@ final class GitWorktreeValidationTests: XCTestCase {
     func testAcceptsRepoPathSpelledThroughSymlink() throws {
         let alias = root + "/alias"
         try FileManager.default.createSymbolicLink(atPath: alias, withDestinationPath: repo)
-        XCTAssertTrue(GitWorktree.isRepositoryTopLevel(alias))
+        XCTAssertNil(GitWorktree.repositoryTopLevelProblem(alias))
     }
 
     func testLinkedWorktreeIsStillAcceptedAsRepo() throws {
         // Agents running in a worktree pass its own top level (unchanged
         // behavior; resolving the main repo is a separate change).
         let created = try XCTUnwrap(GitWorktree.create(branch: "feat/x", repoRoot: repo).path)
-        XCTAssertTrue(GitWorktree.isRepositoryTopLevel(created))
+        XCTAssertNil(GitWorktree.repositoryTopLevelProblem(created))
         let nested = GitWorktree.create(branch: "feat/y", repoRoot: created)
         XCTAssertNil(nested.error)
         XCTAssertEqual(nested.path, root + "/repo.feat-x.feat-y")

@@ -187,10 +187,6 @@ enum GitWorktree {
         return output.isEmpty ? nil : output
     }
 
-    static func isRepositoryTopLevel(_ path: String) -> Bool {
-        repositoryTopLevelProblem(path) == nil
-    }
-
     /// Nil when `path` is the top level of a git work tree; otherwise why
     /// not, keeping git's own message (e.g. its safe.directory advice).
     static func repositoryTopLevelProblem(_ path: String) -> String? {

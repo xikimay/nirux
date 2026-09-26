@@ -85,12 +85,6 @@ struct NiruxURLRequest: Equatable, Sendable {
     var profileID: String?
     let launchID: String?
 
-    init(action: Action, profileID: String?, launchID: String?) {
-        self.action = action
-        self.profileID = profileID
-        self.launchID = launchID
-    }
-
     init?(url: URL) {
         guard url.scheme == "nirux" else { return nil }
         let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
@@ -184,14 +178,21 @@ struct NiruxURLRequest: Equatable, Sendable {
     /// It must not link the new agent to a live parent agent's Mission
     /// mailbox (that would give an outside caller a channel to it), and it
     /// opens in the space the user is looking at rather than one the caller
-    /// picked. Neither is shown on the sheet.
+    /// picked. None of that is shown on the sheet.
     func restrictedForConfirmation() -> NiruxURLRequest {
         var restricted = self
         restricted.profileID = nil
-        if case .newWorktree(var request) = action {
+        switch action {
+        case .newWorktree(var request):
             request.parentWorkspaceID = nil
             request.parentAgentUUID = nil
             restricted.action = .newWorktree(request)
+        case .openEditor(let query, var target):
+            // Nor may it switch to a workspace (and its space) of its choosing.
+            target?.workspaceID = nil
+            restricted.action = .openEditor(query: query.filter { $0.name != "workspace" }, target: target)
+        case .newWorkspace:
+            break
         }
         return restricted
     }
@@ -352,28 +353,46 @@ struct URLConfirmationQueue {
 }
 
 /// One-time authorization for the worktree request that Nirux's own
-/// worktree panel asks the running agent to send, keyed by the handover file
-/// Nirux pre-created under an unguessable name. It lets that request through
-/// even when the agent's shell has no current NIRUX_LAUNCH_ID (a tmux
-/// session from before a restart) or the confirmation queue is cooling down.
+/// worktree panel asks the running agent to send. It is keyed by the
+/// handover file Nirux pre-created under an unguessable name and bound to
+/// the exact request Nirux built, so it lets that request (and only that
+/// one) through even when the agent's shell has no current NIRUX_LAUNCH_ID
+/// (a tmux session from before a restart) or the confirmation queue is
+/// cooling down.
 @MainActor
 enum InAppWorktreeTickets {
     static let lifetime: TimeInterval = 30 * 60
 
-    private static var expiries: [String: TimeInterval] = [:]
-
-    static func issue(handoverPath: String, now: TimeInterval) {
-        expiries = expiries.filter { $0.value > now }
-        expiries[handoverPath] = now + lifetime
+    private struct Ticket {
+        let request: NiruxURLRequest.NewWorktree
+        let profileID: String?
+        let expiry: TimeInterval
     }
 
-    /// True once per issued ticket, for a worktree request carrying its
-    /// handover path before it expires.
-    static func redeem(_ request: NiruxURLRequest, now: TimeInterval) -> Bool {
+    private static var tickets: [String: Ticket] = [:]
+
+    /// `request.repo` must already be a resolved (realpath) path, as the
+    /// incoming request will be after `resolvingPaths()`.
+    static func issue(for request: NiruxURLRequest.NewWorktree, profileID: String?, now: TimeInterval) {
+        guard let path = request.handoverPath else { return }
+        tickets = tickets.filter { $0.value.expiry > now }
+        tickets[path] = Ticket(request: request, profileID: profileID, expiry: now + lifetime)
+    }
+
+    /// True when `request` is exactly the one a live ticket was issued for.
+    static func matches(_ request: NiruxURLRequest, now: TimeInterval) -> Bool {
         guard case .newWorktree(let worktree) = request.action,
               let path = worktree.handoverPath,
-              let expiry = expiries.removeValue(forKey: path)
+              let ticket = tickets[path]
         else { return false }
-        return expiry > now
+        return ticket.expiry > now && ticket.request == worktree && ticket.profileID == request.profileID
+    }
+
+    /// `matches`, consuming the ticket: true at most once.
+    static func redeem(_ request: NiruxURLRequest, now: TimeInterval) -> Bool {
+        guard matches(request, now: now), case .newWorktree(let worktree) = request.action,
+              let path = worktree.handoverPath else { return false }
+        tickets[path] = nil
+        return true
     }
 }

@@ -603,13 +603,18 @@ extension NiruxShellView {
                         self.addWorkspace(title: branch, cwd: path, agent: runningAgent)
                         return
                     }
-                    InAppWorktreeTickets.issue(handoverPath: handoverPath, now: ProcessInfo.processInfo.systemUptime)
                     let isMission = Self.currentMissionHandoffsEnabled()
-                    let url = Self.inAppWorktreeURL(for: NiruxURLRequest.NewWorktree(
+                    let request = NiruxURLRequest.NewWorktree(
                         branch: branch, repo: repoRoot, agent: runningAgent, handoverPath: handoverPath,
                         parentWorkspaceID: isMission ? self.activeWorkspace?.id : nil,
                         parentAgentUUID: isMission ? col?.agentUUID : nil
-                    ), profileID: self.activeProfileID)
+                    )
+                    var expected = request
+                    expected.repo = repoRoot.realPath ?? repoRoot
+                    InAppWorktreeTickets.issue(
+                        for: expected, profileID: self.activeProfileID, now: ProcessInfo.processInfo.systemUptime
+                    )
+                    let url = Self.inAppWorktreeURL(for: request, profileID: self.activeProfileID)
                     let prompt = "Write a concise session handover into \(handoverPath) "
                         + "(sections: Goal, Context, Done so far, Next steps; Nirux created the file empty). "
                         + "Nirux will move it into the new worktree as \(Self.handoverFilename(for: runningAgent)). "

@@ -34,12 +34,13 @@ extension NiruxShellView {
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                // An agent retrying the same `open` (its handover is already
-                // gone): focus the workspace the first request opened instead
-                // of adding a duplicate agent in the same folder.
-                if let path, handoverError == .cannotOpen(ENOENT),
-                   let existing = self.workspaces.first(where: { $0.cwd.realPath == path.realPath }) {
-                    self.focusWorkspace(id: existing.id)
+                // An agent retrying the same `open` after its handover was
+                // delivered: focus the workspace the first request opened
+                // instead of adding a duplicate agent in the same folder.
+                if let handoverPath, handoverError == .cannotOpen(ENOENT),
+                   let previousID = DeliveredHandovers.workspaceID(for: handoverPath),
+                   self.workspaces.contains(where: { $0.id == previousID }) {
+                    self.focusWorkspace(id: previousID)
                     return
                 }
                 if let handoverPath, let handoverError {
@@ -52,6 +53,9 @@ extension NiruxShellView {
                 if let path {
                     let childWorkspaceID = UUID().uuidString
                     let childAgentUUID = UUID().uuidString
+                    if deliveredHandover, let handoverPath {
+                        DeliveredHandovers.record(handoverPath, workspaceID: childWorkspaceID)
+                    }
                     var missionID: String?
                     if let parent = self.validMissionParent(
                         workspaceID: parentWorkspaceID,
@@ -158,5 +162,22 @@ extension NiruxShellView {
               workspace.columns.contains(where: { $0.agentUUID == agentUUID })
         else { return nil }
         return (workspaceID, agentUUID)
+    }
+}
+
+/// Handover paths already moved into a worktree, so a retried request for
+/// the same handover can be recognized (bounded; newest kept).
+@MainActor
+private enum DeliveredHandovers {
+    private static var workspaceByPath: [(path: String, workspaceID: String)] = []
+
+    static func record(_ path: String, workspaceID: String) {
+        workspaceByPath.removeAll { $0.path == path }
+        workspaceByPath.append((path, workspaceID))
+        if workspaceByPath.count > 32 { workspaceByPath.removeFirst() }
+    }
+
+    static func workspaceID(for path: String) -> String? {
+        workspaceByPath.last { $0.path == path }?.workspaceID
     }
 }

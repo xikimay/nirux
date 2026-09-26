@@ -76,7 +76,7 @@ extension NiruxApp {
             guard let self else { return }
             guard let resolved else {
                 NSLog("[URL] Ignored nirux:// request: folder or file not usable")
-                if request.hasValidLaunchID() {
+                if request.hasValidLaunchID() || InAppWorktreeTickets.matches(request, now: ProcessInfo.processInfo.systemUptime) {
                     self.shell?.presentProblem(Self.unusableTargetMessage(for: request.action), "")
                 }
                 return
@@ -161,11 +161,22 @@ extension NiruxApp {
         let sheet = alert.window
         let lifetime = SheetLifetime()
         Task { @MainActor in
-            while !lifetime.ended, !(sheet.isVisible && NSApp.isActive) {
-                try? await Task.sleep(for: .milliseconds(100))
+            // Arm once the sheet has been on screen, with Nirux active, for
+            // 0.75 s in a row.
+            var shownSince: TimeInterval?
+            while !lifetime.ended {
+                let now = ProcessInfo.processInfo.systemUptime
+                if sheet.isVisible, NSApp.isActive {
+                    if let shownSince, now - shownSince >= 0.75 {
+                        confirm.isEnabled = true
+                        return
+                    }
+                    shownSince = shownSince ?? now
+                } else {
+                    shownSince = nil
+                }
+                try? await Task.sleep(for: .milliseconds(50))
             }
-            try? await Task.sleep(for: .milliseconds(750))
-            if !lifetime.ended { confirm.isEnabled = true }
         }
 
         NSApp.activate(ignoringOtherApps: true)
