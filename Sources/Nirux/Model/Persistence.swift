@@ -1,9 +1,20 @@
 import Foundation
 
 /// Saves/restores workspace layout to ~/Library/Application Support/nirux/state.json
+///
+/// Recovery copies live next to it:
+/// - `state.backup.1…5.json`: the last distinct states, newest first.
+/// - `state.daily.YYYY-MM-DD.json`: the first save of each day, kept for a
+///   week, because an active session cycles through the backups in a minute.
+/// - `state.corrupt.<timestamp>.json`: a state.json this build could not
+///   decode (hand edit, disk damage, a newer build's format), set aside
+///   before a save replaces it. Never read back; kept for manual recovery.
 enum Persistence {
     /// Rotating backups kept next to state.json for corruption recovery.
     private static let maxBackups = 5
+    private static let maxDailySnapshots = 7
+    private static let maxCorruptCopies = 10
+    private static let loadCache = LoadCache()
 
     private static var stateURL: URL {
         // Development escape hatch: a debug launch restores AND re-saves the
@@ -37,12 +48,23 @@ enum Persistence {
         stateURL.deletingLastPathComponent().appendingPathComponent("state.backup.\(index).json")
     }
 
+    /// Writes state.json only when its bytes change, so the 10 s heartbeat
+    /// doesn't cycle identical copies through the backups. `now` picks the
+    /// daily snapshot's date.
     @discardableResult
-    static func save(_ state: PersistedState) -> Bool {
+    static func save(_ state: PersistedState, now: Date = Date()) -> Bool {
+        let url = stateURL
         do {
-            let data = try JSONEncoder().encode(state)
-            rotateBackups()
-            try data.write(to: stateURL, options: .atomic)
+            let encoder = JSONEncoder()
+            // Stable key order keeps unchanged state byte-identical.
+            encoder.outputFormatting = .sortedKeys
+            let data = try encoder.encode(state)
+            let existing = try existingContents(of: url)
+            if existing != data {
+                if let existing, !prepareToReplace(existing, at: url, now: now) { return false }
+                try data.write(to: url, options: .atomic)
+            }
+            writeDailySnapshotIfNeeded(data, now: now)
             return true
         } catch {
             NSLog("[Nirux Persistence] Failed to save state: %@", error.localizedDescription)
@@ -50,8 +72,28 @@ enum Persistence {
         }
     }
 
+    /// nil when there is no state.json yet. Throws when it exists but can't
+    /// be read: a save must never replace bytes it could not inspect.
+    private static func existingContents(of url: URL) throws -> Data? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try Data(contentsOf: url)
+    }
+
+    /// A decodable state.json rotates into the backups. An undecodable one is
+    /// copied aside instead and the backups stay untouched, so it can never
+    /// push a good backup out. False when that copy could not be written.
+    private static func prepareToReplace(_ existing: Data, at url: URL, now: Date) -> Bool {
+        let decodable = loadCache.lookup(path: url.path, contents: existing)?.decodedFromContents
+            ?? (decode(existing, name: url.lastPathComponent) != nil)
+        if decodable {
+            rotateBackups()
+            return true
+        }
+        return setAsideUnreadable(existing, now: now)
+    }
+
     /// Shift state.backup.N.json → N+1 and copy the current state.json to 1.
-    /// Renames within the same directory are cheap; runs on every save.
+    /// Renames within the same directory are cheap.
     private static func rotateBackups() {
         let fm = FileManager.default
         guard fm.fileExists(atPath: stateURL.path) else { return }
@@ -67,13 +109,29 @@ enum Persistence {
     }
 
     static func load() -> PersistedState? {
+        let url = stateURL
         // Missing file is normal on first run — don't log it.
-        guard FileManager.default.fileExists(atPath: stateURL.path) else { return nil }
-        if let state = load(from: stateURL) { return state }
-        // Corruption recovery: walk the rotating backups newest-first.
-        for index in 1...maxBackups {
-            if let recovered = load(from: backupURL(index)) {
-                NSLog("[Nirux Persistence] state.json unreadable — recovered from backup %d", index)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let contents: Data
+        do {
+            contents = try Data(contentsOf: url)
+        } catch {
+            NSLog("[Nirux Persistence] Failed to load state.json: %@", error.localizedDescription)
+            return recoverFromCopies()
+        }
+        if let cached = loadCache.lookup(path: url.path, contents: contents) { return cached.state }
+        let decoded = decode(contents, name: url.lastPathComponent)
+        let state = decoded ?? recoverFromCopies()
+        loadCache.store(.init(path: url.path, contents: contents, state: state, decodedFromContents: decoded != nil))
+        return state
+    }
+
+    /// Corruption recovery: the rotating backups newest-first, then the daily
+    /// snapshots newest-first.
+    private static func recoverFromCopies() -> PersistedState? {
+        for url in (1...maxBackups).map(backupURL) + dailySnapshotURLs() {
+            if let recovered = load(from: url) {
+                NSLog("[Nirux Persistence] state.json unreadable — recovered from %@", url.lastPathComponent)
                 return recovered
             }
         }
@@ -83,12 +141,118 @@ enum Persistence {
     private static func load(from url: URL) -> PersistedState? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         do {
-            let data = try Data(contentsOf: url)
-            return try JSONDecoder().decode(PersistedState.self, from: data)
+            return decode(try Data(contentsOf: url), name: url.lastPathComponent)
         } catch {
             NSLog("[Nirux Persistence] Failed to load %@: %@", url.lastPathComponent, error.localizedDescription)
             return nil
         }
+    }
+
+    private static func decode(_ data: Data, name: String) -> PersistedState? {
+        do {
+            return try JSONDecoder().decode(PersistedState.self, from: data)
+        } catch {
+            NSLog("[Nirux Persistence] Failed to load %@: %@", name, error.localizedDescription)
+            return nil
+        }
+    }
+
+    // MARK: - Recovery copies
+
+    /// The first save of each day survives for a week of active days.
+    private static func writeDailySnapshotIfNeeded(_ data: Data, now: Date) {
+        let fm = FileManager.default
+        let url = stateDirectory.appendingPathComponent("state.daily.\(stamp(now, withTime: false)).json")
+        guard !fm.fileExists(atPath: url.path) else { return }
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            NSLog("[Nirux Persistence] Failed to write %@: %@", url.lastPathComponent, error.localizedDescription)
+            return
+        }
+        for stale in dailySnapshotURLs().dropFirst(maxDailySnapshots) {
+            try? fm.removeItem(at: stale)
+        }
+    }
+
+    /// Copies bytes this build can't decode before a save replaces them,
+    /// unless an identical copy is already set aside.
+    private static func setAsideUnreadable(_ contents: Data, now: Date) -> Bool {
+        let fm = FileManager.default
+        if corruptCopyURLs().contains(where: { (try? Data(contentsOf: $0)) == contents }) { return true }
+        let timestamp = stamp(now, withTime: true)
+        var url = stateDirectory.appendingPathComponent("state.corrupt.\(timestamp).json")
+        var suffix = 2
+        while fm.fileExists(atPath: url.path) {
+            url = stateDirectory.appendingPathComponent("state.corrupt.\(timestamp)-\(suffix).json")
+            suffix += 1
+        }
+        do {
+            try contents.write(to: url, options: .atomic)
+        } catch {
+            NSLog(
+                "[Nirux Persistence] Keeping unreadable state.json — failed to copy it aside: %@",
+                error.localizedDescription
+            )
+            return false
+        }
+        NSLog("[Nirux Persistence] state.json unreadable — kept a copy as %@", url.lastPathComponent)
+        for stale in corruptCopyURLs().dropFirst(maxCorruptCopies) where stale != url {
+            try? fm.removeItem(at: stale)
+        }
+        return true
+    }
+
+    /// Newest first: zero-padded local dates sort chronologically by name.
+    private static func dailySnapshotURLs() -> [URL] {
+        recoveryCopies { $0.wholeMatch(of: /state\.daily\.\d{4}-\d{2}-\d{2}\.json/) != nil }
+    }
+
+    private static func corruptCopyURLs() -> [URL] {
+        recoveryCopies { $0.wholeMatch(of: /state\.corrupt\.\d{4}-\d{2}-\d{2}-\d{6}(-\d+)?\.json/) != nil }
+    }
+
+    private static func recoveryCopies(where matches: (String) -> Bool) -> [URL] {
+        let dir = stateDirectory
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        return names.filter(matches).sorted(by: >).map { dir.appendingPathComponent($0) }
+    }
+
+    /// `2026-09-26`, or `2026-09-26-143005` with the time, in local time.
+    private static func stamp(_ date: Date, withTime: Bool) -> String {
+        let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        let day = String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+        guard withTime else { return day }
+        return day + String(format: "-%02d%02d%02d", parts.hour ?? 0, parts.minute ?? 0, parts.second ?? 0)
+    }
+}
+
+/// Content-addressed memo of the last state.json `load()` resolved, so its
+/// hot callers (every terminal launch, launch-mode lookups, the heartbeat
+/// save) skip JSON decoding while the file is unchanged.
+private final class LoadCache: @unchecked Sendable {
+    struct Entry {
+        let path: String
+        let contents: Data
+        let state: PersistedState?
+        /// False when `state` came from a recovery copy, not from `contents`.
+        let decodedFromContents: Bool
+    }
+
+    private let lock = NSLock()
+    private var entry: Entry?
+
+    func lookup(path: String, contents: Data) -> Entry? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry, entry.path == path, entry.contents == contents else { return nil }
+        return entry
+    }
+
+    func store(_ newEntry: Entry) {
+        lock.lock()
+        entry = newEntry
+        lock.unlock()
     }
 }
 
