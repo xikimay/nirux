@@ -14,8 +14,8 @@ struct LocalServerProposalBook<ColumnID: Hashable> {
         let url: LocalServerURL
         /// The terminal column that printed the URL; its title bar shows the chip.
         let column: ColumnID
-        /// Consecutive scans that found nothing listening.
-        var misses = 0
+        /// When scans stopped finding a listener (nil while listening).
+        var missingSince: TimeInterval?
     }
 
     struct PendingDetection: Equatable {
@@ -34,9 +34,11 @@ struct LocalServerProposalBook<ColumnID: Hashable> {
     static var pendingWindow: TimeInterval { 4 }
     /// Rescan cadence while proposals are live, to notice stopped servers.
     static var livenessScanInterval: TimeInterval { 3 }
-    /// A proposal survives one empty scan: restarts (Django autoreload,
-    /// Vite config reload) briefly unbind the port without reprinting it.
-    static var missesBeforeRemoval: Int { 2 }
+    /// A proposal survives its port being unbound this long: restarts
+    /// (Django autoreload, Vite config reload) briefly unbind it without
+    /// reprinting the URL. In seconds, not scans — scans run faster while
+    /// a detection is pending.
+    static var removalGrace: TimeInterval { 3 }
     /// Output listing hundreds of ports shouldn't queue hundreds of detections.
     static var maxPending: Int { 16 }
 
@@ -85,12 +87,14 @@ struct LocalServerProposalBook<ColumnID: Hashable> {
     ) -> Bool {
         let before = proposals.map(\.url)
         for index in proposals.indices {
-            proposals[index].misses = listeningPorts.contains(proposals[index].url.port)
-                ? 0
-                : proposals[index].misses + 1
+            if listeningPorts.contains(proposals[index].url.port) {
+                proposals[index].missingSince = nil
+            } else if proposals[index].missingSince == nil {
+                proposals[index].missingSince = now
+            }
         }
         proposals.removeAll {
-            $0.misses >= Self.missesBeforeRemoval
+            $0.missingSince.map { now - $0 >= Self.removalGrace } == true
                 || browserPorts.contains($0.url.port)
                 || !liveColumns.contains($0.column)
         }

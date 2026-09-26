@@ -7,6 +7,8 @@ struct LocalServerTracking {
     /// detection is pending or a proposal is live.
     var scanTimer: Timer?
     var scanInFlight = false
+    /// A URL was detected while a scan ran — that scan predates it.
+    var detectedDuringScan = false
 }
 
 // MARK: - Dev-server proposals
@@ -72,6 +74,7 @@ extension WorkspaceState {
                 now: ProcessInfo.processInfo.systemUptime
               )
         else { return }
+        if localServers.scanInFlight { localServers.detectedDuringScan = true }
         scheduleLocalServerScan(after: Book.firstScanDelay)
     }
 
@@ -111,6 +114,10 @@ extension WorkspaceState {
             liveColumns: localServerTerminalColumns,
             now: ProcessInfo.processInfo.systemUptime
         )
+        if localServers.detectedDuringScan {
+            localServers.detectedDuringScan = false
+            scheduleLocalServerScan(after: Book.firstScanDelay)
+        }
         if changed {
             localServerProposalsChanged()
         } else if let delay = localServers.book.nextScanDelay {

@@ -559,10 +559,13 @@ private final class PtyState: @unchecked Sendable {
     private var localServerScanner = LocalServerURLScanner()
     private var localServerLastForwarded: [Int: TimeInterval] = [:]
     private static let localServerForwardInterval: TimeInterval = 1
-    /// Something reached the PTY through `sendRaw` — keystrokes, pastes,
-    /// remote prompts, commands Nirux types. Unlike `machine.hasUserInput`
-    /// it ignores ghostty's own writes (replies to the terminal queries
-    /// Claude Code sends at startup) and the lone Ctrl+L redraw nudge.
+    /// Something reached the PTY through `sendRaw` — keystrokes (including
+    /// the Enter after a ⌘V paste, which itself goes through ghostty),
+    /// dropped files, remote prompts, commands Nirux types. Unlike
+    /// `machine.hasUserInput` it ignores ghostty's own writes (replies to
+    /// the terminal queries Claude Code sends at startup) and the lone
+    /// Ctrl+L redraw nudge. Once open, a TUI repaint can still resurface
+    /// an old URL — at most one proposal per port, and only if listening.
     private var hasTypedInput = false
 
     func noteTypedInput(_ data: Data) {

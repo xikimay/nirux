@@ -3,8 +3,9 @@ import Darwin
 /// TCP ports with a LISTEN socket in one of the user's own processes, read
 /// through libproc like `lsof` does. No connection is ever made, so dev
 /// servers don't log anything, and the check stays free of side effects
-/// even when it repeats every few seconds. About 2 ms for ~750 processes;
-/// blocking — call it off the main thread.
+/// even when it repeats every few seconds. Servers run by another user
+/// (`sudo`, root-owned helpers) aren't visible. About 2 ms for ~750
+/// processes; blocking — call it off the main thread.
 enum LocalListeners {
     static func listeningPorts() -> Set<Int> {
         let uid = getuid()
@@ -74,6 +75,8 @@ enum LocalListeners {
     private static func isSystemService(_ pid: pid_t) -> Bool {
         var path = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
         guard proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { return false }
-        return isSystemExecutable(String(cString: path))
+        return path.withUnsafeBufferPointer { buffer in
+            buffer.baseAddress.map { isSystemExecutable(String(cString: $0)) } ?? false
+        }
     }
 }

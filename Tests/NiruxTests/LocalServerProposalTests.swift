@@ -129,16 +129,31 @@ final class LocalServerProposalTests: XCTestCase {
 
     // MARK: - Liveness + columns
 
-    func testStoppedServerIsRemovedAfterTwoEmptyScans() {
+    func testStoppedServerIsRemovedAfterItsGracePeriod() {
         var book = Book()
         propose(&book, url(3000))
         propose(&book, url(5173))
-        // A restart unbinds the port briefly: one empty scan is forgiven.
+        // A restart unbinds the port briefly: the grace period forgives it.
         XCTAssertFalse(book.applyScan(listeningPorts: [5173], browserPorts: [], liveColumns: ["term"], now: 3))
         XCTAssertFalse(book.applyScan(listeningPorts: [3000, 5173], browserPorts: [], liveColumns: ["term"], now: 6))
         XCTAssertFalse(book.applyScan(listeningPorts: [5173], browserPorts: [], liveColumns: ["term"], now: 9))
-        XCTAssertTrue(book.applyScan(listeningPorts: [5173], browserPorts: [], liveColumns: ["term"], now: 12))
+        XCTAssertTrue(book.applyScan(
+            listeningPorts: [5173], browserPorts: [], liveColumns: ["term"], now: 9 + Book.removalGrace
+        ))
         XCTAssertEqual(book.proposals.map(\.url.port), [5173])
+    }
+
+    func testGraceIsTimeBasedWhenScansRunFast() {
+        var book = Book()
+        propose(&book, url(3000))
+        // A pending detection makes scans run every second.
+        XCTAssertTrue(book.noteDetected(url(8000), in: "term", browserPorts: [], now: 10))
+        for now in [10.3, 11.3, 12.3] {
+            book.applyScan(listeningPorts: [], browserPorts: [], liveColumns: ["term"], now: now)
+            XCTAssertEqual(book.proposals.map(\.url.port), [3000], "removed too early at \(now)")
+        }
+        book.applyScan(listeningPorts: [], browserPorts: [], liveColumns: ["term"], now: 10.3 + Book.removalGrace)
+        XCTAssertTrue(book.proposals.isEmpty)
     }
 
     func testClosedTerminalDropsItsProposalsAndPendingDetections() {
