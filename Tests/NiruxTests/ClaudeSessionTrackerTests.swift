@@ -18,20 +18,20 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         from emitter: ProcessInstance?,
         inForegroundJob: Bool? = nil,
         foreground: ForegroundProcess?,
-        transcript: String? = nil
+        source: String? = nil
     ) -> ClaudeSessionTracker.Admission {
         tracker.admit(
             name,
             sessionID: sessionID,
-            transcriptPath: transcript,
+            source: source,
             emitter: emitter,
             emitterInForegroundJob: inForegroundJob ?? (emitter != nil && emitter == foreground?.instance),
             foregroundProcess: foreground
         )
     }
 
-    private func restore(existing: Set<String> = []) -> ClaudeSessionTracker.Restore? {
-        tracker.restore(for: parent, transcriptExists: { existing.contains($0) })
+    private func restore() -> ClaudeSessionTracker.Restore? {
+        tracker.restore(for: parent)
     }
 
     func testColumnAgentBindsItsSession() {
@@ -68,31 +68,37 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         XCTAssertEqual(admit(.stop, "legacy", from: nil, foreground: codex), .rejected)
     }
 
-    func testOtherForegroundJobMembersRouteButNeverBind() {
+    func testUnprovenEmittersRouteButNeverBind() {
         // A launcher's forked `claude`, or an MCP server's, shares the
-        // terminal's foreground process group without being its leader.
+        // terminal's foreground process group without being its leader; an
+        // older receiver build reports no emitter at all.
         let member = ProcessInstance(pid: 701, startedAt: 71)
-        XCTAssertEqual(admit(.stop, "child", from: member, inForegroundJob: true, foreground: parent), .accepted)
-        XCTAssertNil(restore())
-
         _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
-        XCTAssertEqual(admit(.stop, "other", from: member, inForegroundJob: true, foreground: parent), .rejected)
-        XCTAssertEqual(admit(.stop, "parent", from: member, inForegroundJob: true, foreground: parent), .accepted)
+        _ = admit(.userPromptSubmit, "parent", from: parent.instance, foreground: parent)
+
+        XCTAssertEqual(admit(.sessionStart, "other", from: member, inForegroundJob: true, foreground: parent), .accepted)
+        XCTAssertEqual(admit(.sessionStart, "legacy", from: nil, foreground: parent), .accepted)
+        XCTAssertEqual(admit(.stop, "legacy", from: nil, foreground: parent), .accepted)
+        XCTAssertEqual(restore(), .resume("parent"))
     }
 
-    func testClearRebindsAndIgnoresTheLeftSessionsEnd() {
-        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
+    func testClearRebindsAndDropsTheLeftSessionsEnd() {
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent, source: "startup")
+        _ = admit(.userPromptSubmit, "parent", from: parent.instance, foreground: parent)
 
         // The new session's SessionStart may land before the old SessionEnd.
-        XCTAssertEqual(admit(.sessionStart, "cleared", from: parent.instance, foreground: parent), .adopted)
-        XCTAssertEqual(admit(.sessionEnd, "parent", from: parent.instance, foreground: parent), .accepted)
+        XCTAssertEqual(admit(.sessionStart, "cleared", from: parent.instance, foreground: parent, source: "clear"), .adopted)
+        XCTAssertEqual(admit(.sessionEnd, "parent", from: parent.instance, foreground: parent), .rejected)
+        XCTAssertEqual(restore(), .fresh, "nothing was said in the cleared session yet")
+
+        _ = admit(.userPromptSubmit, "cleared", from: parent.instance, foreground: parent)
         XCTAssertEqual(restore(), .resume("cleared"))
     }
 
     func testOnlySessionStartSwitchesABoundSession() {
         _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
 
-        for name in [.userPromptSubmit, .notification, .stop, .preToolUse, .sessionEnd] as [AgentHookEvent.Name] {
+        for name in [.userPromptSubmit, .notification, .stop, .preToolUse] as [AgentHookEvent.Name] {
             XCTAssertEqual(admit(name, "teammate", from: parent.instance, foreground: parent), .accepted, "\(name)")
         }
         XCTAssertEqual(restore(), .resume("parent"))
@@ -105,19 +111,32 @@ final class ClaudeSessionTrackerTests: XCTestCase {
     }
 
     func testUnpromptedSessionRestoresFresh() {
-        let transcript = "/tmp/projects/p/parent.jsonl"
-        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent, transcript: transcript)
-
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent, source: "startup")
         XCTAssertEqual(restore(), .fresh)
-        XCTAssertEqual(restore(existing: [transcript]), .resume("parent"))
+
+        // Ending or re-announcing the session says nothing was prompted.
+        _ = admit(.sessionEnd, "parent", from: parent.instance, foreground: parent)
+        XCTAssertEqual(restore(), .fresh)
+
+        _ = admit(.stop, "parent", from: parent.instance, foreground: parent)
+        XCTAssertEqual(restore(), .resume("parent"))
     }
 
-    func testTranscriptFollowsTheBoundSession() {
-        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent, transcript: "/t/parent.jsonl")
-        _ = admit(.sessionStart, "cleared", from: parent.instance, foreground: parent, transcript: "/t/cleared.jsonl")
+    func testResumedForkedAndCompactedSessionsHaveAConversation() {
+        for source in ["resume", "fork", "compact", "some-future-source"] {
+            var tracker = ClaudeSessionTracker()
+            _ = tracker.admit(
+                .sessionStart, sessionID: source, source: source,
+                emitter: parent.instance, emitterInForegroundJob: true, foregroundProcess: parent
+            )
+            XCTAssertEqual(tracker.restore(for: parent), .resume(source), source)
+        }
+    }
 
-        XCTAssertEqual(restore(existing: ["/t/parent.jsonl"]), .fresh)
-        XCTAssertEqual(restore(existing: ["/t/cleared.jsonl"]), .resume("cleared"))
+    func testCompactionMarksABoundSessionPrompted() {
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent, source: "startup")
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent, source: "compact")
+        XCTAssertEqual(restore(), .resume("parent"))
     }
 
     func testRestartedClaudeReplacesAKilledOne() {
@@ -146,16 +165,6 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         XCTAssertNil(restore())
     }
 
-    func testLegacyEventsWithoutEmitterOnlyFailOnAContradiction() {
-        XCTAssertEqual(admit(.stop, "legacy", from: nil, foreground: parent), .accepted)
-        XCTAssertNil(restore(), "unverified events never bind")
-
-        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
-        XCTAssertEqual(admit(.stop, "parent", from: nil, foreground: parent), .accepted)
-        XCTAssertEqual(admit(.sessionEnd, "nested", from: nil, foreground: parent), .rejected)
-        XCTAssertEqual(admit(.sessionEnd, nil, from: nil, foreground: parent), .accepted)
-    }
-
     func testRestoredSessionPersistsBeforeItsFirstHook() {
         let restored = ForegroundProcess(
             instance: ProcessInstance(pid: 710, startedAt: 71),
@@ -164,12 +173,9 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         )
         tracker.prepareResume(sessionID: "restored")
 
-        XCTAssertEqual(tracker.restore(for: restored, transcriptExists: { _ in false }), .resume("restored"))
-        XCTAssertEqual(
-            admit(.sessionStart, "restored", from: restored.instance, foreground: restored, transcript: "/t/r.jsonl"),
-            .accepted
-        )
-        XCTAssertEqual(tracker.restore(for: restored, transcriptExists: { $0 == "/t/r.jsonl" }), .resume("restored"))
+        XCTAssertEqual(tracker.restore(for: restored), .resume("restored"))
+        XCTAssertEqual(admit(.sessionStart, "restored", from: restored.instance, foreground: restored, source: "resume"), .accepted)
+        XCTAssertEqual(tracker.restore(for: restored), .resume("restored"))
     }
 
     func testRestoreThatStartedAnotherSessionFollowsTheHook() {

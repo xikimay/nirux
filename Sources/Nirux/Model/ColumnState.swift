@@ -356,7 +356,7 @@ final class ColumnState {
         return claudeSessionTracker.admit(
             event.name,
             sessionID: event.sessionID,
-            transcriptPath: event.transcriptPath,
+            source: event.source,
             emitter: event.emitterProcess,
             emitterInForegroundJob: emitterInForegroundJob,
             foregroundProcess: pty?.foregroundProcess(snapshot: snapshot)

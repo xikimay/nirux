@@ -39,9 +39,6 @@ struct AgentHookEvent: Codable, Equatable {
     let detail: String?
     /// Claude SessionStart `source`: startup, resume, clear, compact, fork.
     let source: String?
-    /// Claude `transcript_path` — written on the session's first message,
-    /// so its absence means there is no conversation to resume.
-    let transcriptPath: String?
     /// Receiver-side timestamp (epoch seconds) — the emitter's clock and
     /// timezone are irrelevant.
     let timestamp: TimeInterval
@@ -77,7 +74,6 @@ struct AgentHookEvent: Codable, Equatable {
             sessionID = payload["session_id"] as? String
             cwd = payload["cwd"] as? String
             source = name == .sessionStart ? payload["source"] as? String : nil
-            transcriptPath = payload["transcript_path"] as? String
             if name == .preToolUse {
                 detail = payload["tool_name"] as? String
             } else if name == .notification {
@@ -93,7 +89,6 @@ struct AgentHookEvent: Codable, Equatable {
             sessionID = payload["thread-id"] as? String
             cwd = payload["cwd"] as? String
             source = nil
-            transcriptPath = nil
             let message = payload["last-assistant-message"] as? String
             detail = message.map { String($0.prefix(500)) }
         }

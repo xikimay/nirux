@@ -566,8 +566,8 @@ struct PersistedColumn: Codable {
     /// Exact Claude session formerly attached to this column. Older state
     /// files omit it and restore through Claude's interactive session picker.
     var claudeSessionID: String?
-    /// The column's Claude session had no transcript yet (never prompted,
-    /// or just cleared): restore starts a fresh `claude` instead.
+    /// The column's Claude session was never prompted (a fresh start or
+    /// /clear): there is nothing to resume, so restore starts a new one.
     var claudeSessionIsEmpty: Bool?
     /// Stable hook-routing identity (NIRUX_AGENT_UUID) for terminal columns.
     var agentUUID: String?

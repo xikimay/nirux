@@ -129,7 +129,7 @@ struct CodexSessionTracker {
 struct ClaudeSessionTracker {
     enum Admission: Equatable {
         /// Another Claude process under this column (a nested `claude -p`,
-        /// or a session the foreground `claude` already replaced). Must not
+        /// or a session the foreground `claude` already left). Must not
         /// touch the column's status, activity or notifications.
         case rejected
         /// The column's agent — route it.
@@ -141,8 +141,8 @@ struct ClaudeSessionTracker {
     /// How a restore brings the column's Claude back.
     enum Restore: Equatable {
         case resume(String)
-        /// The bound session has no transcript yet (never prompted, or just
-        /// cleared): nothing to resume, and `--resume` would fail.
+        /// The bound session was never prompted (a fresh start or /clear):
+        /// Claude has no conversation to resume, and `--resume` would fail.
         case fresh
 
         var sessionID: String? {
@@ -152,9 +152,11 @@ struct ClaudeSessionTracker {
     }
 
     private var session = AgentSessionBinding(processName: "claude", resumeArgument: "--resume")
-    /// Transcript the hooks reported for the bound session. Claude writes
-    /// it on the first message, not at SessionStart.
-    private var transcript: (sessionID: String, path: String)?
+    /// Bound session known to have no conversation yet. Decided from hook
+    /// evidence, not the transcript file: Claude writes that lazily, and a
+    /// session resumed from another directory reports a path that doesn't
+    /// exist yet.
+    private var unpromptedSessionID: String?
 
     mutating func prepareResume(sessionID: String) {
         session.prepareResume(sessionID: sessionID)
@@ -164,7 +166,7 @@ struct ClaudeSessionTracker {
     mutating func admit(
         _ name: AgentHookEvent.Name,
         sessionID: String?,
-        transcriptPath: String?,
+        source: String?,
         emitter: ProcessInstance?,
         emitterInForegroundJob: Bool,
         foregroundProcess: ForegroundProcess?
@@ -176,54 +178,45 @@ struct ClaudeSessionTracker {
               AgentStatusMachine.isRecognizedAgentProcess(foregroundProcess.name) else { return .accepted }
         // A Claude hook under a Codex column comes from a `claude` Codex ran.
         guard foregroundProcess.name == "claude" else { return .rejected }
-        let sessionID = sessionID.flatMap { $0.isEmpty ? nil : $0 }
-        let boundSessionID = session.sessionID(boundTo: foregroundProcess.instance)
-
         guard emitter == foregroundProcess.instance else {
-            // Outside the foreground job: nested. A legacy queue entry (no
-            // emitter) or another member of the job (a launcher's child, an
-            // MCP server's `claude`) can't prove ownership, so it is routed
-            // unless it contradicts the verified binding — and never binds.
-            guard emitter == nil || emitterInForegroundJob else { return .rejected }
-            if let boundSessionID, let sessionID, sessionID != boundSessionID { return .rejected }
-            return .accepted
+            // Outside the foreground job: nested. A receiver without emitter
+            // identity (an older Nirux build still registered as the hook)
+            // or another member of the job (a launcher's child, an MCP
+            // server's `claude`) can't prove ownership: route, never bind.
+            return emitter == nil || emitterInForegroundJob ? .accepted : .rejected
         }
-        guard let sessionID else { return .accepted }
+        guard let sessionID = sessionID.flatMap({ $0.isEmpty ? nil : $0 }) else { return .accepted }
+        let boundSessionID = session.sessionID(boundTo: foregroundProcess.instance)
         if sessionID == boundSessionID {
-            if let transcriptPath { transcript = (sessionID, transcriptPath) }
+            if name != .sessionEnd, name != .sessionStart || source == "compact" {
+                unpromptedSessionID = nil
+            }
             return .accepted
         }
         // The foreground `claude` reports another conversation. /clear,
         // /resume and /branch switch through SessionStart. Turn events only
         // adopt a column nothing is bound to yet: once bound, a different ID
-        // there may be an in-process teammate's. A SessionEnd is the
-        // straggler of the session just left, and PreToolUse may come from a
-        // subagent — neither binds.
+        // there may be an in-process teammate's. PreToolUse may come from a
+        // subagent. A SessionEnd is the straggler of the session just left.
         switch name {
         case .sessionStart:
-            break
+            unpromptedSessionID = source == "startup" || source == "clear" ? sessionID : nil
         case .userPromptSubmit, .notification, .stop:
             guard boundSessionID == nil else { return .accepted }
-        case .sessionEnd, .preToolUse, .turnComplete:
+            unpromptedSessionID = nil
+        case .sessionEnd:
+            return boundSessionID == nil ? .accepted : .rejected
+        case .preToolUse, .turnComplete:
             return .accepted
         }
-        let changed = session.bind(sessionID: sessionID, process: foregroundProcess.instance)
-        transcript = transcriptPath.map { (sessionID, $0) }
-        return changed ? .adopted : .accepted
+        return session.bind(sessionID: sessionID, process: foregroundProcess.instance) ? .adopted : .accepted
     }
 
     /// Nil when no session is bound to this foreground process — restore
-    /// then asks through the picker. An unknown transcript (a restored
-    /// session not yet re-announced by its hooks) counts as present.
-    mutating func restore(
-        for foregroundProcess: ForegroundProcess?,
-        transcriptExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
-    ) -> Restore? {
+    /// then asks through the picker.
+    mutating func restore(for foregroundProcess: ForegroundProcess?) -> Restore? {
         guard let sessionID = session.sessionID(for: foregroundProcess) else { return nil }
-        if let transcript, transcript.sessionID == sessionID, !transcriptExists(transcript.path) {
-            return .fresh
-        }
-        return .resume(sessionID)
+        return sessionID == unpromptedSessionID ? .fresh : .resume(sessionID)
     }
 
     @discardableResult
