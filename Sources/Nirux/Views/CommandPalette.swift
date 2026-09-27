@@ -50,6 +50,10 @@ final class CommandPalette: NSObject {
 
         filteredActions = actions
         selectedIndex = 0
+        // Return on a URL, or a click outside, closes the palette still in
+        // URL mode: it would read the next commands typed as a URL.
+        mode = .actions
+        searchField.placeholderString = "Type a command..."
 
         let windowFrame = window.frame
         let panelWidth: CGFloat = 520
