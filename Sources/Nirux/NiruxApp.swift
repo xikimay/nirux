@@ -83,7 +83,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         shellView.autoresizingMask = [.width, .height]
         window.contentView = shellView
         shell = shellView
-        setupUpdater()
+        setupStatusBarNotices()
 
         // Native notifications: click focuses the originating workspace/column.
         NiruxNotifier.shared.setup()
@@ -164,6 +164,13 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         NSApp.activate(ignoringOtherApps: true)
         startTrackingFrontmostApp()
         drainLaunchURLBacklog()
+    }
+
+    /// The status bar's notices: an available update, a crash of an earlier
+    /// session.
+    private func setupStatusBarNotices() {
+        setupUpdater()
+        checkForCrashReports()
     }
 
     /// The Getting Started checklist refreshes after the install, so it
