@@ -42,16 +42,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             exit(AgentHookCLI.run(kind: kind, payload: payload))
         }
         if args.count >= 2, args[1] == "--mission" {
-            guard args.count >= 3 else { exit(2) }
-            let arguments = Array(args.dropFirst(3))
-            switch args[2] {
-            case "ask": exit(MissionEventCLI.ask(arguments: arguments))
-            case "receive": exit(MissionEventCLI.receive(arguments: arguments))
-            case "reply": exit(MissionEventCLI.reply(arguments: arguments))
-            default:
-                guard let kind = MissionEvent.Kind(rawValue: args[2]) else { exit(2) }
-                exit(MissionEventCLI.run(kind: kind, arguments: arguments))
-            }
+            exit(MissionEventCLI.main(Array(args.dropFirst(2))))
         }
 
         let app = NSApplication.shared

@@ -247,7 +247,9 @@ final class EditorSearchPanel: NSObject {
         let process = Process()
         let pipe = Pipe()
         process.standardOutput = pipe
-        process.standardError = Pipe() // discard
+        // Never a pipe nobody reads: a search printing enough warnings
+        // (unreadable directories, say) would fill it and stall.
+        process.standardError = FileHandle.nullDevice
         process.currentDirectoryURL = URL(fileURLWithPath: workspaceCwd)
 
         let usesRipgrepJSON: Bool
