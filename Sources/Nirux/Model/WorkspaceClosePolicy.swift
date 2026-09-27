@@ -6,7 +6,8 @@ import Foundation
 /// or idle at its prompt — is never killed without confirmation; a bare
 /// shell closes without ceremony.
 enum WorkspaceClosePolicy {
-    /// A recognized agent process (claude/codex) that closing would kill.
+    /// A recognized agent process (`AgentStatusMachine.isRecognizedAgentProcess`)
+    /// that closing would kill.
     struct LiveAgent: Equatable {
         /// Process name, e.g. "claude".
         var processName: String
@@ -18,6 +19,8 @@ enum WorkspaceClosePolicy {
             switch processName {
             case "claude": return "Claude"
             case "codex": return "Codex"
+            case "gemini": return "Gemini"
+            case "opencode": return "OpenCode"
             default: return processName
             }
         }
@@ -92,9 +95,9 @@ enum WorkspaceClosePolicy {
 extension WorkspaceClosePolicy.LiveAgent {
     /// Status from the agent's status machine. Idle is only trusted when
     /// Claude's hooks drive it: the output-activity fallback (Codex,
-    /// hook-less Claude) reads idle until the first keystroke — an agent
-    /// launched with a handover prompt works while showing idle — and
-    /// through silent tool calls.
+    /// hook-less Claude, Gemini, OpenCode) reads idle until the first
+    /// keystroke — an agent launched with a handover prompt works while
+    /// showing idle — and through silent tool calls.
     init(processName: String, machineStatus: AgentStatus, hookKind: String?) {
         let hookDriven = processName == "claude" && hookKind == "claude"
         self.init(processName: processName, status: machineStatus == .idle && !hookDriven ? nil : machineStatus)

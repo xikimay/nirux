@@ -130,6 +130,43 @@ final class CloseAgentDetectionTests: XCTestCase {
         XCTAssertEqual(backgroundAgent.foregroundProcessName(snapshot: ProcessSnapshot()), "zsh")
     }
 
+    /// Gemini CLI runs as `node --no-warnings=… …/gemini`: the live argv
+    /// read must reach past the runtime flags, in the foreground and in the
+    /// descendant scan. (`bash --norc` stands in for node's flags; `exec -a`
+    /// sets argv[0].) Recognized for close, yet never a remote-prompt target.
+    @MainActor
+    func testFlaggedRuntimeLaunchOfGeminiIsProtectedButNotRemote() async throws {
+        try await withScratchStateDirectory { cwd in
+            let script = (cwd as NSString).appendingPathComponent("gemini")
+            try "sleep 30; :\n".write(toFile: script, atomically: true, encoding: .utf8)
+            let foreground = PtySession()
+            let background = PtySession()
+            let claude = PtySession()
+            foreground.start(shell: "/bin/zsh", args: ["-f", "-c", "exec -a node /bin/bash --norc gemini"], cwd: cwd)
+            background.start(
+                shell: "/bin/zsh",
+                args: ["-f", "-c", "(exec -a node /bin/bash --norc gemini) & wait"],
+                cwd: cwd
+            )
+            claude.start(shell: "/bin/zsh", args: ["-f", "-c", "exec -a claude /bin/cat"], cwd: cwd)
+
+            let expected: [String?] = ["gemini", "gemini", "claude"]
+            var names: [String?] = []
+            let deadline = Date().addingTimeInterval(3)
+            repeat {
+                let snapshot = ProcessSnapshot()
+                names = [foreground, background, claude].map { $0.agentProcessName(snapshot: snapshot) }
+                if names == expected { break }
+                try await Task.sleep(for: .milliseconds(20))
+            } while Date() < deadline
+            XCTAssertEqual(names, expected)
+            let snapshot = ProcessSnapshot()
+            XCTAssertEqual(foreground.foregroundProcessName(snapshot: snapshot), "gemini")
+            XCTAssertFalse(foreground.acceptsRemotePrompts(snapshot: snapshot))
+            XCTAssertTrue(claude.acceptsRemotePrompts(snapshot: snapshot))
+        }
+    }
+
     @MainActor
     func testEmptySnapshotFallsBackToTheHeartbeatsView() async throws {
         try await withScratchStateDirectory { cwd in

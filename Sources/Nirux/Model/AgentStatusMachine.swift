@@ -87,11 +87,29 @@ struct AgentStatusMachine {
     private static let reminderRaceWindow: TimeInterval = 3.0
     private static let reminderDelay: TimeInterval = 5.0
 
-    /// Central capability gate shared by local status and remote prompt
-    /// routing. Bot commands remain agent-agnostic even as this allowlist
-    /// grows with Nirux's supported terminal agents.
+    /// Agents Nirux integrates with: lifecycle hooks (Claude Code), turn
+    /// notifications (Codex), launch presets and session restore.
+    static let integratedAgentProcesses: Set<String> = ["claude", "codex"]
+
+    /// Agents recognized by foreground process name alone — no hooks, no
+    /// launcher, no restore. Their status comes from the output-activity
+    /// fallback in `tick`; closing their column asks first like any agent's.
+    /// Names are `ProcessSnapshot.execName` results: Gemini CLI runs as
+    /// `node [flags] …/gemini`, opencode as a native `opencode` binary.
+    static let activityOnlyAgentProcesses: Set<String> = ["gemini", "opencode"]
+
+    /// Central gate for local agent status, nested-hook attribution and
+    /// close confirmation.
     static func isRecognizedAgentProcess(_ name: String) -> Bool {
-        name == "claude" || name == "codex"
+        integratedAgentProcesses.contains(name) || activityOnlyAgentProcesses.contains(name)
+    }
+
+    /// Telegram injects prompts only into integrated agents: their hooks
+    /// report the dialogs a remote prompt must not answer blindly, which an
+    /// activity-only agent can't — its permission prompt looks like any
+    /// silence. Bot commands themselves stay agent-agnostic.
+    static func acceptsRemotePrompts(processName name: String) -> Bool {
+        integratedAgentProcesses.contains(name)
     }
 
     /// Why the column wants the user, while it does: the oldest dialog
