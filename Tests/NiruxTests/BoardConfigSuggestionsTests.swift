@@ -23,10 +23,15 @@ final class BoardConfigSuggestionsTests: XCTestCase {
     @discardableResult
     static func git(_ arguments: [String], at directory: String) throws -> String {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false",
+        // The git the code under test runs, so both read the same format.
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false",
                              "-c", "user.name=Test", "-c", "user.email=test@example.com"] + arguments
         process.currentDirectoryURL = URL(fileURLWithPath: directory)
+        // The developer's own config (a reftable or sha256 default) stays out.
+        process.environment = ProcessInfo.processInfo.environment.merging(
+            ["GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"]
+        ) { _, new in new }
         let output = Pipe()
         process.standardOutput = output
         process.standardError = output
@@ -41,7 +46,7 @@ final class BoardConfigSuggestionsTests: XCTestCase {
     }
 
     /// A repository whose `origin` is `remote`, with `origin/HEAD` on main
-    /// unless told otherwise, and the given workflow files.
+    /// unless told otherwise, and the given workflow files committed.
     static func makeRepository(
         at path: String, remote: String?, originHead: Bool = true, workflows: [String] = []
     ) throws {
@@ -52,6 +57,7 @@ final class BoardConfigSuggestionsTests: XCTestCase {
         for file in workflows {
             try Data("on: push\n".utf8).write(to: URL(fileURLWithPath: workflowsFolder + "/" + file))
         }
+        try git(["add", "-A"], at: path)
         try git(["commit", "-q", "--allow-empty", "-m", "init"], at: path)
         if let remote {
             try git(["remote", "add", "origin", remote], at: path)
@@ -69,6 +75,10 @@ final class BoardConfigSuggestionsTests: XCTestCase {
             workflows: ["tests.yaml", "nightly.yml", "README.md", "-bad.yml"]
         )
         try FileManager.default.createDirectory(atPath: repo + "/.github/workflows/nested.yml", withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: URL(fileURLWithPath: repo + "/.github/workflows/nested.yml/a.yml"))
+        try Self.git(["add", "-A"], at: repo)
+        try Self.git(["commit", "-q", "-m", "nested"], at: repo)
+        try Self.git(["update-ref", "refs/remotes/origin/main", "HEAD"], at: repo)
         let worktree = root + "/widgets.feat"
         try Self.git(["worktree", "add", "-q", "-b", "feat/x", worktree], at: repo)
         let subfolder = repo + "/Sources"
@@ -78,11 +88,12 @@ final class BoardConfigSuggestionsTests: XCTestCase {
             workspaceFolders: [worktree, repo, subfolder, root + "/gone", root], repository: nil
         )
 
-        XCTAssertEqual(suggestions.repository, "acme/widgets")
+        XCTAssertEqual(suggestions.repository, "Acme/Widgets", "spelled as the remote spells it")
         XCTAssertEqual(suggestions.source, .shared)
         XCTAssertEqual(suggestions.checkout, repo, "the main working tree, not the worktree")
         XCTAssertEqual(suggestions.baseBranch, "main")
         XCTAssertEqual(suggestions.workflowFiles, ["nightly.yml", "tests.yaml"])
+        XCTAssertEqual(suggestions.workflowsRef, "origin/main")
     }
 
     func testWorkspacesInTwoRepositoriesSuggestNone() throws {
@@ -116,6 +127,12 @@ final class BoardConfigSuggestionsTests: XCTestCase {
 
         XCTAssertNil(suggestions.repository)
         XCTAssertEqual(suggestions.source, .differing(["acme/one", BoardConfigSuggestions.noGitHubRemote]))
+
+        // The same repository, spelled differently, is one.
+        try Self.makeRepository(at: root + "/upper", remote: "https://github.com/ACME/One")
+        let shared = BoardConfigSuggestions.read(workspaceFolders: [root + "/github", root + "/upper"], repository: nil)
+        XCTAssertEqual(shared.source, .shared)
+        XCTAssertEqual(shared.repository, "acme/one")
     }
 
     func testNoWorkspaceInARepositorySuggestsNothing() throws {
@@ -138,6 +155,67 @@ final class BoardConfigSuggestionsTests: XCTestCase {
         XCTAssertEqual(suggestions.checkout, repo)
         XCTAssertNil(suggestions.baseBranch)
         XCTAssertEqual(suggestions.workflowFiles, [])
+    }
+
+    /// A default branch that moved (master to main) leaves `origin/HEAD` on
+    /// a branch that's gone: nothing is suggested.
+    func testAnOriginHEADOnABranchThatsGoneIsNotSuggested() throws {
+        let repo = root + "/repo"
+        try Self.makeRepository(at: repo, remote: "https://github.com/acme/repo", originHead: false)
+        try Self.git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master"], at: repo)
+
+        XCTAssertNil(BoardConfigSuggestions.defaultBranch(of: "origin", at: repo))
+    }
+
+    /// `--short` would print `remotes/origin/main` here.
+    func testALocalBranchNamedLikeTheRemoteOneDoesntChangeTheBaseBranch() throws {
+        let repo = root + "/repo"
+        try Self.makeRepository(at: repo, remote: "https://github.com/acme/repo")
+        try Self.git(["branch", "origin/main"], at: repo)
+
+        XCTAssertEqual(BoardConfigSuggestions.defaultBranch(of: "origin", at: repo), "main")
+    }
+
+    /// The main checkout may be on a branch that changed the workflows: the
+    /// list comes from the base branch, as last fetched.
+    func testWorkflowFilesComeFromTheBaseBranch() throws {
+        let repo = root + "/repo"
+        try Self.makeRepository(at: repo, remote: "https://github.com/acme/repo", workflows: ["nightly.yml"])
+        try Self.git(["checkout", "-q", "-b", "feat/ci"], at: repo)
+        try Data("on: push\n".utf8).write(to: URL(fileURLWithPath: repo + "/.github/workflows/new.yml"))
+
+        let fromMain = BoardConfigSuggestions.read(workspaceFolders: [repo], repository: nil)
+        XCTAssertEqual(fromMain.workflowFiles, ["nightly.yml"])
+        XCTAssertEqual(fromMain.workflowsRef, "origin/main")
+
+        // A saved base branch that the checkout never fetched: its own files.
+        let unfetched = BoardConfigSuggestions.read(workspaceFolders: [repo], repository: nil, baseBranch: "release")
+        XCTAssertEqual(unfetched.workflowFiles, ["new.yml", "nightly.yml"])
+        XCTAssertNil(unfetched.workflowsRef)
+    }
+
+    func testAWorktreeOfABareRepositoryIsItsOwnCheckout() throws {
+        let source = root + "/source"
+        try Self.makeRepository(at: source, remote: nil)
+        try Self.git(["clone", "-q", "--bare", source, root + "/bare.git"], at: root)
+        try Self.git(["worktree", "add", "-q", root + "/wt", "main"], at: root + "/bare.git")
+
+        let folder = try XCTUnwrap(BoardConfigSuggestions.folder(at: root + "/wt"))
+
+        XCTAssertEqual(folder.checkout, root + "/wt")
+    }
+
+    func testRemoteURLsKeepTheirSpelling() {
+        for (url, expected) in [
+            ("git@github.com:Acme/Widgets.git", "Acme/Widgets"),
+            ("https://github.com/Acme/Widgets", "Acme/Widgets"),
+            ("ssh://git@ssh.github.com:443/Acme/Widgets.git", "Acme/Widgets"),
+            ("https://github.com/Acme/Widgets/", "Acme/Widgets")
+        ] {
+            XCTAssertEqual(BoardConfigSuggestions.repositoryName(remoteURL: url), expected, url)
+        }
+        XCTAssertNil(BoardConfigSuggestions.repositoryName(remoteURL: "git@gitlab.com:acme/widgets.git"))
+        XCTAssertNil(BoardConfigSuggestions.repositoryName(remoteURL: "/local/path"))
     }
 
     /// A branch pushed to another remote reads that remote, as PRDetect does.

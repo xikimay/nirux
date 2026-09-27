@@ -515,23 +515,38 @@ and the journal:
     pile up copies. If the copy fails, the file stays as it is;
   - anything but a regular file (a folder, a link) or a file over 1 MB is
     neither read nor replaced;
+  - Save refuses values `BoardConfig.problems` rejects, and a file another
+    Nirux saved since the form read it;
   - writes are atomic, and the file is 0600. Deleting the space leaves it, like
     the brief.
 - **The queue starts only** when the file is writable and complete: a
   repository, a base branch, at least one required check, timeouts in range,
-  and a post-merge workflow chosen, a file or `"none"`
-  (`BoardConfigStore.Loaded.queueStartProblems`).
+  and a post-merge workflow chosen, a file or `"none"`. B2 and B3 read
+  `BoardConfigStore(spaceID:).load().queueSettings`, which is nil otherwise
+  (`queueStartProblems` says why) and holds no optional value.
+  - GitHub ignores case in `owner/name`: compare
+    `QueueSettings.gitHubRepository`, for "one queue per repository" and a
+    PR's head repository.
+  - `gh --repo owner/name` follows `GH_HOST`, which a terminal may set: pass
+    `github.com/owner/name`.
+  - A base branch may hold `#` or `%`: percent-encode it in REST paths.
+- `BoardConfigStore.didSaveNotification` announces each save, with the
+  space's id, for the board to reload.
 - **Editing:** "Board Settings…" in the space's menu (B4), a small form in a
   sheet. B1 adds it to the board header, and opens it the first time a board
   lacks a repository.
   - Fields show the saved values, else values read from the local checkouts,
     never from the network: the repository every workspace in a repository
-    pushes to (github.com only), and the branch its remote's `HEAD` points to.
-    Nothing is written before Save.
+    pushes to (github.com only, spelled as its remote spells it), and the
+    branch its remote's `HEAD` points to, if that branch is there. A pasted
+    github.com URL is saved as `owner/name`. Nothing is written before Save.
   - The post-merge workflow is never preselected. The form lists the
-    `.github/workflows/*.yml|yaml` files of that repository's main checkout,
-    None, and Other file… for a name typed by hand.
+    `.github/workflows/*.yml|yaml` files of the base branch as that
+    repository's main checkout last fetched it (else of the checkout's own
+    files), None, and Other file… for a name typed by hand.
   - Required checks go one per line: matrix job names hold commas.
+  - A read-only file is shown as it is, without suggestions, and Save is
+    disabled.
 
 ## 6. Data
 

@@ -74,7 +74,9 @@ final class BoardConfigStoreTests: XCTestCase {
         XCTAssertEqual(try store.save(config).get(), nil)
 
         let loaded = store.load()
-        XCTAssertEqual(loaded, BoardConfigStore.Loaded(config: config, status: .loaded))
+        XCTAssertEqual(loaded.status, .loaded)
+        XCTAssertEqual(loaded.config, config)
+        XCTAssertEqual(loaded.contents, try Data(contentsOf: fileURL))
         XCTAssertEqual(loaded.queueStartProblems, [])
         let text = try contents()
         XCTAssertTrue(text.contains(#""repository" : "xikimay/nirux""#), "slashes aren't escaped: \(text)")
@@ -89,8 +91,9 @@ final class BoardConfigStoreTests: XCTestCase {
         XCTAssertEqual(loaded.config, BoardConfig(repository: "a/b"))
         XCTAssertEqual(
             loaded.queueStartProblems,
-            ["Set the base branch.", "Choose the post-merge workflow, or None."]
+            ["Set the base branch.", "Choose the post-merge workflow in Board Settings…, or None."]
         )
+        XCTAssertNil(loaded.queueSettings)
     }
 
     func testANewerSchemaIsReadButNeverWritten() throws {
@@ -103,8 +106,10 @@ final class BoardConfigStoreTests: XCTestCase {
         XCTAssertEqual(loaded.status, .readOnly(.newerSchema(2)))
         XCTAssertEqual(loaded.config?.repository, "a/b")
         XCTAssertFalse(loaded.isWritable)
-        XCTAssertTrue(loaded.config?.canStartQueue == true)
+        XCTAssertEqual(loaded.config?.problems, [], "values this build would accept")
         XCTAssertEqual(loaded.queueStartProblems.count, 1, "the queue refuses a newer schema")
+        XCTAssertFalse(loaded.canStartQueue)
+        XCTAssertNil(loaded.queueSettings)
 
         XCTAssertEqual(store.save(config), .failure(.readOnly(.newerSchema(2))))
         XCTAssertEqual(try contents(), original)
@@ -146,11 +151,82 @@ final class BoardConfigStoreTests: XCTestCase {
             let loaded = store.load()
             XCTAssertEqual(loaded.status, .readOnly(.unsupportedMergeMethod(method)))
             XCTAssertEqual(loaded.config?.mergeMethod, .merge)
+            XCTAssertNil(loaded.queueSettings, "never runs as merge")
             XCTAssertEqual(loaded.queueStartProblems.count, 1)
             XCTAssertTrue(loaded.queueStartProblems[0].contains(method))
             XCTAssertEqual(store.save(config), .failure(.readOnly(.unsupportedMergeMethod(method))))
             XCTAssertEqual(try contents(), original)
         }
+    }
+
+    /// A board.json as B4 writes it: later builds must keep reading it.
+    func testAFileWrittenByTheFirstVersionStaysReadable() throws {
+        try write("""
+        {
+          "baseBranch" : "main",
+          "checksTimeoutMinutes" : 30,
+          "mergeMethod" : "merge",
+          "postMergeTimeoutMinutes" : 30,
+          "postMergeWorkflow" : "nightly.yml",
+          "repository" : "xikimay/nirux",
+          "requiredChecks" : [
+            "test"
+          ],
+          "schemaVersion" : 1
+        }
+        """)
+        let loaded = store.load()
+        XCTAssertEqual(loaded.status, .loaded)
+        XCTAssertEqual(loaded.queueSettings, BoardConfig.QueueSettings(
+            repository: "xikimay/nirux",
+            gitHubRepository: GitHubRepository(owner: "xikimay", name: "nirux"),
+            baseBranch: "main",
+            requiredChecks: ["test"],
+            postMergeWorkflow: "nightly.yml",
+            mergeMethod: .merge,
+            checksTimeoutMinutes: 30,
+            postMergeTimeoutMinutes: 30
+        ))
+    }
+
+    func testNoneMeansNoPostMergeWorkflowInTheQueueSettings() throws {
+        var none = config
+        none.postMergeWorkflow = .noWorkflow
+        XCTAssertNoThrow(try store.save(none).get())
+        let settings = try XCTUnwrap(store.load().queueSettings)
+        XCTAssertNil(settings.postMergeWorkflow)
+    }
+
+    /// Only a missing or null version is the current one. Any number above
+    /// it is newer; anything else can't be trusted, so it is unreadable and
+    /// copied aside before a Save replaces it.
+    func testASchemaVersionThatIsntAWholeNumberIsNeverTakenForTheCurrentOne() throws {
+        let body = #""repository": "a/b", "baseBranch": "main", "postMergeWorkflow": "none""#
+        for (version, expected) in [
+            ("null", BoardConfigStore.Loaded.Status.loaded),
+            ("1", .loaded),
+            ("1.0", .loaded),
+            ("2.5", .readOnly(.newerSchema(2))),
+            ("99999999999999999999", .readOnly(.newerSchema(Int.max))),
+            ("\"2\"", .unreadable),
+            ("true", .unreadable),
+            ("0.5", .unreadable),
+            ("{\"major\": 2}", .unreadable)
+        ] {
+            try write("{\"schemaVersion\": \(version), \(body)}")
+            let loaded = store.load()
+            XCTAssertEqual(loaded.status, expected, version)
+            if expected != .loaded {
+                XCTAssertFalse(loaded.canStartQueue, version)
+            }
+        }
+    }
+
+    func testAnEmptyMergeMethodMeansMerge() throws {
+        try write(#"{"mergeMethod": ""}"#)
+        let loaded = store.load()
+        XCTAssertEqual(loaded.status, .loaded)
+        XCTAssertEqual(loaded.config?.mergeMethod, .merge)
     }
 
     // MARK: - Unreadable files
@@ -160,7 +236,8 @@ final class BoardConfigStoreTests: XCTestCase {
         try write(original)
 
         let loaded = store.load()
-        XCTAssertEqual(loaded, BoardConfigStore.Loaded(config: nil, status: .unreadable))
+        XCTAssertEqual(loaded.status, .unreadable)
+        XCTAssertNil(loaded.config)
         XCTAssertTrue(loaded.isWritable)
         _ = store.load()
         XCTAssertEqual(try folderEntries(), ["board.json"], "loading copies nothing")
@@ -225,6 +302,17 @@ final class BoardConfigStoreTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: target, encoding: .utf8), "{}")
     }
 
+    func testAFIFOInPlaceOfTheFileIsNeitherReadNorReplaced() throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        XCTAssertEqual(mkfifo(fileURL.path, 0o600), 0)
+
+        XCTAssertEqual(store.load().status, .readOnly(.notARegularFile), "read without blocking")
+        XCTAssertEqual(store.save(config), .failure(.readOnly(.notARegularFile)))
+        var info = stat()
+        XCTAssertEqual(lstat(fileURL.path, &info), 0)
+        XCTAssertEqual(info.st_mode & S_IFMT, S_IFIFO, "still the FIFO")
+    }
+
     func testATooLargeFileIsNeitherReadNorReplaced() throws {
         try write("{}" + String(repeating: " ", count: BoardConfigStore.maxFileBytes))
 
@@ -235,6 +323,49 @@ final class BoardConfigStoreTests: XCTestCase {
     }
 
     // MARK: - Writing
+
+    func testSaveRefusesValuesTheFileCouldntHoldFaithfully() throws {
+        for workflow in [BoardConfig.PostMergeWorkflow.workflow("none"), .workflow("")] {
+            var invalid = config
+            invalid.postMergeWorkflow = workflow
+            guard case .failure(.invalid) = store.save(invalid) else {
+                return XCTFail("saved \(workflow), which reads back as something else")
+            }
+        }
+        var noRepository = config
+        noRepository.repository = nil
+        XCTAssertEqual(store.save(noRepository), .failure(.invalid(["Set the repository (owner/name)."])))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    /// Another Nirux (the installed app, a dev build) saved while the form
+    /// was open: its file isn't overwritten.
+    func testSaveLeavesAFileChangedSinceItWasLoadedAlone() throws {
+        let missing = store.load()
+        XCTAssertNoThrow(try store.save(config).get())
+        var mine = config
+        mine.baseBranch = "develop"
+        XCTAssertEqual(store.save(mine, replacing: missing), .failure(.changedSinceLoaded))
+        XCTAssertEqual(store.load().config, config)
+
+        let loaded = store.load()
+        var theirs = config
+        theirs.requiredChecks = ["build"]
+        XCTAssertNoThrow(try store.save(theirs).get())
+        XCTAssertEqual(store.save(mine, replacing: loaded), .failure(.changedSinceLoaded))
+        XCTAssertEqual(store.load().config, theirs)
+
+        XCTAssertNoThrow(try store.save(mine, replacing: store.load()).get())
+        XCTAssertEqual(store.load().config, mine)
+    }
+
+    func testASaveIsAnnouncedWithTheSpace() throws {
+        let posted = expectation(forNotification: BoardConfigStore.didSaveNotification, object: nil) { notification in
+            notification.userInfo?["spaceID"] as? String == "space-1"
+        }
+        XCTAssertNoThrow(try store.save(config).get())
+        wait(for: [posted], timeout: 1)
+    }
 
     /// Replaced by a rename: a reader holding the old file still sees it
     /// whole, and nothing is left behind.

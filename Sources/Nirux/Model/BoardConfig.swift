@@ -6,8 +6,9 @@ import Foundation
 /// See docs/project-board.md, section 5.
 ///
 /// Values stay as read, even invalid ones (an empty check name, a timeout
-/// of 0), so writing the config back loses nothing. `problems` lists them,
-/// and the queue refuses to start while any is left (`queueStartProblems`).
+/// of 0), so writing the config back loses nothing. `problems` lists them.
+/// The merge queue starts only through `BoardConfigStore.Loaded`, whose
+/// `queueSettings` also refuses a file this build must not write.
 struct BoardConfig: Equatable, Sendable {
     static let schemaVersion = 1
     static let defaultRequiredChecks = ["test"]
@@ -49,7 +50,8 @@ struct BoardConfig: Equatable, Sendable {
         }
     }
 
-    /// `owner/name` on github.com. Nil when not set.
+    /// `owner/name` on github.com, as typed or as the remote spells it. Nil
+    /// when not set. GitHub ignores case: compare `gitHubRepository`.
     var repository: String?
     /// The branch pull requests merge into. Nil when not set.
     var baseBranch: String?
@@ -59,6 +61,23 @@ struct BoardConfig: Equatable, Sendable {
     var mergeMethod: MergeMethod = .merge
     var checksTimeoutMinutes = BoardConfig.defaultTimeoutMinutes
     var postMergeTimeoutMinutes = BoardConfig.defaultTimeoutMinutes
+
+    /// What the merge queue runs with: every value set and valid. Made by
+    /// `BoardConfigStore.Loaded.queueSettings` only.
+    struct QueueSettings: Equatable, Sendable {
+        /// As saved, for `gh --repo` and display.
+        let repository: String
+        /// For comparisons: one queue per repository, a PR's head repository.
+        let gitHubRepository: GitHubRepository
+        let baseBranch: String
+        let requiredChecks: [String]
+        /// The workflow file to wait for after each merge. Nil: merge the
+        /// next PR right away.
+        let postMergeWorkflow: String?
+        let mergeMethod: MergeMethod
+        let checksTimeoutMinutes: Int
+        let postMergeTimeoutMinutes: Int
+    }
 
     // MARK: - Validation
 
@@ -84,7 +103,7 @@ struct BoardConfig: Equatable, Sendable {
         if requiredChecks.isEmpty {
             problems.append("Add at least one required check.")
         } else if requiredChecks.contains(where: { !Self.isValidCheckName($0) }) {
-            problems.append("A required check is empty or holds a line break.")
+            problems.append("A required check is empty, or holds a tab or a line break.")
         }
         if case .workflow(let file) = postMergeWorkflow, !Self.isValidWorkflowFile(file) {
             problems.append("The post-merge workflow must be a .yml or .yaml file name, such as nightly.yml.")
@@ -97,22 +116,18 @@ struct BoardConfig: Equatable, Sendable {
         return problems
     }
 
-    /// Why the merge queue can't start with these values. Empty when it can.
-    /// Besides `problems`, the post-merge workflow must be chosen. The file
-    /// itself can also stop the queue: see `BoardConfigStore.Loaded`.
-    var queueStartProblems: [String] {
-        var problems = problems
-        if postMergeWorkflow == .unset {
-            problems.append("Choose the post-merge workflow, or None.")
-        }
-        return problems
+    /// The repository to compare with others (lowercased, on github.com).
+    /// Nil unless `repository` is valid.
+    var gitHubRepository: GitHubRepository? {
+        guard let repository, Self.isValidRepository(repository) else { return nil }
+        let parts = repository.split(separator: "/")
+        return GitHubRepository(owner: String(parts[0]), name: String(parts[1]))
     }
 
-    var canStartQueue: Bool { queueStartProblems.isEmpty }
-
     /// `owner/name` with GitHub's characters: an owner of 1 to 39 letters,
-    /// digits and hyphens, not starting with a hyphen; a name of 1 to 100
-    /// letters, digits, `.`, `-` and `_`, other than `.` and `..`.
+    /// digits, hyphens and underscores (managed users' accounts), not
+    /// starting with a hyphen; a name of 1 to 100 letters, digits, `.`, `-`
+    /// and `_`, other than `.` and `..`, not ending in `.git`.
     static func isValidRepository(_ value: String) -> Bool {
         let parts = value.split(separator: "/", omittingEmptySubsequences: false)
         guard parts.count == 2 else { return false }
@@ -122,16 +137,20 @@ struct BoardConfig: Equatable, Sendable {
             scalar.isASCII && CharacterSet.alphanumerics.contains(scalar)
         }
         guard (1...39).contains(owner.count), owner.first != "-",
-              owner.allSatisfy({ isASCIIAlphanumeric($0) || $0 == "-" })
+              owner.allSatisfy({ isASCIIAlphanumeric($0) || $0 == "-" || $0 == "_" })
         else { return false }
         return (1...100).contains(name.count) && parts[1] != "." && parts[1] != ".."
+            && !parts[1].lowercased().hasSuffix(".git")
             && name.allSatisfy { isASCIIAlphanumeric($0) || "._-".unicodeScalars.contains($0) }
     }
 
-    /// The rules of `git check-ref-format --branch`, plus no leading
-    /// hyphen, so the name can't read as an option.
+    /// The rules of `git check-ref-format --branch`, plus no leading hyphen
+    /// or plus sign (an option, a force refspec), no `HEAD` and no `refs/`:
+    /// a plain branch name. It may hold `#` or `%`: percent-encode it in a
+    /// REST path.
     static func isValidBranchName(_ name: String) -> Bool {
-        guard !name.isEmpty, name != "@", !name.hasPrefix("-"), !name.hasPrefix("/"),
+        guard !name.isEmpty, name != "@", name != "HEAD", !name.hasPrefix("-"), !name.hasPrefix("+"),
+              !name.hasPrefix("refs/"), !name.hasPrefix("/"),
               !name.hasSuffix("/"), !name.hasSuffix("."), !name.hasSuffix(".lock"),
               !name.contains(".."), !name.contains("//"), !name.contains("@{")
         else { return false }
@@ -141,9 +160,10 @@ struct BoardConfig: Equatable, Sendable {
         return !name.split(separator: "/").contains { $0.hasPrefix(".") || $0.hasSuffix(".lock") }
     }
 
+    /// Not blank, and on one line: the form lists one check per line.
     static func isValidCheckName(_ name: String) -> Bool {
         !name.trimmingCharacters(in: .whitespaces).isEmpty
-            && !name.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7F }
+            && !name.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7F || CharacterSet.newlines.contains($0) }
     }
 
     /// A file name in `.github/workflows`: no folder, ending in `.yml` or
@@ -160,6 +180,9 @@ struct BoardConfig: Equatable, Sendable {
 // MARK: - Coding
 
 extension BoardConfig: Codable {
+    /// Never remove or rename a key: a file that has it would turn
+    /// read-only (an unknown key). Changing what a key holds or means bumps
+    /// `schemaVersion`, so older builds leave the file alone.
     enum CodingKeys: String, CodingKey, CaseIterable {
         case schemaVersion
         case repository

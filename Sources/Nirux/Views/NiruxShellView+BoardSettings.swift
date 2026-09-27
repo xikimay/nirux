@@ -6,9 +6,13 @@ extension NiruxShellView {
     /// "Board Settings…" in a space's menu. Reads board.json and runs git in
     /// the space's workspace folders off the main thread, then opens the form.
     func showBoardSettings(profileID: String) {
-        guard window != nil, !isReadingBoardSettings else { return }
+        guard window != nil else { return }
+        guard !isReadingBoardSettings else {
+            NSSound.beep()
+            return
+        }
         if let panel = boardSettingsPanel {
-            panel.focus()
+            if panel.spaceID == profileID { panel.focus() } else { NSSound.beep() }
             return
         }
         guard let store = BoardConfigStore(spaceID: profileID) else {
@@ -36,7 +40,9 @@ extension NiruxShellView {
         DispatchQueue.global(qos: .userInitiated).async {
             let loaded = store.load()
             let suggestions = BoardConfigSuggestions.read(
-                workspaceFolders: workspaceFolders, repository: loaded.config?.repository
+                workspaceFolders: workspaceFolders,
+                repository: loaded.config?.repository,
+                baseBranch: loaded.config?.baseBranch
             )
             DispatchQueue.main.async { @MainActor in
                 completion(loaded, suggestions)
@@ -57,7 +63,8 @@ extension NiruxShellView {
         let panel = BoardSettingsPanel()
         boardSettingsPanel = panel
         panel.onSave = { config in
-            switch store.save(config) {
+            // Refused if another Nirux saved the file since it was read.
+            switch store.save(config, replacing: loaded) {
             case .success: return nil
             case .failure(let error): return error.message
             }
@@ -70,7 +77,8 @@ extension NiruxShellView {
         panel.show(
             attachedTo: window,
             content: BoardSettingsPanel.Content(
-                spaceName: profile.name, filePath: store.fileURL.path, loaded: loaded, suggestions: suggestions
+                spaceID: profileID, spaceName: profile.name, filePath: store.fileURL.path,
+                loaded: loaded, suggestions: suggestions
             )
         )
     }

@@ -104,9 +104,9 @@ final class BoardSettingsPanelTests: XCTestCase {
             try click(form.saveButton)
 
             XCTAssertNil(shell.boardSettingsPanel)
-            let config = try XCTUnwrap(try store(space).load().config)
-            XCTAssertEqual(config.postMergeWorkflow, .unset)
-            XCTAssertFalse(config.canStartQueue)
+            let loaded = try store(space).load()
+            XCTAssertEqual(loaded.config?.postMergeWorkflow, .unset)
+            XCTAssertFalse(loaded.canStartQueue)
             let text = try String(contentsOf: try store(space).fileURL, encoding: .utf8)
             XCTAssertFalse(text.contains("postMergeWorkflow"))
         }
@@ -147,7 +147,7 @@ final class BoardSettingsPanelTests: XCTestCase {
     func testInvalidValuesAreRefusedAndNothingIsWritten() throws {
         try withShell { shell, space in
             let form = try open(shell, space)
-            form.repositoryField.stringValue = "https://github.com/acme/widgets"
+            form.repositoryField.stringValue = "acme widgets"
             form.baseBranchField.stringValue = ""
             form.checksView.string = "\n  \n"
             form.checksTimeoutField.stringValue = "0"
@@ -162,6 +162,82 @@ final class BoardSettingsPanelTests: XCTestCase {
             XCTAssertTrue(lines[0].contains("owner/name"))
             XCTAssertFalse(FileManager.default.fileExists(atPath: try store(space).fileURL.path))
             try click(form.cancelButton)
+        }
+    }
+
+    @MainActor
+    func testAPastedGitHubURLIsSavedAsOwnerAndName() throws {
+        try withShell { shell, space in
+            let form = try open(shell, space)
+            form.repositoryField.stringValue = "https://github.com/Acme/Widgets.git"
+            form.baseBranchField.stringValue = "main"
+            try click(form.saveButton)
+
+            XCTAssertNil(shell.boardSettingsPanel)
+            XCTAssertEqual(try store(space).load().config?.repository, "Acme/Widgets")
+        }
+    }
+
+    /// Another Nirux saved the file while the form was open.
+    @MainActor
+    func testAFileSavedElsewhereMeanwhileIsNotOverwritten() throws {
+        try withShell { shell, space in
+            let form = try open(shell, space)
+            form.repositoryField.stringValue = "acme/mine"
+            form.baseBranchField.stringValue = "main"
+            let theirs = BoardConfig(repository: "acme/theirs", baseBranch: "main")
+            XCTAssertNoThrow(try store(space).save(theirs).get())
+
+            try click(form.saveButton)
+
+            XCTAssertTrue(shell.boardSettingsPanel === form)
+            XCTAssertTrue(form.errorLabel.stringValue.contains("changed since"), form.errorLabel.stringValue)
+            XCTAssertEqual(try store(space).load().config, theirs)
+            try click(form.cancelButton)
+        }
+    }
+
+    /// On a short window the fields scroll and the buttons stay in view;
+    /// every problem shows between them.
+    @MainActor
+    func testTheSheetFitsTheWindowAndShowsEveryProblem() throws {
+        try withShell(height: 560) { shell, space in
+            let form = try open(shell, space)
+            let panel = try XCTUnwrap(form.panel)
+            let window = try XCTUnwrap(shell.window)
+            XCTAssertLessThanOrEqual(panel.frame.height, window.contentLayoutRect.height)
+            let content = try XCTUnwrap(panel.contentView)
+            XCTAssertTrue(content.bounds.contains(form.saveButton.frame))
+
+            form.repositoryField.stringValue = String(repeating: "not a repository ", count: 12)
+            form.baseBranchField.stringValue = ""
+            form.checksView.string = ""
+            form.checksTimeoutField.stringValue = "0"
+            try choose(.other, in: form)
+            form.workflowNameField.stringValue = "nightly"
+            try click(form.saveButton)
+
+            XCTAssertEqual(form.errorLabel.stringValue.components(separatedBy: "\n").count, 5)
+            XCTAssertTrue(content.bounds.contains(form.errorLabel.frame))
+            XCTAssertGreaterThanOrEqual(
+                form.errorLabel.frame.height,
+                form.errorLabel.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: form.errorLabel.frame.width,
+                                                                  height: .greatestFiniteMagnitude)).height ?? 0
+            )
+            XCTAssertFalse(form.errorLabel.frame.intersects(form.saveButton.frame))
+            XCTAssertTrue(content.bounds.contains(form.saveButton.frame))
+            try click(form.cancelButton)
+        }
+    }
+
+    /// Opened while the delete confirmation was up: the space goes, the
+    /// form with it.
+    @MainActor
+    func testDeletingTheSpaceClosesItsForm() throws {
+        try withShell { shell, space in
+            _ = try open(shell, space)
+            shell.deleteSpace(profileID: space.id)
+            XCTAssertNil(shell.boardSettingsPanel)
         }
     }
 
@@ -189,6 +265,26 @@ final class BoardSettingsPanelTests: XCTestCase {
             form.saveAction(nil)
             XCTAssertTrue(shell.boardSettingsPanel === form)
             XCTAssertEqual(try String(contentsOf: try store(space).fileURL, encoding: .utf8), original)
+            try click(form.cancelButton)
+        }
+    }
+
+    /// The disabled fields show the file, never suggestions it doesn't hold.
+    @MainActor
+    func testAReadOnlyFileShowsOnlyWhatItHolds() throws {
+        try withShell { shell, space in
+            let repo = root + "/widgets"
+            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets")
+            shell.addWorkspace(title: "widgets", cwd: repo, profileID: space.id)
+            try write(#"{"requiredChecks": ["build"], "reviewers": 2}"#, for: space)
+
+            let form = try open(shell, space)
+
+            XCTAssertTrue(form.bannerLabel.stringValue.contains("reviewers"), form.bannerLabel.stringValue)
+            XCTAssertEqual(form.repositoryField.stringValue, "")
+            XCTAssertEqual(form.baseBranchField.stringValue, "")
+            XCTAssertEqual(form.checksView.string, "build")
+            XCTAssertEqual(form.cancelButton.title, "Close")
             try click(form.cancelButton)
         }
     }
@@ -221,7 +317,7 @@ final class BoardSettingsPanelTests: XCTestCase {
     // MARK: - Helpers
 
     @MainActor
-    private func withShell(_ body: (NiruxShellView, WorkspaceProfile) throws -> Void) throws {
+    private func withShell(height: CGFloat = 800, _ body: (NiruxShellView, WorkspaceProfile) throws -> Void) throws {
         let stateDirectory = root + "/state"
         try FileManager.default.createDirectory(atPath: stateDirectory, withIntermediateDirectories: true)
         let previousStateDirectory = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
@@ -235,10 +331,10 @@ final class BoardSettingsPanelTests: XCTestCase {
         }
 
         _ = NSApplication.shared
-        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: height))
         shell.stopHeartbeat()
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: height),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false

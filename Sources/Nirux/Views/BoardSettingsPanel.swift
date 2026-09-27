@@ -11,6 +11,7 @@ import AppKit
 @MainActor
 final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     struct Content {
+        let spaceID: String
         let spaceName: String
         let filePath: String
         let loaded: BoardConfigStore.Loaded
@@ -31,6 +32,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
 
     private(set) var panel: NSPanel?
     private weak var parentWindow: NSWindow?
+    private(set) var spaceID: String?
     private(set) var isWritable = true
 
     let repositoryField = NSTextField()
@@ -49,16 +51,36 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     /// separator.
     private(set) var workflowChoices: [WorkflowChoice?] = []
 
+    private let scrollView = NSScrollView()
+    /// The fields' height: the sheet is as tall, up to `maxHeight`, and they
+    /// scroll beyond it.
+    private var documentHeight: CGFloat = 0
+    private var maxHeight: CGFloat = .greatestFiniteMagnitude
+
     private static let width: CGFloat = 620
     private static let labelX: CGFloat = 24
     private static let fieldX: CGFloat = 184
     private static var fieldWidth: CGFloat { width - fieldX - 24 }
+    /// The buttons' band at the bottom, outside the scrolling fields.
+    private static let buttonsHeight: CGFloat = 66
+
+    // Explicit, so the controls' default values are made on the main actor
+    // with every toolchain.
+    override init() {
+        super.init()
+    }
 
     func show(attachedTo window: NSWindow, content: Content) {
         parentWindow = window
+        spaceID = content.spaceID
         isWritable = content.loaded.isWritable
+        // A sheet hangs from the title bar: it must fit in the window and on
+        // the screen, or Save ends up under the Dock.
+        let screenHeight = (window.screen ?? NSScreen.main)?.visibleFrame.height ?? .greatestFiniteMagnitude
+        maxHeight = max(320, min(window.contentLayoutRect.height, screenHeight) - 40)
         let panel = buildPanel(content)
         self.panel = panel
+        layoutPanel()
         window.beginSheet(panel)
         panel.makeFirstResponder(isWritable ? repositoryField : cancelButton)
     }
@@ -82,11 +104,14 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         return workflowChoices.indices.contains(index) ? workflowChoices[index] ?? .unset : .unset
     }
 
-    /// The values on screen, as a config. Blank check lines are dropped, and
-    /// a timeout that isn't a number reads as 0, which `problems` refuses.
+    /// The values on screen, as a config. A pasted github.com URL reads as
+    /// its `owner/name`, blank check lines are dropped, and a timeout that
+    /// isn't a number reads as 0, which `problems` refuses.
     func draftConfig() -> BoardConfig {
         var config = BoardConfig()
-        config.repository = Self.trimmedValue(of: repositoryField)
+        config.repository = Self.trimmedValue(of: repositoryField).map { value in
+            value.contains("github.com") ? BoardConfigSuggestions.repositoryName(remoteURL: value) ?? value : value
+        }
         config.baseBranch = Self.trimmedValue(of: baseBranchField)
         var checks: [String] = []
         for line in checksView.string.components(separatedBy: .newlines) {
@@ -137,6 +162,21 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     private func showError(_ message: String) {
         errorLabel.stringValue = message
         errorLabel.isHidden = false
+        layoutPanel()
+    }
+
+    /// The fields scroll above the buttons; an error shows between them,
+    /// whole, and the sheet grows for it while it fits.
+    private func layoutPanel() {
+        guard let panel else { return }
+        let errorHeight = errorLabel.isHidden ? 0 : Self.wrappedHeight(of: errorLabel, width: Self.width - 48)
+        let bottom = Self.buttonsHeight + (errorLabel.isHidden ? 0 : errorHeight + 8)
+        let height = min(documentHeight + bottom, max(maxHeight, bottom + 120))
+        panel.setContentSize(NSSize(width: Self.width, height: height))
+        scrollView.frame = NSRect(x: 0, y: bottom, width: Self.width, height: height - bottom)
+        errorLabel.frame = NSRect(x: 24, y: Self.buttonsHeight - 4, width: Self.width - 48, height: errorHeight)
+        cancelButton.frame = NSRect(x: Self.width - 222, y: 18, width: 96, height: 30)
+        saveButton.frame = NSRect(x: Self.width - 120, y: 18, width: 96, height: 30)
     }
 
     /// Tab leaves the checks list instead of typing a tab into it.
@@ -158,9 +198,10 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     private func buildPanel(_ content: Content) -> NSPanel {
         let saved = content.loaded.config
         let suggestions = content.suggestions
-        // Nothing to show from a file this build doesn't read: blank
-        // fields, so suggestions can't pass for what the file says.
+        // A read-only file shows what it holds and nothing else: suggestions
+        // mustn't pass for its values. The hints still say what they are.
         let isUnread = saved == nil && !content.loaded.isWritable
+        let suggested = content.loaded.isWritable ? suggestions : nil
         let view = FlippedView(frame: NSRect(x: 0, y: 0, width: Self.width, height: 100))
         var y: CGFloat = 20
 
@@ -184,13 +225,13 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         }
 
         y = addLabel("Repository", y: y, in: view)
-        repositoryField.stringValue = isUnread ? "" : saved?.repository ?? suggestions.repository ?? ""
+        repositoryField.stringValue = isUnread ? "" : saved?.repository ?? suggested?.repository ?? ""
         repositoryField.placeholderString = "owner/name"
         y = addField(repositoryField, y: y, in: view)
         y = addHint(Self.repositoryHint(suggestions), y: y, in: view) + 10
 
         y = addLabel("Base branch", y: y, in: view)
-        baseBranchField.stringValue = isUnread ? "" : saved?.baseBranch ?? suggestions.baseBranch ?? ""
+        baseBranchField.stringValue = isUnread ? "" : saved?.baseBranch ?? suggested?.baseBranch ?? ""
         baseBranchField.placeholderString = "main"
         y = addField(baseBranchField, y: y, in: view)
         y = addHint(Self.baseBranchHint(suggestions), y: y, in: view) + 10
@@ -199,8 +240,8 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         let checks = isUnread ? [] : saved?.requiredChecks ?? BoardConfig.defaultRequiredChecks
         y = addChecksView(text: checks.joined(separator: "\n"), y: y, in: view)
         y = addHint(
-            "One per line: a check run name, or Workflow / job. The queue merges a pull request only when "
-                + "each is green; a name that never shows up stops it.",
+            "One per line: a check run’s name, or Workflow / job, without the (pull_request) the pull request "
+                + "page adds. The queue merges only when each is green; a name that never shows up stops it.",
             y: y, in: view
         ) + 10
 
@@ -230,45 +271,52 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         y = addHint(
             "Minutes the queue waits for the required checks, and for the post-merge run, before it stops.",
             y: y, in: view
-        ) + 12
+        ) + 16
+
+        if !isWritable {
+            // Disabled, so they look it: nothing here can be saved.
+            for field in [repositoryField, baseBranchField, workflowNameField, checksTimeoutField, postMergeTimeoutField] {
+                field.isEditable = false
+                field.isEnabled = false
+            }
+            checksView.isEditable = false
+            checksView.textColor = NSColor.white.withAlphaComponent(0.45)
+            workflowPopup.isEnabled = false
+            mergeMethodPopup.isEnabled = false
+        }
+        view.setFrameSize(NSSize(width: Self.width, height: y))
+        documentHeight = y
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: Self.width, height: y + Self.buttonsHeight))
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.borderType = .noBorder
+        scrollView.documentView = view
+        container.addSubview(scrollView)
 
         errorLabel.font = .systemFont(ofSize: 11.5)
         errorLabel.textColor = .systemRed
-        errorLabel.maximumNumberOfLines = 4
-        errorLabel.frame = NSRect(x: 24, y: y, width: Self.width - 48, height: 60)
+        errorLabel.maximumNumberOfLines = 0
+        errorLabel.preferredMaxLayoutWidth = Self.width - 48
         errorLabel.isHidden = true
-        view.addSubview(errorLabel)
-        y += 64
+        container.addSubview(errorLabel)
 
         cancelButton.title = isWritable ? "Cancel" : "Close"
         cancelButton.bezelStyle = .rounded
         cancelButton.target = self
         cancelButton.action = #selector(cancelAction(_:))
         cancelButton.keyEquivalent = "\u{1b}"
-        cancelButton.frame = NSRect(x: Self.width - 222, y: y, width: 96, height: 30)
-        view.addSubview(cancelButton)
+        container.addSubview(cancelButton)
         saveButton.bezelStyle = .rounded
         saveButton.target = self
         saveButton.action = #selector(saveAction(_:))
         saveButton.keyEquivalent = "\r"
         saveButton.isEnabled = isWritable
-        saveButton.frame = NSRect(x: Self.width - 120, y: y, width: 96, height: 30)
-        view.addSubview(saveButton)
-        y += 30 + 18
+        container.addSubview(saveButton)
 
-        if !isWritable {
-            for field in [repositoryField, baseBranchField, workflowNameField, checksTimeoutField, postMergeTimeoutField] {
-                field.isEditable = false
-            }
-            checksView.isEditable = false
-            workflowPopup.isEnabled = false
-            workflowNameField.isEnabled = false
-            mergeMethodPopup.isEnabled = false
-        }
-
-        view.setFrameSize(NSSize(width: Self.width, height: y))
         let panel = NSPanel(
-            contentRect: NSRect(origin: .zero, size: view.frame.size),
+            contentRect: container.frame,
             styleMask: [.titled, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -279,7 +327,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         panel.backgroundColor = NSColor(red: 0.105, green: 0.105, blue: 0.14, alpha: 1)
         panel.isReleasedWhenClosed = false
         panel.autorecalculatesKeyViewLoop = true
-        panel.contentView = view
+        panel.contentView = container
         return panel
     }
 
@@ -460,16 +508,17 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     }
 
     static func workflowHint(_ suggestions: BoardConfigSuggestions) -> String {
-        let purpose = "After each merge the queue waits for this workflow’s run on the base branch. "
+        let purpose = "After each merge the queue waits for this workflow’s push run on the base branch. "
             + "None merges the next pull request right away."
         guard let checkout = suggestions.checkout else {
             return purpose + " No local checkout is known: choose Other file… and type its name."
         }
         let path = (checkout as NSString).abbreviatingWithTildeInPath
+        let source = suggestions.workflowsRef.map { "\($0) in \(path)" } ?? path
         if suggestions.workflowFiles?.isEmpty != false {
-            return purpose + " \(path) has no workflow file: choose Other file… to type one."
+            return purpose + " \(source) has no workflow file: choose Other file… to type one."
         }
-        return purpose + " Files from \(path)/.github/workflows."
+        return purpose + " Files from .github/workflows of \(source)."
     }
 
     static func title(of choice: WorkflowChoice) -> String {

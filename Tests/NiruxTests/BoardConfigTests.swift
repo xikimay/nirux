@@ -96,25 +96,36 @@ final class BoardConfigTests: XCTestCase {
 
     // MARK: - Validation
 
+    private func queueProblems(_ config: BoardConfig) -> [String] {
+        BoardConfigStore.Loaded(config: config, status: .loaded).queueStartProblems
+    }
+
     func testACompleteConfigHasNoProblemAndCanStartTheQueue() {
         XCTAssertEqual(complete.problems, [])
-        XCTAssertTrue(complete.canStartQueue)
+        XCTAssertEqual(queueProblems(complete), [])
         var none = complete
         none.postMergeWorkflow = .noWorkflow
-        XCTAssertTrue(none.canStartQueue)
+        XCTAssertEqual(queueProblems(none), [])
     }
 
     func testTheQueueNeedsARepositoryAndAChosenPostMergeWorkflow() {
         var unset = complete
         unset.postMergeWorkflow = .unset
         XCTAssertEqual(unset.problems, [], "Save accepts an unset workflow")
-        XCTAssertFalse(unset.canStartQueue)
-        XCTAssertEqual(unset.queueStartProblems, ["Choose the post-merge workflow, or None."])
+        XCTAssertEqual(queueProblems(unset), ["Choose the post-merge workflow in Board Settings…, or None."])
 
         var noRepository = complete
         noRepository.repository = nil
-        XCTAssertFalse(noRepository.canStartQueue)
         XCTAssertEqual(noRepository.problems, ["Set the repository (owner/name)."])
+        XCTAssertEqual(queueProblems(noRepository), ["Set the repository (owner/name)."])
+    }
+
+    func testTheRepositoryComparesWithoutCase() {
+        var config = complete
+        config.repository = "Acme/Widgets"
+        XCTAssertEqual(config.gitHubRepository, GitHubRepository(owner: "acme", name: "widgets"))
+        config.repository = "not valid"
+        XCTAssertNil(config.gitHubRepository)
     }
 
     func testEveryProblemIsReported() {
@@ -133,12 +144,13 @@ final class BoardConfigTests: XCTestCase {
     }
 
     func testRepositoriesUseGitHubsCharacters() {
-        for valid in ["xikimay/nirux", "Lakr233/libghostty-spm", "a/b", "my-org/repo.name_2", "o/.github"] {
+        for valid in ["xikimay/nirux", "Lakr233/libghostty-spm", "a/b", "my-org/repo.name_2", "o/.github", "user_emu/r"] {
             XCTAssertTrue(BoardConfig.isValidRepository(valid), valid)
         }
         for invalid in [
             "", "nirux", "a/b/c", "/nirux", "xikimay/", "-org/repo", "org/.", "org/..", "o r/g", "org/rép",
-            "https://github.com/a/b", String(repeating: "a", count: 40) + "/b", "a/" + String(repeating: "b", count: 101)
+            "https://github.com/a/b", String(repeating: "a", count: 40) + "/b", "a/" + String(repeating: "b", count: 101),
+            "acme/widgets.git", "acme/widgets.GIT"
         ] {
             XCTAssertFalse(BoardConfig.isValidRepository(invalid), invalid)
         }
@@ -150,9 +162,18 @@ final class BoardConfigTests: XCTestCase {
         }
         for invalid in [
             "", "-main", "a b", "a..b", "a//b", "/main", "main/", "main.", "main.lock", "a@{1}", "@", "a:b",
-            "a~1", "a^", "a?", "a*", "a[b", "a\\b", ".hidden", "a/.b", "tab\there"
+            "a~1", "a^", "a?", "a*", "a[b", "a\\b", ".hidden", "a/.b", "tab\there", "HEAD", "refs/heads/main", "+main"
         ] {
             XCTAssertFalse(BoardConfig.isValidBranchName(invalid), invalid)
+        }
+    }
+
+    func testCheckNamesHoldOneLine() {
+        for valid in ["test", "CodeQL / Analyze (swift)", "build (macos-15, debug)"] {
+            XCTAssertTrue(BoardConfig.isValidCheckName(valid), valid)
+        }
+        for invalid in ["", "  ", "a\nb", "a\u{2028}b", "a\u{85}b", "a\tb"] {
+            XCTAssertFalse(BoardConfig.isValidCheckName(invalid), invalid)
         }
     }
 
