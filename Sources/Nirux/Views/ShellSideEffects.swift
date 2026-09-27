@@ -11,8 +11,10 @@ struct ShellSideEffects {
     /// Types an agent's launch command into a new terminal column.
     var launchAgent: @MainActor (_ column: ColumnState, _ command: String) -> Void = { column, command in
         // After the column's shell has started (0.5 s, see ColumnState).
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            column.pty?.sendRaw("\(command)\n")
+        // Weak: a column closed meanwhile neither starts a shell nor gets
+        // the command.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak column] in
+            column?.pty?.sendRaw("\(command)\n")
         }
     }
 

@@ -299,11 +299,12 @@ final class ColumnState {
             self?.showShellExitedOverlay()
         }
 
-        // Delay shell start so the terminal surface is created first
+        // Delay shell start so the terminal surface is created first. Weak:
+        // a column closed meanwhile forks no shell.
         let args = shellArgs
         let env = environment
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            ptySession.start(
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak ptySession] in
+            ptySession?.start(
                 shell: PtySession.defaultShell,
                 args: args,
                 cwd: cwd,
