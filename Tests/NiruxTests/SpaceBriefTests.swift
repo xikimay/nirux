@@ -170,6 +170,7 @@ final class SpaceBriefTests: XCTestCase {
         XCTAssertEqual(NiruxShellView.claudeCommand(mode: .default), "command claude")
     }
 
+    @MainActor
     func testShellsPassTheClaudeBriefAsOneExactArgument() throws {
         let brief = "# Project brief (from Nirux)\nLine two: \"q\" $HOME `id` \\ 'x' é\n\n- last"
         let file = stateDirectory.appendingPathComponent("brief injected.md")
@@ -195,6 +196,7 @@ final class SpaceBriefTests: XCTestCase {
         }
     }
 
+    @MainActor
     func testShellsPassTheCodexBriefAsOneExactArgument() throws {
         let brief = "# Brief\nSay \"hi\" $HOME `id` \\ 'q' é"
         let file = stateDirectory.appendingPathComponent("brief codex.toml")
