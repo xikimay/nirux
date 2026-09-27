@@ -75,6 +75,26 @@ final class WebContentKeyRoutingTests: XCTestCase {
         XCTAssertFalse(passes(editor: false, "\r", [.command, .option], keyCode: 0x24))
     }
 
+    /// Edit > Find in Terminal and Find Next/Previous act on terminal
+    /// columns only; Monaco's find widget and web pages keep the chords.
+    func testFindChordsReachWebContentInEditorAndBrowser() {
+        for editor in [true, false] {
+            XCTAssertTrue(passes(editor: editor, "f", .command))
+            XCTAssertTrue(passes(editor: editor, "g", .command))
+            XCTAssertTrue(passes(editor: editor, "G", [.command, .shift]))
+            // Russian: the Cmd key table types the Latin letter.
+            XCTAssertTrue(passes(editor: editor, "f", .command, ignoringModifiers: "а", keyCode: 0x03))
+            XCTAssertTrue(passes(editor: editor, "п", .command, keyCode: 0x05))
+        }
+    }
+
+    func testFindChordNeighboursStillReachTheMenu() {
+        for editor in [true, false] {
+            XCTAssertFalse(passes(editor: editor, "F", [.command, .shift]), "Search Workspace")
+            XCTAssertFalse(passes(editor: editor, "f", [.command, .control]), "Enter Full Screen")
+        }
+    }
+
     func testMenuChordsAreNotPassedThrough() {
         XCTAssertFalse(passes(editor: true, "s", [.command, .control]))
         XCTAssertFalse(passes(editor: true, "e", .command))

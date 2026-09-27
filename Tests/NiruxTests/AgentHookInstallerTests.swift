@@ -526,6 +526,59 @@ final class AgentHookInstallerTests: XCTestCase {
         XCTAssertFalse(read(".codex/config.toml").isEmpty)
     }
 
+    // MARK: - Status (first-launch checklist)
+
+    func testStatusReportsInstalledHooks() {
+        XCTAssertEqual(
+            AgentHookInstaller.status(home: home, environment: [:], bundleURL: appBundle),
+            AgentHooksStatus(claude: false, codex: false, installsHooks: true)
+        )
+
+        AgentHookInstaller.installAll(executablePath: "/Apps/Nirux", home: home, environment: [:], bundleURL: appBundle)
+
+        XCTAssertEqual(
+            AgentHookInstaller.status(home: home, environment: [:], bundleURL: appBundle),
+            AgentHooksStatus(claude: true, codex: true, installsHooks: true)
+        )
+        XCTAssertFalse(
+            AgentHookInstaller.status(home: home, environment: [:], bundleURL: devBuild).installsHooks,
+            "a dev build reports that it never writes the hooks"
+        )
+    }
+
+    func testStatusNeedsEveryClaudeEvent() throws {
+        AgentHookInstaller.installClaudeHooks(executablePath: "/Apps/Nirux", home: home)
+        var settings = claudeSettings()
+        var hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
+        hooks["PreToolUse"] = [["matcher": "", "hooks": [["type": "command", "command": "my-linter"]]]]
+        settings["hooks"] = hooks
+        let data = try JSONSerialization.data(withJSONObject: settings)
+        try data.write(to: home.appendingPathComponent(".claude/settings.json"))
+
+        XCTAssertFalse(AgentHookInstaller.hasClaudeHooks(home: home))
+    }
+
+    func testStatusIgnoresForeignOrUnparsableConfigs() {
+        write("notify = [\"/usr/local/bin/my-notify\"]\n", ".codex/config.toml")
+        write("{ not json", ".claude/settings.json")
+        XCTAssertFalse(AgentHookInstaller.hasCodexNotify(home: home))
+        XCTAssertFalse(AgentHookInstaller.hasClaudeHooks(home: home))
+
+        AgentHookInstaller.installCodexNotify(executablePath: "/Apps/Nirux", home: home)
+        XCTAssertFalse(AgentHookInstaller.hasCodexNotify(home: home), "a foreign notify stays in place")
+    }
+
+    func testStatusFollowsSymlinkedConfigs() throws {
+        try symlink(".claude/settings.json", to: home.appendingPathComponent("dotfiles/claude.json").path)
+        try symlink(".codex/config.toml", to: "../dotfiles/codex.toml")
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent("dotfiles"), withIntermediateDirectories: true)
+        AgentHookInstaller.installAll(executablePath: "/Apps/Nirux", home: home, environment: [:], bundleURL: appBundle)
+
+        XCTAssertTrue(AgentHookInstaller.hasClaudeHooks(home: home))
+        XCTAssertTrue(AgentHookInstaller.hasCodexNotify(home: home))
+    }
+
     // MARK: - Receiver (end to end)
 
     /// `swift test` builds the app executable next to the test bundle.

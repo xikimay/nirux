@@ -13,6 +13,7 @@ enum SidebarExpandedMetrics {
     static let sectionHeaderAdvance: CGFloat = 28
     static let shortcutHintGap: CGFloat = 14
     static let shortcutHintHeight: CGFloat = 22
+    static let onboardingCardGap: CGFloat = 8
 
     static let workspaceInsetX: CGFloat = 8
     static let workspacePaddingY: CGFloat = 14

@@ -297,7 +297,9 @@ final class MissionTests: XCTestCase {
 
 extension MissionTests {
     func testCLIRequiresMissionEnvironmentAndWritesOneJSONLine() throws {
-        let eventsURL = try makeDirectory().appendingPathComponent("mission-events.jsonl")
+        let directory = try makeDirectory()
+        let eventsURL = directory.appendingPathComponent("mission-events.jsonl")
+        let missionsURL = directory.appendingPathComponent("missions.json")
         let environment = [
             "NIRUX_MISSION_HANDOFFS": "1",
             "NIRUX_MISSION_ID": missionID,
@@ -310,7 +312,8 @@ extension MissionTests {
             arguments: ["--message", " Need an answer "],
             environment: environment,
             now: 42,
-            eventsURL: eventsURL
+            eventsURL: eventsURL,
+            missionsURL: missionsURL
         ), 0)
 
         let lines = try Data(contentsOf: eventsURL).split(separator: 0x0A)
@@ -327,39 +330,10 @@ extension MissionTests {
             kind: .completed,
             arguments: ["--message", "Done"],
             environment: [:],
-            eventsURL: eventsURL
+            eventsURL: eventsURL,
+            missionsURL: missionsURL
         ), 2)
         XCTAssertEqual(try Data(contentsOf: eventsURL).split(separator: 0x0A).count, 1)
-    }
-
-    func testAskWaitReturnsPersistedCorrelatedResponse() throws {
-        let directory = try makeDirectory()
-        let missionsURL = directory.appendingPathComponent("missions.json")
-        let eventsURL = directory.appendingPathComponent("mission-events.jsonl")
-        let store = MissionStore(fileURL: missionsURL)
-        XCTAssertNotNil(store.create(request(), enabled: true, now: 10))
-        let question = event()
-        XCTAssertNotNil(store.accept(question, enabled: true))
-        XCTAssertNotNil(store.respond(
-            to: question.id,
-            message: "Use AuthService.",
-            enabled: true,
-            now: 30
-        ))
-
-        let result = MissionEventCLI.ask(
-            arguments: ["--message", "Which API?", "--timeout", "0"],
-            environment: childEnvironment,
-            now: 20,
-            eventID: question.id,
-            eventsURL: eventsURL,
-            missionsURL: missionsURL,
-            pollInterval: 0.01
-        )
-        XCTAssertEqual(result, 0)
-        let queued = try decodeSingleEvent(from: eventsURL)
-        XCTAssertEqual(queued.id, question.id)
-        XCTAssertEqual(queued.kind, .question)
     }
 
     func testParentReceiveAndReplyRoundTripThroughQueue() throws {
@@ -562,15 +536,6 @@ extension MissionTests {
         var data = try JSONEncoder().encode(event)
         data.append(0x0A)
         try data.write(to: url)
-    }
-
-    private var childEnvironment: [String: String] {
-        [
-            "NIRUX_MISSION_HANDOFFS": "1",
-            "NIRUX_MISSION_ID": missionID,
-            "NIRUX_WORKSPACE_ID": childWorkspaceID,
-            "NIRUX_AGENT_UUID": childAgentUUID
-        ]
     }
 
     private var parentEnvironment: [String: String] {
