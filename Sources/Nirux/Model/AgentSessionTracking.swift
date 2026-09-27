@@ -246,7 +246,7 @@ struct ClaudeSessionTracker {
             guard boundSessionID == nil || boundSessionID == unpromptedSessionID else { return .accepted }
         case .sessionEnd:
             return boundSessionID == nil ? .accepted : .rejected
-        case .preToolUse, .permissionRequest, .postToolUse, .subagentStop, .turnComplete:
+        case .preToolUse, .permissionRequest, .postToolUse, .subagentStop, .turnComplete, .approvalResolved:
             return .accepted
         }
         let changed = session.bind(sessionID: sessionID, process: foregroundProcess.instance)
@@ -289,6 +289,31 @@ struct ClaudeSessionTracker {
     /// Session bound to this `claude` process, if any.
     func boundSessionID(for process: ProcessInstance) -> String? {
         session.sessionID(boundTo: process)
+    }
+
+    /// The session whose permission requests the sidebar may answer: the
+    /// one this foreground `claude` confirmed through its own hooks, when
+    /// `emitter` is that `claude` (or the real one under a launcher). Never
+    /// another member of its job, a nested run, or a teammate's session.
+    func approvableSessionID(emitter: Emitter, foregroundProcess: ForegroundProcess) -> String? {
+        switch emitter {
+        case .foregroundProcess:
+            break
+        case .foregroundChild where hookFiringForeground != foregroundProcess.instance:
+            break
+        case .foregroundChild, .foregroundJob, .elsewhere, .unknown:
+            return nil
+        }
+        return confirmedSessionID(of: foregroundProcess)
+    }
+
+    /// The session bound to this foreground `claude`, once confirmed by one
+    /// of its hooks — not merely restored from its launch arguments.
+    func confirmedSessionID(of foregroundProcess: ForegroundProcess) -> String? {
+        guard foregroundProcess.name == session.processName,
+              let bound = session.sessionID(boundTo: foregroundProcess.instance),
+              bound == confirmedSessionID else { return nil }
+        return bound
     }
 
     /// Nil when no session is bound to this foreground process — restore

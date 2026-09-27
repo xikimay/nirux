@@ -16,6 +16,9 @@ struct AgentHookEvent: Codable, Equatable {
         case sessionStart, userPromptSubmit, preToolUse, notification, stop, sessionEnd
         case permissionRequest, postToolUse, subagentStop
         case turnComplete // codex
+        /// Not a Claude hook: the receiver reports what became of a
+        /// PermissionRequest it held for a sidebar decision.
+        case approvalResolved
     }
 
     let kind: Kind
@@ -60,6 +63,12 @@ struct AgentHookEvent: Codable, Equatable {
     /// events only (see `carriesTranscriptPath`): enough to follow the
     /// column's session usage without growing every tool event's line.
     let transcriptPath: String?
+    /// Sidebar approval (see `PermissionApproval`): on a PermissionRequest,
+    /// the request ID and deadline (epoch seconds) the receiver waits
+    /// under; on approvalResolved, the request and what became of it.
+    var approvalRequestID: String?
+    var approvalDeadline: TimeInterval?
+    var approvalOutcome: PermissionApproval.Outcome?
     /// Receiver-side timestamp (epoch seconds) — the emitter's clock and
     /// timezone are irrelevant.
     let timestamp: TimeInterval
@@ -176,6 +185,9 @@ struct AgentHookEvent: Codable, Equatable {
         agentID: String? = nil,
         notificationType: String? = nil,
         transcriptPath: String? = nil,
+        approvalRequestID: String? = nil,
+        approvalDeadline: TimeInterval? = nil,
+        approvalOutcome: PermissionApproval.Outcome? = nil,
         timestamp: TimeInterval = 0
     ) {
         self.kind = kind
@@ -193,7 +205,33 @@ struct AgentHookEvent: Codable, Equatable {
         self.agentID = agentID
         self.notificationType = notificationType
         self.transcriptPath = transcriptPath
+        self.approvalRequestID = approvalRequestID
+        self.approvalDeadline = approvalDeadline
+        self.approvalOutcome = approvalOutcome
         self.timestamp = timestamp
+    }
+
+    /// The receiver's report on the sidebar approval of `request`.
+    static func approvalResolved(
+        _ request: AgentHookEvent,
+        outcome: PermissionApproval.Outcome,
+        now: TimeInterval
+    ) -> AgentHookEvent {
+        AgentHookEvent(
+            kind: request.kind,
+            name: .approvalResolved,
+            agentUUID: request.agentUUID,
+            workspaceID: request.workspaceID,
+            sessionID: request.sessionID,
+            emitterProcess: request.emitterProcess,
+            cwd: request.cwd,
+            detail: request.toolName,
+            toolName: request.toolName,
+            agentID: request.agentID,
+            approvalRequestID: request.approvalRequestID,
+            approvalOutcome: outcome,
+            timestamp: now
+        )
     }
 }
 
@@ -221,15 +259,44 @@ enum AgentHookCLI {
         let env = ProcessInfo.processInfo.environment
         guard isFromNiruxTerminal(env: env) else { return 0 }
         let emitterProcess = ProcessInstance.hookEmitter(for: kind)
-        guard let event = AgentHookEvent(
+        let now = Date().timeIntervalSince1970
+        guard var event = AgentHookEvent(
             kind: kind,
             payload: raw,
             env: env,
-            now: Date().timeIntervalSince1970,
+            now: now,
             emitterProcess: emitterProcess
         ) else { return 0 }
 
+        let channel = PermissionApprovalChannel.standard
+        let wait = event.name == .permissionRequest
+            ? PermissionApprovalWait.prepare(payload: raw, env: env, now: now) { channel.isAppListening() }
+            : nil
+        event.approvalRequestID = wait?.requestID
+        event.approvalDeadline = wait?.deadline
         append(event)
+        guard let wait else { return 0 }
+
+        // Claude kills the hook's shell when it gives up on the hook (turn
+        // interrupted): this process is then reparented.
+        let parent = getppid()
+        let outcome = wait.waitForDecision(
+            on: channel,
+            now: { Date().timeIntervalSince1970 },
+            sleep: { Thread.sleep(forTimeInterval: $0) },
+            isAbandoned: { getppid() != parent }
+        )
+        // Reported before the decision reaches Claude, so it precedes the
+        // events the decision causes (PostToolUse) in the queue.
+        append(.approvalResolved(event, outcome: outcome, now: Date().timeIntervalSince1970))
+        let behavior: PermissionApproval.Behavior? = switch outcome {
+        case .allow: .allow
+        case .deny: .deny
+        case .release, .expired, .invalid: nil
+        }
+        if let behavior, let output = PermissionApproval.hookOutput(for: behavior, isSubagent: wait.isSubagent) {
+            FileHandle.standardOutput.write(output)
+        }
         return 0
     }
 

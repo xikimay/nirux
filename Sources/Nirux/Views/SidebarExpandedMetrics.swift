@@ -42,6 +42,38 @@ enum SidebarExpandedMetrics {
     static let countChipWidth: CGFloat = 34
     static let countChipHeight: CGFloat = 22
 
+    // Allow / Deny block under a column holding a permission request. The
+    // request text is printable ASCII in a monospaced font, hard-wrapped
+    // at a fixed column so the lines are exactly the text, cut nowhere.
+    static var approvalFont: NSFont { .monospacedSystemFont(ofSize: 10, weight: .regular) }
+    static let approvalCharactersPerLine = 32
+    static let approvalLineHeight: CGFloat = 13
+    static let approvalInset: CGFloat = 7
+    static let approvalButtonGap: CGFloat = 7
+    static let approvalButtonWidth: CGFloat = 58
+    static let approvalButtonHeight: CGFloat = 20
+    /// Space left under the block, before the next column row.
+    static let approvalBottomGap: CGFloat = 6
+
+    static func approvalLines(_ text: String) -> [String] {
+        var lines: [String] = []
+        var rest = Substring(text)
+        repeat {
+            lines.append(String(rest.prefix(approvalCharactersPerLine)))
+            rest = rest.dropFirst(approvalCharactersPerLine)
+        } while !rest.isEmpty
+        return lines
+    }
+
+    static func approvalBlockHeight(for approval: SidebarPermissionApproval) -> CGFloat {
+        approvalInset + CGFloat(approvalLines(approval.text).count) * approvalLineHeight
+            + approvalButtonGap + approvalButtonHeight + approvalInset
+    }
+
+    static func approvalBlockAdvance(for column: ColumnInfo) -> CGFloat {
+        column.permissionApproval.map { approvalBlockHeight(for: $0) + approvalBottomGap } ?? 0
+    }
+
     static func groupHeight(for infos: [WorkspaceInfo]) -> CGFloat {
         infos.reduce(CGFloat(0)) { total, info in
             total + workspaceHeight(for: info) + workspaceGap
@@ -64,6 +96,7 @@ enum SidebarExpandedMetrics {
             }
         }
         height += columnGap + CGFloat(workspace.columns.count) * columnRowAdvance
+        height += workspace.columns.reduce(CGFloat(0)) { $0 + approvalBlockAdvance(for: $1) }
         return height
     }
 }

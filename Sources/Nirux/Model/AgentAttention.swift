@@ -109,6 +109,8 @@ struct AgentPermissionRequest: Hashable, Sendable {
     /// answered (a denial fires no hook). Only the column's status trusts
     /// that; the Telegram gate waits for proof.
     var mayBeAnswered = false
+    /// The hook receiver waits for a sidebar decision on this request.
+    var approval: PermissionApprovalTicket?
 
     init(
         toolName: String?,
@@ -148,6 +150,10 @@ struct AgentHookOutcome: Equatable {
     /// The event reports a request already reported: the delayed
     /// `permission_prompt` notification after its PermissionRequest.
     var isRepeat = false
+    /// Requests whose receiver still waits for a sidebar decision that
+    /// the event closed by other means (answered at the terminal, turn or
+    /// session over): release them, nothing will be decided.
+    var abandonedApprovals: [AgentPermissionRequest] = []
 }
 
 /// Display-safe text from agent payloads (notification messages, tool
@@ -230,6 +236,36 @@ enum AgentToolInput {
             }
         }
         return AgentText.clean(value, maxLength: maxSummaryLength)
+    }
+
+    /// The exact text a sidebar approval shows, or nil when the sidebar
+    /// can't offer one. Only tools whose whole meaning is one short value
+    /// qualify: a command, a URL, a search query, a file to read. Edits and
+    /// writes (whose change can't be shown), Grep/Glob (whose path the
+    /// excerpt omits) and MCP tools answer in the terminal. The value must
+    /// also reach the screen unchanged: printable ASCII, no newline or tab,
+    /// no folded spaces, no truncation. Approving then means approving
+    /// exactly the text on screen.
+    static func approvalText(toolName: String, input: [String: Any], cwd: String?, home: String?) -> String? {
+        switch toolName {
+        case "Bash", "PowerShell":
+            // Leaving the sandbox changes what the command may reach; the
+            // terminal dialog says so, the sidebar would not.
+            if input["dangerouslyDisableSandbox"] as? Bool == true { return nil }
+        case "Read", "WebFetch", "WebSearch":
+            break
+        default:
+            return nil
+        }
+        // Printable ASCII only: every character then takes one cell of the
+        // sidebar's monospaced text, with no look-alike, wide or
+        // right-to-left glyph to hide what runs.
+        guard let raw = primaryValue(toolName: toolName, input: input), !raw.isEmpty,
+              raw.count <= maxSummaryLength,
+              raw.unicodeScalars.allSatisfy({ (0x20...0x7E).contains($0.value) }),
+              AgentText.clean(raw, maxLength: maxSummaryLength) == raw
+        else { return nil }
+        return summary(toolName: toolName, input: input, cwd: cwd, home: home)
     }
 
     /// Stable across processes (each hook runs its own receiver, so no

@@ -41,6 +41,7 @@ extension NiruxShellView {
                     foregroundProcess: foregroundProcess,
                     isUserFocused: isUserFocused
                 ) ?? .idle
+                let permissionApproval = sidebarApproval(for: col, isOnScreen: isUserFocused)
                 return ColumnInfo(
                     index: colIndex,
                     processName: foregroundProcess?.name,
@@ -55,7 +56,8 @@ extension NiruxShellView {
                     editorIsDirty: col.editorColumn?.isDirty ?? false,
                     agentElapsedSeconds: col.pty?.agentTurnStartedAt
                         .map { Date().timeIntervalSince($0) },
-                    attentionReason: agentStatus == .needsAttention ? col.pty?.agentAttentionReason : nil
+                    attentionReason: agentStatus == .needsAttention ? col.pty?.agentAttentionReason : nil,
+                    permissionApproval: permissionApproval
                 )
             }
             return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,

@@ -13,6 +13,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     weak var settingsNoFlickerCheckbox: NSButton?
     weak var settingsCodexLaunchModePopup: NSPopUpButton?
     weak var settingsMissionHandoffsCheckbox: NSButton?
+    weak var settingsSidebarApprovalsCheckbox: NSButton?
     weak var settingsTelegramEnabledCheckbox: NSButton?
     weak var settingsTelegramTokenField: NSSecureTextField?
     weak var settingsTelegramCompletionCheckbox: NSButton?
@@ -106,6 +107,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         }
         shellView.refreshActivitySidebar()
         let hooks = AgentHookCenter.shared
+        // Before the backlog replay in start(): it releases what it can't hold.
+        hooks.applySidebarApprovals(enabled: NiruxShellView.currentSidebarApprovalsEnabled())
         hooks.resolver = { [weak shellView] uuid in
             shellView?.resolveAgentColumn(uuid: uuid)
         }
@@ -176,6 +179,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         telegramRemoteAccessController?.shutdown()
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
         ActivityStore.shared.flush()
+        // Receivers stop waiting on an app that is gone.
+        AgentHookCenter.shared.approvalChannel().setListening(nil)
         AgentHookCenter.shared.stop()
         MissionEventCenter.shared.stop()
     }

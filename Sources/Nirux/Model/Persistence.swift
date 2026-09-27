@@ -370,6 +370,9 @@ struct PersistedSettings: Codable {
     /// Experimental and intentionally opt-in. Missing in older state files
     /// decodes to false so existing worktree behavior is unchanged.
     var missionHandoffsEnabled: Bool = false
+    /// Experimental, opt-in: answer Claude permission dialogs from the
+    /// sidebar (see `PermissionApproval`). Missing decodes to false.
+    var sidebarApprovalsEnabled: Bool = false
     /// Master gate. Secrets never live here; the bot token is in Keychain.
     var telegramRemoteAccessEnabled: Bool = false
     var telegramPairedUserID: Int64?
@@ -392,6 +395,7 @@ struct PersistedSettings: Codable {
         sidebarExpanded: Bool? = nil,
         inactiveWorkspacesCollapsed: Bool? = nil,
         missionHandoffsEnabled: Bool = false,
+        sidebarApprovalsEnabled: Bool = false,
         telegramRemoteAccessEnabled: Bool = false,
         telegramPairedUserID: Int64? = nil,
         telegramPairedChatID: Int64? = nil,
@@ -406,6 +410,7 @@ struct PersistedSettings: Codable {
         self.sidebarExpanded = sidebarExpanded
         self.inactiveWorkspacesCollapsed = inactiveWorkspacesCollapsed
         self.missionHandoffsEnabled = missionHandoffsEnabled
+        self.sidebarApprovalsEnabled = sidebarApprovalsEnabled
         self.telegramRemoteAccessEnabled = telegramRemoteAccessEnabled
         self.telegramPairedUserID = telegramPairedUserID
         self.telegramPairedChatID = telegramPairedChatID
@@ -422,6 +427,7 @@ struct PersistedSettings: Codable {
         case sidebarExpanded
         case inactiveWorkspacesCollapsed
         case missionHandoffsEnabled
+        case sidebarApprovalsEnabled
         case telegramRemoteAccessEnabled
         case telegramPairedUserID
         case telegramPairedChatID
@@ -448,6 +454,7 @@ struct PersistedSettings: Codable {
         sidebarExpanded = try container.decodeIfPresent(Bool.self, forKey: .sidebarExpanded)
         inactiveWorkspacesCollapsed = try container.decodeIfPresent(Bool.self, forKey: .inactiveWorkspacesCollapsed)
         missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? false
+        sidebarApprovalsEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarApprovalsEnabled) ?? false
         telegramRemoteAccessEnabled = try container.decodeIfPresent(
             Bool.self, forKey: .telegramRemoteAccessEnabled
         ) ?? false
@@ -479,6 +486,7 @@ struct PersistedSettings: Codable {
         try container.encodeIfPresent(sidebarExpanded, forKey: .sidebarExpanded)
         try container.encodeIfPresent(inactiveWorkspacesCollapsed, forKey: .inactiveWorkspacesCollapsed)
         try container.encode(missionHandoffsEnabled, forKey: .missionHandoffsEnabled)
+        try container.encode(sidebarApprovalsEnabled, forKey: .sidebarApprovalsEnabled)
         try container.encode(telegramRemoteAccessEnabled, forKey: .telegramRemoteAccessEnabled)
         try container.encodeIfPresent(telegramPairedUserID, forKey: .telegramPairedUserID)
         try container.encodeIfPresent(telegramPairedChatID, forKey: .telegramPairedChatID)

@@ -88,7 +88,8 @@ struct ActivityEntry: Codable, Hashable {
         case .sessionEnd: category = .sessionEnd
         // A PermissionRequest shows in its column at once; the feed waits for
         // Claude's reminder, which only comes when nobody answered.
-        case .userPromptSubmit, .preToolUse, .permissionRequest, .postToolUse, .subagentStop: return nil
+        case .userPromptSubmit, .preToolUse, .permissionRequest, .postToolUse, .subagentStop,
+             .approvalResolved: return nil
         }
         agentKind = event.kind.rawValue
         agentUUID = event.agentUUID

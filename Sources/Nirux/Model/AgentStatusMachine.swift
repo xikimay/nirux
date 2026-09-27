@@ -153,19 +153,27 @@ struct AgentStatusMachine {
     mutating func apply(_ event: AgentHookEvent, isUserFocused: Bool) -> AgentHookOutcome {
         let now = event.timestamp
         lastEventAt = now
+        let waitingBefore = pendingDialogs.filter { $0.approval.map { $0.sent == nil } ?? false }
         var outcome = AgentHookOutcome()
+        applyEvent(event, now: now, isUserFocused: isUserFocused, outcome: &outcome)
+        // A receiver still waiting on a dialog that just closed otherwise
+        // (answered at the terminal, turn over) will never get a decision.
+        outcome.abandonedApprovals = waitingBefore.filter { waiting in
+            waiting.approval?.requestID != event.approvalRequestID
+                && !pendingDialogs.contains { $0.approval?.requestID == waiting.approval?.requestID }
+        }
+        return outcome
+    }
+
+    private mutating func applyEvent(
+        _ event: AgentHookEvent,
+        now: TimeInterval,
+        isUserFocused: Bool,
+        outcome: inout AgentHookOutcome
+    ) {
         switch event.name {
-        case .sessionStart where event.source == "compact":
-            // Auto (mid-turn) or /compact: same conversation, no turn ends.
-            hookKind = event.kind.rawValue
         case .sessionStart:
-            // A new conversation in this process (startup, /clear, /resume):
-            // whatever dialogs the old one showed are gone.
-            hookKind = event.kind.rawValue
-            endTurn()
-            closeDialogs { _ in true }
-            lastAttentionReason = nil
-            state = .idle
+            startConversation(event)
         case .userPromptSubmit:
             hookKind = event.kind.rawValue
             // A prompt was typed at the session's input, which no dialog of
@@ -194,7 +202,7 @@ struct AgentStatusMachine {
         case .permissionRequest:
             hookKind = event.kind.rawValue
             noteTurnActivity(at: now)
-            let request = AgentPermissionRequest(
+            var request = AgentPermissionRequest(
                 toolName: event.toolName,
                 summary: event.toolSummary,
                 key: event.toolKey,
@@ -202,6 +210,9 @@ struct AgentStatusMachine {
                 sessionID: event.sessionID,
                 requestedAt: now
             )
+            if let requestID = event.approvalRequestID, let deadline = event.approvalDeadline {
+                request.approval = PermissionApprovalTicket(requestID: requestID, deadline: deadline)
+            }
             // The same call asked again (a plan re-proposed after "keep
             // planning"): the earlier dialog is gone.
             if let key = request.key { pendingDialogs.removeAll { $0.isSameCall(key: key, as: event) } }
@@ -236,8 +247,94 @@ struct AgentStatusMachine {
             turnEndedAt = now
             outcome.attention = .turnFinished
             outcome.firedAttention = block(for: .turnFinished, isUserFocused: isUserFocused)
+        case .approvalResolved:
+            applyApprovalResolution(event)
         }
-        return outcome
+    }
+
+    private mutating func startConversation(_ event: AgentHookEvent) {
+        hookKind = event.kind.rawValue
+        // Auto (mid-turn) or /compact: same conversation, no turn ends.
+        guard event.source != "compact" else { return }
+        // A new conversation in this process (startup, /clear, /resume):
+        // whatever dialogs the old one showed are gone.
+        endTurn()
+        closeDialogs { _ in true }
+        lastAttentionReason = nil
+        state = .idle
+    }
+
+    /// The receiver's report on a sidebar approval. A decision that
+    /// reached Claude closes its dialog: Claude applied it, or ignored it
+    /// because the terminal answered first. Anything else only ends the
+    /// sidebar's chance to answer; the dialog stays in the terminal.
+    private mutating func applyApprovalResolution(_ event: AgentHookEvent) {
+        guard let requestID = event.approvalRequestID,
+              let index = pendingDialogs.firstIndex(where: { $0.approval?.requestID == requestID }) else { return }
+        switch event.approvalOutcome {
+        case .allow?:
+            noteClosed(pendingDialogs.remove(at: index))
+            resumeUnlessBlocked()
+        case .deny?:
+            let dialog = pendingDialogs.remove(at: index)
+            noteClosed(dialog)
+            guard dialog.agentID == nil else {
+                // The subagent reads the denial and goes on.
+                resumeUnlessBlocked()
+                return
+            }
+            // A main-thread denial interrupts the turn, like "No" at the
+            // terminal, and no Stop follows an interrupt.
+            closeDialogs { $0.agentID == nil && $0.sessionID == dialog.sessionID }
+            endTurn()
+            if openDialogs.isEmpty { state = .idle }
+        case .release?, .expired?, .invalid?, nil:
+            pendingDialogs[index].approval = nil
+        }
+    }
+
+    /// The oldest dialog the sidebar can still answer, or whose decision
+    /// is on its way: an open dialog (see `openDialogs`) whose receiver
+    /// waits.
+    func sidebarApproval(now: TimeInterval) -> AgentPermissionRequest? {
+        openDialogs.first { $0.approval?.isShown(now: now) == true }
+    }
+
+    /// Record a sidebar decision on an open request. Nil when the request
+    /// can no longer be answered (closed, expired, already decided).
+    mutating func markApprovalSent(
+        requestID: String,
+        behavior: PermissionApproval.Behavior,
+        now: TimeInterval
+    ) -> AgentPermissionRequest? {
+        guard let index = pendingDialogs.firstIndex(where: { $0.approval?.requestID == requestID }),
+              !pendingDialogs[index].mayBeAnswered,
+              pendingDialogs[index].approval?.isOpen(now: now) == true else { return nil }
+        pendingDialogs[index].approval?.sent = behavior
+        return pendingDialogs[index]
+    }
+
+    /// Stop holding one request (its decision could not be sent). Returns
+    /// it, ticket included, so its receiver can be released.
+    mutating func dropApproval(requestID: String) -> AgentPermissionRequest? {
+        guard let index = pendingDialogs.firstIndex(where: { $0.approval?.requestID == requestID }) else {
+            return nil
+        }
+        let request = pendingDialogs[index]
+        pendingDialogs[index].approval = nil
+        return request
+    }
+
+    /// Drop the sidebar's hold on every request it has not decided,
+    /// returning them so their receivers can be released: the column is on
+    /// screen, where the terminal dialog answers.
+    mutating func takeUndecidedApprovals() -> [AgentPermissionRequest] {
+        var taken: [AgentPermissionRequest] = []
+        for index in pendingDialogs.indices where pendingDialogs[index].approval.map({ $0.sent == nil }) ?? false {
+            taken.append(pendingDialogs[index])
+            pendingDialogs[index].approval = nil
+        }
+        return taken
     }
 
     /// What an event asks of the user, read without column state (its
