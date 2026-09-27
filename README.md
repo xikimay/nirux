@@ -130,6 +130,8 @@ Nirux installs lightweight lifecycle hooks so agent status is exact instead of g
 
 Each event carries the column's stable `NIRUX_AGENT_UUID`, so status and attention signals are attributed to the exact column that emitted them — across restarts. Agents launched outside Nirux (or before the hooks were installed) fall back to simple output-activity detection. To remove the hooks, delete the marked entries from those two files.
 
+Both files are global, so every Claude Code and Codex session on the Mac runs these hooks. They are guarded on `NIRUX_AGENT_UUID`, which Nirux terminals set and processes started from them inherit: a session without it stops at a shell test and never launches Nirux, and Nirux ignores any event that arrives without it. Symlinked config files (dotfiles) are updated in place; the link is kept.
+
 ### Telegram Remote Access
 
 Telegram Remote Access is disabled by default. It uses outbound Bot API `getUpdates` long polling, so Nirux does not open a listening port and you do not need a public webhook. Nirux and the Mac must remain running and online for the bot to respond.
@@ -210,6 +212,16 @@ Run from SwiftPM:
 ```bash
 swift run Nirux
 ```
+
+A development build otherwise restores and saves the installed app's workspaces. Isolate smoke runs:
+
+```bash
+NIRUX_STATE_DIR=/tmp/nirux-dev swift run Nirux
+```
+
+`NIRUX_STATE_DIR` moves workspaces, settings, Activity and Mission history, and agent hook events out of `~/Library/Application Support/nirux/` (`HOME` is ignored). URL history, the Keychain (Telegram token), and the `nirux://` scheme stay shared with the installed app.
+
+Only a Nirux running from an `.app` bundle installs the agent hooks, so `swift run` leaves `~/.claude/settings.json` and `~/.codex/config.toml` alone. The hooks the installed app wrote keep working, and agents in the dev build's terminals report into its state directory. To test installer changes, set `NIRUX_FORCE_HOOK_INSTALL=1`; this points the global hooks at the dev binary until the installed app is relaunched. `NIRUX_SKIP_HOOK_INSTALL=1` disables the install for any build; set it when launching a local `bundle.sh` bundle for a smoke test, which would otherwise point the hooks at that bundle.
 
 Create a local app bundle:
 
