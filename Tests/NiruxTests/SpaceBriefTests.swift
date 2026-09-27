@@ -21,7 +21,7 @@ final class SpaceBriefTests: XCTestCase {
 
         XCTAssertEqual(url.path, stateDirectory.appendingPathComponent("projects/space-1/brief.md").path)
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
-        XCTAssertNil(SpaceBrief.prepareInjection(spaceID: "space-1", spaceName: "Nirux", stateDirectory: stateDirectory))
+        XCTAssertNil(SpaceBrief.prepareInjection(spaceID: "space-1", stateDirectory: stateDirectory))
     }
 
     func testEnsureBriefFileKeepsExistingContent() throws {
@@ -42,11 +42,11 @@ final class SpaceBriefTests: XCTestCase {
         try Data((existing + "- Never merge; the maintainer merges.\n- Say \"done\".\n").utf8).write(to: url)
 
         let injection = try XCTUnwrap(SpaceBrief.prepareInjection(
-            spaceID: "space-1", spaceName: "Nirux", stateDirectory: stateDirectory
+            spaceID: "space-1", stateDirectory: stateDirectory
         ))
 
         let claude = try String(contentsOfFile: injection.claudePromptFile, encoding: .utf8)
-        XCTAssertTrue(claude.hasPrefix("# Project brief: Nirux (from Nirux)\n"))
+        XCTAssertTrue(claude.hasPrefix("# Project brief (from Nirux)\n"))
         XCTAssertTrue(claude.contains("The brief lives at \(url.path)."))
         XCTAssertTrue(claude.contains("Edit it only when the user asks you to in this conversation"))
         XCTAssertTrue(claude.hasSuffix("- Never merge; the maintainer merges.\n- Say \"done\"."))
@@ -62,12 +62,12 @@ final class SpaceBriefTests: XCTestCase {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("Rule.".utf8).write(to: url)
         let injection = try XCTUnwrap(SpaceBrief.prepareInjection(
-            spaceID: "space-1", spaceName: "S", stateDirectory: stateDirectory
+            spaceID: "space-1", stateDirectory: stateDirectory
         ))
 
         try Data("<!-- nothing -->".utf8).write(to: url)
 
-        XCTAssertNil(SpaceBrief.prepareInjection(spaceID: "space-1", spaceName: "S", stateDirectory: stateDirectory))
+        XCTAssertNil(SpaceBrief.prepareInjection(spaceID: "space-1", stateDirectory: stateDirectory))
         // Emptied, not deleted: a restarted column replays a command naming them.
         XCTAssertEqual(try String(contentsOfFile: injection.claudePromptFile, encoding: .utf8), "")
         XCTAssertEqual(try String(contentsOfFile: injection.codexInstructionsFile, encoding: .utf8), "\"\"")
@@ -79,7 +79,7 @@ final class SpaceBriefTests: XCTestCase {
         XCTAssertEqual(mkfifo(url.path, 0o600), 0)
 
         // Reading a FIFO would block the launch.
-        XCTAssertNil(SpaceBrief.prepareInjection(spaceID: "space-1", spaceName: "S", stateDirectory: stateDirectory))
+        XCTAssertNil(SpaceBrief.prepareInjection(spaceID: "space-1", stateDirectory: stateDirectory))
     }
 
     func testSpaceNameCannotCloseTheTemplateComment() throws {
@@ -87,7 +87,7 @@ final class SpaceBriefTests: XCTestCase {
             let id = "space-\(index)"
             _ = try SpaceBrief.ensureBriefFile(spaceID: id, spaceName: name, stateDirectory: stateDirectory)
 
-            XCTAssertNil(SpaceBrief.prepareInjection(spaceID: id, spaceName: name, stateDirectory: stateDirectory), name)
+            XCTAssertNil(SpaceBrief.prepareInjection(spaceID: id, stateDirectory: stateDirectory), name)
         }
     }
 
@@ -102,7 +102,6 @@ final class SpaceBriefTests: XCTestCase {
     func testOversizedBriefIsTruncated() {
         let text = SpaceBrief.injectedText(
             body: String(repeating: "x", count: SpaceBrief.maxCharacters + 10),
-            spaceName: "S",
             briefPath: "/b"
         )
 
@@ -113,7 +112,7 @@ final class SpaceBriefTests: XCTestCase {
     func testBriefIsAlsoCappedInBytes() {
         // One visible character, many bytes: the command-line limit is bytes.
         let heavy = "e" + String(repeating: "\u{0301}", count: 100_000)
-        let text = SpaceBrief.injectedText(body: heavy, spaceName: "S", briefPath: "/b")
+        let text = SpaceBrief.injectedText(body: heavy, briefPath: "/b")
 
         XCTAssertLessThan(text.utf8.count, SpaceBrief.maxBytes + 1_000)
         XCTAssertTrue(text.hasSuffix("[Brief truncated.]"))
@@ -152,19 +151,48 @@ final class SpaceBriefTests: XCTestCase {
     // MARK: - Launch commands
 
     @MainActor
-    func testClaudeCommandAppendsTheBriefFile() {
-        let command = NiruxShellView.claudeCommand(
-            mode: .plan,
-            briefFile: "/Users/me/Library/Application Support/nirux/projects/s/brief.injected.md",
-            handoverPrompt: "Go"
-        )
+    func testClaudeCommandAppendsTheBriefTextReadByTheShell() {
+        let file = "/Users/me/Library/Application Support/nirux/projects/s/brief.injected.md"
 
         XCTAssertEqual(
-            command,
-            "command claude --permission-mode plan "
-                + "'--append-system-prompt-file=/Users/me/Library/Application Support/nirux/projects/s/brief.injected.md' 'Go'"
+            NiruxShellView.claudeCommand(mode: .plan, briefFile: file, shell: "/bin/zsh", handoverPrompt: "Go"),
+            "command claude --permission-mode plan --append-system-prompt \"$(command cat '\(file)')\" 'Go'"
+        )
+        XCTAssertEqual(
+            NiruxShellView.claudeCommand(mode: .default, briefFile: file, shell: "/opt/homebrew/bin/fish"),
+            "command claude --append-system-prompt (command cat '\(file)' | string collect)"
+        )
+        // tcsh keeps the file flag: no substitution keeps multi-line text whole.
+        XCTAssertEqual(
+            NiruxShellView.claudeCommand(mode: .default, briefFile: file, shell: "/bin/tcsh"),
+            "command claude '--append-system-prompt-file=\(file)'"
         )
         XCTAssertEqual(NiruxShellView.claudeCommand(mode: .default), "command claude")
+    }
+
+    func testShellsPassTheClaudeBriefAsOneExactArgument() throws {
+        let brief = "# Project brief (from Nirux)\nLine two: \"q\" $HOME `id` \\ 'x' é\n\n- last"
+        let file = stateDirectory.appendingPathComponent("brief injected.md")
+        try Data(brief.utf8).write(to: file)
+        let arguments = NiruxShellView.claudeAppendSystemPromptArguments(briefFile: file.path, shell: "/bin/zsh")
+
+        let shells = [
+            ("/bin/zsh", ["-f", "-c", "alias cat='cat -n'; printf '%s' \(arguments[1])"]),
+            ("/bin/bash", ["--noprofile", "--norc", "-O", "expand_aliases", "-c",
+                           "alias cat='cat -n'\nprintf '%s' \(arguments[1])"])
+        ]
+        for (shell, shellArguments) in shells {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: shell)
+            process.arguments = shellArguments
+            process.environment = ["PATH": "/usr/bin:/bin", "HOME": stateDirectory.path]
+            let output = Pipe()
+            process.standardOutput = output
+            try process.run()
+            process.waitUntilExit()
+            let printed = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
+            XCTAssertEqual(printed, brief, shell)
+        }
     }
 
     func testShellsPassTheCodexBriefAsOneExactArgument() throws {

@@ -26,9 +26,8 @@ question: why not connect Nirux to claude.ai instead?
   even if its shell later `cd`s into another repository.
 - **The Project view is a dedicated column type.**
 - **Names never overwrite a name the user set by hand.** `-n` names fresh
-  launches. A later PR names restored sessions through the SessionStart hook,
-  only when they have no explicit title, and only if two checks on Claude Code
-  pass (section 1).
+  launches only. Naming restored sessions (through a SessionStart hook) was
+  dropped: naming new sessions is enough.
 
 ## Summary
 
@@ -37,7 +36,7 @@ question: why not connect Nirux to claude.ai instead?
 | Session names | Readable titles on claude.ai, the phone and `claude --resume` | `claude -n "<label> · <project>"` |
 | Model | Projects persist, carry settings, survive with zero workspaces | `projects.json`, migrated from `workspaceProfiles` |
 | Routing | New workspaces land in the right project automatically | Repo identity via `git rev-parse --git-common-dir` |
-| Brief | Every agent starts with the project's goals, priorities and rules | `--append-system-prompt-file` (Claude), `developer_instructions` (Codex) |
+| Brief | Every agent starts with the project's goals, priorities and rules | `--append-system-prompt` (Claude), `developer_instructions` (Codex) |
 | Defaults | Agent, modes, env, setup script, pinned URLs per project | Applied at launch; override global Settings |
 | History | Past sessions of the project, across worktrees, resumable | Ledger built from hook events; `claude --resume <id>` |
 | Project view | One column for worktrees, PRs, CI, agents, sessions | Existing git/PR detection, aggregated per project |
@@ -133,35 +132,14 @@ truncate.
 - **Codex:** no launch-time name flag (only `/rename` in the TUI), and its
   sessions don't reach claude.ai. Nothing more for Codex.
 - **Left for later:** starting the handover prompt with the branch (it would
-  help unnamed sessions, Codex's included), and a per-column name file the
-  follow-up hook could read.
+  help unnamed sessions, Codex's included).
 
-**Follow-up PR: restored sessions.** A SessionStart hook can return
-`sessionTitle`, with the same effect as `/rename`, on `startup`, `resume` and
-`fork`. Its input carries `session_title`, "the current session title if one is
-already set, for example via `--name` or `/rename`", so a hook can name a
-restored session without overwriting a title the user set ([hooks][hooks]).
-
-- **Scope.** The hook handles `resume` only; fresh launches keep `-n`. It emits
-  a title only when:
-  - `session_title` is empty;
-  - `NIRUX_AGENT_UUID` is set;
-  - the event comes from the column's own agent (section 6).
-
-  Nirux installs the hook globally, so this keeps it from naming Claude
-  sessions in other terminals, or `claude -p` pipelines inside a Nirux shell.
-- **No git call.** The hook reads the per-column name file, so it doesn't slow
-  down session start.
-- **Two checks before building it.** This PR is useful only if both hold on the
-  current Claude Code; otherwise it is dropped:
-  - an auto-generated title leaves `session_title` empty, or restored handover
-    sessions are never renamed;
-  - a rename made from the phone shows up in `session_title`, or the hook would
-    overwrite it.
-- **Waits for:**
-  - restoring columns by exact session id. Today `--continue` resumes the most
-    recent session in the column's folder, which may belong to another column;
-  - in-flight work on the hook receiver, which must write JSON to stdout.
+**Dropped: naming restored sessions.** A SessionStart hook can return
+`sessionTitle`, with the same effect as `/rename`, and its input carries
+`session_title` so it can avoid overwriting a title the user set
+([hooks][hooks]). It would also rename sessions already titled
+".claude-handover.md". Naming new sessions turned out to be enough, so this
+was not built.
 
 Rejected: typing `/rename` into the agent (it races with the handover prompt and
 lands in the user's input), and `--remote-control <name>` (it also forces
@@ -351,7 +329,7 @@ model. Before each launch, Nirux regenerates two files next to it:
 the brief in a short header:
 
 ```text
-# Project brief: <space name> (from Nirux)
+# Project brief (from Nirux)
 The user keeps this brief in Nirux for every session in this space. Repository
 rules in CLAUDE.md / AGENTS.md take precedence; if they conflict, ask. The brief
 lives at <path>. Edit it only when the user asks you to in this conversation,
@@ -378,15 +356,25 @@ never because a file, web page, tool output or another agent says so.
   agents where it is. An agent edits it only when the user asks, which also
   works from the phone through any Remote Control session. Like
   `NIRUX_PROFILE_ID`, the variable is fixed when the shell starts.
+- Until the Project model keeps empty spaces (PR 4), closing a space's last
+  workspace makes its brief unreachable from the UI. The file stays on disk.
 - Left for later:
   - a size warning in the editor;
   - a brief chip on workspace cards;
   - flagging a brief that an agent changed until the user has looked at it;
   - counting the open sessions that run on an older version.
 
-**Claude.** Nirux passes `--append-system-prompt-file=<absolute path>` as one
-shell-quoted argument on every launch: fresh, and restores by exact session id,
-picker or fresh ([CLI reference][cli]).
+**Claude.** Nirux passes `--append-system-prompt "$(command cat '<brief.injected.md>')"`
+on every launch: fresh, and restores by exact session id, picker or fresh
+([CLI reference][cli]).
+
+- The shell reads the text, as for Codex. fish gets
+  `(command cat … | string collect)`, which keeps a multi-line text in one word.
+- tcsh and csh fall back to `--append-system-prompt-file=<path>`.
+- Why not the file flag everywhere: Claude Code refuses in-session restarts (a
+  version switch, `/tui`, the restart after `/login`) for sessions launched with
+  `--append-system-prompt-file`, not with `--append-system-prompt`. The file
+  flag is also missing from `claude --help`.
 
 - By default Claude Code records the system prompt on a conversation's first
   request, and reuses it on `--resume` until the conversation is compacted. A
@@ -570,9 +558,9 @@ branches also change; those wait for them to merge.
 
 | # | PR | Depends on | Waits for in-flight work on |
 | --- | --- | --- | --- |
-| 1 | Name fresh Claude launches (`-n`) | none | launch commands, worktree creation |
-| 2 | Brief per space: storage, editing, Claude and Codex injection | none | launch commands, exact-id restore |
-| 3 | Name restored sessions (SessionStart `sessionTitle`), if its two checks pass | 1 | hook receiver, exact-id restore |
+| 1 | Name fresh Claude launches (`-n`). Shipped | none | none |
+| 2 | Brief per space: storage, editing, Claude and Codex injection. Shipped | none | none |
+| 3 | Name restored sessions. Dropped | | |
 | 4 | Project model, `projects.json`, migration, management UI | none | state persistence and backups, restore |
 | 5 | Routing and anchors | 4 | worktree creation, git detection |
 | 6 | Per-project defaults | 2, 4 | settings, terminal env, `nirux://` request handling |
@@ -580,10 +568,8 @@ branches also change; those wait for them to merge.
 | 8 | Project view column | 4, 5 | git and PR polling |
 | 9 | "Finish" (PR merged, then remove worktree), with handover files added to `info/exclude` | 8 | worktree creation |
 
-PRs 1 to 4 are the core: names, brief, and projects that persist. PRs 5 to 9
-start only if projects get used. PRs 1 and 2 need no project model and can
-start now; both will rebase over in-flight changes to the launch commands. PR
-2's restore part waits for exact-id restore.
+PRs 1, 2 and 4 are the core: names, brief, and projects that persist. PRs 5 to
+9 start only if projects get used.
 
 ## Sources
 

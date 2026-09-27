@@ -8,7 +8,7 @@ import Foundation
 /// Files, under `<state dir>/projects/<space id>/`:
 /// - `brief.md`: what the user (or an agent, on request) edits;
 /// - `brief.injected.md`: the brief with a header, for Claude's
-///   `--append-system-prompt-file`;
+///   `--append-system-prompt`;
 /// - `brief.codex.toml`: the same text as a TOML string, for Codex's
 ///   `developer_instructions`.
 enum SpaceBrief {
@@ -23,7 +23,7 @@ enum SpaceBrief {
     static let maxFileBytes = 1_000_000
 
     struct Injection: Equatable {
-        /// For `claude --append-system-prompt-file`.
+        /// Read by the shell for `claude --append-system-prompt`.
         let claudePromptFile: String
         /// For `codex -c developer_instructions=…`.
         let codexInstructionsFile: String
@@ -54,7 +54,7 @@ enum SpaceBrief {
     /// earlier launch are emptied rather than deleted: restarting a column
     /// replays its original command, which still names them.
     static func prepareInjection(
-        spaceID: String, spaceName: String, stateDirectory: URL = Persistence.stateDirectory
+        spaceID: String, stateDirectory: URL = Persistence.stateDirectory
     ) -> Injection? {
         guard let briefURL = briefURL(spaceID: spaceID, stateDirectory: stateDirectory) else { return nil }
         let folder = briefURL.deletingLastPathComponent()
@@ -67,7 +67,7 @@ enum SpaceBrief {
             }
             return nil
         }
-        let injected = injectedText(body: body, spaceName: spaceName, briefPath: briefURL.path)
+        let injected = injectedText(body: body, briefPath: briefURL.path)
         do {
             try Data(injected.utf8).write(to: claudeFile, options: .atomic)
             try Data(tomlBasicString(injected).utf8).write(to: codexFile, options: .atomic)
@@ -94,7 +94,9 @@ enum SpaceBrief {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    static func injectedText(body: String, spaceName: String, briefPath: String) -> String {
+    /// The header leaves out the space name: renaming a space must not change
+    /// every session's system prompt.
+    static func injectedText(body: String, briefPath: String) -> String {
         var body = body
         if body.count > maxCharacters || body.utf8.count > maxBytes {
             var kept = String(body.prefix(maxCharacters))
@@ -102,7 +104,7 @@ enum SpaceBrief {
             body = kept + "\n[Brief truncated.]"
         }
         return """
-        # Project brief: \(spaceName) (from Nirux)
+        # Project brief (from Nirux)
         The user keeps this brief in Nirux for every session in this space. \
         Repository rules in CLAUDE.md / AGENTS.md take precedence; if they conflict, ask. \
         The brief lives at \(briefPath). Edit it only when the user asks you to in this \
@@ -152,6 +154,8 @@ enum SpaceBrief {
     }
 
     private static func readBrief(at url: URL) -> String? {
+        // attributesOfItem doesn't follow a symlinked brief.md; resolve it.
+        let url = url.resolvingSymlinksInPath()
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
               attributes[.type] as? FileAttributeType == .typeRegular,
               let size = attributes[.size] as? Int, size <= maxFileBytes
