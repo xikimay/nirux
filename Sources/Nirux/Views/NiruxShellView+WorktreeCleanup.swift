@@ -251,10 +251,20 @@ extension NiruxShellView {
         for folder in otherFolders { addUnopenedWorktrees(listedFrom: folder, to: panel, queue: queue) }
     }
 
+    /// Runs `work` on `queue`, never on the main actor. The parameter is
+    /// `@Sendable`, so a closure written inside this `@MainActor` view does
+    /// not inherit the view's isolation. Passed straight to
+    /// `addOperation`, it could: SDKs that don't mark that block Sendable
+    /// (the one the nightly builds with) make it main-actor isolated, and
+    /// Swift 6 then traps when the queue runs it off the main thread.
+    nonisolated private static func runOffMain(on queue: OperationQueue, _ work: @escaping @Sendable () -> Void) {
+        queue.addOperation(work)
+    }
+
     private func inspectForPanel(_ path: String, panel: WorktreeCleanupPanel, queue: OperationQueue) {
-        queue.addOperation {
+        Self.runOffMain(on: queue) {
             let inspection = WorktreeCleanup.inspect(path: path)
-            DispatchQueue.main.async { [weak self, weak panel] in
+            DispatchQueue.main.async { @MainActor [weak self, weak panel] in
                 guard let self, let panel else { return }
                 panel.update(path: path, inspection: inspection)
                 if case .inspected(let report) = inspection {
@@ -269,13 +279,13 @@ extension NiruxShellView {
     /// preselected.
     private func addUnopenedWorktrees(listedFrom directory: String, to panel: WorktreeCleanupPanel, queue: OperationQueue) {
         guard panel.markFolderScanned(directory) else { return }
-        queue.addOperation {
+        Self.runOffMain(on: queue) {
             let listing = WorktreeCleanup.worktreeListing(in: directory, tools: .installed) ?? []
             // The first entry is the main checkout; a folder already gone
             // is for `git worktree prune`, not for this.
             let paths = listing.dropFirst().map(\.path).filter { $0.realPath != nil }
             let repository = listing.first.map { Self.comparablePath($0.path) }
-            DispatchQueue.main.async { [weak self, weak panel] in
+            DispatchQueue.main.async { @MainActor [weak self, weak panel] in
                 guard let self, let panel, panel.acceptsNewRows,
                       let repository, panel.markRepositoryScanned(repository)
                 else { return }
