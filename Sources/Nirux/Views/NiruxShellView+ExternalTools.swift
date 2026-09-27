@@ -19,6 +19,9 @@ extension NiruxShellView {
     /// Build a `claude …` shell command for the given launch mode.
     /// Restores use an exact session ID, Claude's interactive picker, or a
     /// fresh session (nil); they deliberately never guess with `--continue`.
+    /// `sessionName` becomes `--name` (see `SessionName`) on a fresh launch
+    /// only: it is ignored with `resume`, so a restore never overwrites a
+    /// name the user set with `/rename` or from claude.ai.
     /// `handoverPrompt` is appended as a single-quoted positional argument
     /// (used by the worktree handover flow).
     ///
@@ -28,6 +31,7 @@ extension NiruxShellView {
     static func claudeCommand(
         resume: AgentResumeTarget? = nil,
         mode: ClaudeLaunchMode,
+        sessionName: String? = nil,
         handoverPrompt: String? = nil
     ) -> String {
         var parts = ["command", "claude"]
@@ -38,6 +42,11 @@ extension NiruxShellView {
             }
         }
         parts.append(contentsOf: mode.cliArgs)
+        if resume == nil, let sessionName {
+            // One `--name=` argument, so a name starting with "-" can't be
+            // read as another flag.
+            parts.append(Self.shellQuotedArgument("--name=" + sessionName))
+        }
         if let prompt = handoverPrompt {
             parts.append(Self.shellQuotedArgument(prompt))
         }

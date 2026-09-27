@@ -20,7 +20,8 @@ extension NiruxShellView {
         workspaceID: String = UUID().uuidString,
         initialAgentUUID: String = UUID().uuidString,
         missionID: String? = nil,
-        deliveredHandover: Bool = false
+        deliveredHandover: Bool = false,
+        worktreeBranch: String? = nil
     ) {
         let snapshot: NSImageView? = {
             guard let rep = viewport.bitmapImageRepForCachingDisplay(in: viewport.bounds) else { return nil }
@@ -56,7 +57,7 @@ extension NiruxShellView {
 
         // Launch agent in the new workspace's terminal
         if let agent {
-            launchAgent(agent, in: workspace, deliveredHandover: deliveredHandover)
+            launchAgent(agent, in: workspace, deliveredHandover: deliveredHandover, worktreeBranch: worktreeBranch)
         }
 
         if let snapshot {
@@ -99,7 +100,14 @@ extension NiruxShellView {
         return instructions.isEmpty ? nil : instructions.joined(separator: " ")
     }
 
-    private func launchAgent(_ agent: NiruxApp.WorkspaceAgent, in workspace: WorkspaceState, deliveredHandover: Bool) {
+    /// `worktreeBranch` is the branch checked out in a worktree Nirux just
+    /// created; it names the Claude session (see `SessionName`).
+    private func launchAgent(
+        _ agent: NiruxApp.WorkspaceAgent,
+        in workspace: WorkspaceState,
+        deliveredHandover: Bool,
+        worktreeBranch: String?
+    ) {
         guard let col = workspace.columns[safe: workspace.focusedIndex] else { return }
         let handoverPrompt = Self.agentStartupPrompt(
             agent: agent,
@@ -112,6 +120,11 @@ extension NiruxShellView {
         case .claude:
             cmd = NiruxShellView.claudeCommand(
                 mode: NiruxShellView.currentClaudeLaunchMode(),
+                sessionName: SessionName.make(
+                    worktreeBranch: worktreeBranch,
+                    spaceName: workspaceStore.profiles.first { $0.id == workspace.profileID }?.name,
+                    isDefaultSpace: workspace.profileID == WorkspaceProfile.defaultID
+                ),
                 handoverPrompt: handoverPrompt
             )
         case .codex:

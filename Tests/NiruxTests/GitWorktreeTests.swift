@@ -51,6 +51,47 @@ final class GitWorktreeTests: XCTestCase {
         XCTAssertEqual(result.stderr, "git could not start or timed out after 0.1s")
     }
 
+    func testCurrentBranchReadsCheckedOutBranchAndNilWhenDetached() {
+        let repo = directory.path
+        XCTAssertEqual(GitWorktree.gitRunFull(["init", "-q", "-b", "feat/names"], cwd: repo).status, 0)
+        XCTAssertEqual(
+            GitWorktree.gitRunFull(
+                [
+                    "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+                    "-c", "core.hooksPath=/dev/null", "commit", "-q", "--allow-empty", "-m", "x"
+                ],
+                cwd: repo
+            ).status,
+            0
+        )
+
+        // A tag with the branch's name must not turn it into "heads/feat/names".
+        XCTAssertEqual(GitWorktree.gitRunFull(["tag", "feat/names"], cwd: repo).status, 0)
+        XCTAssertEqual(GitWorktree.currentBranch(at: repo), "feat/names")
+
+        // On a case-insensitive volume (the macOS default), the same folder
+        // typed in another case is still that checkout.
+        if FileManager.default.fileExists(atPath: repo.uppercased()) {
+            XCTAssertEqual(GitWorktree.currentBranch(at: repo.uppercased()), "feat/names")
+        }
+
+        // A plain folder inside the checkout is not a checkout of its own.
+        let inner = directory.appendingPathComponent("inner")
+        XCTAssertNoThrow(try FileManager.default.createDirectory(at: inner, withIntermediateDirectories: true))
+        XCTAssertNil(GitWorktree.currentBranch(at: inner.path))
+
+        XCTAssertEqual(
+            GitWorktree.gitRunFull(["-c", "core.hooksPath=/dev/null", "checkout", "-q", "--detach"], cwd: repo).status,
+            0
+        )
+        XCTAssertNil(GitWorktree.currentBranch(at: repo))
+    }
+
+    func testCurrentBranchIsNilOutsideARepository() {
+        XCTAssertNil(GitWorktree.currentBranch(at: directory.path))
+        XCTAssertNil(GitWorktree.currentBranch(at: directory.appendingPathComponent("gone").path))
+    }
+
     func testGitRunFullReportsMissingDirectory() {
         let missing = directory.appendingPathComponent("gone").path
 
