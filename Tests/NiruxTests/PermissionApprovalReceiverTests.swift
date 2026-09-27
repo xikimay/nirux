@@ -35,10 +35,12 @@ final class PermissionApprovalReceiverTests: XCTestCase {
         let exited: DispatchSemaphore
     }
 
-    private func startReceiver(command: String = "git push origin main", session: String = "sess") throws -> Receiver {
+    private let session = "0b6c1c56-5a4f-4f3e-9f1a-7d2f3c4b5a69"
+
+    private func startReceiver(command: String = "git push origin main", mode: String = "default") throws -> Receiver {
         let payload: [String: Any] = [
             "hook_event_name": "PermissionRequest", "session_id": session, "cwd": "/proj",
-            "tool_name": "Bash", "tool_input": ["command": command]
+            "permission_mode": mode, "tool_name": "Bash", "tool_input": ["command": command]
         ]
         let stdin = Pipe()
         let stdout = Pipe()
@@ -94,17 +96,17 @@ final class PermissionApprovalReceiverTests: XCTestCase {
         let receiver = try startReceiver()
         let request = try XCTUnwrap(queuedRequest())
         let requestID = try XCTUnwrap(request.approvalRequestID)
-        XCTAssertEqual(request.toolSummary, "git push origin main")
+        XCTAssertEqual(request.approvalText, "git push origin main")
         let deadline = try XCTUnwrap(request.approvalDeadline)
         XCTAssertEqual(deadline - request.timestamp, PermissionApproval.mainThreadWindow, accuracy: 0.01)
 
         XCTAssertTrue(channel.send(PermissionApprovalDecision(
-            requestID: requestID, sessionID: "sess", agentUUID: "uuid-1", behavior: .allow,
+            requestID: requestID, sessionID: self.session, agentUUID: "uuid-1", behavior: .allow,
             issuedAt: Date().timeIntervalSince1970
         )))
         let (status, stdout) = try finish(receiver)
         XCTAssertEqual(status, 0)
-        let output = try XCTUnwrap(PermissionApproval.hookOutput(for: .allow, isSubagent: false))
+        let output = try XCTUnwrap(PermissionApproval.hookOutput(for: .allow))
         let expected = try XCTUnwrap(String(bytes: output, encoding: .utf8))
         XCTAssertEqual(stdout, expected)
 
@@ -133,7 +135,7 @@ final class PermissionApprovalReceiverTests: XCTestCase {
         let receiver = try startReceiver()
         let requestID = try XCTUnwrap(queuedRequest()?.approvalRequestID)
         channel.send(PermissionApprovalDecision(
-            requestID: requestID, sessionID: "sess", agentUUID: "uuid-1", behavior: .release,
+            requestID: requestID, sessionID: self.session, agentUUID: "uuid-1", behavior: .release,
             issuedAt: Date().timeIntervalSince1970
         ))
         let (_, stdout) = try finish(receiver)
@@ -152,6 +154,27 @@ final class PermissionApprovalReceiverTests: XCTestCase {
         let events = queuedEvents()
         XCTAssertEqual(events.map(\.name), [.permissionRequest])
         XCTAssertNil(events.first?.approvalRequestID)
+    }
+
+    func testBypassSessionsAreNeverHeld() throws {
+        try listen()
+        let receiver = try startReceiver(mode: "bypassPermissions")
+        let (_, stdout) = try finish(receiver)
+        XCTAssertEqual(stdout, "")
+        XCTAssertNil(queuedEvents().first?.approvalRequestID)
+    }
+
+    /// The app quits while a receiver waits: it stops within about a second.
+    func testReceiverStopsWhenTheAppGoesAway() throws {
+        try listen()
+        let receiver = try startReceiver()
+        _ = try XCTUnwrap(queuedRequest()?.approvalRequestID)
+        let started = Date()
+        channel.setListening(nil)
+        let (_, stdout) = try finish(receiver)
+        XCTAssertEqual(stdout, "")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5)
+        XCTAssertEqual(queuedEvents().last?.approvalOutcome, .expired)
     }
 
     func testCommandTheSidebarCannotShowExactlyIsNotHeld() throws {

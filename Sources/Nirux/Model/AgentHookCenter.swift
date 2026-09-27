@@ -27,10 +27,8 @@ final class AgentHookCenter {
         /// App active AND focused column of the active workspace (or any
         /// focused column in pilot mode) — see resolveAgentColumn.
         let isUserFocused: Bool
-        /// The same column test without the app being active: the column
-        /// the user sees in Nirux, whose terminal dialog answers requests
-        /// (the sidebar doesn't hold them).
-        var isColumnOnScreen = false
+        /// Whether the sidebar may hold the column's permission requests.
+        let approvalHold: PermissionApprovalHold
     }
 
     struct AppliedEvent {
@@ -53,6 +51,7 @@ final class AgentHookCenter {
     var approvalsEnabled = false
     /// Where sidebar decisions go; tests point it at a temporary directory.
     var approvalChannel: () -> PermissionApprovalChannel = { .standard }
+    private var lastApprovalSweep: TimeInterval = 0
 
     private var dirSource: DispatchSourceFileSystemObject?
     private var fileSource: DispatchSourceFileSystemObject?
@@ -210,6 +209,7 @@ final class AgentHookCenter {
                     claudeRestoreChanged = true
                 }
                 isApprovalEligible = event.name == .permissionRequest && event.approvalRequestID != nil
+                    && PermissionApproval.isDisplayable(toolName: event.toolName, text: event.approvalText)
                     && resolution.column.isApprovalEligible(event, foregroundProcess: foregroundProcess, snapshot: processes)
             case .codex:
                 if Self.isNestedCodexHook(foregroundName: foregroundProcess?.name) { return nil }
@@ -217,15 +217,16 @@ final class AgentHookCenter {
         }
         if event.name == .permissionRequest, event.approvalRequestID != nil,
            !Self.keepsApproval(
-               enabled: approvalsEnabled,
-               eligible: isApprovalEligible,
-               isColumnOnScreen: resolution?.isColumnOnScreen ?? true,
+               eligible: approvalsEnabled && isApprovalEligible,
+               hold: resolution?.approvalHold ?? .never,
+               isSubagent: event.agentID != nil,
                deadline: event.approvalDeadline,
                now: Date().timeIntervalSince1970
            ) {
             releaseHeldRequest(event)
             event.approvalRequestID = nil
             event.approvalDeadline = nil
+            event.approvalText = nil
         }
         let outcome = resolution?.column.pty.map {
             $0.applyAgentHook(event, isUserFocused: resolution?.isUserFocused ?? false)
@@ -242,19 +243,26 @@ final class AgentHookCenter {
         }
     }
 
-    /// Whether the sidebar holds a request its receiver waits on: the
-    /// option is on, the column's own `claude` asked for the column's
-    /// session, the user is not looking at that column (its terminal
-    /// dialog answers there), and the wait is not about to end.
+    /// Whether the sidebar holds a request its receiver waits on:
+    /// `eligible` (the option is on, and the column's own `claude` asked
+    /// for the column's session), the column's card can show the buttons
+    /// (see `PermissionApprovalHold`), and the wait is not about to end.
     nonisolated static func keepsApproval(
-        enabled: Bool,
         eligible: Bool,
-        isColumnOnScreen: Bool,
+        hold: PermissionApprovalHold,
+        isSubagent: Bool,
         deadline: TimeInterval?,
         now: TimeInterval
     ) -> Bool {
-        guard enabled, eligible, !isColumnOnScreen, let deadline else { return false }
+        guard eligible, hold.holds(isSubagent: isSubagent), let deadline else { return false }
         return now < deadline - PermissionApproval.sendMargin
+    }
+
+    /// Clear decisions no receiver claimed, at most once a minute.
+    func sweepApprovalsIfDue(now: TimeInterval = Date().timeIntervalSince1970) {
+        guard approvalsEnabled, now - lastApprovalSweep >= 60 else { return }
+        lastApprovalSweep = now
+        approvalChannel().sweep()
     }
 
     /// Tell the receiver of a held PermissionRequest to stop waiting: the

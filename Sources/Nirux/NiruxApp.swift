@@ -180,6 +180,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
         ActivityStore.shared.flush()
         // Receivers stop waiting on an app that is gone.
+        shell?.releaseAllPermissionApprovals()
         AgentHookCenter.shared.approvalChannel().setListening(nil)
         AgentHookCenter.shared.stop()
         MissionEventCenter.shared.stop()

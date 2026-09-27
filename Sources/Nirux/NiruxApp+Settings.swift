@@ -164,7 +164,7 @@ extension NiruxApp {
         checkbox.state = Persistence.load()?.settings?.missionHandoffsEnabled == true ? .on : .off
         background.addSubview(checkbox)
 
-        let hint = NSTextField(labelWithString:
+        let hint = NSTextField(wrappingLabelWithString:
             "Allows worktree agents to exchange questions, answers, and completion results. "
             + "New terminals pick up changes.")
         hint.font = .systemFont(ofSize: 11)
@@ -180,7 +180,7 @@ extension NiruxApp {
         approvals.state = NiruxShellView.currentSidebarApprovalsEnabled() ? .on : .off
         background.addSubview(approvals)
 
-        let approvalsHint = NSTextField(labelWithString:
+        let approvalsHint = NSTextField(wrappingLabelWithString:
             "Allow or deny once for columns you are not looking at: short commands, reads, "
             + "web fetches and searches, shown in full. Never \"always allow\".")
         approvalsHint.font = .systemFont(ofSize: 11)
@@ -422,7 +422,10 @@ extension NiruxApp {
         let hooks = AgentHookCenter.shared
         let wasEnabled = hooks.approvalsEnabled
         hooks.applySidebarApprovals(enabled: enabled)
-        if wasEnabled, !enabled { shell?.releaseAllPermissionApprovals() }
+        if wasEnabled, !hooks.approvalsEnabled {
+            shell?.releaseAllPermissionApprovals()
+            shell?.updateSidebar()
+        }
     }
 
     @objc func settingsTelegramPair(_ sender: NSButton) {

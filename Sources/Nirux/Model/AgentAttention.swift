@@ -240,32 +240,53 @@ enum AgentToolInput {
 
     /// The exact text a sidebar approval shows, or nil when the sidebar
     /// can't offer one. Only tools whose whole meaning is one short value
-    /// qualify: a command, a URL, a search query, a file to read. Edits and
-    /// writes (whose change can't be shown), Grep/Glob (whose path the
-    /// excerpt omits) and MCP tools answer in the terminal. The value must
-    /// also reach the screen unchanged: printable ASCII, no newline or tab,
-    /// no folded spaces, no truncation. Approving then means approving
-    /// exactly the text on screen.
-    static func approvalText(toolName: String, input: [String: Any], cwd: String?, home: String?) -> String? {
+    /// qualify: a command, a URL, a search query, a file to read (by its
+    /// absolute or `~/` path, never relative to a directory the card
+    /// doesn't show). Edits and writes (whose change can't be shown),
+    /// Grep/Glob (whose excerpt omits the path) and MCP tools answer in the
+    /// terminal. The value must also reach the screen unchanged
+    /// (`isExactDisplay`): approving then means approving exactly the text
+    /// on screen.
+    static func approvalText(toolName: String, input: [String: Any], home: String?) -> String? {
+        let value: String?
         switch toolName {
         case "Bash", "PowerShell":
             // Leaving the sandbox changes what the command may reach; the
-            // terminal dialog says so, the sidebar would not.
-            if input["dangerouslyDisableSandbox"] as? Bool == true { return nil }
-        case "Read", "WebFetch", "WebSearch":
-            break
+            // terminal dialog says so, the sidebar would not. Only an
+            // explicit "no" counts: any other value may mean yes.
+            switch input["dangerouslyDisableSandbox"] {
+            case nil: break
+            case let flag as Bool where !flag: break
+            case let flag as String where flag == "false": break
+            default: return nil
+            }
+            value = input["command"] as? String
+        case "Read":
+            value = (input["file_path"] as? String).map { path in
+                guard let home, !home.isEmpty, path.hasPrefix(home + "/") else { return path }
+                return "~/" + path.dropFirst(home.count + 1)
+            }
+        case "WebFetch":
+            value = input["url"] as? String
+        case "WebSearch":
+            value = input["query"] as? String
         default:
             return nil
         }
-        // Printable ASCII only: every character then takes one cell of the
-        // sidebar's monospaced text, with no look-alike, wide or
-        // right-to-left glyph to hide what runs.
-        guard let raw = primaryValue(toolName: toolName, input: input), !raw.isEmpty,
-              raw.count <= maxSummaryLength,
-              raw.unicodeScalars.allSatisfy({ (0x20...0x7E).contains($0.value) }),
-              AgentText.clean(raw, maxLength: maxSummaryLength) == raw
-        else { return nil }
-        return summary(toolName: toolName, input: input, cwd: cwd, home: home)
+        guard let value, isExactDisplay(value) else { return nil }
+        return value
+    }
+
+    /// Printable ASCII on one line, with no leading, trailing or doubled
+    /// space, at most `maxSummaryLength` characters: every character then
+    /// takes one visible cell of the sidebar's monospaced text, with no
+    /// hidden newline, look-alike, wide or right-to-left glyph.
+    static func isExactDisplay(_ text: String) -> Bool {
+        !text.isEmpty
+            && text.utf8.count <= maxSummaryLength
+            && text.utf8.allSatisfy { (0x20...0x7E).contains($0) }
+            && !text.hasPrefix(" ") && !text.hasSuffix(" ")
+            && !text.contains("  ")
     }
 
     /// Stable across processes (each hook runs its own receiver, so no

@@ -59,6 +59,8 @@ extension SidebarView {
                 workspaceIndex: workspaceIndex,
                 key: SidebarHoverTarget.approvalButtonKey(requestID: requestID, behavior: behavior)
             ))
+        case .permissionBlock(let workspaceIndex):
+            setHoverTarget(.workspaceCard(workspaceIndex))
         case .link:
             break
         }

@@ -210,8 +210,11 @@ struct AgentStatusMachine {
                 sessionID: event.sessionID,
                 requestedAt: now
             )
-            if let requestID = event.approvalRequestID, let deadline = event.approvalDeadline {
-                request.approval = PermissionApprovalTicket(requestID: requestID, deadline: deadline)
+            if let requestID = event.approvalRequestID, let deadline = event.approvalDeadline,
+               let text = event.approvalText {
+                request.approval = PermissionApprovalTicket(
+                    requestID: requestID, deadline: deadline, text: text, isSubagent: event.agentID != nil
+                )
             }
             // The same call asked again (a plan re-proposed after "keep
             // planning"): the earlier dialog is gone.
@@ -265,39 +268,32 @@ struct AgentStatusMachine {
     }
 
     /// The receiver's report on a sidebar approval. A decision that
-    /// reached Claude closes its dialog: Claude applied it, or ignored it
-    /// because the terminal answered first. Anything else only ends the
+    /// reached Claude closes its dialog: Claude applied it (the call runs,
+    /// or the agent reads the denial and goes on), or ignored it because
+    /// the dialog was answered first. Anything else only ends the
     /// sidebar's chance to answer; the dialog stays in the terminal.
     private mutating func applyApprovalResolution(_ event: AgentHookEvent) {
         guard let requestID = event.approvalRequestID,
               let index = pendingDialogs.firstIndex(where: { $0.approval?.requestID == requestID }) else { return }
         switch event.approvalOutcome {
-        case .allow?:
+        case .allow?, .deny?:
             noteClosed(pendingDialogs.remove(at: index))
             resumeUnlessBlocked()
-        case .deny?:
-            let dialog = pendingDialogs.remove(at: index)
-            noteClosed(dialog)
-            guard dialog.agentID == nil else {
-                // The subagent reads the denial and goes on.
-                resumeUnlessBlocked()
-                return
-            }
-            // A main-thread denial interrupts the turn, like "No" at the
-            // terminal, and no Stop follows an interrupt.
-            closeDialogs { $0.agentID == nil && $0.sessionID == dialog.sessionID }
-            endTurn()
-            if openDialogs.isEmpty { state = .idle }
         case .release?, .expired?, .invalid?, nil:
-            pendingDialogs[index].approval = nil
+            if pendingDialogs[index].approval?.sent != nil {
+                // Said on the card for a moment: answer in the terminal.
+                pendingDialogs[index].approval?.undelivered = true
+            } else {
+                pendingDialogs[index].approval = nil
+            }
         }
     }
 
     /// The oldest dialog the sidebar can still answer, or whose decision
-    /// is on its way: an open dialog (see `openDialogs`) whose receiver
-    /// waits.
+    /// is on its way: an open dialog (see `openDialogs`) whose card has
+    /// something to show.
     func sidebarApproval(now: TimeInterval) -> AgentPermissionRequest? {
-        openDialogs.first { $0.approval?.isShown(now: now) == true }
+        openDialogs.first { $0.approval?.display(now: now) != nil }
     }
 
     /// Record a sidebar decision on an open request. Nil when the request
@@ -311,6 +307,7 @@ struct AgentStatusMachine {
               !pendingDialogs[index].mayBeAnswered,
               pendingDialogs[index].approval?.isOpen(now: now) == true else { return nil }
         pendingDialogs[index].approval?.sent = behavior
+        pendingDialogs[index].approval?.sentAt = now
         return pendingDialogs[index]
     }
 
@@ -325,12 +322,16 @@ struct AgentStatusMachine {
         return request
     }
 
-    /// Drop the sidebar's hold on every request it has not decided,
-    /// returning them so their receivers can be released: the column is on
-    /// screen, where the terminal dialog answers.
-    mutating func takeUndecidedApprovals() -> [AgentPermissionRequest] {
+    /// Drop the sidebar's hold on the requests it has not decided (those
+    /// `shouldTake` picks), returning them so their receivers can be
+    /// released: the terminal dialog answers.
+    mutating func takeUndecidedApprovals(
+        where shouldTake: (AgentPermissionRequest) -> Bool = { _ in true }
+    ) -> [AgentPermissionRequest] {
         var taken: [AgentPermissionRequest] = []
-        for index in pendingDialogs.indices where pendingDialogs[index].approval.map({ $0.sent == nil }) ?? false {
+        for index in pendingDialogs.indices {
+            guard let ticket = pendingDialogs[index].approval, ticket.sent == nil,
+                  shouldTake(pendingDialogs[index]) else { continue }
             taken.append(pendingDialogs[index])
             pendingDialogs[index].approval = nil
         }
@@ -436,6 +437,10 @@ struct AgentStatusMachine {
     private mutating func noteProgress(of event: AgentHookEvent) {
         for index in pendingDialogs.indices
         where pendingDialogs[index].agentID == event.agentID && pendingDialogs[index].sessionID == event.sessionID {
+            // A request the sidebar holds is unanswered: its column was
+            // never on screen, where the terminal could answer it. This
+            // event is a sibling call's.
+            if pendingDialogs[index].approval?.isHeld(at: event.timestamp) == true { continue }
             pendingDialogs[index].mayBeAnswered = true
         }
     }

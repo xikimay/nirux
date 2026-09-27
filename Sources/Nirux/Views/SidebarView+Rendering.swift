@@ -121,6 +121,7 @@ extension SidebarView {
         }
 
         refreshHoverTargetFromMouse()
+        refreshApprovalArming()
         let clip = contentScrollView.contentView
         let activeIndex = activeWorkspaceIndex
         let activeChanged = activeIndex != lastFollowedActiveIndex

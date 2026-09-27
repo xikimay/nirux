@@ -71,19 +71,18 @@ struct ColumnInfo: Hashable {
 struct SidebarPermissionApproval: Hashable {
     let requestID: String
     let toolName: String
-    /// Exactly what the call does (`AgentToolInput.approvalText`).
+    /// Exactly what the call does, as the receiver checked it.
     let text: String
-    /// The decision on its way, once clicked.
-    let sent: PermissionApproval.Behavior?
+    /// Buttons, the decision on its way, or its failure.
+    let display: PermissionApprovalTicket.Display
 
-    init?(_ request: AgentPermissionRequest) {
-        guard let ticket = request.approval, let toolName = request.toolName, let text = request.summary else {
-            return nil
-        }
+    init?(_ request: AgentPermissionRequest, now: TimeInterval) {
+        guard let ticket = request.approval, let toolName = request.toolName,
+              let display = ticket.display(now: now) else { return nil }
         requestID = ticket.requestID
         self.toolName = toolName
-        self.text = text
-        sent = ticket.sent
+        text = ticket.text
+        self.display = display
     }
 }
 
@@ -166,6 +165,9 @@ enum SidebarHitRegion {
     case permissionDecision(
         workspaceIndex: Int, columnIndex: Int, requestID: String, behavior: PermissionApproval.Behavior
     )
+    /// The rest of that block: clicks there do nothing (a press meant for
+    /// a button that just moved must not reach the card below).
+    case permissionBlock(workspaceIndex: Int)
 }
 
 /// Full parameter set of SidebarView.update(...) — stashed while a

@@ -23,7 +23,8 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         AgentHookEvent(
             kind: .claude, name: name, sessionID: "lead", detail: tool,
             toolName: tool, toolSummary: summary, toolKey: key, agentID: agent,
-            approvalRequestID: requestID, approvalDeadline: deadline, approvalOutcome: outcome,
+            approvalRequestID: requestID, approvalDeadline: deadline,
+            approvalText: requestID == nil ? nil : summary, approvalOutcome: outcome,
             timestamp: t0 + offset
         )
     }
@@ -63,8 +64,28 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         holdRequest()
         XCTAssertNotNil(machine.markApprovalSent(requestID: requestID, behavior: .allow, now: t0 + 2))
         XCTAssertNil(machine.markApprovalSent(requestID: requestID, behavior: .deny, now: t0 + 2), "already decided")
-        XCTAssertEqual(machine.sidebarApproval(now: t0 + 2)?.approval?.sent, .allow)
+        XCTAssertEqual(machine.sidebarApproval(now: t0 + 2)?.approval?.display(now: t0 + 2), .sending(.allow))
         XCTAssertNil(machine.markApprovalSent(requestID: "other", behavior: .allow, now: t0 + 2))
+    }
+
+    /// No report from the receiver: the card says the decision didn't arrive,
+    /// then hands the dialog back to the terminal.
+    func testSentDecisionThatNeverArrivesIsReported() {
+        let ticket = { () -> PermissionApprovalTicket in
+            var ticket = PermissionApprovalTicket(requestID: "r", deadline: 100, text: "ls")
+            ticket.sent = .deny
+            ticket.sentAt = 10
+            return ticket
+        }()
+        XCTAssertEqual(ticket.display(now: 12), .sending(.deny))
+        XCTAssertEqual(ticket.display(now: 10 + PermissionApproval.deliveryTimeout), .undelivered)
+        XCTAssertNil(ticket.display(now: 10 + PermissionApproval.deliveryTimeout + PermissionApproval.failureNoticeDuration))
+
+        holdRequest()
+        _ = machine.markApprovalSent(requestID: requestID, behavior: .allow, now: t0 + 2)
+        _ = resolve(.invalid)
+        XCTAssertEqual(machine.sidebarApproval(now: t0 + 3)?.approval?.display(now: t0 + 3), .undelivered)
+        XCTAssertEqual(machine.pendingDialogs.count, 1, "the terminal dialog still waits")
     }
 
     func testExpiredRequestCannotBeDecided() {
@@ -72,13 +93,24 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         XCTAssertNil(machine.markApprovalSent(requestID: requestID, behavior: .allow, now: t0 + 55))
     }
 
-    /// A later tool event suggests the dialog was answered at the terminal:
-    /// the column no longer shows it, and neither does the sidebar.
-    func testDialogThatMayBeAnsweredIsNotOffered() {
+    /// A held request is unanswered (its column was never on screen): a
+    /// sibling call's progress neither hides it nor unblocks the column.
+    func testSiblingCallProgressKeepsTheHeldRequest() {
         holdRequest()
+        _ = machine.apply(event(.postToolUse, at: 2, tool: "Read", summary: "b", key: "k2"), isUserFocused: false)
+        XCTAssertNotNil(machine.sidebarApproval(now: t0 + 3))
+        XCTAssertNotNil(machine.markApprovalSent(requestID: requestID, behavior: .allow, now: t0 + 3))
+        XCTAssertEqual(machine.state, .needsAttention)
+    }
+
+    /// Once the sidebar let go, #38's rule applies again: a later tool
+    /// event suggests the dialog was answered at the terminal.
+    func testReleasedRequestFollowsTheTerminalAgain() {
+        holdRequest()
+        _ = machine.takeUndecidedApprovals()
         _ = machine.apply(event(.preToolUse, at: 2, key: nil), isUserFocused: false)
+        XCTAssertEqual(machine.state, .working)
         XCTAssertNil(machine.sidebarApproval(now: t0 + 3))
-        XCTAssertNil(machine.markApprovalSent(requestID: requestID, behavior: .allow, now: t0 + 3))
     }
 
     func testAllowReachingClaudeClosesTheDialogAndTheAgentWorks() {
@@ -91,13 +123,14 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         XCTAssertFalse(outcome.firedAttention)
     }
 
-    func testMainThreadDenialEndsTheTurnWithoutAlert() {
+    /// The denial never interrupts: the agent reads it and goes on.
+    func testMainThreadDenialLetsTheTurnGoOn() {
         holdRequest()
         _ = machine.markApprovalSent(requestID: requestID, behavior: .deny, now: t0 + 2)
         let outcome = resolve(.deny)
         XCTAssertTrue(machine.pendingDialogs.isEmpty)
-        XCTAssertEqual(machine.state, .idle)
-        XCTAssertNil(machine.turnStartedAt)
+        XCTAssertEqual(machine.state, .working)
+        XCTAssertNotNil(machine.turnStartedAt)
         XCTAssertFalse(outcome.firedAttention)
     }
 
@@ -181,8 +214,11 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         var request = AgentPermissionRequest(
             toolName: "Bash", summary: text, key: "k", agentID: nil, sessionID: "lead", requestedAt: 0
         )
-        request.approval = PermissionApprovalTicket(requestID: requestID, deadline: 100, sent: sent)
-        return SidebarPermissionApproval(request)
+        var ticket = PermissionApprovalTicket(requestID: requestID, deadline: 100, text: text)
+        ticket.sent = sent
+        ticket.sentAt = sent.map { _ in 10 }
+        request.approval = ticket
+        return SidebarPermissionApproval(request, now: 11)
     }
 
     private func workspace(_ columns: [ColumnInfo]) -> WorkspaceInfo {
@@ -250,13 +286,22 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         ).render()
 
         XCTAssertEqual(decisionRegions(result.hitAreas), [
-            DecisionRegion(workspace: 2, column: 1, requestID: requestID, behavior: .allow),
-            DecisionRegion(workspace: 2, column: 1, requestID: requestID, behavior: .deny)
-        ])
+            DecisionRegion(workspace: 2, column: 1, requestID: requestID, behavior: .deny),
+            DecisionRegion(workspace: 2, column: 1, requestID: requestID, behavior: .allow)
+        ], "Allow last, away from where row labels start")
         XCTAssertTrue(
             labels(result.views).contains(SidebarExpandedMetrics.approvalLines(text).joined(separator: "\n")),
             "the whole request, split only into lines"
         )
+        // The rest of the block swallows clicks meant for what was there.
+        let blockHit = try XCTUnwrap(result.hitAreas.firstIndex {
+            if case .permissionBlock(2) = $0.region { return true }
+            return false
+        })
+        XCTAssertGreaterThan(blockHit, try XCTUnwrap(result.hitAreas.lastIndex {
+            if case .permissionDecision = $0.region { return true }
+            return false
+        }))
         XCTAssertEqual(result.approvalButtons.count, 2)
         // The buttons are hit before the card (first match wins).
         let workspaceHit = try XCTUnwrap(result.hitAreas.firstIndex {
@@ -286,11 +331,74 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         XCTAssertTrue(result.approvalButtons.isEmpty)
     }
 
-    func testRequestWithoutTheToolOrTextIsNotShown() {
+    @MainActor
+    func testUndeliveredDecisionSaysToAnswerInTheTerminal() {
+        var request = AgentPermissionRequest(
+            toolName: "Bash", summary: "ls", key: "k", agentID: nil, sessionID: "lead", requestedAt: 0
+        )
+        var ticket = PermissionApprovalTicket(requestID: requestID, deadline: 100, text: "ls")
+        ticket.sent = .allow
+        ticket.sentAt = 10
+        ticket.undelivered = true
+        request.approval = ticket
+        let result = SidebarWorkspaceCardRenderer(
+            workspace: workspace([column(SidebarPermissionApproval(request, now: 11))]),
+            sidebarWidth: 260, padding: 20, yOffset: 800
+        ).render()
+        XCTAssertTrue(labels(result.views).contains("Not delivered — answer in the terminal"))
+        XCTAssertTrue(decisionRegions(result.hitAreas).isEmpty)
+    }
+
+    /// A line break never hides a space: `rm -rf ./dist/assets/old-bundle *`
+    /// must not read as `old-bundle*`.
+    @MainActor
+    func testSpacesAtLineBreaksStayVisible() {
+        let text = "rm -rf ./dist/assets/old-bundle *"
+        let lines = SidebarExpandedMetrics.approvalLines(text)
+        XCTAssertEqual(lines, ["rm -rf ./dist/assets/old-bundle ", "*"])
+        let shown = SidebarApprovalBlockRenderer.attributedLines(lines).string
+        XCTAssertEqual(shown, "rm -rf ./dist/assets/old-bundle\u{2423}\n*")
+        for line in shown.split(separator: "\n") {
+            XCTAssertFalse(line.hasPrefix(" ") || line.hasSuffix(" "), String(line))
+        }
+        let inner = SidebarApprovalBlockRenderer.attributedLines(["a b"]).string
+        XCTAssertEqual(inner, "a b", "spaces inside a line stay plain")
+        XCTAssertEqual(
+            SidebarApprovalBlockRenderer.attributedLines(SidebarExpandedMetrics.approvalLines("x" + String(repeating: "y", count: 30) + " z")).string,
+            "x" + String(repeating: "y", count: 30) + "\u{2423}\nz"
+        )
+    }
+
+    /// A button that just appeared or moved takes no click for a moment.
+    @MainActor
+    func testButtonsArmOnlyAfterStayingPut() {
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 800))
+        let key = SidebarHoverTarget.approvalButtonKey(requestID: requestID, behavior: .allow)
+        let button = SidebarBadgeView(text: "Allow", textColor: .white, fillColor: .clear, font: .systemFont(ofSize: 11))
+        button.frame = NSRect(x: 20, y: 100, width: 58, height: 20)
+        sidebar.approvalButtonViews = [key: button]
+
+        sidebar.refreshApprovalArming(now: 10)
+        XCTAssertFalse(sidebar.isApprovalButtonArmed(key, now: 10.5))
+        XCTAssertTrue(sidebar.isApprovalButtonArmed(key, now: 10 + SidebarView.approvalArmingDelay))
+
+        sidebar.refreshApprovalArming(now: 11)
+        XCTAssertTrue(sidebar.isApprovalButtonArmed(key, now: 11), "same place: still armed")
+
+        button.frame.origin.y = 160
+        sidebar.refreshApprovalArming(now: 12)
+        XCTAssertFalse(sidebar.isApprovalButtonArmed(key, now: 12.1), "moved: armed again later")
+
+        sidebar.approvalButtonViews = [:]
+        sidebar.refreshApprovalArming(now: 13)
+        XCTAssertFalse(sidebar.isApprovalButtonArmed(key, now: 20), "gone")
+    }
+
+    func testRequestWithoutTheToolIsNotShown() {
         var request = AgentPermissionRequest(
             toolName: nil, summary: "ls", key: nil, agentID: nil, sessionID: "lead", requestedAt: 0
         )
-        request.approval = PermissionApprovalTicket(requestID: requestID, deadline: 100)
-        XCTAssertNil(SidebarPermissionApproval(request))
+        request.approval = PermissionApprovalTicket(requestID: requestID, deadline: 100, text: "ls")
+        XCTAssertNil(SidebarPermissionApproval(request, now: 1))
     }
 }

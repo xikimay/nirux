@@ -172,13 +172,17 @@ extension NiruxShellView {
         for (wsIndex, workspace) in workspaces.enumerated() {
             guard let colIndex = workspace.columns.firstIndex(where: { $0.agentUUID == uuid }) else { continue }
             let isActive = wsIndex == activeWSIndex
-            let isColumnOnScreen = colIndex == workspace.focusedIndex && (isActive || isPilotMode)
+            let isUserFocused = NSApp.isActive
+                && colIndex == workspace.focusedIndex
+                && (isActive || isPilotMode)
             return AgentHookCenter.Resolution(
                 workspace: workspace,
                 column: workspace.columns[colIndex],
                 columnIndex: colIndex,
-                isUserFocused: NSApp.isActive && isColumnOnScreen,
-                isColumnOnScreen: isColumnOnScreen
+                isUserFocused: isUserFocused,
+                approvalHold: approvalHold(
+                    workspaceIndex: wsIndex, columnIndex: colIndex, listed: Set(visibleWorkspaceIndices)
+                )
             )
         }
         return nil

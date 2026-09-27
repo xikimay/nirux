@@ -21,6 +21,7 @@ extension NiruxShellView {
             }
         }
         let visibleIndices = visibleWorkspaceIndices
+        let approvalHolds = releaseApprovalsNotHeld()
         let infos = visibleIndices.map { index in
             let workspace = workspaces[index]
             let isActive = index == activeWSIndex
@@ -41,7 +42,7 @@ extension NiruxShellView {
                     foregroundProcess: foregroundProcess,
                     isUserFocused: isUserFocused
                 ) ?? .idle
-                let permissionApproval = sidebarApproval(for: col, isOnScreen: isUserFocused)
+                let permissionApproval = sidebarApproval(for: col, hold: approvalHolds[ObjectIdentifier(col)])
                 return ColumnInfo(
                     index: colIndex,
                     processName: foregroundProcess?.name,

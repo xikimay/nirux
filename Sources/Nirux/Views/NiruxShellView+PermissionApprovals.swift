@@ -10,7 +10,8 @@ extension NiruxShellView {
         requestID: String,
         behavior: PermissionApproval.Behavior
     ) {
-        defer { updateSidebar() }
+        let snapshot = ProcessSnapshot()
+        defer { updateSidebar(snapshot: snapshot) }
         let hooks = AgentHookCenter.shared
         guard hooks.approvalsEnabled, behavior != .release,
               workspaces.indices.contains(workspaceIndex),
@@ -24,7 +25,7 @@ extension NiruxShellView {
             return
         }
         // The column's `claude` must still run the session that asked.
-        let foreground = pty.foregroundProcess(snapshot: ProcessSnapshot())
+        let foreground = pty.foregroundProcess(snapshot: snapshot)
         let sent = request.sessionID.map { sessionID in
             column.confirmedClaudeSessionID(foregroundProcess: foreground) == sessionID
                 && hooks.approvalChannel().send(PermissionApprovalDecision(
@@ -46,35 +47,67 @@ extension NiruxShellView {
         NSLog("[Approvals] %@ sent for %@ request %@", behavior.rawValue, request.toolName ?? "?", requestID)
     }
 
-    /// What the column's card offers. A column on screen answers in its
-    /// terminal, and so does every column while no card can show Allow /
-    /// Deny (collapsed sidebar, pilot mode): their requests are released.
-    func sidebarApproval(for column: ColumnState, isOnScreen: Bool) -> SidebarPermissionApproval? {
-        guard isSidebarExpanded, !isPilotMode, !isOnScreen else {
-            releaseHeldApprovals(of: column)
-            return nil
-        }
-        return column.pty?.sidebarApproval(now: Date().timeIntervalSince1970).flatMap(SidebarPermissionApproval.init)
+    /// Whether the sidebar may hold the requests of a column: its card is
+    /// drawn with the buttons, for a column the user is not looking at
+    /// (its terminal dialog answers). Not in pilot mode, a collapsed
+    /// sidebar, another space (`listed` holds the listed workspaces), the
+    /// folded inactive section, or under VoiceOver, which the buttons don't
+    /// serve.
+    func approvalHold(workspaceIndex: Int, columnIndex: Int, listed: Set<Int>) -> PermissionApprovalHold {
+        guard workspaces.indices.contains(workspaceIndex) else { return .never }
+        let workspace = workspaces[workspaceIndex]
+        let isOnScreen = columnIndex == workspace.focusedIndex && (workspaceIndex == activeWSIndex || isPilotMode)
+        let cardShown = isSidebarExpanded && !isPilotMode && !isOnScreen
+            && listed.contains(workspaceIndex)
+            && !(workspace.isInactive && sidebar.isInactiveSectionCollapsed)
+            && !NSWorkspace.shared.isVoiceOverEnabled
+        let userSeesSidebar = NSApp.isActive && window?.isVisible == true && window?.isMiniaturized == false
+        return PermissionApprovalHold(cardShown: cardShown, userSeesSidebar: userSeesSidebar)
     }
 
-    /// The sidebar holds requests only for columns the user is not looking
-    /// at, while its cards can show them: otherwise the terminal dialog
-    /// answers. Releasing also lets a background subagent's dialog, which
-    /// waits for the hook, show at once.
-    func releaseHeldApprovals(of column: ColumnState) {
+    /// Release every request the sidebar can no longer hold (see
+    /// `approvalHold`), across all workspaces. Returns each column's hold,
+    /// for the cards.
+    func releaseApprovalsNotHeld() -> [ObjectIdentifier: PermissionApprovalHold] {
+        let listed = Set(visibleWorkspaceIndices)
+        var holds: [ObjectIdentifier: PermissionApprovalHold] = [:]
+        for (workspaceIndex, workspace) in workspaces.enumerated() {
+            for (columnIndex, column) in workspace.columns.enumerated() {
+                let hold = approvalHold(workspaceIndex: workspaceIndex, columnIndex: columnIndex, listed: listed)
+                holds[ObjectIdentifier(column)] = hold
+                releaseHeldApprovals(of: column) { !hold.holds(isSubagent: $0.agentID != nil) }
+            }
+        }
+        AgentHookCenter.shared.sweepApprovalsIfDue()
+        return holds
+    }
+
+    /// What the column's card offers, if its card shows the buttons.
+    func sidebarApproval(for column: ColumnState, hold: PermissionApprovalHold?) -> SidebarPermissionApproval? {
+        guard hold?.cardShown == true else { return nil }
+        let now = Date().timeIntervalSince1970
+        return column.pty?.sidebarApproval(now: now).flatMap { SidebarPermissionApproval($0, now: now) }
+    }
+
+    /// Hand held requests back to their terminal dialog (all, or those
+    /// `shouldRelease` picks). Releasing also lets a background subagent's
+    /// dialog, which waits for the hook, show at once.
+    func releaseHeldApprovals(
+        of column: ColumnState,
+        where shouldRelease: (AgentPermissionRequest) -> Bool = { _ in true }
+    ) {
         guard let pty = column.pty else { return }
-        for request in pty.takeUndecidedApprovals() {
+        for request in pty.takeUndecidedApprovals(where: shouldRelease) {
             AgentHookCenter.shared.release(request, agentUUID: column.agentUUID)
         }
     }
 
-    /// The option was turned off: every held request goes back to its
-    /// terminal dialog.
+    /// The option was turned off, or the app quits: every held request
+    /// goes back to its terminal dialog.
     func releaseAllPermissionApprovals() {
         for workspace in workspaces {
             for column in workspace.columns { releaseHeldApprovals(of: column) }
         }
-        updateSidebar()
     }
 
     static func currentSidebarApprovalsEnabled() -> Bool {
@@ -87,9 +120,12 @@ extension AgentHookCenter {
     /// the channel names this process while on. Stale decisions of an
     /// earlier run are swept either way.
     func applySidebarApprovals(enabled: Bool) {
-        approvalsEnabled = enabled
         let channel = approvalChannel()
-        channel.setListening(enabled ? ProcessInstance.running(pid: getpid()) : nil)
+        let listening = channel.setListening(enabled ? ProcessInstance.running(pid: getpid()) : nil)
+        if enabled, !listening {
+            NSLog("[Approvals] state directory not private to this user — sidebar approvals stay off")
+        }
+        approvalsEnabled = enabled && listening
         channel.sweep()
     }
 }

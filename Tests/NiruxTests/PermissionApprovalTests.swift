@@ -19,8 +19,8 @@ final class PermissionApprovalTests: XCTestCase {
 
     // MARK: - What the sidebar may approve
 
-    private func approvalText(_ tool: String, _ input: [String: Any], cwd: String? = "/proj") -> String? {
-        AgentToolInput.approvalText(toolName: tool, input: input, cwd: cwd, home: "/Users/me")
+    private func approvalText(_ tool: String, _ input: [String: Any]) -> String? {
+        AgentToolInput.approvalText(toolName: tool, input: input, home: "/Users/me")
     }
 
     func testShortSingleLineCommandsAreApprovableVerbatim() {
@@ -32,9 +32,11 @@ final class PermissionApprovalTests: XCTestCase {
         XCTAssertEqual(approvalText("Bash", ["command": longest]), longest)
     }
 
-    func testReadShowsTheSamePathTheDialogNames() {
-        XCTAssertEqual(approvalText("Read", ["file_path": "/proj/Sources/a.swift"]), "Sources/a.swift")
+    /// Never relative to a working directory the card doesn't show.
+    func testReadShowsAnAbsoluteOrHomePath() {
+        XCTAssertEqual(approvalText("Read", ["file_path": "/proj/Sources/a.swift"]), "/proj/Sources/a.swift")
         XCTAssertEqual(approvalText("Read", ["file_path": "/Users/me/.ssh/config"]), "~/.ssh/config")
+        XCTAssertEqual(approvalText("Read", ["file_path": "/Users/meow/x"]), "/Users/meow/x")
         XCTAssertEqual(approvalText("Read", ["file_path": "/etc/hosts"]), "/etc/hosts")
     }
 
@@ -61,7 +63,11 @@ final class PermissionApprovalTests: XCTestCase {
 
     func testOnlyToolsWhoseWholeMeaningIsShownQualify() {
         XCTAssertNil(approvalText("Bash", ["command": "curl example.com", "dangerouslyDisableSandbox": true]))
+        XCTAssertNil(approvalText("Bash", ["command": "curl example.com", "dangerouslyDisableSandbox": "true"]))
+        XCTAssertNil(approvalText("Bash", ["command": "curl example.com", "dangerouslyDisableSandbox": "yes"]))
+        XCTAssertNil(approvalText("Bash", ["command": "curl example.com", "dangerouslyDisableSandbox": NSNull()]))
         XCTAssertEqual(approvalText("Bash", ["command": "ls", "dangerouslyDisableSandbox": false]), "ls")
+        XCTAssertEqual(approvalText("Bash", ["command": "ls", "dangerouslyDisableSandbox": "false"]), "ls")
         XCTAssertEqual(approvalText("Bash", ["command": "sleep 60", "run_in_background": true]), "sleep 60")
         for tool in ["Edit", "MultiEdit", "Write", "NotebookEdit"] {
             XCTAssertNil(approvalText(tool, ["file_path": "/proj/a.swift", "content": "x"]), tool)
@@ -85,43 +91,59 @@ final class PermissionApprovalTests: XCTestCase {
     }
 
     func testAllowNeverCarriesPermanentRulesOrInputChanges() throws {
-        let allow = try decision(in: PermissionApproval.hookOutput(for: .allow, isSubagent: false))
+        let allow = try decision(in: PermissionApproval.hookOutput(for: .allow))
         XCTAssertEqual(allow.keys.sorted(), ["behavior"])
         XCTAssertEqual(allow["behavior"] as? String, "allow")
     }
 
-    func testDenyInterruptsOnlyTheMainThreadLikeTheTerminal() throws {
-        let main = try decision(in: PermissionApproval.hookOutput(for: .deny, isSubagent: false))
-        XCTAssertEqual(main["behavior"] as? String, "deny")
-        XCTAssertEqual(main["interrupt"] as? Bool, true)
-        XCTAssertEqual(main["message"] as? String, PermissionApproval.denyMessage)
-        let subagent = try decision(in: PermissionApproval.hookOutput(for: .deny, isSubagent: true))
-        XCTAssertEqual(subagent["interrupt"] as? Bool, false)
-        XCTAssertNil(PermissionApproval.hookOutput(for: .release, isSubagent: false))
+    /// A denial tells the agent and lets it go on, like "No" with feedback
+    /// in the terminal: it never stops a run nobody is watching.
+    func testDenyNeverInterruptsTheTurn() throws {
+        let deny = try decision(in: PermissionApproval.hookOutput(for: .deny))
+        XCTAssertEqual(deny["behavior"] as? String, "deny")
+        XCTAssertEqual(deny["interrupt"] as? Bool, false)
+        XCTAssertEqual(deny["message"] as? String, PermissionApproval.denyMessage)
+        XCTAssertNil(PermissionApproval.hookOutput(for: .release))
+    }
+
+    /// The app checks what a queued request asks it to show itself: the
+    /// receiver may be another build.
+    func testAppOnlyShowsTextItCanShowExactly() {
+        XCTAssertTrue(PermissionApproval.isDisplayable(toolName: "Bash", text: "git push"))
+        XCTAssertFalse(PermissionApproval.isDisplayable(toolName: "Edit", text: "a.swift"))
+        XCTAssertFalse(PermissionApproval.isDisplayable(toolName: "Bash", text: "echo hi\nrm -rf ~"))
+        XCTAssertFalse(PermissionApproval.isDisplayable(toolName: "Bash", text: "caf\u{00E9}"))
+        XCTAssertFalse(PermissionApproval.isDisplayable(toolName: "Bash", text: nil))
+        XCTAssertFalse(PermissionApproval.isDisplayable(toolName: nil, text: "ls"))
     }
 
     // MARK: - Which requests a receiver holds
 
     private let env = ["NIRUX_AGENT_UUID": "uuid-1", "HOME": "/Users/me"]
 
+    private let session = "0b6c1c56-5a4f-4f3e-9f1a-7d2f3c4b5a69"
+
     private func payload(
         tool: String = "Bash",
         input: [String: Any] = ["command": "git push"],
-        session: String? = "sess",
-        agent: String? = nil
+        session: String? = "0b6c1c56-5a4f-4f3e-9f1a-7d2f3c4b5a69",
+        agent: String? = nil,
+        mode: String? = "default"
     ) -> [String: Any] {
         var payload: [String: Any] = [
             "hook_event_name": "PermissionRequest", "tool_name": tool, "tool_input": input, "cwd": "/proj"
         ]
         payload["session_id"] = session
         payload["agent_id"] = agent
+        payload["permission_mode"] = mode
         return payload
     }
 
     func testReceiverHoldsApprovableRequestsWhileTheAppListens() throws {
         let main = try XCTUnwrap(PermissionApprovalWait.prepare(payload: payload(), env: env, now: 100) { true })
         XCTAssertNotNil(UUID(uuidString: main.requestID))
-        XCTAssertEqual(main.sessionID, "sess")
+        XCTAssertEqual(main.sessionID, session)
+        XCTAssertEqual(main.text, "git push")
         XCTAssertEqual(main.agentUUID, "uuid-1")
         XCTAssertFalse(main.isSubagent)
         XCTAssertEqual(main.deadline, 100 + PermissionApproval.mainThreadWindow)
@@ -136,6 +158,8 @@ final class PermissionApprovalTests: XCTestCase {
         XCTAssertNil(PermissionApprovalWait.prepare(payload: payload(), env: env, now: 1) { false }, "option off")
         XCTAssertNil(PermissionApprovalWait.prepare(payload: payload(session: nil), env: env, now: 1) { true })
         XCTAssertNil(PermissionApprovalWait.prepare(payload: payload(session: ""), env: env, now: 1) { true })
+        // A call served to a cloud session reports "served:<caller>".
+        XCTAssertNil(PermissionApprovalWait.prepare(payload: payload(session: "served:abc"), env: env, now: 1) { true })
         XCTAssertNil(PermissionApprovalWait.prepare(payload: payload(), env: ["HOME": "/Users/me"], now: 1) { true })
         XCTAssertNil(PermissionApprovalWait.prepare(
             payload: payload(tool: "Edit", input: ["file_path": "/proj/a"]), env: env, now: 1
@@ -143,6 +167,18 @@ final class PermissionApprovalTests: XCTestCase {
         var stop = payload()
         stop["hook_event_name"] = "PreToolUse"
         XCTAssertNil(PermissionApprovalWait.prepare(payload: stop, env: env, now: 1) { true })
+    }
+
+    /// Under bypass and auto modes, the dialogs left are Claude's safety
+    /// checks (a dangerous rm): they stay in the terminal, with their warning.
+    func testOnlySessionsAskingForOrdinaryApprovalAreHeld() {
+        for mode in ["default", "acceptEdits", "plan"] {
+            XCTAssertNotNil(PermissionApprovalWait.prepare(payload: payload(mode: mode), env: env, now: 1) { true }, mode)
+        }
+        for mode in ["bypassPermissions", "auto", "dontAsk", "", "future"] {
+            XCTAssertNil(PermissionApprovalWait.prepare(payload: payload(mode: mode), env: env, now: 1) { true }, mode)
+        }
+        XCTAssertNil(PermissionApprovalWait.prepare(payload: payload(mode: nil), env: env, now: 1) { true })
     }
 
     func testTheAppIsAskedOnlyForApprovableRequests() {
@@ -158,7 +194,7 @@ final class PermissionApprovalTests: XCTestCase {
 
     private func wait(session: String = "sess", agent: String = "uuid-1", at start: TimeInterval = 1_000) -> PermissionApprovalWait {
         PermissionApprovalWait(
-            requestID: UUID().uuidString, sessionID: session, agentUUID: agent, isSubagent: false,
+            requestID: UUID().uuidString, sessionID: session, agentUUID: agent, text: "ls", isSubagent: false,
             startedAt: start, deadline: start + 55
         )
     }
@@ -168,14 +204,15 @@ final class PermissionApprovalTests: XCTestCase {
         _ behavior: PermissionApproval.Behavior = .allow,
         session: String? = nil,
         agent: String? = nil,
-        at issuedAt: TimeInterval? = nil
+        version: Int = PermissionApproval.protocolVersion
     ) -> PermissionApprovalDecision {
         PermissionApprovalDecision(
             requestID: wait.requestID,
             sessionID: session ?? wait.sessionID,
             agentUUID: agent ?? wait.agentUUID,
             behavior: behavior,
-            issuedAt: issuedAt ?? wait.startedAt + 2
+            issuedAt: wait.startedAt + 2,
+            version: version
         )
     }
 
@@ -210,6 +247,14 @@ final class PermissionApprovalTests: XCTestCase {
         XCTAssertEqual(channel.decisionURL(requestID: lowercase)?.lastPathComponent, "\(lowercase.uppercased()).json")
     }
 
+    func testMarkerOfAnotherProtocolIsIgnored() throws {
+        let me = try XCTUnwrap(ProcessInstance.running(pid: getpid()))
+        XCTAssertTrue(channel.setListening(me))
+        let other = PermissionApprovalMarker(version: PermissionApproval.protocolVersion + 1, app: me)
+        try JSONEncoder().encode(other).write(to: channel.markerURL)
+        XCTAssertFalse(channel.isAppListening(), "a receiver of another build never waits on this app")
+    }
+
     func testMarkerNamesTheListeningAppProcess() throws {
         XCTAssertFalse(channel.isAppListening(), "no marker: option off")
         let me = try XCTUnwrap(ProcessInstance.running(pid: getpid()))
@@ -238,6 +283,63 @@ final class PermissionApprovalTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: staleURL.path))
         XCTAssertNotNil(channel.claimDecision(requestID: fresh.requestID))
         XCTAssertTrue(channel.isAppListening())
+    }
+
+    // MARK: - Trust
+
+    /// A state directory another account could write (a shared
+    /// NIRUX_STATE_DIR under /tmp): nothing there may pass for a decision.
+    private func stateChannel() throws -> (state: URL, channel: PermissionApprovalChannel) {
+        let state = directory.appendingPathComponent("state", isDirectory: true)
+        try FileManager.default.createDirectory(at: state, withIntermediateDirectories: true)
+        return (state, PermissionApprovalChannel(directory: state.appendingPathComponent("permission-approvals")))
+    }
+
+    func testChannelInADirectoryOthersCanWriteIsNotTrusted() throws {
+        let (state, channel) = try stateChannel()
+        let me = try XCTUnwrap(ProcessInstance.running(pid: getpid()))
+        XCTAssertTrue(channel.setListening(me))
+        XCTAssertTrue(channel.isAppListening())
+
+        chmod(state.path, 0o777)
+        XCTAssertFalse(channel.isTrusted())
+        XCTAssertFalse(channel.isAppListening(), "receivers don't wait")
+        XCTAssertFalse(channel.send(decision(for: wait())), "the app doesn't write")
+        XCTAssertFalse(channel.setListening(me))
+        chmod(state.path, 0o755)
+        XCTAssertTrue(channel.isTrusted())
+    }
+
+    func testSymlinkedChannelIsNotTrusted() throws {
+        let (state, channel) = try stateChannel()
+        let elsewhere = directory.appendingPathComponent("elsewhere", isDirectory: true)
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        chmod(elsewhere.path, 0o700)
+        try FileManager.default.createSymbolicLink(
+            at: state.appendingPathComponent("permission-approvals"), withDestinationURL: elsewhere
+        )
+        XCTAssertFalse(channel.isTrusted())
+        XCTAssertFalse(channel.send(decision(for: wait())))
+    }
+
+    /// A planted FIFO or link never blocks nor redirects the receiver.
+    func testOnlySmallRegularFilesAreRead() throws {
+        channel.setListening(try XCTUnwrap(ProcessInstance.running(pid: getpid())))
+        let fifo = wait()
+        XCTAssertEqual(mkfifo(try XCTUnwrap(channel.decisionURL(requestID: fifo.requestID)).path, 0o600), 0)
+        XCTAssertNil(channel.claimDecision(requestID: fifo.requestID), "returns at once")
+
+        let linked = wait()
+        let target = directory.appendingPathComponent("target.json")
+        try JSONEncoder().encode(decision(for: linked)).write(to: target)
+        try FileManager.default.createSymbolicLink(
+            at: try XCTUnwrap(channel.decisionURL(requestID: linked.requestID)), withDestinationURL: target
+        )
+        XCTAssertNil(channel.claimDecision(requestID: linked.requestID))
+
+        let large = wait()
+        try Data(repeating: 0x20, count: 5_000).write(to: try XCTUnwrap(channel.decisionURL(requestID: large.requestID)))
+        XCTAssertNil(channel.claimDecision(requestID: large.requestID))
     }
 
     // MARK: - Receiver wait
@@ -305,15 +407,14 @@ final class PermissionApprovalTests: XCTestCase {
         XCTAssertEqual(run(request).0, .release)
     }
 
-    func testDecisionForAnotherSessionOrColumnIsRejected() {
+    func testDecisionForAnotherSessionColumnOrProtocolIsRejected() {
         for bad in [
             decision(for: wait(), session: "teammate"),
             decision(for: wait(), agent: "uuid-2"),
-            decision(for: wait(), at: 900), // issued before the request existed
-            decision(for: wait(), at: 1_100) // after its deadline
+            decision(for: wait(), version: PermissionApproval.protocolVersion + 1)
         ] {
             let request = PermissionApprovalWait(
-                requestID: bad.requestID, sessionID: "sess", agentUUID: "uuid-1", isSubagent: false,
+                requestID: bad.requestID, sessionID: "sess", agentUUID: "uuid-1", text: "ls", isSubagent: false,
                 startedAt: 1_000, deadline: 1_055
             )
             channel.send(bad)
@@ -344,7 +445,7 @@ extension PermissionApprovalTests {
         let request = AgentHookEvent(
             kind: .claude, name: .permissionRequest, agentUUID: "uuid-1", sessionID: "sess",
             toolName: "Bash", toolSummary: "git push", agentID: "a1",
-            approvalRequestID: "ID", approvalDeadline: 55, timestamp: 1
+            approvalRequestID: "ID", approvalDeadline: 55, approvalText: "git push", timestamp: 1
         )
         let decoded = try JSONDecoder().decode(AgentHookEvent.self, from: JSONEncoder().encode(request))
         XCTAssertEqual(decoded, request)
@@ -353,6 +454,7 @@ extension PermissionApprovalTests {
         let legacy = try JSONDecoder().decode(AgentHookEvent.self, from: Data(old.utf8))
         XCTAssertNil(legacy.approvalRequestID)
         XCTAssertNil(legacy.approvalDeadline)
+        XCTAssertNil(legacy.approvalText)
 
         let resolved = AgentHookEvent.approvalResolved(request, outcome: .allow, now: 9)
         XCTAssertEqual(resolved.name, .approvalResolved)
@@ -366,20 +468,34 @@ extension PermissionApprovalTests {
     }
 
     func testSidebarHoldsARequestOnlyWhenEverythingAllowsIt() {
+        let shown = PermissionApprovalHold(cardShown: true, userSeesSidebar: true)
         func keeps(
-            enabled: Bool = true, eligible: Bool = true, onScreen: Bool = false, deadline: TimeInterval? = 100
+            eligible: Bool = true, hold: PermissionApprovalHold? = nil,
+            subagent: Bool = false, deadline: TimeInterval? = 100
         ) -> Bool {
             AgentHookCenter.keepsApproval(
-                enabled: enabled, eligible: eligible, isColumnOnScreen: onScreen, deadline: deadline, now: 50
+                eligible: eligible, hold: hold ?? shown, isSubagent: subagent, deadline: deadline, now: 50
             )
         }
         XCTAssertTrue(keeps())
-        XCTAssertFalse(keeps(enabled: false), "option off")
-        XCTAssertFalse(keeps(eligible: false), "not the column's claude or session")
-        XCTAssertFalse(keeps(onScreen: true), "the terminal answers")
+        XCTAssertTrue(keeps(subagent: true))
+        XCTAssertFalse(keeps(eligible: false), "option off, or not the column's claude or session")
+        XCTAssertFalse(keeps(hold: .never), "no card, or the column is on screen")
         XCTAssertFalse(keeps(deadline: nil))
         XCTAssertFalse(keeps(deadline: 51), "about to expire")
         XCTAssertFalse(keeps(deadline: 20), "replayed after its receiver left")
+    }
+
+    /// A background subagent's dialog waits for the hook: its request is
+    /// held only while the user can see the buttons.
+    func testSubagentRequestsNeedTheUserAtTheSidebar() {
+        let unseen = PermissionApprovalHold(cardShown: true, userSeesSidebar: false)
+        XCTAssertTrue(unseen.holds(isSubagent: false), "the main thread's dialog never waits")
+        XCTAssertFalse(unseen.holds(isSubagent: true))
+        let seen = PermissionApprovalHold(cardShown: true, userSeesSidebar: true)
+        XCTAssertTrue(seen.holds(isSubagent: true))
+        let noCard = PermissionApprovalHold(cardShown: false, userSeesSidebar: true)
+        XCTAssertFalse(noCard.holds(isSubagent: false))
     }
 
     func testOnlyTheColumnsOwnClaudeMayBeAnsweredForItsSession() {

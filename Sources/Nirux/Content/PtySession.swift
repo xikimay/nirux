@@ -328,8 +328,10 @@ final class PtySession: @unchecked Sendable {
         state.machine.markApprovalSent(requestID: requestID, behavior: behavior, now: now)
     }
 
-    func takeUndecidedApprovals() -> [AgentPermissionRequest] {
-        state.machine.takeUndecidedApprovals()
+    func takeUndecidedApprovals(
+        where shouldTake: (AgentPermissionRequest) -> Bool = { _ in true }
+    ) -> [AgentPermissionRequest] {
+        state.machine.takeUndecidedApprovals(where: shouldTake)
     }
 
     func dropApproval(requestID: String) -> AgentPermissionRequest? {

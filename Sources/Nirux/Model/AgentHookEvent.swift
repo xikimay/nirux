@@ -68,6 +68,8 @@ struct AgentHookEvent: Codable, Equatable {
     /// under; on approvalResolved, the request and what became of it.
     var approvalRequestID: String?
     var approvalDeadline: TimeInterval?
+    /// The call's exact text, as the receiver checked it.
+    var approvalText: String?
     var approvalOutcome: PermissionApproval.Outcome?
     /// Receiver-side timestamp (epoch seconds) — the emitter's clock and
     /// timezone are irrelevant.
@@ -187,6 +189,7 @@ struct AgentHookEvent: Codable, Equatable {
         transcriptPath: String? = nil,
         approvalRequestID: String? = nil,
         approvalDeadline: TimeInterval? = nil,
+        approvalText: String? = nil,
         approvalOutcome: PermissionApproval.Outcome? = nil,
         timestamp: TimeInterval = 0
     ) {
@@ -207,6 +210,7 @@ struct AgentHookEvent: Codable, Equatable {
         self.transcriptPath = transcriptPath
         self.approvalRequestID = approvalRequestID
         self.approvalDeadline = approvalDeadline
+        self.approvalText = approvalText
         self.approvalOutcome = approvalOutcome
         self.timestamp = timestamp
     }
@@ -242,6 +246,10 @@ struct AgentHookEvent: Codable, Equatable {
 /// sync hook surfaces inside the agent's UI.
 enum AgentHookCLI {
     static func run(kind: AgentHookEvent.Kind, payload: String?) -> Int32 {
+        // Claude runs each hook under a shell it kills when it gives up on
+        // the hook (an interrupted turn): this process is then reparented.
+        // Read first, before anything slow.
+        let parent = getppid()
         let raw: [String: Any]
         if kind == .codex {
             guard let payload,
@@ -269,23 +277,16 @@ enum AgentHookCLI {
         ) else { return 0 }
 
         let channel = PermissionApprovalChannel.standard
-        let wait = event.name == .permissionRequest
+        let wait = event.name == .permissionRequest && parent > 1
             ? PermissionApprovalWait.prepare(payload: raw, env: env, now: now) { channel.isAppListening() }
             : nil
         event.approvalRequestID = wait?.requestID
         event.approvalDeadline = wait?.deadline
+        event.approvalText = wait?.text
         append(event)
         guard let wait else { return 0 }
 
-        // Claude kills the hook's shell when it gives up on the hook (turn
-        // interrupted): this process is then reparented.
-        let parent = getppid()
-        let outcome = wait.waitForDecision(
-            on: channel,
-            now: { Date().timeIntervalSince1970 },
-            sleep: { Thread.sleep(forTimeInterval: $0) },
-            isAbandoned: { getppid() != parent }
-        )
+        let outcome = waitForDecision(wait, on: channel, parent: parent)
         // Reported before the decision reaches Claude, so it precedes the
         // events the decision causes (PostToolUse) in the queue.
         append(.approvalResolved(event, outcome: outcome, now: Date().timeIntervalSince1970))
@@ -294,10 +295,32 @@ enum AgentHookCLI {
         case .deny: .deny
         case .release, .expired, .invalid: nil
         }
-        if let behavior, let output = PermissionApproval.hookOutput(for: behavior, isSubagent: wait.isSubagent) {
-            FileHandle.standardOutput.write(output)
+        if let behavior, let output = PermissionApproval.hookOutput(for: behavior) {
+            try? FileHandle.standardOutput.write(contentsOf: output)
         }
         return 0
+    }
+
+    /// Waits on a monotonic clock, so a wall-clock step never stretches
+    /// the wait; stops early once Claude abandons the hook or the app that
+    /// would answer is gone (checked about once a second).
+    private static func waitForDecision(
+        _ wait: PermissionApprovalWait,
+        on channel: PermissionApprovalChannel,
+        parent: pid_t
+    ) -> PermissionApproval.Outcome {
+        let start = clock_gettime_nsec_np(CLOCK_MONOTONIC)
+        var checks = 0
+        return wait.waitForDecision(
+            on: channel,
+            now: { wait.startedAt + Double(clock_gettime_nsec_np(CLOCK_MONOTONIC) - start) / 1e9 },
+            sleep: { Thread.sleep(forTimeInterval: $0) },
+            isAbandoned: {
+                checks += 1
+                if getppid() != parent { return true }
+                return checks % 10 == 0 && !channel.isAppListening()
+            }
+        )
     }
 
     /// Only Nirux terminals export NIRUX_AGENT_UUID. An event without it
