@@ -330,32 +330,31 @@ extension NiruxApp {
             showSettingsError("Add a Telegram bot token before enabling Remote Access.")
             return false
         }
-        var state = Persistence.load() ?? PersistedState(workspaces: [], activeWorkspaceIndex: 0)
-        var settings = state.settings ?? PersistedSettings()
-        if !telegramOnly {
-            // Without a readable popup selection, keep the saved mode.
-            if let raw = settingsLaunchModePopup?.selectedItem?.representedObject as? String,
-               let mode = ClaudeLaunchMode(rawValue: raw) {
-                settings.claudeLaunchMode = mode
+        let saved = Persistence.updateSettings(liveLayout: shell?.persistedState()) { settings in
+            if !telegramOnly {
+                // Without a readable popup selection, keep the saved mode.
+                if let raw = settingsLaunchModePopup?.selectedItem?.representedObject as? String,
+                   let mode = ClaudeLaunchMode(rawValue: raw) {
+                    settings.claudeLaunchMode = mode
+                }
+                if let raw = settingsCodexLaunchModePopup?.selectedItem?.representedObject as? String,
+                   let mode = CodexLaunchMode(rawValue: raw) {
+                    settings.codexLaunchMode = mode
+                }
+                settings.claudeNoFlicker = noFlicker
+                settings.missionHandoffsEnabled = missionHandoffsEnabled
             }
-            if let raw = settingsCodexLaunchModePopup?.selectedItem?.representedObject as? String,
-               let mode = CodexLaunchMode(rawValue: raw) {
-                settings.codexLaunchMode = mode
+            settings.telegramRemoteAccessEnabled = telegramEnabled
+            settings.telegramNotifyOnCompletion = settingsTelegramCompletionCheckbox?.state != .off
+            settings.telegramNotifyOnAttention = settingsTelegramAttentionCheckbox?.state != .off
+            if !enteredToken.isEmpty, enteredToken != existingToken {
+                // A different bot has a different trust boundary and update stream.
+                settings.telegramPairedUserID = nil
+                settings.telegramPairedChatID = nil
+                settings.telegramLastUpdateID = nil
             }
-            settings.claudeNoFlicker = noFlicker
-            settings.missionHandoffsEnabled = missionHandoffsEnabled
         }
-        settings.telegramRemoteAccessEnabled = telegramEnabled
-        settings.telegramNotifyOnCompletion = settingsTelegramCompletionCheckbox?.state != .off
-        settings.telegramNotifyOnAttention = settingsTelegramAttentionCheckbox?.state != .off
-        if !enteredToken.isEmpty, enteredToken != existingToken {
-            // A different bot has a different trust boundary and update stream.
-            settings.telegramPairedUserID = nil
-            settings.telegramPairedChatID = nil
-            settings.telegramLastUpdateID = nil
-        }
-        state.settings = settings
-        guard Persistence.save(state) else {
+        guard saved else {
             showSettingsError("Could not write the settings file. Check the disk and try again.", title: "Settings")
             return false
         }
@@ -413,14 +412,12 @@ extension NiruxApp {
             showSettingsError("Could not remove the Telegram token from Keychain: \(error.localizedDescription)")
             return
         }
-        var state = Persistence.load() ?? PersistedState(workspaces: [], activeWorkspaceIndex: 0)
-        var settings = state.settings ?? PersistedSettings()
-        settings.telegramRemoteAccessEnabled = false
-        settings.telegramPairedUserID = nil
-        settings.telegramPairedChatID = nil
-        settings.telegramLastUpdateID = nil
-        state.settings = settings
-        Persistence.save(state)
+        Persistence.updateSettings(liveLayout: shell?.persistedState()) { settings in
+            settings.telegramRemoteAccessEnabled = false
+            settings.telegramPairedUserID = nil
+            settings.telegramPairedChatID = nil
+            settings.telegramLastUpdateID = nil
+        }
         settingsTelegramEnabledCheckbox?.state = .off
         settingsTelegramTokenField?.stringValue = ""
         settingsTelegramTokenField?.placeholderString = "Paste the token from @BotFather"

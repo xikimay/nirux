@@ -88,6 +88,32 @@ final class SettingsPanelTests: XCTestCase {
     }
 
     @MainActor
+    func testSaveOverUnreadableStateKeepsTheWorkspacesOnScreen() throws {
+        try withIsolatedState {
+            let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
+            shell.stopHeartbeat()
+            let workspace = try XCTUnwrap(shell.workspaces.first)
+            workspace.title = "on screen"
+            // Undecodable, with no copy to recover from.
+            try Data("{".utf8).write(to: Persistence.stateDirectory.appendingPathComponent("state.json"))
+            XCTAssertNil(Persistence.load())
+            let app = try openSettings()
+            defer { close(app) }
+            app.shell = shell
+            let fullAutoIndex = try XCTUnwrap(CodexLaunchMode.allCases.firstIndex(of: .fullAuto))
+            app.settingsCodexLaunchModePopup?.selectItem(at: fullAutoIndex)
+
+            app.settingsSave(NSButton())
+
+            XCTAssertNil(app.settingsPanel, "Save did not complete")
+            let saved = try XCTUnwrap(Persistence.load())
+            XCTAssertEqual(saved.workspaces.map(\.id), [workspace.id])
+            XCTAssertEqual(saved.workspaces.first?.title, "on screen")
+            XCTAssertEqual(saved.settings?.codexLaunchMode, .fullAuto)
+        }
+    }
+
+    @MainActor
     func testSaveKeepsPanelOpenWhenStateCannotBeWritten() throws {
         try withIsolatedState(writable: false) {
             let app = try openSettings()

@@ -47,6 +47,7 @@ final class TelegramRemoteAccessController {
     typealias SessionsProvider = () -> [RemoteAgentSession]
     typealias PromptSender = (String, String) -> RemotePromptResult
     typealias TokenLoader = () throws -> String?
+    typealias LiveLayoutProvider = () -> PersistedState?
 
     private enum PollingError: LocalizedError {
         case updateStatePersistenceFailed
@@ -61,6 +62,10 @@ final class TelegramRemoteAccessController {
     private let sessionsProvider: SessionsProvider
     private let promptSender: PromptSender
     private let tokenLoader: TokenLoader
+    /// The layout on screen, saved with settings when state.json can't be
+    /// loaded (see `Persistence.updateSettings`). The app always wires it;
+    /// the nil default is for tests.
+    private let liveLayout: LiveLayoutProvider
     private let urlSession: URLSession
     private var pollingTask: Task<Void, Never>?
     private var pollGeneration = 0
@@ -85,11 +90,13 @@ final class TelegramRemoteAccessController {
         sessions: @escaping SessionsProvider,
         sendPrompt: @escaping PromptSender,
         tokenLoader: @escaping TokenLoader = TelegramTokenStore.load,
+        liveLayout: @escaping LiveLayoutProvider = { nil },
         urlSession: URLSession = .shared
     ) {
         sessionsProvider = sessions
         promptSender = sendPrompt
         self.tokenLoader = tokenLoader
+        self.liveLayout = liveLayout
         self.urlSession = urlSession
     }
 
@@ -543,21 +550,17 @@ final class TelegramRemoteAccessController {
     }
 
     private func updatePersistedPairing(userID: Int64?, chatID: Int64?) {
-        var state = Persistence.load() ?? PersistedState(workspaces: [], activeWorkspaceIndex: 0)
-        var settings = state.settings ?? PersistedSettings()
-        settings.telegramPairedUserID = userID
-        settings.telegramPairedChatID = chatID
-        state.settings = settings
-        Persistence.save(state)
+        Persistence.updateSettings(liveLayout: liveLayout()) { settings in
+            settings.telegramPairedUserID = userID
+            settings.telegramPairedChatID = chatID
+        }
     }
 
     private func persistLastUpdateID(_ updateID: Int64) -> Bool {
-        var state = Persistence.load() ?? PersistedState(workspaces: [], activeWorkspaceIndex: 0)
-        var settings = state.settings ?? PersistedSettings()
-        guard updateID > (settings.telegramLastUpdateID ?? Int64.min) else { return true }
-        settings.telegramLastUpdateID = updateID
-        state.settings = settings
-        return Persistence.save(state)
+        guard updateID > (Persistence.load()?.settings?.telegramLastUpdateID ?? Int64.min) else { return true }
+        return Persistence.updateSettings(liveLayout: liveLayout()) { settings in
+            settings.telegramLastUpdateID = updateID
+        }
     }
 
     private func publishState() {
