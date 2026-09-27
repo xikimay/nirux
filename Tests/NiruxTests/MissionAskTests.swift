@@ -159,6 +159,10 @@ final class MissionAskTests: XCTestCase {
         XCTAssertEqual(questions(in: fixture).count, 2)
         XCTAssertEqual(ask("Which API?", in: fixture, at: replayAt + 3), 3, "and its retries resume it")
         XCTAssertEqual(try queuedEvents(in: fixture).count, 0)
+        var replayed: [String] = []
+        XCTAssertEqual(ask("Which API?", in: fixture, at: 45) { replayed.append($0) }, 3, "clock moved back")
+        XCTAssertTrue(replayed.isEmpty, "the first answer is never replayed once a new question exists")
+        XCTAssertEqual(try queuedEvents(in: fixture).count, 0)
     }
 
     func testAskWaitsForAnAnswerSavedWhileItPolls() async throws {
@@ -211,13 +215,16 @@ final class MissionAskTests: XCTestCase {
         XCTAssertEqual(status, 4)
     }
 
-    /// The CLI creates the queue file before writing its line, so drain
-    /// until the question is in the ledger rather than when the file exists.
+    /// The CLI creates the queue file before writing its line in one call,
+    /// so drain only once the file holds that line.
     private func drainUntilQuestionIsRecorded(_ fixture: Fixture) async throws -> MissionEvent {
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
-            fixture.center.drain()
-            if let question = questions(in: fixture).first { return question }
+            let size = (try? FileManager.default.attributesOfItem(atPath: fixture.eventsURL.path)[.size]) as? Int
+            if (size ?? 0) > 0 {
+                fixture.center.drain()
+                if let question = questions(in: fixture).first { return question }
+            }
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         return try XCTUnwrap(questions(in: fixture).first)
@@ -247,14 +254,16 @@ final class MissionAskTests: XCTestCase {
         XCTAssertTrue(try queuedEvents(in: fixture).isEmpty)
     }
 
-    func testAskReportsAnUnreadableLedgerAsRetryable() throws {
+    func testAskTellsAnUnreadableLedgerFromAMissingOne() throws {
         let fixture = try makeFixture()
         try Data("not json".utf8).write(to: fixture.missionsURL)
-        XCTAssertEqual(ask("Which API?", in: fixture), 1)
+        XCTAssertEqual(ask("Which API?", in: fixture), 1, "worth retrying")
+        try FileManager.default.removeItem(at: fixture.missionsURL)
+        XCTAssertEqual(ask("Which API?", in: fixture), 4, "no Mission was ever recorded")
         XCTAssertTrue(try queuedEvents(in: fixture).isEmpty)
     }
 
-    func testReceiveStopsOnlyWhenNoMissionIsActive() throws {
+    func testReceiveStopsOnlyOnceItsMissionsEnded() throws {
         let fixture = try makeFixture()
         func receive() -> Int32 {
             MissionEventCLI.receive(
@@ -270,6 +279,26 @@ final class MissionAskTests: XCTestCase {
         XCTAssertEqual(receive(), 0, "prints the completion")
         fixture.center.drain()
         XCTAssertEqual(receive(), 4, "nothing left to wait for")
+
+        let newParent = [
+            "NIRUX_MISSION_HANDOFFS": "1",
+            "NIRUX_WORKSPACE_ID": parentWorkspaceID,
+            "NIRUX_AGENT_UUID": otherAgentUUID
+        ]
+        XCTAssertEqual(MissionEventCLI.receive(
+            arguments: ["--timeout", "0"],
+            environment: newParent,
+            eventsURL: fixture.eventsURL,
+            missionsURL: fixture.missionsURL
+        ), 3, "its Mission may still be on the way")
+
+        try Data("not json".utf8).write(to: fixture.missionsURL)
+        XCTAssertEqual(MissionEventCLI.receive(
+            arguments: ["--timeout", "0"],
+            environment: parentEnvironment,
+            eventsURL: fixture.eventsURL,
+            missionsURL: fixture.missionsURL
+        ), 1)
     }
 
     func testReplyStopsWhenTheQuestionWasAlreadyAnswered() throws {
@@ -290,11 +319,27 @@ final class MissionAskTests: XCTestCase {
         XCTAssertTrue(try queuedEvents(in: fixture).isEmpty)
     }
 
-    func testDisabledSettingAndBadCommandsNeverTouchTheMailbox() {
+    func testDisabledSettingAndBadCommandsStopBeforeTheMailbox() throws {
         XCTAssertEqual(MissionEventCLI.main(["ask", "--message", "Hi"], handoffsEnabled: { false }), 4)
         XCTAssertEqual(MissionEventCLI.main([], handoffsEnabled: { true }), 2)
         XCTAssertEqual(MissionEventCLI.main(["response"], handoffsEnabled: { true }), 2)
-        XCTAssertEqual(MissionEventCLI.main(["ask", "--message"], handoffsEnabled: { nil }), 2)
+
+        let fixture = try makeFixture()
+        for arguments in [["--message"], ["--message", String(repeating: "x", count: 501)], ["--timeout", "5"]] {
+            XCTAssertEqual(MissionEventCLI.ask(
+                arguments: arguments,
+                environment: childEnvironment(),
+                eventsURL: fixture.eventsURL,
+                missionsURL: fixture.missionsURL
+            ), 2, "\(arguments)")
+        }
+        XCTAssertEqual(MissionEventCLI.ask(
+            arguments: ["--message", "Hi"],
+            environment: [:],
+            eventsURL: fixture.eventsURL,
+            missionsURL: fixture.missionsURL
+        ), 2, "not a Mission terminal")
+        XCTAssertTrue(try queuedEvents(in: fixture).isEmpty)
     }
 
     func testTimeoutCanShortenButNeverExtendTheWait() {

@@ -122,7 +122,7 @@ enum MissionEventCLI {
         }
 
         var ledger = MissionLedgerReader(url: missionsURL)
-        guard ledger.refresh() else { return unreadableLedger(missionsURL) }
+        guard loadLedger(&ledger) else { return unreadableLedger(missionsURL) }
         let mission: Mission
         switch childMission(context, in: ledger.missions) {
         case let .active(active):
@@ -213,6 +213,17 @@ enum MissionEventCLI {
     private static func questionID(
         for message: String, context: ChildContext, in mission: Mission, now: TimeInterval
     ) -> String {
+        func derivedID(_ generation: Int) -> String {
+            derivedEventID([
+                "nirux.mission.question",
+                context.missionID,
+                context.workspaceID,
+                context.agentUUID,
+                String(generation),
+                message
+            ])
+        }
+        let recorded = Set(mission.events.lazy.filter { $0.kind == .question }.map(\.id))
         let settled = Set(mission.events.compactMap { event -> String? in
             guard event.kind == .response,
                   let receivedAt = event.childConsumedAt,
@@ -220,17 +231,17 @@ enum MissionEventCLI {
             else { return nil }
             return event.inReplyTo
         })
-        let generation = mission.events.filter { event in
-            event.kind == .question && event.message == message && settled.contains(event.id)
-        }.count
-        return derivedEventID([
-            "nirux.mission.question",
-            context.missionID,
-            context.workspaceID,
-            context.agentUUID,
-            String(generation),
-            message
-        ])
+        // A later generation also closes an earlier one, so a clock moved
+        // back never reopens an old question and replays its answer.
+        var current = derivedID(0)
+        var generation = 0
+        while recorded.contains(current) {
+            let next = derivedID(generation + 1)
+            guard settled.contains(current) || recorded.contains(next) else { break }
+            current = next
+            generation += 1
+        }
+        return current
     }
 
     /// RFC 9562 version 8 UUID from a SHA-256 digest. Only the last
@@ -278,13 +289,13 @@ enum MissionEventCLI {
             nextParentEvent(context: context, in: missions)
         }
         guard let (mission, event) = next else {
-            // Checked only after a full wait: a Mission requested just before
-            // this call appears once Nirux has created its worktree.
-            guard ledger.missions.contains(where: { mission in
-                mission.parentWorkspaceID == context.workspaceID
-                    && mission.parentAgentUUID == context.agentUUID
-                    && mission.status == .active
-            }) else {
+            if !ledger.hasRead, !ledger.isMissing { return unreadableLedger(missionsURL) }
+            // A parent that never had a Mission keeps waiting: Nirux records
+            // one only after creating its worktree, which can take a while.
+            let missions = ledger.missions.filter {
+                $0.parentWorkspaceID == context.workspaceID && $0.parentAgentUUID == context.agentUUID
+            }
+            if !missions.isEmpty, !missions.contains(where: { $0.status == .active }) {
                 writeStandardError("No active Mission for this terminal; stop waiting.")
                 return 4
             }
@@ -341,7 +352,7 @@ enum MissionEventCLI {
             return usage("reply --event <question-event-id> --message <1-\(maxMessageLength) characters>")
         }
         var ledger = MissionLedgerReader(url: missionsURL)
-        guard ledger.refresh() else { return unreadableLedger(missionsURL) }
+        guard loadLedger(&ledger) else { return unreadableLedger(missionsURL) }
         guard let mission = ledger.missions.first(where: { mission in
             mission.parentWorkspaceID == context.workspaceID
                 && mission.parentAgentUUID == context.agentUUID
@@ -355,7 +366,8 @@ enum MissionEventCLI {
         }) else {
             writeStandardError(
                 "This question is not waiting for an answer from this terminal: it was already answered "
-                    + "(perhaps from Nirux Activity), its Mission ended, or it belongs to another parent."
+                    + "(perhaps from Nirux Activity), its Mission ended, or it belongs to another parent. "
+                    + "Do not resend it; keep using `receive` for the child's other events."
             )
             return 4
         }
@@ -508,6 +520,12 @@ enum MissionEventCLI {
             "Could not write the Mission queue at \(url.path): \(String(cString: strerror(code))). "
                 + "If a sandbox blocks writes there, run the command outside the sandbox."
         )
+    }
+
+    /// Read the ledger once. A missing file is an empty ledger, since Nirux
+    /// creates it with the first Mission; any other failure is status 1.
+    private static func loadLedger(_ ledger: inout MissionLedgerReader) -> Bool {
+        ledger.refresh() || ledger.isMissing
     }
 
     private static func unreadableLedger(_ url: URL) -> Int32 {

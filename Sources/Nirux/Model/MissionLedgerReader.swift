@@ -21,6 +21,16 @@ struct MissionLedgerReader {
         self.url = url
     }
 
+    /// Whether a read succeeded, so `missions` reflects the file.
+    var hasRead: Bool { signature != nil }
+
+    /// Nirux creates the ledger with the first Mission, so a missing file
+    /// means there is none; other stat failures are not "missing".
+    var isMissing: Bool {
+        var info = stat()
+        return stat(url.path, &info) != 0 && errno == ENOENT
+    }
+
     /// Decode the ledger again only when the file changed since the last
     /// successful read. Returns true when `missions` was replaced. A failed
     /// read keeps the previous missions and is retried on the next call.

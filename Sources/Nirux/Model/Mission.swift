@@ -50,8 +50,9 @@ struct MissionEvent: Codable, Equatable {
     /// Separate from Activity delivery: whether the parent agent CLI has
     /// consumed this child event. UI display must not consume an agent inbox.
     var parentConsumedAt: TimeInterval?
-    /// Set on a response once the child's `ask` has printed it, so asking
-    /// the same question again starts a new exchange instead of replaying it.
+    /// Set on a response once the child's `ask` has printed it. Asking the
+    /// same question again replays the answer for a short window (a rerun
+    /// after a cut-off command), then starts a new exchange.
     var childConsumedAt: TimeInterval?
 
     init(

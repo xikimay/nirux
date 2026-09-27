@@ -266,8 +266,10 @@ extension NiruxShellView {
           shell tool stops the command before it prints anything. An identical `ask` resumes the
           same question instead of sending it twice, and prints the answer if it arrived meanwhile.
           For `reply`, 3 means Nirux has not confirmed the answer yet: do not send it again.
-        - 4: stop. Mission handoffs are off, the Mission has ended, the terminal is not part of it,
-          or the question no longer waits for an answer.
+        - 4: do not retry that command. Mission handoffs are off, the Mission has ended, the
+          terminal is not part of it, or (for `reply`) the question no longer waits for an answer,
+          for example because a human answered it from Nirux Activity.
+        - 2: invalid usage, or not a Mission terminal; the error message says which.
         - 1: Nirux's state could not be read or written. If a sandbox blocks it, run the command
           outside the sandbox.
 
