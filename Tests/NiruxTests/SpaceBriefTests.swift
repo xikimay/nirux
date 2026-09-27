@@ -160,7 +160,7 @@ final class SpaceBriefTests: XCTestCase {
         )
         XCTAssertEqual(
             NiruxShellView.claudeCommand(mode: .default, briefFile: file, shell: "/opt/homebrew/bin/fish"),
-            "command claude --append-system-prompt (command cat '\(file)' | string collect)"
+            "command claude --append-system-prompt \"$(command cat '\(file)')\""
         )
         // tcsh keeps the file flag: no substitution keeps multi-line text whole.
         XCTAssertEqual(

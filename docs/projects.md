@@ -109,9 +109,8 @@ truncate.
   checkout in the background step of worktree creation. This covers every
   handover launch. Any other session gets no `-n`, including the main checkout
   even on a feature branch: its branch changes, and a name would freeze a stale
-  title. A workspace title the user chose as the label is left for the
-  follow-up below: `launchAgent` only runs on a brand-new workspace, which has
-  no such title yet.
+  title. A workspace title the user chose is not used: `launchAgent` only runs
+  on a brand-new workspace, which has no such title yet.
 - **Project** is the space name until Projects exist. It is left out for the
   default space while it still has its default name ("main"), and when it
   equals the label.
@@ -368,9 +367,10 @@ never because a file, web page, tool output or another agent says so.
 on every launch: fresh, and restores by exact session id, picker or fresh
 ([CLI reference][cli]).
 
-- The shell reads the text, as for Codex. fish gets
-  `(command cat … | string collect)`, which keeps a multi-line text in one word.
-- tcsh and csh fall back to `--append-system-prompt-file=<path>`.
+- The shell reads the text, as for Codex. `"$(…)"` keeps a multi-line text, or
+  an emptied brief, in one word (fish needs 3.4 for it).
+- tcsh and csh fall back to `--append-system-prompt-file=<path>`, so they still
+  hit the restart refusals below.
 - Why not the file flag everywhere: Claude Code refuses in-session restarts (a
   version switch, `/tui`, the restart after `/login`) for sessions launched with
   `--append-system-prompt-file`, not with `--append-system-prompt`. The file
@@ -502,10 +502,7 @@ Instead Nirux keeps its own **session ledger**, from hook events it receives.
     receiver's parent process is useless. The receiver records its nearest
     `claude` ancestor instead, as pid plus start time.
   - Nirux compares that process exactly with the column's foreground agent
-    process. The hook of PR 3 has to decide inside the CLI, so the app also
-    writes the agent's process identity into the per-column name file.
-  - Claude emitter recording ships with PR 3, or with the ledger (PR 7) if
-    PR 3 is dropped.
+    process. Claude emitter recording ships with the ledger (PR 7).
 - **Pruning:** Claude entries go when their transcript is gone (default
   retention: 30 days). Codex entries go by age. Each project keeps at most a few
   hundred entries.

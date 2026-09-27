@@ -7,16 +7,15 @@ extension NiruxShellView {
     /// shell as one word. Claude refuses in-session restarts (a version
     /// switch, /tui, the restart after /login) for sessions launched with
     /// `--append-system-prompt-file`, not with `--append-system-prompt`.
-    /// `command cat` skips a user's `cat` alias or function. tcsh and csh
-    /// keep the file flag: they have no command substitution that keeps a
-    /// multi-line text in one word.
+    /// `command cat` skips a user's `cat` alias or function. `"$(…)"` stays
+    /// one word even for an emptied brief (fish needs 3.4 for it; fish's
+    /// `(…)` would give no word at all and swallow the next argument). tcsh
+    /// and csh keep the file flag: they have no command substitution that
+    /// keeps a multi-line text in one word.
     static func claudeAppendSystemPromptArguments(briefFile: String, shell: String) -> [String] {
-        let read = "command cat \(Self.shellQuotedArgument(briefFile))"
         switch (shell as NSString).lastPathComponent {
         case "tcsh", "csh": return [Self.shellQuotedArgument("--append-system-prompt-file=" + briefFile)]
-        // fish splits `(…)` output on newlines; `string collect` keeps one word.
-        case "fish": return ["--append-system-prompt", "(\(read) | string collect)"]
-        default: return ["--append-system-prompt", "\"$(\(read))\""]
+        default: return ["--append-system-prompt", "\"$(command cat \(Self.shellQuotedArgument(briefFile)))\""]
         }
     }
 
