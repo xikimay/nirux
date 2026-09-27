@@ -516,11 +516,11 @@ final class TelegramRemoteAccessTests: XCTestCase {
         XCTAssertEqual(update.callbackQuery?.data, "session:agent-uuid")
     }
 
-    func testRecognizedAgentCapabilityGate() {
-        XCTAssertTrue(AgentStatusMachine.isRecognizedAgentProcess("claude"))
-        XCTAssertTrue(AgentStatusMachine.isRecognizedAgentProcess("codex"))
-        XCTAssertFalse(AgentStatusMachine.isRecognizedAgentProcess("zsh"))
-        XCTAssertFalse(AgentStatusMachine.isRecognizedAgentProcess("vim"))
+    func testRemotePromptCapabilityGate() {
+        XCTAssertTrue(AgentStatusMachine.acceptsRemotePrompts(processName: "claude"))
+        XCTAssertTrue(AgentStatusMachine.acceptsRemotePrompts(processName: "codex"))
+        XCTAssertFalse(AgentStatusMachine.acceptsRemotePrompts(processName: "zsh"))
+        XCTAssertFalse(AgentStatusMachine.acceptsRemotePrompts(processName: "gemini"))
     }
 
     @MainActor

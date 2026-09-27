@@ -74,6 +74,20 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         XCTAssertEqual(admit(.stop, "legacy", from: nil, foreground: codex), .rejected)
     }
 
+    func testClaudeHooksUnderAnActivityOnlyAgentAreNested() {
+        // A `claude -p` Gemini CLI or OpenCode ran from its shell tool
+        // inherits the column UUID; it must not drive the column.
+        for name in ["gemini", "opencode"] {
+            let agent = ForegroundProcess(
+                instance: ProcessInstance(pid: 800, startedAt: 80),
+                name: name,
+                arguments: [name]
+            )
+            XCTAssertEqual(admit(.stop, "nested", from: nested, foreground: agent), .rejected, name)
+            XCTAssertEqual(admit(.sessionStart, "nested", from: nil, foreground: agent), .rejected, name)
+        }
+    }
+
     func testReceiverWithoutEmitterRoutesButNeverBinds() {
         // An older Nirux build still registered as the hook command.
         _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
@@ -195,6 +209,8 @@ final class ClaudeSessionTrackerTests: XCTestCase {
 
     func testCodexHooksUnderAnotherAgentAreNested() {
         XCTAssertTrue(AgentHookCenter.isNestedCodexHook(foregroundName: "claude"))
+        XCTAssertTrue(AgentHookCenter.isNestedCodexHook(foregroundName: "gemini"))
+        XCTAssertTrue(AgentHookCenter.isNestedCodexHook(foregroundName: "opencode"))
         XCTAssertFalse(AgentHookCenter.isNestedCodexHook(foregroundName: "codex"))
         XCTAssertFalse(AgentHookCenter.isNestedCodexHook(foregroundName: "zsh"))
         XCTAssertFalse(AgentHookCenter.isNestedCodexHook(foregroundName: nil))

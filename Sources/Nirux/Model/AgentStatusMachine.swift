@@ -87,17 +87,42 @@ struct AgentStatusMachine {
     private static let reminderRaceWindow: TimeInterval = 3.0
     private static let reminderDelay: TimeInterval = 5.0
 
-    /// Central capability gate shared by local status and remote prompt
-    /// routing. Bot commands remain agent-agnostic even as this allowlist
-    /// grows with Nirux's supported terminal agents.
+    /// Agents Nirux integrates with: lifecycle hooks (Claude Code), turn
+    /// notifications (Codex), launch presets and session restore.
+    static let integratedAgentProcesses: Set<String> = ["claude", "codex"]
+
+    /// Agents recognized by foreground process name alone — no hooks, no
+    /// launcher, no restore. Their status comes from the output-activity
+    /// fallback in `tick`; closing their column asks first like any agent's.
+    /// Names are `ProcessSnapshot.execName` results: Gemini CLI runs as
+    /// `node [flags] …/gemini`, opencode as a native `opencode` binary.
+    static let activityOnlyAgentProcesses: Set<String> = ["gemini", "opencode"]
+
+    /// Central gate for local agent status, nested-hook attribution and
+    /// close confirmation.
     static func isRecognizedAgentProcess(_ name: String) -> Bool {
-        name == "claude" || name == "codex"
+        integratedAgentProcesses.contains(name) || activityOnlyAgentProcesses.contains(name)
+    }
+
+    /// Telegram injects prompts only into integrated agents. Claude's hooks
+    /// report the dialogs a remote prompt must not answer; an activity-only
+    /// agent reports nothing, so its permission prompt looks like any
+    /// silence and a prompt could land on it. (Codex's notify reports turn
+    /// ends only — the same blind spot, accepted before this tier existed.)
+    /// Bot commands themselves stay agent-agnostic.
+    static func acceptsRemotePrompts(processName name: String) -> Bool {
+        integratedAgentProcesses.contains(name)
     }
 
     /// Why the column wants the user, while it does: the oldest dialog
     /// still believed open, else the last attention event's reason.
     var attentionReason: AgentAttentionReason? {
         guard state == .needsAttention else { return nil }
+        // Dialogs are Claude's: a suspended claude's stay pending behind an
+        // activity-only agent, but don't explain that agent's silence.
+        if let lastForegroundName, Self.activityOnlyAgentProcesses.contains(lastForegroundName) {
+            return lastAttentionReason
+        }
         return openDialogs.first?.reason ?? lastAttentionReason
     }
 
@@ -378,7 +403,7 @@ struct AgentStatusMachine {
     @discardableResult
     mutating func tick(fgName: String, isUserFocused: Bool, now: Date) -> AgentStatus {
         let isAgent = Self.isRecognizedAgentProcess(fgName)
-        if fgName != lastForegroundName { foregroundChanged(to: fgName, isAgent: isAgent, now: now) }
+        if fgName != lastForegroundName { foregroundChanged(to: fgName, now: now) }
 
         guard isAgent else {
             hookWorking = false
@@ -437,20 +462,28 @@ struct AgentStatusMachine {
     }
 
     /// A different foreground command inherits nothing from the previous
-    /// one — except hook capability, which stays: the hook event
-    /// (SessionStart) can arrive BEFORE the next process-table snapshot
-    /// notices the change, and clearing it here would knock the session
-    /// back into the flaky fallback for no reason.
-    private mutating func foregroundChanged(to fgName: String, isAgent: Bool, now: Date) {
+    /// one — except hook capability, which stays (unless an activity-only
+    /// agent takes over, see below): the hook event (SessionStart) can
+    /// arrive BEFORE the next process-table snapshot notices the change,
+    /// and clearing it here would knock the session back into the flaky
+    /// fallback for no reason.
+    private mutating func foregroundChanged(to fgName: String, now: Date) {
         lastForegroundName = fgName
         foregroundSince = now
         hookWorking = false
         lastReadAt = 0 // the old command's dying output is not this one's work
         lastAttentionReason = nil
-        // Another agent took over the terminal: a `claude` that died without
-        // SessionEnd left its dialogs behind. (A shell in front may just
-        // mean it's suspended; a new claude's SessionStart clears them.)
-        if isAgent, fgName != "claude" { pendingDialogs.removeAll() }
+        // Another integrated agent took over the terminal: a `claude` that
+        // died without SessionEnd left its dialogs behind. (A shell in front
+        // may just mean it's suspended; a new claude's SessionStart clears
+        // them.) An activity-only agent keeps them: it may run in front of a
+        // suspended claude whose dialog is back on `fg`, and they are what
+        // keeps Telegram from typing into it.
+        if Self.integratedAgentProcesses.contains(fgName), fgName != "claude" { pendingDialogs.removeAll() }
+        // No hook ever drives an activity-only agent (a Claude or Codex hook
+        // under it is a nested run's); a claude's leftover kind would mute
+        // its OSC 9 notifications.
+        if Self.activityOnlyAgentProcesses.contains(fgName) { hookKind = nil }
     }
 
     private mutating func startFallbackTurn(now: Date) {

@@ -9,14 +9,14 @@ Nirux is alpha software.
 - Persistent workspaces: keep each task's name and context visible, stack workspaces vertically, and archive inactive ones in a collapsible sidebar section that does not poll GitHub.
 - Horizontal columns: mix Ghostty-backed terminals, WKWebView browser columns, and Monaco editor columns in the same workspace. `Cmd+F` in a terminal searches its scrollback with Ghostty's native search, highlighting every match.
 - Agent launchers: start Claude Code or Codex from the command palette with configurable permission and sandbox presets.
-- Attention and Activity: per-column agent status (working / needs attention, with elapsed time) driven by real Claude Code hooks and Codex turn notifications — not output guessing — plus a persistent sidebar feed, edge glows for off-screen attention, native macOS notifications that focus the right workspace and column on click, and a Dock badge counting waiting workspaces.
+- Attention and Activity: per-column agent status (working / needs attention, with elapsed time) driven by real Claude Code hooks and Codex turn notifications — not output guessing (Gemini CLI and OpenCode, which have no hooks, get output-activity status) — plus a persistent sidebar feed, edge glows for off-screen attention, native macOS notifications that focus the right workspace and column on click, and a Dock badge counting waiting workspaces.
 - Claude context usage: a Claude column's title bar shows how full its session's context window is (`ctx 62%`, or `ctx 124k` while the window size is unknown), with the session's token totals in a tooltip — read from the session transcript, see [Claude context usage](#claude-context-usage).
 - Opt-in Telegram Remote Access: pair one private Telegram user to list live agent sessions, inspect status and recent output, receive completion/attention alerts, and continue a selected session without exposing a webhook or general-purpose shell.
 - Worktree flow: create or open Git worktrees as new workspaces, optionally handing context from the current agent session into the new workspace.
 - Built-in editor: open files, keep tabs, search the workspace, browse the file tree with Finder icons, view Git changes, and toggle file diffs. Find/replace, word wrap, font zoom, per-tab scroll restore, and disk-conflict protection included.
 - Browser context: open URLs in app, keep URL history, import cookies from Chrome, Brave, Arc, or Edge into the shared WebKit data store, download files to ~/Downloads, and inspect pages with the Web Inspector.
 - Pilot mode: switch to a compact overview of active workspaces with branch, column, diff, PR, CI, and review state where available.
-- Session restore: workspace layout, editor tabs, browser URLs, sidebar state, detected Claude/Codex launch modes, and verified Claude session / Codex thread IDs are saved under Application Support, with rotating backups for corruption recovery. Each agent column resumes its own conversation by exact ID (`claude --resume <id>`, `codex resume <id>`) in the directory it ran in; a Claude session that was never prompted restarts fresh, and legacy, missing, malformed, or duplicate IDs open the agent's interactive resume picker instead of guessing the last session. A `claude -p` launched by a column's agent, or a `codex exec` launched by a Claude column, keeps its own session and doesn't drive that column's status, notifications, or restore.
+- Session restore: workspace layout, editor tabs, browser URLs, sidebar state, detected Claude/Codex launch modes, and verified Claude session / Codex thread IDs are saved under Application Support, with rotating backups for corruption recovery. Each agent column resumes its own conversation by exact ID (`claude --resume <id>`, `codex resume <id>`) in the directory it ran in; a Claude session that was never prompted restarts fresh, and legacy, missing, malformed, or duplicate IDs open the agent's interactive resume picker instead of guessing the last session. A `claude -p` launched by a column's agent, or a `codex exec` launched by a Claude, Gemini CLI or OpenCode column, keeps its own session and doesn't drive that column's status, notifications, or restore.
 
 ## Requirements
 
@@ -111,7 +111,7 @@ Useful shortcuts:
 | `Shift+Cmd+P` | Command palette, including from the editor |
 | `Cmd+T` | New terminal column |
 | `Cmd+B` | Open browser URL flow |
-| `Cmd+W` | Close editor tab, column, or workspace depending on context — asks first when a Claude or Codex session is running (Return cancels, ⌘D closes); with Settings or a detached Web Inspector in front, closes that window instead |
+| `Cmd+W` | Close editor tab, column, or workspace depending on context — asks first when a Claude, Codex, Gemini CLI or OpenCode session is running (Return cancels, ⌘D closes); with Settings or a detached Web Inspector in front, closes that window instead |
 | `Cmd+1…9` | Focus column N |
 | `Cmd+Left` / `Cmd+Right` | Focus previous or next column |
 | `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column |
@@ -153,7 +153,7 @@ Nirux installs lightweight lifecycle hooks so agent status is exact instead of g
 - `~/.claude/settings.json` gains `hooks` entries invoking `Nirux --hook claude` on session start, prompt submit, tool use, notification, stop, and session end. Existing hooks are preserved; the entries refresh themselves on every launch.
 - `~/.codex/config.toml` gains a `notify` entry invoking `Nirux --hook codex` on completed turns (left untouched if you already have your own `notify`).
 
-Each event carries the column's stable `NIRUX_AGENT_UUID`, so status and attention signals are attributed to the exact column that emitted them — across restarts. Agents launched outside Nirux (or before the hooks were installed) fall back to simple output-activity detection. To remove the hooks, delete the marked entries from those two files.
+Each event carries the column's stable `NIRUX_AGENT_UUID`, so status and attention signals are attributed to the exact column that emitted them — across restarts. Agents launched outside Nirux (or before the hooks were installed) fall back to simple output-activity detection. Gemini CLI and OpenCode have no hooks: Nirux recognizes them by process name (`gemini`, also behind its `node` launcher, and `opencode`) and always uses output-activity detection for them. To remove the hooks, delete the marked entries from those two files.
 
 Both files are global, so every Claude Code and Codex session on the Mac runs these hooks. They are guarded on `NIRUX_AGENT_UUID`, which Nirux terminals set and processes started from them inherit: a session without it stops at a shell test and never launches Nirux, and Nirux ignores any event that arrives without it. Symlinked config files (dotfiles) are updated in place; the link is kept.
 
@@ -178,12 +178,12 @@ Set it up with a dedicated bot:
 
 Supported commands:
 
-- `/sessions` — list and select recognized live agent sessions.
+- `/sessions` — list and select live Claude Code and Codex sessions.
 - `/status` — show the selected session's workspace, column, state, and directory.
 - `/tail` — show a bounded plain-text tail of recent terminal output.
 - `/help` — show the command summary.
 
-The bot token is stored as a generic password in macOS Keychain, never in `state.json`. Nirux persists only non-secret preferences, the paired Telegram user/chat IDs, and the last consumed update ID. Once pairing is complete, messages from every other user or chat are ignored. There is deliberately no `/exec`: prompts are routed by stable column UUID and injected only after Nirux re-verifies that a recognized agent process—not an idle shell—is currently live in that column. Clearing the token disables Remote Access and removes the pairing.
+The bot token is stored as a generic password in macOS Keychain, never in `state.json`. Nirux persists only non-secret preferences, the paired Telegram user/chat IDs, and the last consumed update ID. Once pairing is complete, messages from every other user or chat are ignored. There is deliberately no `/exec`: prompts are routed by stable column UUID and injected only after Nirux re-verifies that a Claude Code or Codex process—not an idle shell—is currently live in that column. Gemini CLI and OpenCode columns are not offered: without hooks, Nirux can't tell that a permission prompt is on screen, so a remote prompt could answer it. Clearing the token disables Remote Access and removes the pairing.
 
 ### Terminal appearance (Ghostty config)
 

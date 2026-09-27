@@ -150,6 +150,10 @@ enum PilotSidebarRenderer {
             return claudeAppIcon ?? sfSymbol("sparkles", color: color)
         case "codex":
             return codexAppIcon ?? sfSymbol("brain.head.profile", color: color)
+        case "gemini":
+            return sfSymbol("sparkle", color: color)
+        case "opencode":
+            return sfSymbol("chevron.left.forwardslash.chevron.right", color: color)
         case "vim", "nvim", "vi", "helix", "hx", "nano", "emacs":
             return sfSymbol("pencil.line", color: color)
         case "ssh", "mosh":

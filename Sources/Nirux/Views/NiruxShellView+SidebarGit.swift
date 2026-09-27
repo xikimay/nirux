@@ -590,10 +590,13 @@ extension NiruxShellView {
     // MARK: - Terminal Redraw
 
     private static let shells: Set<String> = ["zsh", "bash", "fish", "sh", "-zsh", "-bash"]
-    /// Processes that redraw correctly from SIGWINCH alone — Ctrl+L clears their session/screen.
-    /// Claude Code rebinds Ctrl+L to `/clear`, so broadcasting it on every layout
-    /// change (e.g. Cmd+E width cycle, pilot-mode toggle) wiped active sessions.
-    private static let sigwinchOnly: Set<String> = ["codex", "claude"]
+    /// Recognized agents redraw correctly from SIGWINCH alone — Ctrl+L clears their session/screen.
+    /// Claude Code rebinds Ctrl+L to `/clear` and Gemini CLI's clears its history, so
+    /// broadcasting it on every layout change (e.g. Cmd+E width cycle, pilot-mode toggle)
+    /// wiped active sessions.
+    private static func redrawsFromSigwinchAlone(_ name: String) -> Bool {
+        AgentStatusMachine.isRecognizedAgentProcess(name)
+    }
 
     /// Light redraw: ask every terminal to refresh its surface and mark its
     /// view dirty. No keystrokes are sent to the TUI — use
@@ -609,8 +612,8 @@ extension NiruxShellView {
     }
 
     /// Heavy redraw: refresh every terminal surface and additionally send
-    /// Ctrl+L (0x0C) to any foreground process that isn't a plain shell
-    /// (claude, codex, vim, htop, etc.) so TUI apps repaint their buffer.
+    /// Ctrl+L (0x0C) to any foreground process that isn't a plain shell or
+    /// a recognized agent (vim, htop, etc.) so TUI apps repaint their buffer.
     func redrawAllTerminals() {
         let snap = ProcessSnapshot()
         for workspace in workspaces {
@@ -618,11 +621,11 @@ extension NiruxShellView {
                 col.terminalView?.fitToSize()
                 col.pty?.forceRedraw()
                 col.terminalView?.needsDisplay = true
-                // Ctrl+L to any non-shell TUI (claude, vim, htop, etc.)
+                // Ctrl+L to any non-shell TUI (vim, htop, etc.)
                 // Skip processes that handle SIGWINCH correctly on their own.
                 if let name = col.pty?.foregroundProcessName(snapshot: snap),
                    !Self.shells.contains(name),
-                   !Self.sigwinchOnly.contains(name) {
+                   !Self.redrawsFromSigwinchAlone(name) {
                     col.pty?.sendRaw(Data([0x0C]))
                 }
             }

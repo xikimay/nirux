@@ -370,7 +370,7 @@ final class TelegramRemoteAccessController {
         }
         let agentUUID = String(data.dropFirst("session:".count))
         guard let session = sessionsProvider().first(where: { $0.id == agentUUID }) else {
-            try? await client.answerCallbackQuery(id: callback.id, text: "That agent session is no longer live.")
+            try? await client.answerCallbackQuery(id: callback.id, text: "That agent session is no longer available.")
             return
         }
         selectedAgentUUID = session.id
@@ -383,7 +383,7 @@ final class TelegramRemoteAccessController {
         let sessions = sessionsProvider()
         guard !sessions.isEmpty else {
             selectedAgentUUID = nil
-            _ = await send("No recognized live agent sessions are available.", chatID: chatID, client: client)
+            _ = await send("No live Claude Code or Codex sessions are available.", chatID: chatID, client: client)
             return
         }
         if sessions.count == 1 { selectedAgentUUID = sessions[0].id }
@@ -429,7 +429,7 @@ final class TelegramRemoteAccessController {
             if let message { rememberReplyRoute(message.messageID, agentUUID: session.id) }
         case .sessionUnavailable:
             if selectedAgentUUID == target { selectedAgentUUID = nil }
-            _ = await send("That agent session is no longer live. Use /sessions to choose another.", chatID: chatID, client: client)
+            _ = await send("That agent session is no longer available. Use /sessions to choose another.", chatID: chatID, client: client)
         case .emptyPrompt:
             _ = await send("The prompt was empty after removing terminal control characters.", chatID: chatID, client: client)
         }
@@ -553,7 +553,7 @@ final class TelegramRemoteAccessController {
     private static let helpText = """
     Nirux Telegram Remote Access
 
-    /sessions — list and select recognized live agent sessions
+    /sessions — list and select live Claude Code and Codex sessions
     /status — show the selected session status
     /tail — show recent terminal output
     /help — show this message

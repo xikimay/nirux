@@ -157,7 +157,9 @@ final class ProcessSnapshot {
             if let capturedArguments {
                 arguments = capturedArguments[pid] ?? []
             } else {
-                arguments = Self.arguments(of: pid, maxArgs: 2)
+                // Room for runtime flags before the script (`node
+                // --no-warnings=… --max-old-space-size=… …/gemini`).
+                arguments = Self.arguments(of: pid, maxArgs: 8)
             }
             if let name = Self.execName(from: arguments) ?? commMap[pid], matches(name) { return name }
             pending.append(contentsOf: childrenMap[pid] ?? [])
@@ -190,11 +192,33 @@ final class ProcessSnapshot {
         if runtimeBinaries.contains(name0), argv.count >= 2 {
             let arg1 = argv[1]
             if !arg1.hasPrefix("-") {
-                let base = ((arg1 as NSString).lastPathComponent as NSString).deletingPathExtension
+                let base = scriptName(arg1)
                 if !base.isEmpty { return base }
+            } else if let script = argv.dropFirst().first(where: { !isValuelessLongFlag($0) }),
+                      !script.hasPrefix("-"), (script as NSString).pathExtension.isEmpty,
+                      AgentStatusMachine.isRecognizedAgentProcess(scriptName(script)) {
+                // Runtime flags before an agent's bin shim: Gemini CLI's
+                // shebang (`env -S node --no-warnings=…`), its relaunched
+                // child (`--max-old-space-size=…`), a shell alias
+                // (`--no-deprecation`). Only flags that can't take a separate
+                // value are skipped — after `-r`, `-m` or `--import` the next
+                // argument is the flag's — and only an extensionless agent
+                // name is trusted, so `node --env-file=.env codex.mjs` stays
+                // `node`.
+                return scriptName(script)
             }
         }
         return name0
+    }
+
+    private static func scriptName(_ argument: String) -> String {
+        ((argument as NSString).lastPathComponent as NSString).deletingPathExtension
+    }
+
+    /// `--name=value`, or a `--no…` switch (`--no-deprecation`,
+    /// `--noprofile`): carries its value, if any, inline.
+    private static func isValuelessLongFlag(_ argument: String) -> Bool {
+        argument.hasPrefix("--") && (argument.contains("=") || argument.hasPrefix("--no"))
     }
 
     /// Read up to maxArgs arguments from KERN_PROCARGS2
@@ -357,14 +381,15 @@ final class PtySession: @unchecked Sendable {
         return [state.machine.lastForegroundName, state.machine.hookKind].compactMap { $0 }.first(where: isAgent)
     }
 
-    /// Remote prompts are accepted only while a supported agent process is
-    /// currently in the foreground. A stable UUID alone is not enough: the
-    /// same column can later fall back to an idle shell.
+    /// Remote prompts are accepted only while an integrated agent process
+    /// (Claude Code, Codex) is currently in the foreground. A stable UUID
+    /// alone is not enough: the same column can later fall back to an idle
+    /// shell.
     func acceptsRemotePrompts(snapshot: ProcessSnapshot) -> Bool {
         guard !hasExited,
               let process = foregroundProcessName(snapshot: snapshot)
         else { return false }
-        return AgentStatusMachine.isRecognizedAgentProcess(process)
+        return AgentStatusMachine.acceptsRemotePrompts(processName: process)
     }
 
     func recentOutput(maxLines: Int = 40, maxCharacters: Int = 3_500) -> String {

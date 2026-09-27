@@ -214,7 +214,8 @@ struct ClaudeSessionTracker {
         // closed. Route it as before; there is no live process to bind.
         guard let foregroundProcess,
               AgentStatusMachine.isRecognizedAgentProcess(foregroundProcess.name) else { return .accepted }
-        // A Claude hook under a Codex column comes from a `claude` Codex ran.
+        // A Claude hook under another agent's column (Codex, Gemini…) comes
+        // from a `claude` that agent ran.
         guard foregroundProcess.name == "claude" else { return .rejected }
         let sessionID = sessionID.flatMap { $0.isEmpty ? nil : $0 }
         let boundSessionID = session.sessionID(boundTo: foregroundProcess.instance)
