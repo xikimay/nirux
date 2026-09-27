@@ -90,10 +90,12 @@ enum AgentHookInstaller {
     ]
 
     /// Newer events, with the first Claude Code that knows each. They go in
-    /// only when the `claude` Nirux terminals run is known to be at least
-    /// that recent: an older one would drop the whole settings file (see
-    /// above). Unknown version, no entry — and a refresh takes back an
-    /// entry the version no longer allows.
+    /// only when every `claude` Nirux terminals could run is known to be at
+    /// least that recent (see `ClaudeCodeVersion.detect`): an older one
+    /// would drop the whole settings file (see above). Unknown version, no
+    /// entry — and a refresh takes back an entry the version no longer
+    /// allows. A Claude Code that runs elsewhere (an IDE's own copy, a
+    /// pinned SDK) stays out of sight.
     ///
     /// StopFailure (2.1.78) fires instead of Stop when a turn ends on an
     /// API error. Claude doesn't wait for it, so the receiver never slows

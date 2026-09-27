@@ -243,8 +243,12 @@ struct ClaudeSessionTracker {
         switch name {
         case .sessionStart:
             break
-        case .userPromptSubmit, .notification, .stop, .stopFailure:
+        case .userPromptSubmit, .notification, .stop:
             guard boundSessionID == nil || boundSessionID == unpromptedSessionID else { return .accepted }
+        case .stopFailure:
+            // Another conversation's failure (a teammate's, one left by
+            // /clear) must not stop this one's turn or offer Resume here.
+            return boundSessionID == nil ? .accepted : .rejected
         case .sessionEnd:
             return boundSessionID == nil ? .accepted : .rejected
         case .preToolUse, .permissionRequest, .postToolUse, .subagentStop, .turnComplete, .approvalResolved:
@@ -290,6 +294,12 @@ struct ClaudeSessionTracker {
     /// Session bound to this `claude` process, if any.
     func boundSessionID(for process: ProcessInstance) -> String? {
         session.sessionID(boundTo: process)
+    }
+
+    /// `process` fired hooks itself: it would send SessionEnd on a clean
+    /// exit.
+    func hasFiredHooks(_ process: ProcessInstance) -> Bool {
+        hookFiringForeground == process
     }
 
     /// The conversation `process` confirmed through its own hooks — still

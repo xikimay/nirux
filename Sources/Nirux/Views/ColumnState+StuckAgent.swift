@@ -12,17 +12,22 @@ extension ColumnState {
         if let foregroundProcess, AgentStatusMachine.isRecognizedAgentProcess(foregroundProcess.name) {
             if pty.agentMidTurnExit != nil { pty.clearAgentMidTurnExit() }
             lastForegroundAgent = foregroundProcess
+            lastForegroundAgentSeenAt = now
             return
         }
-        // An empty snapshot can't tell: decide on the next one.
-        guard let agent = lastForegroundAgent, !snapshot.isEmpty else { return }
+        // An empty snapshot can't tell; a process still listed is suspended
+        // (or not reaped yet): keep watching it.
+        guard let agent = lastForegroundAgent, !snapshot.isEmpty, !snapshot.contains(agent.instance) else { return }
         lastForegroundAgent = nil
-        guard !snapshot.contains(agent.instance) else { return }
+        // `claude -p` has no conversation to come back to.
+        guard !AgentHookCenter.isHeadlessClaude(agent) else { return }
         pty.noteAgentExited(AgentMidTurnExit(
             processName: agent.name,
             exitedAt: now,
+            lastSeenAt: lastForegroundAgentSeenAt,
             sessionID: agent.name == "claude" ? lastConfirmedClaudeSessionID(of: agent.instance) : nil,
-            arguments: agent.arguments
+            arguments: agent.arguments,
+            firedHooks: claudeHooksFired(by: agent.instance)
         ))
     }
 

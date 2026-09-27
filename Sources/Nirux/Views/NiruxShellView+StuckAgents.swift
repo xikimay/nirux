@@ -43,7 +43,8 @@ extension NiruxShellView {
             now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess
         ), !(place.isWatched && NSApp.isActive) {
             column.notifyAgentAttention(reason: reason)
-            ActivityStore.shared.record(ActivityEntry(
+            onStuckAgentAlert?(reason, workspace, place.columnIndex, column)
+            stuckAgentActivity.record(ActivityEntry(
                 category: .attention,
                 agentKind: pty.agentMidTurnExit?.processName ?? "claude",
                 agentUUID: column.agentUUID,
@@ -62,6 +63,38 @@ extension NiruxShellView {
         }
     }
 
+    /// While Nirux is in the background the heartbeat stops, and a blocked
+    /// agent fires no hook to refresh anything: a slow watch keeps the
+    /// stuck-agent alerts going — the long wait, the confirmed exit — for
+    /// the user who is away. Half a minute is well inside the minutes a
+    /// wait threshold counts, and one process-table scan per tick is cheap.
+    static let stuckWatchInterval: TimeInterval = 30
+
+    func startStuckWatch() {
+        guard stuckWatchTimer == nil else { return }
+        stuckWatchTimer = Timer.scheduledTimer(withTimeInterval: Self.stuckWatchInterval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refreshStuckAgents() }
+        }
+    }
+
+    func stopStuckWatch() {
+        stuckWatchTimer?.invalidate()
+        stuckWatchTimer = nil
+    }
+
+    /// The stuck-agent pass alone, for every column: no status tick, no
+    /// sidebar rebuild.
+    func refreshStuckAgents(snapshot: ProcessSnapshot = ProcessSnapshot(), now: TimeInterval = Date().timeIntervalSince1970) {
+        for workspace in workspaces {
+            for (columnIndex, column) in workspace.columns.enumerated() {
+                refreshStuckAgent(
+                    column, at: StuckAgentPlace(workspace: workspace, columnIndex: columnIndex, isWatched: false),
+                    foregroundProcess: column.pty?.foregroundProcess(snapshot: snapshot), snapshot: snapshot, now: now
+                )
+            }
+        }
+    }
+
     /// What the column's row shows of a stuck agent.
     func sidebarStuckState(
         of column: ColumnState,
@@ -74,12 +107,9 @@ extension NiruxShellView {
         case .waiting(let reason, let since)?:
             return .waiting(reason, duration: PilotSidebarRenderer.shortDuration(now - since))
         case .stoppedOnError(let failure)?:
-            let resume: SidebarStuckState.Resume
-            switch pty.agentResumeRefusal(snapshot: snapshot, now: now) {
-            case nil: resume = .offered
-            case .alreadySent?: resume = .sending
-            case .notStopped?, .notClaude?, .notAtPrompt?: resume = .unavailable
-            }
+            let resume = SidebarStuckState.Resume(
+                pty.agentResumeRefusal(foreground: foregroundProcess, snapshot: snapshot, now: now)
+            )
             return .stoppedOnError(kind: failure.kind, detail: failure.detail, failedAt: failure.failedAt, resume: resume)
         case .exitedMidTurn(let exit)?:
             return .exitedMidTurn(processName: exit.processName)

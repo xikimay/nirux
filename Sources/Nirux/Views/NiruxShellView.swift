@@ -72,6 +72,13 @@ final class NiruxShellView: NSView {
     var stuckAgentWaitThreshold: TimeInterval? = NiruxShellView.stuckWaitThreshold(
         minutes: NiruxShellView.currentStuckAgentMinutes()
     )
+    /// Keeps stuck-agent alerts going while the heartbeat is stopped.
+    var stuckWatchTimer: Timer?
+    /// Where stuck-agent alerts are recorded (tests use their own).
+    var stuckAgentActivity = ActivityStore.shared
+    /// A stuck-agent alert went out (Telegram relays it): the reason, the
+    /// workspace, the column's index, the column.
+    var onStuckAgentAlert: ((AgentAttentionReason, WorkspaceState, Int, ColumnState) -> Void)?
 
     // Panel references (stored properties must live in main class declaration)
     var nameInputPanel: NameInputPanel?
@@ -399,6 +406,7 @@ final class NiruxShellView: NSView {
                 guard let self else { return }
                 self.clearAllAgentAttention()
                 self.resumeGitRefresh()
+                self.stopStuckWatch()
                 self.startHeartbeat()
                 if self.isPilotMode { self.startPilotRefresh() }
                 self.forEachEditorColumn { $0.resumeFileWatch() }
@@ -412,6 +420,7 @@ final class NiruxShellView: NSView {
                 // dialog must not wait on them (the heartbeat stops too).
                 if AgentHookCenter.shared.approvalsEnabled { self.updateSidebar() }
                 self.stopHeartbeat()
+                self.startStuckWatch()
                 self.stopPilotRefresh()
                 self.forEachEditorColumn { $0.pauseFileWatch() }
             }

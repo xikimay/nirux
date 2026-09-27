@@ -79,6 +79,10 @@ final class StuckAgentTests: XCTestCase {
         XCTAssertEqual(crossed, .stillWaiting(.permission(tool: "Bash", summary: "git push"), waited: threshold))
         XCTAssertEqual(stuck(at: threshold + 1), .waiting(.permission(tool: "Bash", summary: "git push"), since: t0 + 1))
         XCTAssertNil(alert(at: threshold + 3), "one alert per dialog")
+        // Another dialog first in line for a moment doesn't make the first
+        // one alert again.
+        _ = apply(event(.permissionRequest, at: 2, tool: "Read", key: "k2", agent: "sub"))
+        XCTAssertNil(alert(at: threshold + 4))
         XCTAssertNil(alert(at: 7_200), "still the same wait two hours on")
         XCTAssertEqual(stuck(at: 7_200), .waiting(.permission(tool: "Bash", summary: "git push"), since: t0 + 1))
     }
@@ -268,12 +272,83 @@ final class StuckAgentTests: XCTestCase {
         _ = apply(event(.stopFailure, at: 5, errorKind: "overloaded"))
         XCTAssertNil(refusal(foreground: claude(ProcessInstance(pid: 9, startedAt: 2))),
                      "no emitter recorded: any claude in front")
+        XCTAssertEqual(refusal(foreground: claude(ProcessInstance(pid: 9, startedAt: t0 + 6))), .notClaude,
+                       "but not one started after the failure")
+    }
+
+    /// Only an error `continue` can get past; a rate limit or a login may
+    /// come with Claude's own menu, which fires no hook and Enter answers.
+    func testResumeOnlyForErrorsItCanGetPast() {
+        for (kind, refused) in [
+            ("overloaded", false), ("server_error", false), ("unknown", false), ("max_output_tokens", false),
+            (nil, false), ("rate_limit", true), ("authentication_failed", true), ("billing_error", true),
+            ("invalid_request", true), ("model_not_found", true)
+        ] as [(String?, Bool)] {
+            machine = AgentStatusMachine()
+            startTurn()
+            _ = apply(event(.stopFailure, at: 5, errorKind: kind))
+            XCTAssertEqual(refusal(), refused ? .needsFix : nil, kind ?? "nil")
+        }
+    }
+
+    /// Text typed since the failure is the user's draft: `continue` would
+    /// join it, and Enter would send it.
+    func testResumeRefusedOverTheUsersDraft() {
+        startTurn()
+        _ = apply(event(.stopFailure, at: 5, errorKind: "overloaded"))
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 7))
+        XCTAssertEqual(refusal(), .userTyped)
+    }
+
+    func testResumesOwnKeystrokeIsNotADraft() {
+        startTurn()
+        _ = apply(event(.stopFailure, at: 5, errorKind: "overloaded"))
+        machine.markResumeSent(now: t0 + 10)
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 10.01))
+        machine.noteResumeTyped()
+        XCTAssertNil(refusal(at: 10 + AgentStatusMachine.resumeRetryDelay), "no turn started: offered again")
+        machine.markResumeSent(now: t0 + 100)
+        XCTAssertNil(refusal(at: 50), "a clock set back reads as the delay over")
+    }
+
+    func testResumeRefusedForHeadlessClaude() {
+        startTurn()
+        _ = apply(event(.stopFailure, at: 5, errorKind: "overloaded"))
+        let headless = ForegroundProcess(instance: claudeProcess, name: "claude", arguments: ["claude", "-p", "fix it"])
+        XCTAssertEqual(refusal(foreground: headless), .notClaude)
+    }
+
+    /// Claude doesn't wait for StopFailure: one that lands after the next
+    /// prompt is about the turn before, and ends nothing.
+    func testLateStopFailureOfAnEarlierPromptEndsNothing() {
+        startTurn()
+        _ = apply(AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "lead", promptID: "p2", timestamp: t0 + 6))
+        _ = apply(AgentHookEvent(
+            kind: .claude, name: .stopFailure, sessionID: "lead", errorKind: "overloaded", promptID: "p1", timestamp: t0 + 7
+        ))
+        XCTAssertNil(machine.turnFailure)
+        XCTAssertEqual(machine.state, .working)
+
+        _ = apply(AgentHookEvent(
+            kind: .claude, name: .stopFailure, sessionID: "lead", errorKind: "overloaded", promptID: "p2", timestamp: t0 + 9
+        ))
+        XCTAssertNotNil(machine.turnFailure, "its own prompt's failure counts")
+    }
+
+    func testQuotaAutoResumeClearsTheFailure() {
+        startTurn()
+        _ = apply(event(.stopFailure, at: 5, errorKind: "rate_limit"))
+        _ = apply(event(.notification, at: 3_600, type: "quota_auto_resume_fired"))
+        XCTAssertNil(machine.turnFailure, "Claude went on by itself")
     }
 
     // MARK: - Died mid-turn
 
-    private func exit(at offset: TimeInterval) -> AgentMidTurnExit {
-        AgentMidTurnExit(processName: "claude", exitedAt: t0 + offset, sessionID: "lead", arguments: ["claude"])
+    private func exit(at offset: TimeInterval, seenAt: TimeInterval? = nil, firedHooks: Bool = true) -> AgentMidTurnExit {
+        AgentMidTurnExit(
+            processName: "claude", exitedAt: t0 + offset, lastSeenAt: t0 + (seenAt ?? offset - 2),
+            sessionID: "lead", arguments: ["claude"], firedHooks: firedHooks
+        )
     }
 
     func testExitMidTurnIsConfirmedAfterItsSessionEndHadTime() {
@@ -304,8 +379,29 @@ final class StuckAgentTests: XCTestCase {
         XCTAssertNil(machine.midTurnExit, "no turn in flight")
 
         var unhooked = AgentStatusMachine()
-        unhooked.noteAgentExited(exit(at: 20))
+        unhooked.noteAgentExited(exit(at: 20, firedHooks: false))
         XCTAssertNil(unhooked.midTurnExit, "without hooks, no SessionEnd tells a quit from a crash")
+    }
+
+    /// Ctrl-Z, `fg`, then a crash: the shell in front cleared the column's
+    /// hook kind, but this very process proved it fires hooks.
+    func testExitAfterASuspendStillCounts() {
+        startTurn()
+        _ = machine.tick(fgName: "zsh", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 5))
+        _ = machine.tick(fgName: "claude", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 8))
+        XCTAssertNil(machine.hookKind)
+        machine.noteAgentExited(exit(at: 20))
+        XCTAssertNotNil(machine.midTurnExit)
+    }
+
+    /// Keys typed after the agent was last seen alive reached the dying
+    /// claude or the shell: the user is there, and the shell line isn't
+    /// empty.
+    func testExitAfterTheUserTypedIsTheirs() {
+        startTurn()
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 19))
+        machine.noteAgentExited(exit(at: 20, seenAt: 18))
+        XCTAssertNil(machine.midTurnExit)
     }
 
     func testExitNoticeEndsWhenTheUserTypesOrAnAgentReturns() {
@@ -414,5 +510,9 @@ final class StuckAgentTests: XCTestCase {
         XCTAssertEqual(text.body, "Bash: git push")
         XCTAssertEqual(RemoteDialogText.attentionLabel(failure), "Agent stopped on an API error")
         XCTAssertEqual(RemoteDialogText.attentionLabel(wait), "Agent needs permission")
+        let telegram = RemoteDialogText.stuckNotification(wait)
+        XCTAssertEqual(telegram.label, "Agent needs permission")
+        XCTAssertEqual(telegram.detail, "Tool: Bash\nWaiting for 2h05m", "the tool, never its command")
+        XCTAssertEqual(RemoteDialogText.stuckNotification(.exitedMidTurn).label, "Agent exited mid-turn")
     }
 }

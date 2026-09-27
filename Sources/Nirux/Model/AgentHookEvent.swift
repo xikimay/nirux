@@ -65,6 +65,9 @@ struct AgentHookEvent: Codable, Equatable {
     /// Claude StopFailure `error`: what ended the turn (`rate_limit`,
     /// `overloaded`, `authentication_failed`…). Its details go in `detail`.
     let errorKind: String?
+    /// Claude `prompt_id` on UserPromptSubmit and StopFailure: tells the
+    /// turn a late StopFailure was about.
+    let promptID: String?
     /// Claude session transcript (`transcript_path`), on the turn-level
     /// events only (see `carriesTranscriptPath`): enough to follow the
     /// column's session usage without growing every tool event's line.
@@ -128,6 +131,9 @@ struct AgentHookEvent: Codable, Equatable {
             errorKind = name == .stopFailure
                 ? (payload["error"] as? String).flatMap { AgentText.clean($0, maxLength: 40) }
                 : nil
+            promptID = [.userPromptSubmit, .stopFailure].contains(name)
+                ? (payload["prompt_id"] as? String).flatMap { AgentText.clean($0, maxLength: 80) }
+                : nil
             switch name {
             case .notification:
                 detail = (payload["message"] as? String).flatMap { AgentText.clean($0, maxLength: 300) }
@@ -154,6 +160,7 @@ struct AgentHookEvent: Codable, Equatable {
             agentID = nil
             notificationType = nil
             errorKind = nil
+            promptID = nil
             transcriptPath = nil
         }
     }
@@ -202,6 +209,7 @@ struct AgentHookEvent: Codable, Equatable {
         agentID: String? = nil,
         notificationType: String? = nil,
         errorKind: String? = nil,
+        promptID: String? = nil,
         transcriptPath: String? = nil,
         approvalRequestID: String? = nil,
         approvalDeadline: TimeInterval? = nil,
@@ -224,6 +232,7 @@ struct AgentHookEvent: Codable, Equatable {
         self.agentID = agentID
         self.notificationType = notificationType
         self.errorKind = errorKind
+        self.promptID = promptID
         self.transcriptPath = transcriptPath
         self.approvalRequestID = approvalRequestID
         self.approvalDeadline = approvalDeadline

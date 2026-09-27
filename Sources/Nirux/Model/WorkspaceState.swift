@@ -434,7 +434,11 @@ extension WorkspaceState {
                 NSApp.requestUserAttention(.informationalRequest)
                 // Native notification with click-to-focus routing.
                 let processName: String
-                if let col, let title = col.terminalTitle,
+                if reason == .exitedMidTurn {
+                    // The title is the shell's now; only claude's exits are
+                    // reported (see AgentStatusMachine.noteAgentExited).
+                    processName = "claude"
+                } else if let col, let title = col.terminalTitle,
                    !title.isEmpty, !ColumnState.boringTitles.contains(title) {
                     processName = title
                 } else {

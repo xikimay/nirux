@@ -564,6 +564,25 @@ final class TelegramRemoteAccessController {
 }
 
 extension TelegramRemoteAccessController {
+    /// A stuck-agent alert (see `NiruxShellView.refreshStuckAgent`): a
+    /// dialog waiting past the threshold, an agent that died mid-turn. It
+    /// comes from time passing, not a hook event, and goes out once per
+    /// stuck state.
+    func handleStuckAgent(_ reason: AgentAttentionReason, workspaceTitle: String, columnIndex: Int, agentUUID: String?) {
+        guard notifyOnAttention, let agentUUID, isAuthorizedConfiguration,
+              Date() >= notificationArmedAt else { return }
+        let (label, detail) = RemoteDialogText.stuckNotification(reason)
+        Task { [weak self] in
+            await self?.sendAgentNotification(
+                label: label,
+                workspaceTitle: workspaceTitle,
+                columnNumber: columnIndex + 1,
+                agentUUID: agentUUID,
+                detail: detail
+            )
+        }
+    }
+
     /// Hook events are already normalized upstream; Telegram sees only
     /// completion/attention notifications tied to a stable column ID.
     /// Attention comes from Claude's own notifications, which it sends once
@@ -588,7 +607,9 @@ extension TelegramRemoteAccessController {
             guard let attention = outcome.attention else { return }
             (eventLabel, detail) = RemoteDialogText.attentionNotification(attention, message: detail)
         case .stopFailure where notifyOnAttention:
-            guard let attention = outcome.attention else { return }
+            // Once per attention episode: an agent failing again unseen
+            // (a limit hit again) says nothing new.
+            guard outcome.firedAttention, let attention = outcome.attention else { return }
             eventLabel = RemoteDialogText.attentionLabel(attention)
             // The error kind only: its details stay on the Mac.
             detail = event.errorKind.map { "Error: \($0)" }

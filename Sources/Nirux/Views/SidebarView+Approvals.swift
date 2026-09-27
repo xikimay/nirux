@@ -56,8 +56,8 @@ extension SidebarView {
         switch region {
         case let .permissionDecision(_, _, requestID, behavior):
             return SidebarHoverTarget.approvalButtonKey(requestID: requestID, behavior: behavior)
-        case let .agentResume(workspaceIndex, columnIndex, _):
-            return SidebarHoverTarget.resumeButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
+        case let .agentResume(workspaceIndex, columnIndex, failedAt):
+            return SidebarHoverTarget.resumeButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt)
         default:
             return nil
         }

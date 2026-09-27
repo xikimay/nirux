@@ -93,7 +93,8 @@ final class StuckAgentSidebarTests: XCTestCase {
         XCTAssertEqual(resumeRegions(result.hitAreas), [ResumeRegion(workspace: 2, column: 1, failedAt: 1_005)])
         XCTAssertTrue(labels(result.views).contains("rate_limit — API Error: 429"))
         XCTAssertEqual(
-            Array(result.approvalButtons.keys), [SidebarHoverTarget.resumeButtonKey(workspaceIndex: 2, columnIndex: 1)],
+            Array(result.approvalButtons.keys),
+            [SidebarHoverTarget.resumeButtonKey(workspaceIndex: 2, columnIndex: 1, failedAt: 1_005)],
             "armed and hovered like Allow / Deny"
         )
         let resumeHit = try XCTUnwrap(result.hitAreas.firstIndex {
@@ -119,6 +120,8 @@ final class StuckAgentSidebarTests: XCTestCase {
     func testNoResumeButtonUnlessOffered() {
         for (resume, text) in [
             (SidebarStuckState.Resume.sending, "Resuming…"),
+            (.userTyped, "Text in its prompt: send it from the terminal"),
+            (.needsFix, "Needs a fix in the terminal first"),
             (.unavailable, "Resume once claude is back at its prompt")
         ] {
             let result = SidebarWorkspaceCardRenderer(
@@ -152,7 +155,12 @@ final class StuckAgentSidebarTests: XCTestCase {
             pressed: resume, released: resume, clickCount: 1, armedAtPress: true, armedAtRelease: true
         ), "Resume is no permission decision")
         XCTAssertEqual(
-            SidebarView.armedButtonKey(for: resume), SidebarHoverTarget.resumeButtonKey(workspaceIndex: 2, columnIndex: 1)
+            SidebarView.armedButtonKey(for: resume),
+            SidebarHoverTarget.resumeButtonKey(workspaceIndex: 2, columnIndex: 1, failedAt: 1_005)
+        )
+        XCTAssertNotEqual(
+            SidebarView.armedButtonKey(for: resume), SidebarView.armedButtonKey(for: laterFailure),
+            "another failure's button at the same place arms again"
         )
     }
 
@@ -216,15 +224,20 @@ final class StuckAgentSidebarTests: XCTestCase {
             _ = column.admitClaudeHook(event, foregroundProcess: claude, snapshot: bothAlive)
             pty.applyAgentHook(event, isUserFocused: false)
         }
-        column.trackForegroundAgent(claude, snapshot: bothAlive, now: 100)
+        // A status refresh, as the sidebar runs it: follow, then tick.
+        func refresh(_ foreground: ForegroundProcess, _ snapshot: ProcessSnapshot, at now: TimeInterval) {
+            column.trackForegroundAgent(foreground, snapshot: snapshot, now: now)
+            _ = pty.agentStatus(foregroundProcess: foreground, isUserFocused: false)
+        }
+        refresh(claude, bothAlive, at: 100)
 
         // Ctrl-Z: the shell is in front, the agent still runs.
-        column.trackForegroundAgent(shell, snapshot: bothAlive, now: 102)
+        refresh(shell, bothAlive, at: 102)
         XCTAssertNil(pty.agentMidTurnExit, "suspended, not gone")
 
-        // Back in front, then gone from the process table.
-        column.trackForegroundAgent(claude, snapshot: bothAlive, now: 104)
-        column.trackForegroundAgent(shell, snapshot: claudeGone, now: 106)
+        // `fg`, then gone from the process table.
+        refresh(claude, bothAlive, at: 104)
+        refresh(shell, claudeGone, at: 106)
         let exit = try XCTUnwrap(pty.agentMidTurnExit)
         XCTAssertEqual(exit.exitedAt, 106)
         XCTAssertEqual(exit.sessionID, "conv", "its conversation, to resume")
@@ -234,6 +247,14 @@ final class StuckAgentSidebarTests: XCTestCase {
 
         // An agent in front again ends it.
         column.trackForegroundAgent(claude, snapshot: bothAlive, now: 112)
+        XCTAssertNil(pty.agentMidTurnExit)
+
+        // A `claude -p` has no conversation to come back to.
+        let headless = ForegroundProcess(
+            instance: ProcessInstance(pid: 600, startedAt: 120), name: "claude", arguments: ["claude", "-p", "go"]
+        )
+        column.trackForegroundAgent(headless, snapshot: ProcessSnapshot(entries: [entry(shell), entry(headless)]), now: 121)
+        column.trackForegroundAgent(shell, snapshot: claudeGone, now: 123)
         XCTAssertNil(pty.agentMidTurnExit)
     }
 
@@ -287,5 +308,84 @@ final class StuckAgentSidebarTests: XCTestCase {
         let typed = try await waitUntil { pty.recentOutput().contains("continue") }
         XCTAssertTrue(typed)
         XCTAssertEqual(pty.resumeFailedTurn(snapshot: ProcessSnapshot(), now: now + 2), .alreadySent, "one click, one continue")
+    }
+
+    // MARK: - Nirux in the background
+
+    /// The heartbeat stops in the background, and a blocked agent fires no
+    /// hook: the slow watch still alerts, once, and hands the alert on (to
+    /// Telegram).
+    func testStuckWatchAlertsWhileNiruxIsInTheBackground() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-stuck-watch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let previousStateDirectory = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
+        setenv("NIRUX_STATE_DIR", root.path, 1)
+        defer {
+            if let previousStateDirectory { setenv("NIRUX_STATE_DIR", previousStateDirectory, 1) } else { unsetenv("NIRUX_STATE_DIR") }
+            try? FileManager.default.removeItem(at: root)
+        }
+        _ = NSApplication.shared
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
+        shell.stopHeartbeat()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800), styleMask: [.titled], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = shell
+        defer { window.close() }
+
+        let column = try XCTUnwrap(shell.workspaces.first?.columns.first)
+        let pty = try XCTUnwrap(column.pty)
+        let started = try await waitUntil(timeout: 10) { pty.shellPID != nil }
+        XCTAssertTrue(started)
+        let shellPID = try XCTUnwrap(pty.shellPID)
+
+        // A claude in front of the column's shell, as the process table
+        // would show it.
+        let now = Date().timeIntervalSince1970
+        let claudePID: pid_t = 99_999
+        let snapshot = ProcessSnapshot(entries: [
+            ProcessSnapshot.Entry(
+                pid: shellPID, parentPID: 1, processGroupID: shellPID, terminalForegroundProcessGroupID: claudePID,
+                name: "zsh", startedAt: now - 8_000, arguments: ["zsh"]
+            ),
+            ProcessSnapshot.Entry(
+                pid: claudePID, parentPID: shellPID, processGroupID: claudePID, terminalForegroundProcessGroupID: claudePID,
+                name: "claude", startedAt: now - 7_200, arguments: ["claude"]
+            )
+        ])
+        XCTAssertEqual(pty.foregroundProcess(snapshot: snapshot)?.name, "claude")
+        for (name, offset) in [(AgentHookEvent.Name.sessionStart, 7_000.0), (.userPromptSubmit, 6_900), (.permissionRequest, 3_600)] {
+            pty.applyAgentHook(AgentHookEvent(
+                kind: .claude, name: name, sessionID: "lead", toolName: name == .permissionRequest ? "Bash" : nil,
+                toolKey: name == .permissionRequest ? "k" : nil, timestamp: now - offset
+            ), isUserFocused: false)
+        }
+
+        // The system notification needs an app bundle, which xctest isn't.
+        var notified: [AgentAttentionReason?] = []
+        column.onAgentAttention = { notified.append($0) }
+        var alerts: [AgentAttentionReason] = []
+        shell.onStuckAgentAlert = { reason, _, columnIndex, alerted in
+            XCTAssertEqual(columnIndex, 0)
+            XCTAssertTrue(alerted === column)
+            alerts.append(reason)
+        }
+        shell.stuckAgentWaitThreshold = 600
+        let activity = ActivityStore(persistsToDisk: false)
+        shell.stuckAgentActivity = activity
+        shell.refreshStuckAgents(snapshot: snapshot, now: now)
+        shell.refreshStuckAgents(snapshot: snapshot, now: now + 30)
+        let waited = AgentAttentionReason.stillWaiting(.permission(tool: "Bash", summary: nil), waited: 3_600)
+        XCTAssertEqual(alerts, [waited], "once")
+        XCTAssertEqual(notified, [waited])
+        XCTAssertEqual(activity.entries.map(\.category), [.attention])
+        XCTAssertEqual(activity.entries.first?.detail, "waiting 1h00m · permission: Bash")
+
+        // Nirux leaving the front starts the watch as the heartbeat stops.
+        NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)
+        XCTAssertNotNil(shell.stuckWatchTimer)
+        shell.stopStuckWatch()
+        XCTAssertNil(shell.stuckWatchTimer)
     }
 }

@@ -66,6 +66,19 @@ extension NiruxApp {
         return true
     }
 
+    /// ⌘V pastes through ghostty, not `sendRaw`: note it as the user's
+    /// input all the same (a draft in Claude's prompt, a partial shell line).
+    private static func notePaste(_ event: NSEvent, in column: ColumnState) {
+        guard WebContentKeyRouting.typesLetter(
+            "v", ansiKeyCode: 0x09,
+            characters: event.characters,
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+            keyCode: event.keyCode
+        ) else { return }
+        column.pty?.noteUserPaste()
+        column.dismissAgentExitOnTyping()
+    }
+
     /// Route ALL key input directly to PTY, bypassing ghostty entirely.
     /// Ghostty only handles rendering — we handle ALL input.
     /// This prevents ghostty's broken inMemory key handling from interfering.
@@ -167,6 +180,7 @@ extension NiruxApp {
                 // menu sees them, so Cmd+T/Cmd+arrow/etc. silently die if we
                 // just return the event here. Mirror the WebView/Editor path
                 // above: invoke the menu key equivalent and consume on hit.
+                Self.notePaste(event, in: col)
                 if NSApp.mainMenu?.performKeyEquivalent(with: event) == true {
                     return nil
                 }

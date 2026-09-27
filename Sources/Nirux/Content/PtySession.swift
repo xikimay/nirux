@@ -365,10 +365,15 @@ final class PtySession: @unchecked Sendable {
     }
 
     /// Why Resume can't type `continue` now, if it can't (see
-    /// `AgentStatusMachine.resumeRefusal`). The failed `claude` may be the
-    /// foreground process or run under it (a launcher that spawns it).
-    func agentResumeRefusal(snapshot: ProcessSnapshot, now: TimeInterval) -> AgentResumeRefusal? {
-        guard !hasExited, let foreground = foregroundProcess(snapshot: snapshot) else { return .notClaude }
+    /// `AgentStatusMachine.resumeRefusal`). `foreground` is this terminal's
+    /// foreground process in `snapshot`; the failed `claude` may be it or
+    /// run under it (a launcher that spawns it).
+    func agentResumeRefusal(
+        foreground: ForegroundProcess?,
+        snapshot: ProcessSnapshot,
+        now: TimeInterval
+    ) -> AgentResumeRefusal? {
+        guard !hasExited, let foreground else { return .notClaude }
         return state.machine.resumeRefusal(
             foreground: foreground,
             ownsEmitter: { $0 == foreground.instance || snapshot.isProcess($0, childOf: foreground.instance.pid) },
@@ -380,11 +385,19 @@ final class PtySession: @unchecked Sendable {
     /// typed only when `agentResumeRefusal` allows it. Returns the refusal
     /// otherwise.
     func resumeFailedTurn(snapshot: ProcessSnapshot, now: TimeInterval) -> AgentResumeRefusal? {
-        if let refusal = agentResumeRefusal(snapshot: snapshot, now: now) { return refusal }
+        let foreground = foregroundProcess(snapshot: snapshot)
+        if let refusal = agentResumeRefusal(foreground: foreground, snapshot: snapshot, now: now) { return refusal }
         guard let input = RemotePromptSanitizer.terminalInput(for: "continue") else { return .notStopped }
         state.machine.markResumeSent(now: now)
         sendRaw(input)
+        state.machine.noteResumeTyped()
         return nil
+    }
+
+    /// The user pasted into the terminal (⌘V): input like a keystroke,
+    /// though ghostty writes it.
+    func noteUserPaste() {
+        state.machine.noteKeystroke(now: Date())
     }
 
     /// The user's login shell ($SHELL) when it's a mainstream

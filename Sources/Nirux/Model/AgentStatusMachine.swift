@@ -50,6 +50,10 @@ struct AgentStatusMachine {
     /// the first turn event seen (a turn already running at launch). Nil
     /// between turns. Drives the "working · 12m" display.
     private(set) var turnStartedAt: TimeInterval?
+    /// A turn is in flight by hook evidence alone: unlike `turnStartedAt`,
+    /// which the output fallback also drives, a suspend (Ctrl-Z) and `fg`
+    /// leave it as it was.
+    private(set) var hookTurnInFlight = false
     /// Agent kind ("claude") once this session has emitted a hook event —
     /// proof that hooks are installed and authoritative for this session.
     private(set) var hookKind: String?
@@ -64,7 +68,7 @@ struct AgentStatusMachine {
     private var lastInteractionAt: TimeInterval = 0
     /// Epoch seconds of the last keystroke Nirux sent (`PtySession.sendRaw`)
     /// — unlike `lastInteractionAt`, never terminal replies or resizes.
-    private var lastKeystrokeAt: TimeInterval = 0
+    private(set) var lastKeystrokeAt: TimeInterval = 0
 
     /// The user has typed at least once since the shell started. Fallback
     /// attention is gated on this: output before the first keystroke is
@@ -83,9 +87,13 @@ struct AgentStatusMachine {
     /// The agent process died mid-turn (see `noteAgentExited`). Cleared by
     /// a new session, an agent back in the foreground, or the user.
     private(set) var midTurnExit: AgentMidTurnExit?
-    /// `requestedAt` of the dialog whose long wait already alerted: one
+    /// `requestedAt` of the dialogs whose long wait already alerted: one
     /// alert per dialog.
-    private var longWaitAlertedSince: TimeInterval?
+    private var longWaitAlerted: Set<TimeInterval> = []
+    /// Claude's `prompt_id` of the main thread's current turn: a
+    /// StopFailure about another prompt arrived late (Claude doesn't wait
+    /// for it) and ends nothing.
+    private var turnPromptID: String?
 
     private static let echoWindow: TimeInterval = 0.3
     private static let activityWindow: TimeInterval = 3.0
@@ -194,16 +202,7 @@ struct AgentStatusMachine {
         case .sessionStart:
             startConversation(event)
         case .userPromptSubmit:
-            hookKind = event.kind.rawValue
-            // A prompt was typed at the session's input, which no dialog of
-            // it covered: they are all closed. This also frees the subagent
-            // dialogs an interrupt (Esc) left behind with no hook. (Missed
-            // race: a message queued earlier and sent while a background
-            // subagent's dialog is up.)
-            closeDialogs { $0.sessionID == event.sessionID }
-            turnStartedAt = now
-            turnFailure = nil
-            resumeUnlessBlocked()
+            startTurn(event, now: now)
         case .preToolUse:
             hookKind = event.kind.rawValue
             noteTurnActivity(at: now)
@@ -276,6 +275,21 @@ struct AgentStatusMachine {
         }
     }
 
+    private mutating func startTurn(_ event: AgentHookEvent, now: TimeInterval) {
+        hookKind = event.kind.rawValue
+        // A prompt was typed at the session's input, which no dialog of
+        // it covered: they are all closed. This also frees the subagent
+        // dialogs an interrupt (Esc) left behind with no hook. (Missed
+        // race: a message queued earlier and sent while a background
+        // subagent's dialog is up.)
+        closeDialogs { $0.sessionID == event.sessionID }
+        turnStartedAt = now
+        hookTurnInFlight = true
+        turnFailure = nil
+        if event.agentID == nil { turnPromptID = event.promptID }
+        resumeUnlessBlocked()
+    }
+
     private mutating func startConversation(_ event: AgentHookEvent) {
         hookKind = event.kind.rawValue
         // Auto (mid-turn) or /compact: same conversation, no turn ends.
@@ -301,9 +315,14 @@ struct AgentStatusMachine {
         outcome: inout AgentHookOutcome
     ) {
         hookKind = event.kind.rawValue
-        // Claude reports the main thread's failures only; a subagent's
-        // would end nothing of the main thread's.
-        if event.name == .stopFailure, event.agentID != nil { return }
+        if event.name == .stopFailure {
+            // Claude reports the main thread's failures only; a subagent's
+            // would end nothing of the main thread's.
+            guard event.agentID == nil else { return }
+            // Claude doesn't wait for StopFailure: a new prompt may have
+            // started the next turn before it arrived.
+            if let failed = event.promptID, let current = turnPromptID, failed != current { return }
+        }
         closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
         endTurn()
         turnFailure = event.name == .stopFailure
@@ -408,7 +427,11 @@ struct AgentStatusMachine {
     ) {
         let reason: AgentAttentionReason
         switch event.notificationType {
-        case "auth_success", "agent_completed", "quota_auto_resume_fired":
+        case "auth_success", "agent_completed":
+            return
+        case "quota_auto_resume_fired":
+            // Claude resumes the turn by itself.
+            if event.agentID == nil { turnFailure = nil }
             return
         case "elicitation_complete", "elicitation_response":
             // The form was answered: its dialog is gone.
@@ -519,11 +542,13 @@ struct AgentStatusMachine {
     /// A turn already running when Nirux first heard of it starts here.
     private mutating func noteTurnActivity(at timestamp: TimeInterval) {
         if turnStartedAt == nil { turnStartedAt = timestamp }
+        hookTurnInFlight = true
     }
 
     private mutating func endTurn() {
         hookWorking = false
         turnStartedAt = nil
+        hookTurnInFlight = false
     }
 
     /// PTY output arrived. Echo right after a keystroke/resize is not work.
@@ -673,41 +698,18 @@ struct AgentStatusMachine {
     /// first; if its turn was still in flight, it crashed or was killed.
     /// (Codex and activity-only agents report no session end: their exit
     /// can't be told from a quit.)
+    ///
+    /// A keystroke since the agent was last seen alive may have reached the
+    /// shell: the user is there and took over.
     mutating func noteAgentExited(_ exit: AgentMidTurnExit) {
-        guard exit.processName == "claude", hookKind == "claude", turnStartedAt != nil else { return }
+        guard exit.processName == "claude", exit.firedHooks || hookKind == "claude", hookTurnInFlight,
+              lastKeystrokeAt <= exit.lastSeenAt else { return }
         midTurnExit = exit
     }
 
     /// An agent is back in the foreground, or the user dealt with the exit.
     mutating func clearMidTurnExit() {
         midTurnExit = nil
-    }
-
-    /// What keeps the agent from going on, if anything. `foreground` is
-    /// the column's foreground process now; `waitThreshold` nil turns the
-    /// long-wait check off.
-    func stuckState(now: TimeInterval, waitThreshold: TimeInterval?, foreground: ForegroundProcess?) -> AgentStuckState? {
-        if let midTurnExit {
-            let agentInFront = foreground.map { Self.isRecognizedAgentProcess($0.name) } ?? false
-            guard !agentInFront, now - midTurnExit.exitedAt >= Self.exitConfirmationDelay else { return nil }
-            return .exitedMidTurn(midTurnExit)
-        }
-        // A failure and dialogs are the foreground claude's own: not those
-        // of one suspended behind a shell, nor of an earlier claude (events
-        // queued while Nirux was closed replay at launch).
-        guard let foreground, foreground.name == "claude" else { return nil }
-        let startedAt = foreground.instance.startedAt
-        if let turnFailure, turnFailure.failedAt >= startedAt { return .stoppedOnError(turnFailure) }
-        // A keystroke since a dialog opened went to it: it was answered
-        // (the tool may then run long, silently) or denied with Esc, which
-        // fires no hook. Claude's reminder clears the keystroke once a
-        // dialog sits unanswered.
-        if let waitThreshold, let dialog = openDialogs.first(where: {
-            $0.requestedAt >= startedAt && $0.requestedAt >= lastKeystrokeAt
-        }), now - dialog.requestedAt >= waitThreshold {
-            return .waiting(dialog.reason, since: dialog.requestedAt)
-        }
-        return nil
     }
 
     /// The alert a stuck state owes, once: a dialog crossing the wait
@@ -725,35 +727,23 @@ struct AgentStatusMachine {
             midTurnExit?.alerted = true
             return .exitedMidTurn
         case .waiting(let reason, let since)?:
-            guard longWaitAlertedSince != since else { return nil }
-            longWaitAlertedSince = since
+            // Forget dialogs gone; each one still listed alerts once.
+            longWaitAlerted.formIntersection(pendingDialogs.map(\.requestedAt))
+            guard longWaitAlerted.insert(since).inserted else { return nil }
             return .stillWaiting(reason, waited: now - since)
         case .stoppedOnError?, nil:
             return nil
         }
     }
 
-    /// Whether Resume may type `continue`: a failed turn with nothing
-    /// since, `foreground` is the `claude` that failed (`ownsEmitter` says
-    /// whether it is, or runs, the process that reported the failure), and
-    /// it is back at its prompt — no dialog listed, no work going on.
-    func resumeRefusal(
-        foreground: ForegroundProcess?,
-        ownsEmitter: (ProcessInstance) -> Bool,
-        now: TimeInterval
-    ) -> AgentResumeRefusal? {
-        guard let turnFailure else { return .notStopped }
-        guard let foreground, foreground.name == "claude",
-              turnFailure.emitter.map(ownsEmitter) ?? true else { return .notClaude }
-        // Any dialog still listed may be on screen, where typed text
-        // answers it instead of reaching the prompt.
-        guard pendingDialogs.isEmpty, !hookWorking, turnStartedAt == nil else { return .notAtPrompt }
-        if let sent = turnFailure.resumeSentAt, now - sent < Self.resumeRetryDelay { return .alreadySent }
-        return nil
-    }
-
+    /// `continue` is about to be typed: its own keystroke follows, and is
+    /// not the user's (see `noteResumeTyped`).
     mutating func markResumeSent(now: TimeInterval) {
         turnFailure?.resumeSentAt = now
+    }
+
+    mutating func noteResumeTyped() {
+        turnFailure?.resumeKeystrokeAt = lastKeystrokeAt
     }
 
     /// New shell in the same terminal (start/restart) — everything resets.
@@ -776,6 +766,8 @@ struct AgentStatusMachine {
         foregroundSince = nil
         turnFailure = nil
         midTurnExit = nil
-        longWaitAlertedSince = nil
+        longWaitAlerted = []
+        turnPromptID = nil
+        hookTurnInFlight = false
     }
 }

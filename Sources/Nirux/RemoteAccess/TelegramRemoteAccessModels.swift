@@ -69,6 +69,16 @@ enum RemoteDialogText {
         return (attentionLabel(attention), detail)
     }
 
+    /// Label and body of a stuck-agent alert: how long, and the tool a
+    /// permission is for — never its command or the question's text.
+    static func stuckNotification(_ reason: AgentAttentionReason) -> (label: String, detail: String?) {
+        guard case .stillWaiting(let dialog, let waited) = reason else { return (attentionLabel(reason), nil) }
+        var lines: [String] = []
+        if case .permission(let tool?, _) = dialog, tool != "ExitPlanMode" { lines.append("Tool: \(tool)") }
+        lines.append("Waiting for \(PilotSidebarRenderer.shortDuration(waited))")
+        return (attentionLabel(dialog), lines.joined(separator: "\n"))
+    }
+
     static func blockedPromptMessage(for session: RemoteAgentSession) -> String {
         let dialog = session.pendingDialog.map(waitingLabel) ?? "waiting for permission"
         return "Not sent: \(session.workspaceTitle) · column \(session.columnIndex + 1) is \(dialog). "

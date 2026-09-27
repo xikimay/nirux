@@ -77,9 +77,10 @@ final class ColumnState {
     /// An agent died mid-turn in the shell that still runs here
     /// (ColumnState+StuckAgent.swift).
     var agentExitOverlay: ShellExitedOverlay?
-    /// The agent last seen in the foreground: gone from the process table
-    /// once it leaves, it exited rather than being suspended.
+    /// The agent last seen in the foreground, and when: gone from the
+    /// process table once it leaves, it exited rather than being suspended.
     var lastForegroundAgent: ForegroundProcess?
+    var lastForegroundAgentSeenAt: TimeInterval = 0
     /// The user asked to resume the agent that died mid-turn.
     var onResumeExitedAgent: (() -> Void)?
 
@@ -434,14 +435,18 @@ final class ColumnState {
     }
 
     /// The session the column's `claude` confirmed, if it still runs.
+    func confirmedClaudeSessionID(foregroundProcess: ForegroundProcess?) -> String? {
+        foregroundProcess.flatMap { claudeSessionTracker.confirmedSessionID(of: $0) }
+    }
+
     /// The conversation a `claude` of this column confirmed through its own
     /// hooks, known even after it exited.
     func lastConfirmedClaudeSessionID(of process: ProcessInstance) -> String? {
         claudeSessionTracker.lastConfirmedSessionID(of: process)
     }
 
-    func confirmedClaudeSessionID(foregroundProcess: ForegroundProcess?) -> String? {
-        foregroundProcess.flatMap { claudeSessionTracker.confirmedSessionID(of: $0) }
+    func claudeHooksFired(by process: ProcessInstance) -> Bool {
+        claudeSessionTracker.hasFiredHooks(process)
     }
 
     func persistedClaudeRestore(foregroundProcess: ForegroundProcess?) -> ClaudeSessionTracker.Restore? {

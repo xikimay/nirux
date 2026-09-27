@@ -85,8 +85,33 @@ enum SidebarStuckState: Hashable {
         case offered
         /// `continue` went out; the next turn has not started yet.
         case sending
+        /// The user typed at its prompt since: their draft, their Enter.
+        case userTyped
+        /// The error needs the user first (log in, billing, a limit…).
+        case needsFix
         /// Claude is not at its prompt (or not in front).
         case unavailable
+
+        init(_ refusal: AgentResumeRefusal?) {
+            switch refusal {
+            case nil: self = .offered
+            case .alreadySent?: self = .sending
+            case .userTyped?: self = .userTyped
+            case .needsFix?: self = .needsFix
+            case .notStopped?, .notClaude?, .notAtPrompt?: self = .unavailable
+            }
+        }
+
+        /// Where Resume stands, when it isn't the button.
+        var status: String? {
+            switch self {
+            case .offered: return nil
+            case .sending: return "Resuming…"
+            case .userTyped: return "Text in its prompt: send it from the terminal"
+            case .needsFix: return "Needs a fix in the terminal first"
+            case .unavailable: return "Resume once claude is back at its prompt"
+            }
+        }
     }
 
     /// " · <label>" after the process name: short enough for the row, the
@@ -272,9 +297,10 @@ enum SidebarHoverTarget: Equatable {
     }
 
     /// Key of a Resume button's view, among the approval buttons (hover and
-    /// click arming treat them alike).
-    static func resumeButtonKey(workspaceIndex: Int, columnIndex: Int) -> String {
-        "resume|\(workspaceIndex)|\(columnIndex)"
+    /// click arming treat them alike). The failure is part of it: a button
+    /// for another failure at the same place arms again.
+    static func resumeButtonKey(workspaceIndex: Int, columnIndex: Int, failedAt: TimeInterval) -> String {
+        "resume|\(workspaceIndex)|\(columnIndex)|\(failedAt)"
     }
 }
 

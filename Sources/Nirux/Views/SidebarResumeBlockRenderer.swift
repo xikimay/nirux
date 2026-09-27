@@ -25,22 +25,21 @@ struct SidebarResumeBlockRenderer {
         var buttons: [String: SidebarBadgeView] = [:]
 
         let buttonsY = top - height + metrics.approvalInset
-        switch resume {
-        case .offered:
+        if let status = resume.status {
+            views.append(self.status(status, x: x, y: buttonsY, width: width, alpha: resume == .sending ? 0.55 : 0.7))
+        } else {
             let button = resumeButton()
             button.frame = NSRect(x: x, y: buttonsY, width: metrics.resumeButtonWidth, height: metrics.approvalButtonHeight)
             views.append(button)
             let region = SidebarHitRegion.agentResume(
                 workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt
             )
-            buttons[SidebarHoverTarget.resumeButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex)] = button
+            buttons[SidebarHoverTarget.resumeButtonKey(
+                workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt
+            )] = button
             hitAreas.append(SidebarHitArea(frame: button.frame.insetBy(dx: -3, dy: -3), region: region))
             let offset = metrics.resumeButtonWidth + 8
             views.append(status("types “continue”", x: x + offset, y: buttonsY, width: width - offset, alpha: 0.4))
-        case .sending:
-            views.append(status("Resuming…", x: x, y: buttonsY, width: width, alpha: 0.55))
-        case .unavailable:
-            views.append(status("Resume once claude is back at its prompt", x: x, y: buttonsY, width: width, alpha: 0.55))
         }
         hitAreas.append(SidebarHitArea(frame: blockFrame, region: .actionBlock(workspaceIndex: workspaceIndex)))
         return SidebarApprovalBlockRenderer.Result(

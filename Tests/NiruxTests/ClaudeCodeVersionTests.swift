@@ -21,6 +21,7 @@ final class ClaudeCodeVersionTests: XCTestCase {
         let url = root.appendingPathComponent(relative)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try contents.write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
         return url.path
     }
 
@@ -37,7 +38,9 @@ final class ClaudeCodeVersionTests: XCTestCase {
 
     func testParsingAndOrder() {
         XCTAssertEqual(ClaudeCodeVersion("2.1.283")?.description, "2.1.283")
-        XCTAssertEqual(ClaudeCodeVersion("2.1.90-beta.1"), ClaudeCodeVersion("2.1.90"))
+        XCTAssertLessThan(ClaudeCodeVersion("2.1.78-beta.1")!, ClaudeCodeVersion(major: 2, minor: 1, patch: 78),
+                          "a pre-release comes before its release")
+        XCTAssertGreaterThan(ClaudeCodeVersion("2.1.79-beta.1")!, ClaudeCodeVersion(major: 2, minor: 1, patch: 78))
         for invalid in ["", "2.1", "2.1.x", "2.1.3.4", "v2.1.3", "2..3", "２.1.3"] {
             XCTAssertNil(ClaudeCodeVersion(invalid), invalid)
         }
@@ -73,11 +76,36 @@ final class ClaudeCodeVersionTests: XCTestCase {
         XCTAssertEqual(ClaudeCodeVersion.installed(at: claude), ClaudeCodeVersion("1.0.51"))
     }
 
+    /// ~/.claude/settings.json is shared by every claude on the Mac: the
+    /// oldest one found decides, and one whose version can't be read makes
+    /// it unknown.
+    func testDetectTakesTheOldestClaudeFound() throws {
+        let home = root.appendingPathComponent("home").path
+        let native = try file("home/.local/share/claude/versions/2.1.283")
+        _ = try link("home/.local/bin/claude", to: native)
+        XCTAssertEqual(ClaudeCodeVersion.detect(path: "", home: home), ClaudeCodeVersion("2.1.283"))
+
+        try file("usr/lib/node_modules/@anthropic-ai/claude-code/package.json", manifest(version: "2.1.70"))
+        let cli = try file("usr/lib/node_modules/@anthropic-ai/claude-code/cli.js")
+        _ = try link("usr/bin/claude", to: cli)
+        let npmBin = root.appendingPathComponent("usr/bin").path
+        XCTAssertEqual(ClaudeCodeVersion.detect(path: npmBin, home: home), ClaudeCodeVersion("2.1.70"),
+                       "an older npm install elsewhere on PATH")
+
+        try file("shims/claude")
+        let shims = root.appendingPathComponent("shims").path
+        XCTAssertNil(ClaudeCodeVersion.detect(path: shims, home: home), "one unreadable: unknown")
+        XCTAssertNil(ClaudeCodeVersion.detect(path: "", home: root.appendingPathComponent("nobody").path), "none found")
+    }
+
     func testUnknownLayoutsReadAsUnknown() throws {
         XCTAssertNil(ClaudeCodeVersion.installed(at: try file("shims/claude")), "a shim says nothing")
         // Someone else's package.json next to a wrapper is not Claude's.
         try file("tools/package.json", manifest(name: "my-wrapper", version: "9.9.9"))
         XCTAssertNil(ClaudeCodeVersion.installed(at: try file("tools/claude")))
+        // A stray `npm i` in the home folder is not the wrapper's package.
+        try file("home2/node_modules/@anthropic-ai/claude-code/package.json", manifest(version: "2.1.283"))
+        XCTAssertNil(ClaudeCodeVersion.installed(at: try file("home2/bin/claude")))
         // A folder named like a version, but not the native installer's.
         XCTAssertNil(ClaudeCodeVersion.installed(at: try file("stuff/versions/2.1.283")))
         XCTAssertNil(ClaudeCodeVersion.installed(at: root.appendingPathComponent("missing/claude").path))
