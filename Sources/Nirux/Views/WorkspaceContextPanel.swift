@@ -40,13 +40,14 @@ final class WorkspaceContextPanel {
     private var panel: NSPanel?
     private var titleLabel: NSTextField?
     private var cwdLabel: NSTextField?
-    private var purposeEditor: NSTextView?
+    private(set) var purposeEditor: NSTextView?
     private var phasePopUp: NSPopUpButton?
-    private var summaryEditor: NSTextView?
+    private(set) var summaryEditor: NSTextView?
     private var summaryHelpLabel: NSTextField?
     private var nextStepField: NSTextField?
     private var blockerField: NSTextField?
     private var liveContextLabel: NSTextField?
+    private var editorUndoStacks: [EditorUndoStack] = []
 
     private static let size = NSSize(width: 660, height: 640)
 
@@ -69,6 +70,10 @@ final class WorkspaceContextPanel {
             effective: configuration.effectivePhase
         )
         liveContextLabel?.stringValue = Self.liveContextText(configuration)
+        // The panel is reused across workspaces: undo steps recorded against
+        // the previous workspace's text would replay onto this one.
+        editorUndoStacks.forEach { $0.stack.removeAllActions() }
+        panel.undoManager?.removeAllActions()
 
         let windowFrame = window.frame
         let x = windowFrame.midX - Self.size.width / 2
@@ -275,6 +280,9 @@ final class WorkspaceContextPanel {
         editor.isAutomaticQuoteSubstitutionEnabled = false
         editor.isAutomaticDashSubstitutionEnabled = false
         editor.allowsUndo = true
+        let undoStack = EditorUndoStack()
+        editor.delegate = undoStack
+        editorUndoStacks.append(undoStack)
         editor.textContainerInset = NSSize(width: 8, height: 7)
         editor.autoresizingMask = [.width]
         scroll.documentView = editor
@@ -339,5 +347,16 @@ final class WorkspaceContextPanel {
         let agents = "Agents    \(working) working  ·  \(waiting) waiting  ·  \(configuration.agentStatuses.count) columns"
         return [activity, "Git       \(git)", pullRequest, agents, "Path      \(configuration.cwd)"]
             .joined(separator: "\n")
+    }
+}
+
+/// Gives one editor its own undo stack. The editors would otherwise share the
+/// panel's, so Cmd+Z in Summary could revert an earlier Purpose edit.
+@MainActor
+private final class EditorUndoStack: NSObject, NSTextViewDelegate {
+    let stack = UndoManager()
+
+    func undoManager(for view: NSTextView) -> UndoManager? {
+        stack
     }
 }

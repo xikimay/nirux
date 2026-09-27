@@ -33,7 +33,7 @@ extension NiruxApp {
         // Also consume flagsChanged to prevent ghostty from sending modifier
         // key events to the PTY (breaks Claude Code's kitty keyboard protocol)
         NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged]) { [weak self] event in
-            guard let shell = self?.shell else { return event }
+            guard let shell = self?.shell, event.window === self?.mainWindow else { return event }
             if shell.isOverlayActive { return event }
             guard let workspace = shell.activeWorkspaceForKeyIntercept,
                   let col = workspace.columns[safe: workspace.focusedIndex]
@@ -44,7 +44,10 @@ extension NiruxApp {
         }
 
         NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-            guard let shell = self?.shell else { return event }
+            // Only the main window's columns are routed here. Other windows —
+            // panels, a detached Web Inspector, Sparkle — keep AppKit's own
+            // key handling instead of feeding the focused column.
+            guard let shell = self?.shell, event.window === self?.mainWindow else { return event }
 
             // Don't intercept when an overlay is active (picker, etc.)
             if shell.isOverlayActive { return event }
@@ -65,47 +68,37 @@ extension NiruxApp {
                     // menu items: menu items would also consume Cmd+[/] in
                     // EDITOR columns, killing Monaco's indent/outdent-line
                     // shortcuts with a no-op action.
-                    if col.isWebView, event.modifierFlags == [.command],
-                       let chars = event.charactersIgnoringModifiers {
-                        if chars == "[" {
+                    if col.isWebView,
+                       event.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command] {
+                        let typed = [event.characters, event.charactersIgnoringModifiers]
+                        if typed.contains("[") {
                             col.webViewColumn?.goBack()
                             return nil
                         }
-                        if chars == "]" {
+                        if typed.contains("]") {
                             col.webViewColumn?.goForward()
                             return nil
                         }
                     }
-                    // Cmd+P is bound to "Command Palette" in the menu, but in
-                    // an editor column Monaco rebinds it to its own quick-open
-                    // (which Nirux replaces with the workspace file picker).
-                    // Let Monaco see it instead of the menu — there's a
-                    // dedicated palette shortcut elsewhere if the user wants
-                    // the global one.
-                    if col.isEditor, event.charactersIgnoringModifiers == "p" {
-                        return event
-                    }
-                    // Cmd+Opt+Return: Monaco resolves this chord itself —
-                    // "Replace All" while the find widget is open, else it
-                    // posts the send-selection bridge message. Routing it to
-                    // the menu here would shadow Replace All.
-                    if col.isEditor, event.keyCode == 0x24,
-                       event.modifierFlags.contains(.option) {
-                        return event
-                    }
-                    // Cmd+S (exactly — Option/Shift/Control absent): let
-                    // Monaco's save binding fire. The menu would otherwise
-                    // consume it for "Toggle Sidebar" (key equivalent "s")
-                    // and the editor could never save from the keyboard.
-                    // Cmd+Opt+S (Save All) still routes to the menu below.
-                    if col.isEditor, event.charactersIgnoringModifiers == "s",
-                       event.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command] {
+                    if WebContentKeyRouting.passesToWebContent(
+                        isEditor: col.isEditor,
+                        characters: event.characters,
+                        charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+                        keyCode: event.keyCode,
+                        modifierFlags: event.modifierFlags
+                    ) {
                         return event
                     }
                     // Cmd+W: in an editor with open tabs, close the active
                     // tab first; only fall through to "Close Column" once
                     // the tab list is empty. Mirrors VSCode/Cursor.
-                    if col.isEditor, event.charactersIgnoringModifiers == "w",
+                    if col.isEditor,
+                       WebContentKeyRouting.typesLetter(
+                           "w", ansiKeyCode: 0x0D,
+                           characters: event.characters,
+                           charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+                           keyCode: event.keyCode
+                       ),
                        let editor = col.editorColumn, let active = editor.activePath {
                         editor.close(path: active)
                         return nil
@@ -124,15 +117,6 @@ extension NiruxApp {
 
             // Cmd+key: some go to PTY (Cmd+Backspace), rest to menu system
             if event.modifierFlags.contains(.command) {
-                // Cmd+S (exactly): toggle sidebar — must intercept here
-                // because ghostty's performKeyEquivalent swallows the event.
-                // Exact-modifier match so Cmd+Opt+S (Save All) falls through
-                // to the menu instead of toggling the sidebar.
-                if event.charactersIgnoringModifiers == "s",
-                   event.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command] {
-                    shell.toggleSidebar()
-                    return nil
-                }
                 let bytes = KeyMapper.bytesForEvent(event)
                 if !bytes.isEmpty {
                     pty.sendRaw(bytes)

@@ -5,7 +5,8 @@ struct PaletteAction {
     let icon: String
     let title: String
     let subtitle: String
-    let shortcut: String  // e.g. "⌘T" displayed on the right
+    /// Shown on the right. Only table chords, so every label is bound.
+    let shortcut: NiruxShortcuts?
     let action: () -> Void
 }
 
@@ -322,8 +323,8 @@ final class CommandPalette: NSObject {
             row.addSubview(subtitle)
 
             // Shortcut label (right side)
-            if !action.shortcut.isEmpty {
-                let shortcut = NSTextField(labelWithString: action.shortcut)
+            if let chord = action.shortcut?.chord {
+                let shortcut = NSTextField(labelWithString: chord.display)
                 shortcut.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
                 shortcut.textColor = .tertiaryLabelColor
                 shortcut.alignment = .right
