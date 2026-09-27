@@ -134,11 +134,17 @@ extension NiruxShellView {
         // closing another workspace from its context menu must not steal focus.
         if index == activeWSIndex,
            let target = workspaceStore.fallbackIndexAfterClosingWorkspace(at: index) {
+            let changesSpace = workspaces[target].profileID != activeProfileID
             workspaceStore.selectWorkspace(at: target)
+            // As any switch: its badge, git context and title bars. Another
+            // space shows at once, as when picked in the sidebar: a slide
+            // from this space's strip would mean nothing there.
+            refreshAfterWorkspaceSelection(animated: !changesSpace)
+        } else {
+            relayout(animated: true)
+            updateSidebar()
+            focusActiveTerminal(in: window)
         }
-        relayout(animated: true)
-        updateSidebar()
-        focusActiveTerminal(in: window)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
             guard let self else { return }
