@@ -194,14 +194,17 @@ final class ProcessSnapshot {
             if !arg1.hasPrefix("-") {
                 let base = scriptName(arg1)
                 if !base.isEmpty { return base }
-            } else if let script = argv.dropFirst().first(where: { !$0.hasPrefix("-") }),
+            } else if let script = argv.dropFirst().first(where: { !isValuelessLongFlag($0) }),
+                      !script.hasPrefix("-"), (script as NSString).pathExtension.isEmpty,
                       AgentStatusMachine.isRecognizedAgentProcess(scriptName(script)) {
-                // Runtime flags before an agent's script: Gemini CLI's shebang
-                // (`env -S node --no-warnings=…`), its relaunched child
-                // (`--max-old-space-size=…`), a shell alias. Only an agent
-                // name is trusted: after a flag that takes a value
-                // (`node -r dotenv/config app.js`) the first bare argument is
-                // that value, not the script.
+                // Runtime flags before an agent's bin shim: Gemini CLI's
+                // shebang (`env -S node --no-warnings=…`), its relaunched
+                // child (`--max-old-space-size=…`), a shell alias
+                // (`--no-deprecation`). Only flags that can't take a separate
+                // value are skipped — after `-r`, `-m` or `--import` the next
+                // argument is the flag's — and only an extensionless agent
+                // name is trusted, so `node --env-file=.env codex.mjs` stays
+                // `node`.
                 return scriptName(script)
             }
         }
@@ -210,6 +213,12 @@ final class ProcessSnapshot {
 
     private static func scriptName(_ argument: String) -> String {
         ((argument as NSString).lastPathComponent as NSString).deletingPathExtension
+    }
+
+    /// `--name=value`, or a `--no…` switch (`--no-deprecation`,
+    /// `--noprofile`): carries its value, if any, inline.
+    private static func isValuelessLongFlag(_ argument: String) -> Bool {
+        argument.hasPrefix("--") && (argument.contains("=") || argument.hasPrefix("--no"))
     }
 
     /// Read up to maxArgs arguments from KERN_PROCARGS2

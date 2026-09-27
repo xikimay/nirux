@@ -130,10 +130,11 @@ final class CloseAgentDetectionTests: XCTestCase {
         XCTAssertEqual(backgroundAgent.foregroundProcessName(snapshot: ProcessSnapshot()), "zsh")
     }
 
-    /// Gemini CLI runs as `node --no-warnings=… …/gemini`: the live argv
-    /// read must reach past the runtime flags, in the foreground and in the
-    /// descendant scan. (`bash --norc` stands in for node's flags; `exec -a`
-    /// sets argv[0].) Recognized for close, yet never a remote-prompt target.
+    /// Gemini CLI's relaunched child runs as `node --no-warnings=…
+    /// --max-old-space-size=… …/gemini`: the live argv read must reach past
+    /// both flags, in the foreground and in the descendant scan. (`bash
+    /// --noprofile --norc` stands in for node's flags; `exec -a` sets
+    /// argv[0].) Recognized for close, yet never a remote-prompt target.
     @MainActor
     func testFlaggedRuntimeLaunchOfGeminiIsProtectedButNotRemote() async throws {
         try await withScratchStateDirectory { cwd in
@@ -142,10 +143,10 @@ final class CloseAgentDetectionTests: XCTestCase {
             let foreground = PtySession()
             let background = PtySession()
             let claude = PtySession()
-            foreground.start(shell: "/bin/zsh", args: ["-f", "-c", "exec -a node /bin/bash --norc gemini"], cwd: cwd)
+            foreground.start(shell: "/bin/zsh", args: ["-f", "-c", "exec -a node /bin/bash --noprofile --norc gemini"], cwd: cwd)
             background.start(
                 shell: "/bin/zsh",
-                args: ["-f", "-c", "(exec -a node /bin/bash --norc gemini) & wait"],
+                args: ["-f", "-c", "(exec -a node /bin/bash --noprofile --norc gemini) & wait"],
                 cwd: cwd
             )
             claude.start(shell: "/bin/zsh", args: ["-f", "-c", "exec -a claude /bin/cat"], cwd: cwd)

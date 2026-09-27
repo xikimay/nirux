@@ -35,11 +35,19 @@ final class ActivityOnlyAgentTests: XCTestCase {
     }
 
     func testOtherFlaggedRuntimeLaunchesKeepTheRuntimeName() {
-        // The first bare argument after `-r` is the flag's value, not the
-        // script: only an agent name is trusted there.
+        // A flag that may take a separate value stops the scan: the next
+        // argument can be its value (`-r ./claude.js`), not the script.
         XCTAssertEqual(ProcessSnapshot.execName(from: ["node", "-r", "dotenv/config", "server.js"]), "node")
-        XCTAssertEqual(ProcessSnapshot.execName(from: ["node", "--inspect", "server.js"]), "node")
-        XCTAssertEqual(ProcessSnapshot.execName(from: ["python3", "-m", "http.server"]), "python3")
+        XCTAssertEqual(ProcessSnapshot.execName(from: ["node", "-r", "./claude.js", "server.js"]), "node")
+        XCTAssertEqual(ProcessSnapshot.execName(from: ["node", "--import", "codex", "app.js"]), "node")
+        XCTAssertEqual(ProcessSnapshot.execName(from: ["node", "--watch", "claude"]), "node")
+        XCTAssertEqual(ProcessSnapshot.execName(from: ["python3", "-m", "codex"]), "python3")
+        XCTAssertEqual(ProcessSnapshot.execName(from: ["java", "-jar", "codex.jar"]), "java")
+        XCTAssertEqual(ProcessSnapshot.execName(from: ["node", "--", "/opt/homebrew/bin/gemini"]), "node")
+        // Agent names only from extensionless bin shims past a flag.
+        XCTAssertEqual(ProcessSnapshot.execName(from: ["node", "--env-file=.env", "codex.mjs"]), "node")
+        XCTAssertEqual(ProcessSnapshot.execName(from: ["node", "--no-deprecation", "gemini.js"]), "node")
+        XCTAssertEqual(ProcessSnapshot.execName(from: ["node", "--no-deprecation", "server"]), "node")
         XCTAssertEqual(ProcessSnapshot.execName(from: ["node", "--version"]), "node")
         XCTAssertEqual(ProcessSnapshot.execName(from: ["node", "server.js"]), "server")
     }
@@ -61,13 +69,15 @@ final class ActivityOnlyAgentTests: XCTestCase {
         XCTAssertEqual(running.foregroundProcess(shellPID: 10)?.name, "gemini")
         XCTAssertEqual(running.firstDescendantName(of: 10, where: isAgent), "gemini")
 
-        // ^Z, then the launcher died: only its relaunched child is left.
-        let orphanedChild = ProcessSnapshot(entries: [
+        // Under a wrapper whose own name says nothing, suspended with ^Z:
+        // the scan reaches the relaunched child past both flags.
+        let wrapped = ProcessSnapshot(entries: [
             entry(10, parent: 1, group: 10, foreground: 10, name: "zsh", ["zsh"]),
-            entry(21, parent: 10, group: 20, foreground: 10, name: "node", child)
+            entry(20, parent: 10, group: 20, foreground: 10, name: "caffeinate", ["caffeinate", "-i", "node"]),
+            entry(21, parent: 20, group: 20, foreground: 10, name: "node", child)
         ])
-        XCTAssertEqual(orphanedChild.foregroundProcess(shellPID: 10)?.name, "zsh")
-        XCTAssertEqual(orphanedChild.firstDescendantName(of: 10, where: isAgent), "gemini")
+        XCTAssertEqual(wrapped.foregroundProcess(shellPID: 10)?.name, "zsh")
+        XCTAssertEqual(wrapped.firstDescendantName(of: 10, where: isAgent), "gemini")
     }
 
     // MARK: - Status
@@ -92,15 +102,27 @@ final class ActivityOnlyAgentTests: XCTestCase {
         XCTAssertEqual(machine.tick(fgName: "node", isUserFocused: false, now: t0 + 6.5), .idle)
     }
 
-    func testActivityOnlyAgentTakingOverDropsClaudesDialogs() {
-        // claude died without SessionEnd, leaving a dialog; gemini now owns
-        // the terminal.
+    func testActivityOnlyAgentKeepsASuspendedClaudesDialogs() {
+        // claude shows a dialog, ^Z, the user runs gemini: on `fg` the dialog
+        // is back, and it must still keep Telegram from typing into it.
         _ = machine.tick(fgName: "claude", isUserFocused: false, now: t0)
+        _ = machine.apply(AgentHookEvent(kind: .claude, name: .sessionStart), isUserFocused: false)
         _ = machine.apply(AgentHookEvent(kind: .claude, name: .permissionRequest), isUserFocused: false)
+        _ = machine.tick(fgName: "zsh", isUserFocused: false, now: t0 + 1)
+        _ = machine.tick(fgName: "gemini", isUserFocused: false, now: t0 + 2)
         XCTAssertEqual(machine.pendingDialogs.count, 1)
-        _ = machine.tick(fgName: "gemini", isUserFocused: false, now: t0 + 1)
+        XCTAssertNil(machine.hookKind, "no hook drives gemini; OSC 9 must not stay muted")
+
+        // gemini's own silence is not claude's dialog.
+        machine.noteUserInput(now: t0 + 8)
+        machine.noteRead(now: t0 + 9)
+        XCTAssertEqual(machine.tick(fgName: "gemini", isUserFocused: false, now: t0 + 9.5), .working)
+        XCTAssertEqual(machine.tick(fgName: "gemini", isUserFocused: false, now: t0 + 20), .needsAttention)
+        XCTAssertNil(machine.attentionReason)
+
+        // An integrated agent taking over still drops them (claude died).
+        _ = machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 21)
         XCTAssertTrue(machine.pendingDialogs.isEmpty)
-        XCTAssertEqual(machine.state, .idle)
     }
 
     // MARK: - Capabilities

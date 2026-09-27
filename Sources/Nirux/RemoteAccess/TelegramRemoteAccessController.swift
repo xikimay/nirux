@@ -383,7 +383,7 @@ final class TelegramRemoteAccessController {
         let sessions = sessionsProvider()
         guard !sessions.isEmpty else {
             selectedAgentUUID = nil
-            _ = await send("No recognized live agent sessions are available.", chatID: chatID, client: client)
+            _ = await send("No live Claude Code or Codex sessions are available.", chatID: chatID, client: client)
             return
         }
         if sessions.count == 1 { selectedAgentUUID = sessions[0].id }
@@ -553,7 +553,7 @@ final class TelegramRemoteAccessController {
     private static let helpText = """
     Nirux Telegram Remote Access
 
-    /sessions — list and select recognized live agent sessions
+    /sessions — list and select live Claude Code and Codex sessions
     /status — show the selected session status
     /tail — show recent terminal output
     /help — show this message
