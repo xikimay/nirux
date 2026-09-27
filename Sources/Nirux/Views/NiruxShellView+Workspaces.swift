@@ -177,43 +177,6 @@ extension NiruxShellView {
         focusActiveTerminal(in: window)
     }
 
-    func closeWorkspace(at index: Int) {
-        guard workspaces.count > 1 else { return }
-
-        let wsToRemove = workspaces[index]
-        // Only move the selection when the *active* workspace is going away —
-        // closing another workspace from its context menu must not steal focus.
-        if index == activeWSIndex,
-           let target = workspaceStore.fallbackIndexAfterClosingWorkspace(at: index) {
-            workspaceStore.selectWorkspace(at: target)
-        }
-        relayout(animated: true)
-        updateSidebar()
-        focusActiveTerminal(in: window)
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-            guard let self else { return }
-            guard let removed = self.workspaceStore.removeWorkspace(wsToRemove) else { return }
-
-            if self.isPilotMode {
-                NSAnimationContext.runAnimationGroup({ ctx in
-                    ctx.duration = 0.25
-                    ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                    removed.containerView.animator().alphaValue = 0
-                }, completionHandler: {
-                    DispatchQueue.main.async {
-                        removed.containerView.removeFromSuperview()
-                    }
-                })
-                self.relayout(animated: true)
-            } else {
-                removed.containerView.removeFromSuperview()
-                self.relayout(animated: false)
-            }
-            self.updateSidebar()
-        }
-    }
-
     func selectProfile(_ profileID: String) {
         activateProfile(profileID, slideOutDirection: nil)
     }
@@ -338,57 +301,6 @@ extension NiruxShellView {
 
     private func refreshAfterWorkspaceMutation() {
         relayout(animated: true)
-        updateSidebar()
-        focusActiveTerminal(in: window)
-        saveState()
-    }
-
-    /// Sidebar-menu close path: unlike the last-column ⌘W fallthrough, a
-    /// menu click is one careless gesture away — confirm before killing
-    /// live agent sessions or multi-column workspaces.
-    func requestCloseWorkspace(at index: Int) {
-        guard let workspace = workspaces[safe: index] else { return }
-        let context = WorkspaceClosePolicy.Context(
-            totalWorkspaceCount: workspaces.count,
-            columnCount: workspace.columns.count,
-            hasBusyAgent: workspace.columns.contains { ($0.pty?.cachedAgentState ?? .idle) != .idle },
-            isWorktreeBacked: GitWorktree.isLinkedWorktree(at: workspace.cwd)
-        )
-        switch WorkspaceClosePolicy.decision(for: context) {
-        case .blocked:
-            return
-        case .close:
-            closeWorkspace(at: index)
-        case .confirm(let details):
-            let alert = NSAlert()
-            alert.alertStyle = .warning
-            alert.messageText = "Close workspace “\(workspace.title)”?"
-            alert.informativeText = details.joined(separator: "\n")
-            alert.addButton(withTitle: "Close Workspace")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-            // Main-queue work can mutate `workspaces` while the modal runs
-            // (worktree creation finishing, a prior close's deferred removal) —
-            // re-resolve the index by identity before closing.
-            guard let currentIndex = workspaces.firstIndex(where: { $0 === workspace }) else { return }
-            closeWorkspace(at: currentIndex)
-        }
-    }
-
-    /// Close a specific column of a specific workspace (sidebar context
-    /// menu). The ⌘W path only reaches the focused column of the active
-    /// workspace; this mirrors its non-animated bookkeeping.
-    func closeColumn(workspaceIndex: Int, columnIndex: Int) {
-        guard let workspace = workspaces[safe: workspaceIndex],
-              workspace.columns.count > 1,
-              workspace.columns.indices.contains(columnIndex) else { return }
-        workspace.closeColumn(at: columnIndex)
-        relayout(animated: false)
-        workspace.layoutAndScroll(
-            viewportWidth: viewport.frame.width,
-            height: workspace.containerView.frame.height,
-            animated: true, pilotMode: isPilotMode
-        )
         updateSidebar()
         focusActiveTerminal(in: window)
         saveState()

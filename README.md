@@ -95,7 +95,7 @@ Useful shortcuts:
 | `Cmd+P` | Command palette (fuzzy matching) |
 | `Cmd+T` | New terminal column |
 | `Cmd+B` | Open browser URL flow |
-| `Cmd+W` | Close editor tab, column, or workspace depending on context |
+| `Cmd+W` | Close editor tab, column, or workspace depending on context — asks first when a Claude or Codex session is running (Return cancels, ⌘D closes) |
 | `Cmd+1…9` | Focus column N |
 | `Cmd+Left` / `Cmd+Right` | Focus previous or next column |
 | `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column |
@@ -130,6 +130,8 @@ Nirux installs lightweight lifecycle hooks so agent status is exact instead of g
 
 Each event carries the column's stable `NIRUX_AGENT_UUID`, so status and attention signals are attributed to the exact column that emitted them — across restarts. Agents launched outside Nirux (or before the hooks were installed) fall back to simple output-activity detection. To remove the hooks, delete the marked entries from those two files.
 
+Both files are global, so every Claude Code and Codex session on the Mac runs these hooks. They are guarded on `NIRUX_AGENT_UUID`, which Nirux terminals set and processes started from them inherit: a session without it stops at a shell test and never launches Nirux, and Nirux ignores any event that arrives without it. Symlinked config files (dotfiles) are updated in place; the link is kept.
+
 ### Telegram Remote Access
 
 Telegram Remote Access is disabled by default. It uses outbound Bot API `getUpdates` long polling, so Nirux does not open a listening port and you do not need a public webhook. Nirux and the Mac must remain running and online for the bot to respond.
@@ -149,6 +151,26 @@ Supported commands:
 - `/help` — show the command summary.
 
 The bot token is stored as a generic password in macOS Keychain, never in `state.json`. Nirux persists only non-secret preferences, the paired Telegram user/chat IDs, and the last consumed update ID. Once pairing is complete, messages from every other user or chat are ignored. There is deliberately no `/exec`: prompts are routed by stable column UUID and injected only after Nirux re-verifies that a recognized agent process—not an idle shell—is currently live in that column. Clearing the token disables Remote Access and removes the pairing.
+
+### Terminal appearance (Ghostty config)
+
+Terminals follow the appearance settings of your Ghostty configuration. Nirux reads the same files as Ghostty, in the same order: `$XDG_CONFIG_HOME/ghostty/config` and `config.ghostty` (`~/.config` when `XDG_CONFIG_HOME` is unset), then `config` and `config.ghostty` in `~/Library/Application Support/com.mitchellh.ghostty/`, then any `config-file` includes.
+
+Only appearance keys are honored:
+
+- fonts: `font-family*`, `font-style*`, `font-feature`, `font-variation*`, `font-codepoint-map`, `font-synthetic-style`, `font-size`, `font-thicken*`, `font-shaping-break`, and the `adjust-*` cell metrics;
+- colors: `theme`, `background`, `foreground`, `palette`, `palette-generate`, `palette-harmonious`, `bold-color`, `minimum-contrast`, `faint-opacity`, `alpha-blending`, `window-colorspace`, `selection-*` and `search-*` colors, and the deprecated `bold-is-bright`, `cursor-invert-fg-bg`, and `selection-invert-fg-bg`;
+- cursor: `cursor-color`, `cursor-text`, `cursor-opacity`, `cursor-style`, `cursor-style-blink`.
+
+Everything else, including keybinds, window and macOS options, padding, opacity, and shell or command settings, is ignored: Nirux handles input, layout, and shells itself. Settings you don't set keep Nirux's defaults: 14pt, a blinking block cursor, and the Afterglow palette. If you set your own `background` or `foreground`, Afterglow's cursor and selection colors are dropped too, so they stay visible against your colors.
+
+`theme` accepts a theme name, an absolute path, or a `light:…,dark:…` pair. Nirux always uses the dark variant, because its window is always dark. Names are looked up in `$XDG_CONFIG_HOME/ghostty/themes` (`~/.config/ghostty/themes` by default), then in the themes bundled with Ghostty.app when it is installed. A theme that can't be found is ignored. Only the theme's appearance settings are used. As in Ghostty, a theme overrides the defaults, and your explicit settings override the theme. Nirux's default colors are left out as soon as the theme contributes any setting.
+
+Invalid lines, in your config or in its theme, are skipped individually instead of invalidating the whole config; look for `[GhosttyConfig]` messages in Console.app.
+
+The configuration is read each time a terminal opens, so a change applies to terminals you open afterwards. Terminals that are already open keep their settings.
+
+To make Nirux ignore your Ghostty configuration, run `defaults write com.xikimay.nirux IgnoreGhosttyConfig -bool true` (`defaults delete com.xikimay.nirux IgnoreGhosttyConfig` undoes it).
 
 ## Worktrees And URL Scheme
 
@@ -211,6 +233,16 @@ Run from SwiftPM:
 swift run Nirux
 ```
 
+A development build otherwise restores and saves the installed app's workspaces. Isolate smoke runs:
+
+```bash
+NIRUX_STATE_DIR=/tmp/nirux-dev swift run Nirux
+```
+
+`NIRUX_STATE_DIR` moves workspaces, settings, Activity and Mission history, and agent hook events out of `~/Library/Application Support/nirux/` (`HOME` is ignored). URL history, the Keychain (Telegram token), and the `nirux://` scheme stay shared with the installed app.
+
+Only a Nirux running from an `.app` bundle installs the agent hooks, so `swift run` leaves `~/.claude/settings.json` and `~/.codex/config.toml` alone. The hooks the installed app wrote keep working, and agents in the dev build's terminals report into its state directory. To test installer changes, set `NIRUX_FORCE_HOOK_INSTALL=1`; this points the global hooks at the dev binary until the installed app is relaunched. `NIRUX_SKIP_HOOK_INSTALL=1` disables the install for any build; set it when launching a local `bundle.sh` bundle for a smoke test, which would otherwise point the hooks at that bundle.
+
 Create a local app bundle:
 
 ```bash
@@ -223,6 +255,14 @@ By default `bundle.sh` uses ad-hoc signing. To create a Developer ID-signed bund
 ```bash
 NIRUX_CODESIGN_IDENTITY="Developer ID Application: Example Name (ABCDE12345)" \
   ./scripts/bundle.sh "dev" "1"
+```
+
+### Fingerprint mismatch for libghostty-spm
+
+If SwiftPM fails with `Revision be4e5b6… for libghostty-spm … version 1.3.1 does not match previously recorded value b093032…`, your machine recorded the `1.3.1` tag before upstream re-tagged it onto an identical source tree. Clear the stale fingerprint once:
+
+```bash
+rm ~/Library/org.swift.swiftpm/security/fingerprints/libghostty-spm-*.json
 ```
 
 ## Architecture

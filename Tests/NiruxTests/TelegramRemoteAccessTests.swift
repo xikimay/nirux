@@ -58,8 +58,13 @@ final class TelegramRemoteAccessTests: XCTestCase {
         TelegramURLProtocolStub.api.reset()
 
         controller.reloadFromPersistence()
+        // Update 9 is checkpointed before it is handled, so its callback answer
+        // can still be in flight once the last update ID is persisted. Exact
+        // counts are asserted below.
         let completed = try await waitUntil {
-            TelegramURLProtocolStub.api.sentMessages.count == 7
+            let snapshot = TelegramURLProtocolStub.api.snapshot()
+            return snapshot.sentMessages.count >= 7
+                && snapshot.callbackAnswers >= 2
                 && Persistence.load()?.settings?.telegramLastUpdateID == 9
         }
 
@@ -67,7 +72,8 @@ final class TelegramRemoteAccessTests: XCTestCase {
         guard completed, api.sentMessages.count == 7 else {
             XCTFail(
                 "Telegram transcript incomplete: methods=\(api.requestedMethods.sorted()), "
-                    + "messages=\(api.sentMessages.count), offsets=\(api.getUpdatesOffsets)"
+                    + "messages=\(api.sentMessages.count), callbackAnswers=\(api.callbackAnswers), "
+                    + "offsets=\(api.getUpdatesOffsets.prefix(12))"
             )
             return
         }
@@ -167,9 +173,11 @@ final class TelegramRemoteAccessTests: XCTestCase {
             )
         ])
 
+        // The paired identity is published before the confirmation reply is sent.
         let paired = try await waitUntil {
             controller.displayState.pairedUserID == 321
                 && Persistence.load()?.settings?.telegramLastUpdateID == 2
+                && !TelegramURLProtocolStub.api.sentMessages.isEmpty
         }
         XCTAssertTrue(paired)
         let settings = try XCTUnwrap(Persistence.load()?.settings)

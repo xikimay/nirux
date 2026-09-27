@@ -19,8 +19,9 @@ struct AgentHookEvent: Codable, Equatable {
     let kind: Kind
     let name: Name
     /// NIRUX_AGENT_UUID from the hook process's environment (inherited from
-    /// the shell of the column that launched the agent). Nil when the agent
-    /// runs outside a Nirux terminal.
+    /// the shell of the column that launched the agent). The receiver drops
+    /// events without it (see `AgentHookCLI.isFromNiruxTerminal`); nil only
+    /// in queue entries written by older builds.
     let agentUUID: String?
     /// NIRUX_WORKSPACE_ID from the same environment — lets notifications
     /// route events back to their workspace.
@@ -111,6 +112,7 @@ enum AgentHookCLI {
         }
 
         let env = ProcessInfo.processInfo.environment
+        guard isFromNiruxTerminal(env: env) else { return 0 }
         let emitterProcess = kind == .codex
             ? ProcessInstance.running(pid: getppid())
             : nil
@@ -124,6 +126,18 @@ enum AgentHookCLI {
 
         append(event)
         return 0
+    }
+
+    /// Only Nirux terminals export NIRUX_AGENT_UUID. An event without it
+    /// can't be routed to a column; queueing it would only put an
+    /// "External agent" row in the activity feed. The installed hook
+    /// commands already skip launching Nirux then; this drops events from
+    /// hook entries written by older builds (until the next launch
+    /// refreshes them) and from manual invocations. Check it only after
+    /// reading stdin: Claude reports a hook that exits before taking its
+    /// whole payload as failed (EPIPE).
+    static func isFromNiruxTerminal(env: [String: String]) -> Bool {
+        env["NIRUX_AGENT_UUID"]?.isEmpty == false
     }
 
     /// Append one JSON line. O_APPEND keeps concurrent writers (several
