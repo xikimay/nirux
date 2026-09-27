@@ -70,6 +70,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.isReleasedWhenClosed = false // ARC owns it; close() must not free it too
         window.appearance = NSAppearance(named: .darkAqua)
         window.contentView = sidebar
         window.orderFront(nil)
@@ -123,17 +124,9 @@ final class WorkspaceUXRenderingTests: XCTestCase {
         ))
         XCTAssertEqual(renamedWorkspaceIndex, 1)
 
-        let inactiveHeader = try XCTUnwrap(sidebar.hitAreas.first {
-            if case .link(let url, _) = $0.region {
-                return url == SidebarView.inactiveSectionActionURL
-            }
-            return false
-        })
-        sidebar.mouseDown(with: try mouseEvent(
-            in: sidebar,
-            at: inactiveHeader.frame.center,
-            clickCount: 1
-        ))
+        // Through the window, like a real click: it lands on the header
+        // row, which must pass it on to the sidebar.
+        window.sendEvent(try mouseEvent(in: sidebar, at: try inactiveHeaderFrame(in: sidebar).center, clickCount: 1))
         sidebar.layoutSubtreeIfNeeded()
 
         visibleText = text(in: sidebar)
@@ -142,6 +135,17 @@ final class WorkspaceUXRenderingTests: XCTestCase {
         XCTAssertTrue(visibleText.contains("Search prototype"))
         XCTAssertFalse(visibleText.contains("ACTIVITY"))
         try capture(sidebar, named: "workspace-sidebar-expanded.png")
+
+        window.sendEvent(try mouseEvent(in: sidebar, at: try inactiveHeaderFrame(in: sidebar).center, clickCount: 1))
+        sidebar.layoutSubtreeIfNeeded()
+
+        visibleText = text(in: sidebar)
+        XCTAssertTrue(visibleText.contains("▸ INACTIVE"))
+        XCTAssertFalse(visibleText.contains("Release notes"))
+    }
+
+    private func inactiveHeaderFrame(in sidebar: SidebarView) throws -> NSRect {
+        try XCTUnwrap(sidebar.inactiveSectionHeaderFrame)
     }
 
     func testWorkspaceNamingPanelAcceptsNewAndReplacementNames() throws {
@@ -152,6 +156,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        hostWindow.isReleasedWhenClosed = false
         hostWindow.orderFront(nil)
         defer { hostWindow.close() }
 

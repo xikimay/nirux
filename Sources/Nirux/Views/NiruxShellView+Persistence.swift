@@ -82,7 +82,6 @@ extension NiruxShellView {
             isSidebarExpanded = expanded
             sidebar.isExpanded = expanded
         }
-        sidebar.setInactiveSectionCollapsed(settings?.inactiveWorkspacesCollapsed ?? true)
     }
 
     private struct ClaimedSessionIDs {
@@ -227,7 +226,6 @@ extension NiruxShellView {
         )
         // The shell is the source of truth for sidebar state — carry the rest.
         settings.sidebarExpanded = isSidebarExpanded
-        settings.inactiveWorkspacesCollapsed = sidebar.isInactiveSectionCollapsed
         return PersistedState(
             workspaces: workspaces.map { workspace in
                 PersistedWorkspace(

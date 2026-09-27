@@ -63,6 +63,7 @@ extension SidebarView {
         let padding = SidebarExpandedMetrics.padding
         let activeInfos = displayedWorkspaceInfos.filter { !$0.isInactive }
         let inactiveInfos = displayedWorkspaceInfos.filter { $0.isInactive }
+        let listedInactiveInfos = inactiveInfos.filter { listsWorkspace(isInactive: true, isActive: $0.isActive) }
         let hasWorkspaces = !activeInfos.isEmpty || !inactiveInfos.isEmpty
         let activeProfile = lastProfiles.first(where: { $0.isActive })
         let activityRows = ActivityStore.shared.visibleFeedEntries(maxCount: Self.activityMaxRows)
@@ -71,6 +72,7 @@ extension SidebarView {
         let contentH = expandedContentHeight(
             activeInfos: activeInfos,
             inactiveInfos: inactiveInfos,
+            listedInactiveInfos: listedInactiveInfos,
             activityCount: activityRows.count,
             onboardingHeight: onboardingCard?.height
         )
@@ -95,9 +97,7 @@ extension SidebarView {
                 "inactive", count: inactiveInfos.count, padding: padding,
                 yOffset: yOffset, isCollapsed: isInactiveSectionCollapsed
             )
-            if !isInactiveSectionCollapsed {
-                yOffset = buildWorkspaceGroup(inactiveInfos, padding: padding, yOffset: yOffset)
-            }
+            yOffset = buildWorkspaceGroup(listedInactiveInfos, padding: padding, yOffset: yOffset)
         }
         // The checklist teaches the same chords as the hint, and more.
         if let onboardingCard {
@@ -146,8 +146,8 @@ extension SidebarView {
     /// Size the scrollable document so content is top-anchored and never
     /// hides behind the bottom space switcher.
     private func expandedContentHeight(
-        activeInfos: [WorkspaceInfo], inactiveInfos: [WorkspaceInfo], activityCount: Int,
-        onboardingHeight: CGFloat?
+        activeInfos: [WorkspaceInfo], inactiveInfos: [WorkspaceInfo], listedInactiveInfos: [WorkspaceInfo],
+        activityCount: Int, onboardingHeight: CGFloat?
     ) -> CGFloat {
         var height = SidebarExpandedMetrics.verticalPadding
             + SidebarExpandedMetrics.spaceHeaderHeight
@@ -160,9 +160,7 @@ extension SidebarView {
         if !inactiveInfos.isEmpty {
             height += SidebarExpandedMetrics.sectionGap
             height += SidebarExpandedMetrics.sectionHeaderAdvance
-            if !isInactiveSectionCollapsed {
-                height += SidebarExpandedMetrics.groupHeight(for: inactiveInfos)
-            }
+            height += SidebarExpandedMetrics.groupHeight(for: listedInactiveInfos)
         }
         if let onboardingHeight {
             height += SidebarExpandedMetrics.onboardingCardGap + onboardingHeight
@@ -374,11 +372,27 @@ extension SidebarView {
         label.frame = headerFrame
         addSubviewDoc(label)
         expandedViews.append(label)
-        if isCollapsed != nil {
+        if let isCollapsed {
+            // The whole row, as wide as the cards and down to the first
+            // one, not just the text band.
+            let inset = SidebarExpandedMetrics.workspaceInsetX
+            let rowFrame = NSRect(
+                x: inset,
+                y: yOffset - SidebarExpandedMetrics.sectionHeaderAdvance,
+                width: bounds.width - inset * 2,
+                height: SidebarExpandedMetrics.sectionHeaderAdvance
+            )
             hitAreas.append(SidebarHitArea(
-                frame: headerFrame,
+                frame: rowFrame,
                 region: .link(url: SidebarView.inactiveSectionActionURL, label: label)
             ))
+            let toggle = SidebarSectionToggleView(frame: rowFrame)
+            toggle.setAccessibilityLabel("\(title.capitalized) workspaces, \(count)")
+            toggle.setAccessibilityExpanded(!isCollapsed)
+            toggle.onPress = { [weak self] in self?.toggleInactiveSection() }
+            label.setAccessibilityElement(false)
+            addSubviewDoc(toggle)
+            expandedViews.append(toggle)
         }
 
         let countChip = badgeView(
@@ -394,6 +408,8 @@ extension SidebarView {
         )
         countChip.setAccessibilityRole(.staticText)
         countChip.setAccessibilityLabel("\(count)")
+        // The toggle button already says it.
+        countChip.setAccessibilityElement(isCollapsed == nil)
         addSubviewDoc(countChip)
         expandedViews.append(countChip)
 

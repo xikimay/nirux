@@ -128,6 +128,12 @@ extension NiruxApp {
         shell?.togglePilotMode()
     }
 
+    /// Same toggle as the sidebar's INACTIVE header (also in the ⌘P
+    /// palette), for the menu bar and Help search.
+    @objc func toggleInactiveWorkspaces(_ sender: Any?) {
+        shell?.sidebar.toggleInactiveSection()
+    }
+
     // Not `toggleSidebar(_:)`: NSWindow answers that AppKit selector first,
     // so a nil-target menu item would resolve to the window and stay disabled.
     @objc func toggleWorkspaceSidebar(_ sender: Any?) {
@@ -235,6 +241,11 @@ extension NiruxApp {
         let viewMenu = NSMenu(title: "View")
         viewMenu.addItem(withTitle: "Toggle Sidebar", action: #selector(toggleWorkspaceSidebar(_:)), shortcut: .toggleSidebar)
         viewMenu.addItem(withTitle: "Pilot Mode", action: #selector(togglePilotMode(_:)), shortcut: .pilotMode)
+        viewMenu.addItem(
+            withTitle: "Show Inactive Workspaces",
+            action: #selector(toggleInactiveWorkspaces(_:)),
+            keyEquivalent: ""
+        )
         viewMenu.addItem(NSMenuItem.separator())
         viewMenu.addItem(
             withTitle: "Toggle Editor Diff",

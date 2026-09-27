@@ -367,7 +367,6 @@ struct PersistedSettings: Codable {
     var claudeNoFlicker: Bool? = true
     var codexLaunchMode: CodexLaunchMode?
     var sidebarExpanded: Bool?
-    var inactiveWorkspacesCollapsed: Bool?
     /// Experimental and intentionally opt-in. Missing in older state files
     /// decodes to false so existing worktree behavior is unchanged.
     var missionHandoffsEnabled: Bool = false
@@ -394,7 +393,6 @@ struct PersistedSettings: Codable {
         claudeNoFlicker: Bool? = true,
         codexLaunchMode: CodexLaunchMode? = nil,
         sidebarExpanded: Bool? = nil,
-        inactiveWorkspacesCollapsed: Bool? = nil,
         missionHandoffsEnabled: Bool = false,
         sidebarApprovalsEnabled: Bool = false,
         telegramRemoteAccessEnabled: Bool = false,
@@ -409,7 +407,6 @@ struct PersistedSettings: Codable {
         self.claudeNoFlicker = claudeNoFlicker
         self.codexLaunchMode = codexLaunchMode
         self.sidebarExpanded = sidebarExpanded
-        self.inactiveWorkspacesCollapsed = inactiveWorkspacesCollapsed
         self.missionHandoffsEnabled = missionHandoffsEnabled
         self.sidebarApprovalsEnabled = sidebarApprovalsEnabled
         self.telegramRemoteAccessEnabled = telegramRemoteAccessEnabled
@@ -426,7 +423,6 @@ struct PersistedSettings: Codable {
         case claudeNoFlicker
         case codexLaunchMode
         case sidebarExpanded
-        case inactiveWorkspacesCollapsed
         case missionHandoffsEnabled
         case sidebarApprovalsEnabled
         case telegramRemoteAccessEnabled
@@ -453,7 +449,6 @@ struct PersistedSettings: Codable {
         claudeNoFlicker = try container.decodeIfPresent(Bool.self, forKey: .claudeNoFlicker) ?? true
         codexLaunchMode = try container.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)
         sidebarExpanded = try container.decodeIfPresent(Bool.self, forKey: .sidebarExpanded)
-        inactiveWorkspacesCollapsed = try container.decodeIfPresent(Bool.self, forKey: .inactiveWorkspacesCollapsed)
         missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? false
         sidebarApprovalsEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarApprovalsEnabled) ?? false
         telegramRemoteAccessEnabled = try container.decodeIfPresent(
@@ -485,7 +480,6 @@ struct PersistedSettings: Codable {
         try container.encodeIfPresent(claudeNoFlicker, forKey: .claudeNoFlicker)
         try container.encodeIfPresent(codexLaunchMode, forKey: .codexLaunchMode)
         try container.encodeIfPresent(sidebarExpanded, forKey: .sidebarExpanded)
-        try container.encodeIfPresent(inactiveWorkspacesCollapsed, forKey: .inactiveWorkspacesCollapsed)
         try container.encode(missionHandoffsEnabled, forKey: .missionHandoffsEnabled)
         try container.encode(sidebarApprovalsEnabled, forKey: .sidebarApprovalsEnabled)
         try container.encode(telegramRemoteAccessEnabled, forKey: .telegramRemoteAccessEnabled)

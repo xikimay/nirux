@@ -195,6 +195,11 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     // MARK: - NSMenuItemValidation
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        validateMenuItemForUpdate(menuItem)
+        if menuItem.action == #selector(toggleInactiveWorkspaces(_:)) {
+            guard let shell else { return false }
+            menuItem.state = shell.sidebar.isInactiveSectionCollapsed ? .off : .on
+            return shell.sidebar.hasInactiveWorkspaces
+        }
+        return validateMenuItemForUpdate(menuItem)
     }
 }
