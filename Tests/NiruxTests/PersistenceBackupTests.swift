@@ -342,7 +342,7 @@ final class PersistenceBackupTests: XCTestCase {
         }
         XCTAssertNil(Persistence.load())
 
-        // What Settings does when load() finds nothing: save an otherwise empty state.
+        // An otherwise empty state: what a settings write saves without a live layout.
         XCTAssertTrue(Persistence.save(PersistedState(workspaces: [], activeWorkspaceIndex: 0), now: date(day: 1)))
 
         XCTAssertEqual(contents("state.corrupt.2026-03-01-120000.json"), unreadable)
@@ -358,6 +358,40 @@ final class PersistenceBackupTests: XCTestCase {
 
         XCTAssertEqual(contents("state.json/inside"), Data("keep".utf8))
         XCTAssertEqual(files(prefix: "state.corrupt."), [])
+    }
+
+    // MARK: - Settings updates
+
+    func testSettingsUpdateKeepsTheSavedLayout() throws {
+        XCTAssertTrue(Persistence.save(state("saved"), now: date(day: 1)))
+        var askedForLiveLayout = false
+        func liveLayout() -> PersistedState {
+            askedForLiveLayout = true
+            return state("live")
+        }
+
+        XCTAssertTrue(Persistence.updateSettings(liveLayout: liveLayout()) { $0.codexLaunchMode = .fullAuto })
+
+        XCTAssertFalse(askedForLiveLayout)
+        let saved = try XCTUnwrap(Persistence.load())
+        XCTAssertEqual(saved.workspaces.map(\.title), ["saved"])
+        XCTAssertEqual(saved.settings?.codexLaunchMode, .fullAuto)
+    }
+
+    func testSettingsUpdateOverStateNothingCanRecoverSavesTheLiveLayout() throws {
+        try write(unreadable, "state.json")
+        try write(unreadable, "state.backup.1.json")
+        XCTAssertNil(Persistence.load())
+        var live = state("live")
+        live.settings = PersistedSettings(sidebarExpanded: false)
+
+        XCTAssertTrue(Persistence.updateSettings(liveLayout: live) { $0.codexLaunchMode = .fullAuto })
+
+        let saved = try XCTUnwrap(Persistence.load())
+        XCTAssertEqual(saved.workspaces.map(\.title), ["live"])
+        XCTAssertEqual(saved.settings?.codexLaunchMode, .fullAuto)
+        XCTAssertEqual(saved.settings?.sidebarExpanded, false)
+        XCTAssertEqual(files(prefix: "state.corrupt.").count, 1)
     }
 
     // MARK: - Helpers

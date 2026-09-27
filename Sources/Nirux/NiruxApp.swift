@@ -122,12 +122,11 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             shellView?.applyAgentHookEvents(events)
         }
         let remoteAccess = TelegramRemoteAccessController(
-            sessions: { [weak shellView] in
-                shellView?.remoteAgentSessions() ?? []
-            },
+            sessions: { [weak shellView] in shellView?.remoteAgentSessions() ?? [] },
             sendPrompt: { [weak shellView] agentUUID, prompt in
                 shellView?.sendRemotePrompt(agentUUID: agentUUID, prompt: prompt) ?? .sessionUnavailable
-            }
+            },
+            liveLayout: { [weak shellView] in shellView?.persistedState() }
         )
         telegramRemoteAccessController = remoteAccess
         remoteAccess.onStateChange = { [weak self] in

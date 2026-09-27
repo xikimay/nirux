@@ -214,6 +214,26 @@ enum Persistence {
             return nil
         }
     }
+
+    /// Applies `update` to the saved settings, keeping the saved layout. When
+    /// nothing loads (state.json missing, or it and every copy unreadable),
+    /// they are saved with `liveLayout`, the layout on screen, rather than
+    /// with no workspaces, which a relaunch after a crash, or another build,
+    /// would restore until the next heartbeat. The layout is empty only when
+    /// that is nil.
+    /// `liveLayout` is evaluated only then: it scans processes and settles
+    /// restored columns.
+    @discardableResult
+    static func updateSettings(
+        liveLayout: @autoclosure () -> PersistedState?,
+        _ update: (inout PersistedSettings) -> Void
+    ) -> Bool {
+        var state = load() ?? liveLayout() ?? PersistedState(workspaces: [], activeWorkspaceIndex: 0)
+        var settings = state.settings ?? PersistedSettings()
+        update(&settings)
+        state.settings = settings
+        return save(state)
+    }
 }
 
 struct PersistedState: Codable {

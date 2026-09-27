@@ -473,6 +473,40 @@ final class TelegramRemoteAccessTests: XCTestCase {
         XCTAssertFalse(AgentStatusMachine.isRecognizedAgentProcess("vim"))
     }
 
+    @MainActor
+    func testUnpairOverUnreadableStateKeepsTheLiveLayout() throws {
+        let stateDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nirux-telegram-unpair-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
+        let previousStateDirectory = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
+        setenv("NIRUX_STATE_DIR", stateDirectory.path, 1)
+        defer {
+            restoreEnvironment("NIRUX_STATE_DIR", previousValue: previousStateDirectory)
+            try? FileManager.default.removeItem(at: stateDirectory)
+        }
+        try Data("{".utf8).write(to: stateDirectory.appendingPathComponent("state.json"))
+        XCTAssertNil(Persistence.load())
+        var live = PersistedState(
+            workspaces: [PersistedWorkspace(title: "live", cwd: "/tmp/project", columns: [], focusedColumnIndex: 0)],
+            activeWorkspaceIndex: 0
+        )
+        live.settings = PersistedSettings(telegramPairedUserID: 42, telegramPairedChatID: 42)
+        let controller = TelegramRemoteAccessController(
+            sessions: { [] },
+            sendPrompt: { _, _ in .sessionUnavailable },
+            tokenLoader: { nil },
+            liveLayout: { live }
+        )
+        defer { controller.shutdown() }
+
+        controller.unpair()
+
+        let saved = try XCTUnwrap(Persistence.load())
+        XCTAssertEqual(saved.workspaces.map(\.title), ["live"])
+        XCTAssertNil(saved.settings?.telegramPairedUserID)
+        XCTAssertNil(saved.settings?.telegramPairedChatID)
+    }
+
 }
 
 private extension TelegramRemoteAccessTests {

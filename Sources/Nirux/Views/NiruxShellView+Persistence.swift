@@ -185,12 +185,19 @@ extension NiruxShellView {
     }
 
     func saveState(snapshot: ProcessSnapshot? = nil) {
+        Persistence.save(persistedState(snapshot: snapshot))
+    }
+
+    /// The layout on screen, with the saved settings (defaults when none
+    /// load) and the sidebar's state. Meant to be saved: a restored agent
+    /// column that has launched drops its restore state.
+    func persistedState(snapshot: ProcessSnapshot? = nil) -> PersistedState {
         let snapshot = snapshot ?? ProcessSnapshot()
         var settings = Persistence.load()?.settings ?? PersistedSettings()
         // The shell is the source of truth for sidebar state — carry the rest.
         settings.sidebarExpanded = isSidebarExpanded
         settings.inactiveWorkspacesCollapsed = sidebar.isInactiveSectionCollapsed
-        Persistence.save(PersistedState(
+        return PersistedState(
             workspaces: workspaces.map { workspace in
                 PersistedWorkspace(
                     id: workspace.id, title: workspace.title,
@@ -214,7 +221,7 @@ extension NiruxShellView {
             workspaceProfiles: workspaceStore.navigableProfiles,
             activeProfileID: activeProfileID,
             activeWorkspaceID: activeWorkspace?.id
-        ))
+        )
     }
 
     private func persistedColumn(
