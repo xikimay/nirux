@@ -49,6 +49,10 @@ final class WorkspaceState {
     var titleIsManual: Bool = false
     var profileID: String = WorkspaceProfile.defaultID
     var isInactive: Bool = false
+    /// Close in flight: `closeWorkspace` keeps the workspace in the store
+    /// until its exit animation ends. It no longer counts as remaining and
+    /// must not be selected or closed again.
+    var isClosing = false
     let missionID: String?
     /// Controls mission variables for terminals created after a Settings
     /// change. Already-running shells retain the environment they launched
@@ -121,6 +125,10 @@ final class WorkspaceState {
     /// A terminal file: link was cmd-clicked — the shell opens it in an
     /// editor column in this workspace, at the optional line.
     var onTerminalOpenFile: ((WorkspaceState, String, Int?) -> Void)?
+    /// Bring an existing column of this workspace into view and focus it.
+    var onRevealColumn: ((WorkspaceState, Int) -> Void)?
+    /// Dev-server proposals — see WorkspaceState+LocalServers.swift.
+    var localServers = LocalServerTracking()
 
     init(
         id: String = UUID().uuidString,
@@ -453,6 +461,7 @@ extension WorkspaceState {
         setupTitleTracking(for: col)
         setupAgentAttentionTracking(for: col)
         setupLinkOpening(for: col)
+        setupLocalServerDetection(for: col)
     }
 
     func detectGitBranch() {
@@ -472,7 +481,8 @@ extension WorkspaceState {
             agentUUID: agentUUID,
             missionID: missionID,
             missionHandoffsEnabled: missionHandoffsEnabled,
-            executablePath: Bundle.main.executableURL?.path
+            executablePath: Bundle.main.executableURL?.path,
+            launchID: NiruxLaunchAuthorization.launchID
         )
     }
 
@@ -487,13 +497,16 @@ extension WorkspaceState {
         agentUUID: String,
         missionID: String?,
         missionHandoffsEnabled: Bool,
-        executablePath: String?
+        executablePath: String?,
+        launchID: String
     ) -> [String: String] {
         var environment = [
             "NIRUX_PROFILE_ID": profileID,
             "NIRUX_WORKSPACE_ID": workspaceID,
             // Hook events carry this back — see AgentHookCenter.
-            "NIRUX_AGENT_UUID": agentUUID
+            "NIRUX_AGENT_UUID": agentUUID,
+            // Authorizes nirux:// requests from this terminal's agents.
+            NiruxLaunchAuthorization.environmentKey: launchID
         ]
         if missionHandoffsEnabled {
             environment["NIRUX_MISSION_HANDOFFS"] = "1"
@@ -579,6 +592,9 @@ extension WorkspaceState {
     func addColumn(webViewURL: String) {
         let col = ColumnState(url: webViewURL)
         insertColumn(col)
+        // A browser column on a proposed port makes that proposal moot.
+        col.webViewColumn?.onURLChanged = { [weak self] in self?.pruneLocalServerProposals() }
+        pruneLocalServerProposals()
     }
 
     /// Insert a Monaco editor column scoped to the provided cwd, defaulting

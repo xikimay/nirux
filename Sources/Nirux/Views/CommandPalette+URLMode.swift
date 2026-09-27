@@ -41,10 +41,11 @@ extension CommandPalette {
     /// Switch palette to URL input mode
     func switchToURLMode() {
         mode = .urlInput
-        urlSelectedIndex = 0
-        let defaults = ["http://localhost:3000", "http://localhost:8080", "http://localhost:5173"]
+        let detected = Self.detectedURLsProvider?() ?? []
         let history = URLHistory.load()
-        urlSuggestions = history + defaults.filter { defaultURL in !history.contains(defaultURL) }
+        detectedURLs = Set(detected)
+        urlSuggestions = Self.urlSuggestions(detected: detected, history: history)
+        urlSelectedIndex = Self.defaultURLSelection(in: urlSuggestions, history: history)
         searchField?.placeholderString = "Enter URL or search..."
         searchField?.stringValue = ""
         rebuildURLList()
@@ -75,11 +76,24 @@ extension CommandPalette {
             badge.frame = NSRect(x: 12, y: 9, width: 38, height: 18)
             row.addSubview(badge)
 
+            let isDetected = detectedURLs.contains(hint)
+            let tagWidth: CGFloat = isDetected ? 72 : 0
             let label = NSTextField(labelWithString: hint)
             label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
             label.textColor = .white
-            label.frame = NSRect(x: 52, y: 8, width: 400, height: 20)
+            label.lineBreakMode = .byTruncatingTail
+            label.frame = NSRect(x: 52, y: 8, width: min(400, row.bounds.width - 64 - tagWidth), height: 20)
             row.addSubview(label)
+
+            if isDetected {
+                let tag = NSTextField(labelWithString: "DETECTED")
+                tag.font = .monospacedSystemFont(ofSize: 9, weight: .bold)
+                tag.textColor = NSColor.systemGreen.withAlphaComponent(0.85)
+                tag.alignment = .right
+                tag.toolTip = "Printed by a terminal in this workspace and listening now"
+                tag.frame = NSRect(x: row.bounds.width - tagWidth - 12, y: 10, width: tagWidth, height: 16)
+                row.addSubview(tag)
+            }
 
             listContainer.addSubview(row)
             rowViews.append(row)
@@ -93,6 +107,31 @@ extension CommandPalette {
         for (index, row) in rowViews.enumerated() {
             row.layer?.backgroundColor = (index == urlSelectedIndex) ? accent.cgColor : NSColor.clear.cgColor
         }
+    }
+
+    nonisolated static let defaultURLSuggestions = ["http://localhost:3000", "http://localhost:8080", "http://localhost:5173"]
+
+    /// Detected dev servers first, then history, then the fixed localhost
+    /// defaults — each URL once, first position wins.
+    nonisolated static func urlSuggestions(
+        detected: [String],
+        history: [String],
+        defaults: [String] = defaultURLSuggestions
+    ) -> [String] {
+        var seen = Set<String>()
+        return (detected + history + defaults).filter { seen.insert(normalizedSuggestionKey($0)).inserted }
+    }
+
+    /// ⌘B ↩ on an empty field keeps reopening the last URL: detected rows
+    /// sit above it but don't take the selection.
+    nonisolated static func defaultURLSelection(in suggestions: [String], history: [String]) -> Int {
+        guard let last = history.first.map(normalizedSuggestionKey) else { return 0 }
+        return suggestions.firstIndex { normalizedSuggestionKey($0) == last } ?? 0
+    }
+
+    /// "http://localhost:5173/" and "http://localhost:5173" are one entry.
+    private nonisolated static func normalizedSuggestionKey(_ url: String) -> String {
+        url.hasSuffix("/") ? String(url.dropLast()) : url
     }
 
     /// Add a URL to the persistent history (most recent first)

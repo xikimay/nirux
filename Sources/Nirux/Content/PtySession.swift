@@ -130,6 +130,36 @@ final class ProcessSnapshot {
         return ForegroundProcess(instance: instance, name: name, arguments: arguments)
     }
 
+    /// The process-table sysctl failed and captured nothing — a caller
+    /// gating a destructive action must not read that as "no agent".
+    var isEmpty: Bool { commMap.isEmpty }
+
+    /// First process name among `rootPID`'s descendants (children,
+    /// grandchildren, …) that `matches`. Unlike `foregroundProcess`, this
+    /// also sees stopped (^Z) and background jobs and processes under a
+    /// wrapper (npx, caffeinate) — everything that dies with the PTY.
+    /// Breadth-first, so the shell's own jobs are checked before a big
+    /// foreground build (make -j) can use up the `limit`.
+    func firstDescendantName(of rootPID: pid_t, limit: Int = 256, where matches: (String) -> Bool) -> String? {
+        var pending = childrenMap[rootPID] ?? []
+        var visited = Set<pid_t>()
+        var next = 0
+        while next < pending.count, visited.count < limit {
+            let pid = pending[next]
+            next += 1
+            guard visited.insert(pid).inserted else { continue }
+            let arguments: [String]
+            if let capturedArguments {
+                arguments = capturedArguments[pid] ?? []
+            } else {
+                arguments = Self.arguments(of: pid, maxArgs: 2)
+            }
+            if let name = Self.execName(from: arguments) ?? commMap[pid], matches(name) { return name }
+            pending.append(contentsOf: childrenMap[pid] ?? [])
+        }
+        return nil
+    }
+
     func isProcess(
         _ process: ProcessInstance,
         inForegroundProcessGroupOf shellPID: pid_t
@@ -215,6 +245,13 @@ final class PtySession: @unchecked Sendable {
         set { state.onOsc9Received = newValue }
     }
 
+    /// Called on the main queue when the output shows a local dev-server
+    /// URL (`http://localhost:5173/`). Throttled per port.
+    var onLocalServerURL: ((LocalServerURL) -> Void)? {
+        get { state.onLocalServerURL }
+        set { state.onLocalServerURL = newValue }
+    }
+
     /// Called on the main queue when the shell process exits.
     var onProcessExit: (() -> Void)? {
         get { state.onProcessExit }
@@ -228,6 +265,9 @@ final class PtySession: @unchecked Sendable {
 
     /// Last applied grid size — the right starting size for a restart.
     var lastSize: (cols: Int, rows: Int) { (state.lastCols, state.lastRows) }
+
+    /// The shell's pid while it runs.
+    var shellPID: pid_t? { state.childPid > 0 ? state.childPid : nil }
 
     /// When the current foreground process took over (drives the "working
     /// · 12m" display in the sidebar). Nil while the idle shell runs.
@@ -269,6 +309,25 @@ final class PtySession: @unchecked Sendable {
 
     /// Last computed agent state (no snapshot needed — read from persistent state)
     var cachedAgentState: AgentStatus { state.machine.state }
+
+    /// Hook kind ("claude"/"codex") once the running agent emitted a hook
+    /// event — closing only trusts an "idle" status that hooks drive.
+    var agentHookKind: String? { state.machine.hookKind }
+
+    /// A recognized agent that closing this terminal would kill: the
+    /// foreground process, or any descendant of the shell — a job suspended
+    /// with ^Z, or an agent under a wrapper, dies with the PTY too. Fails
+    /// closed: an empty snapshot, or a turn the status machine still sees
+    /// in flight, falls back to the heartbeat's last view of the agent — so
+    /// an agent that exited since the last tick (≤ 2 s) may still prompt.
+    func agentProcessName(snapshot: ProcessSnapshot) -> String? {
+        guard !hasExited, state.childPid > 0 else { return nil }
+        let isAgent = AgentStatusMachine.isRecognizedAgentProcess
+        if let name = foregroundProcessName(snapshot: snapshot), isAgent(name) { return name }
+        if let name = snapshot.firstDescendantName(of: state.childPid, where: isAgent) { return name }
+        guard snapshot.isEmpty || cachedAgentState != .idle else { return nil }
+        return [state.machine.lastForegroundName, state.machine.hookKind].compactMap { $0 }.first(where: isAgent)
+    }
 
     /// Remote prompts are accepted only while a supported agent process is
     /// currently in the foreground. A stable UUID alone is not enough: the
@@ -345,12 +404,13 @@ final class PtySession: @unchecked Sendable {
     /// Used for keys that ghostty's inMemory backend doesn't route correctly
     /// (e.g. Enter when Claude Code enables kitty keyboard protocol).
     func sendRaw(_ data: Data) {
+        state.noteTypedInput(data)
         state.writeToPty(data)
     }
 
     func sendRaw(_ string: String) {
         if let data = string.data(using: .utf8) {
-            state.writeToPty(data)
+            sendRaw(data)
         }
     }
 
@@ -543,9 +603,32 @@ private final class PtyState: @unchecked Sendable {
     var onCwdChanged: ((String) -> Void)?
     var onTitleChanged: ((String) -> Void)?
     var onOsc9Received: (() -> Void)?
+    var onLocalServerURL: ((LocalServerURL) -> Void)?
     var onProcessExit: (() -> Void)?
     var machine = AgentStatusMachine()
     let outputBuffer = TerminalOutputBuffer()
+    /// Read-queue only. A (re)start sets `localServerStateIsStale` from
+    /// main instead of resetting them, so a straggling read handler of the
+    /// previous shell never sees them replaced mid-scan.
+    private var localServerScanner = LocalServerURLScanner()
+    private var localServerLastForwarded: [Int: TimeInterval] = [:]
+    private var localServerStateIsStale = false
+    private static let localServerForwardInterval: TimeInterval = 1
+    /// Something reached the PTY through `sendRaw` — keystrokes (including
+    /// the Enter after a ⌘V paste, which itself goes through ghostty),
+    /// dropped files, remote prompts, commands Nirux types. Unlike
+    /// `machine.hasUserInput` it ignores ghostty's own writes (replies to
+    /// the terminal queries Claude Code sends at startup) and the lone
+    /// Ctrl+L redraw nudge. Once open, a TUI repaint can still resurface
+    /// an old URL — at most one proposal per port, and only if listening.
+    private var hasTypedInput = false
+
+    func noteTypedInput(_ data: Data) {
+        guard !hasTypedInput, data != Self.redrawNudge else { return }
+        hasTypedInput = true
+    }
+
+    private static let redrawNudge = Data([0x0C])
 
     func foregroundProcess(snapshot: ProcessSnapshot) -> ForegroundProcess? {
         guard childPid > 0 else { return nil }
@@ -562,6 +645,8 @@ private final class PtyState: @unchecked Sendable {
 
     func markPtyStarted() {
         machine.reset()
+        localServerStateIsStale = true
+        hasTypedInput = false
     }
 
     func writeToPty(_ data: Data) {
@@ -664,6 +749,36 @@ private final class PtyState: @unchecked Sendable {
            str.contains("\u{1b}]") {
             parseOscSequences(str)
         }
+        // Output before the first typed input is launch noise — notably
+        // `claude --continue` replaying old transcripts.
+        if hasTypedInput, onLocalServerURL != nil {
+            detectLocalServerURLs(in: buffer, count: bytesRead)
+        }
+    }
+
+    private func detectLocalServerURLs(in buffer: [UInt8], count: Int) {
+        if localServerStateIsStale {
+            localServerStateIsStale = false
+            localServerScanner = LocalServerURLScanner()
+            localServerLastForwarded = [:]
+        }
+        let urls = buffer.withUnsafeBytes {
+            localServerScanner.scan(UnsafeRawBufferPointer(rebasing: $0[..<count]))
+        }
+        guard !urls.isEmpty, let callback = onLocalServerURL else { return }
+        // TUIs repaint the same URL on every frame; the workspace dedupes
+        // per port, this just keeps the main queue quiet. Short enough not
+        // to swallow the reprint of a quick server restart.
+        let now = ProcessInfo.processInfo.systemUptime
+        let fresh = urls.filter { url in
+            if let last = localServerLastForwarded[url.port],
+               now - last < Self.localServerForwardInterval { return false }
+            if localServerLastForwarded.count >= 64 { localServerLastForwarded.removeAll() }
+            localServerLastForwarded[url.port] = now
+            return true
+        }
+        guard !fresh.isEmpty else { return }
+        DispatchQueue.main.async { fresh.forEach(callback) }
     }
 
     /// Parse OSC sequences from terminal output (cwd, title).
