@@ -313,6 +313,9 @@ extension NiruxShellView {
         case .closeColumn(let columnIndex):
             closeColumn(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
             return
+        case .cleanUpWorktree:
+            requestWorktreeCleanup(workspaceIndex: workspaceIndex)
+            return
         }
         guard didChange else { return }
         refreshAfterWorkspaceMutation()

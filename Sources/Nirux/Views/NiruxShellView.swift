@@ -75,6 +75,10 @@ final class NiruxShellView: NSView {
     var urlPanel: URLInputPanel?
     var filePickerPanel: FilePickerPanel?
     var searchPanel: EditorSearchPanel?
+    var worktreeCleanupPanel: WorktreeCleanupPanel?
+    /// Worktrees a "Clean Up Worktree…" is checking or confirming, so a
+    /// second click doesn't start another.
+    var worktreeCleanupsInFlight: Set<String> = []
 
     /// Debounce timer used to nudge TUI agents (claude, codex, vim…) to
     /// redraw after the window stops resizing. Without this, agents that
@@ -112,6 +116,7 @@ final class NiruxShellView: NSView {
         verticalStrip.addSubview(workspace.containerView)
         sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index) }
         sidebar.onWorkspaceAction = { [weak self] action, index in self?.handleWorkspaceSidebarAction(action, workspaceIndex: index) }
+        sidebar.offersWorktreeCleanup = { [weak self] index in self?.offersWorktreeCleanup(workspaceIndex: index) ?? false }
         sidebar.onWorkspaceReordered = { [weak self] index, position in
             self?.handleWorkspaceReorder(workspaceIndex: index, targetPosition: position)
         }

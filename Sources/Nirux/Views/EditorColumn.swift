@@ -45,6 +45,10 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         guard let activePath, !Self.isDiffGroupPath(activePath) else { return false }
         return (dirtyByPath[activePath] ?? false) || diskModifiedWhileDirty.contains(activePath)
     }
+    /// Every open file with unsaved changes, in any tab.
+    var unsavedPaths: [String] {
+        openPaths.filter { (dirtyByPath[$0] ?? false) || diskModifiedWhileDirty.contains($0) }
+    }
 
     var onPathChanged: (() -> Void)?
     var onDirtyChanged: (() -> Void)?

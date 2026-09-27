@@ -181,6 +181,7 @@ enum WorkspaceSidebarAction {
     case moveUp, moveDown, markActive, markInactive
     case close, rename, editContext, newWorkspace
     case closeColumn(columnIndex: Int)
+    case cleanUpWorktree
 }
 
 /// Hover highlight target in the expanded sidebar. Links have their own
