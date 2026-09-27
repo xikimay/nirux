@@ -1,7 +1,8 @@
 # Project Board
 
-Status: design, validated by the user on 2026-09-27. B4 (the config) is
-implemented; the rest isn't.
+Status: design, validated by the user on 2026-09-27. B4 (the config) and B1
+(the read-only board) are implemented; the merge queue (B2, B3) isn't. What B1
+decided along the way is in section 2.1.
 
 On the night of 2026-09-26, one Claude session coordinated about fifteen
 parallel pull requests by hand:
@@ -120,7 +121,7 @@ Order:
 | Column | Shows | Source |
 | --- | --- | --- |
 | Name | Workspace title, else branch. Click focuses the workspace | `WorkspaceState`, git context |
-| Agent | waiting (permission: Bash) · working · idle · none. With stuck-agent detection: waiting 12m, stopped on error, exited | `AgentStatusMachine`: state and open dialogs, #38's reasons; `feat/stuck-agents` (not started) |
+| Agent | waiting (permission: Bash) · working · idle · none. With stuck-agent detection: waiting 12m, stopped on error, exited | `AgentStatusMachine`: state and open dialogs, #38's reasons; stuck states from #55 |
 | PR | #52, draft, open, merged or closed; conflicting | Batched `gh pr list` (section 6) |
 | Checks | Each required check by name; the others as one summary | The batch's `statusCheckRollup`, for display only |
 | Queue | Position, current step, or why the PR can't join | Merge queue (section 3) |
@@ -140,9 +141,10 @@ Order:
     its turn reads `.needsAttention`. A finished turn shows as "idle".
   - It says "idle", not "done", because `WorkspacePhase.done` means the PR is
     merged or closed.
-- **Until stuck-agent detection lands**, the Agent column shows #38's states
-  only, and Resume is hidden. Resume sends `continue` to an agent stopped on an
-  API error, only if it is back at its prompt.
+- **Resume** (#55) sends `continue` to an agent stopped on an API error, only
+  if it is back at its prompt, and reopens the conversation of a `claude` that
+  exited mid-turn. It uses the sidebar's actions and refusals: a refused Resume
+  shows disabled, with the reason.
 - **Clean Up** opens the existing cleanup for that worktree (#46). Today its
   single-worktree entry takes a workspace, so B1 adds one that takes a path. It
   never runs by itself.
@@ -152,6 +154,39 @@ Order:
   post-merge workflow on the base branch ("nightly: success 20:27, 60e0ff2"),
   the queue controls, and a Refresh button.
 - Left for later: Projects' brief preview and pinned URLs (section 7 there).
+
+### 2.1 Decided while building B1
+
+Choices the design left open, taken as the most conservative option and
+documented in B1's pull request:
+
+- **Order inside group 2:** rows with an open pull request by number, oldest
+  first, as the queue orders them by default; then the rows with a workspace
+  but no open pull request, by name. Groups 3 and 4 follow, by name and by
+  sidebar order.
+- **A merged pull request** marks its branch's worktree ("#52 merged") when
+  no open one does. Such a worktree without a workspace goes to "Other
+  worktrees", ready for Clean Up.
+- **A bare repository** has no main working tree: its first entry gets no
+  row, and its linked worktrees sort like any other.
+- **Urgency across a row's agent columns:** stopped on error, exited mid-turn,
+  waiting past the stuck threshold, waiting, working, idle. Failures come
+  first: nothing but the user moves them.
+- **Buttons, most urgent first:** Resume, Focus, Open, Clean Up. A column too
+  narrow for all of them leaves out the last ones; clicking the name still
+  focuses. Focus goes to the most urgent agent column of the row.
+- **Open** opens a workspace with a shell in the worktree, in the board's
+  project, as "Open Worktree" does. It launches no agent.
+- **On screen** means its workspace is shown (selected, or in Pilot Mode's
+  rows) in a window that isn't minimized. The board reads on the status
+  refresh, which pauses while Nirux is in the background, as the sidebar's
+  pull request reads do.
+- **Without a repository**, or with an unreadable `board.json`, the board says
+  so instead of listing rows, and calls no `gh`. Board Settings opens by
+  itself only when the board is opened from the palette, not when it is
+  restored at launch.
+- **Clean Up** runs "Clean Up Worktree…" (#46) on the row's folder
+  (`requestWorktreeCleanup(path:)`), with its checks and confirmation.
 
 ## 3. Merge queue
 
@@ -580,8 +615,11 @@ What the board adds:
   --workflow <file> --branch <base> --event push --limit 1` (REST), every 5
   minutes on screen, and at each queue step.
 - **Worktrees:** `git worktree list` when the board opens, on Refresh, and every
-  60 s on screen. It is local and cheap.
-- **Cache:** in memory, per repository, dropped when the board closes. A
+  60 s on screen. It is local and cheap. It runs again at the next refresh when
+  a project workspace opens in a folder not listed yet, or a listed worktree's
+  folder is gone (cleaned up).
+- **Cache:** in memory, in the board, for its repository, dropped when the
+  board closes or changes project or repository. A
   running queue makes its own reads.
 - Later: feed `PRDetect` from the batch, so the sidebar and the board make one
   call. That changes #31's code paths, so it waits.

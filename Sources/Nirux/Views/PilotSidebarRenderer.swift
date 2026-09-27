@@ -139,6 +139,9 @@ enum PilotSidebarRenderer {
         if column.isEditor {
             return sfSymbol("doc.text", color: color)
         }
+        if column.isProjectBoard {
+            return sfSymbol("tablecells", color: color)
+        }
         if column.isWebView {
             return sfSymbol("globe", color: color)
         }
@@ -191,6 +194,8 @@ enum PilotSidebarRenderer {
         let displayName: String
         if column.isEditor {
             displayName = column.editorFileName ?? "editor"
+        } else if column.isProjectBoard {
+            displayName = "Project Board"
         } else if column.isWebView {
             displayName = column.webTitle?.isEmpty == false ? column.webTitle! : "web"
         } else {

@@ -131,6 +131,12 @@ extension NiruxShellView {
         guard let workspace = workspaces[safe: workspaceIndex], !workspace.isClosing,
               let path = Self.worktreeCleanupPath(forCwd: workspace.cwd)
         else { return }
+        requestWorktreeCleanup(path: path)
+    }
+
+    /// The same for a worktree named by its folder, which may have no
+    /// workspace: the Project Board's "Clean Up…".
+    func requestWorktreeCleanup(path: String) {
         let key = Self.comparablePath(path)
         guard worktreeCleanupsInFlight.insert(key).inserted else { return }
         DispatchQueue.global(qos: .userInitiated).async {
@@ -139,6 +145,10 @@ extension NiruxShellView {
                 guard let self else { return }
                 var candidate = self.worktreeCleanupCandidate(path: path)
                 candidate.inspection = inspection
+                if let presenter = self.worktreeCleanupPresenter {
+                    self.worktreeCleanupsInFlight.remove(key)
+                    return presenter(candidate)
+                }
                 self.presentWorktreeCleanup(candidate) { [weak self] in
                     self?.worktreeCleanupsInFlight.remove(key)
                 }

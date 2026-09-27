@@ -30,6 +30,13 @@ extension NiruxShellView {
                 self?.openEditorColumn()
             },
             PaletteAction(
+                icon: "📋", title: "Open Project Board",
+                subtitle: "Branches, agents and pull requests of the current project",
+                shortcut: nil
+            ) { [weak self] in
+                self?.openProjectBoard()
+            },
+            PaletteAction(
                 icon: "🔎", title: "Search Workspace", subtitle: "Find text across files in the current workspace",
                 shortcut: .searchWorkspace
             ) { [weak self] in
