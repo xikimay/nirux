@@ -130,6 +130,36 @@ final class ProcessSnapshot {
         return ForegroundProcess(instance: instance, name: name, arguments: arguments)
     }
 
+    /// The process-table sysctl failed and captured nothing — a caller
+    /// gating a destructive action must not read that as "no agent".
+    var isEmpty: Bool { commMap.isEmpty }
+
+    /// First process name among `rootPID`'s descendants (children,
+    /// grandchildren, …) that `matches`. Unlike `foregroundProcess`, this
+    /// also sees stopped (^Z) and background jobs and processes under a
+    /// wrapper (npx, caffeinate) — everything that dies with the PTY.
+    /// Breadth-first, so the shell's own jobs are checked before a big
+    /// foreground build (make -j) can use up the `limit`.
+    func firstDescendantName(of rootPID: pid_t, limit: Int = 256, where matches: (String) -> Bool) -> String? {
+        var pending = childrenMap[rootPID] ?? []
+        var visited = Set<pid_t>()
+        var next = 0
+        while next < pending.count, visited.count < limit {
+            let pid = pending[next]
+            next += 1
+            guard visited.insert(pid).inserted else { continue }
+            let arguments: [String]
+            if let capturedArguments {
+                arguments = capturedArguments[pid] ?? []
+            } else {
+                arguments = Self.arguments(of: pid, maxArgs: 2)
+            }
+            if let name = Self.execName(from: arguments) ?? commMap[pid], matches(name) { return name }
+            pending.append(contentsOf: childrenMap[pid] ?? [])
+        }
+        return nil
+    }
+
     func isProcess(
         _ process: ProcessInstance,
         inForegroundProcessGroupOf shellPID: pid_t
@@ -269,6 +299,25 @@ final class PtySession: @unchecked Sendable {
 
     /// Last computed agent state (no snapshot needed — read from persistent state)
     var cachedAgentState: AgentStatus { state.machine.state }
+
+    /// Hook kind ("claude"/"codex") once the running agent emitted a hook
+    /// event — closing only trusts an "idle" status that hooks drive.
+    var agentHookKind: String? { state.machine.hookKind }
+
+    /// A recognized agent that closing this terminal would kill: the
+    /// foreground process, or any descendant of the shell — a job suspended
+    /// with ^Z, or an agent under a wrapper, dies with the PTY too. Fails
+    /// closed: an empty snapshot, or a turn the status machine still sees
+    /// in flight, falls back to the heartbeat's last view of the agent — so
+    /// an agent that exited since the last tick (≤ 2 s) may still prompt.
+    func agentProcessName(snapshot: ProcessSnapshot) -> String? {
+        guard !hasExited, state.childPid > 0 else { return nil }
+        let isAgent = AgentStatusMachine.isRecognizedAgentProcess
+        if let name = foregroundProcessName(snapshot: snapshot), isAgent(name) { return name }
+        if let name = snapshot.firstDescendantName(of: state.childPid, where: isAgent) { return name }
+        guard snapshot.isEmpty || cachedAgentState != .idle else { return nil }
+        return [state.machine.lastForegroundName, state.machine.hookKind].compactMap { $0 }.first(where: isAgent)
+    }
 
     /// Remote prompts are accepted only while a supported agent process is
     /// currently in the foreground. A stable UUID alone is not enough: the

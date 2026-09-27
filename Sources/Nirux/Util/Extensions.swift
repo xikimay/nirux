@@ -26,4 +26,15 @@ extension String {
         }
         return path
     }
+
+    /// realpath(3): the absolute path with every symlink resolved, or nil
+    /// if it doesn't exist. Unlike `resolvingSymlinksInPath`, keeps the
+    /// `/private` prefix, so /tmp/x and /private/tmp/x compare equal.
+    /// Absolute paths only: a relative one would silently resolve against
+    /// the app's working directory.
+    var realPath: String? {
+        guard hasPrefix("/"), let resolved = Darwin.realpath(self, nil) else { return nil }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
 }
