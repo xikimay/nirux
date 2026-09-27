@@ -370,7 +370,7 @@ final class TelegramRemoteAccessController {
         }
         let agentUUID = String(data.dropFirst("session:".count))
         guard let session = sessionsProvider().first(where: { $0.id == agentUUID }) else {
-            try? await client.answerCallbackQuery(id: callback.id, text: "That agent session is no longer live.")
+            try? await client.answerCallbackQuery(id: callback.id, text: "That agent session is no longer available.")
             return
         }
         selectedAgentUUID = session.id
@@ -429,7 +429,7 @@ final class TelegramRemoteAccessController {
             if let message { rememberReplyRoute(message.messageID, agentUUID: session.id) }
         case .sessionUnavailable:
             if selectedAgentUUID == target { selectedAgentUUID = nil }
-            _ = await send("That agent session is no longer live. Use /sessions to choose another.", chatID: chatID, client: client)
+            _ = await send("That agent session is no longer available. Use /sessions to choose another.", chatID: chatID, client: client)
         case .emptyPrompt:
             _ = await send("The prompt was empty after removing terminal control characters.", chatID: chatID, client: client)
         }

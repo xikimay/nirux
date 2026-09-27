@@ -125,6 +125,19 @@ final class ActivityOnlyAgentTests: XCTestCase {
         XCTAssertTrue(machine.pendingDialogs.isEmpty)
     }
 
+    func testDirectHandoffFromClaudeUnmutesOsc9() {
+        // `claude -p x; gemini`: no shell tick in between to clear the kind.
+        _ = machine.tick(fgName: "claude", isUserFocused: false, now: t0)
+        _ = machine.apply(AgentHookEvent(kind: .claude, name: .sessionStart), isUserFocused: false)
+        XCTAssertEqual(machine.hookKind, "claude")
+        _ = machine.tick(fgName: "gemini", isUserFocused: false, now: t0 + 1)
+        XCTAssertNil(machine.hookKind)
+        // An integrated agent keeps it: its SessionStart may come first.
+        _ = machine.apply(AgentHookEvent(kind: .claude, name: .sessionStart), isUserFocused: false)
+        _ = machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 2)
+        XCTAssertEqual(machine.hookKind, "claude")
+    }
+
     // MARK: - Capabilities
 
     func testRecognizedButNotARemotePromptTarget() {

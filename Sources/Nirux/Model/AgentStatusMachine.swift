@@ -462,10 +462,11 @@ struct AgentStatusMachine {
     }
 
     /// A different foreground command inherits nothing from the previous
-    /// one — except hook capability, which stays: the hook event
-    /// (SessionStart) can arrive BEFORE the next process-table snapshot
-    /// notices the change, and clearing it here would knock the session
-    /// back into the flaky fallback for no reason.
+    /// one — except hook capability, which stays (unless an activity-only
+    /// agent takes over, see below): the hook event (SessionStart) can
+    /// arrive BEFORE the next process-table snapshot notices the change,
+    /// and clearing it here would knock the session back into the flaky
+    /// fallback for no reason.
     private mutating func foregroundChanged(to fgName: String, now: Date) {
         lastForegroundName = fgName
         foregroundSince = now
