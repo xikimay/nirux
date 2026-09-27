@@ -1005,10 +1005,10 @@ private struct DiffGroupTab {
 
 // MARK: - Git / diff content helpers (nonisolated statics)
 
-private extension EditorColumn {
+extension EditorColumn {
     /// Reads the comparison-side content for the requested diff mode.
     /// Nonisolated so we can call it from a background queue.
-    private nonisolated static func gitOriginalContent(
+    nonisolated static func gitOriginalContent(
         of absPath: String,
         cwd: String,
         mode: EditorDiffMode
@@ -1023,7 +1023,7 @@ private extension EditorColumn {
             // empty original so clicking a change always opens a useful diff.
             return FileManager.default.fileExists(atPath: absPath) ? "" : nil
         case .branch:
-            guard let base = branchBaseRef(cwd: cwd) else { return nil }
+            guard let base = GitCommand.branchBaseRef(cwd: cwd) else { return nil }
             // A file added on the branch has no blob at the merge-base; an
             // empty original gives Monaco the expected "whole file added" diff.
             return gitContent(relativePath: rel, ref: base, cwd: cwd) ?? ""
@@ -1097,38 +1097,6 @@ private extension EditorColumn {
     }
 
     private nonisolated static func gitContent(relativePath rel: String, ref: String, cwd: String) -> String? {
-        guard let result = runGit(["show", "\(ref):\(rel)"], cwd: cwd),
-              result.status == 0
-        else { return nil }
-        return result.output
-    }
-
-    private nonisolated static func branchBaseRef(cwd: String) -> String? {
-        for candidate in ["@{upstream}", "origin/main", "origin/master", "main", "master"] {
-            guard let result = runGit(["merge-base", "HEAD", candidate], cwd: cwd),
-                  result.status == 0
-            else { continue }
-            let sha = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !sha.isEmpty { return sha }
-        }
-        return nil
-    }
-
-    private nonisolated static func runGit(_ arguments: [String], cwd: String) -> (status: Int32, output: String)? {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = arguments
-        process.currentDirectoryURL = URL(fileURLWithPath: cwd)
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return nil
-        }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+        GitCommand.output(["show", "\(ref):\(rel)"], cwd: cwd)
     }
 }
