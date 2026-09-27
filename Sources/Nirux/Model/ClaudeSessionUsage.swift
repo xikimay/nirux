@@ -14,13 +14,13 @@ struct ClaudeTokenCounts: Equatable, Sendable {
     /// used" counts these three and never the output.
     var context: Int { input + cacheWrite + cacheRead }
 
-    /// Nil unless the object carries at least one known count. Counts are
-    /// clamped: a malformed value must not overflow the session sums.
     static let fieldKeys = [
         "input_tokens", "output_tokens",
         "cache_creation_input_tokens", "cache_read_input_tokens"
     ]
 
+    /// Nil unless the object carries at least one known count. Counts are
+    /// clamped: a malformed value must not overflow the session sums.
     init?(usage: [String: Any]) {
         let fields = Self.fieldKeys.map { key -> Int? in
             guard let number = usage[key] as? NSNumber else { return nil }

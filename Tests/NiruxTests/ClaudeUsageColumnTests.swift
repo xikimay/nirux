@@ -76,6 +76,39 @@ final class ClaudeUsageColumnTests: XCTestCase {
         XCTAssertEqual(step(another, running: true, name: "claude"), .stop)
     }
 
+    /// The column's shell never starts here, so its foreground is unknown:
+    /// what decides is whether the session's `claude` still runs.
+    func testRefreshHidesWhileTheSessionRunsElsewhereAndDropsItOnceGone() throws {
+        let column = ColumnState(cwd: "/tmp")
+        column.view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
+        column.layoutWithTitleBar(width: 600, height: 400)
+        column.followClaudeTranscript(at: "/t/s1.jsonl", sessionID: "s1", process: claude.instance)
+        var parser = ClaudeTranscriptUsageParser()
+        parser.consume(line: Data(TranscriptLine.response(id: "msg_1", cacheRead: 50_000).utf8))
+        column.setAgentUsage(parser.usage)
+        XCTAssertEqual(column.usageLabel?.isHidden, false)
+        let follower = try XCTUnwrap(column.claudeTranscript?.follower)
+
+        func entry(_ pid: pid_t, _ name: String) -> ProcessSnapshot.Entry {
+            .init(pid: pid, parentPID: 1, processGroupID: pid, terminalForegroundProcessGroupID: -1,
+                  name: name, startedAt: TimeInterval(pid / 10), arguments: [name])
+        }
+        // A failed process-table read changes nothing.
+        column.refreshAgentUsage(snapshot: ProcessSnapshot(entries: []))
+        XCTAssertEqual(column.usageLabel?.isHidden, false)
+
+        // Still running (suspended): hidden, still followed.
+        column.refreshAgentUsage(snapshot: ProcessSnapshot(entries: [entry(700, "claude"), entry(50, "zsh")]))
+        XCTAssertEqual(column.usageLabel?.isHidden, true)
+        XCTAssertTrue(column.claudeTranscript?.follower === follower)
+        XCTAssertEqual(column.claudeTranscript?.isInForeground, false)
+
+        // Exited: no longer followed.
+        column.refreshAgentUsage(snapshot: ProcessSnapshot(entries: [entry(50, "zsh")]))
+        XCTAssertNil(column.claudeTranscript)
+        XCTAssertEqual(column.usageLabel?.isHidden, true)
+    }
+
     func testTitleBarShowsTheUsageWhenThereIsRoom() {
         let column = ColumnState(cwd: "/tmp")
         column.view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
