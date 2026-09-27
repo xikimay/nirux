@@ -14,7 +14,8 @@ enum GitCommand {
     /// is not UTF-8). Nil when git fails, cannot start or outlives
     /// `timeout`. Standard error is discarded. Runs without optional locks,
     /// so `git status` neither rewrites the index nor, killed at the
-    /// timeout, leaves an `index.lock` behind.
+    /// timeout, leaves an `index.lock` behind (`git diff` still refreshes
+    /// the index).
     static func output(
         _ arguments: [String],
         cwd: String,
@@ -36,7 +37,8 @@ enum GitCommand {
     }
 
     /// The merge-base of HEAD with its upstream, else with the first
-    /// default branch that exists: the base "branch" diffs compare against.
+    /// default branch that shares history with HEAD: the base "branch"
+    /// diffs compare against.
     static func branchBaseRef(cwd: String, gitPath: String = "/usr/bin/git") -> String? {
         for candidate in ["@{upstream}", "origin/main", "origin/master", "main", "master"] {
             guard let output = output(["merge-base", "HEAD", candidate], cwd: cwd, gitPath: gitPath)

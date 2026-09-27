@@ -50,7 +50,7 @@ final class GitCommandTests: XCTestCase {
     }
 
     func testDiffOriginalOverTheLimitIsSizedButNotLoaded() throws {
-        // Deleted, so only the blob's own size can flag it as too large.
+        // Deleted: the diff group's working-copy size check cannot help.
         let file = directory.appendingPathComponent("large.txt")
         let base = Self.largeText("base")
         try git(["init", "-q", "-b", "main"])

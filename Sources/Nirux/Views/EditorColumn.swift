@@ -655,10 +655,10 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                 guard self.activePath == path else { return } // stale request
                 switch original {
                 case nil:
-                    NSLog("[EditorColumn] no git \(mode.rawValue) content for \(path) — file untracked, git missing, or branch base unavailable")
+                    NSLog("%@", "[EditorColumn] no git \(mode.rawValue) content for \(path) — file untracked, git missing, or branch base unavailable")
                     NSSound.beep()
                 case .tooLarge(let byteCount):
-                    NSLog("[EditorColumn] git \(mode.rawValue) content for \(path) too large to diff (\(byteCount) bytes)")
+                    NSLog("%@", "[EditorColumn] git \(mode.rawValue) original of \(path) too large to diff (\(byteCount) bytes)")
                     NSSound.beep()
                 case .text(let original):
                     self.diffActivePath = path
@@ -1097,7 +1097,7 @@ extension EditorColumn {
         relativePath rel: String,
         byteCount: UInt64
     ) -> [String: Any] {
-        NSLog("[EditorColumn] replacing large visual diff file \(absPath) (\(byteCount) bytes)")
+        NSLog("%@", "[EditorColumn] replacing large visual diff file \(absPath) (\(byteCount) bytes)")
         return [
             "path": rel,
             "name": rel,
@@ -1120,7 +1120,9 @@ extension EditorColumn {
     }
 
     /// The blob at `ref:rel`, or only its size when over `maxBytes`. Nil
-    /// when there is no such blob.
+    /// when there is no such blob (or git fails). `cat-file blob` prints
+    /// exactly the bytes `-s` counted; `show` would list a tree or print a
+    /// submodule commit's whole patch.
     private nonisolated static func gitContent(
         relativePath rel: String,
         ref: String,
@@ -1132,6 +1134,6 @@ extension EditorColumn {
             .flatMap({ UInt64($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
         else { return nil }
         guard byteCount <= maxBytes else { return .tooLarge(byteCount: byteCount) }
-        return GitCommand.output(["show", object], cwd: cwd).map(DiffOriginal.text)
+        return GitCommand.output(["cat-file", "blob", object], cwd: cwd).map(DiffOriginal.text)
     }
 }
