@@ -51,22 +51,24 @@ final class GitWorktreeTests: XCTestCase {
         XCTAssertEqual(result.stderr, "git could not start or timed out after 0.1s")
     }
 
+    /// Runs a git write in the test repo, pinned against a developer's global
+    /// config: hooks (core.hooksPath, templates) and commit or tag signing
+    /// would otherwise make it fail or behave differently.
+    private func isolatedGit(_ args: [String]) -> Int32 {
+        let pinned = [
+            "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "tag.gpgSign=false",
+            "-c", "user.name=t", "-c", "user.email=t@t"
+        ]
+        return GitWorktree.gitRunFull(pinned + args, cwd: directory.path).status
+    }
+
     func testCurrentBranchReadsCheckedOutBranchAndNilWhenDetached() {
         let repo = directory.path
-        XCTAssertEqual(GitWorktree.gitRunFull(["init", "-q", "-b", "feat/names"], cwd: repo).status, 0)
-        XCTAssertEqual(
-            GitWorktree.gitRunFull(
-                [
-                    "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
-                    "-c", "core.hooksPath=/dev/null", "commit", "-q", "--allow-empty", "-m", "x"
-                ],
-                cwd: repo
-            ).status,
-            0
-        )
+        XCTAssertEqual(isolatedGit(["init", "-q", "--template=", "-b", "feat/names"]), 0)
+        XCTAssertEqual(isolatedGit(["commit", "-q", "--allow-empty", "-m", "x"]), 0)
 
         // A tag with the branch's name must not turn it into "heads/feat/names".
-        XCTAssertEqual(GitWorktree.gitRunFull(["tag", "feat/names"], cwd: repo).status, 0)
+        XCTAssertEqual(isolatedGit(["tag", "feat/names"]), 0)
         XCTAssertEqual(GitWorktree.currentBranch(at: repo), "feat/names")
 
         // On a case-insensitive volume (the macOS default), the same folder
@@ -80,10 +82,7 @@ final class GitWorktreeTests: XCTestCase {
         XCTAssertNoThrow(try FileManager.default.createDirectory(at: inner, withIntermediateDirectories: true))
         XCTAssertNil(GitWorktree.currentBranch(at: inner.path))
 
-        XCTAssertEqual(
-            GitWorktree.gitRunFull(["-c", "core.hooksPath=/dev/null", "checkout", "-q", "--detach"], cwd: repo).status,
-            0
-        )
+        XCTAssertEqual(isolatedGit(["checkout", "-q", "--detach"]), 0)
         XCTAssertNil(GitWorktree.currentBranch(at: repo))
     }
 

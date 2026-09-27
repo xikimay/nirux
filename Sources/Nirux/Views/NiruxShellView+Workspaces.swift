@@ -100,8 +100,10 @@ extension NiruxShellView {
         return instructions.isEmpty ? nil : instructions.joined(separator: " ")
     }
 
-    /// `worktreeBranch` is the branch checked out in a worktree Nirux just
-    /// created; it names the Claude session (see `SessionName`).
+    /// `worktreeBranch` is the branch read back from the checkout
+    /// (`GitWorktree.currentBranch(at:)`) of a worktree workspace Nirux just
+    /// opened; nil when unreadable, detached, or not a worktree workspace. It
+    /// names the Claude session (see `SessionName`).
     private func launchAgent(
         _ agent: NiruxApp.WorkspaceAgent,
         in workspace: WorkspaceState,
