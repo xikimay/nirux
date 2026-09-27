@@ -18,7 +18,10 @@ import Foundation
 /// Pure value type with injected time — fully unit-testable. `PtySession`
 /// owns one instance and feeds it reads, writes, resizes and hook events.
 struct AgentStatusMachine {
-    private(set) var state: AgentStatus = .idle
+    private(set) var state: AgentStatus = .idle {
+        // Leaving attention ends the episode: the next one alerts again.
+        didSet { if state != .needsAttention { attentionAlerted = false } }
+    }
     /// Set by UserPromptSubmit/PreToolUse/PostToolUse, cleared by
     /// Stop/SessionEnd and by a dialog opening.
     private var hookWorking = false
@@ -34,6 +37,13 @@ struct AgentStatusMachine {
     /// Why the column last asked for attention (turn finished, message…);
     /// a pending dialog outranks it — see `attentionReason`.
     private var lastAttentionReason: AgentAttentionReason?
+    /// The external alert went out for the current attention episode.
+    private var attentionAlerted = false
+    /// Epoch seconds a dialog last closed, and of the event being applied.
+    private var lastDialogClosedAt: TimeInterval = 0
+    private var lastEventAt: TimeInterval = 0
+    /// Codex's last turnComplete: output before it is the finished turn's.
+    private var turnEndedAt: TimeInterval = 0
     /// Start of the current turn (epoch seconds): UserPromptSubmit, else
     /// the first turn event seen (a turn already running at launch). Nil
     /// between turns. Drives the "working · 12m" display.
@@ -69,6 +79,9 @@ struct AgentStatusMachine {
     /// Ignore fallback transitions right after a foreground-process change —
     /// startup output of the new command is not a completed turn either.
     private static let startupWindow: TimeInterval = 5.0
+    /// An async `permission_prompt` landing this soon after a dialog closed
+    /// is about that dialog.
+    private static let reminderRaceWindow: TimeInterval = 3.0
 
     /// Central capability gate shared by local status and remote prompt
     /// routing. Bot commands remain agent-agnostic even as this allowlist
@@ -77,15 +90,21 @@ struct AgentStatusMachine {
         name == "claude" || name == "codex"
     }
 
-    /// Why the column wants the user, while it does: the oldest pending
-    /// dialog, else the last attention event's reason.
+    /// Why the column wants the user, while it does: the oldest dialog
+    /// still believed open, else the last attention event's reason.
     var attentionReason: AgentAttentionReason? {
         guard state == .needsAttention else { return nil }
-        return pendingDialogs.first?.reason ?? lastAttentionReason
+        return openDialogs.first?.reason ?? lastAttentionReason
+    }
+
+    /// Pending dialogs no later tool event of their agent has superseded —
+    /// what the column's own status believes is on screen.
+    private var openDialogs: [AgentPermissionRequest] {
+        pendingDialogs.filter { !$0.mayBeAnswered }
     }
 
     /// Name-only entry point (a hook event without payload details).
-    /// Returns true when the column flipped into `.needsAttention`.
+    /// Returns true when the column should alert.
     mutating func applyHook(
         _ name: AgentHookEvent.Name,
         kind: AgentHookEvent.Kind,
@@ -95,40 +114,52 @@ struct AgentStatusMachine {
         apply(AgentHookEvent(kind: kind, name: name, source: source), isUserFocused: isUserFocused).firedAttention
     }
 
-    /// Apply one hook event. `firedAttention` is set on the transition into
-    /// `.needsAttention` (dock bounce, notification); already-attention
-    /// stays quiet.
+    /// Apply one hook event. `firedAttention` asks for the external alert
+    /// (dock bounce, notification) once per attention episode, and only
+    /// for events Claude itself alerts on: a turn's end, its notifications.
+    /// A PermissionRequest shows at once in the column but leaves the alert
+    /// to Claude's `permission_prompt` notification, sent ~6 s later only
+    /// if the dialog is really on screen and unanswered — another
+    /// PermissionRequest hook may have answered it, and nobody was asked.
     mutating func apply(_ event: AgentHookEvent, isUserFocused: Bool) -> AgentHookOutcome {
         let now = event.timestamp
+        lastEventAt = now
         var outcome = AgentHookOutcome()
         switch event.name {
         case .sessionStart where event.source == "compact":
             // Auto (mid-turn) or /compact: same conversation, no turn ends.
             hookKind = event.kind.rawValue
         case .sessionStart:
+            // A new conversation in this process (startup, /clear, /resume):
+            // whatever dialogs the old one showed are gone.
             hookKind = event.kind.rawValue
             endTurn()
-            pendingDialogs.removeAll()
+            closeDialogs { _ in true }
+            lastAttentionReason = nil
             state = .idle
         case .userPromptSubmit:
             hookKind = event.kind.rawValue
-            // A prompt was typed at the main input: no dialog is on screen.
-            pendingDialogs.removeAll()
+            // A prompt reached the main thread: its dialogs are closed. A
+            // background subagent's may still be up.
+            closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
             turnStartedAt = now
             hookWorking = true
             state = .working
         case .preToolUse:
             hookKind = event.kind.rawValue
             noteTurnActivity(at: now)
+            noteProgress(of: event)
             resumeUnlessBlocked()
         case .postToolUse:
             hookKind = event.kind.rawValue
             noteTurnActivity(at: now)
             // The call ran: its dialog, if it had one, was answered.
             if let key = event.toolKey,
-               let index = pendingDialogs.firstIndex(where: { $0.key == key && $0.agentID == event.agentID }) {
+               let index = pendingDialogs.firstIndex(where: { $0.isSameCall(key: key, as: event) }) {
                 pendingDialogs.remove(at: index)
+                lastDialogClosedAt = now
             }
+            noteProgress(of: event)
             resumeUnlessBlocked()
         case .permissionRequest:
             hookKind = event.kind.rawValue
@@ -138,35 +169,41 @@ struct AgentStatusMachine {
                 summary: event.toolSummary,
                 key: event.toolKey,
                 agentID: event.agentID,
+                sessionID: event.sessionID,
                 requestedAt: now
             )
+            // The same call asked again (a plan re-proposed after "keep
+            // planning"): the earlier dialog is gone.
+            if let key = request.key { pendingDialogs.removeAll { $0.isSameCall(key: key, as: event) } }
             pendingDialogs.append(request)
             outcome.attention = request.reason
-            outcome.firedAttention = block(for: request.reason, isUserFocused: isUserFocused)
+            _ = block(for: request.reason, isUserFocused: isUserFocused, alert: false)
         case .notification:
             hookKind = event.kind.rawValue
             applyNotification(event, now: now, isUserFocused: isUserFocused, outcome: &outcome)
         case .subagentStop:
             // Its dialogs closed with it (a denial fires no hook).
             if let agentID = event.agentID {
-                pendingDialogs.removeAll { $0.agentID == agentID }
+                closeDialogs { $0.agentID == agentID }
             }
         case .stop:
             hookKind = event.kind.rawValue
             // The main thread finished: none of its dialogs is open.
-            pendingDialogs.removeAll { $0.agentID == nil }
+            closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
             endTurn()
             outcome.attention = .turnFinished
             outcome.firedAttention = block(for: .turnFinished, isUserFocused: isUserFocused)
         case .sessionEnd:
             endTurn()
-            pendingDialogs.removeAll()
+            closeDialogs { event.sessionID == nil || $0.sessionID == event.sessionID }
+            lastAttentionReason = nil
             hookKind = nil
             state = .idle
         case .turnComplete:
             // Codex: no working-state hooks — output fallback covers that.
             // The notify payload only marks the end of a turn.
             endTurn()
+            turnEndedAt = now
             outcome.attention = .turnFinished
             outcome.firedAttention = block(for: .turnFinished, isUserFocused: isUserFocused)
         }
@@ -191,31 +228,50 @@ struct AgentStatusMachine {
     ) {
         let reason: AgentAttentionReason
         switch event.notificationType {
-        case "auth_success", "elicitation_complete", "elicitation_response",
-             "agent_completed", "quota_auto_resume_fired":
+        case "auth_success", "agent_completed", "quota_auto_resume_fired":
+            return
+        case "elicitation_complete", "elicitation_response":
+            // The form was answered: its dialog is gone.
+            if let index = pendingDialogs.firstIndex(where: {
+                $0.isQuestion && $0.key == nil && $0.agentID == event.agentID
+            }) {
+                pendingDialogs.remove(at: index)
+                lastDialogClosedAt = now
+            }
             return
         case "permission_prompt":
-            // Sent ~6 s into a dialog nobody answered — after its
+            // Sent ~6 s into a dialog nobody touched — after its
             // PermissionRequest, or alone (a sandboxed command's network
-            // request, which fires no PermissionRequest).
-            if let pending = pendingDialogs.first {
-                reason = pending.reason
+            // request fires no PermissionRequest). Either way a dialog is
+            // on screen and no keystroke answered it.
+            lastKeystrokeAt = 0
+            if !pendingDialogs.isEmpty {
+                for index in pendingDialogs.indices { pendingDialogs[index].mayBeAnswered = false }
+                reason = pendingDialogs[0].reason
                 outcome.isRepeat = true
+            } else if now - lastDialogClosedAt < Self.reminderRaceWindow {
+                // The hook is async: this reminder raced the close of the
+                // dialog it was about.
+                return
             } else {
                 reason = .permission(tool: nil, summary: event.detail)
                 pendingDialogs.append(AgentPermissionRequest(
-                    toolName: nil, summary: event.detail, key: nil, agentID: nil, requestedAt: now
+                    toolName: nil, summary: event.detail, key: nil,
+                    agentID: event.agentID, sessionID: event.sessionID, requestedAt: now
                 ))
             }
         case "elicitation_dialog", "elicitation_url_dialog", "agent_needs_input":
+            lastKeystrokeAt = 0
             reason = .question(event.detail)
             pendingDialogs.append(AgentPermissionRequest(
-                toolName: nil, summary: event.detail, key: nil, agentID: nil, requestedAt: now, isQuestion: true
+                toolName: nil, summary: event.detail, key: nil,
+                agentID: event.agentID, sessionID: event.sessionID, requestedAt: now, isQuestion: true
             ))
         case "idle_prompt":
             // Claude finished responding a minute ago: the main thread sits
             // at its prompt, not in a dialog.
-            pendingDialogs.removeAll { $0.agentID == nil }
+            closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
+            endTurn()
             reason = .turnFinished
         default:
             reason = .message(event.detail)
@@ -226,20 +282,45 @@ struct AgentStatusMachine {
 
     /// The agent waits on the user: it no longer works (leave hookWorking
     /// set and the next tick would flip needsAttention straight back to
-    /// `.working` while the agent sits idle).
-    private mutating func block(for reason: AgentAttentionReason, isUserFocused: Bool) -> Bool {
+    /// `.working` while the agent sits idle). True when the external alert
+    /// should go out: once per attention episode.
+    private mutating func block(for reason: AgentAttentionReason, isUserFocused: Bool, alert: Bool = true) -> Bool {
         hookWorking = false
         lastAttentionReason = reason
-        return requestAttention(isUserFocused: isUserFocused)
+        if isUserFocused {
+            state = .idle
+            return false
+        }
+        state = .needsAttention
+        guard alert, !attentionAlerted else { return false }
+        attentionAlerted = true
+        return true
+    }
+
+    /// A tool event from an agent: it got past its dialogs — answered, or
+    /// denied, which fires no hook. The status believes it; the Telegram
+    /// gate keeps the entries until proof (a call can run beside an open
+    /// dialog). Claude's `permission_prompt` reopens them if one still waits.
+    private mutating func noteProgress(of event: AgentHookEvent) {
+        for index in pendingDialogs.indices
+        where pendingDialogs[index].agentID == event.agentID && pendingDialogs[index].sessionID == event.sessionID {
+            pendingDialogs[index].mayBeAnswered = true
+        }
     }
 
     /// A tool event: the agent works — unless a dialog still waits. Other
     /// subagents keep calling tools while one waits on the user, and the
     /// column must keep saying it is blocked.
     private mutating func resumeUnlessBlocked() {
-        guard pendingDialogs.isEmpty else { return }
+        guard openDialogs.isEmpty else { return }
         hookWorking = true
         state = .working
+    }
+
+    private mutating func closeDialogs(where shouldClose: (AgentPermissionRequest) -> Bool) {
+        let count = pendingDialogs.count
+        pendingDialogs.removeAll(where: shouldClose)
+        if pendingDialogs.count != count { lastDialogClosedAt = lastEventAt }
     }
 
     /// A turn already running when Nirux first heard of it starts here.
@@ -250,16 +331,6 @@ struct AgentStatusMachine {
     private mutating func endTurn() {
         hookWorking = false
         turnStartedAt = nil
-    }
-
-    private mutating func requestAttention(isUserFocused: Bool) -> Bool {
-        if isUserFocused {
-            state = .idle
-            return false
-        }
-        if state == .needsAttention { return false }
-        state = .needsAttention
-        return true
     }
 
     /// PTY output arrived. Echo right after a keystroke/resize is not work.
@@ -304,6 +375,7 @@ struct AgentStatusMachine {
             // the session back into the flaky fallback for no reason.
             hookWorking = false
             lastReadAt = 0 // the old command's dying output is not this one's work
+            lastAttentionReason = nil
         }
 
         guard isAgent else {
@@ -337,7 +409,8 @@ struct AgentStatusMachine {
             turnStartedAt = nil
             return state
         }
-        let recentlyActive = lastReadAt > 0
+        // Output from before Codex reported its turn over is that turn's.
+        let recentlyActive = lastReadAt > turnEndedAt
             && now.timeIntervalSince1970 - lastReadAt < Self.activityWindow
         // Without turn hooks, a turn is a stretch of output.
         switch state {
@@ -370,9 +443,12 @@ struct AgentStatusMachine {
     /// nothing until it finishes, however long it runs. After the user
     /// typed into the column (the answer), sustained output — Claude's
     /// spinner while the tool runs — shows the column working; silence
-    /// (a denial ends the turn) shows it idle. Never raises attention.
+    /// (a denial ends the turn) shows it idle. Never raises attention, and
+    /// only with a single dialog open: with several, typing may have
+    /// answered one while another still waits.
     private func isRunningAnsweredDialog(now: Date) -> Bool {
-        guard let latest = pendingDialogs.last, lastKeystrokeAt > latest.requestedAt else { return false }
+        let open = openDialogs
+        guard open.count == 1, lastKeystrokeAt > open[0].requestedAt else { return false }
         return lastReadAt > lastKeystrokeAt
             && now.timeIntervalSince1970 - lastReadAt < Self.activityWindow
     }
@@ -389,6 +465,9 @@ struct AgentStatusMachine {
         hookKind = nil
         pendingDialogs.removeAll()
         lastAttentionReason = nil
+        lastDialogClosedAt = 0
+        lastEventAt = 0
+        turnEndedAt = 0
         turnStartedAt = nil
         lastReadAt = 0
         lastInteractionAt = 0

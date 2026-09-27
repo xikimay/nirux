@@ -70,8 +70,9 @@ enum RemoteDialogText {
         let dialog = session.pendingDialog.map(waitingLabel) ?? "waiting for permission"
         return "Not sent: \(session.workspaceTitle) · column \(session.columnIndex + 1) is \(dialog). "
             + "A prompt typed now would land in that dialog and could answer it. "
-            + "Answer it in Nirux; remote prompts resume once the agent moves on "
-            + "(the tool call finishes, the turn ends, or you send a prompt from Nirux)."
+            + "Answer it in Nirux. Remote prompts resume once Claude shows the dialog closed "
+            + "(the tool call finishes, the turn ends, or a prompt is sent from Nirux); "
+            + "a denied dialog shows nothing until then."
     }
 }
 

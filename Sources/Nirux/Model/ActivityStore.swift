@@ -77,17 +77,18 @@ struct ActivityEntry: Codable, Hashable {
         var detail = event.detail
         switch event.name {
         case .notification:
-            // Informational types ask nothing, and the permission_prompt
-            // sent after a PermissionRequest repeats its row.
-            guard outcome.attention != nil, !outcome.isRepeat else { return nil }
+            // Informational types ask nothing. Claude's reminder about a
+            // PermissionRequest (sent once the user seems away) carries the
+            // request's details: tool and command, question.
+            guard let attention = outcome.attention else { return nil }
             category = .attention
-        case .permissionRequest:
-            category = .attention
-            detail = outcome.attention?.activitySummary
+            if outcome.isRepeat { detail = attention.activitySummary }
         case .stop, .turnComplete: category = .turnComplete
         case .sessionStart: category = .sessionStart
         case .sessionEnd: category = .sessionEnd
-        case .userPromptSubmit, .preToolUse, .postToolUse, .subagentStop: return nil
+        // A PermissionRequest shows in its column at once; the feed waits for
+        // Claude's reminder, which only comes when nobody answered.
+        case .userPromptSubmit, .preToolUse, .permissionRequest, .postToolUse, .subagentStop: return nil
         }
         agentKind = event.kind.rawValue
         agentUUID = event.agentUUID

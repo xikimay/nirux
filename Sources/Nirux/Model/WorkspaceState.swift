@@ -423,7 +423,7 @@ extension WorkspaceState {
     }
 
     private func setupAgentAttentionTracking(for col: ColumnState) {
-        col.onAgentAttention = { [weak self, weak col] in
+        col.onAgentAttention = { [weak self, weak col] reason in
             guard let self else { return }
             self.hasNotification = true
             self.onMetadataChanged?()
@@ -444,7 +444,7 @@ extension WorkspaceState {
                     workspaceTitle: self.title,
                     columnIndex: columnIndex,
                     processName: processName,
-                    reason: col?.pty?.agentAttentionReason
+                    reason: reason
                 )
             }
         }

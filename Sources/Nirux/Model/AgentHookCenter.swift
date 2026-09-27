@@ -203,7 +203,7 @@ final class AgentHookCenter {
         } ?? AgentStatusMachine.standaloneOutcome(for: event)
         onEventReceived?(event, resolution, outcome)
         if outcome.firedAttention, let resolution {
-            resolution.column.notifyAgentAttention()
+            resolution.column.notifyAgentAttention(reason: outcome.attention)
         }
         return resolution.map {
             AppliedEvent(event: event, resolution: $0, claudeRestoreChanged: claudeRestoreChanged)

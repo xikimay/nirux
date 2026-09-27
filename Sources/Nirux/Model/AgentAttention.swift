@@ -97,17 +97,25 @@ struct AgentPermissionRequest: Hashable, Sendable {
     let key: String?
     /// Subagent that asked; nil on the main thread.
     let agentID: String?
+    /// Claude session that asked: a teammate's turn ending closes nothing
+    /// of the lead's.
+    let sessionID: String?
     /// Epoch seconds.
     let requestedAt: TimeInterval
     /// A question (AskUserQuestion, an MCP elicitation form) rather than an
     /// approval.
     let isQuestion: Bool
+    /// A later tool event from the same agent suggests the dialog was
+    /// answered (a denial fires no hook). Only the column's status trusts
+    /// that; the Telegram gate waits for proof.
+    var mayBeAnswered = false
 
     init(
         toolName: String?,
         summary: String?,
         key: String?,
         agentID: String?,
+        sessionID: String?,
         requestedAt: TimeInterval,
         isQuestion: Bool? = nil
     ) {
@@ -115,12 +123,19 @@ struct AgentPermissionRequest: Hashable, Sendable {
         self.summary = summary
         self.key = key
         self.agentID = agentID
+        self.sessionID = sessionID
         self.requestedAt = requestedAt
         self.isQuestion = isQuestion ?? (toolName == "AskUserQuestion")
     }
 
     var reason: AgentAttentionReason {
         isQuestion ? .question(summary) : .permission(tool: toolName, summary: summary)
+    }
+
+    /// Whether `event` (PostToolUse, a re-sent PermissionRequest) is about
+    /// the call this dialog asked about.
+    func isSameCall(key: String, as event: AgentHookEvent) -> Bool {
+        self.key == key && agentID == event.agentID && sessionID == event.sessionID
     }
 }
 
@@ -142,12 +157,13 @@ enum AgentText {
     static func clean(_ text: String, maxLength: Int) -> String? {
         guard maxLength > 0 else { return nil }
         var scalars = String.UnicodeScalarView()
+        var kept = 0 // UnicodeScalarView.count is O(n)
         var pendingSpace = false
         var truncated = false
         // Bounds the scan on huge inputs (a Write's content, a heredoc).
         let scalarBudget = maxLength * 4 + 4
         for scalar in text.unicodeScalars {
-            if scalars.count >= scalarBudget {
+            if kept >= scalarBudget {
                 truncated = true
                 break
             }
@@ -163,9 +179,13 @@ enum AgentText {
             default:
                 break
             }
-            if pendingSpace, !scalars.isEmpty { scalars.append(" ") }
+            if pendingSpace, kept > 0 {
+                scalars.append(" ")
+                kept += 1
+            }
             pendingSpace = false
             scalars.append(scalar)
+            kept += 1
         }
         let result = String(scalars)
         guard !result.isEmpty else { return nil }
@@ -178,8 +198,8 @@ enum AgentText {
 enum AgentToolInput {
     static let maxSummaryLength = 160
 
-    /// The input field that identifies a call, by tool. Nil for tools
-    /// without one (MCP tools…): the whole input identifies those.
+    /// The input field that says what a call does, by tool. Nil for tools
+    /// without one (MCP tools…).
     static func primaryValue(toolName: String, input: [String: Any]) -> String? {
         switch toolName {
         case "Bash", "PowerShell": return input["command"] as? String
@@ -213,13 +233,15 @@ enum AgentToolInput {
     }
 
     /// Stable across processes (each hook runs its own receiver, so no
-    /// per-process seeded hashing): the tool name plus its identifying
-    /// field, or its whole input with sorted keys.
+    /// per-process seeded hashing): the tool name plus its whole input
+    /// with sorted keys — two Greps with one pattern in different paths
+    /// are different calls. Tools whose answer rewrites their input key on
+    /// what stays: the question asked, or the name alone for a plan.
     static func key(toolName: String, input: [String: Any]) -> String {
         var material = Data(toolName.utf8)
         material.append(0)
-        if let value = primaryValue(toolName: toolName, input: input) {
-            material.append(Data(value.utf8))
+        if ["AskUserQuestion", "ExitPlanMode"].contains(toolName) {
+            material.append(Data((primaryValue(toolName: toolName, input: input) ?? "").utf8))
         } else if JSONSerialization.isValidJSONObject(input),
                   let json = try? JSONSerialization.data(withJSONObject: input, options: [.sortedKeys]) {
             material.append(json)

@@ -73,12 +73,12 @@ final class AgentHookEventTests: XCTestCase {
         XCTAssertEqual(request.toolSummary, "git push origin main [31mrm -rf build")
         XCTAssertEqual(request.agentID, "sub-1")
 
-        // The call's PostToolUse carries extra input fields; the key only
-        // reads the command, so it still matches.
+        // The call's PostToolUse carries the same input (in any key order).
         let done = try XCTUnwrap(claudeEvent([
             "hook_event_name": "PostToolUse",
             "tool_name": "Bash",
-            "tool_input": ["command": command, "timeout": 120_000],
+            "tool_input": ["description": "Push", "command": command],
+            "tool_response": ["stdout": "ok"],
             "tool_use_id": "toolu_1",
             "agent_id": "sub-1"
         ]))
@@ -137,6 +137,33 @@ final class AgentHookEventTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(event.toolSummary).hasSuffix("…"))
         let line = try JSONEncoder().encode(event)
         XCTAssertLessThan(line.count, 1_000, "the queue line holds an excerpt, not the input")
+    }
+
+    /// Two Greps for one pattern in different places are different calls:
+    /// one finishing must not clear the other's dialog.
+    func testCallKeyReadsTheWholeInput() {
+        let etc = AgentToolInput.key(toolName: "Grep", input: ["pattern": "TODO", "path": "/etc"])
+        let src = AgentToolInput.key(toolName: "Grep", input: ["pattern": "TODO", "path": "./src"])
+        XCTAssertNotEqual(etc, src)
+        // Answering rewrites these inputs: the question, or the name alone.
+        let asked = AgentToolInput.key(toolName: "AskUserQuestion", input: ["questions": [["question": "DB?"]]])
+        let answered = AgentToolInput.key(
+            toolName: "AskUserQuestion", input: ["questions": [["question": "DB?"]], "answers": ["DB?": "Postgres"]]
+        )
+        XCTAssertEqual(asked, answered)
+        XCTAssertEqual(
+            AgentToolInput.key(toolName: "ExitPlanMode", input: ["plan": "v1"]),
+            AgentToolInput.key(toolName: "ExitPlanMode", input: ["plan": "v2, edited"])
+        )
+    }
+
+    /// Runs inside a sync hook: a long command followed by a sea of
+    /// whitespace must not cost a recount per scalar.
+    func testCleanIsLinearOnHugeWhitespace() {
+        let input = String(repeating: "x", count: 600) + String(repeating: " ", count: 500_000) + "y"
+        let start = Date()
+        XCTAssertEqual(AgentText.clean(input, maxLength: 160), String(repeating: "x", count: 159) + "…")
+        XCTAssertLessThan(Date().timeIntervalSince(start), 1.5)
     }
 
     func testMCPToolKeyIgnoresKeyOrder() {

@@ -307,7 +307,17 @@ final class PtySession: @unchecked Sendable {
     /// caller then fires the workspace-level notification path.
     @discardableResult
     func applyAgentHook(_ event: AgentHookEvent, isUserFocused: Bool) -> AgentHookOutcome {
-        state.machine.apply(event, isUserFocused: isUserFocused)
+        let dialogsBefore = state.machine.pendingDialogs.count
+        let outcome = state.machine.apply(event, isUserFocused: isUserFocused)
+        let dialogs = state.machine.pendingDialogs
+        if dialogs.count != dialogsBefore {
+            // Stale-gate reports need the trail: which event opened or
+            // closed what (NIRUX_TERM_DEBUG=1).
+            NiruxDebugLog.log("agent dialogs \(dialogsBefore)→\(dialogs.count) on \(event.name.rawValue) "
+                + "agent=\(event.agentID ?? "main"): "
+                + dialogs.map { "\($0.toolName ?? "?")[\($0.key ?? "-")]" }.joined(separator: ","))
+        }
+        return outcome
     }
 
     /// Last computed agent state (no snapshot needed — read from persistent state)

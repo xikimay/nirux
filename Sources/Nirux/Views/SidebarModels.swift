@@ -24,7 +24,7 @@ struct ColumnInfo: Hashable {
     /// granularity it's *displayed* ("12m" via shortDuration), not raw
     /// seconds: the sidebar's render-signature gate would otherwise see a
     /// change on every 2s heartbeat while an agent merely gets older.
-    private var elapsedDisplay: String? {
+    var elapsedDisplay: String? {
         guard agentStatus == .working, let agentElapsedSeconds else { return nil }
         return PilotSidebarRenderer.shortDuration(agentElapsedSeconds)
     }

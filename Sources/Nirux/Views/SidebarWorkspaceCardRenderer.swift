@@ -308,7 +308,7 @@ final class SidebarWorkspaceCardRenderer {
             label.toolTip = PilotSidebarRenderer.attentionTooltip(for: column)
             append(label)
 
-            let dot = statusDot(status: column.agentStatus, reason: column.attentionReason)
+            let dot = statusDot(status: column.agentStatus)
             dot.frame = NSRect(
                 x: sidebarWidth - padding - rightDotSize,
                 y: rowY + (rowHeight - rightDotSize) / 2,
@@ -463,7 +463,7 @@ final class SidebarWorkspaceCardRenderer {
         )
     }
 
-    private func statusDot(status: AgentStatus, reason: AgentAttentionReason?) -> NSView {
+    private func statusDot(status: AgentStatus) -> NSView {
         let dot = SidebarBackgroundView()
         dot.wantsLayer = true
         dot.layer?.cornerRadius = 4
@@ -472,7 +472,7 @@ final class SidebarWorkspaceCardRenderer {
         case .working:
             color = .systemGreen
         case .needsAttention:
-            color = PilotSidebarRenderer.attentionColor(for: reason)
+            color = .systemOrange
         case .idle:
             color = NSColor.white.withAlphaComponent(0.22)
         }

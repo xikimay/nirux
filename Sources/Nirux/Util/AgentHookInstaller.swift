@@ -127,22 +127,21 @@ enum AgentHookInstaller {
         }
 
         var hooks = root["hooks"] as? [String: Any] ?? [:]
+        // Drop Nirux-owned entries under EVERY event, listed or not: an
+        // event another build installed (older, or newer before a
+        // downgrade) must not keep launching the binary.
+        for event in hooks.keys.sorted() {
+            guard let groups = hooks[event] as? [[String: Any]],
+                  let cleaned = removingNiruxEntries(from: groups) else { continue }
+            if cleaned.isEmpty, !claudeHookEvents.contains(event) {
+                hooks.removeValue(forKey: event)
+            } else {
+                hooks[event] = cleaned
+            }
+        }
+        let entry: [String: Any] = ["type": "command", "command": command]
         for event in claudeHookEvents {
             var groups = hooks[event] as? [[String: Any]] ?? []
-            // Drop Nirux-owned hook entries (any stale path); drop groups
-            // left empty by that removal. User hooks in mixed groups survive.
-            for index in groups.indices.reversed() {
-                var list = groups[index]["hooks"] as? [[String: Any]] ?? []
-                list.removeAll {
-                    ($0["command"] as? String)?.range(of: claudeCommandPattern, options: .regularExpression) != nil
-                }
-                if list.isEmpty {
-                    groups.remove(at: index)
-                } else {
-                    groups[index]["hooks"] = list
-                }
-            }
-            let entry: [String: Any] = ["type": "command", "command": command]
             groups.append(["matcher": "", "hooks": [entry]])
             hooks[event] = groups
         }
@@ -166,6 +165,30 @@ enum AgentHookInstaller {
         } catch {
             NSLog("[AgentHooks] failed to write %@: %@", url.path, error.localizedDescription)
         }
+    }
+
+    /// `groups` without Nirux-owned hook entries (any stale path), and
+    /// without groups that removal left empty; user hooks in mixed groups
+    /// survive. Nil when nothing was Nirux's.
+    private static func removingNiruxEntries(from groups: [[String: Any]]) -> [[String: Any]]? {
+        var removed = false
+        var result: [[String: Any]] = []
+        for var group in groups {
+            let list = group["hooks"] as? [[String: Any]] ?? []
+            let kept = list.filter {
+                ($0["command"] as? String)?.range(of: claudeCommandPattern, options: .regularExpression) == nil
+            }
+            guard kept.count != list.count else {
+                result.append(group)
+                continue
+            }
+            removed = true
+            if !kept.isEmpty {
+                group["hooks"] = kept
+                result.append(group)
+            }
+        }
+        return removed ? result : nil
     }
 
     // MARK: - Codex (~/.codex/config.toml)

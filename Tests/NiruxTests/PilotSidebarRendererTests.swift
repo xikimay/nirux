@@ -76,11 +76,30 @@ final class PilotSidebarRendererTests: XCTestCase {
         XCTAssertNil(PilotSidebarRenderer.attentionTooltip(for: column(.idle, reason: nil)))
     }
 
-    func testPermissionAndTurnFinishedDotsDiffer() {
-        XCTAssertEqual(PilotSidebarRenderer.attentionColor(for: .permission(tool: "Bash", summary: nil)), .systemOrange)
-        XCTAssertEqual(PilotSidebarRenderer.attentionColor(for: .question(nil)), .systemOrange)
-        XCTAssertEqual(PilotSidebarRenderer.attentionColor(for: nil), .systemOrange)
-        XCTAssertEqual(PilotSidebarRenderer.attentionColor(for: .turnFinished), .niruxAccent)
+    /// The dot stays orange for any attention (like the glows and
+    /// borders); the label tells a blocked agent from a finished turn.
+    func testBlockedAndFinishedLabelsDiffer() {
+        let blocked = PilotSidebarRenderer.attentionTextColor(for: .permission(tool: "Bash", summary: nil))
+        let question = PilotSidebarRenderer.attentionTextColor(for: .question(nil))
+        let done = PilotSidebarRenderer.attentionTextColor(for: .turnFinished)
+        XCTAssertEqual(blocked, question)
+        XCTAssertNotEqual(blocked, done)
+    }
+
+    func testPilotFingerprintSeesTheReason() {
+        let workspace = WorkspaceState(cwd: "/tmp")
+        func info(_ reason: AgentAttentionReason) -> WorkspaceInfo {
+            WorkspaceInfo(
+                id: "w", index: 0, title: "w", profileID: "p", isInactive: false, columnCount: 1,
+                focusedColumn: 0, gitBranch: nil, hasNotification: false, isActive: false,
+                columns: [column(.needsAttention, reason: reason)], prInfo: nil, diffStats: nil,
+                purpose: nil, nextStep: nil, blocker: nil, phase: .active, lastSummary: nil, lastActivityAt: nil
+            )
+        }
+        XCTAssertNotEqual(
+            workspace.pilotFingerprint(info(.turnFinished)),
+            workspace.pilotFingerprint(info(.permission(tool: "Bash", summary: nil)))
+        )
     }
 
     func testReasonChangeRerendersTheRow() {

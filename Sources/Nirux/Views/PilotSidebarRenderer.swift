@@ -211,11 +211,12 @@ enum PilotSidebarRenderer {
                 .foregroundColor: NSColor.systemGreen.withAlphaComponent(0.65)
             ]))
         }
-        // Why a waiting agent waits — "· permission · Bash", in its dot's color.
+        // Why a waiting agent waits — "· permission · Bash" in orange when
+        // it is blocked on the user, a muted "· done" when its turn ended.
         if column.agentStatus == .needsAttention, let reason = column.attentionReason {
             result.append(NSAttributedString(string: " · \(reason.shortLabel)", attributes: [
                 .font: font,
-                .foregroundColor: attentionColor(for: reason).withAlphaComponent(0.8)
+                .foregroundColor: attentionTextColor(for: reason)
             ]))
         }
 
@@ -229,10 +230,10 @@ enum PilotSidebarRenderer {
         return [reason.headline, detail].compactMap { $0 }.joined(separator: " — ")
     }
 
-    /// Orange when the agent is blocked on the user (a dialog, an unknown
-    /// ask); the accent blue when it merely finished its turn.
-    static func attentionColor(for reason: AgentAttentionReason?) -> NSColor {
-        reason == .turnFinished ? .niruxAccent : .systemOrange
+    static func attentionTextColor(for reason: AgentAttentionReason) -> NSColor {
+        reason == .turnFinished
+            ? NSColor.white.withAlphaComponent(0.45)
+            : NSColor.systemOrange.withAlphaComponent(0.8)
     }
 
     /// Compact duration for sidebar rows: 42s, 12m, 1h05m. Pure —
@@ -250,11 +251,10 @@ enum PilotSidebarRenderer {
     /// Caller is responsible for adding the returned view to its parent and
     /// tracking it for later removal.
     static func makeAgentDot(
-        status: AgentStatus, reason: AgentAttentionReason? = nil,
-        x: CGFloat, yOffset: CGFloat, rowHeight: CGFloat, size: CGFloat
+        status: AgentStatus, x: CGFloat, yOffset: CGFloat, rowHeight: CGFloat, size: CGFloat
     ) -> NSView? {
         guard status != .idle else { return nil }
-        let dotColor: NSColor = status == .working ? .systemGreen : attentionColor(for: reason)
+        let dotColor: NSColor = status == .working ? .systemGreen : .systemOrange
         let dot = NSView(frame: NSRect(
             x: x, y: yOffset - rowHeight + (rowHeight - size) / 2,
             width: size, height: size
