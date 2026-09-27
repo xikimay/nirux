@@ -26,6 +26,11 @@ final class SidebarView: NSView {
     var onCreateProfile: (() -> Void)?
     var onRenameProfile: ((String) -> Void)?
     var onEditProfileBrief: ((String) -> Void)?
+    var onRecolorProfile: ((String, String) -> Void)?
+    var onDeleteProfile: ((String) -> Void)?
+    /// (workspace id, space id). By id: a close that finishes while the menu
+    /// is open can leave a card's index stale.
+    var onMoveWorkspaceToProfile: ((String, String) -> Void)?
     var onInactiveSectionCollapsedChange: ((Bool) -> Void)?
     var isExpanded: Bool = false {
         didSet {
@@ -494,12 +499,7 @@ final class SidebarView: NSView {
     private func spaceOptionsMenu() -> NSMenu {
         let menu = NSMenu()
         if let active = lastProfiles.first(where: { $0.isActive }) {
-            menu.addClosureItem(title: "Rename Space…") { [weak self] in
-                self?.onRenameProfile?(active.id)
-            }
-            menu.addClosureItem(title: "Edit Space Brief…") { [weak self] in
-                self?.onEditProfileBrief?(active.id)
-            }
+            addSpaceManagementItems(to: menu, for: active)
         }
         menu.addClosureItem(title: "New Space") { [weak self] in
             self?.onCreateProfile?()
@@ -560,6 +560,7 @@ final class SidebarView: NSView {
         menu.addClosureItem(title: "Move Down") { [weak self] in
             self?.onWorkspaceAction?(.moveDown, workspaceIndex)
         }
+        if let item = moveToSpaceItem(workspaceIndex: workspaceIndex) { menu.addItem(item) }
         menu.addItem(.separator())
         if workspace?.isInactive == true {
             menu.addClosureItem(title: "Move to Active") { [weak self] in

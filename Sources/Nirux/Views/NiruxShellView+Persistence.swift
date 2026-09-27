@@ -10,7 +10,15 @@ extension NiruxShellView {
             persisted: persisted,
             hasUnreadableState: persisted == nil && Persistence.hasStoredState
         )
-        guard let state = persisted, !state.workspaces.isEmpty else { return }
+        let loadedProfiles = projectStore.load(
+            mirror: persisted?.workspaceProfiles,
+            markerPresent: persisted?.projectsFileVersion != nil
+        )
+        workspaceStore.deletedProfileIDs = projectStore.deletedIDs
+        guard let state = persisted, !state.workspaces.isEmpty else {
+            workspaceStore.replaceProfiles(loadedProfiles, activeProfileID: activeProfileID)
+            return
+        }
         for workspace in workspaces { workspace.containerView.removeFromSuperview() }
         workspaces.removeAll()
         // A corrupt/hand-edited state file (or an older collision) may map
@@ -19,10 +27,7 @@ extension NiruxShellView {
         // auto-resume; duplicates use the picker.
         var claimedSessionIDs = ClaimedSessionIDs()
 
-        let restoredProfiles = state.workspaceProfiles?.isEmpty == false
-            ? state.workspaceProfiles!
-            : [WorkspaceProfile.defaultProfile]
-        workspaceStore.replaceProfiles(restoredProfiles, activeProfileID: state.activeProfileID)
+        workspaceStore.replaceProfiles(loadedProfiles, activeProfileID: state.activeProfileID)
         let validProfileIDs = Set(profiles.map { $0.id })
 
         for persistedWS in state.workspaces {
@@ -205,6 +210,9 @@ extension NiruxShellView {
     }
 
     func saveState(snapshot: ProcessSnapshot? = nil) {
+        // projects.json first: a crash in between leaves new spaces with an
+        // old mirror, which the marker rule handles (see ProjectStore).
+        projectStore.save(workspaceStore.profiles)
         Persistence.save(persistedState(snapshot: snapshot))
     }
 
@@ -241,9 +249,11 @@ extension NiruxShellView {
             },
             activeWorkspaceIndex: activeWSIndex,
             settings: settings,
-            workspaceProfiles: workspaceStore.navigableProfiles,
+            workspaceProfiles: workspaceStore.profiles,
             activeProfileID: activeProfileID,
-            activeWorkspaceID: activeWorkspace?.id
+            activeWorkspaceID: activeWorkspace?.id,
+            // Only when projects.json holds these spaces; see ProjectStore.
+            projectsFileVersion: projectStore.isFileCurrent ? ProjectStore.schemaVersion : nil
         )
     }
 

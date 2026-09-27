@@ -153,7 +153,8 @@ enum SpaceBrief {
         return false
     }
 
-    private static func readBrief(at url: URL) -> String? {
+    /// Nil unless a regular file of at most `maxFileBytes` (a FIFO would block).
+    static func readBrief(at url: URL) -> String? {
         // attributesOfItem doesn't follow a symlinked brief.md; resolve it.
         let url = url.resolvingSymlinksInPath()
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
@@ -184,7 +185,7 @@ enum SpaceBrief {
         with until Nirux restarts them and they compact.
         Repository rules belong in CLAUDE.md / AGENTS.md. Keep it short: it is sent
         with every request. Text inside this comment is not sent.
-        A space goes away when its last workspace closes; this file stays here.
+        Deleting the space leaves this file here.
         -->
 
         """

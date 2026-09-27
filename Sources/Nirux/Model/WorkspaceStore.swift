@@ -6,6 +6,10 @@ final class WorkspaceStore {
     private(set) var profiles: [WorkspaceProfile] = [WorkspaceProfile.defaultProfile]
     private(set) var activeProfileID: String = WorkspaceProfile.defaultID
     private(set) var activeWorkspaceID: String?
+    /// Deleted spaces' ids (see ProjectStore). Shells started in them keep the
+    /// id in NIRUX_PROFILE_ID, so a request naming one goes to the default
+    /// space, where their workspaces moved.
+    var deletedProfileIDs: Set<String> = []
 
     var activeWorkspaceIndex: Int {
         get {
@@ -26,10 +30,9 @@ final class WorkspaceStore {
         profiles.first { $0.id == activeProfileID } ?? WorkspaceProfile.defaultProfile
     }
 
-    var navigableProfiles: [WorkspaceProfile] {
-        let profileIDsWithWorkspaces = Set(workspaces.map { $0.profileID })
-        return profiles.filter { profileIDsWithWorkspaces.contains($0.id) }
-    }
+    /// Every space, empty ones included: spaces persist (see `ProjectStore`),
+    /// and selecting an empty one opens a workspace in it.
+    var navigableProfiles: [WorkspaceProfile] { profiles }
 
     var visibleWorkspaceIndices: [Int] {
         visibleWorkspaceIndices(in: activeProfileID)
@@ -60,10 +63,10 @@ final class WorkspaceStore {
 
     func targetProfileID(for requestedProfileID: String?) -> String {
         guard let requestedProfileID = requestedProfileID?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !requestedProfileID.isEmpty,
-              profiles.contains(where: { $0.id == requestedProfileID })
+              !requestedProfileID.isEmpty
         else { return activeProfileID }
-        return requestedProfileID
+        if deletedProfileIDs.contains(requestedProfileID) { return WorkspaceProfile.defaultID }
+        return profiles.contains { $0.id == requestedProfileID } ? requestedProfileID : activeProfileID
     }
 
     @discardableResult
@@ -88,19 +91,21 @@ final class WorkspaceStore {
         return selectWorkspace(at: index)
     }
 
+    /// Selects a space. An empty one is selected with no active workspace:
+    /// the caller opens one in it.
     @discardableResult
     func selectProfile(_ profileID: String) -> Bool {
-        guard profiles.contains(where: { $0.id == profileID }),
-              let first = visibleWorkspaceIndices(in: profileID).first
-        else { return false }
+        guard profiles.contains(where: { $0.id == profileID }) else { return false }
         activeProfileID = profileID
-        activeWorkspaceID = workspaces[first].id
+        activeWorkspaceID = visibleWorkspaceIndices(in: profileID).first.map { workspaces[$0].id }
         return true
     }
 
+    /// ⌘⌥←/→ cycles through spaces that have workspaces: stepping onto an
+    /// empty one would open a workspace each time it passes.
     @discardableResult
     func selectAdjacentProfile(delta: Int) -> WorkspaceProfile? {
-        let candidates = navigableProfiles
+        let candidates = profiles.filter { $0.id == activeProfileID || hasWorkspaces(in: $0.id) }
         guard candidates.count > 1,
               let current = candidates.firstIndex(where: { $0.id == activeProfileID })
         else { return nil }
@@ -184,10 +189,12 @@ final class WorkspaceStore {
 
     func createProfile(named baseName: String) -> WorkspaceProfile {
         let name = uniqueProfileName(baseName)
+        let usedColors = Set(profiles.map { $0.colorHex.uppercased() })
         let profile = WorkspaceProfile(
             id: UUID().uuidString,
             name: name,
-            colorHex: WorkspaceProfile.colorHex(for: profiles.count)
+            colorHex: WorkspaceProfile.palette.first { !usedColors.contains($0.hex.uppercased()) }?.hex
+                ?? WorkspaceProfile.colorHex(for: profiles.count)
         )
         profiles.append(profile)
         activeProfileID = profile.id
@@ -203,6 +210,57 @@ final class WorkspaceStore {
         else { return false }
 
         profiles[index].name = uniqueProfileName(trimmed, excluding: id)
+        return true
+    }
+
+    /// Deletes a space. Its workspaces move to the default space, which can't
+    /// be deleted. Returns false for the default or an unknown space.
+    @discardableResult
+    func deleteProfile(id: String) -> Bool {
+        guard id != WorkspaceProfile.defaultID,
+              let index = profiles.firstIndex(where: { $0.id == id })
+        else { return false }
+        for workspace in workspaces where workspace.profileID == id {
+            workspace.profileID = WorkspaceProfile.defaultID
+        }
+        profiles.remove(at: index)
+        deletedProfileIDs.insert(id)
+        if activeProfileID == id { activeProfileID = WorkspaceProfile.defaultID }
+        reconcileSelection(preferActiveProfile: true)
+        return true
+    }
+
+    @discardableResult
+    func setProfileColor(id: String, colorHex: String) -> Bool {
+        guard let index = profiles.firstIndex(where: { $0.id == id }) else { return false }
+        profiles[index].colorHex = colorHex
+        return true
+    }
+
+    /// Moves a workspace to the end of another space. Moving the active
+    /// workspace selects its neighbour in the space it leaves, or follows it
+    /// when that space is left empty.
+    @discardableResult
+    func moveWorkspace(at index: Int, toProfile profileID: String) -> Bool {
+        guard workspaces.indices.contains(index),
+              profiles.contains(where: { $0.id == profileID }),
+              workspaces[index].profileID != profileID
+        else { return false }
+        let workspace = workspaces[index]
+        let wasActive = workspace.id == activeWorkspaceID
+        // The card above it in the sidebar, else the one below.
+        let visible = visibleWorkspaceIndices(in: workspace.profileID)
+        let position = visible.firstIndex(of: index) ?? 0
+        let isCandidate = { (candidate: Int) in candidate != index && !self.workspaces[candidate].isClosing }
+        let neighbourIndex = visible[..<position].last(where: isCandidate)
+            ?? visible[position...].first(where: isCandidate)
+        let neighbourID = neighbourIndex.map { workspaces[$0].id }
+
+        workspace.profileID = profileID
+        workspaces.remove(at: index)
+        workspaces.append(workspace)
+        if wasActive { selectWorkspace(id: neighbourID ?? workspace.id) }
+        reconcileSelection(preferActiveProfile: true)
         return true
     }
 

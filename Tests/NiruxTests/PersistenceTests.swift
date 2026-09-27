@@ -272,7 +272,7 @@ final class PersistedStateCodingTests: XCTestCase {
     }
 
     @MainActor
-    func testWorkspaceStoreDoesNotNavigateToEmptyProfiles() {
+    func testWorkspaceStoreNavigatesToEmptyProfilesWithoutAWorkspace() {
         let store = WorkspaceStore()
         let empty = WorkspaceProfile(id: "empty", name: "empty", colorHex: "#E0AF68")
         store.replaceProfiles([WorkspaceProfile.defaultProfile, empty], activeProfileID: empty.id)
@@ -281,10 +281,13 @@ final class PersistedStateCodingTests: XCTestCase {
         workspace.profileID = WorkspaceProfile.defaultID
         store.appendWorkspace(workspace)
 
-        XCTAssertEqual(store.navigableProfiles.map(\.id), [WorkspaceProfile.defaultID])
-        XCTAssertFalse(store.selectProfile(empty.id))
-        XCTAssertEqual(store.activeProfileID, WorkspaceProfile.defaultID)
-        XCTAssertEqual(store.visibleWorkspaceIndices.map { store.workspaces[$0].id }, ["main"])
+        // Spaces persist: an empty one stays in the switcher and can be
+        // selected; the caller then opens a workspace in it.
+        XCTAssertEqual(store.navigableProfiles.map(\.id), [WorkspaceProfile.defaultID, empty.id])
+        XCTAssertTrue(store.selectProfile(empty.id))
+        XCTAssertEqual(store.activeProfileID, empty.id)
+        XCTAssertNil(store.activeWorkspaceID, "the caller opens a workspace in it")
+        XCTAssertTrue(store.visibleWorkspaceIndices.isEmpty)
     }
 
     @MainActor

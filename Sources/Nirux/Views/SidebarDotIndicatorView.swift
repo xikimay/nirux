@@ -10,6 +10,8 @@ final class SidebarDotIndicatorView: NSView {
         }
     }
     var onSelect: ((SidebarDotIndicatorAction) -> Void)?
+    /// Right-click menu for the item under the pointer, if any.
+    var menuProvider: ((SidebarDotIndicatorAction) -> NSMenu?)?
 
     private let tooltipText: String
     private var trackingArea: NSTrackingArea?
@@ -30,11 +32,13 @@ final class SidebarDotIndicatorView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     override func mouseDown(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        for (idx, rect) in dotRects().enumerated() where rect.insetBy(dx: -4, dy: -4).contains(point) {
-            onSelect?(items[idx].action)
-            return
-        }
+        guard let index = itemIndex(at: convert(event.locationInWindow, from: nil)) else { return }
+        onSelect?(items[index].action)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let index = itemIndex(at: convert(event.locationInWindow, from: nil)) else { return nil }
+        return menuProvider?(items[index].action)
     }
 
     // MARK: - Hover
@@ -67,8 +71,13 @@ final class SidebarDotIndicatorView: NSView {
         hoveredIndex = itemIndex(at: convert(window.mouseLocationOutsideOfEventStream, from: nil))
     }
 
+    /// The dot nearest the point among those whose hit area contains it:
+    /// with many spaces the gaps shrink and hit areas overlap.
     private func itemIndex(at point: NSPoint) -> Int? {
-        dotRects().firstIndex { $0.insetBy(dx: -4, dy: -4).contains(point) }
+        dotRects().enumerated()
+            .filter { $0.element.insetBy(dx: -4, dy: -4).contains(point) }
+            .min { abs($0.element.midX - point.x) < abs($1.element.midX - point.x) }?
+            .offset
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -92,8 +101,14 @@ final class SidebarDotIndicatorView: NSView {
                     ctx.fillEllipse(in: rect.insetBy(dx: -5, dy: -5))
                 }
                 let dimAlpha: CGFloat = isHovered ? 0.75 : 0.45
-                ctx.setFillColor((item.isActive ? color : color.withAlphaComponent(dimAlpha)).cgColor)
-                ctx.fillEllipse(in: rect)
+                if item.isEmpty && !item.isActive {
+                    ctx.setStrokeColor(color.withAlphaComponent(dimAlpha).cgColor)
+                    ctx.setLineWidth(1.5)
+                    ctx.strokeEllipse(in: rect.insetBy(dx: 0.75, dy: 0.75))
+                } else {
+                    ctx.setFillColor((item.isActive ? color : color.withAlphaComponent(dimAlpha)).cgColor)
+                    ctx.fillEllipse(in: rect)
+                }
                 if item.isActive {
                     ctx.setStrokeColor(color.withAlphaComponent(0.9).cgColor)
                     ctx.setLineWidth(1.5)
@@ -172,8 +187,10 @@ final class SidebarDotIndicatorView: NSView {
         let normalSize: CGFloat = 9
         let activeSize: CGFloat = 11
         let actionSize: CGFloat = 22
-        let gap: CGFloat = 18
         let widths = items.map { item in item.label != nil ? actionSize : (item.isActive ? activeSize : normalSize) }
+        // Spaces persist, so they can outgrow the sidebar: tighten the gaps.
+        let gapCount = CGFloat(max(items.count - 1, 1))
+        let gap = min(18, max(4, (bounds.width - 24 - widths.reduce(0, +)) / gapCount))
         let totalW = widths.reduce(0, +) + CGFloat(max(items.count - 1, 0)) * gap
         var x = (bounds.width - totalW) / 2
         return items.map { item in

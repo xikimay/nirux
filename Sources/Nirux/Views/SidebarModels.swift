@@ -219,4 +219,6 @@ struct SidebarDotIndicatorItem: Equatable {
     let isActive: Bool
     let hasAttention: Bool
     let label: String?
+    /// A space with no workspaces: drawn as a ring rather than a filled dot.
+    var isEmpty: Bool = false
 }
