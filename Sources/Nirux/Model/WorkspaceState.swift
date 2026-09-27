@@ -116,6 +116,8 @@ final class WorkspaceState {
 
     /// Called by NiruxShellView to wire up sidebar refresh
     var onMetadataChanged: (() -> Void)?
+    /// A column's terminal title changed (fires before onMetadataChanged).
+    var onColumnTitleChanged: ((ColumnState) -> Void)?
     var onFocusedColumnChanged: (() -> Void)?
     var onGitContextChanged: (() -> Void)?
     var onDiffStatsClicked: (() -> Void)?
@@ -125,6 +127,10 @@ final class WorkspaceState {
     /// A terminal file: link was cmd-clicked — the shell opens it in an
     /// editor column in this workspace, at the optional line.
     var onTerminalOpenFile: ((WorkspaceState, String, Int?) -> Void)?
+    /// Bring an existing column of this workspace into view and focus it.
+    var onRevealColumn: ((WorkspaceState, Int) -> Void)?
+    /// Dev-server proposals — see WorkspaceState+LocalServers.swift.
+    var localServers = LocalServerTracking()
 
     init(
         id: String = UUID().uuidString,
@@ -409,8 +415,10 @@ extension WorkspaceState {
     }
 
     private func setupTitleTracking(for col: ColumnState) {
-        col.onTitleChanged = { [weak self] in
-            self?.onMetadataChanged?()
+        col.onTitleChanged = { [weak self, weak col] in
+            guard let self else { return }
+            if let col { self.onColumnTitleChanged?(col) }
+            self.onMetadataChanged?()
         }
     }
 
@@ -457,14 +465,7 @@ extension WorkspaceState {
         setupTitleTracking(for: col)
         setupAgentAttentionTracking(for: col)
         setupLinkOpening(for: col)
-    }
-
-    func detectGitBranch() {
-        let workingDirectory = focusedWorkingDirectory
-        guard let observation = beginGitContextObservation(at: workingDirectory) else { return }
-        GitDetect.contextAsync(at: workingDirectory) { [weak self] result in
-            self?.applyGitContextObservation(result, observation: observation)
-        }
+        setupLocalServerDetection(for: col)
     }
 
     // MARK: - Column Management
@@ -587,6 +588,9 @@ extension WorkspaceState {
     func addColumn(webViewURL: String) {
         let col = ColumnState(url: webViewURL)
         insertColumn(col)
+        // A browser column on a proposed port makes that proposal moot.
+        col.webViewColumn?.onURLChanged = { [weak self] in self?.pruneLocalServerProposals() }
+        pruneLocalServerProposals()
     }
 
     /// Insert a Monaco editor column scoped to the provided cwd, defaulting

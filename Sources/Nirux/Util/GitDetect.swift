@@ -116,6 +116,12 @@ enum GitContextDetectionResult: Equatable, Sendable {
 }
 
 enum GitDetect {
+    /// Background reads must never write the repository: without this,
+    /// `git status` refreshes `.git/index` as a side effect, which contends
+    /// with the user's own git commands and wakes the FSEvents watcher that
+    /// triggered the read in the first place.
+    static let readOnlyEnvironment = ["GIT_OPTIONAL_LOCKS": "0"]
+
     static func context(at path: String) -> GitContext? {
         guard case .observed(let context) = observe(at: path) else { return nil }
         return context
@@ -266,6 +272,7 @@ enum GitDetect {
             executableURL: URL(fileURLWithPath: gitPath),
             arguments: arguments,
             currentDirectoryURL: URL(fileURLWithPath: path),
+            environment: readOnlyEnvironment,
             timeout: timeout
         ), let output = String(data: result.standardOutput, encoding: .utf8)
         else { return nil }

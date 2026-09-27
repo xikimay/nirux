@@ -1,9 +1,22 @@
 import Foundation
 
 /// Saves/restores workspace layout to ~/Library/Application Support/nirux/state.json
+///
+/// Recovery copies live next to it:
+/// - `state.backup.1…5.json`: 1 mirrors the last state written, 2…5 are the
+///   distinct states before it (including any another build wrote).
+/// - `state.daily.YYYY-MM-DD.json`: the first save of each day, kept for a
+///   week, because an active session cycles through the backups in a minute.
+/// - `state.corrupt.<timestamp>.json`: a state.json this build could not
+///   read or decode (hand edit, disk damage, a newer build's format), copied
+///   (or hard-linked, if unreadable) before a save replaces it. Never read
+///   back; kept for manual recovery.
 enum Persistence {
-    /// Rotating backups kept next to state.json for corruption recovery.
     private static let maxBackups = 5
+    private static let loadCache = PersistenceLoadCache()
+    /// Prefix of the uniquely named files a save stages before renaming them
+    /// into place; crash leftovers are swept once a day.
+    static let stagingPrefix = "state.tmp-"
 
     private static var stateURL: URL {
         // Development escape hatch: a debug launch restores AND re-saves the
@@ -33,16 +46,37 @@ enum Persistence {
         stateURL.deletingLastPathComponent()
     }
 
-    private static func backupURL(_ index: Int) -> URL {
-        stateURL.deletingLastPathComponent().appendingPathComponent("state.backup.\(index).json")
+    private static func backupURL(_ index: Int, in dir: URL) -> URL {
+        dir.appendingPathComponent("state.backup.\(index).json")
     }
 
+    /// Writes state.json only when its bytes change, so the 10 s heartbeat
+    /// doesn't cycle identical copies through the backups. `now` picks the
+    /// daily snapshot's date.
     @discardableResult
-    static func save(_ state: PersistedState) -> Bool {
+    static func save(_ state: PersistedState, now: Date = Date()) -> Bool {
+        let url = stateURL
+        let dir = url.deletingLastPathComponent()
         do {
-            let data = try JSONEncoder().encode(state)
-            rotateBackups()
-            try data.write(to: stateURL, options: .atomic)
+            let encoder = JSONEncoder()
+            // Stable key order keeps unchanged state byte-identical.
+            encoder.outputFormatting = .sortedKeys
+            let data = try encoder.encode(state)
+            let existing = try? Data(contentsOf: url)
+            if existing != data {
+                guard keepCurrentState(at: url, contents: existing, now: now) else { return false }
+                if existing == nil, FileManager.default.fileExists(atPath: url.path) {
+                    try replaceUnreadable(url, with: data, in: dir)
+                } else {
+                    try data.write(to: url, options: .atomic)
+                }
+                // A state recovered for bytes that may come back is stale now.
+                loadCache.clear()
+                // Only after a successful write, so failing retries (disk
+                // full) can't cycle the history out.
+                pushBackup(data, in: dir)
+            }
+            writeDailySnapshotIfNeeded(data, in: dir, now: now)
             return true
         } catch {
             NSLog("[Nirux Persistence] Failed to save state: %@", error.localizedDescription)
@@ -50,30 +84,112 @@ enum Persistence {
         }
     }
 
-    /// Shift state.backup.N.json → N+1 and copy the current state.json to 1.
-    /// Renames within the same directory are cheap; runs on every save.
-    private static func rotateBackups() {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: stateURL.path) else { return }
-        for index in stride(from: maxBackups - 1, through: 1, by: -1) {
-            let src = backupURL(index)
-            let dst = backupURL(index + 1)
-            guard fm.fileExists(atPath: src.path) else { continue }
-            try? fm.removeItem(at: dst)
-            try? fm.moveItem(at: src, to: dst)
+    /// Makes what state.json holds survive the write that replaces it,
+    /// without moving it: the atomic write swaps it out, so state.json is
+    /// never missing. A decodable file already is backup.1 or gets pushed
+    /// (another build or a hand edit wrote it); one this build can't decode
+    /// is copied to state.corrupt.*; one it can't even read is hard-linked
+    /// there, which needs no read access. False when that failed: then it
+    /// must not be replaced.
+    private static func keepCurrentState(at url: URL, contents: Data?, now: Date) -> Bool {
+        let dir = url.deletingLastPathComponent()
+        guard let contents else {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return true }
+            guard !isDirectory.boolValue else {
+                NSLog("[Nirux Persistence] state.json is a directory — not replacing it")
+                return false
+            }
+            return setAsideUnusable(url, contents: nil, now: now)
         }
-        try? fm.removeItem(at: backupURL(1))
-        try? fm.copyItem(at: stateURL, to: backupURL(1))
+        let decodable = loadCache.lookup(path: url.path, contents: contents)?.decodedFromContents
+            ?? (decode(contents, name: url.lastPathComponent) != nil)
+        guard decodable else { return setAsideUnusable(url, contents: contents, now: now) }
+        return contents == (try? Data(contentsOf: backupURL(1, in: dir))) || pushBackup(contents, in: dir)
     }
 
-    static func load() -> PersistedState? {
-        // Missing file is normal on first run — don't log it.
-        guard FileManager.default.fileExists(atPath: stateURL.path) else { return nil }
-        if let state = load(from: stateURL) { return state }
-        // Corruption recovery: walk the rotating backups newest-first.
-        for index in 1...maxBackups {
-            if let recovered = load(from: backupURL(index)) {
-                NSLog("[Nirux Persistence] state.json unreadable — recovered from backup %d", index)
+    /// Swaps new contents in for a state.json that can't be read. rename(2)
+    /// replaces it atomically, like the usual write, but unlike Data's
+    /// atomic write it doesn't carry the unreadable permissions over.
+    private static func replaceUnreadable(_ url: URL, with data: Data, in dir: URL) throws {
+        let staged = stagingURL(in: dir)
+        do {
+            try data.write(to: staged)
+        } catch {
+            try? FileManager.default.removeItem(at: staged)
+            throw error
+        }
+        guard rename(staged.path, url.path) == 0 else {
+            let code = POSIXErrorCode(rawValue: errno) ?? .EIO
+            try? FileManager.default.removeItem(at: staged)
+            throw POSIXError(code)
+        }
+    }
+
+    /// Unique per call: other processes may share the state directory.
+    private static func stagingURL(in dir: URL) -> URL {
+        dir.appendingPathComponent("\(stagingPrefix)\(UUID().uuidString).json")
+    }
+
+    /// Shift state.backup.N.json → N+1 and put `data` in 1, so backup.1
+    /// mirrors the last write and 2…5 are the distinct states before it.
+    /// backup.1 moves out of the way first: when it can't (immutable, a
+    /// directory), nothing else has moved, so retries can't drain the chain.
+    /// False when `data` didn't land in backup.1.
+    @discardableResult
+    private static func pushBackup(_ data: Data, in dir: URL) -> Bool {
+        let fm = FileManager.default
+        let newest = backupURL(1, in: dir)
+        let staged = stagingURL(in: dir)
+        let displaced = stagingURL(in: dir)
+        do {
+            try data.write(to: staged)
+            if fm.fileExists(atPath: newest.path) { try fm.moveItem(at: newest, to: displaced) }
+        } catch {
+            try? fm.removeItem(at: staged)
+            NSLog("[Nirux Persistence] Failed to update %@: %@", newest.lastPathComponent, error.localizedDescription)
+            return false
+        }
+        // rename(2) replaces its destination atomically; a failed one keeps it.
+        for index in stride(from: maxBackups - 1, through: 2, by: -1)
+        where fm.fileExists(atPath: backupURL(index, in: dir).path) {
+            rename(backupURL(index, in: dir).path, backupURL(index + 1, in: dir).path)
+        }
+        if fm.fileExists(atPath: displaced.path) { rename(displaced.path, backupURL(2, in: dir).path) }
+        guard rename(staged.path, newest.path) == 0 else {
+            try? fm.removeItem(at: staged)
+            return false
+        }
+        return true
+    }
+
+    /// `now` decides which daily snapshots are dated in the future.
+    static func load(now: Date = Date()) -> PersistedState? {
+        let url = stateURL
+        let dir = url.deletingLastPathComponent()
+        let contents: Data
+        do {
+            contents = try Data(contentsOf: url)
+        } catch {
+            // Missing file is normal on first run — don't log it.
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            NSLog("[Nirux Persistence] Failed to load state.json: %@", error.localizedDescription)
+            return recoverFromCopies(in: dir, now: now)
+        }
+        if let cached = loadCache.lookup(path: url.path, contents: contents) { return cached.state }
+        let decoded = decode(contents, name: url.lastPathComponent)
+        let state = decoded ?? recoverFromCopies(in: dir, now: now)
+        loadCache.store(.init(path: url.path, contents: contents, state: state, decodedFromContents: decoded != nil))
+        return state
+    }
+
+    /// Corruption recovery: the rotating backups newest-first, then the daily
+    /// snapshots newest-first.
+    private static func recoverFromCopies(in dir: URL, now: Date) -> PersistedState? {
+        let candidates = (1...maxBackups).map { backupURL($0, in: dir) } + dailySnapshotURLs(in: dir, now: now)
+        for url in candidates {
+            if let recovered = load(from: url) {
+                NSLog("[Nirux Persistence] state.json unreadable — recovered from %@", url.lastPathComponent)
                 return recovered
             }
         }
@@ -83,10 +199,18 @@ enum Persistence {
     private static func load(from url: URL) -> PersistedState? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         do {
-            let data = try Data(contentsOf: url)
-            return try JSONDecoder().decode(PersistedState.self, from: data)
+            return decode(try Data(contentsOf: url), name: url.lastPathComponent)
         } catch {
             NSLog("[Nirux Persistence] Failed to load %@: %@", url.lastPathComponent, error.localizedDescription)
+            return nil
+        }
+    }
+
+    private static func decode(_ data: Data, name: String) -> PersistedState? {
+        do {
+            return try JSONDecoder().decode(PersistedState.self, from: data)
+        } catch {
+            NSLog("[Nirux Persistence] Failed to load %@: %@", name, error.localizedDescription)
             return nil
         }
     }
