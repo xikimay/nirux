@@ -98,7 +98,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // Agent lifecycle hooks: install into ~/.claude/settings.json and
         // ~/.codex/config.toml, then start routing events to columns. Must
         // run AFTER restoreState so queued events resolve to live columns.
-        AgentHookInstaller.installAll()
+        installAgentHooks(reportingTo: shellView)
         ActivityStore.shared.load()
         MissionStore.shared.load()
         ActivityStore.shared.onChange = { [weak shellView] in
@@ -155,6 +155,13 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         NSApp.activate(ignoringOtherApps: true)
         startTrackingFrontmostApp()
         drainLaunchURLBacklog()
+    }
+
+    /// The Getting Started checklist refreshes after the install, so it
+    /// reports the hooks as written.
+    private func installAgentHooks(reportingTo shellView: NiruxShellView) {
+        AgentHookInstaller.installAll()
+        shellView.refreshOnboardingChecklist()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

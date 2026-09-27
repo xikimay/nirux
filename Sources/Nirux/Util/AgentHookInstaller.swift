@@ -210,8 +210,7 @@ enum AgentHookInstaller {
         // bare \r (as the file's last byte) is invalid TOML.
         var lines = text.components(separatedBy: "\n")
         let cr = text.contains("\r\n") ? "\r" : ""
-        let notifyPattern = #"^\s*notify\s*="#
-        if let index = lines.firstIndex(where: { $0.range(of: notifyPattern, options: .regularExpression) != nil }) {
+        if let index = lines.firstIndex(where: isNotifyLine) {
             guard isNiruxNotify(lines[index]) else {
                 NSLog("[AgentHooks] ~/.codex/config.toml has a foreign or multi-line notify — codex turn status stays heuristic")
                 return
@@ -239,6 +238,10 @@ enum AgentHookInstaller {
         write(lines: lines, to: url)
     }
 
+    private static func isNotifyLine(_ line: String) -> Bool {
+        line.range(of: #"^\s*notify\s*="#, options: .regularExpression) != nil
+    }
+
     /// Whether a `notify` line is one Nirux wrote: the unguarded
     /// `["<path>", "--hook", "codex"]` of older builds or the guarded form,
     /// whole on one line. A wrapped array counts as foreign: replacing its
@@ -255,6 +258,45 @@ enum AgentHookInstaller {
         } catch {
             NSLog("[AgentHooks] failed to write %@: %@", url.path, error.localizedDescription)
         }
+    }
+
+    // MARK: - Status (first-launch checklist)
+
+    static func status(
+        home: URL = URL(fileURLWithPath: NSHomeDirectory()),
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        bundleURL: URL = Bundle.main.bundleURL
+    ) -> AgentHooksStatus {
+        AgentHooksStatus(
+            claude: hasClaudeHooks(home: home),
+            codex: hasCodexNotify(home: home),
+            installsHooks: shouldInstall(environment: environment, bundleURL: bundleURL)
+        )
+    }
+
+    /// Every event Nirux listens to has a Nirux entry, whichever app path it
+    /// runs (the next launch of the app bundle refreshes the path).
+    static func hasClaudeHooks(home: URL) -> Bool {
+        guard let url = resolvingSymlinks(home.appendingPathComponent(".claude/settings.json")),
+              let data = try? Data(contentsOf: url),
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let hooks = root["hooks"] as? [String: Any] else { return false }
+        return claudeHookEvents.allSatisfy { event in
+            let groups = hooks[event] as? [[String: Any]] ?? []
+            return groups.contains { group in
+                (group["hooks"] as? [[String: Any]] ?? []).contains {
+                    ($0["command"] as? String)?.range(of: claudeCommandPattern, options: .regularExpression) != nil
+                }
+            }
+        }
+    }
+
+    /// Checks the first `notify` line, the one the installer manages.
+    static func hasCodexNotify(home: URL) -> Bool {
+        guard let url = resolvingSymlinks(home.appendingPathComponent(".codex/config.toml")),
+              let text = try? String(contentsOf: url, encoding: .utf8),
+              let line = text.components(separatedBy: "\n").first(where: isNotifyLine) else { return false }
+        return isNiruxNotify(line)
     }
 
     // MARK: - Helpers

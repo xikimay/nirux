@@ -324,6 +324,7 @@ extension NiruxShellView {
         saveState()
 
         if expanding {
+            refreshOnboardingChecklist()
             sidebar.fadeOutDots {
                 self.relayout(animated: true)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in

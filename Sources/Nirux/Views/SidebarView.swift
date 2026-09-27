@@ -42,6 +42,22 @@ final class SidebarView: NSView {
 
     var lastInfos: [WorkspaceInfo] = []
     var lastProfiles: [ProfileInfo] = []
+
+    /// First-launch checklist, shown below the workspaces while set; nil
+    /// hides it. Owned by NiruxShellView.
+    var onboardingChecklist: OnboardingChecklist? {
+        didSet {
+            guard onboardingChecklist != oldValue else { return }
+            if onboardingChecklist == nil { revealsOnboardingCardOnNextBuild = false }
+            lastRenderSignature = nil
+            if isExpanded { rebuildContent() }
+        }
+    }
+    var onOnboardingAction: ((OnboardingChecklistAction) -> Void)?
+    /// Kept across rebuilds (see OnboardingChecklistView).
+    var onboardingCardView: OnboardingChecklistView?
+    /// Set by `revealOnboardingCard()` while the card isn't laid out yet.
+    var revealsOnboardingCardOnNextBuild = false
     /// Inactive workspaces default to hidden so a large archive cannot
     /// consume the whole sidebar. Persisted by NiruxShellView.
     var isInactiveSectionCollapsed = true
@@ -158,6 +174,7 @@ final class SidebarView: NSView {
         hasher.combine(lastProfiles)
         hasher.combine(lastInfos)
         hasher.combine(isInactiveSectionCollapsed)
+        hasher.combine(onboardingChecklist)
         for workspace in lastInfos {
             if let lastActivityAt = workspace.lastActivityAt {
                 hasher.combine(Self.relativeAge(since: lastActivityAt))
@@ -372,6 +389,14 @@ final class SidebarView: NSView {
             return
         }
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
+
+        // The checklist's buttons track their own hover and cursor.
+        if let card = onboardingCardView, card.superview != nil, card.frame.contains(point) {
+            clearHover()
+            setHoverTarget(nil)
+            if !card.hasButton(at: point) { NSCursor.arrow.set() }
+            return
+        }
 
         guard let area = hitArea(at: point) else {
             clearHover()

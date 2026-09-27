@@ -356,35 +356,26 @@ extension NiruxShellView {
     /// Name → content of every skill Nirux ships. Installed together: the
     /// set is small and versioned with the app, so partial installs would
     /// only create confusion about which copy is current.
-    private static let agentSkills = [
+    static let agentSkills = [
         "nirux-worktree": worktreeSkillContent,
         "nirux-show-code": showCodeSkillContent
     ]
 
-    func installAgentSkills() {
-        // Swift multiline strings already normalize indentation. Preserve the
-        // authored content verbatim so YAML front matter stays valid.
-        let roots = [
-            NSHomeDirectory() + "/.agents/skills",  // Codex, Cursor, Copilot, etc.
-            NSHomeDirectory() + "/.claude/skills"  // Claude Code
-        ]
-
+    /// Palette action and checklist button. The checklist row turning green
+    /// is its confirmation, so it skips the success alert; failures always
+    /// alert.
+    func installAgentSkills(confirmsSuccess: Bool = true) {
         do {
-            for (name, content) in Self.agentSkills {
-                for root in roots {
-                    let dir = root + "/" + name
-                    try FileManager.default.createDirectory(
-                        atPath: dir, withIntermediateDirectories: true)
-                    try (content + "\n").write(toFile: dir + "/SKILL.md", atomically: true, encoding: .utf8)
-                }
-            }
-
+            try AgentSkillsInstaller.install(Self.agentSkills, home: NSHomeDirectory())
+            refreshOnboardingChecklist()
+            guard confirmsSuccess else { return }
             let alert = NSAlert()
             alert.messageText = "Agent Skills Installed"
             let names = Self.agentSkills.keys.sorted().joined(separator: ", ")
             alert.informativeText = "Installed \(names) to ~/.agents/skills/ and ~/.claude/skills/\nAll agents will auto-detect them."
             alert.runModal()
         } catch {
+            refreshOnboardingChecklist()
             let alert = NSAlert()
             alert.messageText = "Install Failed"
             alert.informativeText = error.localizedDescription

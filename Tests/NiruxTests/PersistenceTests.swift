@@ -27,6 +27,32 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertFalse(Persistence.save(state))
     }
 
+    func testStoredStateDetectionIgnoresNonStateFiles() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nirux-stored-state-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let previousDirectory = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
+        setenv("NIRUX_STATE_DIR", directory.path, 1)
+        defer {
+            if let previousDirectory {
+                setenv("NIRUX_STATE_DIR", previousDirectory, 1)
+            } else {
+                unsetenv("NIRUX_STATE_DIR")
+            }
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        XCTAssertFalse(Persistence.hasStoredState, "empty directory: fresh install")
+        for name in ["hook-events.jsonl", "state.tmp-1234.json", "activity.json"] {
+            try Data("{}".utf8).write(to: directory.appendingPathComponent(name))
+        }
+        XCTAssertFalse(Persistence.hasStoredState)
+
+        try Data("not json".utf8).write(to: directory.appendingPathComponent("state.backup.3.json"))
+        XCTAssertTrue(Persistence.hasStoredState, "a recovery copy counts, readable or not")
+        XCTAssertNil(Persistence.load(), "nothing loads, so the checklist must not treat this as fresh")
+    }
+
     func testPersistedStateRoundTripsThroughJSON() throws {
         let original = PersistedState(
             workspaces: [
