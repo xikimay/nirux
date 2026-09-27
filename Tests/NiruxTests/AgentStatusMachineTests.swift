@@ -203,6 +203,26 @@ final class AgentStatusMachineTests: XCTestCase {
         XCTAssertTrue(machine.pendingDialogs.isEmpty)
     }
 
+    /// A denied dialog (no hook) looks answered once the agent moves on;
+    /// the reminder then is about the NEW dialog, not the stale one.
+    func testReminderNamesTheDialogOnScreen() {
+        startTurn()
+        _ = machine.apply(event(.permissionRequest, at: 1, tool: "Bash", summary: "rm -rf build", key: "rm"),
+                          isUserFocused: false)
+        _ = machine.apply(event(.preToolUse, at: 30, tool: "Bash"), isUserFocused: false) // denied with feedback
+        _ = machine.apply(event(.permissionRequest, at: 31, tool: "Bash", summary: "git push", key: "push"),
+                          isUserFocused: false)
+        let reminder = machine.apply(event(.notification, at: 37, type: "permission_prompt"), isUserFocused: false)
+        XCTAssertEqual(reminder.attention, .permission(tool: "Bash", summary: "git push"))
+        XCTAssertEqual(machine.attentionReason, .permission(tool: "Bash", summary: "git push"))
+
+        // Everything looked answered: the reminder reopens the newest only.
+        _ = machine.apply(event(.preToolUse, at: 40, tool: "Read"), isUserFocused: false)
+        let again = machine.apply(event(.notification, at: 47, type: "permission_prompt"), isUserFocused: false)
+        XCTAssertEqual(again.attention, .permission(tool: "Bash", summary: "git push"))
+        XCTAssertEqual(machine.pendingDialogs.filter { !$0.mayBeAnswered }.map(\.key), ["push"])
+    }
+
     func testPermissionPromptAloneIsAPendingDialog() {
         // A sandboxed command's network request fires no PermissionRequest.
         startTurn()
@@ -236,6 +256,26 @@ final class AgentStatusMachineTests: XCTestCase {
         // Long after, a reminder alone is a new dialog (a network request).
         _ = machine.apply(event(.notification, at: 30, type: "permission_prompt"), isUserFocused: false)
         XCTAssertEqual(machine.pendingDialogs.count, 1)
+    }
+
+    /// Right after a quick dialog closed, a reminder can't be about it
+    /// (its ~6 s weren't up): it is a new dialog.
+    func testReminderAfterAQuickCloseIsANewDialog() {
+        startTurn()
+        _ = machine.apply(event(.permissionRequest, at: 10, tool: "Read", key: "r", agent: "bg"), isUserFocused: false)
+        _ = machine.apply(event(.postToolUse, at: 11, tool: "Read", key: "r", agent: "bg"), isUserFocused: false)
+        let reminder = machine.apply(event(.notification, at: 12, type: "permission_prompt"), isUserFocused: false)
+        XCTAssertTrue(reminder.firedAttention)
+        XCTAssertEqual(machine.pendingDialogs.count, 1)
+    }
+
+    func testAnotherAgentTakingTheTerminalDropsClaudesDialogs() {
+        startTurn()
+        _ = machine.apply(event(.permissionRequest, tool: "Bash", key: "k"), isUserFocused: false)
+        _ = machine.tick(fgName: "zsh", isUserFocused: false, now: t0 + 5) // suspended, or exited
+        XCTAssertEqual(machine.pendingDialogs.count, 1)
+        _ = machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 9) // claude died without SessionEnd
+        XCTAssertTrue(machine.pendingDialogs.isEmpty)
     }
 
     func testInformationalNotificationsChangeNothing() {
@@ -295,10 +335,12 @@ final class AgentStatusMachineTests: XCTestCase {
         // Stop: the main thread's dialogs closed; a background subagent's may not have.
         _ = machine.apply(event(.stop), isUserFocused: false)
         XCTAssertEqual(machine.pendingDialogs.map(\.agentID), ["sub-a"])
-        // A (queued) prompt reaches the main thread: the subagent's dialog may still be up.
-        _ = machine.apply(event(.userPromptSubmit), isUserFocused: false)
-        XCTAssertEqual(machine.pendingDialogs.map(\.agentID), ["sub-a"])
         _ = machine.apply(event(.subagentStop, agent: "sub-a"), isUserFocused: false)
+        XCTAssertTrue(machine.pendingDialogs.isEmpty)
+        // An interrupt (Esc) during a subagent's dialog fires neither
+        // SubagentStop nor Stop: the next prompt typed frees the gate.
+        _ = machine.apply(event(.permissionRequest, tool: "Bash", key: "sub", agent: "sub-c"), isUserFocused: false)
+        _ = machine.apply(event(.userPromptSubmit), isUserFocused: false)
         XCTAssertTrue(machine.pendingDialogs.isEmpty)
 
         _ = machine.apply(event(.permissionRequest, tool: "Bash", key: "denied"), isUserFocused: false)

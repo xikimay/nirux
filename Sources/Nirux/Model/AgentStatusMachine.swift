@@ -39,8 +39,10 @@ struct AgentStatusMachine {
     private var lastAttentionReason: AgentAttentionReason?
     /// The external alert went out for the current attention episode.
     private var attentionAlerted = false
-    /// Epoch seconds a dialog last closed, and of the event being applied.
+    /// Epoch seconds a dialog last closed (and when it had opened), and of
+    /// the event being applied.
     private var lastDialogClosedAt: TimeInterval = 0
+    private var lastClosedDialogRequestedAt: TimeInterval = 0
     private var lastEventAt: TimeInterval = 0
     /// Codex's last turnComplete: output before it is the finished turn's.
     private var turnEndedAt: TimeInterval = 0
@@ -80,8 +82,10 @@ struct AgentStatusMachine {
     /// startup output of the new command is not a completed turn either.
     private static let startupWindow: TimeInterval = 5.0
     /// An async `permission_prompt` landing this soon after a dialog closed
-    /// is about that dialog.
+    /// is about that dialog — if it was open long enough for Claude's
+    /// reminder (~6 s without typing) to be due.
     private static let reminderRaceWindow: TimeInterval = 3.0
+    private static let reminderDelay: TimeInterval = 5.0
 
     /// Central capability gate shared by local status and remote prompt
     /// routing. Bot commands remain agent-agnostic even as this allowlist
@@ -139,12 +143,14 @@ struct AgentStatusMachine {
             state = .idle
         case .userPromptSubmit:
             hookKind = event.kind.rawValue
-            // A prompt reached the main thread: its dialogs are closed. A
-            // background subagent's may still be up.
-            closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
+            // A prompt was typed at the session's input, which no dialog of
+            // it covered: they are all closed. This also frees the subagent
+            // dialogs an interrupt (Esc) left behind with no hook. (Missed
+            // race: a message queued earlier and sent while a background
+            // subagent's dialog is up.)
+            closeDialogs { $0.sessionID == event.sessionID }
             turnStartedAt = now
-            hookWorking = true
-            state = .working
+            resumeUnlessBlocked()
         case .preToolUse:
             hookKind = event.kind.rawValue
             noteTurnActivity(at: now)
@@ -156,8 +162,7 @@ struct AgentStatusMachine {
             // The call ran: its dialog, if it had one, was answered.
             if let key = event.toolKey,
                let index = pendingDialogs.firstIndex(where: { $0.isSameCall(key: key, as: event) }) {
-                pendingDialogs.remove(at: index)
-                lastDialogClosedAt = now
+                noteClosed(pendingDialogs.remove(at: index))
             }
             noteProgress(of: event)
             resumeUnlessBlocked()
@@ -235,8 +240,7 @@ struct AgentStatusMachine {
             if let index = pendingDialogs.firstIndex(where: {
                 $0.isQuestion && $0.key == nil && $0.agentID == event.agentID
             }) {
-                pendingDialogs.remove(at: index)
-                lastDialogClosedAt = now
+                noteClosed(pendingDialogs.remove(at: index))
             }
             return
         case "permission_prompt":
@@ -245,13 +249,19 @@ struct AgentStatusMachine {
             // request fires no PermissionRequest). Either way a dialog is
             // on screen and no keystroke answered it.
             lastKeystrokeAt = 0
-            if !pendingDialogs.isEmpty {
-                for index in pendingDialogs.indices { pendingDialogs[index].mayBeAnswered = false }
-                reason = pendingDialogs[0].reason
+            if let open = openDialogs.first {
+                reason = open.reason
                 outcome.isRepeat = true
-            } else if now - lastDialogClosedAt < Self.reminderRaceWindow {
+            } else if !pendingDialogs.isEmpty {
+                // Every entry looked answered, yet one waits: the newest
+                // (older ones were likely denied, which fires no hook).
+                pendingDialogs[pendingDialogs.count - 1].mayBeAnswered = false
+                reason = pendingDialogs[pendingDialogs.count - 1].reason
+                outcome.isRepeat = true
+            } else if now - lastDialogClosedAt < Self.reminderRaceWindow,
+                      now - lastClosedDialogRequestedAt >= Self.reminderDelay {
                 // The hook is async: this reminder raced the close of the
-                // dialog it was about.
+                // dialog it was about (old enough for its reminder).
                 return
             } else {
                 reason = .permission(tool: nil, summary: event.detail)
@@ -318,9 +328,13 @@ struct AgentStatusMachine {
     }
 
     private mutating func closeDialogs(where shouldClose: (AgentPermissionRequest) -> Bool) {
-        let count = pendingDialogs.count
+        for dialog in pendingDialogs where shouldClose(dialog) { noteClosed(dialog) }
         pendingDialogs.removeAll(where: shouldClose)
-        if pendingDialogs.count != count { lastDialogClosedAt = lastEventAt }
+    }
+
+    private mutating func noteClosed(_ dialog: AgentPermissionRequest) {
+        lastDialogClosedAt = lastEventAt
+        lastClosedDialogRequestedAt = dialog.requestedAt
     }
 
     /// A turn already running when Nirux first heard of it starts here.
@@ -364,19 +378,7 @@ struct AgentStatusMachine {
     @discardableResult
     mutating func tick(fgName: String, isUserFocused: Bool, now: Date) -> AgentStatus {
         let isAgent = Self.isRecognizedAgentProcess(fgName)
-
-        if fgName != lastForegroundName {
-            lastForegroundName = fgName
-            foregroundSince = now
-            // A different foreground command inherits nothing from the
-            // previous one — except hook capability, which stays: the hook
-            // event (SessionStart) can arrive BEFORE the next process-table
-            // snapshot notices the change, and clearing it here would knock
-            // the session back into the flaky fallback for no reason.
-            hookWorking = false
-            lastReadAt = 0 // the old command's dying output is not this one's work
-            lastAttentionReason = nil
-        }
+        if fgName != lastForegroundName { foregroundChanged(to: fgName, isAgent: isAgent, now: now) }
 
         guard isAgent else {
             hookWorking = false
@@ -434,6 +436,23 @@ struct AgentStatusMachine {
         return state
     }
 
+    /// A different foreground command inherits nothing from the previous
+    /// one — except hook capability, which stays: the hook event
+    /// (SessionStart) can arrive BEFORE the next process-table snapshot
+    /// notices the change, and clearing it here would knock the session
+    /// back into the flaky fallback for no reason.
+    private mutating func foregroundChanged(to fgName: String, isAgent: Bool, now: Date) {
+        lastForegroundName = fgName
+        foregroundSince = now
+        hookWorking = false
+        lastReadAt = 0 // the old command's dying output is not this one's work
+        lastAttentionReason = nil
+        // Another agent took over the terminal: a `claude` that died without
+        // SessionEnd left its dialogs behind. (A shell in front may just
+        // mean it's suspended; a new claude's SessionStart clears them.)
+        if isAgent, fgName != "claude" { pendingDialogs.removeAll() }
+    }
+
     private mutating func startFallbackTurn(now: Date) {
         state = .working
         turnStartedAt = now.timeIntervalSince1970
@@ -466,6 +485,7 @@ struct AgentStatusMachine {
         pendingDialogs.removeAll()
         lastAttentionReason = nil
         lastDialogClosedAt = 0
+        lastClosedDialogRequestedAt = 0
         lastEventAt = 0
         turnEndedAt = 0
         turnStartedAt = nil
