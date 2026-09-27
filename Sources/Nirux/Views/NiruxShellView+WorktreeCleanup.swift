@@ -251,12 +251,15 @@ extension NiruxShellView {
         for folder in otherFolders { addUnopenedWorktrees(listedFrom: folder, to: panel, queue: queue) }
     }
 
-    /// Runs `work` on `queue`, never on the main actor. The parameter is
-    /// `@Sendable`, so a closure written inside this `@MainActor` view does
-    /// not inherit the view's isolation. Passed straight to
-    /// `addOperation`, it could: SDKs that don't mark that block Sendable
-    /// (the one the nightly builds with) make it main-actor isolated, and
-    /// Swift 6 then traps when the queue runs it off the main thread.
+    /// Runs `work` on `queue`, never on the main actor. A closure written
+    /// inside this `@MainActor` view and passed straight to `addOperation`
+    /// was compiled as `@MainActor @Sendable` by the Swift 6.1 toolchain
+    /// that builds the nightly (Xcode 16.4), even though the SDK marks that
+    /// block Sendable, and Swift 6 trapped when the queue ran it off the
+    /// main thread. Swift 6.2 does not, so local runs can't show it. Taking
+    /// the closure through this nonisolated function's `@Sendable`
+    /// parameter keeps it nonisolated on both toolchains. Don't read
+    /// "Sendable" on an imported callback as a guarantee.
     nonisolated private static func runOffMain(on queue: OperationQueue, _ work: @escaping @Sendable () -> Void) {
         queue.addOperation(work)
     }
