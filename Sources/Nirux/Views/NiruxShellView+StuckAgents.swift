@@ -25,10 +25,11 @@ extension NiruxShellView {
 
     /// One column on a status refresh: follow its foreground agent, send
     /// the alert a stuck state owes (once), and show or take down the
-    /// notice of an agent that died mid-turn. The alert goes out even for
-    /// the column on screen: a dialog nobody touched for the whole
-    /// threshold says nobody is watching (the system notification waits
-    /// for Nirux to be in the background anyway).
+    /// notice of an agent that died mid-turn. The alert goes out (Telegram,
+    /// Activity) even for the column on screen: a dialog nobody touched for
+    /// the whole threshold says nobody is watching. Only the in-app flag,
+    /// the Dock badge and the system banner skip that column while Nirux is
+    /// in front.
     func refreshStuckAgent(
         _ column: ColumnState,
         at place: StuckAgentPlace,
@@ -42,7 +43,9 @@ extension NiruxShellView {
         if let reason = pty.takeAgentStuckAlert(
             now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess
         ) {
-            column.notifyAgentAttention(reason: reason)
+            let onScreen = NSApp.isActive && workspace === activeWorkspace
+                && workspace.columns[safe: workspace.focusedIndex] === column
+            if !onScreen { column.notifyAgentAttention(reason: reason) }
             onStuckAgentAlert?(reason, workspace, place.columnIndex, column)
             stuckAgentActivity.record(ActivityEntry(
                 category: .attention,

@@ -331,6 +331,19 @@ final class StuckAgentTests: XCTestCase {
         XCTAssertEqual(refusal(), .userTyped)
     }
 
+    /// Once a dialog is answered its tool runs with no hook until it ends,
+    /// and the dialog stays listed: keys typed meanwhile are a draft.
+    func testDraftTypedWhileAnApprovedToolRunsIsADraft() {
+        startTurn()
+        _ = apply(event(.userPromptSubmit, at: 1))
+        _ = apply(event(.permissionRequest, at: 2, tool: "Bash", key: "k"))
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 3)) // "1": approves it
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 30)) // the next instruction, no Enter
+        _ = apply(event(.postToolUse, at: 60, tool: "Bash", key: "k"))
+        _ = apply(event(.stopFailure, at: 61, errorKind: "overloaded"))
+        XCTAssertEqual(refusal(at: 62), .userTyped)
+    }
+
     func testResumesOwnKeystrokeIsNotADraft() {
         startTurn()
         _ = apply(event(.stopFailure, at: 5, errorKind: "overloaded"))

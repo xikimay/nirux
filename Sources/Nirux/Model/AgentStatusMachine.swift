@@ -586,10 +586,12 @@ struct AgentStatusMachine {
     /// answered, which terminal replies and focus reports never do.
     mutating func noteKeystroke(now: Date) {
         let time = now.timeIntervalSince1970
+        // A key answers a dialog only while none reached it yet: answered, it stays
+        // listed until its tool ends (no hook between); later keys reach the prompt.
+        let answersDialog = openDialogs.contains { $0.requestedAt >= lastKeystrokeAt }
         lastKeystrokeAt = time
         lastInputAt = time
-        // Keys while a dialog is believed open go to it, not to the prompt.
-        if openDialogs.isEmpty { lastDraftInputAt = time }
+        if !answersDialog { lastDraftInputAt = time }
         // Typing at the shell an agent left: the user took over.
         midTurnExit = nil
     }
