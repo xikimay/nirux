@@ -56,6 +56,10 @@ struct AgentHookEvent: Codable, Equatable {
     /// Claude Notification `notification_type` (permission_prompt,
     /// idle_prompt…); nil from Claude versions that predate it.
     let notificationType: String?
+    /// Claude session transcript (`transcript_path`), on the turn-level
+    /// events only (see `carriesTranscriptPath`): enough to follow the
+    /// column's session usage without growing every tool event's line.
+    let transcriptPath: String?
     /// Receiver-side timestamp (epoch seconds) — the emitter's clock and
     /// timezone are irrelevant.
     let timestamp: TimeInterval
@@ -100,6 +104,9 @@ struct AgentHookEvent: Codable, Equatable {
                 toolSummary = nil
                 toolKey = nil
             }
+            transcriptPath = Self.carriesTranscriptPath(name)
+                ? (payload["transcript_path"] as? String).flatMap(Self.validTranscriptPath)
+                : nil
             if name == .notification {
                 notificationType = payload["notification_type"] as? String
                 detail = (payload["message"] as? String).flatMap { AgentText.clean($0, maxLength: 300) }
@@ -122,7 +129,19 @@ struct AgentHookEvent: Codable, Equatable {
             toolKey = nil
             agentID = nil
             notificationType = nil
+            transcriptPath = nil
         }
+    }
+
+    /// Events that bind or confirm the column's session — where its
+    /// transcript is worth knowing.
+    static func carriesTranscriptPath(_ name: Name) -> Bool {
+        [.sessionStart, .userPromptSubmit, .stop].contains(name)
+    }
+
+    /// An absolute `.jsonl` path, or nil.
+    static func validTranscriptPath(_ path: String) -> String? {
+        path.hasPrefix("/") && path.hasSuffix(".jsonl") && !path.contains("\0") ? path : nil
     }
 
     private static func claudeName(_ hookName: String) -> Name? {
@@ -156,6 +175,7 @@ struct AgentHookEvent: Codable, Equatable {
         toolKey: String? = nil,
         agentID: String? = nil,
         notificationType: String? = nil,
+        transcriptPath: String? = nil,
         timestamp: TimeInterval = 0
     ) {
         self.kind = kind
@@ -172,6 +192,7 @@ struct AgentHookEvent: Codable, Equatable {
         self.toolKey = toolKey
         self.agentID = agentID
         self.notificationType = notificationType
+        self.transcriptPath = transcriptPath
         self.timestamp = timestamp
     }
 }

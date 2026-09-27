@@ -285,6 +285,11 @@ struct ClaudeSessionTracker {
         }
     }
 
+    /// Session bound to this `claude` process, if any.
+    func boundSessionID(for process: ProcessInstance) -> String? {
+        session.sessionID(boundTo: process)
+    }
+
     /// Nil when no session is bound to this foreground process — restore
     /// then asks through the picker.
     mutating func restore(for foregroundProcess: ForegroundProcess?) -> Restore? {
