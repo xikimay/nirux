@@ -155,18 +155,27 @@ stored and managed:
   read but never written; that is logged, with no banner yet.
 - **Backups:** the previous readable version is kept as `projects.json.bak`,
   not the rotation and dailies of `state.json`. An unreadable file is copied
-  aside as `projects.corrupt.<time>.json`. If that copy fails, the file is
-  never overwritten.
+  aside as `projects.corrupt.<time>.json`. If that copy fails, or the path is a
+  directory, the file is never overwritten.
 - **Migration and rollback** use the `projectsFileVersion` marker described
-  below. A missing file with the marker present is rebuilt from the mirror:
-  today the mirror holds every field a space has, so only a deletion could come
-  back, and only from an older `state.json` backup. This needs revisiting once
-  projects carry more than the mirror does.
-- **Empty spaces persist**, drawn as a ring in the switcher; selecting one opens
-  a workspace in it.
-- **Space menu:** "Space Color" and "Delete Space…". The deleted space's
-  workspaces move to the default space, and its brief stays on disk.
-- **Workspace card menu:** "Move to Space". The moved workspace's shells keep
+  below. It is written only when `projects.json` holds the saved spaces, so a
+  build that couldn't write the file (read-only, write error) leaves it out and
+  the next launch merges the mirror. When the file is missing or unreadable:
+  - with the marker, the mirror is the latest list, since it was saved together
+    with the file. A space only the backup has counts as deleted.
+  - without the marker, the backup and the mirror are merged.
+  - This needs revisiting once projects carry more than the mirror does.
+- **Empty spaces persist**, drawn as a ring in the switcher. Clicking one opens
+  a workspace in it. ⌘⌥←/→ skips empty spaces, so cycling doesn't open
+  workspaces.
+- **Space menu**, on the header or on right-clicking any space's dot:
+  "Rename Space…", "Edit Space Brief…", "Space Color" and "Delete Space…".
+  Right-clicking lets you manage an empty space without opening a workspace in
+  it. A deleted space's workspaces move to the default space, and its brief
+  stays on disk. A new space takes a color no other space uses.
+- **Workspace card menu:** "Move to Space". The workspace goes to the end of
+  the target space. If it was selected, the selection moves to its neighbour,
+  or follows it when its space is left empty. The moved workspace's shells keep
   their old `NIRUX_PROFILE_ID` until they restart, so a worktree they create
   lands in the old space until routing (section 3) resolves the parent's
   current project.

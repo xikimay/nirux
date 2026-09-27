@@ -181,7 +181,9 @@ enum WorkspaceSidebarAction {
     case moveUp, moveDown, markActive, markInactive
     case close, rename, editContext, newWorkspace
     case closeColumn(columnIndex: Int)
-    case moveToProfile(String)
+    /// Carries the workspace's id: the menu's index can go stale when a close
+    /// finishes while it is open.
+    case moveToProfile(String, workspaceID: String)
 }
 
 /// Hover highlight target in the expanded sidebar. Links have their own

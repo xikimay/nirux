@@ -97,9 +97,11 @@ final class WorkspaceStore {
         return true
     }
 
+    /// ⌘⌥←/→ cycles through spaces that have workspaces: stepping onto an
+    /// empty one would open a workspace each time it passes.
     @discardableResult
     func selectAdjacentProfile(delta: Int) -> WorkspaceProfile? {
-        let candidates = navigableProfiles
+        let candidates = profiles.filter { $0.id == activeProfileID || hasWorkspaces(in: $0.id) }
         guard candidates.count > 1,
               let current = candidates.firstIndex(where: { $0.id == activeProfileID })
         else { return nil }
@@ -183,10 +185,12 @@ final class WorkspaceStore {
 
     func createProfile(named baseName: String) -> WorkspaceProfile {
         let name = uniqueProfileName(baseName)
+        let usedColors = Set(profiles.map { $0.colorHex.uppercased() })
         let profile = WorkspaceProfile(
             id: UUID().uuidString,
             name: name,
-            colorHex: WorkspaceProfile.colorHex(for: profiles.count)
+            colorHex: WorkspaceProfile.palette.first { !usedColors.contains($0.hex.uppercased()) }?.hex
+                ?? WorkspaceProfile.colorHex(for: profiles.count)
         )
         profiles.append(profile)
         activeProfileID = profile.id
@@ -228,16 +232,25 @@ final class WorkspaceStore {
         return true
     }
 
-    /// Moves a workspace to another space. The current space keeps its
-    /// selection when it still has workspaces; otherwise the selection
-    /// follows the workspace.
+    /// Moves a workspace to the end of another space. Moving the active
+    /// workspace selects its neighbour in the space it leaves, or follows it
+    /// when that space is left empty.
     @discardableResult
     func moveWorkspace(at index: Int, toProfile profileID: String) -> Bool {
         guard workspaces.indices.contains(index),
               profiles.contains(where: { $0.id == profileID }),
               workspaces[index].profileID != profileID
         else { return false }
-        workspaces[index].profileID = profileID
+        let workspace = workspaces[index]
+        let wasActive = workspace.id == activeWorkspaceID
+        let neighbours = visibleWorkspaceIndices(in: workspace.profileID)
+            .filter { $0 != index && !workspaces[$0].isClosing }
+        let neighbourID = (neighbours.last { $0 < index } ?? neighbours.first).map { workspaces[$0].id }
+
+        workspace.profileID = profileID
+        workspaces.remove(at: index)
+        workspaces.append(workspace)
+        if wasActive { selectWorkspace(id: neighbourID ?? workspace.id) }
         reconcileSelection(preferActiveProfile: true)
         return true
     }

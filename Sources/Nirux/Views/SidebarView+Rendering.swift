@@ -332,6 +332,14 @@ extension SidebarView {
             items: items,
             tooltip: "Spaces"
         )
+        view.menuProvider = { [weak self] action in
+            guard case .selectProfile(let profileID) = action,
+                  let profile = self?.lastProfiles.first(where: { $0.id == profileID })
+            else { return nil }
+            let menu = NSMenu()
+            self?.addSpaceManagementItems(to: menu, for: profile)
+            return menu
+        }
         view.onSelect = { [weak self] action in
             switch action {
             case .createProfile:

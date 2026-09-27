@@ -15,18 +15,17 @@ extension NiruxShellView {
         guard profileID != WorkspaceProfile.defaultID,
               let space = profiles.first(where: { $0.id == profileID })
         else { return }
-        let count = workspaces.filter { $0.profileID == profileID }.count
+        let count = workspaces.filter { $0.profileID == profileID && !$0.isClosing }.count
         let target = profiles.first { $0.id == WorkspaceProfile.defaultID }?.name
             ?? WorkspaceProfile.defaultProfile.name
-        let alert = NSAlert()
-        alert.messageText = "Delete the space \"\(space.name)\"?"
-        alert.informativeText = count == 0
+        let moved = count == 0
             ? "It has no workspaces."
             : "Its \(count == 1 ? "workspace moves" : "\(count) workspaces move") to \"\(target)\"."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Delete Space")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard confirmDestructiveClose(
+            message: "Delete the space \"\(space.name)\"?",
+            details: [moved, "Its brief stays on disk."],
+            confirmTitle: "Delete Space"
+        ) else { return }
         deleteSpace(profileID: profileID)
     }
 

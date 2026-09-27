@@ -251,7 +251,8 @@ extension NiruxShellView {
             workspaceProfiles: workspaceStore.profiles,
             activeProfileID: activeProfileID,
             activeWorkspaceID: activeWorkspace?.id,
-            projectsFileVersion: ProjectStore.schemaVersion
+            // Only when projects.json holds these spaces; see ProjectStore.
+            projectsFileVersion: projectStore.isFileCurrent ? ProjectStore.schemaVersion : nil
         )
     }
 

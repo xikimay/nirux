@@ -3,8 +3,9 @@ import AppKit
 // MARK: - Space management menus (see ProjectStore)
 
 extension SidebarView {
-    /// The active space's items in the header menu: rename, brief, color,
-    /// delete.
+    /// A space's items: rename, brief, color, delete. Used by the active
+    /// space's header menu and by right-clicking any space's dot, so an empty
+    /// space can be managed without opening a workspace in it.
     func addSpaceManagementItems(to menu: NSMenu, for profile: ProfileInfo) {
         menu.addClosureItem(title: "Rename Space…") { [weak self] in
             self?.onRenameProfile?(profile.id)
@@ -33,12 +34,14 @@ extension SidebarView {
     /// workspaces, so every other space is a target. Nil with no other space.
     func moveToSpaceItem(workspaceIndex: Int) -> NSMenuItem? {
         let otherSpaces = lastProfiles.filter { !$0.isActive }
-        guard !otherSpaces.isEmpty else { return nil }
+        guard !otherSpaces.isEmpty,
+              let workspaceID = lastInfos.first(where: { $0.index == workspaceIndex })?.id
+        else { return nil }
         let item = NSMenuItem(title: "Move to Space", action: nil, keyEquivalent: "")
         let submenu = NSMenu()
         for space in otherSpaces {
             submenu.addClosureItem(title: space.name) { [weak self] in
-                self?.onWorkspaceAction?(.moveToProfile(space.id), workspaceIndex)
+                self?.onWorkspaceAction?(.moveToProfile(space.id, workspaceID: workspaceID), workspaceIndex)
             }
         }
         item.submenu = submenu

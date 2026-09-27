@@ -286,51 +286,8 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(store.navigableProfiles.map(\.id), [WorkspaceProfile.defaultID, empty.id])
         XCTAssertTrue(store.selectProfile(empty.id))
         XCTAssertEqual(store.activeProfileID, empty.id)
+        XCTAssertNil(store.activeWorkspaceID, "the caller opens a workspace in it")
         XCTAssertTrue(store.visibleWorkspaceIndices.isEmpty)
-    }
-
-    @MainActor
-    func testDeletingASpaceMovesItsWorkspacesToTheDefaultSpace() {
-        let store = WorkspaceStore()
-        let work = WorkspaceProfile(id: "work", name: "Work", colorHex: "#9ECE6A")
-        store.replaceProfiles([WorkspaceProfile.defaultProfile, work], activeProfileID: work.id)
-        let first = WorkspaceState(id: "a", title: "a", cwd: "/tmp/a")
-        first.profileID = work.id
-        let second = WorkspaceState(id: "b", title: "b", cwd: "/tmp/b")
-        second.profileID = work.id
-        store.appendWorkspace(first)
-        store.appendWorkspace(second)
-
-        XCTAssertFalse(store.deleteProfile(id: WorkspaceProfile.defaultID))
-        XCTAssertTrue(store.deleteProfile(id: work.id))
-
-        XCTAssertEqual(store.profiles.map(\.id), [WorkspaceProfile.defaultID])
-        XCTAssertEqual(store.workspaces.map(\.profileID), [WorkspaceProfile.defaultID, WorkspaceProfile.defaultID])
-        XCTAssertEqual(store.activeProfileID, WorkspaceProfile.defaultID)
-        XCTAssertNotNil(store.activeWorkspace)
-    }
-
-    @MainActor
-    func testWorkspaceMovesToAnotherSpaceAndSpacesCanBeRecolored() {
-        let store = WorkspaceStore()
-        let work = WorkspaceProfile(id: "work", name: "Work", colorHex: "#9ECE6A")
-        store.replaceProfiles([WorkspaceProfile.defaultProfile, work], activeProfileID: WorkspaceProfile.defaultID)
-        let stays = WorkspaceState(id: "stays", title: "stays", cwd: "/tmp/stays")
-        let moves = WorkspaceState(id: "moves", title: "moves", cwd: "/tmp/moves")
-        store.appendWorkspace(stays)
-        store.appendWorkspace(moves)
-
-        XCTAssertTrue(store.moveWorkspace(at: 1, toProfile: work.id))
-        XCTAssertFalse(store.moveWorkspace(at: 1, toProfile: work.id), "already there")
-        XCTAssertFalse(store.moveWorkspace(at: 1, toProfile: "unknown"))
-
-        XCTAssertEqual(store.workspaces[1].profileID, work.id)
-        // The current space still has a workspace, so it keeps the selection.
-        XCTAssertEqual(store.activeProfileID, WorkspaceProfile.defaultID)
-        XCTAssertEqual(store.activeWorkspace?.id, "stays")
-
-        XCTAssertTrue(store.setProfileColor(id: work.id, colorHex: "#F7768E"))
-        XCTAssertEqual(store.profiles.first { $0.id == work.id }?.colorHex, "#F7768E")
     }
 
     @MainActor

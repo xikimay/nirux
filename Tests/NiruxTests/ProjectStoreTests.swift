@@ -1,13 +1,13 @@
 import XCTest
 @testable import Nirux
 
-@MainActor
 final class ProjectStoreTests: XCTestCase {
     private var directory: URL!
     private var fileURL: URL { directory.appendingPathComponent("projects.json") }
 
     private let work = WorkspaceProfile(id: "work", name: "Work", colorHex: "#9ECE6A")
     private let home = WorkspaceProfile(id: "home", name: "Home", colorHex: "#E0AF68")
+    private let main = WorkspaceProfile.defaultProfile
 
     override func setUpWithError() throws {
         // The caches directory keeps file permissions through atomic writes;
@@ -25,53 +25,61 @@ final class ProjectStoreTests: XCTestCase {
         try Data(json.utf8).write(to: fileURL)
     }
 
+    @MainActor
+    private func savedStore(_ profiles: [WorkspaceProfile]...) -> ProjectStore {
+        let store = ProjectStore(fileURL: fileURL)
+        _ = store.load(mirror: nil, markerPresent: false)
+        for version in profiles { store.save(version) }
+        return store
+    }
+
+    @MainActor
     func testFirstLaunchMigratesFromTheStateMirrorAndWritesAPrivateFile() throws {
         let store = ProjectStore(fileURL: fileURL)
-        let loaded = store.load(mirror: [WorkspaceProfile.defaultProfile, work], markerPresent: false)
-        XCTAssertEqual(loaded, [WorkspaceProfile.defaultProfile, work])
+        let loaded = store.load(mirror: [main, work], markerPresent: false)
+        XCTAssertEqual(loaded, [main, work])
 
-        store.save(loaded)
+        XCTAssertTrue(store.save(loaded))
+        XCTAssertTrue(store.isFileCurrent)
 
-        guard case .ok(let file) = ProjectStore.read(fileURL) else { return XCTFail("file not written") }
+        guard case .ok(let file, _) = ProjectStore.read(fileURL) else { return XCTFail("file not written") }
         XCTAssertEqual(file.schemaVersion, ProjectStore.schemaVersion)
-        XCTAssertEqual(file.projects, [WorkspaceProfile.defaultProfile, work])
+        XCTAssertEqual(file.projects, [main, work])
         let permissions = try FileManager.default.attributesOfItem(atPath: fileURL.path)[.posixPermissions] as? Int
         XCTAssertEqual(permissions, 0o600)
     }
 
+    @MainActor
     func testWithTheMarkerTheFileWinsOverTheMirror() {
-        let store = ProjectStore(fileURL: fileURL)
-        store.save([WorkspaceProfile.defaultProfile, work, home])
+        _ = savedStore([main, work, home])
 
-        let reloaded = ProjectStore(fileURL: fileURL)
-        let loaded = reloaded.load(mirror: [WorkspaceProfile.defaultProfile], markerPresent: true)
+        let loaded = ProjectStore(fileURL: fileURL).load(mirror: [main], markerPresent: true)
 
         // An empty space the mirror doesn't list is still there.
-        XCTAssertEqual(loaded.map(\.id), [WorkspaceProfile.defaultID, "work", "home"])
+        XCTAssertEqual(loaded.map(\.id), [main.id, "work", "home"])
     }
 
+    @MainActor
     func testWithoutTheMarkerAnOlderBuildsRenamesAndNewSpacesAreMerged() {
-        let store = ProjectStore(fileURL: fileURL)
-        store.save([WorkspaceProfile.defaultProfile, work, home])
+        let store = savedStore([main, work, home])
         store.markDeleted("gone")
-        store.save([WorkspaceProfile.defaultProfile, work, home])
+        store.save([main, work, home])
 
         var renamed = work
         renamed.name = "Work renamed"
-        let created = WorkspaceProfile(id: "new", name: "New", colorHex: "#BB9AF7")
+        let created = WorkspaceProfile(id: "new", name: "Home", colorHex: "#BB9AF7")
         let revived = WorkspaceProfile(id: "gone", name: "Gone", colorHex: "#F7768E")
         let reloaded = ProjectStore(fileURL: fileURL)
-        let loaded = reloaded.load(
-            mirror: [WorkspaceProfile.defaultProfile, renamed, created, revived],
-            markerPresent: false
-        )
+        let loaded = reloaded.load(mirror: [main, renamed, created, revived], markerPresent: false)
 
-        XCTAssertEqual(loaded.map(\.id), [WorkspaceProfile.defaultID, "work", "home", "new"])
+        XCTAssertEqual(loaded.map(\.id), [main.id, "work", "home", "new"])
         XCTAssertEqual(loaded.first { $0.id == "work" }?.name, "Work renamed")
+        XCTAssertEqual(loaded.first { $0.id == "new" }?.name, "Home 2", "names stay unique")
         XCTAssertEqual(reloaded.deletedIDs, ["gone"], "a deleted space doesn't come back from the mirror")
     }
 
-    func testANewerSchemaIsReadButNeverWritten() throws {
+    @MainActor
+    func testANewerSchemaIsReadButNeverWrittenAndLeavesTheMarkerOut() throws {
         try writeFile("""
         {"schemaVersion": 99, "projects": [{"id": "work", "name": "Work", "colorHex": "#9ECE6A", "anchors": []}],
          "deletedIDs": []}
@@ -79,33 +87,88 @@ final class ProjectStoreTests: XCTestCase {
         let before = try Data(contentsOf: fileURL)
         let store = ProjectStore(fileURL: fileURL)
 
-        let loaded = store.load(mirror: nil, markerPresent: true)
-        store.save([WorkspaceProfile.defaultProfile])
+        XCTAssertEqual(store.load(mirror: nil, markerPresent: true), [work])
+        XCTAssertFalse(store.save([main, home]))
 
-        XCTAssertEqual(loaded, [work])
         XCTAssertEqual(store.availability, .readOnlyNewerSchema(99))
+        XCTAssertFalse(store.isFileCurrent, "state.json must not claim the file is current")
+        XCTAssertEqual(try Data(contentsOf: fileURL), before)
+
+        // Next launch: no marker, so this session's edits come from the mirror.
+        let next = ProjectStore(fileURL: fileURL).load(mirror: [main, home], markerPresent: false)
+        XCTAssertEqual(next.map(\.id), ["work", main.id, "home"])
+    }
+
+    @MainActor
+    func testANewerSchemaThatDoesNotDecodeHereIsStillNeverWritten() throws {
+        try writeFile(#"{"schemaVersion": 2, "projects": {"format": "changed"}}"#)
+        let before = try Data(contentsOf: fileURL)
+        let store = ProjectStore(fileURL: fileURL)
+
+        XCTAssertEqual(store.load(mirror: [main, work], markerPresent: false), [main, work])
+        store.save([main])
+
+        XCTAssertEqual(store.availability, .readOnlyNewerSchema(2))
         XCTAssertEqual(try Data(contentsOf: fileURL), before)
     }
 
-    func testAnUnreadableFileIsSetAsideAndTheBackupIsUsed() throws {
-        let store = ProjectStore(fileURL: fileURL)
-        store.save([WorkspaceProfile.defaultProfile, work])
-        store.save([WorkspaceProfile.defaultProfile, work, home]) // keeps the previous version as .bak
+    @MainActor
+    func testAnUnreadableFileIsSetAsideAndTheMirrorIsTrustedWithTheMarker() throws {
+        _ = savedStore([main, work], [main, work, home]) // .bak holds [main, work]
         try writeFile("{ not json")
 
         let reloaded = ProjectStore(fileURL: fileURL)
-        let loaded = reloaded.load(mirror: [WorkspaceProfile.defaultProfile], markerPresent: true)
+        let loaded = reloaded.load(mirror: [main, work, home], markerPresent: true)
 
-        XCTAssertEqual(loaded.map(\.id), [WorkspaceProfile.defaultID, "work"])
+        // The marker says projects.json held the mirror's spaces; .bak is older.
+        XCTAssertEqual(loaded.map(\.id), [main.id, "work", "home"])
         let corrupt = try FileManager.default.contentsOfDirectory(atPath: directory.path)
             .filter { $0.hasPrefix("projects.corrupt.") }
         XCTAssertEqual(corrupt.count, 1)
         XCTAssertEqual(reloaded.availability, .writable)
     }
 
-    func testDecodingIsLenient() throws {
+    @MainActor
+    func testAMissingFileFallsBackToTheBackup() throws {
+        _ = savedStore([main, work, home], [main, work]) // .bak holds [main, work, home]
+        try FileManager.default.removeItem(at: fileURL)
+
+        // With the marker, a space only the backup has was deleted since.
+        let withMarker = ProjectStore(fileURL: fileURL)
+        XCTAssertEqual(withMarker.load(mirror: [main, work], markerPresent: true).map(\.id), [main.id, "work"])
+        XCTAssertEqual(withMarker.deletedIDs, ["home"])
+
+        // Without it (an older build saved last), the backup and mirror merge.
+        let withoutMarker = ProjectStore(fileURL: fileURL)
+        XCTAssertEqual(
+            withoutMarker.load(mirror: [main, work], markerPresent: false).map(\.id),
+            [main.id, "work", "home"]
+        )
+    }
+
+    @MainActor
+    func testADirectoryInPlaceOfTheFileIsNeverReplaced() throws {
+        try FileManager.default.createDirectory(at: fileURL, withIntermediateDirectories: true)
+        let store = ProjectStore(fileURL: fileURL)
+
+        XCTAssertEqual(store.load(mirror: [main, work], markerPresent: true), [main, work])
+        XCTAssertFalse(store.save([main]))
+        XCTAssertEqual(store.availability, .readOnlyUnreadable)
+    }
+
+    @MainActor
+    func testNothingIsSavedBeforeLoading() {
+        let store = ProjectStore(fileURL: fileURL)
+
+        XCTAssertFalse(store.save([main]))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    @MainActor
+    func testDecodingIsLenientAndDropsDuplicateIDs() throws {
         try writeFile("""
-        {"projects": [{"id": "work", "name": "Work"}, {"name": "no id"}, {"id": "bare"}], "future": true}
+        {"projects": [{"id": "work", "name": "Work"}, {"name": "no id"}, {"id": "bare"}, {"id": "work"}],
+         "future": true}
         """)
         let loaded = ProjectStore(fileURL: fileURL).load(mirror: nil, markerPresent: true)
 
@@ -114,16 +177,20 @@ final class ProjectStoreTests: XCTestCase {
         XCTAssertEqual(loaded.last?.name, "space")
     }
 
-    func testSaveOnlyWritesWhenSomethingChanged() throws {
-        let store = ProjectStore(fileURL: fileURL)
-        store.save([WorkspaceProfile.defaultProfile, work])
-        let firstWrite = try FileManager.default.attributesOfItem(atPath: fileURL.path)[.modificationDate] as? Date
+    @MainActor
+    func testSaveOnlyRewritesTheFileWhenSomethingChanged() throws {
+        let store = savedStore([main, work])
+        let inode = { try FileManager.default.attributesOfItem(atPath: self.fileURL.path)[.systemFileNumber] as? Int }
+        let first = try inode()
 
-        Thread.sleep(forTimeInterval: 1.1)
-        store.save([WorkspaceProfile.defaultProfile, work])
+        XCTAssertTrue(store.save([main, work]))
+        XCTAssertEqual(try inode(), first, "an atomic rewrite would change the inode")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.backupURL.path))
 
-        let secondWrite = try FileManager.default.attributesOfItem(atPath: fileURL.path)[.modificationDate] as? Date
-        XCTAssertEqual(firstWrite, secondWrite)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: store.backupURL.path), "no change, no backup")
+        // A new launch reading the same file doesn't rewrite it either.
+        let reloaded = ProjectStore(fileURL: fileURL)
+        _ = reloaded.load(mirror: nil, markerPresent: true)
+        XCTAssertTrue(reloaded.save([main, work]))
+        XCTAssertEqual(try inode(), first)
     }
 }

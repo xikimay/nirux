@@ -305,9 +305,10 @@ extension NiruxShellView {
         case .closeColumn(let columnIndex):
             closeColumn(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
             return
-        case .moveToProfile(let profileID):
+        case .moveToProfile(let profileID, let workspaceID):
             // Its shells keep the old NIRUX_PROFILE_ID until they restart.
-            didChange = workspaceStore.moveWorkspace(at: workspaceIndex, toProfile: profileID)
+            guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
+            didChange = workspaceStore.moveWorkspace(at: index, toProfile: profileID)
         }
         guard didChange else { return }
         refreshAfterWorkspaceMutation()
