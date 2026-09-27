@@ -33,7 +33,8 @@ struct ActivityEntry: Codable, Hashable {
     let columnIndex: Int?
     /// Workspace title at event time (titles change; the entry freezes it).
     let workspaceTitle: String
-    /// Notification message / codex final message — nil for lifecycle rows.
+    /// What was asked (notification message, "permission: Bash · <command>")
+    /// or the codex final message — nil for lifecycle rows.
     let detail: String?
     /// Epoch seconds (the hook receiver's clock).
     let timestamp: TimeInterval
@@ -63,22 +64,37 @@ struct ActivityEntry: Codable, Hashable {
         self.missionReplyToEventID = missionReplyToEventID
     }
 
-    /// Events worth a feed row. UserPromptSubmit/PreToolUse fire far too
-    /// often — they drive the status machine, not the feed.
-    init?(event: AgentHookEvent, workspaceTitle: String, columnIndex: Int?) {
+    /// Events worth a feed row. Prompt and tool events fire far too often —
+    /// they drive the status machine, not the feed. `outcome` is what the
+    /// column made of the event (see `AgentHookCenter.onEventReceived`).
+    init?(
+        event: AgentHookEvent,
+        workspaceTitle: String,
+        columnIndex: Int?,
+        outcome: AgentHookOutcome? = nil
+    ) {
+        let outcome = outcome ?? AgentStatusMachine.standaloneOutcome(for: event)
+        var detail = event.detail
         switch event.name {
-        case .notification: category = .attention
+        case .notification:
+            // Informational types ask nothing, and the permission_prompt
+            // sent after a PermissionRequest repeats its row.
+            guard outcome.attention != nil, !outcome.isRepeat else { return nil }
+            category = .attention
+        case .permissionRequest:
+            category = .attention
+            detail = outcome.attention?.activitySummary
         case .stop, .turnComplete: category = .turnComplete
         case .sessionStart: category = .sessionStart
         case .sessionEnd: category = .sessionEnd
-        case .userPromptSubmit, .preToolUse: return nil
+        case .userPromptSubmit, .preToolUse, .postToolUse, .subagentStop: return nil
         }
         agentKind = event.kind.rawValue
         agentUUID = event.agentUUID
         workspaceID = event.workspaceID
         self.columnIndex = columnIndex
         self.workspaceTitle = workspaceTitle
-        detail = event.detail
+        self.detail = detail
         timestamp = event.timestamp
         missionID = nil
         missionEventID = nil
@@ -257,10 +273,11 @@ final class ActivityStore {
 
     @discardableResult
     func record(
-        _ event: AgentHookEvent, workspaceTitle: String, columnIndex: Int?
+        _ event: AgentHookEvent, workspaceTitle: String, columnIndex: Int?,
+        outcome: AgentHookOutcome? = nil
     ) -> Bool {
         guard let entry = ActivityEntry(
-            event: event, workspaceTitle: workspaceTitle, columnIndex: columnIndex
+            event: event, workspaceTitle: workspaceTitle, columnIndex: columnIndex, outcome: outcome
         ) else { return false }
         record(entry)
         return true

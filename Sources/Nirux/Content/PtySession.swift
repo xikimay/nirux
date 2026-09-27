@@ -263,9 +263,18 @@ final class PtySession: @unchecked Sendable {
     /// The shell's pid while it runs.
     var shellPID: pid_t? { state.childPid > 0 ? state.childPid : nil }
 
-    /// When the current foreground process took over (drives the "working
-    /// · 12m" display in the sidebar). Nil while the idle shell runs.
-    var foregroundProcessStartedAt: Date? { state.machine.foregroundSince }
+    /// Start of the agent's current turn (drives the "working · 12m"
+    /// display in the sidebar). Nil between turns.
+    var agentTurnStartedAt: Date? {
+        state.machine.turnStartedAt.map { Date(timeIntervalSince1970: $0) }
+    }
+
+    /// Why the agent waits on the user, while it does.
+    var agentAttentionReason: AgentAttentionReason? { state.machine.attentionReason }
+
+    /// The oldest dialog (permission, question) the agent may be showing —
+    /// even while the column is focused and reads as idle.
+    var pendingAgentDialog: AgentPermissionRequest? { state.machine.pendingDialogs.first }
 
     /// The user's login shell ($SHELL) when it's a mainstream
     /// POSIX-compatible one, else zsh. Restricted to an allowlist because
@@ -293,14 +302,12 @@ final class PtySession: @unchecked Sendable {
         return state.machine.tick(fgName: fgName, isUserFocused: isUserFocused, now: Date())
     }
 
-    /// Apply a hook event routed by AgentHookCenter (main queue). Returns
-    /// true when the column flipped INTO needsAttention — the caller then
-    /// fires the workspace-level notification path.
+    /// Apply a hook event routed by AgentHookCenter (main queue).
+    /// `firedAttention` means the column flipped INTO needsAttention — the
+    /// caller then fires the workspace-level notification path.
     @discardableResult
-    func applyAgentHook(_ event: AgentHookEvent, isUserFocused: Bool) -> Bool {
-        state.machine.applyHook(
-            event.name, kind: event.kind, source: event.source, isUserFocused: isUserFocused
-        )
+    func applyAgentHook(_ event: AgentHookEvent, isUserFocused: Bool) -> AgentHookOutcome {
+        state.machine.apply(event, isUserFocused: isUserFocused)
     }
 
     /// Last computed agent state (no snapshot needed — read from persistent state)
@@ -620,7 +627,8 @@ private final class PtyState: @unchecked Sendable {
     private var hasTypedInput = false
 
     func noteTypedInput(_ data: Data) {
-        guard !hasTypedInput, data != Self.redrawNudge else { return }
+        guard data != Self.redrawNudge else { return }
+        machine.noteKeystroke(now: Date())
         hasTypedInput = true
     }
 

@@ -305,9 +305,10 @@ final class SidebarWorkspaceCardRenderer {
             let label = NSTextField(labelWithAttributedString: PilotSidebarRenderer.attributedColumn(column, fontSize: 11))
             label.lineBreakMode = .byTruncatingTail
             label.frame = NSRect(x: padding, y: rowY, width: sidebarWidth - padding * 2 - 18, height: rowHeight)
+            label.toolTip = PilotSidebarRenderer.attentionTooltip(for: column)
             append(label)
 
-            let dot = statusDot(status: column.agentStatus)
+            let dot = statusDot(status: column.agentStatus, reason: column.attentionReason)
             dot.frame = NSRect(
                 x: sidebarWidth - padding - rightDotSize,
                 y: rowY + (rowHeight - rightDotSize) / 2,
@@ -462,7 +463,7 @@ final class SidebarWorkspaceCardRenderer {
         )
     }
 
-    private func statusDot(status: AgentStatus) -> NSView {
+    private func statusDot(status: AgentStatus, reason: AgentAttentionReason?) -> NSView {
         let dot = SidebarBackgroundView()
         dot.wantsLayer = true
         dot.layer?.cornerRadius = 4
@@ -471,7 +472,7 @@ final class SidebarWorkspaceCardRenderer {
         case .working:
             color = .systemGreen
         case .needsAttention:
-            color = .systemOrange
+            color = PilotSidebarRenderer.attentionColor(for: reason)
         case .idle:
             color = NSColor.white.withAlphaComponent(0.22)
         }

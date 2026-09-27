@@ -54,6 +54,68 @@ final class PilotSidebarRendererTests: XCTestCase {
         XCTAssertEqual(PilotSidebarRenderer.shortDuration(-5), "0s")
     }
 
+    // MARK: - Attention reason
+
+    private func column(_ status: AgentStatus, reason: AgentAttentionReason?) -> ColumnInfo {
+        ColumnInfo(
+            index: 0, processName: "claude", abbreviatedCwd: nil, isFocused: false,
+            isWebView: false, webTitle: nil, terminalTitle: nil, agentStatus: status,
+            isEditor: false, editorFileName: nil, attentionReason: reason
+        )
+    }
+
+    func testRowSaysWhyTheAgentWaits() {
+        let waiting = column(.needsAttention, reason: .permission(tool: "Bash", summary: "git push\u{1B}[2J"))
+        XCTAssertTrue(PilotSidebarRenderer.attributedColumn(waiting).string.hasSuffix("claude · permission · Bash"))
+        XCTAssertEqual(
+            PilotSidebarRenderer.attentionTooltip(for: waiting), "needs permission — Bash: git push[2J"
+        )
+        let done = column(.needsAttention, reason: .turnFinished)
+        XCTAssertTrue(PilotSidebarRenderer.attributedColumn(done).string.hasSuffix("claude · done"))
+        XCTAssertEqual(PilotSidebarRenderer.attentionTooltip(for: done), "finished its turn")
+        XCTAssertNil(PilotSidebarRenderer.attentionTooltip(for: column(.idle, reason: nil)))
+    }
+
+    func testPermissionAndTurnFinishedDotsDiffer() {
+        XCTAssertEqual(PilotSidebarRenderer.attentionColor(for: .permission(tool: "Bash", summary: nil)), .systemOrange)
+        XCTAssertEqual(PilotSidebarRenderer.attentionColor(for: .question(nil)), .systemOrange)
+        XCTAssertEqual(PilotSidebarRenderer.attentionColor(for: nil), .systemOrange)
+        XCTAssertEqual(PilotSidebarRenderer.attentionColor(for: .turnFinished), .niruxAccent)
+    }
+
+    func testReasonChangeRerendersTheRow() {
+        XCTAssertNotEqual(
+            column(.needsAttention, reason: .turnFinished),
+            column(.needsAttention, reason: .permission(tool: "Bash", summary: nil))
+        )
+    }
+
+    // MARK: - Agent notification text
+
+    func testNotificationSaysWhatIsAsked() {
+        let text = NiruxNotifier.attentionText(
+            processName: "✳ Fix login",
+            workspaceTitle: "checkout",
+            reason: .permission(tool: "Bash", summary: "rm -rf build\n\u{1B}]0;x\u{07}")
+        )
+        XCTAssertEqual(text.title, "✳ Fix login needs permission")
+        XCTAssertEqual(text.subtitle, "checkout")
+        XCTAssertEqual(text.body, "Bash: rm -rf build ]0;x")
+
+        let plan = NiruxNotifier.attentionText(
+            processName: "claude", workspaceTitle: "ws", reason: .permission(tool: "ExitPlanMode", summary: nil)
+        )
+        XCTAssertEqual(plan, NiruxNotifier.AttentionText(title: "claude needs plan approval", subtitle: "", body: "ws"))
+
+        let generic = NiruxNotifier.attentionText(processName: "\u{1B}", workspaceTitle: "ws", reason: nil)
+        XCTAssertEqual(generic, NiruxNotifier.AttentionText(title: "Agent needs you", subtitle: "", body: "ws"))
+
+        let long = NiruxNotifier.attentionText(
+            processName: "claude", workspaceTitle: "ws", reason: .question(String(repeating: "why ", count: 200))
+        )
+        XCTAssertEqual(long.body.count, 200)
+    }
+
     // MARK: - prStateDisplay
 
     func testPrStateDisplayDraft() {

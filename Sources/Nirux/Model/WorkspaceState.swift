@@ -386,9 +386,9 @@ extension WorkspaceState {
         switch event.name {
         case .stop, .turnComplete:
             return recordAgentActivity(at: event.timestamp, automaticSummary: event.detail)
-        case .notification, .sessionStart, .sessionEnd, .userPromptSubmit:
+        case .notification, .permissionRequest, .sessionStart, .sessionEnd, .userPromptSubmit:
             return recordAgentActivity(at: event.timestamp, automaticSummary: nil)
-        case .preToolUse:
+        case .preToolUse, .postToolUse, .subagentStop:
             return false
         }
     }
@@ -443,7 +443,8 @@ extension WorkspaceState {
                     workspaceID: self.id,
                     workspaceTitle: self.title,
                     columnIndex: columnIndex,
-                    processName: processName
+                    processName: processName,
+                    reason: col?.pty?.agentAttentionReason
                 )
             }
         }

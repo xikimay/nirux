@@ -23,6 +23,9 @@ extension NiruxShellView {
         guard let terminalInput = RemotePromptSanitizer.terminalInput(for: prompt) else {
             return .emptyPrompt
         }
+        // A PermissionRequest may still wait out the hook queue's drain
+        // debounce: apply it before deciding whether a dialog is open.
+        AgentHookCenter.shared.drain()
         let snapshot = ProcessSnapshot()
         for workspace in workspaces {
             guard let columnIndex = workspace.columns.firstIndex(where: { $0.agentUUID == agentUUID }) else {
@@ -35,6 +38,7 @@ extension NiruxShellView {
                 columnIndex: columnIndex,
                 snapshot: snapshot
             ), let pty = column.pty else { return .sessionUnavailable }
+            if session.pendingDialog != nil { return .blockedByDialog(session) }
             pty.sendRaw(terminalInput)
             return .sent(session)
         }
@@ -68,7 +72,8 @@ extension NiruxShellView {
             displayName: displayName,
             cwd: pty.childCwd ?? workspace.cwd,
             status: pty.cachedAgentState,
-            recentOutput: pty.recentOutput()
+            recentOutput: pty.recentOutput(),
+            pendingDialog: pty.pendingAgentDialog?.reason
         )
     }
 }

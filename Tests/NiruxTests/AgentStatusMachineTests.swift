@@ -90,6 +90,276 @@ final class AgentStatusMachineTests: XCTestCase {
         XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 120), .working)
     }
 
+    // MARK: - Why the agent waits
+
+    private func event(
+        _ name: AgentHookEvent.Name,
+        at offset: TimeInterval = 0,
+        tool: String? = nil,
+        summary: String? = nil,
+        key: String? = nil,
+        agent: String? = nil,
+        type: String? = nil,
+        message: String? = nil
+    ) -> AgentHookEvent {
+        AgentHookEvent(
+            kind: .claude, name: name, detail: message ?? tool,
+            toolName: tool, toolSummary: summary, toolKey: key, agentID: agent,
+            notificationType: type, timestamp: t0.timeIntervalSince1970 + offset
+        )
+    }
+
+    /// A claude session mid-turn, as the heartbeat sees it.
+    private func startTurn(focused: Bool = false) {
+        _ = machine.tick(fgName: "claude", isUserFocused: focused, now: t0)
+        _ = machine.apply(event(.sessionStart), isUserFocused: focused)
+        _ = machine.apply(event(.userPromptSubmit), isUserFocused: focused)
+        _ = machine.apply(event(.preToolUse, tool: "Bash"), isUserFocused: focused)
+    }
+
+    func testPermissionRequestBlocksWithTheToolAndItsCommand() {
+        startTurn()
+        let outcome = machine.apply(
+            event(.permissionRequest, at: 1, tool: "Bash", summary: "git push", key: "k1"), isUserFocused: false
+        )
+        XCTAssertTrue(outcome.firedAttention)
+        XCTAssertEqual(outcome.attention, .permission(tool: "Bash", summary: "git push"))
+        XCTAssertEqual(machine.state, .needsAttention)
+        XCTAssertEqual(machine.attentionReason, .permission(tool: "Bash", summary: "git push"))
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 30), .needsAttention)
+
+        // Approved: the call ran → the agent works again, the dialog is gone.
+        XCTAssertFalse(machine.apply(event(.postToolUse, at: 40, tool: "Bash", key: "k1"), isUserFocused: false)
+            .firedAttention)
+        XCTAssertEqual(machine.state, .working)
+        XCTAssertTrue(machine.pendingDialogs.isEmpty)
+        XCTAssertNil(machine.attentionReason)
+    }
+
+    func testFocusedColumnKeepsItsDialogPendingWhileIdle() {
+        startTurn(focused: true)
+        XCTAssertFalse(machine.apply(
+            event(.permissionRequest, tool: "Bash", summary: "make", key: "k"), isUserFocused: true
+        ).firedAttention)
+        XCTAssertEqual(machine.state, .idle)
+        XCTAssertNil(machine.attentionReason, "no attention to explain while focused")
+        XCTAssertEqual(machine.pendingDialogs.map(\.toolName), ["Bash"], "the dialog is still open")
+    }
+
+    func testToolEventsElsewhereKeepTheColumnBlocked() {
+        startTurn()
+        _ = machine.apply(event(.permissionRequest, tool: "Bash", key: "k1", agent: "sub-a"), isUserFocused: false)
+        // Another subagent keeps working, and so does a call without a dialog.
+        _ = machine.apply(event(.preToolUse, tool: "Read", agent: "sub-b"), isUserFocused: false)
+        _ = machine.apply(event(.postToolUse, tool: "Read", key: "k2", agent: "sub-b"), isUserFocused: false)
+        _ = machine.apply(event(.postToolUse, tool: "Bash", key: "k1", agent: "sub-b"), isUserFocused: false)
+        XCTAssertEqual(machine.state, .needsAttention)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 5), .needsAttention)
+        XCTAssertEqual(machine.pendingDialogs.count, 1)
+
+        // The subagent ended (its denial fired no hook): the dialog went with it.
+        _ = machine.apply(event(.subagentStop, agent: "sub-a"), isUserFocused: false)
+        XCTAssertTrue(machine.pendingDialogs.isEmpty)
+        _ = machine.apply(event(.postToolUse, tool: "Task", key: "k3"), isUserFocused: false)
+        XCTAssertEqual(machine.state, .working)
+    }
+
+    func testDelayedPermissionPromptRepeatsItsRequest() {
+        startTurn()
+        _ = machine.apply(event(.permissionRequest, tool: "Bash", summary: "rm x", key: "k"), isUserFocused: false)
+        machine.clearAttention() // user glanced at it and left
+        let outcome = machine.apply(
+            event(.notification, type: "permission_prompt", message: "Claude needs your permission to use Bash"),
+            isUserFocused: false
+        )
+        XCTAssertTrue(outcome.isRepeat)
+        XCTAssertTrue(outcome.firedAttention, "still unanswered: remind")
+        XCTAssertEqual(outcome.attention, .permission(tool: "Bash", summary: "rm x"))
+        XCTAssertEqual(machine.pendingDialogs.count, 1)
+    }
+
+    func testPermissionPromptAloneIsAPendingDialog() {
+        // A sandboxed command's network request fires no PermissionRequest.
+        startTurn()
+        let outcome = machine.apply(
+            event(.notification, type: "permission_prompt", message: "Claude needs your permission"),
+            isUserFocused: false
+        )
+        XCTAssertFalse(outcome.isRepeat)
+        XCTAssertEqual(outcome.attention, .permission(tool: nil, summary: "Claude needs your permission"))
+        XCTAssertEqual(machine.pendingDialogs.count, 1)
+        // Nothing identifies its call: tool events can't clear it, the turn's end does.
+        _ = machine.apply(event(.postToolUse, tool: "Bash", key: "k"), isUserFocused: false)
+        XCTAssertEqual(machine.pendingDialogs.count, 1)
+        _ = machine.apply(event(.stop), isUserFocused: false)
+        XCTAssertTrue(machine.pendingDialogs.isEmpty)
+        XCTAssertEqual(machine.attentionReason, .turnFinished)
+    }
+
+    func testInformationalNotificationsChangeNothing() {
+        startTurn()
+        for type in ["auth_success", "elicitation_complete", "elicitation_response", "quota_auto_resume_fired"] {
+            let outcome = machine.apply(event(.notification, type: type, message: "fyi"), isUserFocused: false)
+            XCTAssertNil(outcome.attention, type)
+            XCTAssertFalse(outcome.firedAttention, type)
+            XCTAssertEqual(machine.state, .working, type)
+        }
+    }
+
+    func testUntypedNotificationStillAsksWithItsMessage() {
+        startTurn()
+        let outcome = machine.apply(event(.notification, message: "Claude is waiting"), isUserFocused: false)
+        XCTAssertTrue(outcome.firedAttention)
+        XCTAssertEqual(machine.attentionReason, .message("Claude is waiting"))
+        XCTAssertTrue(machine.pendingDialogs.isEmpty)
+    }
+
+    func testElicitationIsAQuestionDialog() {
+        startTurn()
+        _ = machine.apply(event(.notification, type: "elicitation_dialog", message: "Sign in"), isUserFocused: false)
+        XCTAssertEqual(machine.attentionReason, .question("Sign in"))
+        XCTAssertEqual(machine.pendingDialogs.count, 1)
+    }
+
+    func testAskUserQuestionIsAQuestion() {
+        startTurn()
+        _ = machine.apply(
+            event(.permissionRequest, tool: "AskUserQuestion", summary: "Which DB?", key: "q"), isUserFocused: false
+        )
+        XCTAssertEqual(machine.attentionReason, .question("Which DB?"))
+        _ = machine.apply(event(.postToolUse, tool: "AskUserQuestion", key: "q"), isUserFocused: false)
+        XCTAssertTrue(machine.pendingDialogs.isEmpty)
+        XCTAssertEqual(machine.state, .working)
+    }
+
+    func testTurnBoundariesClearDialogs() {
+        startTurn()
+        _ = machine.apply(event(.permissionRequest, tool: "Bash", key: "main"), isUserFocused: false)
+        _ = machine.apply(event(.permissionRequest, tool: "Bash", key: "sub", agent: "sub-a"), isUserFocused: false)
+        // Stop: the main thread's dialogs closed; a background subagent's may not have.
+        _ = machine.apply(event(.stop), isUserFocused: false)
+        XCTAssertEqual(machine.pendingDialogs.map(\.agentID), ["sub-a"])
+        // A prompt submitted at the main input: no dialog is on screen.
+        _ = machine.apply(event(.userPromptSubmit), isUserFocused: false)
+        XCTAssertTrue(machine.pendingDialogs.isEmpty)
+
+        _ = machine.apply(event(.permissionRequest, tool: "Bash", key: "denied"), isUserFocused: false)
+        _ = machine.apply(event(.notification, type: "idle_prompt", message: "waiting"), isUserFocused: false)
+        XCTAssertTrue(machine.pendingDialogs.isEmpty, "idle at its prompt: the denied dialog is gone")
+        XCTAssertEqual(machine.attentionReason, .turnFinished)
+
+        _ = machine.apply(event(.permissionRequest, tool: "Bash", key: "x", agent: "sub-b"), isUserFocused: false)
+        _ = machine.apply(event(.sessionStart, message: nil), isUserFocused: false)
+        XCTAssertTrue(machine.pendingDialogs.isEmpty)
+    }
+
+    func testCompactionKeepsPendingDialogs() {
+        startTurn()
+        _ = machine.apply(event(.permissionRequest, tool: "Bash", key: "k"), isUserFocused: false)
+        _ = machine.apply(
+            AgentHookEvent(kind: .claude, name: .sessionStart, source: "compact", timestamp: t0.timeIntervalSince1970),
+            isUserFocused: false
+        )
+        XCTAssertEqual(machine.pendingDialogs.count, 1)
+    }
+
+    func testStopSaysTheTurnFinished() {
+        startTurn()
+        let outcome = machine.apply(event(.stop), isUserFocused: false)
+        XCTAssertEqual(outcome.attention, .turnFinished)
+        XCTAssertEqual(machine.attentionReason, .turnFinished)
+    }
+
+    // MARK: - Turn timer
+
+    func testTurnTimerRunsFromPromptToStop() {
+        _ = machine.tick(fgName: "claude", isUserFocused: false, now: t0)
+        _ = machine.apply(event(.sessionStart), isUserFocused: false)
+        XCTAssertNil(machine.turnStartedAt)
+        _ = machine.apply(event(.userPromptSubmit, at: 100), isUserFocused: false)
+        _ = machine.apply(event(.preToolUse, at: 150, tool: "Bash"), isUserFocused: false)
+        _ = machine.apply(event(.permissionRequest, at: 160, tool: "Bash", key: "k"), isUserFocused: false)
+        _ = machine.apply(event(.postToolUse, at: 400, tool: "Bash", key: "k"), isUserFocused: false)
+        XCTAssertEqual(machine.turnStartedAt, t0.timeIntervalSince1970 + 100, "the whole turn, waits included")
+        _ = machine.apply(event(.stop, at: 500), isUserFocused: false)
+        XCTAssertNil(machine.turnStartedAt)
+        // A turn already running when Nirux started: from the first event seen.
+        _ = machine.apply(event(.preToolUse, at: 900, tool: "Read"), isUserFocused: false)
+        XCTAssertEqual(machine.turnStartedAt, t0.timeIntervalSince1970 + 900)
+        _ = machine.apply(event(.sessionEnd, at: 950), isUserFocused: false)
+        XCTAssertNil(machine.turnStartedAt)
+    }
+
+    func testFallbackTurnTimerFollowsOutput() {
+        _ = machine.tick(fgName: "codex", isUserFocused: false, now: t0)
+        machine.noteUserInput(now: t0 + 5)
+        machine.noteRead(now: t0 + 6)
+        _ = machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 6.5)
+        XCTAssertEqual(machine.turnStartedAt, (t0 + 6.5).timeIntervalSince1970)
+        machine.noteRead(now: t0 + 8)
+        _ = machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 8.5)
+        XCTAssertEqual(machine.turnStartedAt, (t0 + 6.5).timeIntervalSince1970, "same stretch of output")
+        _ = machine.tick(fgName: "codex", isUserFocused: false, now: t0 + 20)
+        XCTAssertNil(machine.turnStartedAt)
+        XCTAssertNil(machine.attentionReason, "silence doesn't say why")
+    }
+
+    // MARK: - After a dialog is answered
+
+    func testAnsweredDialogShowsTheRunningToolAsWorking() {
+        startTurn()
+        _ = machine.apply(event(.permissionRequest, at: 1, tool: "Bash", key: "k"), isUserFocused: false)
+        // Output alone (no answer typed) proves nothing.
+        machine.noteRead(now: t0 + 3)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 3.5), .needsAttention)
+
+        // The user answers in the column; the approved command runs, with
+        // Claude's spinner, and no hook fires until it ends.
+        machine.noteKeystroke(now: t0 + 10)
+        machine.noteUserInput(now: t0 + 10)
+        machine.noteRead(now: t0 + 10.1) // the dialog closing: echo
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: true, now: t0 + 10.2), .idle)
+        machine.noteRead(now: t0 + 11)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 11.5), .working)
+        machine.noteRead(now: t0 + 60)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 61), .working)
+        XCTAssertEqual(machine.pendingDialogs.count, 1, "remote prompts stay blocked until hooks confirm")
+
+        // Silence (a denial ended the turn): idle, never attention.
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 70), .idle)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 90), .idle)
+    }
+
+    func testKeystrokesBeforeTheDialogDontCountAsAnAnswer() {
+        startTurn()
+        machine.noteKeystroke(now: t0 + 1) // typing ahead while Claude works
+        machine.noteUserInput(now: t0 + 1)
+        _ = machine.apply(event(.permissionRequest, at: 2, tool: "Bash", key: "k"), isUserFocused: false)
+        machine.noteRead(now: t0 + 5)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 5.5), .needsAttention)
+    }
+
+    func testResetForgetsDialogsAndTurn() {
+        startTurn()
+        _ = machine.apply(event(.permissionRequest, tool: "Bash", key: "k"), isUserFocused: false)
+        machine.reset()
+        XCTAssertTrue(machine.pendingDialogs.isEmpty)
+        XCTAssertNil(machine.turnStartedAt)
+        XCTAssertNil(machine.attentionReason)
+    }
+
+    func testStandaloneOutcomeReadsTheEventAlone() {
+        XCTAssertEqual(
+            AgentStatusMachine.standaloneOutcome(for: event(.permissionRequest, tool: "Bash", summary: "ls", key: "k"))
+                .attention,
+            .permission(tool: "Bash", summary: "ls")
+        )
+        let prompt = AgentStatusMachine.standaloneOutcome(for: event(.notification, type: "permission_prompt", message: "m"))
+        XCTAssertFalse(prompt.isRepeat)
+        XCTAssertFalse(prompt.firedAttention)
+        XCTAssertNil(AgentStatusMachine.standaloneOutcome(for: event(.notification, type: "auth_success")).attention)
+    }
+
     // MARK: - Fallback path (no hooks — codex, unhooked claude)
 
     /// Fallback attention requires engagement: first keystroke + 5s settle

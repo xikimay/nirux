@@ -214,6 +214,38 @@ final class AgentHookInstallerTests: XCTestCase {
         }
     }
 
+    /// An install from before PermissionRequest/PostToolUse/SubagentStop
+    /// joined the list gains them on the next launch; the user's own hooks
+    /// on those events stay.
+    func testClaudeRefreshAddsNewEventsAndKeepsUserHooks() {
+        let stale = #"if [ -n \"$NIRUX_AGENT_UUID\" ] && [ -x '/Old/Nirux' ]; then '/Old/Nirux' --hook claude; fi"#
+        let oldEvents = ["SessionStart", "UserPromptSubmit", "PreToolUse", "Notification", "Stop", "SessionEnd"]
+        var groups = oldEvents.map {
+            #""\#($0)": [{"matcher": "", "hooks": [{"type": "command", "command": "\#(stale)"}]}]"#
+        }
+        groups.append(#""PermissionRequest": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "/usr/local/bin/approver"}]}]"#)
+        groups.append(#""PostToolUse": [{"matcher": "Edit", "hooks": [{"type": "command", "command": "/usr/local/bin/fmt"}]}]"#)
+        write(#"{"hooks": {\#(groups.joined(separator: ", "))}}"#, ".claude/settings.json")
+
+        AgentHookInstaller.installClaudeHooks(executablePath: "/Apps/Nirux", home: home)
+        let settings = claudeSettings()
+        let ours = AgentHookInstaller.claudeHookCommand(executablePath: "/Apps/Nirux")
+        XCTAssertTrue(AgentHookInstaller.claudeHookEvents.contains("PermissionRequest"))
+        XCTAssertTrue(AgentHookInstaller.claudeHookEvents.contains("PostToolUseFailure"))
+        for event in AgentHookInstaller.claudeHookEvents {
+            XCTAssertEqual(
+                hookCommands(settings, event: event).filter { $0.contains("--hook claude") }, [ours], event
+            )
+        }
+        XCTAssertEqual(hookCommands(settings, event: "PermissionRequest"), ["/usr/local/bin/approver", ours])
+        XCTAssertEqual(hookCommands(settings, event: "PostToolUse"), ["/usr/local/bin/fmt", ours])
+        // The receiver prints nothing: a PermissionRequest hook without a
+        // `decision` leaves the dialog to the user.
+        let hooks = settings["hooks"] as? [String: Any] ?? [:]
+        let permissionGroups = hooks["PermissionRequest"] as? [[String: Any]] ?? []
+        XCTAssertEqual(permissionGroups.first?["matcher"] as? String, "Bash", "user matcher untouched")
+    }
+
     func testClaudeKeepsOtherToolsHookClaudeCommands() {
         write("""
         {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "/usr/local/bin/othertool --hook claude"}]}]}}

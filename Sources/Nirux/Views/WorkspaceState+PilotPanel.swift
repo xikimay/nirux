@@ -167,7 +167,7 @@ extension WorkspaceState {
         let dotSize: CGFloat = 8
 
         if let dot = PilotSidebarRenderer.makeAgentDot(
-            status: columnInfo.agentStatus, x: padding,
+            status: columnInfo.agentStatus, reason: columnInfo.attentionReason, x: padding,
             yOffset: cursorY, rowHeight: rowHeight, size: dotSize
         ) {
             panel.addSubview(dot)

@@ -191,40 +191,6 @@ final class TelegramRemoteAccessController {
         publishState()
     }
 
-    /// Hook events are already normalized upstream; Telegram sees only
-    /// generic completion/attention notifications tied to a stable column ID.
-    func handleAgentEvent(_ event: AgentHookEvent, resolution: AgentHookCenter.Resolution?) {
-        guard event.timestamp >= notificationArmedAt.timeIntervalSince1970,
-              let resolution,
-              let agentUUID = event.agentUUID,
-              isAuthorizedConfiguration
-        else { return }
-
-        let eventLabel: String
-        switch event.name {
-        case .notification where notifyOnAttention:
-            eventLabel = "Agent needs attention"
-        case .stop where notifyOnCompletion,
-             .turnComplete where notifyOnCompletion:
-            eventLabel = "Agent turn completed"
-        default:
-            return
-        }
-
-        let workspaceTitle = resolution.workspace.title
-        let columnNumber = resolution.columnIndex + 1
-        let detail = event.detail.flatMap(Self.safeDetail)
-        Task { [weak self] in
-            await self?.sendAgentNotification(
-                label: eventLabel,
-                workspaceTitle: workspaceTitle,
-                columnNumber: columnNumber,
-                agentUUID: agentUUID,
-                detail: detail
-            )
-        }
-    }
-
     private var activePairingCode: String? {
         guard let pairingCode, let pairingExpiresAt, pairingExpiresAt > Date() else { return nil }
         return pairingCode
@@ -458,6 +424,9 @@ final class TelegramRemoteAccessController {
                 client: client
             )
             if let message { rememberReplyRoute(message.messageID, agentUUID: session.id) }
+        case let .blockedByDialog(session):
+            let message = await send(RemoteDialogText.blockedPromptMessage(for: session), chatID: chatID, client: client)
+            if let message { rememberReplyRoute(message.messageID, agentUUID: session.id) }
         case .sessionUnavailable:
             if selectedAgentUUID == target { selectedAgentUUID = nil }
             _ = await send("That agent session is no longer live. Use /sessions to choose another.", chatID: chatID, client: client)
@@ -592,4 +561,49 @@ final class TelegramRemoteAccessController {
     After selecting a session, send ordinary text as a prompt. You can also reply directly to a Nirux notification.
     Shell execution commands are not supported.
     """
+}
+
+extension TelegramRemoteAccessController {
+    /// Hook events are already normalized upstream; Telegram sees only
+    /// completion/attention notifications tied to a stable column ID.
+    /// Attention comes from Claude's own notifications, which it sends once
+    /// the user seems away (no typing for a few seconds) — not from the
+    /// immediate PermissionRequest.
+    func handleAgentEvent(
+        _ event: AgentHookEvent,
+        resolution: AgentHookCenter.Resolution?,
+        outcome: AgentHookOutcome = AgentHookOutcome()
+    ) {
+        guard event.timestamp >= notificationArmedAt.timeIntervalSince1970,
+              let resolution,
+              let agentUUID = event.agentUUID,
+              isAuthorizedConfiguration
+        else { return }
+
+        let eventLabel: String
+        var detail = event.detail.flatMap(Self.safeDetail)
+        switch event.name {
+        case .notification where notifyOnAttention:
+            // Informational notification types ask nothing.
+            guard let attention = outcome.attention else { return }
+            (eventLabel, detail) = RemoteDialogText.attentionNotification(attention, message: detail)
+        case .stop where notifyOnCompletion,
+             .turnComplete where notifyOnCompletion:
+            eventLabel = "Agent turn completed"
+        default:
+            return
+        }
+
+        let workspaceTitle = resolution.workspace.title
+        let columnNumber = resolution.columnIndex + 1
+        Task { [weak self] in
+            await self?.sendAgentNotification(
+                label: eventLabel,
+                workspaceTitle: workspaceTitle,
+                columnNumber: columnNumber,
+                agentUUID: agentUUID,
+                detail: detail
+            )
+        }
+    }
 }

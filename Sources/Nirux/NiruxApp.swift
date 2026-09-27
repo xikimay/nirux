@@ -132,13 +132,13 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         remoteAccess.onStateChange = { [weak self] in
             self?.refreshTelegramSettingsState()
         }
-        hooks.onEventReceived = { [weak remoteAccess] event, resolution in
+        hooks.onEventReceived = { [weak remoteAccess] event, resolution, outcome in
             ActivityStore.shared.record(
                 event,
                 workspaceTitle: resolution?.workspace.title ?? event.cwd ?? "External agent",
-                columnIndex: resolution?.columnIndex
+                columnIndex: resolution?.columnIndex, outcome: outcome
             )
-            remoteAccess?.handleAgentEvent(event, resolution: resolution)
+            remoteAccess?.handleAgentEvent(event, resolution: resolution, outcome: outcome)
         }
         hooks.start()
         // Start after the hook backlog drain so events queued while Nirux was

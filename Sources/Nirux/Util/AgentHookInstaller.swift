@@ -67,11 +67,22 @@ enum AgentHookInstaller {
     /// agent loop (a PreToolUse can never land after its turn's Stop), which
     /// keeps the status machine's event stream deterministic. The receiver
     /// exits in single-digit milliseconds, well under tool-call latency.
+    ///
+    /// PermissionRequest (a dialog opens, with the tool call it asks
+    /// about), PostToolUse/PostToolUseFailure (the call ran: its dialog was
+    /// answered, the agent works again) and SubagentStop (a subagent's
+    /// dialogs are gone) need Claude Code 2.0.56 or later. Claude Code
+    /// before 2.1.101 drops the whole settings file over an event name it
+    /// doesn't know, so only long-established events belong here.
     static let claudeHookEvents = [
         "SessionStart",
         "UserPromptSubmit",
         "PreToolUse",
+        "PermissionRequest",
+        "PostToolUse",
+        "PostToolUseFailure",
         "Notification",
+        "SubagentStop",
         "Stop",
         "SessionEnd"
     ]

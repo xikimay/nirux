@@ -40,7 +40,10 @@ final class AgentHookCenter {
     /// Given NIRUX_AGENT_UUID, locate the owning column. Set by the shell.
     var resolver: ((String) -> Resolution?)?
     var onEventsApplied: (([AppliedEvent]) -> Void)?
-    var onEventReceived: ((AgentHookEvent, Resolution?) -> Void)?
+    /// Every routed event, after its column applied it. The outcome says
+    /// what it asked of the user (from the column's state when it has one,
+    /// else from the event alone).
+    var onEventReceived: ((AgentHookEvent, Resolution?, AgentHookOutcome) -> Void)?
 
     private var dirSource: DispatchSourceFileSystemObject?
     private var fileSource: DispatchSourceFileSystemObject?
@@ -178,6 +181,9 @@ final class AgentHookCenter {
             let foregroundProcess = pty.foregroundProcess(snapshot: processes)
             switch event.kind {
             case .claude:
+                // `claude -p` runs PermissionRequest hooks with no dialog to
+                // show, then denies the call itself: nobody is asked.
+                if event.name == .permissionRequest, Self.isHeadlessClaude(foregroundProcess) { return nil }
                 switch resolution.column.admitClaudeHook(event, foregroundProcess: foregroundProcess, snapshot: processes) {
                 case .rejected:
                     // Not the column's agent (a nested `claude -p` inheriting
@@ -192,16 +198,21 @@ final class AgentHookCenter {
                 if Self.isNestedCodexHook(foregroundName: foregroundProcess?.name) { return nil }
             }
         }
-        onEventReceived?(event, resolution)
-        if let resolution, let pty = resolution.column.pty {
-            let firedAttention = pty.applyAgentHook(event, isUserFocused: resolution.isUserFocused)
-            if firedAttention {
-                resolution.column.notifyAgentAttention()
-            }
+        let outcome = resolution?.column.pty.map {
+            $0.applyAgentHook(event, isUserFocused: resolution?.isUserFocused ?? false)
+        } ?? AgentStatusMachine.standaloneOutcome(for: event)
+        onEventReceived?(event, resolution, outcome)
+        if outcome.firedAttention, let resolution {
+            resolution.column.notifyAgentAttention()
         }
         return resolution.map {
             AppliedEvent(event: event, resolution: $0, claudeRestoreChanged: claudeRestoreChanged)
         }
+    }
+
+    nonisolated static func isHeadlessClaude(_ process: ForegroundProcess?) -> Bool {
+        guard let process, process.name == "claude" else { return false }
+        return process.hasFlag("-p") || process.hasFlag("--print")
     }
 
     /// A Codex hook while another agent owns the terminal came from a

@@ -14,9 +14,11 @@ struct ColumnInfo: Hashable {
     /// Active editor tab has unsaved changes — rendered as a dirty dot
     /// next to the file name.
     var editorIsDirty: Bool = false
-    /// Elapsed time since the foreground process started — shown for
-    /// working agents ("· 12m"). Nil for non-terminal columns / idle shells.
+    /// Elapsed time in the agent's current turn — shown for working agents
+    /// ("· 12m"). Nil for non-terminal columns / between turns.
     var agentElapsedSeconds: TimeInterval?
+    /// Why the agent waits on the user (set with `.needsAttention`).
+    var attentionReason: AgentAttentionReason?
 
     /// Hashable is hand-written to compare `agentElapsedSeconds` at the
     /// granularity it's *displayed* ("12m" via shortDuration), not raw
@@ -40,6 +42,7 @@ struct ColumnInfo: Hashable {
             && lhs.editorFileName == rhs.editorFileName
             && lhs.editorIsDirty == rhs.editorIsDirty
             && lhs.elapsedDisplay == rhs.elapsedDisplay
+            && lhs.attentionReason == rhs.attentionReason
     }
 
     func hash(into hasher: inout Hasher) {
@@ -55,6 +58,7 @@ struct ColumnInfo: Hashable {
         hasher.combine(editorFileName)
         hasher.combine(editorIsDirty)
         hasher.combine(elapsedDisplay)
+        hasher.combine(attentionReason)
     }
 }
 

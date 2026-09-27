@@ -203,15 +203,36 @@ enum PilotSidebarRenderer {
         }
         result.append(NSAttributedString(string: displayName, attributes: [.font: font, .foregroundColor: textColor]))
 
-        // Elapsed time for working agents — "· 12m" in green next to the name.
+        // Time in the current turn for working agents — "· 12m" in green
+        // next to the name.
         if column.agentStatus == .working, let elapsed = column.agentElapsedSeconds {
             result.append(NSAttributedString(string: " · \(shortDuration(elapsed))", attributes: [
                 .font: font,
                 .foregroundColor: NSColor.systemGreen.withAlphaComponent(0.65)
             ]))
         }
+        // Why a waiting agent waits — "· permission · Bash", in its dot's color.
+        if column.agentStatus == .needsAttention, let reason = column.attentionReason {
+            result.append(NSAttributedString(string: " · \(reason.shortLabel)", attributes: [
+                .font: font,
+                .foregroundColor: attentionColor(for: reason).withAlphaComponent(0.8)
+            ]))
+        }
 
         return result
+    }
+
+    /// Row tooltip: what exactly the agent waits on ("Bash: git push").
+    static func attentionTooltip(for column: ColumnInfo) -> String? {
+        guard column.agentStatus == .needsAttention, let reason = column.attentionReason else { return nil }
+        let detail = reason.detailLine.flatMap { AgentText.clean($0, maxLength: 300) }
+        return [reason.headline, detail].compactMap { $0 }.joined(separator: " — ")
+    }
+
+    /// Orange when the agent is blocked on the user (a dialog, an unknown
+    /// ask); the accent blue when it merely finished its turn.
+    static func attentionColor(for reason: AgentAttentionReason?) -> NSColor {
+        reason == .turnFinished ? .niruxAccent : .systemOrange
     }
 
     /// Compact duration for sidebar rows: 42s, 12m, 1h05m. Pure —
@@ -229,10 +250,11 @@ enum PilotSidebarRenderer {
     /// Caller is responsible for adding the returned view to its parent and
     /// tracking it for later removal.
     static func makeAgentDot(
-        status: AgentStatus, x: CGFloat, yOffset: CGFloat, rowHeight: CGFloat, size: CGFloat
+        status: AgentStatus, reason: AgentAttentionReason? = nil,
+        x: CGFloat, yOffset: CGFloat, rowHeight: CGFloat, size: CGFloat
     ) -> NSView? {
         guard status != .idle else { return nil }
-        let dotColor: NSColor = status == .working ? .systemGreen : .systemOrange
+        let dotColor: NSColor = status == .working ? .systemGreen : attentionColor(for: reason)
         let dot = NSView(frame: NSRect(
             x: x, y: yOffset - rowHeight + (rowHeight - size) / 2,
             width: size, height: size
