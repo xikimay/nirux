@@ -6,6 +6,10 @@ final class WorkspaceStore {
     private(set) var profiles: [WorkspaceProfile] = [WorkspaceProfile.defaultProfile]
     private(set) var activeProfileID: String = WorkspaceProfile.defaultID
     private(set) var activeWorkspaceID: String?
+    /// Deleted spaces' ids (see ProjectStore). Shells started in them keep the
+    /// id in NIRUX_PROFILE_ID, so a request naming one goes to the default
+    /// space, where their workspaces moved.
+    var deletedProfileIDs: Set<String> = []
 
     var activeWorkspaceIndex: Int {
         get {
@@ -59,10 +63,10 @@ final class WorkspaceStore {
 
     func targetProfileID(for requestedProfileID: String?) -> String {
         guard let requestedProfileID = requestedProfileID?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !requestedProfileID.isEmpty,
-              profiles.contains(where: { $0.id == requestedProfileID })
+              !requestedProfileID.isEmpty
         else { return activeProfileID }
-        return requestedProfileID
+        if deletedProfileIDs.contains(requestedProfileID) { return WorkspaceProfile.defaultID }
+        return profiles.contains { $0.id == requestedProfileID } ? requestedProfileID : activeProfileID
     }
 
     @discardableResult
@@ -220,6 +224,7 @@ final class WorkspaceStore {
             workspace.profileID = WorkspaceProfile.defaultID
         }
         profiles.remove(at: index)
+        deletedProfileIDs.insert(id)
         if activeProfileID == id { activeProfileID = WorkspaceProfile.defaultID }
         reconcileSelection(preferActiveProfile: true)
         return true
@@ -243,9 +248,13 @@ final class WorkspaceStore {
         else { return false }
         let workspace = workspaces[index]
         let wasActive = workspace.id == activeWorkspaceID
-        let neighbours = visibleWorkspaceIndices(in: workspace.profileID)
-            .filter { $0 != index && !workspaces[$0].isClosing }
-        let neighbourID = (neighbours.last { $0 < index } ?? neighbours.first).map { workspaces[$0].id }
+        // The card above it in the sidebar, else the one below.
+        let visible = visibleWorkspaceIndices(in: workspace.profileID)
+        let position = visible.firstIndex(of: index) ?? 0
+        let isCandidate = { (candidate: Int) in candidate != index && !self.workspaces[candidate].isClosing }
+        let neighbourIndex = visible[..<position].last(where: isCandidate)
+            ?? visible[position...].first(where: isCandidate)
+        let neighbourID = neighbourIndex.map { workspaces[$0].id }
 
         workspace.profileID = profileID
         workspaces.remove(at: index)

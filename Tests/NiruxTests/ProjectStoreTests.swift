@@ -133,10 +133,12 @@ final class ProjectStoreTests: XCTestCase {
         _ = savedStore([main, work, home], [main, work]) // .bak holds [main, work, home]
         try FileManager.default.removeItem(at: fileURL)
 
-        // With the marker, a space only the backup has was deleted since.
+        // With the marker, the mirror is the latest list: a space only the
+        // backup has is left out (not recorded as deleted: the mirror could be
+        // an older state.json backup).
         let withMarker = ProjectStore(fileURL: fileURL)
         XCTAssertEqual(withMarker.load(mirror: [main, work], markerPresent: true).map(\.id), [main.id, "work"])
-        XCTAssertEqual(withMarker.deletedIDs, ["home"])
+        XCTAssertTrue(withMarker.deletedIDs.isEmpty)
 
         // Without it (an older build saved last), the backup and mirror merge.
         let withoutMarker = ProjectStore(fileURL: fileURL)
@@ -175,6 +177,68 @@ final class ProjectStoreTests: XCTestCase {
         XCTAssertEqual(loaded.map(\.id), ["work", "bare"])
         XCTAssertEqual(loaded.first?.colorHex, WorkspaceProfile.colorHex(for: 0))
         XCTAssertEqual(loaded.last?.name, "space")
+    }
+
+    @MainActor
+    func testAFileWithFieldsThisBuildDoesNotKnowIsNeverRewritten() throws {
+        // A newer build added a field without bumping the schema: rewriting
+        // would strip it.
+        try writeFile(##"""
+        {"schemaVersion": 1, "deletedIDs": [],
+         "projects": [{"id": "work", "name": "Work", "colorHex": "#9ECE6A", "anchors": ["x"]}]}
+        """##)
+        let before = try Data(contentsOf: fileURL)
+        let store = ProjectStore(fileURL: fileURL)
+
+        XCTAssertEqual(store.load(mirror: nil, markerPresent: true), [work])
+        XCTAssertFalse(store.save([main, work]))
+        XCTAssertEqual(try Data(contentsOf: fileURL), before)
+    }
+
+    @MainActor
+    func testABackupFromANewerBuildMakesTheStoreReadOnly() throws {
+        try Data(##"{"schemaVersion": 3, "projects": [{"id": "work", "name": "Work", "colorHex": "#9ECE6A"}]}"##.utf8)
+            .write(to: fileURL.appendingPathExtension("bak"))
+        let store = ProjectStore(fileURL: fileURL)
+
+        _ = store.load(mirror: [main], markerPresent: false)
+        XCTAssertEqual(store.availability, .readOnlyNewerSchema(3))
+    }
+
+    @MainActor
+    func testDeletionsWrittenByAnotherInstanceAreKept() throws {
+        let first = savedStore([main, work, home])
+        let second = ProjectStore(fileURL: fileURL)
+        _ = second.load(mirror: nil, markerPresent: true)
+        second.markDeleted("home")
+        second.save([main, work])
+
+        first.save([main, work, WorkspaceProfile(id: "x", name: "X", colorHex: "#BB9AF7")])
+
+        guard case .ok(let file, _) = ProjectStore.read(fileURL) else { return XCTFail("unreadable") }
+        XCTAssertEqual(file.deletedIDs, ["home"])
+    }
+
+    @MainActor
+    func testASpaceDroppedWithItsBriefComesBackUnderItsName() throws {
+        func writeBrief(_ id: String, _ text: String) throws {
+            let url = try XCTUnwrap(SpaceBrief.briefURL(spaceID: id, stateDirectory: directory))
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: url)
+        }
+        try writeBrief("lost", "<!--\nBrief for the space \"Witch Cat\": goals, priorities\n-->\n- Post on Fridays.")
+        try writeBrief("empty", "<!--\nBrief for the space \"Nothing\": goals\n-->\n")
+        try writeBrief("gone", "<!--\nBrief for the space \"Gone\": goals\n-->\nRule.")
+        let store = savedStore([main, work])
+        store.markDeleted("gone")
+        store.save([main, work])
+
+        let loaded = ProjectStore(fileURL: fileURL).load(mirror: nil, markerPresent: true)
+
+        // Only a brief with content, and never a deleted space's.
+        XCTAssertEqual(loaded.map(\.id), [main.id, "work", "lost"])
+        XCTAssertEqual(loaded.last?.name, "Witch Cat")
+        XCTAssertFalse([main.colorHex, work.colorHex].contains(loaded.last?.colorHex ?? ""))
     }
 
     @MainActor

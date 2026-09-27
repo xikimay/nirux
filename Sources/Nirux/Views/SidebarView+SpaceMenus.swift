@@ -41,7 +41,7 @@ extension SidebarView {
         let submenu = NSMenu()
         for space in otherSpaces {
             submenu.addClosureItem(title: space.name) { [weak self] in
-                self?.onWorkspaceAction?(.moveToProfile(space.id, workspaceID: workspaceID), workspaceIndex)
+                self?.onMoveWorkspaceToProfile?(workspaceID, space.id)
             }
         }
         item.submenu = submenu

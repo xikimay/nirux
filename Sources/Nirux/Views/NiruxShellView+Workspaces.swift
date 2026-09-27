@@ -272,6 +272,14 @@ extension NiruxShellView {
         let sourceWorkspace = activeWorkspace
         let baseName = sourceWorkspace.flatMap { profileName(for: $0) } ?? "profile"
         let cwd = sourceWorkspace?.focusedWorkingDirectory ?? NSHomeDirectory()
+        // Spaces persist: reuse an empty one of that name rather than pile up
+        // "name 2", "name 3"…
+        if let empty = profiles.first(where: { $0.name == baseName && workspaceStore.visibleWorkspaceIndices(in: $0.id).isEmpty }),
+           workspaceStore.selectProfile(empty.id) {
+            addWorkspace(title: empty.name, cwd: cwd)
+            saveState()
+            return
+        }
         let profile = workspaceStore.createProfile(named: baseName)
         addWorkspace(title: profile.name, cwd: cwd)
         saveState()
@@ -305,10 +313,6 @@ extension NiruxShellView {
         case .closeColumn(let columnIndex):
             closeColumn(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
             return
-        case .moveToProfile(let profileID, let workspaceID):
-            // Its shells keep the old NIRUX_PROFILE_ID until they restart.
-            guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
-            didChange = workspaceStore.moveWorkspace(at: index, toProfile: profileID)
         }
         guard didChange else { return }
         refreshAfterWorkspaceMutation()

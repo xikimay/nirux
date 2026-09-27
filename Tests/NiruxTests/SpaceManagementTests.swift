@@ -121,4 +121,36 @@ final class SpaceManagementTests: XCTestCase {
         XCTAssertTrue(store.setProfileColor(id: work.id, colorHex: "#F7768E"))
         XCTAssertEqual(store.profiles.first { $0.id == work.id }?.colorHex, "#F7768E")
     }
+
+    @MainActor
+    func testARequestNamingADeletedSpaceGoesToTheDefaultSpace() {
+        let store = WorkspaceStore()
+        let work = WorkspaceProfile(id: "work", name: "Work", colorHex: "#9ECE6A")
+        let home = WorkspaceProfile(id: "home", name: "Home", colorHex: "#E0AF68")
+        store.replaceProfiles([WorkspaceProfile.defaultProfile, work, home], activeProfileID: home.id)
+        let workspace = WorkspaceState(id: "w", title: "w", cwd: "/tmp/w")
+        workspace.profileID = home.id
+        store.appendWorkspace(workspace)
+
+        XCTAssertTrue(store.deleteProfile(id: work.id))
+
+        XCTAssertEqual(store.targetProfileID(for: work.id), WorkspaceProfile.defaultID)
+        XCTAssertEqual(store.targetProfileID(for: "never-existed"), store.activeProfileID)
+    }
+
+    @MainActor
+    func testTheNeighbourIsTheCardAboveInSidebarOrder() {
+        let store = WorkspaceStore()
+        let home = WorkspaceProfile(id: "home", name: "Home", colorHex: "#E0AF68")
+        store.replaceProfiles([WorkspaceProfile.defaultProfile, home], activeProfileID: nil)
+        // Array order a, b(inactive), c; sidebar order a, c, b.
+        for id in ["a", "b", "c"] {
+            store.appendWorkspace(WorkspaceState(id: id, title: id, cwd: "/tmp/\(id)"))
+        }
+        store.setWorkspaceInactive(at: 1, true)
+        store.selectWorkspace(id: "c")
+
+        XCTAssertTrue(store.moveWorkspace(at: 2, toProfile: home.id))
+        XCTAssertEqual(store.activeWorkspace?.id, "a", "not the inactive card that follows it in the array")
+    }
 }

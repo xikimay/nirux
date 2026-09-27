@@ -15,14 +15,20 @@ import Foundation
 /// - marker absent: the mirror may be newer, so it is merged in. Ids it
 ///   doesn't know are imported (unless deleted here) and names and colors
 ///   come from it, so a rename done in an older build survives.
+///
+/// Changing the format: bump `schemaVersion`. A file with keys this build
+/// doesn't know is read but never written, so a rollback can't strip them.
 @MainActor
 final class ProjectStore {
     static let schemaVersion = 1
+    private static let fileKeys: Set<String> = ["schemaVersion", "projects", "deletedIDs"]
+    private static let projectKeys: Set<String> = ["id", "name", "colorHex"]
 
     enum Availability: Equatable {
         case writable
-        /// Saved by a newer Nirux: reading isn't a lossless round trip, so
-        /// this build never writes the file.
+        /// Saved by a newer Nirux (a higher schema, or fields this build
+        /// doesn't know): reading isn't a lossless round trip, so this build
+        /// never writes the file.
         case readOnlyNewerSchema(Int)
         /// Unreadable and not copied aside (or a directory): never replaced.
         case readOnlyUnreadable
@@ -30,19 +36,21 @@ final class ProjectStore {
 
     let fileURL: URL
     private(set) var availability: Availability = .writable
-    /// Ids of deleted spaces, so a mirror can't revive them.
+    /// Ids of deleted spaces, so a mirror or an orphaned brief can't revive
+    /// them.
     private(set) var deletedIDs: Set<String> = []
     /// `projects.json` holds what the last `save` was given. Only then may
     /// `state.json` carry the marker.
     private(set) var isFileCurrent = false
     private var hasLoaded = false
-    private var lastWrittenData: Data?
 
     init(fileURL: URL = Persistence.stateDirectory.appendingPathComponent("projects.json")) {
         self.fileURL = fileURL
     }
 
     var backupURL: URL { fileURL.appendingPathExtension("bak") }
+    /// Where space briefs live (see SpaceBrief).
+    private var briefsFolder: URL { fileURL.deletingLastPathComponent().appendingPathComponent("projects") }
 
     /// The spaces to use at launch.
     /// - Parameters:
@@ -50,30 +58,62 @@ final class ProjectStore {
     ///   - markerPresent: `state.json` carries `projectsFileVersion`.
     func load(mirror: [WorkspaceProfile]?, markerPresent: Bool) -> [WorkspaceProfile] {
         hasLoaded = true
-        let mirror = Self.deduplicated(mirror ?? [])
+        let mirror = mirror.map(Self.deduplicated)
+        let spaces = loadedSpaces(mirror: mirror, markerPresent: markerPresent)
+        return spaces + orphanedBriefSpaces(known: spaces)
+    }
+
+    private func loadedSpaces(mirror: [WorkspaceProfile]?, markerPresent: Bool) -> [WorkspaceProfile] {
         switch Self.read(fileURL) {
         case .ok(let file, let data):
             deletedIDs = Set(file.deletedIDs)
-            if file.schemaVersion > Self.schemaVersion {
+            if file.schemaVersion > Self.schemaVersion || Self.hasUnknownKeys(data) {
                 availability = .readOnlyNewerSchema(file.schemaVersion)
-                NiruxDebugLog.log("ProjectStore: projects.json is schema \(file.schemaVersion); read-only")
-            } else {
-                lastWrittenData = data
+                NiruxDebugLog.log("ProjectStore: projects.json is from a newer Nirux; read-only")
             }
-            return markerPresent ? file.projects : Self.merged(file.projects, withMirror: mirror, deletedIDs: deletedIDs)
+            guard !markerPresent, let mirror else { return file.projects }
+            return Self.merged(file.projects, withMirror: mirror, deletedIDs: deletedIDs)
         case .newerSchemaUnreadable(let version):
             availability = .readOnlyNewerSchema(version)
             NiruxDebugLog.log("ProjectStore: projects.json is schema \(version) and unreadable here; read-only")
-            return mirror
+            return mirror ?? []
         case .directory:
             availability = .readOnlyUnreadable
-            return mirror
+            return mirror ?? []
         case .unreadable(let data):
             if !setAside(data) { availability = .readOnlyUnreadable }
             return recovered(mirror: mirror, markerPresent: markerPresent)
         case .missing:
             return recovered(mirror: mirror, markerPresent: markerPresent)
         }
+    }
+
+    /// `projects.json` is missing or unreadable.
+    private func recovered(mirror: [WorkspaceProfile]?, markerPresent: Bool) -> [WorkspaceProfile] {
+        let backup: ProjectsFile
+        switch Self.read(backupURL) {
+        case .ok(let file, let data):
+            if file.schemaVersion > Self.schemaVersion || Self.hasUnknownKeys(data) {
+                availability = .readOnlyNewerSchema(file.schemaVersion)
+            }
+            backup = file
+        case .newerSchemaUnreadable(let version):
+            availability = .readOnlyNewerSchema(version)
+            return mirror ?? []
+        default:
+            return mirror ?? [] // the first launch after the update, or nothing else to go on
+        }
+        deletedIDs = Set(backup.deletedIDs)
+        guard let mirror else { return backup.projects }
+        guard markerPresent else {
+            return Self.merged(backup.projects, withMirror: mirror, deletedIDs: deletedIDs)
+        }
+        // The marker says projects.json held the mirror's spaces; the backup
+        // is one change older. Keep the backup's copy of each (it may hold
+        // more than the mirror) and nothing the mirror has dropped.
+        let mirrorIDs = Set(mirror.map(\.id))
+        let kept = backup.projects.filter { mirrorIDs.contains($0.id) }
+        return Self.merged(kept, withMirror: mirror, deletedIDs: deletedIDs)
     }
 
     func markDeleted(_ id: String) {
@@ -89,6 +129,13 @@ final class ProjectStore {
             isFileCurrent = false
             return false
         }
+        // Compare with the disk, not with this process's last write: another
+        // Nirux (a second copy, a debug build without NIRUX_STATE_DIR) may
+        // have written since. Keep the deletions it recorded.
+        let current = try? Data(contentsOf: fileURL)
+        if let current, case .ok(let onDisk, _) = Self.decode(current) {
+            deletedIDs.formUnion(onDisk.deletedIDs)
+        }
         let file = ProjectsFile(schemaVersion: Self.schemaVersion, projects: profiles, deletedIDs: deletedIDs.sorted())
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -96,21 +143,21 @@ final class ProjectStore {
             isFileCurrent = false
             return false
         }
-        if data == lastWrittenData {
+        if data == current {
             isFileCurrent = true
             return true
+        }
+        if let current, case .ok = Self.decode(current) {
+            // Best effort: a failed backup must not block the save itself.
+            try? current.write(to: backupURL, options: .atomic)
+            Self.restrictPermissions(backupURL)
         }
         do {
             try FileManager.default.createDirectory(
                 at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true
             )
-            if let current = try? Data(contentsOf: fileURL), case .ok = Self.decode(current) {
-                try current.write(to: backupURL, options: .atomic)
-                Self.restrictPermissions(backupURL)
-            }
             try data.write(to: fileURL, options: .atomic)
             Self.restrictPermissions(fileURL)
-            lastWrittenData = data
             isFileCurrent = true
         } catch {
             NiruxDebugLog.log("ProjectStore: could not save projects.json: \(error)")
@@ -119,20 +166,40 @@ final class ProjectStore {
         return isFileCurrent
     }
 
-    /// `projects.json` is missing or unreadable.
-    private func recovered(mirror: [WorkspaceProfile], markerPresent: Bool) -> [WorkspaceProfile] {
-        guard case .ok(let backup, _) = Self.read(backupURL) else {
-            return mirror // the first launch after the update, or nothing else to go on
+    // MARK: - Orphaned briefs
+
+    /// Spaces that disappeared while their brief has content: an older build
+    /// dropped a space once it had no workspace, which left its brief behind.
+    /// Each comes back under the name its brief's template recorded.
+    private func orphanedBriefSpaces(known: [WorkspaceProfile]) -> [WorkspaceProfile] {
+        let knownIDs = Set(known.map(\.id)).union(deletedIDs)
+        guard let folders = try? FileManager.default.contentsOfDirectory(atPath: briefsFolder.path) else { return [] }
+        var names = known.map(\.name)
+        var used = Set(known.map { $0.colorHex.uppercased() })
+        var adopted: [WorkspaceProfile] = []
+        for id in folders.sorted() where !knownIDs.contains(id) {
+            guard let briefURL = SpaceBrief.briefURL(spaceID: id, stateDirectory: fileURL.deletingLastPathComponent()),
+                  let text = try? String(contentsOf: briefURL, encoding: .utf8),
+                  SpaceBrief.body(of: text) != nil
+            else { continue }
+            let name = Self.uniqueName(Self.templateSpaceName(in: text) ?? "space", among: names)
+            let color = WorkspaceProfile.palette.first { !used.contains($0.hex.uppercased()) }?.hex
+                ?? WorkspaceProfile.colorHex(for: known.count + adopted.count)
+            adopted.append(WorkspaceProfile(id: id, name: name, colorHex: color))
+            names.append(name)
+            used.insert(color.uppercased())
         }
-        guard markerPresent else {
-            deletedIDs = Set(backup.deletedIDs)
-            return Self.merged(backup.projects, withMirror: mirror, deletedIDs: deletedIDs)
-        }
-        // The marker says projects.json held the mirror's spaces; the backup
-        // is one change older. A space only the backup has was deleted since.
-        let mirrorIDs = Set(mirror.map(\.id))
-        deletedIDs = Set(backup.deletedIDs).union(backup.projects.map(\.id).filter { !mirrorIDs.contains($0) })
-        return mirror
+        return adopted
+    }
+
+    /// The space name in a brief's template comment (`Brief for the space "…"`).
+    private static func templateSpaceName(in text: String) -> String? {
+        let prefix = "Brief for the space \""
+        guard let start = text.range(of: prefix),
+              let end = text[start.upperBound...].range(of: "\":")
+        else { return nil }
+        let name = text[start.upperBound..<end.lowerBound].trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? nil : name
     }
 
     // MARK: - Reading
@@ -150,7 +217,7 @@ final class ProjectStore {
 
         /// Lenient: a missing field gets a default, a project without an id
         /// (or with an id already seen) is skipped, and unknown keys are
-        /// ignored.
+        /// ignored here (see `hasUnknownKeys`).
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
@@ -203,8 +270,17 @@ final class ProjectStore {
         return .unreadable(data)
     }
 
-    /// The file's spaces with a newer mirror merged in: it may have renamed
-    /// or recolored spaces, or created new ones.
+    /// Keys this build would drop on rewrite: the file came from a newer build
+    /// even if its schemaVersion wasn't bumped.
+    private static func hasUnknownKeys(_ data: Data) -> Bool {
+        guard let top = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return false }
+        if !Set(top.keys).isSubset(of: fileKeys) { return true }
+        let projects = top["projects"] as? [[String: Any]] ?? []
+        return projects.contains { !Set($0.keys).isSubset(of: projectKeys) }
+    }
+
+    /// `projects` with a newer mirror merged in: it may have renamed or
+    /// recolored spaces, or created new ones.
     static func merged(
         _ projects: [WorkspaceProfile],
         withMirror mirror: [WorkspaceProfile],

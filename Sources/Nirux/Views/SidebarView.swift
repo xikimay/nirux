@@ -28,6 +28,9 @@ final class SidebarView: NSView {
     var onEditProfileBrief: ((String) -> Void)?
     var onRecolorProfile: ((String, String) -> Void)?
     var onDeleteProfile: ((String) -> Void)?
+    /// (workspace id, space id). By id: a close that finishes while the menu
+    /// is open can leave a card's index stale.
+    var onMoveWorkspaceToProfile: ((String, String) -> Void)?
     var onInactiveSectionCollapsedChange: ((Bool) -> Void)?
     var isExpanded: Bool = false {
         didSet {

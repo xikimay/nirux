@@ -32,11 +32,8 @@ final class SidebarDotIndicatorView: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     override func mouseDown(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        for (idx, rect) in dotRects().enumerated() where rect.insetBy(dx: -4, dy: -4).contains(point) {
-            onSelect?(items[idx].action)
-            return
-        }
+        guard let index = itemIndex(at: convert(event.locationInWindow, from: nil)) else { return }
+        onSelect?(items[index].action)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -74,8 +71,13 @@ final class SidebarDotIndicatorView: NSView {
         hoveredIndex = itemIndex(at: convert(window.mouseLocationOutsideOfEventStream, from: nil))
     }
 
+    /// The dot nearest the point among those whose hit area contains it:
+    /// with many spaces the gaps shrink and hit areas overlap.
     private func itemIndex(at point: NSPoint) -> Int? {
-        dotRects().firstIndex { $0.insetBy(dx: -4, dy: -4).contains(point) }
+        dotRects().enumerated()
+            .filter { $0.element.insetBy(dx: -4, dy: -4).contains(point) }
+            .min { abs($0.element.midX - point.x) < abs($1.element.midX - point.x) }?
+            .offset
     }
 
     override func draw(_ dirtyRect: NSRect) {

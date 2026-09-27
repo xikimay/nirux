@@ -1,12 +1,14 @@
 # Projects
 
-Status: design, partly implemented. Session names (section 1) and the space
-brief (section 4) have shipped; the rest is still a proposal.
+Status: design, partly implemented. Session names (section 1), the space brief
+(section 4) and the first step of the model (section 2) have shipped; the rest
+is still a proposal.
 
 Nirux groups workspaces into "spaces" (`WorkspaceProfile`: id, name, color).
 In practice spaces are used as projects, but a space knows nothing about its
-project: no repository, no context for the agents, no defaults, no history. It
-also disappears when its last workspace closes.
+project: no repository, no context for the agents, no defaults, no history.
+Until the first step below shipped, it also disappeared when its last workspace
+closed.
 
 This document proposes promoting spaces to **Projects**, and answers a related
 question: why not connect Nirux to claude.ai instead?
@@ -155,7 +157,7 @@ stored and managed:
   read but never written; that is logged, with no banner yet.
 - **Backups:** the previous readable version is kept as `projects.json.bak`,
   not the rotation and dailies of `state.json`. An unreadable file is copied
-  aside as `projects.corrupt.<time>.json`. If that copy fails, or the path is a
+  aside as `projects.corrupt.<time>-<random>.json`. If that copy fails, or the path is a
   directory, the file is never overwritten.
 - **Migration and rollback** use the `projectsFileVersion` marker described
   below. It is written only when `projects.json` holds the saved spaces, so a
@@ -173,6 +175,16 @@ stored and managed:
   Right-clicking lets you manage an empty space without opening a workspace in
   it. A deleted space's workspaces move to the default space, and its brief
   stays on disk. A new space takes a color no other space uses.
+- **Newer files stay intact:** a file whose schema is newer, or that has keys
+  this build doesn't know, is read but never written. Deleting a space is then
+  refused, since only `projects.json` can record it.
+- **Orphaned briefs:** a brief with content whose space is gone (an older build
+  dropped empty spaces) brings its space back at launch, under the name its
+  template recorded. Deleted spaces' briefs don't.
+- **"New Space"** reuses an empty space of the same name rather than adding
+  "name 2".
+- **Deleted spaces' ids:** a worktree request naming one (from a shell that
+  still has it in `NIRUX_PROFILE_ID`) goes to the default space.
 - **Workspace card menu:** "Move to Space". The workspace goes to the end of
   the target space. If it was selected, the selection moves to its neighbour,
   or follows it when its space is left empty. The moved workspace's shells keep
@@ -255,12 +267,9 @@ roll back.
 
 **Behavior changes:**
 
-- **Empty projects persist.** Today `saveState` only keeps `navigableProfiles`,
-  so a space dies with its last workspace. A project keeps its brief and
-  defaults, so it must survive.
-  - The switcher shows empty projects dimmed; archiving hides them.
-  - Selection needs rework: `selectProfile` refuses an empty space, and
-    selection moves away from one that empties.
+- **Empty projects persist** (shipped, see above). A project keeps its brief
+  and defaults, so it must survive its last workspace. Still to come:
+  archiving, which hides a project from the switcher.
 - **The default project** is today's default space (`WorkspaceProfile.defaultID`),
   with whatever name the user gave it. It behaves like any other project
   (rename, recolor, anchors) but can't be deleted. Deleting another project
