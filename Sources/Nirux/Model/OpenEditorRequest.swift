@@ -17,7 +17,7 @@ struct OpenEditorRequest: Equatable, Sendable {
     let file: String
     let line: Int?
     let endLine: Int?
-    let workspaceID: String?
+    var workspaceID: String?
 
     /// Upper bound for line numbers — far above any real file, low enough
     /// to reject garbage like Int.max from a hostile caller.

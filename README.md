@@ -95,7 +95,7 @@ Useful shortcuts:
 | `Cmd+P` | Command palette (fuzzy matching) |
 | `Cmd+T` | New terminal column |
 | `Cmd+B` | Open browser URL flow |
-| `Cmd+W` | Close editor tab, column, or workspace depending on context |
+| `Cmd+W` | Close editor tab, column, or workspace depending on context — asks first when a Claude or Codex session is running (Return cancels, ⌘D closes) |
 | `Cmd+1…9` | Focus column N |
 | `Cmd+Left` / `Cmd+Right` | Focus previous or next column |
 | `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column |
@@ -130,6 +130,8 @@ Nirux installs lightweight lifecycle hooks so agent status is exact instead of g
 
 Each event carries the column's stable `NIRUX_AGENT_UUID`, so status and attention signals are attributed to the exact column that emitted them — across restarts. Agents launched outside Nirux (or before the hooks were installed) fall back to simple output-activity detection. To remove the hooks, delete the marked entries from those two files.
 
+Both files are global, so every Claude Code and Codex session on the Mac runs these hooks. They are guarded on `NIRUX_AGENT_UUID`, which Nirux terminals set and processes started from them inherit: a session without it stops at a shell test and never launches Nirux, and Nirux ignores any event that arrives without it. Symlinked config files (dotfiles) are updated in place; the link is kept.
+
 ### Telegram Remote Access
 
 Telegram Remote Access is disabled by default. It uses outbound Bot API `getUpdates` long polling, so Nirux does not open a listening port and you do not need a public webhook. Nirux and the Mac must remain running and online for the bot to respond.
@@ -157,26 +159,28 @@ Nirux registers the `nirux://` URL scheme in bundled builds.
 Open a new workspace:
 
 ```text
-nirux://new-workspace?cwd=/path/to/project&title=my-task&agent=claude
+nirux://new-workspace?cwd=/path/to/project&title=my-task&agent=claude&launch=<NIRUX_LAUNCH_ID>
 ```
 
 Create a Git worktree and open it as a workspace:
 
 ```text
-nirux://new-worktree?branch=feat/example&repo=/path/to/repo&agent=codex&handover=/tmp/context.md&profile=default
+nirux://new-worktree?branch=feat/example&repo=/path/to/repo&agent=codex&handover=/tmp/nirux-handover-codex-Ab12Cd&profile=default&launch=<NIRUX_LAUNCH_ID>
 ```
 
-Supported agents are `claude` and `codex`. The optional `profile` query parameter targets the Nirux session/space that should receive the new workspace; Nirux terminals expose it as `NIRUX_PROFILE_ID` for the worktree skill. When a handover file is provided, Nirux moves it into the new worktree as `.claude-handover.md` or `.codex-handover.md`, then launches the selected agent with a prompt to read it.
+Supported agents are `claude` and `codex`. The optional `profile` query parameter targets the Nirux session/space that should receive the new workspace; Nirux terminals expose it as `NIRUX_PROFILE_ID` for the worktree skill. When a handover file is provided, Nirux moves it into the new worktree as `.claude-handover.md` or `.codex-handover.md`, then launches the selected agent with a prompt to read it. The handover must be the user's own regular file directly in `/tmp` with a name starting with `nirux-handover-` (the skill creates it with `mktemp /tmp/nirux-handover-<agent>-XXXXXX`); any other path is ignored and the worktree opens without it. An agent is only told to read a handover that this request delivered, never one that already exists in the folder.
+
+Any app or web page can open a `nirux://` URL, so every action runs without asking only when it carries `launch=` with the current value of `NIRUX_LAUNCH_ID`. Nirux generates that value at each launch and exports it to its terminals; the bundled skills pass it automatically. Without it, or with a value from before Nirux last restarted (for example from inside tmux), Nirux shows a confirmation that spells out the folder or file, branch, agent, and permission mode before doing anything; a confirmed request opens in the space you are looking at and can't link to a Mission. After updating Nirux, run `Install Agent Skills` again so installed skills pass the launch ID.
 
 When Mission handoffs are enabled, the optional `parentWorkspace` and `parentAgent` query parameters identify the delegating Nirux workspace and terminal by UUID. Supplying both creates the parent/child Mission record; the bundled `nirux-worktree` skill adds them automatically. See [Mission handoffs](#mission-handoffs-experimental) for the user workflow.
 
 Open a file in the editor column at a line range (used by agents to show code instead of pasting it into the terminal):
 
 ```text
-nirux://open-editor?file=/path/to/file.swift&line=42&endLine=57&workspace=<NIRUX_WORKSPACE_ID>
+nirux://open-editor?file=/path/to/file.swift&line=42&endLine=57&workspace=<NIRUX_WORKSPACE_ID>&launch=<NIRUX_LAUNCH_ID>
 ```
 
-`file` must be an absolute, URL-encoded path to an existing regular text file of at most 5 MB (binaries are refused; symlinks are resolved). `line` and `endLine` are optional 1-based line numbers; when both are present the editor highlights the whole range. `workspace` is optional — when it matches a workspace ID (Nirux terminals expose it as `NIRUX_WORKSPACE_ID`), Nirux switches to that workspace first. The open never pops dialogs; Nirux comes to the front, but keyboard focus stays in the column the user was working in — it never lands in the editor buffer.
+`file` must be an absolute, URL-encoded path to an existing regular text file of at most 5 MB (binaries are refused; symlinks are resolved). `line` and `endLine` are optional 1-based line numbers; when both are present the editor highlights the whole range. `workspace` is optional — when it matches a workspace ID (Nirux terminals expose it as `NIRUX_WORKSPACE_ID`), Nirux switches to that workspace first. With a valid `launch=<NIRUX_LAUNCH_ID>` the file opens and Nirux comes to the front without a dialog; without it, Nirux first asks for confirmation (like the other actions), so a web page can't put an arbitrary file on screen. Keyboard focus stays in the column the user was working in — it never lands in the editor buffer.
 
 The command palette action `Install Agent Skills` writes the bundled skills to:
 
@@ -209,6 +213,16 @@ Run from SwiftPM:
 swift run Nirux
 ```
 
+A development build otherwise restores and saves the installed app's workspaces. Isolate smoke runs:
+
+```bash
+NIRUX_STATE_DIR=/tmp/nirux-dev swift run Nirux
+```
+
+`NIRUX_STATE_DIR` moves workspaces, settings, Activity and Mission history, and agent hook events out of `~/Library/Application Support/nirux/` (`HOME` is ignored). URL history, the Keychain (Telegram token), and the `nirux://` scheme stay shared with the installed app.
+
+Only a Nirux running from an `.app` bundle installs the agent hooks, so `swift run` leaves `~/.claude/settings.json` and `~/.codex/config.toml` alone. The hooks the installed app wrote keep working, and agents in the dev build's terminals report into its state directory. To test installer changes, set `NIRUX_FORCE_HOOK_INSTALL=1`; this points the global hooks at the dev binary until the installed app is relaunched. `NIRUX_SKIP_HOOK_INSTALL=1` disables the install for any build; set it when launching a local `bundle.sh` bundle for a smoke test, which would otherwise point the hooks at that bundle.
+
 Create a local app bundle:
 
 ```bash
@@ -227,7 +241,7 @@ NIRUX_CODESIGN_IDENTITY="Developer ID Application: Example Name (ABCDE12345)" \
 
 Nirux is a Swift Package with an AppKit executable target:
 
-- `Sources/Nirux/NiruxApp.swift`: app delegate, menus, URL scheme, Sparkle setup.
+- `Sources/Nirux/NiruxApp.swift`: app delegate, menus, Sparkle setup; `NiruxApp+URLScheme.swift` routes `nirux://` URLs.
 - `Sources/Nirux/Views/NiruxShellView.swift`: workspace and column layout.
 - `Sources/Nirux/Model`: persisted workspace, column, and settings state.
 - `Sources/Nirux/Content`: PTY session handling and browser cookie import.
