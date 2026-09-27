@@ -20,10 +20,11 @@ extension NiruxShellView {
 
     /// Every step as it is on disk now.
     func currentOnboardingChecklist() -> OnboardingChecklist {
-        OnboardingChecklist(
-            agents: AgentCLILocator.locate(),
-            skills: AgentSkillsInstaller.status(of: Self.agentSkills, home: NSHomeDirectory()),
-            hooks: AgentHookInstaller.status()
+        let home = sideEffects.homeDirectory()
+        return OnboardingChecklist(
+            agents: AgentCLILocator.locate(home: home),
+            skills: AgentSkillsInstaller.status(of: Self.agentSkills, home: home),
+            hooks: AgentHookInstaller.status(home: URL(fileURLWithPath: home))
         )
     }
 
