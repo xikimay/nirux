@@ -34,13 +34,43 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    struct AttentionText: Equatable {
+        let title: String
+        let subtitle: String
+        let body: String
+    }
+
+    /// "claude needs permission" / workspace / "Bash: git push origin main".
+    /// Every agent-provided part is cleaned (no control characters) and
+    /// bounded; without specifics the workspace title is the body.
+    nonisolated static func attentionText(
+        processName: String,
+        workspaceTitle: String,
+        reason: AgentAttentionReason?
+    ) -> AttentionText {
+        let name = AgentText.clean(processName, maxLength: 60) ?? "Agent"
+        let headline = reason?.headline ?? "needs you"
+        guard let detail = reason?.detailLine.flatMap({ AgentText.clean($0, maxLength: 200) }) else {
+            return AttentionText(title: "\(name) \(headline)", subtitle: "", body: workspaceTitle)
+        }
+        return AttentionText(title: "\(name) \(headline)", subtitle: workspaceTitle, body: detail)
+    }
+
     /// Post a system notification for an agent event. Suppressed while the
     /// app is active — in-app visuals already cover that case.
-    func postAgentAttention(workspaceID: String, workspaceTitle: String, columnIndex: Int?, processName: String) {
+    func postAgentAttention(
+        workspaceID: String,
+        workspaceTitle: String,
+        columnIndex: Int?,
+        processName: String,
+        reason: AgentAttentionReason?
+    ) {
         guard !NSApp.isActive else { return }
+        let text = Self.attentionText(processName: processName, workspaceTitle: workspaceTitle, reason: reason)
         let content = UNMutableNotificationContent()
-        content.title = "\(processName) needs you"
-        content.body = workspaceTitle
+        content.title = text.title
+        content.subtitle = text.subtitle
+        content.body = text.body
         content.sound = .default
         var info: [String: Any] = ["workspaceID": workspaceID]
         if let columnIndex { info["columnIndex"] = columnIndex }

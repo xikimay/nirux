@@ -9,8 +9,11 @@ struct RemoteAgentSession: Equatable, Sendable {
     let cwd: String
     let status: AgentStatus
     let recentOutput: String
+    /// A dialog the agent may be showing (see `PtySession.pendingAgentDialog`).
+    var pendingDialog: AgentAttentionReason?
 
     var statusLabel: String {
+        if let pendingDialog { return RemoteDialogText.waitingLabel(pendingDialog) }
         switch status {
         case .idle: return "idle"
         case .working: return "working"
@@ -21,8 +24,56 @@ struct RemoteAgentSession: Equatable, Sendable {
 
 enum RemotePromptResult: Equatable, Sendable {
     case sent(RemoteAgentSession)
+    /// Not typed: the agent may be showing a dialog, where the prompt's
+    /// text and Enter would answer it (approve a command, pick an option).
+    case blockedByDialog(RemoteAgentSession)
     case sessionUnavailable
     case emptyPrompt
+}
+
+/// How Telegram names a dialog. Tool names only: command excerpts and
+/// question texts stay on the Mac.
+enum RemoteDialogText {
+    static func waitingLabel(_ dialog: AgentAttentionReason) -> String {
+        switch dialog {
+        case .question: return "waiting for an answer"
+        case .permission(let tool, _) where tool == "ExitPlanMode": return "waiting for plan approval"
+        case .permission(let tool?, _): return "waiting for permission (\(tool))"
+        default: return "waiting for permission"
+        }
+    }
+
+    static func attentionLabel(_ attention: AgentAttentionReason) -> String {
+        switch attention {
+        case .permission(let tool, _) where tool == "ExitPlanMode": return "Agent needs plan approval"
+        case .permission: return "Agent needs permission"
+        case .question: return "Agent has a question"
+        case .turnFinished: return "Agent is waiting for input"
+        case .message: return "Agent needs attention"
+        }
+    }
+
+    /// Label and body of an attention notification: Claude's own message,
+    /// plus the tool a permission is for.
+    static func attentionNotification(
+        _ attention: AgentAttentionReason,
+        message: String?
+    ) -> (label: String, detail: String?) {
+        var detail = message
+        if case .permission(let tool?, _) = attention, tool != "ExitPlanMode" {
+            detail = ["Tool: \(tool)", message].compactMap { $0 }.joined(separator: "\n")
+        }
+        return (attentionLabel(attention), detail)
+    }
+
+    static func blockedPromptMessage(for session: RemoteAgentSession) -> String {
+        let dialog = session.pendingDialog.map(waitingLabel) ?? "waiting for permission"
+        return "Not sent: \(session.workspaceTitle) · column \(session.columnIndex + 1) is \(dialog). "
+            + "A prompt typed now would land in that dialog and could answer it. "
+            + "Answer it in Nirux. Remote prompts resume once Claude shows the dialog closed "
+            + "(the tool call finishes, the turn ends, or a prompt is sent from Nirux); "
+            + "a denied dialog shows nothing until then."
+    }
 }
 
 enum RemotePromptSanitizer {

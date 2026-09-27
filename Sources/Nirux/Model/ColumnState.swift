@@ -24,7 +24,8 @@ final class ColumnState {
     var onTitleChanged: (() -> Void)?
     /// Fires when the agent asks for attention (hook-routed turn end /
     /// permission prompt while the user isn't watching this column).
-    var onAgentAttention: (() -> Void)?
+    /// The agent asks for the user (alert), with why when known.
+    var onAgentAttention: ((AgentAttentionReason?) -> Void)?
 
     /// Fires when the user cmd-clicks an http(s) link in the terminal —
     /// the workspace opens it in a browser column.
@@ -256,7 +257,7 @@ final class ColumnState {
 
         // Forward OSC 9 (turn complete for sessions without hook coverage)
         ptySession.onOsc9Received = { [weak self] in
-            self?.onAgentAttention?()
+            self?.onAgentAttention?(nil)
         }
 
         ptySession.onLocalServerURL = { [weak self] url in
@@ -321,8 +322,8 @@ final class ColumnState {
 
     /// AgentHookCenter entry point: the agent in this column just asked for
     /// attention — forward to the workspace-level notification wiring.
-    func notifyAgentAttention() {
-        onAgentAttention?()
+    func notifyAgentAttention(reason: AgentAttentionReason?) {
+        onAgentAttention?(reason)
     }
 
     func prepareCodexResume(sessionID: String) {

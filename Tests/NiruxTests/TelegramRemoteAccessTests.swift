@@ -361,6 +361,56 @@ final class TelegramRemoteAccessTests: XCTestCase {
         XCTAssertTrue(delivered)
     }
 
+    func testRemotePromptsWaitForAnOpenDialog() {
+        var session = Self.makeStaticSession()
+        XCTAssertEqual(session.statusLabel, "working")
+        session.pendingDialog = .permission(tool: "Bash", summary: "curl -H 'Authorization: secret'")
+        XCTAssertEqual(session.statusLabel, "waiting for permission (Bash)")
+        let message = RemoteDialogText.blockedPromptMessage(for: session)
+        XCTAssertTrue(message.hasPrefix("Not sent: Checkout · column 1 is waiting for permission (Bash)."))
+        XCTAssertFalse(message.contains("secret"), "command excerpts stay on the Mac")
+        session.pendingDialog = .question("Which DB?")
+        XCTAssertEqual(session.statusLabel, "waiting for an answer")
+        XCTAssertFalse(RemoteDialogText.blockedPromptMessage(for: session).contains("Which DB"))
+        session.pendingDialog = .permission(tool: "ExitPlanMode", summary: nil)
+        XCTAssertEqual(session.statusLabel, "waiting for plan approval")
+    }
+
+    /// The gate's source of truth: a PermissionRequest leaves a pending
+    /// dialog on the column's PTY until hooks prove it closed.
+    func testPtyKeepsPendingDialogUntilItsCallRuns() {
+        let pty = PtySession()
+        let request = AgentHookEvent(
+            kind: .claude, name: .permissionRequest, toolName: "Bash", toolSummary: "make", toolKey: "k", timestamp: 1
+        )
+        _ = pty.applyAgentHook(request, isUserFocused: true)
+        XCTAssertEqual(pty.pendingAgentDialog?.reason, .permission(tool: "Bash", summary: "make"))
+        _ = pty.applyAgentHook(
+            AgentHookEvent(kind: .claude, name: .preToolUse, toolName: "Read", timestamp: 2), isUserFocused: true
+        )
+        XCTAssertNotNil(pty.pendingAgentDialog, "another call starting proves nothing")
+        _ = pty.applyAgentHook(
+            AgentHookEvent(kind: .claude, name: .postToolUse, toolName: "Bash", toolKey: "k", timestamp: 3),
+            isUserFocused: true
+        )
+        XCTAssertNil(pty.pendingAgentDialog)
+    }
+
+    func testAttentionLabels() {
+        XCTAssertEqual(RemoteDialogText.attentionLabel(.permission(tool: "Bash", summary: nil)),
+                       "Agent needs permission")
+        XCTAssertEqual(RemoteDialogText.attentionLabel(.permission(tool: "ExitPlanMode", summary: nil)),
+                       "Agent needs plan approval")
+        XCTAssertEqual(RemoteDialogText.attentionLabel(.question(nil)), "Agent has a question")
+        XCTAssertEqual(RemoteDialogText.attentionLabel(.turnFinished), "Agent is waiting for input")
+        XCTAssertEqual(RemoteDialogText.attentionLabel(.message("x")), "Agent needs attention")
+        let permission = RemoteDialogText.attentionNotification(
+            .permission(tool: "Bash", summary: "secret command"), message: "Claude needs your permission to use Bash"
+        )
+        XCTAssertEqual(permission.detail, "Tool: Bash\nClaude needs your permission to use Bash")
+        XCTAssertEqual(RemoteDialogText.attentionNotification(.question("q"), message: nil).detail, nil)
+    }
+
     func testPairingStatusIncludesPollingError() {
         let state = TelegramRemoteAccessDisplayState(
             enabled: true,

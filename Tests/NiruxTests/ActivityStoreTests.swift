@@ -462,11 +462,12 @@ final class ActivityStoreTests: XCTestCase {
     func testHookCenterRoutesAttentionAndTurnCompleteIntoActivity() {
         let store = makeStore()
         let center = AgentHookCenter()
-        center.onEventReceived = { event, resolution in
+        center.onEventReceived = { event, resolution, outcome in
             store.record(
                 event,
                 workspaceTitle: resolution?.workspace.title ?? event.cwd ?? "External agent",
-                columnIndex: resolution?.columnIndex
+                columnIndex: resolution?.columnIndex,
+                outcome: outcome
             )
         }
 
@@ -474,6 +475,53 @@ final class ActivityStoreTests: XCTestCase {
         center.dispatch(makeEvent(.turnComplete, kind: .codex, detail: "done"))
 
         XCTAssertEqual(store.feedEntries.map(\.category), [.turnComplete, .attention])
+    }
+
+    /// The feed is "while you were away": a PermissionRequest shows in its
+    /// column at once, and the row comes with Claude's reminder (sent only
+    /// when nobody answered), carrying the request's details.
+    func testUnansweredPermissionRowSaysWhatIsAsked() throws {
+        var machine = AgentStatusMachine()
+        let request = AgentHookEvent(
+            kind: .claude, name: .permissionRequest, agentUUID: "u1", detail: "Bash",
+            toolName: "Bash", toolSummary: "git push origin main", toolKey: "k", timestamp: 10
+        )
+        let requestOutcome = machine.apply(request, isUserFocused: false)
+        XCTAssertNil(ActivityEntry(event: request, workspaceTitle: "ws", columnIndex: 0, outcome: requestOutcome))
+
+        let reminder = AgentHookEvent(
+            kind: .claude, name: .notification, agentUUID: "u1",
+            detail: "Claude needs your permission to use Bash", notificationType: "permission_prompt", timestamp: 16
+        )
+        let reminderOutcome = machine.apply(reminder, isUserFocused: false)
+        let row = try XCTUnwrap(ActivityEntry(event: reminder, workspaceTitle: "ws", columnIndex: 0, outcome: reminderOutcome))
+        XCTAssertEqual(row.category, .attention)
+        XCTAssertEqual(row.detail, "permission: Bash · git push origin main")
+        // Without a PermissionRequest before it, Claude's message is the row.
+        XCTAssertEqual(
+            ActivityEntry(event: reminder, workspaceTitle: "ws", columnIndex: 0)?.detail,
+            "Claude needs your permission to use Bash"
+        )
+    }
+
+    func testQuestionRowAndInformationalNotifications() throws {
+        var machine = AgentStatusMachine()
+        _ = machine.apply(
+            AgentHookEvent(kind: .claude, name: .permissionRequest, toolName: "AskUserQuestion",
+                           toolSummary: "Which DB?", toolKey: "q", timestamp: 1),
+            isUserFocused: false
+        )
+        let reminder = AgentHookEvent(kind: .claude, name: .notification, notificationType: "permission_prompt", timestamp: 8)
+        let outcome = machine.apply(reminder, isUserFocused: false)
+        XCTAssertEqual(
+            ActivityEntry(event: reminder, workspaceTitle: "ws", columnIndex: nil, outcome: outcome)?.detail,
+            "question: Which DB?"
+        )
+        let auth = AgentHookEvent(kind: .claude, name: .notification, detail: "Signed in", notificationType: "auth_success")
+        XCTAssertNil(ActivityEntry(event: auth, workspaceTitle: "ws", columnIndex: nil))
+        for name: AgentHookEvent.Name in [.permissionRequest, .postToolUse, .subagentStop] {
+            XCTAssertNil(ActivityEntry(event: AgentHookEvent(kind: .claude, name: name), workspaceTitle: "ws", columnIndex: nil))
+        }
     }
 
     func testInitialReadTimestampWithoutSidecarTreatsHistoryAsRead() {

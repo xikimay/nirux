@@ -226,7 +226,7 @@ struct ClaudeSessionTracker {
         guard let sessionID else { return .accepted }
         if sessionID == boundSessionID {
             confirmedSessionID = sessionID
-            let isPrompted = name == .userPromptSubmit || name == .stop || name == .preToolUse
+            let isPrompted = [.userPromptSubmit, .stop, .preToolUse, .permissionRequest, .postToolUse].contains(name)
                 || (name == .sessionStart && source == "compact")
             guard isPrompted, unpromptedSessionID == sessionID else { return .accepted }
             unpromptedSessionID = nil
@@ -235,7 +235,7 @@ struct ClaudeSessionTracker {
         // The foreground `claude` reports another conversation. /clear,
         // /resume and /branch switch through SessionStart. Turn events only
         // adopt a column that is unbound or was never prompted: otherwise a
-        // different ID there may be an in-process teammate's. PreToolUse may
+        // different ID there may be an in-process teammate's. Tool events may
         // come from a subagent. A SessionEnd is the straggler of the session
         // just left.
         switch name {
@@ -245,7 +245,7 @@ struct ClaudeSessionTracker {
             guard boundSessionID == nil || boundSessionID == unpromptedSessionID else { return .accepted }
         case .sessionEnd:
             return boundSessionID == nil ? .accepted : .rejected
-        case .preToolUse, .turnComplete:
+        case .preToolUse, .permissionRequest, .postToolUse, .subagentStop, .turnComplete:
             return .accepted
         }
         let changed = session.bind(sessionID: sessionID, process: foregroundProcess.instance)
