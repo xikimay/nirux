@@ -19,7 +19,8 @@ extension NiruxShellView {
         profileID requestedProfileID: String? = nil,
         workspaceID: String = UUID().uuidString,
         initialAgentUUID: String = UUID().uuidString,
-        missionID: String? = nil
+        missionID: String? = nil,
+        deliveredHandover: Bool = false
     ) {
         let snapshot: NSImageView? = {
             guard let rep = viewport.bitmapImageRepForCachingDisplay(in: viewport.bounds) else { return nil }
@@ -55,7 +56,7 @@ extension NiruxShellView {
 
         // Launch agent in the new workspace's terminal
         if let agent {
-            launchAgent(agent, in: workspace)
+            launchAgent(agent, in: workspace, deliveredHandover: deliveredHandover)
         }
 
         if let snapshot {
@@ -71,27 +72,36 @@ extension NiruxShellView {
         }
     }
 
-    private func launchAgent(_ agent: NiruxApp.WorkspaceAgent, in workspace: WorkspaceState) {
-        guard let col = workspace.columns[safe: workspace.focusedIndex] else { return }
-        let handoverName = Self.handoverFilename(for: agent)
-        let handoverPath = workspace.cwd + "/\(handoverName)"
-        let hasHandover = FileManager.default.fileExists(atPath: handoverPath)
+    /// Startup prompt for a freshly launched agent. The handover line is
+    /// only added when this very request delivered one: a handover file that
+    /// merely exists in the folder (committed to the branch, left by an
+    /// earlier session, shipped in a downloaded archive) is never followed.
+    nonisolated static func agentStartupPrompt(
+        agent: NiruxApp.WorkspaceAgent, deliveredHandover: Bool, isMission: Bool
+    ) -> String? {
+        var instructions: [String] = []
+        if deliveredHandover {
+            let handoverName = handoverFilename(for: agent)
+            instructions.append("Read \(handoverName) for full context, then proceed with the next steps described there.")
+        }
+        if isMission {
+            instructions.append(
+                "This is a Nirux mission workspace. Ask the parent and wait safely with "
+                + "\"$NIRUX_CLI_PATH\" --mission ask --message \"...\" --timeout 900; "
+                + "the command output is the parent's answer. Report the final result with "
+                + "\"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
+            )
+        }
+        return instructions.isEmpty ? nil : instructions.joined(separator: " ")
+    }
 
-        let handoverPrompt: String? = {
-            var instructions: [String] = []
-            if hasHandover {
-                instructions.append("Read \(handoverName) for full context, then proceed with the next steps described there.")
-            }
-            if workspace.missionID != nil {
-                instructions.append(
-                    "This is a Nirux mission workspace. Ask the parent and wait safely with "
-                    + "\"$NIRUX_CLI_PATH\" --mission ask --message \"...\" --timeout 900; "
-                    + "the command output is the parent's answer. Report the final result with "
-                    + "\"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
-                )
-            }
-            return instructions.isEmpty ? nil : instructions.joined(separator: " ")
-        }()
+    private func launchAgent(_ agent: NiruxApp.WorkspaceAgent, in workspace: WorkspaceState, deliveredHandover: Bool) {
+        guard let col = workspace.columns[safe: workspace.focusedIndex] else { return }
+        let handoverPrompt = Self.agentStartupPrompt(
+            agent: agent,
+            deliveredHandover: deliveredHandover,
+            isMission: workspace.missionID != nil
+        )
 
         let cmd: String
         switch agent {

@@ -476,7 +476,8 @@ extension WorkspaceState {
             agentUUID: agentUUID,
             missionID: missionID,
             missionHandoffsEnabled: missionHandoffsEnabled,
-            executablePath: Bundle.main.executableURL?.path
+            executablePath: Bundle.main.executableURL?.path,
+            launchID: NiruxLaunchAuthorization.launchID
         )
     }
 
@@ -491,13 +492,16 @@ extension WorkspaceState {
         agentUUID: String,
         missionID: String?,
         missionHandoffsEnabled: Bool,
-        executablePath: String?
+        executablePath: String?,
+        launchID: String
     ) -> [String: String] {
         var environment = [
             "NIRUX_PROFILE_ID": profileID,
             "NIRUX_WORKSPACE_ID": workspaceID,
             // Hook events carry this back — see AgentHookCenter.
-            "NIRUX_AGENT_UUID": agentUUID
+            "NIRUX_AGENT_UUID": agentUUID,
+            // Authorizes nirux:// requests from this terminal's agents.
+            NiruxLaunchAuthorization.environmentKey: launchID
         ]
         if missionHandoffsEnabled {
             environment["NIRUX_MISSION_HANDOFFS"] = "1"

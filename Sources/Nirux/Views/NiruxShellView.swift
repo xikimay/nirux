@@ -563,28 +563,28 @@ extension NiruxShellView {
                     runningAgent = nil
                 }
                 if let runningAgent {
-                    let profileID = self.activeProfileID
-                    let dirName = branch.replacingOccurrences(of: "/", with: "-")
-                    let handoverFileName = Self.handoverFilename(for: runningAgent)
-                    let handoverTmp = "/tmp/nirux-handover-\(runningAgent.rawValue)-\(dirName).md"
-                    let queryAllowed = CharacterSet.urlQueryAllowed
-                    let missionQuery: String = {
-                        guard Self.currentMissionHandoffsEnabled(),
-                              let workspaceID = self.activeWorkspace?.id,
-                              let agentUUID = col?.agentUUID
-                        else { return "" }
-                        return "&parentWorkspace=\(workspaceID)&parentAgent=\(agentUUID)"
-                    }()
-                    let url = "nirux://new-worktree"
-                        + "?branch=\(branch.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? branch)"
-                        + "&repo=\(repoRoot.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? repoRoot)"
-                        + "&agent=\(runningAgent.rawValue)"
-                        + "&handover=\(handoverTmp.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? handoverTmp)"
-                        + "&profile=\(profileID.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? profileID)"
-                        + missionQuery
-                    let prompt = "Write a concise session handover to \(handoverTmp) "
-                        + "(sections: Goal, Context, Done so far, Next steps). "
-                        + "Nirux will move it into the new worktree as \(handoverFileName). "
+                    // Pre-created (O_EXCL, unguessable name) so the agent writes
+                    // into a file the user owns, never through a planted symlink.
+                    guard let handoverPath = HandoverFile.makeEmptySource(agent: runningAgent.rawValue) else {
+                        self.presentProblem("Couldn’t create a handover file in /tmp", "The worktree opens without one.")
+                        self.addWorkspace(title: branch, cwd: path, agent: runningAgent)
+                        return
+                    }
+                    let isMission = Self.currentMissionHandoffsEnabled()
+                    let request = NiruxURLRequest.NewWorktree(
+                        branch: branch, repo: repoRoot, agent: runningAgent, handoverPath: handoverPath,
+                        parentWorkspaceID: isMission ? self.activeWorkspace?.id : nil,
+                        parentAgentUUID: isMission ? col?.agentUUID : nil
+                    )
+                    var expected = request
+                    expected.repo = repoRoot.realPath ?? repoRoot
+                    InAppWorktreeTickets.issue(
+                        for: expected, profileID: self.activeProfileID, now: ProcessInfo.processInfo.systemUptime
+                    )
+                    let url = Self.inAppWorktreeURL(for: request, profileID: self.activeProfileID)
+                    let prompt = "Write a concise session handover into \(handoverPath) "
+                        + "(sections: Goal, Context, Done so far, Next steps; Nirux created the file empty). "
+                        + "Nirux will move it into the new worktree as \(Self.handoverFilename(for: runningAgent)). "
                         + "Then run: open \"\(url)\"\n"
                     col?.pty?.sendRaw(prompt)
                 } else {
