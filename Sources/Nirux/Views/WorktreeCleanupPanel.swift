@@ -1,11 +1,12 @@
 import AppKit
 
 /// "Clean Up Merged Worktrees…": every worktree a workspace is open in,
-/// with the outcome of its checks as they come in. Ready ones are checked
-/// (unless an agent is busy), the others disabled with the reason. A sheet
-/// on the main window, so the workspaces can't change underneath it. The
-/// shell confirms the selection, then cleans up one worktree at a time and
-/// reports on each row.
+/// then the other worktrees of the same repositories, with the outcome of
+/// their checks as they come in. Ready ones are checked when nothing
+/// argues against it (see `WorktreeCleanupCandidate.Availability`), the
+/// others disabled with the reason. A sheet on the main window. The shell
+/// confirms the selection, then cleans up one worktree at a time and
+/// reports on each row; Stop ends the run after the current one.
 @MainActor
 final class WorktreeCleanupPanel: NSObject {
     enum RowResult: Equatable {
@@ -23,27 +24,36 @@ final class WorktreeCleanupPanel: NSObject {
     private(set) var checkedPaths: Set<String> = []
     private var results: [String: RowResult] = [:]
     private(set) var isRunning = false
+    private(set) var stopRequested = false
     private var isFinished = false
+    /// While the shell's confirmation is up: rows whose check lands then
+    /// are not checked behind the user's back.
+    var isConfirming = false
+    private var scannedRepositories: Set<String> = []
+    private var knownPaths: Set<String> = []
 
     private var panel: NSPanel?
     private weak var parentWindow: NSWindow?
+    private var listView: FlippedView?
+    private var emptyLabel: NSTextField?
     private var checkboxes: [String: NSButton] = [:]
     private var detailLabels: [String: NSTextField] = [:]
     private var statusLabel: NSTextField?
     private var cleanUpButton: NSButton?
     private var cancelButton: NSButton?
+    private var selectAllButton: NSButton?
 
-    private static let size = NSSize(width: 720, height: 560)
+    private static let size = NSSize(width: 760, height: 580)
     private static let rowHeight: CGFloat = 48
 
-    var isVisible: Bool { panel?.isVisible == true }
+    /// New worktrees are listed only before the run starts.
+    var acceptsNewRows: Bool { panel != nil && !isRunning && !isFinished }
 
     func show(attachedTo window: NSWindow, candidates: [WorktreeCleanupCandidate]) {
-        self.candidates = candidates
         parentWindow = window
         let panel = buildPanel()
         self.panel = panel
-        for candidate in candidates { render(candidate) }
+        for candidate in candidates { append(candidate) }
         updateControls()
         window.beginSheet(panel)
     }
@@ -52,10 +62,29 @@ final class WorktreeCleanupPanel: NSObject {
         panel?.makeKeyAndOrderFront(nil)
     }
 
+    func append(_ candidate: WorktreeCleanupCandidate) {
+        let key = NiruxShellView.comparablePath(candidate.path)
+        guard knownPaths.insert(key).inserted else { return }
+        candidates.append(candidate)
+        addRow(for: candidate, at: candidates.count - 1)
+        render(candidate)
+        updateControls()
+    }
+
+    func contains(comparablePath: String) -> Bool {
+        knownPaths.contains(comparablePath)
+    }
+
+    /// True the first time a repository is seen.
+    func markRepositoryScanned(_ mainCheckout: String) -> Bool {
+        scannedRepositories.insert(mainCheckout).inserted
+    }
+
     func update(path: String, inspection: WorktreeCleanup.Inspection) {
         guard let index = candidates.firstIndex(where: { $0.path == path }) else { return }
         candidates[index].inspection = inspection
-        if case .ready(_, preselected: true) = candidates[index].availability, !isRunning, !isFinished {
+        if case .ready(_, preselected: true) = candidates[index].availability,
+           !isConfirming, !isRunning, !isFinished {
             checkedPaths.insert(path)
         }
         render(candidates[index])
@@ -112,11 +141,17 @@ final class WorktreeCleanupPanel: NSObject {
 
     private func updateControls() {
         let selectedCount = selectedCandidates.count
+        let isEditable = !isRunning && !isFinished
         cleanUpButton?.title = selectedCount == 0 ? "Clean Up…" : "Clean Up \(selectedCount)…"
-        cleanUpButton?.isEnabled = selectedCount > 0 && !isRunning && !isFinished
-        cancelButton?.title = isFinished ? "Done" : "Cancel"
-        cancelButton?.isEnabled = !isRunning
+        cleanUpButton?.isEnabled = selectedCount > 0 && isEditable
+        selectAllButton?.isEnabled = isEditable && candidates.contains {
+            if case .ready = $0.availability { return !checkedPaths.contains($0.path) }
+            return false
+        }
+        cancelButton?.title = isFinished ? "Done" : isRunning ? "Stop" : "Cancel"
+        cancelButton?.isEnabled = !(isRunning && stopRequested)
         statusLabel?.stringValue = statusText()
+        emptyLabel?.isHidden = !candidates.isEmpty
     }
 
     private func statusText() -> String {
@@ -124,7 +159,8 @@ final class WorktreeCleanupPanel: NSObject {
             let done = results.values.filter { if case .done = $0 { return true } else { return false } }.count
             let failed = results.values.filter { if case .failed = $0 { return true } else { return false } }.count
             let failures = failed > 0 ? " · \(failed) failed" : ""
-            return isRunning ? "Cleaning up… \(done) done\(failures)" : "Finished: \(done) done\(failures)"
+            if isRunning { return stopRequested ? "Stopping after this one…" : "Cleaning up… \(done) done\(failures)" }
+            return "Finished: \(done) done\(failures)"
         }
         let checking = candidates.filter { $0.inspection == nil }.count
         if checking > 0 { return "Checking \(candidates.count - checking) of \(candidates.count)…" }
@@ -143,7 +179,10 @@ final class WorktreeCleanupPanel: NSObject {
                 .foregroundColor: NSColor.white.withAlphaComponent(0.9)
             ]
         )
-        checkbox.toolTip = candidate.path
+        let workspaces = candidate.workspaces.isEmpty
+            ? "No workspace"
+            : "Workspaces: \(WorktreeCleanupCandidate.quotedList(candidate.workspaces.map(\.title)))"
+        checkbox.toolTip = "\(candidate.path)\n\(workspaces)"
         checkbox.isEnabled = Self.isSelectable(candidate) && !isRunning && !isFinished
         checkbox.state = checkedPaths.contains(candidate.path) && Self.isSelectable(candidate) ? .on : .off
 
@@ -201,13 +240,14 @@ final class WorktreeCleanupPanel: NSObject {
 
         let explanation = NSTextField(wrappingLabelWithString:
             "For each checked worktree whose pull request is merged: deletes its folder and its local branch, "
-            + "then closes the workspaces open in it. Remote branches are never touched, and nothing is merged.")
+            + "moves its handover and other leftovers to the Trash, then closes the workspaces open in it. "
+            + "Remote branches are never touched, and nothing is merged.")
         explanation.font = .systemFont(ofSize: 11.5)
         explanation.textColor = NSColor.white.withAlphaComponent(0.5)
-        explanation.frame = NSRect(x: 24, y: size.height - 84, width: size.width - 48, height: 32)
+        explanation.frame = NSRect(x: 24, y: size.height - 98, width: size.width - 48, height: 46)
         container.addSubview(explanation)
 
-        let listFrame = NSRect(x: 16, y: 64, width: size.width - 32, height: size.height - 64 - 96)
+        let listFrame = NSRect(x: 16, y: 64, width: size.width - 32, height: size.height - 64 - 110)
         let scroll = NSScrollView(frame: listFrame)
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
@@ -217,38 +257,26 @@ final class WorktreeCleanupPanel: NSObject {
         scroll.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.03).cgColor
         scroll.layer?.borderWidth = 1
         scroll.layer?.borderColor = NSColor.white.withAlphaComponent(0.07).cgColor
-        let listHeight = max(listFrame.height, CGFloat(candidates.count) * Self.rowHeight + 8)
-        let list = FlippedView(frame: NSRect(x: 0, y: 0, width: listFrame.width, height: listHeight))
-        for (index, candidate) in candidates.enumerated() {
-            let top = 4 + CGFloat(index) * Self.rowHeight
-            let checkbox = NSButton(checkboxWithTitle: candidate.title, target: self, action: #selector(toggle(_:)))
-            checkbox.identifier = NSUserInterfaceItemIdentifier(candidate.path)
-            checkbox.frame = NSRect(x: 14, y: top + 6, width: listFrame.width - 28, height: 18)
-            checkbox.lineBreakMode = .byTruncatingMiddle
-            list.addSubview(checkbox)
-            let detail = NSTextField(labelWithString: "")
-            detail.font = .systemFont(ofSize: 11)
-            detail.lineBreakMode = .byTruncatingTail
-            detail.frame = NSRect(x: 34, y: top + 25, width: listFrame.width - 48, height: 16)
-            list.addSubview(detail)
-            checkboxes[candidate.path] = checkbox
-            detailLabels[candidate.path] = detail
-        }
-        if candidates.isEmpty {
-            let empty = NSTextField(labelWithString: "No workspace is open in a linked worktree.")
-            empty.font = .systemFont(ofSize: 12)
-            empty.textColor = NSColor.white.withAlphaComponent(0.45)
-            empty.alignment = .center
-            empty.frame = NSRect(x: 0, y: listFrame.height / 2 - 10, width: listFrame.width, height: 18)
-            list.addSubview(empty)
-        }
+        let list = FlippedView(frame: NSRect(x: 0, y: 0, width: listFrame.width, height: listFrame.height))
+        let empty = NSTextField(labelWithString: "No workspace is open in a linked worktree.")
+        empty.font = .systemFont(ofSize: 12)
+        empty.textColor = NSColor.white.withAlphaComponent(0.45)
+        empty.alignment = .center
+        empty.frame = NSRect(x: 0, y: listFrame.height / 2 - 10, width: listFrame.width, height: 18)
+        list.addSubview(empty)
         scroll.documentView = list
         container.addSubview(scroll)
+
+        let selectAll = NSButton(title: "Select All Ready", target: self, action: #selector(selectAllReady))
+        selectAll.bezelStyle = .rounded
+        selectAll.frame = NSRect(x: 18, y: 17, width: 140, height: 30)
+        container.addSubview(selectAll)
 
         let status = NSTextField(labelWithString: "")
         status.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
         status.textColor = NSColor.white.withAlphaComponent(0.45)
-        status.frame = NSRect(x: 24, y: 24, width: size.width - 300, height: 16)
+        status.lineBreakMode = .byTruncatingTail
+        status.frame = NSRect(x: 168, y: 24, width: size.width - 168 - 270, height: 16)
         container.addSubview(status)
 
         // Neither button answers Return: the clean-up takes a deliberate
@@ -264,10 +292,32 @@ final class WorktreeCleanupPanel: NSObject {
         container.addSubview(cleanUp)
 
         panel.contentView = container
+        listView = list
+        emptyLabel = empty
         statusLabel = status
         cleanUpButton = cleanUp
         cancelButton = cancel
+        selectAllButton = selectAll
         return panel
+    }
+
+    private func addRow(for candidate: WorktreeCleanupCandidate, at index: Int) {
+        guard let list = listView, let scroll = list.enclosingScrollView else { return }
+        let height = max(scroll.contentSize.height, CGFloat(index + 1) * Self.rowHeight + 8)
+        list.setFrameSize(NSSize(width: list.frame.width, height: height))
+        let top = 4 + CGFloat(index) * Self.rowHeight
+        let checkbox = NSButton(checkboxWithTitle: candidate.title, target: self, action: #selector(toggle(_:)))
+        checkbox.identifier = NSUserInterfaceItemIdentifier(candidate.path)
+        checkbox.frame = NSRect(x: 14, y: top + 6, width: list.frame.width - 28, height: 18)
+        checkbox.lineBreakMode = .byTruncatingMiddle
+        list.addSubview(checkbox)
+        let detail = NSTextField(labelWithString: "")
+        detail.font = .systemFont(ofSize: 11)
+        detail.lineBreakMode = .byTruncatingTail
+        detail.frame = NSRect(x: 34, y: top + 25, width: list.frame.width - 48, height: 16)
+        list.addSubview(detail)
+        checkboxes[candidate.path] = checkbox
+        detailLabels[candidate.path] = detail
     }
 
     @objc private func toggle(_ sender: NSButton) {
@@ -276,14 +326,27 @@ final class WorktreeCleanupPanel: NSObject {
         updateControls()
     }
 
+    @objc private func selectAllReady() {
+        guard !isRunning, !isFinished else { return }
+        for candidate in candidates {
+            if case .ready = candidate.availability { checkedPaths.insert(candidate.path) }
+        }
+        candidates.forEach(render)
+        updateControls()
+    }
+
     @objc private func cancelAction() {
-        guard !isRunning else { return }
+        if isRunning {
+            stopRequested = true
+            updateControls()
+            return
+        }
         dismiss()
     }
 
     @objc private func cleanUpAction() {
         let selected = selectedCandidates
-        guard !selected.isEmpty, !isRunning, !isFinished else { return }
+        guard !selected.isEmpty, !isRunning, !isFinished, !isConfirming else { return }
         onCleanUp?(selected)
     }
 }

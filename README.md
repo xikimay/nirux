@@ -251,16 +251,27 @@ The command palette action `Install Agent Skills` writes the bundled skills to:
 
 ### Cleaning up merged worktrees
 
-`Clean Up Worktree…` in a workspace's `⋯` menu (shown for a workspace open in a linked worktree) removes the worktree folder and its local branch, then closes the workspaces open in it. `Clean Up Merged Worktrees…` in the command palette lists every such worktree across spaces, checks them all, preselects the ready ones and cleans up the checked ones one at a time, reporting on each.
+`Clean Up Worktree…` in a workspace's `⋯` menu (shown when the workspace is open in a linked worktree, or when its folder is gone) removes the worktree folder and its local branch, then closes the workspaces open in it. `Clean Up Merged Worktrees…` in the command palette lists every worktree a workspace is open in, in any space, plus the other worktrees of the same repositories. It checks them all and cleans up the checked ones one at a time, reporting on each; Stop ends the run after the current one.
 
 Nothing is merged, pushed or fetched, and the remote branch is never touched. A worktree is cleaned up only when all of these hold, checked with `gh` and git:
 
 - GitHub reports its branch's pull request as merged. The pull request's state counts, not git ancestry, so squash merges qualify. An open pull request for the branch blocks.
 - The branch tip is the merged pull request's head, or an ancestor of it: no local commit is left out.
-- Nothing is uncommitted or untracked, except `.claude-handover.md`, `.codex-handover.md` and `.claude/settings.local.json`, which are deleted with it. Ignored files (build output, for example) are deleted with the folder too; the confirmation lists them.
-- The worktree is not locked, and no editor in its workspaces has unsaved changes.
+- Nothing is uncommitted or untracked, except `.claude-handover.md`, `.codex-handover.md` and `.claude/settings.local.json`. No tracked file hides an edit from `git status` (skip-worktree, assume-unchanged).
+- No other worktree lives inside it, and it is not locked.
+- No editor holds unsaved changes in its workspaces or to a file in it, and no agent of another workspace runs inside it.
 
-The confirmation lists exactly what will be deleted and any agent session that closing the workspaces ends; Return cancels. Right before deleting, the worktree is read again, and anything new stops the cleanup. `git worktree remove` runs without `--force`; the branch goes with `git branch -d`, or `-D` after a squash merge. If git fails, the cleanup stops and shows git's output. A workspace whose folder is already gone can only be closed.
+`git worktree remove` would delete ignored files along with the folder. So the handover files and every ignored file or folder go to the Trash first, in one "<folder> leftovers" folder per worktree. The exception is build output such as `.build/`, `node_modules/` or `DerivedData/`, which is deleted. The confirmation lists all of it, plus any agent session that closing the workspaces ends. Return cancels.
+
+Right before deleting, the worktree is read again, and anything new stops the cleanup. `git worktree remove` then runs without `--force`, and the branch goes with `git branch -d`, or with `-D` after a squash merge. If git fails, the cleanup stops, shows git's output and puts the leftovers back. A workspace whose folder is already gone can only be closed.
+
+In the palette list, a ready worktree is checked in advance only when:
+
+- its workspaces run no agent, or only Claude idle at its prompt, as its status hooks report;
+- a workspace is open in it;
+- its folder is the one Nirux names for its branch (`<repo>.<branch>`). A folder reused across branches may hold plans of its own.
+
+`Select All Ready` checks the others.
 
 ## Local Development
 

@@ -8,15 +8,25 @@ import Foundation
 ///   not git ancestry, so a squash merge counts; an open one blocks.
 /// - The branch tip is that pull request's head, or an ancestor of it: no
 ///   local commit is missing from what was merged.
-/// - Nothing uncommitted or untracked, except `disposablePaths`.
-/// - The worktree is not locked.
+/// - Nothing uncommitted or untracked, except `disposablePaths`; no edit
+///   hidden from `git status` (skip-worktree, assume-unchanged).
+/// - No other worktree inside it, and it is not locked.
+/// Ignored files are not a reason to refuse, but `git worktree remove`
+/// deletes them: everything but build output goes to the Trash first.
 /// Runs git and gh: call it off the main thread.
 enum WorktreeCleanup {
-    /// Handover files and Claude Code's local settings: an untracked copy is
-    /// deleted along with the worktree, and listed in the confirmation,
-    /// instead of blocking it.
+    /// Handover files and Claude Code's local settings: an untracked copy
+    /// goes to the Trash with the worktree's other leftovers instead of
+    /// blocking it.
     static let disposablePaths: Set<String> = [
         ".claude-handover.md", ".codex-handover.md", ".claude/settings.local.json"
+    ]
+
+    /// Ignored folders (or files) a build or an install recreates. They are
+    /// deleted with the worktree; any other ignored entry goes to the Trash.
+    static let regenerableNames: Set<String> = [
+        ".build", ".swiftpm", "DerivedData", "build", "dist", "node_modules", "target", ".next",
+        ".gradle", "Pods", "__pycache__", ".pytest_cache", ".mypy_cache", ".venv", "coverage", ".DS_Store"
     ]
 
     struct Tools: Sendable {
@@ -25,7 +35,17 @@ enum WorktreeCleanup {
         var ghPath: String?
         /// Added to the environment of every git and gh run.
         var environment: [String: String] = [:]
+        /// For reads and gh: past it, the check fails.
         var timeout: TimeInterval = 60
+        /// For the git commands that delete: killing `git worktree remove`
+        /// midway would leave half a worktree, so only a wedged git hits it.
+        var writeTimeout: TimeInterval = 3600
+        /// Moves a folder to the Trash and returns where it went.
+        var trash: @Sendable (URL) throws -> URL = { url in
+            var trashed: NSURL?
+            try FileManager.default.trashItem(at: url, resultingItemURL: &trashed)
+            return (trashed as URL?) ?? url
+        }
 
         /// The system git and the GitHub CLI where PRDetect looks for it.
         static var installed: Tools {
@@ -47,7 +67,8 @@ enum WorktreeCleanup {
     struct Worktree: Equatable, Sendable {
         /// Top level, resolved with realpath.
         let path: String
-        /// Where git runs to remove it: the repository's main checkout.
+        /// Where git runs to remove it: the main checkout, or the bare
+        /// repository, listed first by `git worktree list`.
         let mainCheckout: String
         /// Nil on a detached HEAD.
         let branch: String?
@@ -56,17 +77,40 @@ enum WorktreeCleanup {
         let isLocked: Bool
         /// `git status` entries that block the cleanup, e.g. "M Sources/a.swift".
         let changes: [String]
-        /// `disposablePaths` present and untracked: deleted before
-        /// `git worktree remove`, which would otherwise refuse.
+        /// Tracked files on disk that `git status` doesn't look at
+        /// (skip-worktree, assume-unchanged): their edits would go unseen.
+        let hiddenFiles: [String]
+        /// Other worktrees of the repository inside this one (Claude Code
+        /// makes its own under `.claude/worktrees`): the folder would take
+        /// them along.
+        let nestedWorktrees: [String]
+        /// `disposablePaths` present and untracked.
         let untrackedDisposable: [String]
-        /// `disposablePaths` present and ignored: removed with the folder.
-        let ignoredDisposable: [String]
-        /// Other ignored files and folders ("build/"): `git worktree remove`
-        /// deletes them with the folder without asking.
+        /// Ignored files and folders, as `git ls-files --directory` groups them.
         let ignoredEntries: [String]
 
-        var repositoryName: String { (mainCheckout as NSString).lastPathComponent }
-        var disposableFiles: [String] { (untrackedDisposable + ignoredDisposable).sorted() }
+        var repositoryName: String {
+            let name = (mainCheckout as NSString).lastPathComponent
+            return name.hasSuffix(".git") ? String(name.dropLast(4)) : name
+        }
+
+        var folderName: String { (path as NSString).lastPathComponent }
+
+        /// What goes to the Trash before the folder is removed.
+        var leftovers: [String] {
+            (untrackedDisposable + ignoredEntries.filter { !WorktreeCleanup.isRegenerable($0) }).sorted()
+        }
+
+        /// Ignored build output, deleted with the folder.
+        var buildOutput: [String] { ignoredEntries.filter(WorktreeCleanup.isRegenerable) }
+
+        /// Whether the folder is the one `GitWorktree.create` makes for
+        /// `branch`. One named for another branch may be a base that moves
+        /// from branch to branch, with a plan of its own in its handover.
+        var folderMatchesBranch: Bool {
+            guard let branch else { return false }
+            return folderName == "\(repositoryName).\(branch.replacingOccurrences(of: "/", with: "-"))"
+        }
     }
 
     struct Report: Equatable, Sendable {
@@ -100,12 +144,9 @@ enum WorktreeCleanup {
         case inspected(Report)
     }
 
-    enum Execution: Equatable, Sendable {
-        /// `forcedBranchDelete`: `git branch -d` refused (squash merge) and
-        /// the branch went with `-D`.
-        case cleaned(forcedBranchDelete: Bool)
-        /// What failed, with git's output, and what was already done.
-        case failed(String)
+    static func isRegenerable(_ entry: String) -> Bool {
+        let trimmed = entry.hasSuffix("/") ? String(entry.dropLast()) : entry
+        return regenerableNames.contains((trimmed as NSString).lastPathComponent)
     }
 
     // MARK: - Inspection
@@ -136,6 +177,14 @@ enum WorktreeCleanup {
         if !worktree.changes.isEmpty {
             problems.append("Uncommitted changes: \(summarized(worktree.changes)).")
         }
+        if !worktree.hiddenFiles.isEmpty {
+            problems.append(
+                "Files git status doesn't check (skip-worktree or assume-unchanged): \(summarized(worktree.hiddenFiles))."
+            )
+        }
+        if !worktree.nestedWorktrees.isEmpty {
+            problems.append("Other worktrees are inside it: \(summarized(worktree.nestedWorktrees)).")
+        }
         if worktree.isLocked {
             problems.append("The worktree is locked (git worktree unlock).")
         }
@@ -155,34 +204,10 @@ enum WorktreeCleanup {
         guard isDirectory.boolValue, let resolved = path.realPath else {
             return .unavailable("\(path) is not a folder.")
         }
-        let paths = git(
-            ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"],
-            in: resolved, tools: tools
-        )
-        guard paths.status == 0 else {
-            return .unavailable(firstLine(paths.stderr) ?? "\(path) is not in a git repository.")
-        }
-        let lines = paths.stdout.split(separator: "\n").map(String.init)
-        guard lines.count == 3, lines[0].realPath == resolved else {
-            return .unavailable("\(path) is not the top level of a git checkout.")
-        }
-        guard let gitDir = lines[1].realPath, let commonDir = lines[2].realPath else {
-            return .unavailable("git couldn't locate the repository of \(path).")
-        }
-        guard gitDir != commonDir else {
-            return .unavailable("\(path) is a repository's main checkout, not a linked worktree.")
-        }
-        guard (gitDir as NSString).deletingLastPathComponent == commonDir + "/worktrees" else {
-            return .unavailable("\(path) is not a linked worktree.")
-        }
-        let mainCheckout = GitWorktree.mainWorktreeRoot(of: resolved)
-        guard mainCheckout != resolved else {
-            return .unavailable("The main checkout of \(path) can't be found (bare repository?).")
-        }
-        guard let listing = worktreeListing(in: mainCheckout, tools: tools),
-              let entry = listing.first(where: { $0.path.realPath == resolved })
-        else {
-            return .unavailable("\(mainCheckout) doesn't list \(path) as one of its worktrees.")
+        let location: Location
+        switch locate(resolved, tools: tools) {
+        case .success(let found): location = found
+        case .failure(let failure): return .unavailable(failure.message)
         }
 
         let head = git(["symbolic-ref", "-q", "HEAD"], in: resolved, tools: tools)
@@ -196,7 +221,7 @@ enum WorktreeCleanup {
             return .unavailable(firstLine(head.stderr) ?? "git couldn't read HEAD in \(path).")
         }
         let tipRead = git(["rev-parse", "-q", "--verify", "HEAD"], in: resolved, tools: tools)
-        let tip = tipRead.status == 0 ? tipRead.stdout.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+        let tip = tipRead.status == 0 ? tipRead.stdout.trimmingCharacters(in: .whitespacesAndNewlines) : ""
 
         let files: FileState
         switch readFiles(at: resolved, tools: tools) {
@@ -205,45 +230,111 @@ enum WorktreeCleanup {
         }
         return .worktree(Worktree(
             path: resolved,
-            mainCheckout: mainCheckout,
+            mainCheckout: location.mainCheckout,
             branch: branch,
-            tip: tip?.isEmpty == false ? tip : nil,
-            isLocked: entry.isLocked,
+            tip: tip.isEmpty ? nil : tip,
+            isLocked: location.isLocked,
             changes: files.changes,
+            hiddenFiles: files.hiddenFiles,
+            nestedWorktrees: location.nestedWorktrees,
             untrackedDisposable: files.untrackedDisposable,
-            ignoredDisposable: files.ignoredDisposable,
             ignoredEntries: files.ignoredEntries
         ))
     }
 
-    private struct FileState {
-        var changes: [String] = []
-        var untrackedDisposable: [String] = []
-        var ignoredDisposable: [String] = []
-        var ignoredEntries: [String] = []
-    }
-
-    private struct ReadFailure: Error {
+    struct ReadFailure: Error {
         let message: String
     }
 
+    private struct Location {
+        let mainCheckout: String
+        let isLocked: Bool
+        let nestedWorktrees: [String]
+    }
+
+    /// Where the worktree sits in its repository, from git's own listing:
+    /// the checkout git runs in to remove it, and worktrees nested inside.
+    private static func locate(_ resolved: String, tools: Tools) -> Result<Location, ReadFailure> {
+        let paths = git(
+            ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"],
+            in: resolved, tools: tools
+        )
+        guard paths.status == 0 else {
+            if isDanglingWorktreeLink(resolved) {
+                return .failure(ReadFailure(message:
+                    "git no longer tracks \(resolved): its worktree entry is gone. Delete the folder yourself."))
+            }
+            return .failure(ReadFailure(message: firstLine(paths.stderr) ?? "\(resolved) is not in a git repository."))
+        }
+        let lines = paths.stdout.split(separator: "\n").map(String.init)
+        guard lines.count == 3, lines[0].realPath == resolved else {
+            return .failure(ReadFailure(message: "\(resolved) is not the top level of a git checkout."))
+        }
+        guard let gitDir = lines[1].realPath, let commonDir = lines[2].realPath else {
+            return .failure(ReadFailure(message: "git couldn't locate the repository of \(resolved)."))
+        }
+        guard gitDir != commonDir else {
+            return .failure(ReadFailure(message: "\(resolved) is a repository's main checkout, not a linked worktree."))
+        }
+        guard (gitDir as NSString).deletingLastPathComponent == commonDir + "/worktrees" else {
+            return .failure(ReadFailure(message: "\(resolved) is not a linked worktree."))
+        }
+        // git lists the main checkout (or the bare repository) first. The
+        // listing must also hold this very folder: a crafted `.git` file can
+        // point any folder at another repository's worktree entry.
+        guard let listing = worktreeListing(in: resolved, tools: tools),
+              let main = listing.first?.path.realPath,
+              main != resolved,
+              let entry = listing.first(where: { $0.path.realPath == resolved })
+        else {
+            return .failure(ReadFailure(message: "git doesn't list \(resolved) as a worktree of its repository."))
+        }
+        let mainDirs = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: main, tools: tools)
+        guard mainDirs.status == 0,
+              mainDirs.stdout.trimmingCharacters(in: .newlines).realPath == commonDir
+        else {
+            return .failure(ReadFailure(message: "The main checkout of \(resolved), \(main), can't be used."))
+        }
+        let nested = listing.compactMap { other -> String? in
+            guard let otherPath = other.path.realPath, otherPath.hasPrefix(resolved + "/") else { return nil }
+            return String(otherPath.dropFirst(resolved.count + 1))
+        }
+        return .success(Location(mainCheckout: main, isLocked: entry.isLocked, nestedWorktrees: nested.sorted()))
+    }
+
+    /// A `.git` file whose `gitdir:` points at a folder that's gone: what
+    /// a `git worktree remove` that failed midway leaves behind.
+    private static func isDanglingWorktreeLink(_ path: String) -> Bool {
+        guard let contents = try? String(contentsOfFile: path + "/.git", encoding: .utf8),
+              contents.hasPrefix("gitdir: ")
+        else { return false }
+        let target = contents.dropFirst("gitdir: ".count).trimmingCharacters(in: .whitespacesAndNewlines)
+        let absolute = target.hasPrefix("/") ? target : path + "/" + target
+        return !FileManager.default.fileExists(atPath: absolute)
+    }
+
+    private struct FileState {
+        var changes: [String] = []
+        var hiddenFiles: [String] = []
+        var untrackedDisposable: [String] = []
+        var ignoredEntries: [String] = []
+    }
+
     /// What `git worktree remove` would find in the folder: changes and
-    /// untracked files (which make it refuse) and ignored ones (which it
-    /// deletes).
+    /// untracked files (which make it refuse), ignored ones (which it
+    /// deletes), and edits hidden from both.
     private static func readFiles(at path: String, tools: Tools) -> Result<FileState, ReadFailure> {
         let status = git(
             ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"],
             in: path, tools: tools
         )
-        guard status.status == 0 else {
-            return .failure(ReadFailure(message: firstLine(status.stderr) ?? "git status failed in \(path)."))
-        }
         let ignored = git(
             ["ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory", "--no-empty-directory"],
             in: path, tools: tools
         )
-        guard ignored.status == 0 else {
-            return .failure(ReadFailure(message: firstLine(ignored.stderr) ?? "git ls-files failed in \(path)."))
+        let flagged = git(["ls-files", "-z", "-v"], in: path, tools: tools)
+        for result in [status, ignored, flagged] where result.status != 0 {
+            return .failure(ReadFailure(message: firstLine(result.stderr) ?? "git couldn't list the files of \(path)."))
         }
         var files = FileState()
         for entry in statusEntries(status.stdout) {
@@ -254,9 +345,11 @@ enum WorktreeCleanup {
             }
         }
         files.untrackedDisposable.sort()
-        let ignoredPaths = ignored.stdout.split(separator: "\0").map(String.init)
-        files.ignoredDisposable = ignoredPaths.filter { disposablePaths.contains($0) }.sorted()
-        files.ignoredEntries = ignoredPaths.filter { !disposablePaths.contains($0) }.sorted()
+        files.ignoredEntries = ignored.stdout.split(separator: "\0").map(String.init).sorted()
+        files.hiddenFiles = hiddenEntries(flagged.stdout).filter { relative in
+            var info = stat()
+            return lstat(path + "/" + relative, &info) == 0
+        }
         return .success(files)
     }
 
@@ -280,13 +373,23 @@ enum WorktreeCleanup {
         return entries
     }
 
-    private struct ListedWorktree {
+    /// Paths `git ls-files -v -z` tags skip-worktree ("S") or
+    /// assume-unchanged (a lowercase tag).
+    static func hiddenEntries(_ output: String) -> [String] {
+        output.split(separator: "\0").compactMap { field in
+            guard field.count > 2, let tag = field.first, tag.isLowercase || tag == "S" else { return nil }
+            return String(field.dropFirst(2))
+        }
+    }
+
+    struct ListedWorktree: Equatable {
         let path: String
         let isLocked: Bool
     }
 
-    private static func worktreeListing(in mainCheckout: String, tools: Tools) -> [ListedWorktree]? {
-        let result = git(["worktree", "list", "--porcelain", "-z"], in: mainCheckout, tools: tools)
+    /// `git worktree list --porcelain -z`, run in `directory`.
+    static func worktreeListing(in directory: String, tools: Tools) -> [ListedWorktree]? {
+        let result = git(["worktree", "list", "--porcelain", "-z"], in: directory, tools: tools)
         guard result.status == 0 else { return nil }
         var listed: [ListedWorktree] = []
         var path: String?
@@ -306,197 +409,6 @@ enum WorktreeCleanup {
         return listed
     }
 
-    // MARK: - Pull request
-
-    enum Ancestry: Equatable {
-        case contained
-        case notContained
-        /// The commit isn't in the local repository.
-        case unknownCommit
-    }
-
-    private static func pullRequestLookup(
-        branch: String, tip: String, worktree: Worktree, tools: Tools
-    ) -> (pullRequest: PullRequest?, problems: [String]) {
-        guard let ghPath = tools.ghPath else {
-            return (nil, ["The GitHub CLI (gh) isn't installed: the pull request can't be checked."])
-        }
-        guard let repository = headRepository(branch: branch, at: worktree.path, tools: tools) else {
-            return (nil, ["\(branch) has no GitHub remote: its pull request can't be looked up."])
-        }
-        let fields = "number,state,headRefOid,headRepositoryOwner,headRepository,url"
-        let result = run(
-            executable: ghPath,
-            arguments: ["pr", "list", "--head=\(branch)", "--state", "all", "--json", fields, "--limit", "1000"],
-            in: worktree.path, tools: tools
-        )
-        guard result.status == 0,
-              let json = try? JSONSerialization.jsonObject(with: Data(result.stdout.utf8)) as? [[String: Any]]
-        else {
-            let reason = firstLine(result.stderr).map { ": \($0)" } ?? ""
-            return (nil, ["gh couldn't list the pull requests of \(branch)\(reason)"])
-        }
-        let candidates = json.compactMap { pullRequest(from: $0, headRepository: repository) }
-        return verdict(branch: branch, tip: tip, candidates: candidates) { headOid in
-            ancestry(of: tip, in: headOid, at: worktree.path, tools: tools)
-        }
-    }
-
-    /// Which pull request the branch belongs to, and why it can't be
-    /// cleaned up if so. An open pull request blocks: the branch is still
-    /// in use. Otherwise a merged one must contain the tip.
-    static func verdict(
-        branch: String,
-        tip: String,
-        candidates: [PullRequest],
-        ancestry: (String) -> Ancestry
-    ) -> (pullRequest: PullRequest?, problems: [String]) {
-        let sorted = candidates.sorted { $0.number > $1.number }
-        if let open = sorted.first(where: { $0.state == "OPEN" }) {
-            return (open, ["Pull request #\(open.number) for \(branch) is still open."])
-        }
-        let merged = sorted.filter { $0.state == "MERGED" }
-        guard let latest = merged.first else {
-            if let closed = sorted.first {
-                return (closed, ["Pull request #\(closed.number) was closed without being merged."])
-            }
-            return (nil, ["No pull request found for \(branch)."])
-        }
-        if let exact = merged.first(where: { $0.headOid == tip }) {
-            return (exact, [])
-        }
-        var unknown: PullRequest?
-        for pullRequest in merged {
-            switch ancestry(pullRequest.headOid) {
-            case .contained: return (pullRequest, [])
-            case .unknownCommit: unknown = unknown ?? pullRequest
-            case .notContained: continue
-            }
-        }
-        if let unknown {
-            return (unknown, [
-                "The head of merged pull request #\(unknown.number) (\(short(unknown.headOid))) isn't in "
-                    + "the local repository, so \(branch) can't be compared with it."
-            ])
-        }
-        return (latest, [
-            "\(branch) has commits that aren't in merged pull request #\(latest.number) "
-                + "(local \(short(tip)), merged head \(short(latest.headOid)))."
-        ])
-    }
-
-    static func pullRequest(from candidate: [String: Any], headRepository: GitHubRepository) -> PullRequest? {
-        guard let number = candidate["number"] as? Int,
-              let state = (candidate["state"] as? String)?.uppercased(),
-              let headOid = candidate["headRefOid"] as? String, isObjectID(headOid),
-              let url = candidate["url"] as? String,
-              let owner = (candidate["headRepositoryOwner"] as? [String: Any])?["login"] as? String,
-              let name = (candidate["headRepository"] as? [String: Any])?["name"] as? String,
-              GitHubRepository(repositoryURL: url, owner: owner, name: name) == headRepository
-        else { return nil }
-        return PullRequest(number: number, state: state, headOid: headOid.lowercased(), url: url)
-    }
-
-    /// The repository the branch is pushed to, as PRDetect matches it; the
-    /// `origin` remote for a branch pushed without an upstream.
-    private static func headRepository(branch: String, at path: String, tools: Tools) -> GitHubRepository? {
-        switch GitDetect.upstreamRepositoryObservation(at: path, branch: branch, gitPath: tools.gitPath) {
-        case .repository(let repository):
-            return repository
-        case .failure:
-            return nil
-        case .absent:
-            let origin = git(["remote", "get-url", "--push", "origin"], in: path, tools: tools)
-            guard origin.status == 0 else { return nil }
-            return GitHubRepository(remoteURL: origin.stdout)
-        }
-    }
-
-    private static func ancestry(of tip: String, in headOid: String, at path: String, tools: Tools) -> Ancestry {
-        guard isObjectID(headOid),
-              git(["cat-file", "-e", "\(headOid)^{commit}"], in: path, tools: tools).status == 0
-        else { return .unknownCommit }
-        switch git(["merge-base", "--is-ancestor", tip, headOid], in: path, tools: tools).status {
-        case 0: return .contained
-        case 1: return .notContained
-        default: return .unknownCommit
-        }
-    }
-
-    private static func isObjectID(_ value: String) -> Bool {
-        [40, 64].contains(value.count) && value.allSatisfy(\.isHexDigit)
-    }
-
-    // MARK: - Execution
-
-    /// Deletes the worktree and its branch as `plan` describes them, after
-    /// reading the worktree again: an agent may have committed or written
-    /// files since the check. Stops at the first failure.
-    static func execute(_ plan: Plan, tools: Tools = .installed) -> Execution {
-        guard case .worktree(let current) = readWorktree(at: plan.worktree.path, tools: tools) else {
-            return .failed("\(plan.worktree.path) can no longer be read. Nothing was deleted.")
-        }
-        var changed = localProblems(current)
-        if current.branch != plan.branch || current.tip != plan.tip {
-            changed.append("\(plan.branch) moved since it was checked.")
-        }
-        if current.mainCheckout != plan.worktree.mainCheckout {
-            changed.append("Its main checkout is no longer \(plan.worktree.mainCheckout).")
-        }
-        let unlisted = Set(current.untrackedDisposable).subtracting(plan.worktree.disposableFiles)
-        if !unlisted.isEmpty {
-            changed.append("New files appeared: \(unlisted.sorted().joined(separator: ", ")).")
-        }
-        guard changed.isEmpty else {
-            return .failed(
-                (["The worktree changed since it was checked. Nothing was deleted."] + changed)
-                    .joined(separator: "\n")
-            )
-        }
-
-        for relative in current.untrackedDisposable {
-            let fullPath = current.path + "/" + relative
-            do {
-                // Only a file or a symlink: a folder by that name would be
-                // listed as its own files, never as a disposable path.
-                let type = try FileManager.default.attributesOfItem(atPath: fullPath)[.type] as? FileAttributeType
-                guard type == .typeRegular || type == .typeSymbolicLink else {
-                    return .failed("\(relative) is not a file. Nothing was deleted.")
-                }
-                try FileManager.default.removeItem(atPath: fullPath)
-            } catch {
-                return .failed("Couldn't delete \(relative): \(error.localizedDescription)")
-            }
-        }
-
-        // No --force: git checks once more that nothing uncommitted or
-        // untracked is left, and refuses otherwise.
-        let removal = git(["worktree", "remove", current.path], in: current.mainCheckout, tools: tools)
-        guard removal.status == 0 else {
-            return .failed("git worktree remove failed:\n\(output(of: removal))")
-        }
-
-        let softDelete = git(["branch", "-d", "--", plan.branch], in: current.mainCheckout, tools: tools)
-        if softDelete.status == 0 { return .cleaned(forcedBranchDelete: false) }
-        // A squash merge leaves the branch unmerged as far as git knows. The
-        // pull request is MERGED and contains the tip, which must not have
-        // moved since.
-        let tipNow = git(["rev-parse", "-q", "--verify", "refs/heads/\(plan.branch)"], in: current.mainCheckout, tools: tools)
-        guard tipNow.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == plan.tip else {
-            return .failed(
-                "The worktree folder was removed, but \(plan.branch) moved since it was checked, "
-                    + "so the branch was kept.\n\(output(of: softDelete))"
-            )
-        }
-        let forcedDelete = git(["branch", "-D", "--", plan.branch], in: current.mainCheckout, tools: tools)
-        guard forcedDelete.status == 0 else {
-            return .failed(
-                "The worktree folder was removed, but deleting \(plan.branch) failed:\n\(output(of: forcedDelete))"
-            )
-        }
-        return .cleaned(forcedBranchDelete: true)
-    }
-
     // MARK: - Helpers
 
     /// "a, b, c and 4 more".
@@ -507,13 +419,13 @@ enum WorktreeCleanup {
 
     static func short(_ objectID: String) -> String { String(objectID.prefix(7)) }
 
-    private static func firstLine(_ text: String) -> String? {
+    static func firstLine(_ text: String) -> String? {
         text.split(separator: "\n").lazy
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .first { !$0.isEmpty }
     }
 
-    private static func output(of result: GitResult) -> String {
+    static func output(of result: GitResult) -> String {
         let text = [result.stderr, result.stdout]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -521,28 +433,33 @@ enum WorktreeCleanup {
         return text.isEmpty ? "exit status \(result.status)" : text
     }
 
-    private static func git(_ arguments: [String], in directory: String, tools: Tools) -> GitResult {
-        run(executable: tools.gitPath, arguments: arguments, in: directory, tools: tools)
+    static func git(
+        _ arguments: [String], in directory: String, tools: Tools, timeout: TimeInterval? = nil
+    ) -> GitResult {
+        run(executable: tools.gitPath, arguments: arguments, in: directory, tools: tools, timeout: timeout)
     }
 
     /// Reads never take optional locks (`git status` would rewrite the
-    /// index); writes take the locks they need regardless.
-    private static func run(executable: String, arguments: [String], in directory: String, tools: Tools) -> GitResult {
+    /// index); writes take the locks they need regardless. Output that
+    /// isn't UTF-8 fails the run rather than reading as empty.
+    static func run(
+        executable: String, arguments: [String], in directory: String, tools: Tools, timeout: TimeInterval? = nil
+    ) -> GitResult {
+        let name = (executable as NSString).lastPathComponent
         guard let result = BoundedProcess.run(
             executableURL: URL(fileURLWithPath: executable),
             arguments: arguments,
             currentDirectoryURL: URL(fileURLWithPath: directory),
             environment: GitDetect.readOnlyEnvironment.merging(tools.environment) { _, override in override },
-            timeout: tools.timeout,
+            timeout: timeout ?? tools.timeout,
             captureStandardError: true
         ) else {
-            let name = (executable as NSString).lastPathComponent
             return GitResult(status: -1, stdout: "", stderr: "\(name) could not start or timed out")
         }
-        return GitResult(
-            status: result.terminationStatus,
-            stdout: String(data: result.standardOutput, encoding: .utf8) ?? "",
-            stderr: String(data: result.standardError, encoding: .utf8) ?? ""
-        )
+        let stderr = String(data: result.standardError, encoding: .utf8) ?? ""
+        guard let stdout = String(data: result.standardOutput, encoding: .utf8) else {
+            return GitResult(status: -1, stdout: "", stderr: "\(name) printed output that isn't UTF-8\n\(stderr)")
+        }
+        return GitResult(status: result.terminationStatus, stdout: stdout, stderr: stderr)
     }
 }

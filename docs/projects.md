@@ -592,7 +592,9 @@ workspace, three rows tall, and covers only the active space.
     PR's head commit, or is an ancestor of it. Otherwise it keeps the branch,
     since there may be unpushed work.
   - The checks and the git side exist: `WorktreeCleanup`, behind the sidebar's
-    "Clean Up Worktree…" and the palette's "Clean Up Merged Worktrees…".
+    "Clean Up Worktree…" and the palette's "Clean Up Merged Worktrees…". It
+    moves handover files and other ignored leftovers to the Trash before
+    `git worktree remove`, so adding them to `info/exclude` loses nothing.
 
 The data sources already exist (`GitDetect`, `PRDetect`, `GitWorktree.list`,
 workspace context). Sections backed by later PRs (brief, pinned URLs, sessions)
