@@ -67,6 +67,10 @@ final class NiruxShellView: NSView {
     /// (see OnboardingChecklist.launchState).
     var onboardingState: OnboardingChecklistState?
 
+    /// Agent launches, the home folder, cookies and modal alerts; tests
+    /// replace them (see ShellSideEffects).
+    var sideEffects = ShellSideEffects()
+
     // Panel references (stored properties must live in main class declaration)
     var nameInputPanel: NameInputPanel?
     var workspaceContextPanel: WorkspaceContextPanel?

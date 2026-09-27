@@ -201,7 +201,7 @@ extension NiruxShellView {
             return nil
         }
         defer { escapeMonitor.map(NSEvent.removeMonitor) }
-        return alert.runModal() == .alertSecondButtonReturn
+        return runModal(alert) == .alertSecondButtonReturn
     }
 
     private static let inlineAlertDetailLimit = 12

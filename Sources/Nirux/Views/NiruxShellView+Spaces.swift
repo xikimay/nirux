@@ -21,7 +21,7 @@ extension NiruxShellView {
             let alert = NSAlert()
             alert.messageText = "Spaces can't be deleted right now"
             alert.informativeText = "They were saved by a newer version of Nirux, or projects.json can't be read."
-            alert.runModal()
+            runModal(alert)
             return
         }
         let count = workspaces.filter { $0.profileID == profileID && !$0.isClosing }.count

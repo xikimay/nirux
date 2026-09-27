@@ -1,0 +1,309 @@
+import AppKit
+import XCTest
+@testable import Nirux
+
+/// Runs every command of the palette in a real window (see UIFlowHarness),
+/// the way a user does: type its title, pick it, press Return. The nightly
+/// once shipped a panel that crashed as it opened (#46) because no test
+/// opened it; here, a new command without a test fails
+/// `testEveryPaletteCommandHasAFlowTest`.
+@MainActor
+final class PaletteCommandFlowTests: XCTestCase {
+    /// The palette commands each test runs. A test must run all of its
+    /// commands, and every command of the palette must be listed here or in
+    /// `exemptions`.
+    static let coverage: [String: [String]] = [
+        "testTerminalColumnCommands": ["New Terminal", "Resize Column (Cycle Width)"],
+        "testEditorCommands": ["Open Editor", "Toggle Editor Diff", "Search Workspace"],
+        "testBrowserCommands": ["Open Browser", "Toggle Web Inspector"],
+        "testImportBrowserCookies": ["Import Browser Cookies"],
+        "testAgentCommands": ["Open Claude Code", "Open Codex"],
+        "testWorkspaceCommands": [
+            "New Workspace", "Rename Workspace", "Show/Hide Sidebar", "Show/Hide Inactive Workspaces", "Pilot Mode"
+        ],
+        "testWorktreeCommands": ["Open Worktree", "New Worktree", "Clean Up Merged Worktrees…"],
+        "testSetupCommands": ["Show Getting Started", "Install Agent Skills", "Open Settings"]
+    ]
+
+    /// Palette commands no test runs, each with the reason. Keep it empty
+    /// unless a command truly can't run in CI.
+    static let exemptions: [String: String] = [:]
+
+    // MARK: - Guard
+
+    func testEveryPaletteCommandHasAFlowTest() throws {
+        let harness = try UIFlowHarness()
+        defer { harness.close() }
+        let titles = harness.paletteCommandTitles()
+        XCTAssertFalse(titles.isEmpty)
+        XCTAssertEqual(titles.count, Set(titles).count, "two palette commands share a title: \(titles)")
+
+        let covered = Self.coverage.values.flatMap { $0 }
+        XCTAssertEqual(covered.count, Set(covered).count, "a command is listed under two tests")
+        for title in titles where !covered.contains(title) && Self.exemptions[title] == nil {
+            XCTFail("“\(title)” is in the palette but no test runs it: add it to a test in PaletteCommandFlowTests.coverage")
+        }
+        for title in Set(covered).union(Self.exemptions.keys) where !titles.contains(title) {
+            XCTFail("“\(title)” is listed in PaletteCommandFlowTests but the palette has no such command")
+        }
+        for (reason, title) in Self.exemptions.map({ ($1, $0) }) where reason.trimmingCharacters(in: .whitespaces).isEmpty {
+            XCTFail("the exemption of “\(title)” gives no reason")
+        }
+        let testNames = Set(Self.defaultTestSuite.tests.map { Self.methodName(of: $0.name) })
+        for testName in Self.coverage.keys {
+            XCTAssertTrue(testNames.contains(testName), "PaletteCommandFlowTests has no test named \(testName)")
+        }
+    }
+
+    // MARK: - Columns
+
+    func testTerminalColumnCommands() throws {
+        try flow { harness in
+            let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+            let columnCount = workspace.columns.count
+
+            harness.runPaletteCommand("New Terminal")
+            XCTAssertEqual(workspace.columns.count, columnCount + 1)
+            let column = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            XCTAssertNotNil(column.terminalView)
+            XCTAssertIdentical(workspace.columns.last, column)
+
+            let width = column.widthFraction
+            harness.runPaletteCommand("Resize Column (Cycle Width)")
+            XCTAssertNotEqual(column.widthFraction, width)
+        }
+    }
+
+    func testEditorCommands() throws {
+        try flow { harness in
+            let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+            let readme = harness.repo + "/README.md"
+
+            harness.runPaletteCommand("Open Editor")
+            let editor = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
+            XCTAssertEqual(editor.workspaceCwd, harness.repo)
+            harness.waitUntil("the editor to open README.md") { editor.activePath == readme }
+
+            // README.md differs from HEAD: git reads the original off the
+            // main thread.
+            harness.runPaletteCommand("Toggle Editor Diff")
+            harness.waitUntil("the diff of README.md") { editor.diffActivePath == readme }
+
+            // rg or grep streams its results from a background queue.
+            harness.runPaletteCommand("Search Workspace")
+            let field = try XCTUnwrap(harness.waitForField(placeholder: "Search workspace…"))
+            harness.type(UIFlowHarness.searchNeedle, into: field)
+            let table = try XCTUnwrap(field.window?.contentView.flatMap {
+                UIFlowHarness.descendant(of: $0, as: NSTableView.self)
+            })
+            harness.waitUntil("a search result") { table.numberOfRows > 0 && table.selectedRow == 0 }
+            harness.press(.returnKey, in: field.window)
+            let target = harness.repo + "/" + UIFlowHarness.searchTarget
+            harness.waitUntil("the result to open in the editor") { editor.activePath == target }
+            XCTAssertFalse(field.window?.isVisible ?? true, "the search panel stayed open")
+            XCTAssertEqual(workspace.columns.compactMap(\.editorColumn).count, 1, "the result opened a second editor")
+        }
+    }
+
+    func testBrowserCommands() throws {
+        try flow { harness in
+            let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+            let page = URL(fileURLWithPath: harness.repo + "/README.md").absoluteString
+
+            harness.runPaletteCommand("Open Browser")
+            let palette = try XCTUnwrap(harness.shell.commandPalette)
+            XCTAssertEqual(palette.mode, .urlInput)
+            XCTAssertTrue(palette.isVisible, "URL mode closed the palette")
+            let field = try XCTUnwrap(palette.searchField)
+            harness.type(page, into: field)
+            harness.press(.returnKey, in: palette.panel)
+            XCTAssertFalse(palette.isVisible)
+            let web = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.webViewColumn)
+            XCTAssertEqual(web.currentURL, page)
+            // The history lives in the test's state folder.
+            XCTAssertEqual(URLHistory.load().first, page)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: harness.stateDirectory + "/url_history.json"))
+
+            harness.runPaletteCommand("Toggle Web Inspector")
+            XCTAssertIdentical(workspace.columns[safe: workspace.focusedIndex]?.webViewColumn, web)
+        }
+    }
+
+    func testImportBrowserCookies() throws {
+        try flow { harness in
+            harness.cookieBrowsers = [.chrome, .arc]
+            XCTAssertEqual(harness.shell.importCookieSubtitle(), "From Chrome, Arc")
+            // The browser choice: Arc, the second button.
+            harness.alertResponses = [.alertSecondButtonReturn]
+
+            harness.runPaletteCommand("Import Browser Cookies")
+            harness.waitUntil("the import result") { harness.alerts.count == 2 }
+            XCTAssertEqual(harness.alerts, ["Import Cookies", "Cookies Imported"])
+            XCTAssertEqual(harness.cookieImports, [.arc])
+        }
+    }
+
+    // MARK: - Agents
+
+    func testAgentCommands() throws {
+        try flow { harness in
+            let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+            let columnCount = workspace.columns.count
+
+            harness.runPaletteCommand("Open Claude Code")
+            XCTAssertEqual(workspace.columns.count, columnCount + 1)
+            XCTAssertEqual(harness.agentLaunches.count, 1)
+            XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command claude") == true, "\(harness.agentLaunches)")
+
+            harness.runPaletteCommand("Open Codex")
+            XCTAssertEqual(workspace.columns.count, columnCount + 2)
+            XCTAssertEqual(harness.agentLaunches.count, 2)
+            XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command codex") == true, "\(harness.agentLaunches)")
+        }
+    }
+
+    // MARK: - Workspaces
+
+    func testWorkspaceCommands() throws {
+        try flow { harness in
+            let shell = harness.shell
+            let repoWorkspace = try XCTUnwrap(shell.activeWorkspace)
+
+            harness.runPaletteCommand("New Workspace")
+            let nameField = try XCTUnwrap(harness.waitForField(placeholder: "Name this workspace for the task"))
+            harness.submit("second", into: nameField)
+            let second = try XCTUnwrap(shell.workspaces.first { $0.title == "second" })
+            XCTAssertIdentical(shell.activeWorkspace, second)
+
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === repoWorkspace }))
+            harness.runPaletteCommand("Rename Workspace")
+            let renameField = try XCTUnwrap(harness.waitForField(placeholder: "Workspace name"))
+            XCTAssertEqual(renameField.stringValue, "repo")
+            harness.submit("renamed", into: renameField)
+            XCTAssertEqual(repoWorkspace.title, "renamed")
+            XCTAssertTrue(repoWorkspace.titleIsManual)
+
+            harness.runPaletteCommand("Show/Hide Sidebar")
+            XCTAssertTrue(shell.isSidebarExpanded)
+            harness.waitUntil("the sidebar to expand") { shell.sidebar.isExpanded }
+
+            // The section only toggles with an inactive workspace to show.
+            let secondIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0 === second })
+            harness.perform(["Move to Inactive"], in: shell.sidebar.workspaceActionMenu(workspaceIndex: secondIndex, columnIndex: nil))
+            XCTAssertTrue(second.isInactive)
+            XCTAssertTrue(shell.sidebar.isInactiveSectionCollapsed)
+            harness.runPaletteCommand("Show/Hide Inactive Workspaces")
+            XCTAssertFalse(shell.sidebar.isInactiveSectionCollapsed)
+
+            harness.runPaletteCommand("Pilot Mode")
+            XCTAssertTrue(shell.isPilotMode)
+            XCTAssertFalse(shell.isSidebarExpanded, "pilot mode hides the sidebar")
+            harness.runPaletteCommand("Pilot Mode")
+            XCTAssertFalse(shell.isPilotMode)
+        }
+    }
+
+    func testWorktreeCommands() throws {
+        try flow { harness in
+            let shell = harness.shell
+
+            // Lists the worktrees off the main thread, then offers them in
+            // the palette.
+            harness.runPaletteCommand("Open Worktree")
+            let palette = try XCTUnwrap(shell.commandPalette)
+            harness.waitUntil("the worktree list") {
+                palette.isVisible && palette.filteredActions.map(\.title) == [harness.worktreeBranch]
+            }
+            harness.press(.returnKey, in: palette.panel)
+            let opened = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertEqual(opened.title, harness.worktreeBranch)
+            XCTAssertEqual(NiruxShellView.comparablePath(opened.cwd), NiruxShellView.comparablePath(harness.worktree))
+
+            // Creates the worktree off the main thread, then opens it with an
+            // agent (the launch double).
+            let repoIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0.cwd == harness.repo })
+            shell.switchToWorkspace(repoIndex)
+            harness.runPaletteCommand("New Worktree")
+            let branchField = try XCTUnwrap(harness.waitForField(placeholder: "Branch name (e.g. feat/my-feature)"))
+            harness.submit("feat/new-flow", into: branchField)
+            harness.waitUntil("the new worktree's workspace") {
+                shell.workspaces.contains { $0.title == "feat/new-flow" }
+            }
+            let created = try XCTUnwrap(shell.workspaces.first { $0.title == "feat/new-flow" })
+            XCTAssertTrue(FileManager.default.fileExists(atPath: created.cwd + "/.git"))
+            XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command claude") == true, "\(harness.agentLaunches)")
+
+            // Inspects each worktree on an OperationQueue (#46, #48).
+            harness.runPaletteCommand("Clean Up Merged Worktrees…")
+            let panel = try XCTUnwrap(shell.worktreeCleanupPanel)
+            let expected = Set([harness.worktree, created.cwd].map(NiruxShellView.comparablePath))
+            harness.waitUntil("both worktrees inspected") {
+                let inspected = panel.candidates.filter { $0.inspection != nil }.map { NiruxShellView.comparablePath($0.path) }
+                return expected.isSubset(of: Set(inspected))
+            }
+            panel.dismiss()
+            XCTAssertNil(shell.worktreeCleanupPanel)
+        }
+    }
+
+    // MARK: - Setup
+
+    func testSetupCommands() throws {
+        try flow { harness in
+            let shell = harness.shell
+
+            harness.runPaletteCommand("Show Getting Started")
+            XCTAssertEqual(shell.onboardingState, .pending)
+            XCTAssertTrue(shell.isSidebarExpanded)
+            // Read from the fake home, where nothing is installed yet.
+            XCTAssertEqual(shell.sidebar.onboardingChecklist?.skills, .missing)
+
+            harness.runPaletteCommand("Install Agent Skills")
+            XCTAssertEqual(harness.alerts, ["Agent Skills Installed"])
+            for root in AgentSkillsInstaller.roots(home: harness.home) {
+                for name in NiruxShellView.agentSkills.keys {
+                    let file = AgentSkillsInstaller.skillFile(root: root, name: name)
+                    XCTAssertTrue(FileManager.default.fileExists(atPath: file), "missing \(file)")
+                }
+            }
+            XCTAssertEqual(shell.sidebar.onboardingChecklist?.skills, .installed)
+
+            // The palette sends the action up the responder chain to the
+            // app delegate.
+            let app = NiruxApp()
+            app.telegramTokenLoader = { nil }
+            app.telegramTokenSaver = { _ in XCTFail("Unexpected Keychain write") }
+            let previousDelegate = NSApp.delegate
+            NSApp.delegate = app
+            harness.runPaletteCommand("Open Settings")
+            NSApp.delegate = previousDelegate
+            let settings = try XCTUnwrap(app.settingsPanel)
+            XCTAssertTrue(settings.isVisible)
+            settings.orderOut(nil)
+            settings.close()
+        }
+    }
+
+    // MARK: - Helpers
+
+    /// Runs `body` on a fresh harness, then checks the test ran every
+    /// command `coverage` lists for it.
+    private func flow(
+        file: StaticString = #filePath, line: UInt = #line, _ body: (UIFlowHarness) throws -> Void
+    ) throws {
+        let harness = try UIFlowHarness()
+        defer { harness.close() }
+        try body(harness)
+        let testName = Self.methodName(of: name)
+        let expected = Set(Self.coverage[testName] ?? [])
+        let missed = expected.subtracting(harness.executedCommands)
+        XCTAssertTrue(missed.isEmpty, "\(testName) didn't run \(missed.sorted())", file: file, line: line)
+        let unlisted = harness.executedCommands.subtracting(expected)
+        XCTAssertTrue(unlisted.isEmpty, "list \(unlisted.sorted()) under \(testName) in coverage", file: file, line: line)
+    }
+
+    /// "testX" from "-[NiruxTests.PaletteCommandFlowTests testX]".
+    private static func methodName(of testName: String) -> String {
+        String(testName.split(separator: " ").last?.dropLast() ?? "")
+    }
+}

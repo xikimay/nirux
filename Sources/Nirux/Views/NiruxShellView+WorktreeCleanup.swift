@@ -414,6 +414,6 @@ extension NiruxShellView {
         alert.messageText = message
         alert.informativeText = lines.joined(separator: "\n")
         alert.addButton(withTitle: "OK")
-        alert.runModal()
+        runModal(alert)
     }
 }

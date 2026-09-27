@@ -731,17 +731,12 @@ enum ColumnKind: String, Codable {
 
 // MARK: - URL History
 
-/// Persists recently visited browser URLs to ~/Library/Application Support/nirux/url_history.json
+/// Persists recently visited browser URLs to url_history.json next to
+/// state.json (~/Library/Application Support/nirux), so NIRUX_STATE_DIR
+/// moves it too.
 enum URLHistory {
     private static var fileURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("nirux")
-        do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        } catch {
-            NSLog("[Nirux URLHistory] Failed to create history dir: %@", error.localizedDescription)
-        }
-        return dir.appendingPathComponent("url_history.json")
+        Persistence.stateDirectory.appendingPathComponent("url_history.json")
     }
 
     private static let maxEntries = 16

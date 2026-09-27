@@ -139,9 +139,7 @@ extension NiruxShellView {
             )
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            col.pty?.sendRaw("\(cmd)\n")
-        }
+        sideEffects.launchAgent(col, cmd)
     }
 
     func focusWorkspace(_ dir: VDir) {
