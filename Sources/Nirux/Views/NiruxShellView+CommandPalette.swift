@@ -99,6 +99,14 @@ extension NiruxShellView {
                 self?.installAgentSkills()
             },
             PaletteAction(
+                icon: "🧭",
+                title: "Show Getting Started",
+                subtitle: "Checklist: agent CLIs, skills, status hooks and shortcuts",
+                shortcut: nil
+            ) { [weak self] in
+                self?.showOnboardingChecklist()
+            },
+            PaletteAction(
                 icon: "🛠", title: "Open Settings", subtitle: "Agent launch modes, remote access and experiments",
                 shortcut: .settings
             ) {

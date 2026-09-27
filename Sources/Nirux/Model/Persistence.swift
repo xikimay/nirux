@@ -38,6 +38,19 @@ enum Persistence {
         return dir.appendingPathComponent("state.json")
     }
 
+    /// Whether state.json or any recovery copy exists, readable or not. Tells
+    /// a fresh install from one whose state couldn't be loaded.
+    static var hasStoredState: Bool {
+        let dir = stateDirectory
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        return names.contains { name in
+            name == "state.json"
+                || (name.hasPrefix("state.backup.") && name.hasSuffix(".json"))
+                || (name.hasPrefix("state.daily.") && name.hasSuffix(".json"))
+                || (name.hasPrefix("state.corrupt.") && name.hasSuffix(".json"))
+        }
+    }
+
     /// The directory holding state.json — also where the hook-events log
     /// lives. Resolves NIRUX_STATE_DIR the same way stateURL does (the hook
     /// receiver process inherits that env from the terminal that spawned it,
@@ -366,6 +379,11 @@ struct PersistedSettings: Codable {
     /// Last update claimed before execution, giving prompt delivery
     /// at-most-once semantics across app restarts.
     var telegramLastUpdateID: Int64?
+    /// First-launch checklist. Nil in state files that predate it; see
+    /// `OnboardingChecklist.launchState`.
+    var onboardingChecklist: OnboardingChecklistState?
+    /// A value a newer build wrote, kept so saving doesn't erase it.
+    private var unknownOnboardingChecklistRawValue: String?
 
     init(
         claudeLaunchMode: ClaudeLaunchMode? = nil,
@@ -379,7 +397,8 @@ struct PersistedSettings: Codable {
         telegramPairedChatID: Int64? = nil,
         telegramNotifyOnCompletion: Bool = true,
         telegramNotifyOnAttention: Bool = true,
-        telegramLastUpdateID: Int64? = nil
+        telegramLastUpdateID: Int64? = nil,
+        onboardingChecklist: OnboardingChecklistState? = nil
     ) {
         self.claudeLaunchMode = claudeLaunchMode
         self.claudeNoFlicker = claudeNoFlicker
@@ -393,6 +412,7 @@ struct PersistedSettings: Codable {
         self.telegramNotifyOnCompletion = telegramNotifyOnCompletion
         self.telegramNotifyOnAttention = telegramNotifyOnAttention
         self.telegramLastUpdateID = telegramLastUpdateID
+        self.onboardingChecklist = onboardingChecklist
     }
 
     enum CodingKeys: String, CodingKey {
@@ -408,6 +428,7 @@ struct PersistedSettings: Codable {
         case telegramNotifyOnCompletion
         case telegramNotifyOnAttention
         case telegramLastUpdateID
+        case onboardingChecklist
         case claudeBypassPermissions // legacy
     }
 
@@ -439,6 +460,12 @@ struct PersistedSettings: Codable {
             Bool.self, forKey: .telegramNotifyOnAttention
         ) ?? true
         telegramLastUpdateID = try container.decodeIfPresent(Int64.self, forKey: .telegramLastUpdateID)
+        // A value from a newer build must not make the whole state file
+        // undecodable: it reads as "no record" and is written back as is.
+        if let raw = try? container.decodeIfPresent(String.self, forKey: .onboardingChecklist) {
+            onboardingChecklist = OnboardingChecklistState(rawValue: raw)
+            if onboardingChecklist == nil { unknownOnboardingChecklistRawValue = raw }
+        }
     }
 
     /// Custom encoder is required because `CodingKeys` carries the legacy
@@ -458,6 +485,9 @@ struct PersistedSettings: Codable {
         try container.encode(telegramNotifyOnCompletion, forKey: .telegramNotifyOnCompletion)
         try container.encode(telegramNotifyOnAttention, forKey: .telegramNotifyOnAttention)
         try container.encodeIfPresent(telegramLastUpdateID, forKey: .telegramLastUpdateID)
+        try container.encodeIfPresent(
+            onboardingChecklist?.rawValue ?? unknownOnboardingChecklistRawValue, forKey: .onboardingChecklist
+        )
     }
 }
 

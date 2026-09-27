@@ -51,6 +51,15 @@ Nirux is organized around workspaces.
 
 A workspace is a persistent task context: it has a current directory, a short title, optional task notes, and a horizontal strip of columns. Columns can be terminals, browser tabs, or editor views. Workspaces are stacked vertically, so you can keep several tasks alive without mixing their terminals, files, and browser context.
 
+On first launch, Nirux opens the sidebar on a **Getting Started** checklist, shown below the workspaces. It never blocks the app, and it covers:
+
+- whether `claude` or `codex` is installed where a Nirux terminal finds it, with copyable install commands (Claude Code's native installer, Homebrew for Codex) and a **Check again** link otherwise. Nirux reads the terminal `PATH` and the usual per-user install locations (`~/.local/bin`, the npm prefix from `~/.npmrc`, nvm, fnm, Volta, asdf, mise, Nix profiles) without running your shell's startup files, so a CLI installed elsewhere shows as missing: close the card if you already have one;
+- whether the bundled Agent Skills are installed and match this version, with an **Install**/**Update** button;
+- whether the [agent status hooks](#agent-status-hooks) are present in `~/.claude/settings.json` and `~/.codex/config.toml`;
+- the main shortcuts: `Cmd+P` palette, `Cmd+T` column, `Cmd+N` workspace, `Cmd+O` Pilot Mode.
+
+Close it with `×` (or **Done** once every step is done); the choice is saved with your settings. Reopen it anytime with `Show Getting Started` from the command palette. Installs that already had workspaces before the checklist existed don't show it on their own.
+
 The intended setup is:
 
 1. Open Nirux and use the first workspace as your main repo workspace.
@@ -75,6 +84,7 @@ Mission completion is always reported explicitly by the child agent. Nirux does 
 Typical command palette actions:
 
 - Install Agent Skills
+- Show Getting Started
 - Open Claude Code
 - Open Codex
 - New Worktree

@@ -541,7 +541,7 @@ final class PtySession: @unchecked Sendable {
     /// shells can find Homebrew, fnm, starship, etc. even on first launch
     /// after Gatekeeper. Computed once per process on first access (must be
     /// triggered from the parent — FileManager is not safe after fork).
-    private static let effectivePath: String = computeEffectivePath()
+    static let effectivePath: String = computeEffectivePath()
 
     private static func computeEffectivePath() -> String {
         let current = String(cString: getenv("PATH") ?? strdup(""))
