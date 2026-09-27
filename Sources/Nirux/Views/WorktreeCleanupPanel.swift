@@ -30,6 +30,7 @@ final class WorktreeCleanupPanel: NSObject {
     /// are not checked behind the user's back.
     var isConfirming = false
     private var scannedRepositories: Set<String> = []
+    private var scannedFolders: Set<String> = []
     private var knownPaths: Set<String> = []
 
     private var panel: NSPanel?
@@ -75,9 +76,14 @@ final class WorktreeCleanupPanel: NSObject {
         knownPaths.contains(comparablePath)
     }
 
-    /// True the first time a repository is seen.
+    /// True the first time a repository (its main checkout) is seen.
     func markRepositoryScanned(_ mainCheckout: String) -> Bool {
         scannedRepositories.insert(mainCheckout).inserted
+    }
+
+    /// True the first time a folder is asked for its repository's worktrees.
+    func markFolderScanned(_ folder: String) -> Bool {
+        scannedFolders.insert(NiruxShellView.comparablePath(folder)).inserted
     }
 
     func update(path: String, inspection: WorktreeCleanup.Inspection) {

@@ -168,13 +168,14 @@ extension NiruxShellView {
     /// come next — Return to send, ⌘⌫ to clear the line — must not confirm
     /// the kill. Plain ⌘D is unbound in Nirux, so no reflex reaches it.
     /// Also used for other destructive confirmations (Delete Space, worktree
-    /// clean-up). Past a dozen lines, the details scroll instead of growing
-    /// the alert.
+    /// clean-up). Past a dozen lines (or as much text), the details scroll
+    /// instead of growing the alert.
     func confirmDestructiveClose(message: String, details: [String], confirmTitle: String) -> Bool {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = message
-        if details.count > Self.inlineAlertDetailLimit {
+        if details.count > Self.inlineAlertDetailLimit
+            || details.reduce(0, { $0 + $1.count }) > Self.inlineAlertCharacterLimit {
             alert.accessoryView = Self.scrollingDetails(details)
         } else {
             alert.informativeText = details.joined(separator: "\n")
@@ -198,6 +199,7 @@ extension NiruxShellView {
     }
 
     private static let inlineAlertDetailLimit = 12
+    private static let inlineAlertCharacterLimit = 1_200
 
     private static func scrollingDetails(_ lines: [String]) -> NSScrollView {
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 460, height: 240))

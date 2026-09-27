@@ -27,3 +27,14 @@ extension NSMenu {
         return item
     }
 }
+
+extension SidebarView {
+    /// "Clean Up Worktree…", for a workspace open in a linked worktree or
+    /// in a folder that's gone.
+    func addWorktreeCleanupItem(to menu: NSMenu, workspaceIndex: Int) {
+        guard offersWorktreeCleanup?(workspaceIndex) == true else { return }
+        menu.addClosureItem(title: "Clean Up Worktree…") { [weak self] in
+            self?.onWorkspaceAction?(.cleanUpWorktree, workspaceIndex)
+        }
+    }
+}

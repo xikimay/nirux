@@ -455,6 +455,49 @@ final class WorktreeCleanupTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: worktree + "/vendor/clone/notes.txt"))
     }
 
+    func testFolderOfIgnoredFilesUnderABuildNameGoesToTheTrash() throws {
+        try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
+        try write("*.secret\nbuild/\n", to: "info/exclude", in: root + "/widgets/.git")
+        try write("key\n", to: "target/signing.secret", in: worktree)
+        try write("artifact\n", to: "build/output.o", in: worktree)
+        let plan = try readyPlan()
+        XCTAssertEqual(plan.worktree.buildOutput, ["build/"])
+        XCTAssertEqual(plan.worktree.leftovers, ["target/"])
+
+        XCTAssertEqual(
+            WorktreeCleanup.execute(plan, tools: tools),
+            .cleaned(forcedBranchDelete: false, trashFolder: "widgets.feat-x leftovers")
+        )
+        XCTAssertEqual(try String(contentsOfFile: trashed("target/signing.secret"), encoding: .utf8), "key\n")
+    }
+
+    func testNewBuildOutputAfterTheCheckDoesNotStopIt() throws {
+        try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
+        try write(".DS_Store\n", to: "info/exclude", in: root + "/widgets/.git")
+        let plan = try readyPlan()
+        try write("finder\n", to: ".DS_Store", in: worktree)
+
+        XCTAssertEqual(WorktreeCleanup.execute(plan, tools: tools), .cleaned(forcedBranchDelete: false, trashFolder: nil))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: worktree))
+    }
+
+    func testTrashFailurePutsTheLeftoversBack() throws {
+        try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
+        try write("# handover\n", to: ".claude-handover.md", in: worktree)
+        try write("{}\n", to: ".claude/settings.local.json", in: worktree)
+        let plan = try readyPlan()
+        tools.trash = { _ in throw CocoaError(.fileWriteVolumeReadOnly) }
+
+        guard case .failed(let message) = WorktreeCleanup.execute(plan, tools: tools) else {
+            return XCTFail("no Trash, no cleanup")
+        }
+        XCTAssertTrue(message.hasPrefix("Couldn't move the leftovers to the Trash"), message)
+        XCTAssertEqual(try String(contentsOfFile: worktree + "/.claude-handover.md", encoding: .utf8), "# handover\n")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: worktree + "/.claude/settings.local.json"))
+        XCTAssertTrue(try isListed(worktree))
+        XCTAssertTrue(branchExists("feat/x"))
+    }
+
     // MARK: - Hidden work
 
     func testNestedWorktreeBlocks() throws {
@@ -537,6 +580,17 @@ final class WorktreeCleanupVerdictTests: XCTestCase {
         XCTAssertEqual(WorktreeCleanup.hiddenEntries(output), ["config.json", "assumed.txt", "both.txt"])
     }
 
+    func testBuildOutputSummaryFoldsRepeatedNames() {
+        let worktree = WorktreeCleanup.Worktree(
+            path: "/tmp/w", mainCheckout: "/tmp/m", branch: "b", tip: nil, isLocked: false, changes: [],
+            hiddenFiles: [], nestedWorktrees: [], untrackedDisposable: [],
+            ignoredEntries: [".DS_Store", ".build/", ".env", "Sources/.DS_Store", "Tests/.DS_Store"],
+            buildOutput: [".DS_Store", ".build/", "Sources/.DS_Store", "Tests/.DS_Store"]
+        )
+        XCTAssertEqual(worktree.leftovers, [".env"])
+        XCTAssertEqual(worktree.buildOutputSummary, [".DS_Store ×3", ".build/"])
+    }
+
     func testBuildOutputIsTheOnlyIgnoredEntryNotTrashed() {
         XCTAssertTrue(WorktreeCleanup.isRegenerable(".build/"))
         XCTAssertTrue(WorktreeCleanup.isRegenerable("app/node_modules/"))
@@ -557,7 +611,8 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
         let worktree = WorktreeCleanup.Worktree(
             path: "/tmp/\(folder)", mainCheckout: "/tmp/widgets", branch: "feat/x",
             tip: String(repeating: "a", count: 40), isLocked: false, changes: [], hiddenFiles: [],
-            nestedWorktrees: [], untrackedDisposable: disposable, ignoredEntries: ignored
+            nestedWorktrees: [], untrackedDisposable: disposable, ignoredEntries: ignored,
+            buildOutput: ignored.filter(WorktreeCleanup.isRegenerable)
         )
         let pullRequest = WorktreeCleanup.PullRequest(
             number: 12, state: "MERGED", headOid: String(repeating: "a", count: 40), url: "https://github.com/acme/widgets/pull/12"
@@ -708,8 +763,9 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
 
         XCTAssertEqual(NiruxShellView.worktreeCleanupPath(forCwd: linked.path), linked.path)
         XCTAssertEqual(NiruxShellView.worktreeCleanupPath(forCwd: linked.path + "/Sources"), linked.path)
-        // A deleted subfolder of a worktree that's still there is that worktree.
-        XCTAssertEqual(NiruxShellView.worktreeCleanupPath(forCwd: linked.path + "/Gone/Deeper"), linked.path)
+        // A folder that's gone is only closed, even inside a worktree that's
+        // still there: it may have been a worktree of its own.
+        XCTAssertEqual(NiruxShellView.worktreeCleanupPath(forCwd: linked.path + "/Gone"), linked.path + "/Gone")
         XCTAssertNil(NiruxShellView.worktreeCleanupPath(forCwd: main.path))
         XCTAssertNil(NiruxShellView.worktreeCleanupPath(forCwd: submodule.path))
         XCTAssertNil(NiruxShellView.worktreeCleanupPath(forCwd: base.path))

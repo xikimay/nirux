@@ -546,9 +546,7 @@ final class SidebarView: NSView {
         menu.addClosureItem(title: "Close Workspace") { [weak self] in
             self?.onWorkspaceAction?(.close, workspaceIndex)
         }.isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
-        if offersWorktreeCleanup?(workspaceIndex) == true {
-            menu.addClosureItem(title: "Clean Up Worktree…") { [weak self] in self?.onWorkspaceAction?(.cleanUpWorktree, workspaceIndex) }
-        }
+        addWorktreeCleanupItem(to: menu, workspaceIndex: workspaceIndex)
         menu.addClosureItem(title: "View/Edit Context…") { [weak self] in
             self?.onWorkspaceAction?(.editContext, workspaceIndex)
         }

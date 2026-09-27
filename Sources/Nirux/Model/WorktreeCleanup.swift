@@ -88,6 +88,10 @@ enum WorktreeCleanup {
         let untrackedDisposable: [String]
         /// Ignored files and folders, as `git ls-files --directory` groups them.
         let ignoredEntries: [String]
+        /// The ignored entries that are build output: a `regenerableNames`
+        /// name an ignore pattern matches itself. (git also groups a folder
+        /// whose files are all ignored, e.g. `target/` holding `*.secret`.)
+        let buildOutput: [String]
 
         var repositoryName: String {
             let name = (mainCheckout as NSString).lastPathComponent
@@ -96,13 +100,27 @@ enum WorktreeCleanup {
 
         var folderName: String { (path as NSString).lastPathComponent }
 
-        /// What goes to the Trash before the folder is removed.
+        /// What goes to the Trash before the folder is removed; the build
+        /// output is deleted with it.
         var leftovers: [String] {
-            (untrackedDisposable + ignoredEntries.filter { !WorktreeCleanup.isRegenerable($0) }).sorted()
+            let deleted = Set(buildOutput)
+            return (untrackedDisposable + ignoredEntries.filter { !deleted.contains($0) }).sorted()
         }
 
-        /// Ignored build output, deleted with the folder.
-        var buildOutput: [String] { ignoredEntries.filter(WorktreeCleanup.isRegenerable) }
+        /// `buildOutput` with one name's copies folded: ".DS_Store ×12".
+        var buildOutputSummary: [String] {
+            let names = buildOutput.map { entry -> String in
+                let trimmed = entry.hasSuffix("/") ? String(entry.dropLast()) : entry
+                return (trimmed as NSString).lastPathComponent + (entry.hasSuffix("/") ? "/" : "")
+            }
+            var counts: [String: Int] = [:]
+            for name in names { counts[name, default: 0] += 1 }
+            var seen: Set<String> = []
+            return zip(buildOutput, names).compactMap { entry, name in
+                guard let count = counts[name], count > 1 else { return entry }
+                return seen.insert(name).inserted ? "\(name) ×\(count)" : nil
+            }
+        }
 
         /// Whether the folder is the one `GitWorktree.create` makes for
         /// `branch`. One named for another branch may be a base that moves
@@ -238,7 +256,8 @@ enum WorktreeCleanup {
             hiddenFiles: files.hiddenFiles,
             nestedWorktrees: location.nestedWorktrees,
             untrackedDisposable: files.untrackedDisposable,
-            ignoredEntries: files.ignoredEntries
+            ignoredEntries: files.ignoredEntries,
+            buildOutput: files.buildOutput
         ))
     }
 
@@ -318,6 +337,7 @@ enum WorktreeCleanup {
         var hiddenFiles: [String] = []
         var untrackedDisposable: [String] = []
         var ignoredEntries: [String] = []
+        var buildOutput: [String] = []
     }
 
     /// What `git worktree remove` would find in the folder: changes and
@@ -346,6 +366,17 @@ enum WorktreeCleanup {
         }
         files.untrackedDisposable.sort()
         files.ignoredEntries = ignored.stdout.split(separator: "\0").map(String.init).sorted()
+        let named = files.ignoredEntries.filter(isRegenerable)
+        if !named.isEmpty {
+            // Exit 1: none of them is ignored by a pattern of its own. (-z
+            // needs --stdin; a path with a newline just goes to the Trash.)
+            let matched = git(["check-ignore", "--"] + named, in: path, tools: tools)
+            guard [0, 1].contains(matched.status) else {
+                return .failure(ReadFailure(message: firstLine(matched.stderr) ?? "git check-ignore failed in \(path)."))
+            }
+            let patterned = Set(matched.stdout.split(separator: "\n").map(String.init))
+            files.buildOutput = named.filter { patterned.contains($0) }
+        }
         files.hiddenFiles = hiddenEntries(flagged.stdout).filter { relative in
             var info = stat()
             return lstat(path + "/" + relative, &info) == 0

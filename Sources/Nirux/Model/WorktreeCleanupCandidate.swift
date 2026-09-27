@@ -121,7 +121,7 @@ struct WorktreeCleanupCandidate: Equatable {
             )
         }
         if !plan.worktree.buildOutput.isEmpty {
-            lines.append("• deletes its build output: \(plan.worktree.buildOutput.joined(separator: ", "))")
+            lines.append("• deletes its build output: \(plan.worktree.buildOutputSummary.joined(separator: ", "))")
         }
         if let workspacePhrase { lines.append("• closes \(workspacePhrase)") }
         if !plan.worktree.folderMatchesBranch {
@@ -161,7 +161,7 @@ struct WorktreeCleanupCandidate: Equatable {
                     lines.append("    to the Trash: \(plan.worktree.leftovers.joined(separator: ", "))")
                 }
                 if !plan.worktree.buildOutput.isEmpty {
-                    lines.append("    build output deleted: \(plan.worktree.buildOutput.joined(separator: ", "))")
+                    lines.append("    build output deleted: \(plan.worktree.buildOutputSummary.joined(separator: ", "))")
                 }
                 if !plan.worktree.folderMatchesBranch {
                     lines.append("    the folder isn’t named for \(plan.branch)")

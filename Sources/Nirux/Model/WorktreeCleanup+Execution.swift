@@ -36,7 +36,7 @@ extension WorktreeCleanup {
         do {
             trashed = try moveToTrash(current.leftovers, from: current.path, tools: tools)
         } catch {
-            return .failed("Couldn't move the leftovers to the Trash: \(error.localizedDescription) Nothing was deleted.")
+            return .failed("Couldn't move the leftovers to the Trash: \(error.localizedDescription) Nothing else was touched.")
         }
         let trashFolder = trashed?.folder.lastPathComponent
 
@@ -77,29 +77,37 @@ extension WorktreeCleanup {
         if current.mainCheckout != plan.worktree.mainCheckout {
             changed.append("Its main checkout is no longer \(plan.worktree.mainCheckout).")
         }
-        let confirmed = Set(plan.worktree.leftovers + plan.worktree.buildOutput)
-        let appeared = (current.leftovers + current.buildOutput).filter { !confirmed.contains($0) }
+        // New build output (a Finder .DS_Store, say) is deleted like the rest.
+        let confirmed = Set(plan.worktree.leftovers)
+        let appeared = current.leftovers.filter { !confirmed.contains($0) }
         if !appeared.isEmpty {
             changed.append("New files appeared: \(appeared.joined(separator: ", ")).")
         }
         return changed
     }
 
-    /// git refused before touching anything (the worktree is still listed):
-    /// the leftovers go back. Or it removed the worktree's entry but not all
-    /// of its folder: what's left is no longer a worktree, so they stay in
-    /// the Trash.
+    /// git refused before touching anything (the folder is there and still
+    /// listed): the leftovers go back. Otherwise it deleted part of it, the
+    /// folder or its entry: the leftovers stay in the Trash, and the report
+    /// says what's left.
     private static func removalFailure(
         _ removal: GitResult, worktree: Worktree, trashed: TrashedLeftovers?, tools: Tools
     ) -> Execution {
         let gitOutput = "git worktree remove failed:\n\(output(of: removal))"
+        let folderExists = FileManager.default.fileExists(atPath: worktree.path)
         let stillListed = worktreeListing(in: worktree.mainCheckout, tools: tools)?
-            .contains { $0.path.realPath == worktree.path } ?? true
-        guard stillListed else {
+            .contains { ($0.path.realPath ?? URL(fileURLWithPath: $0.path).standardizedFileURL.path) == worktree.path }
+            ?? true
+        guard folderExists, stillListed else {
+            let folder = folderExists
+                ? "Part of \(worktree.path) is left: delete it yourself."
+                : "\(worktree.path) was deleted."
+            let entry = stillListed
+                ? "git still lists the worktree (git worktree prune clears it)."
+                : "git no longer tracks it."
             let trashNote = trashed.map { " Its leftovers are in the Trash, in “\($0.folder.lastPathComponent)”." } ?? ""
             return .failed(
-                "\(gitOutput)\ngit no longer tracks \(worktree.path), but part of the folder is left: "
-                    + "delete it yourself. The branch \(worktree.branch ?? "") was kept.\(trashNote)"
+                "\(gitOutput)\n\(folder) \(entry) The branch \(worktree.branch ?? "") was kept.\(trashNote)"
             )
         }
         guard let trashed else { return .failed(gitOutput) }
@@ -129,7 +137,8 @@ extension WorktreeCleanup {
     /// Moves `relativePaths` out of the worktree into one folder, then that
     /// folder to the Trash, so `git worktree remove` can't take them and
     /// the user can get them back. Nil when there's nothing to move. On
-    /// failure, whatever moved is put back.
+    /// failure, whatever moved is put back; what can't be stays in the
+    /// staging folder, which the error names.
     static func moveToTrash(_ relativePaths: [String], from worktree: String, tools: Tools) throws -> TrashedLeftovers? {
         guard !relativePaths.isEmpty else { return nil }
         let fileManager = FileManager.default
@@ -138,7 +147,6 @@ extension WorktreeCleanup {
         let staging = try fileManager.url(
             for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: root, create: true
         )
-        defer { try? fileManager.removeItem(at: staging) }
         let bundle = staging.appendingPathComponent("\(root.lastPathComponent) leftovers", isDirectory: true)
         var moved: [String] = []
         do {
@@ -158,9 +166,16 @@ extension WorktreeCleanup {
                 moved.append(relative)
             }
             let trashedFolder = try tools.trash(bundle)
+            try? fileManager.removeItem(at: staging)
             return TrashedLeftovers(folder: trashedFolder, relativePaths: moved)
         } catch {
-            _ = putBack(TrashedLeftovers(folder: bundle, relativePaths: moved), into: worktree)
+            let stuck = putBack(TrashedLeftovers(folder: bundle, relativePaths: moved), into: worktree)
+            guard stuck.isEmpty else {
+                throw LeftoverError(errorDescription:
+                    "\(error.localizedDescription) \(stuck.joined(separator: ", ")) couldn't be put back "
+                        + "and \(stuck.count == 1 ? "is" : "are") in \(bundle.path).")
+            }
+            try? fileManager.removeItem(at: staging)
             throw error
         }
     }
