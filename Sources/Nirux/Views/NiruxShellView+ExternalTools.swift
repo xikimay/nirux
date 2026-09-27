@@ -244,16 +244,23 @@ extension NiruxShellView {
         with explicit mailbox instructions. The child asks and waits without PTY injection:
 
         ```bash
-        "$NIRUX_CLI_PATH" --mission ask --message "<concise blocker or question>" --timeout 900
+        "$NIRUX_CLI_PATH" --mission ask --message "<concise blocker or question>"
         "$NIRUX_CLI_PATH" --mission completed --message "<concise result>"
         ```
 
         The parent can wait for a child event, then answer a question by its `eventID`:
 
         ```bash
-        "$NIRUX_CLI_PATH" --mission receive --timeout 900
+        "$NIRUX_CLI_PATH" --mission receive
         "$NIRUX_CLI_PATH" --mission reply --event <question-event-id> --message "<concise answer>"
         ```
+
+        `ask` and `receive` wait up to 90 seconds, which stays under the default 2-minute limit of
+        the Claude Code shell tool, so keep the default wait. Exit status 3 means nothing arrived
+        yet: run the exact same command again to keep waiting, and do the same if the shell tool
+        stops the command first. Repeating an identical `ask` resumes the same question instead of
+        sending it twice, and prints the answer if it arrived meanwhile. `ask` exits with status 1
+        once the Mission is no longer active; do not retry it then.
 
         `receive` prints one JSON object. For a `question`, reply before calling `receive` again;
         for `completed`, the event is acknowledged automatically. A human can also click the

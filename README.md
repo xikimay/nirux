@@ -68,7 +68,7 @@ That leaves your main workspace on the original checkout while each isolated bra
 
 Mission handoffs add an explicit, durable mailbox between the agent that delegates a worktree task and the agent launched in that worktree. The feature is disabled by default. Enable `Settings` → `Experimental` → `Mission handoffs`; the setting applies to new terminals. After updating Nirux, run `Install Agent Skills` again so the installed `nirux-worktree` skill has the matching mailbox instructions.
 
-With Mission handoffs enabled, worktrees opened by the installed skill can send correlated questions and wait for answers, while the parent agent can receive and reply from its terminal. Questions and explicit completion results also appear in the Activity section of the expanded sidebar and in native notifications while Nirux is in the background. Click a question in Activity to reply or open its child workspace.
+With Mission handoffs enabled, worktrees opened by the installed skill can send correlated questions and wait for answers, while the parent agent can receive and reply from its terminal. Each wait lasts at most 90 seconds so it ends before the agent's shell tool stops the command; running the same `ask` again resumes the same question instead of sending a duplicate. Questions and explicit completion results also appear in the Activity section of the expanded sidebar and in native notifications while Nirux is in the background. Click a question in Activity to reply or open its child workspace.
 
 Mission completion is always reported explicitly by the child agent. Nirux does not infer completion from a stopped turn and does not inject replies into a terminal. Worktrees opened without Mission metadata keep the existing handover behavior.
 

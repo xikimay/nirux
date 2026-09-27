@@ -29,7 +29,8 @@ struct MissionEvent: Codable, Equatable {
         case question
         case completed
         case response
-        /// Internal parent-inbox acknowledgement. It updates the target
+        /// Internal inbox acknowledgement: from the parent for a question or
+        /// completion, from the child for a response. It updates the target
         /// event and is not retained as a user-visible Mission event.
         case acknowledged
     }
@@ -49,6 +50,9 @@ struct MissionEvent: Codable, Equatable {
     /// Separate from Activity delivery: whether the parent agent CLI has
     /// consumed this child event. UI display must not consume an agent inbox.
     var parentConsumedAt: TimeInterval?
+    /// Set on a response once the child's `ask` has printed it, so asking
+    /// the same question again starts a new exchange instead of replaying it.
+    var childConsumedAt: TimeInterval?
 
     init(
         id: String,
@@ -62,7 +66,8 @@ struct MissionEvent: Codable, Equatable {
         inReplyTo: String? = nil,
         timestamp: TimeInterval,
         deliveredAt: TimeInterval? = nil,
-        parentConsumedAt: TimeInterval? = nil
+        parentConsumedAt: TimeInterval? = nil,
+        childConsumedAt: TimeInterval? = nil
     ) {
         self.id = id
         self.missionID = missionID
@@ -76,6 +81,7 @@ struct MissionEvent: Codable, Equatable {
         self.timestamp = timestamp
         self.deliveredAt = deliveredAt
         self.parentConsumedAt = parentConsumedAt
+        self.childConsumedAt = childConsumedAt
     }
 }
 
@@ -199,12 +205,12 @@ final class MissionStore {
 
     // This single transition keeps validation and its in-memory mutation
     // adjacent so persistence commits exactly one candidate Mission ledger.
-    // swiftlint:disable:next function_body_length
     func process(_ incoming: MissionEvent, enabled: Bool) -> ProcessingResult {
         guard ensureLoaded() else { return .persistenceFailed }
         guard enabled,
               incoming.deliveredAt == nil,
               incoming.parentConsumedAt == nil,
+              incoming.childConsumedAt == nil,
               Self.isIdentifier(incoming.id),
               Self.isIdentifier(incoming.missionID),
               Self.isIdentifier(incoming.childWorkspaceID),
@@ -251,18 +257,7 @@ final class MissionStore {
             updated[index].events[questionIndex].parentConsumedAt = incoming.timestamp
 
         case .acknowledged:
-            guard incoming.parentWorkspaceID == missions[index].parentWorkspaceID,
-                  incoming.parentAgentUUID == missions[index].parentAgentUUID,
-                  let targetID = incoming.inReplyTo,
-                  let targetIndex = missions[index].events.firstIndex(where: {
-                      $0.id == targetID && ($0.kind == .question || $0.kind == .completed)
-                  })
-            else { return .rejected }
-            guard missions[index].events[targetIndex].parentConsumedAt == nil else {
-                return .accepted(nil)
-            }
-            updated[index].events[targetIndex].parentConsumedAt = incoming.timestamp
-            return commit(updated) ? .accepted(nil) : .persistenceFailed
+            return processAcknowledgement(incoming, missionIndex: index)
         }
 
         let event = MissionEvent(
@@ -295,6 +290,31 @@ final class MissionStore {
         }
         guard commit(updated) else { return .persistenceFailed }
         return .accepted(AcceptedEvent(mission: missions[index], event: event))
+    }
+
+    /// Acknowledgements update their target and are not retained: the parent
+    /// consumes a question or completion, the child receives a response.
+    private func processAcknowledgement(
+        _ incoming: MissionEvent, missionIndex index: Int
+    ) -> ProcessingResult {
+        let mission = missions[index]
+        let fromChild = incoming.parentWorkspaceID == nil && incoming.parentAgentUUID == nil
+        guard fromChild
+                || (incoming.parentWorkspaceID == mission.parentWorkspaceID
+                    && incoming.parentAgentUUID == mission.parentAgentUUID)
+        else { return .rejected }
+        let targetKinds: Set<MissionEvent.Kind> = fromChild ? [.response] : [.question, .completed]
+        guard let targetID = incoming.inReplyTo,
+              let targetIndex = mission.events.firstIndex(where: {
+                  $0.id == targetID && targetKinds.contains($0.kind)
+              })
+        else { return .rejected }
+        let consumedAt: WritableKeyPath<MissionEvent, TimeInterval?> =
+            fromChild ? \.childConsumedAt : \.parentConsumedAt
+        guard mission.events[targetIndex][keyPath: consumedAt] == nil else { return .accepted(nil) }
+        var updated = missions
+        updated[index].events[targetIndex][keyPath: consumedAt] = incoming.timestamp
+        return commit(updated) ? .accepted(nil) : .persistenceFailed
     }
 
     /// Trusted UI response path. It uses the same validation and persistence

@@ -87,8 +87,10 @@ extension NiruxShellView {
         if isMission {
             instructions.append(
                 "This is a Nirux mission workspace. Ask the parent and wait safely with "
-                + "\"$NIRUX_CLI_PATH\" --mission ask --message \"...\" --timeout 900; "
-                + "the command output is the parent's answer. Report the final result with "
+                + "\"$NIRUX_CLI_PATH\" --mission ask --message \"...\"; "
+                + "the command output is the parent's answer. It waits up to 90 seconds: "
+                + "if it exits with status 3 or your shell tool stops it first, run the exact "
+                + "same command again, which resumes the same question. Report the final result with "
                 + "\"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
             )
         }
