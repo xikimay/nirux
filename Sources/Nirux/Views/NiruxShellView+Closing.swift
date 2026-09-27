@@ -167,12 +167,18 @@ extension NiruxShellView {
     /// opened the alert may be an accident mid-prompt, and the keys that
     /// come next — Return to send, ⌘⌫ to clear the line — must not confirm
     /// the kill. Plain ⌘D is unbound in Nirux, so no reflex reaches it.
-    /// Also used for other destructive confirmations (Delete Space).
+    /// Also used for other destructive confirmations (Delete Space, worktree
+    /// clean-up). Past a dozen lines, the details scroll instead of growing
+    /// the alert.
     func confirmDestructiveClose(message: String, details: [String], confirmTitle: String) -> Bool {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = message
-        alert.informativeText = details.joined(separator: "\n")
+        if details.count > Self.inlineAlertDetailLimit {
+            alert.accessoryView = Self.scrollingDetails(details)
+        } else {
+            alert.informativeText = details.joined(separator: "\n")
+        }
         let cancel = alert.addButton(withTitle: "Cancel")
         cancel.keyEquivalent = "\r"
         let confirm = alert.addButton(withTitle: confirmTitle)
@@ -190,14 +196,31 @@ extension NiruxShellView {
         defer { escapeMonitor.map(NSEvent.removeMonitor) }
         return alert.runModal() == .alertSecondButtonReturn
     }
+
+    private static let inlineAlertDetailLimit = 12
+
+    private static func scrollingDetails(_ lines: [String]) -> NSScrollView {
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 460, height: 240))
+        scroll.hasVerticalScroller = true
+        scroll.borderType = .bezelBorder
+        let text = NSTextView(frame: scroll.bounds)
+        text.isEditable = false
+        text.isSelectable = true
+        text.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        text.string = lines.joined(separator: "\n")
+        text.textContainerInset = NSSize(width: 4, height: 4)
+        text.autoresizingMask = [.width]
+        scroll.documentView = text
+        return scroll
+    }
 }
 
-private extension WorkspaceState {
+extension WorkspaceState {
     /// Columns not already on their way out.
     var openColumns: [ColumnState] { columns.filter { !$0.isClosing } }
 }
 
-private extension ColumnState {
+extension ColumnState {
     /// The recognized agent closing this column would kill, with the
     /// status its machine last computed.
     func liveAgent(snapshot: ProcessSnapshot) -> WorkspaceClosePolicy.LiveAgent? {

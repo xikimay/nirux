@@ -19,6 +19,9 @@ final class SidebarView: NSView {
     var onPermissionDecision: ((Int, Int, String, PermissionApproval.Behavior) -> Void)?
     var onDiffStatsClicked: ((Int) -> Void)?
     var onWorkspaceAction: ((WorkspaceSidebarAction, Int) -> Void)?
+    /// Whether the workspace's menu offers "Clean Up Worktree…" (it's open
+    /// in a linked worktree, or its folder is gone). Asked on each menu.
+    var offersWorktreeCleanup: ((Int) -> Bool)?
     /// Drag-reorder drop: (store index of dragged workspace, target
     /// position within its active/inactive group).
     var onWorkspaceReordered: ((Int, Int) -> Void)?
@@ -543,6 +546,9 @@ final class SidebarView: NSView {
         menu.addClosureItem(title: "Close Workspace") { [weak self] in
             self?.onWorkspaceAction?(.close, workspaceIndex)
         }.isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
+        if offersWorktreeCleanup?(workspaceIndex) == true {
+            menu.addClosureItem(title: "Clean Up Worktree…") { [weak self] in self?.onWorkspaceAction?(.cleanUpWorktree, workspaceIndex) }
+        }
         menu.addClosureItem(title: "View/Edit Context…") { [weak self] in
             self?.onWorkspaceAction?(.editContext, workspaceIndex)
         }

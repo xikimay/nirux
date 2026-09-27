@@ -344,8 +344,9 @@ Two side effects in the worktree creation code:
 - Handover files stay untracked in every worktree. They block
   `git worktree remove` and can be committed by a `git add -A`. Adding their
   names to `<common dir>/info/exclude` covers every worktree, without touching
-  the repository. To verify: that ignored files don't block
-  `git worktree remove`.
+  the repository. Verified: ignored files don't block `git worktree remove`,
+  which deletes them with the folder (the worktree cleanup lists them in its
+  confirmation).
 
 ## 4. Brief
 
@@ -588,8 +589,10 @@ workspace, three rows tall, and covers only the active space.
   worktree, deletes the branch and closes the workspace, after confirmation.
   - It never uses `--force`.
   - It deletes the branch with `-D` only when the local HEAD equals the merged
-    PR's head commit. Otherwise it keeps the branch, since there may be unpushed
-    work.
+    PR's head commit, or is an ancestor of it. Otherwise it keeps the branch,
+    since there may be unpushed work.
+  - The checks and the git side exist: `WorktreeCleanup`, behind the sidebar's
+    "Clean Up Worktree…" and the palette's "Clean Up Merged Worktrees…".
 
 The data sources already exist (`GitDetect`, `PRDetect`, `GitWorktree.list`,
 workspace context). Sections backed by later PRs (brief, pinned URLs, sessions)

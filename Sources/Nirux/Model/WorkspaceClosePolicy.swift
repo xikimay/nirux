@@ -25,7 +25,7 @@ enum WorkspaceClosePolicy {
             }
         }
 
-        fileprivate var statusDescription: String {
+        var statusDescription: String {
             switch status {
             case .working: return "working"
             case .needsAttention: return "waiting for you"
@@ -82,7 +82,7 @@ enum WorkspaceClosePolicy {
         agent.map { [agentDetail([$0], closing: "column")] }
     }
 
-    private static func agentDetail(_ agents: [LiveAgent], closing target: String) -> String {
+    static func agentDetail(_ agents: [LiveAgent], closing target: String) -> String {
         if agents.count == 1 {
             let agent = agents[0]
             return "\(agent.displayName) is \(agent.statusDescription) — closing the \(target) ends its session."

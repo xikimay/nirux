@@ -90,6 +90,7 @@ Typical command palette actions:
 - Open Codex
 - New Worktree
 - Open Worktree
+- Clean Up Merged Worktrees
 - New Terminal
 - Open Editor
 - Search Workspace
@@ -247,6 +248,19 @@ The command palette action `Install Agent Skills` writes the bundled skills to:
 ```
 
 `nirux-worktree` lets supported agents open isolated Nirux workspaces when the user asks to start work on a feature, bug, or separate branch. `nirux-show-code` teaches agents to open code in the editor column via `nirux://open-editor` when the user asks to see code.
+
+### Cleaning up merged worktrees
+
+`Clean Up Worktree…` in a workspace's `⋯` menu (shown for a workspace open in a linked worktree) removes the worktree folder and its local branch, then closes the workspaces open in it. `Clean Up Merged Worktrees…` in the command palette lists every such worktree across spaces, checks them all, preselects the ready ones and cleans up the checked ones one at a time, reporting on each.
+
+Nothing is merged, pushed or fetched, and the remote branch is never touched. A worktree is cleaned up only when all of these hold, checked with `gh` and git:
+
+- GitHub reports its branch's pull request as merged. The pull request's state counts, not git ancestry, so squash merges qualify. An open pull request for the branch blocks.
+- The branch tip is the merged pull request's head, or an ancestor of it: no local commit is left out.
+- Nothing is uncommitted or untracked, except `.claude-handover.md`, `.codex-handover.md` and `.claude/settings.local.json`, which are deleted with it. Ignored files (build output, for example) are deleted with the folder too; the confirmation lists them.
+- The worktree is not locked, and no editor in its workspaces has unsaved changes.
+
+The confirmation lists exactly what will be deleted and any agent session that closing the workspaces ends; Return cancels. Right before deleting, the worktree is read again, and anything new stops the cleanup. `git worktree remove` runs without `--force`; the branch goes with `git branch -d`, or `-D` after a squash merge. If git fails, the cleanup stops and shows git's output. A workspace whose folder is already gone can only be closed.
 
 ## Local Development
 

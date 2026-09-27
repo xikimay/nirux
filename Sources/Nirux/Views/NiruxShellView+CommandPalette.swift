@@ -76,6 +76,13 @@ extension NiruxShellView {
                 self?.showWorktreeListPalette()
             },
             PaletteAction(
+                icon: "🧹", title: "Clean Up Merged Worktrees…",
+                subtitle: "Delete worktrees and local branches whose pull request is merged",
+                shortcut: nil
+            ) { [weak self] in
+                self?.showWorktreeCleanupPanel()
+            },
+            PaletteAction(
                 icon: "🔍", title: "Pilot Mode", subtitle: "Toggle overview of all workspaces",
                 shortcut: .pilotMode
             ) { [weak self] in
