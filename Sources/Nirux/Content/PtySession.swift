@@ -63,6 +63,7 @@ final class ProcessSnapshot {
     private var capturedArguments: [pid_t: [String]]?
 
     init() {
+        PollingDiagnostics.recordProcessTableScan()
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
         var size: Int = 0
         guard sysctl(&mib, 4, nil, &size, nil, 0) == 0, size > 0 else { return }

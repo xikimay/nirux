@@ -164,13 +164,15 @@ final class ColumnState {
     }
 
     /// Update the title bar label text: [title or process] · [path]
-    func updateTitleBarLabel(snapshot: ProcessSnapshot) {
+    /// The snapshot is only evaluated for shell titles, which fall back to
+    /// the foreground process name.
+    func updateTitleBarLabel(snapshot: @autoclosure () -> ProcessSnapshot) {
         guard let label = titleLabel else { return }
         let name: String
         if let termTitle = terminalTitle, !termTitle.isEmpty, !Self.boringTitles.contains(termTitle) {
             name = termTitle
         } else {
-            name = pty?.foregroundProcessName(snapshot: snapshot) ?? "shell"
+            name = pty?.foregroundProcessName(snapshot: snapshot()) ?? "shell"
         }
         let path = pty?.childCwd?.abbreviatedPath(maxComponents: 2) ?? ""
         label.stringValue = path.isEmpty ? name : "\(name) · \(path)"

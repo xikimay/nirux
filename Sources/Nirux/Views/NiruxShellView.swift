@@ -51,6 +51,11 @@ final class NiruxShellView: NSView {
     // Heartbeat
     var heartbeatTimer: Timer?
     var heartbeatTick: UInt = 0
+    /// Event-driven git/PR refresh scheduling (FSEvents + throttles).
+    let gitRefresh = GitRefreshCoordinator()
+    /// See scheduleMetadataRefresh(): one process-table scan per window.
+    var isMetadataRefreshScheduled = false
+    var lastMetadataRefreshAt: TimeInterval = 0
 
     /// Dwell timer that marks visible Activity entries as read. The
     /// generation invalidates a fired timer whose MainActor task is queued.
@@ -143,13 +148,12 @@ final class NiruxShellView: NSView {
                 guard let self else { return }
                 let snapshot = ProcessSnapshot()
                 self.heartbeatTick &+= 1
-                self.refreshGitBranches()
-                self.refreshTitleBarLabels(snapshot: snapshot)
-                self.updateSidebar(snapshot: snapshot)
+                // Git and PR reads are event-driven; the tick only starts
+                // the ones that are due (see GitRefreshPolicy).
+                self.refreshGitAndPullRequests()
+                self.refreshMetadata(snapshot: snapshot)
                 // Save state every ~10s (every 5th tick)
                 if self.heartbeatTick % 5 == 0 { self.saveState(snapshot: snapshot) }
-                // PR info every ~30s (every 15th tick)
-                if self.heartbeatTick % 15 == 0 { self.refreshPRInfo() }
             }
         }
     }
@@ -163,16 +167,7 @@ final class NiruxShellView: NSView {
     /// sidebar refresh, diff click-through, terminal link opening. Used by
     /// init, addWorkspace and session restore.
     func wireWorkspace(_ workspace: WorkspaceState) {
-        workspace.onMetadataChanged = { [weak self] in self?.updateSidebar(); self?.refreshTitleBarLabels() }
-        workspace.onFocusedColumnChanged = { [weak workspace] in
-            workspace?.detectGitBranch()
-        }
-        workspace.onGitContextChanged = { [weak self, weak workspace] in
-            guard let self, let workspace else { return }
-            self.updateSidebar()
-            self.refreshTitleBarLabels()
-            self.refreshPRInfo(for: [workspace])
-        }
+        wireMetadataAndGitRefresh(workspace)
         workspace.onDiffStatsClicked = { [weak self, weak workspace] in
             guard let workspace else { return }
             self?.openDiffInEditor(for: workspace)
@@ -362,6 +357,7 @@ final class NiruxShellView: NSView {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.clearAllAgentAttention()
+                self.resumeGitRefresh()
                 self.startHeartbeat()
                 if self.isPilotMode { self.startPilotRefresh() }
                 self.forEachEditorColumn { $0.resumeFileWatch() }
@@ -370,6 +366,7 @@ final class NiruxShellView: NSView {
         NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                self.gitRefresh.isSuspended = true
                 self.stopHeartbeat()
                 self.stopPilotRefresh()
                 self.forEachEditorColumn { $0.pauseFileWatch() }

@@ -116,6 +116,8 @@ final class WorkspaceState {
 
     /// Called by NiruxShellView to wire up sidebar refresh
     var onMetadataChanged: (() -> Void)?
+    /// A column's terminal title changed (fires before onMetadataChanged).
+    var onColumnTitleChanged: ((ColumnState) -> Void)?
     var onFocusedColumnChanged: (() -> Void)?
     var onGitContextChanged: (() -> Void)?
     var onDiffStatsClicked: (() -> Void)?
@@ -413,8 +415,10 @@ extension WorkspaceState {
     }
 
     private func setupTitleTracking(for col: ColumnState) {
-        col.onTitleChanged = { [weak self] in
-            self?.onMetadataChanged?()
+        col.onTitleChanged = { [weak self, weak col] in
+            guard let self else { return }
+            if let col { self.onColumnTitleChanged?(col) }
+            self.onMetadataChanged?()
         }
     }
 
@@ -462,14 +466,6 @@ extension WorkspaceState {
         setupAgentAttentionTracking(for: col)
         setupLinkOpening(for: col)
         setupLocalServerDetection(for: col)
-    }
-
-    func detectGitBranch() {
-        let workingDirectory = focusedWorkingDirectory
-        guard let observation = beginGitContextObservation(at: workingDirectory) else { return }
-        GitDetect.contextAsync(at: workingDirectory) { [weak self] result in
-            self?.applyGitContextObservation(result, observation: observation)
-        }
     }
 
     // MARK: - Column Management

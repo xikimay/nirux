@@ -151,9 +151,21 @@ enum PRDetect {
         (lhs["number"] as? Int ?? 0) > (rhs["number"] as? Int ?? 0)
     }
 
-    private static func pullRequestInfo(from candidate: [String: Any]) -> PRInfo {
+    static func pullRequestInfo(from candidate: [String: Any]) -> PRInfo {
         let rollup = candidate["statusCheckRollup"] as? [[String: Any]] ?? []
         let conclusions = rollup.compactMap { $0["conclusion"] as? String }
+        // One running check keeps the rollup pending: a CheckRun that has
+        // not completed (empty conclusion) or a pending commit status. A
+        // mix of finished and running checks is not a success yet.
+        let hasRunningCheck = rollup.contains { check in
+            if let state = check["state"] as? String {
+                return ["PENDING", "EXPECTED"].contains(state.uppercased())
+            }
+            if let status = check["status"] as? String, status.uppercased() != "COMPLETED" {
+                return true
+            }
+            return (check["conclusion"] as? String)?.isEmpty ?? false
+        }
         let allChecksPending = !rollup.isEmpty && conclusions.allSatisfy({ $0.isEmpty })
         let ciStatus: String?
         let failedCheckUrl: String?
@@ -162,7 +174,7 @@ enum PRDetect {
             failedCheckUrl = rollup
                 .first { ($0["conclusion"] as? String) == "FAILURE" }
                 .flatMap { $0["detailsUrl"] as? String }
-        } else if conclusions.contains("PENDING") || allChecksPending {
+        } else if conclusions.contains("PENDING") || allChecksPending || hasRunningCheck {
             ciStatus = "PENDING"
             failedCheckUrl = nil
         } else if !conclusions.isEmpty {
@@ -230,7 +242,7 @@ enum PRDetect {
             return .failure
         }
         guard let output = gitOutput(
-            arguments: ["diff", "--shortstat"],
+            arguments: noIndexRefresh + ["diff", "--shortstat"],
             cwd: cwd,
             gitPath: gitPath
         ) else { return .failure }
@@ -239,6 +251,8 @@ enum PRDetect {
     }
 
     private static func diffPaths(cwd: String) -> [String] {
+        // User-initiated: unlike the background shortstat, this may refresh
+        // the index, or it would list touched-but-unchanged files.
         guard let output = gitOutput(arguments: ["diff", "--name-only"], cwd: cwd) else { return [] }
         return output
             .split(separator: "\n")
@@ -246,6 +260,11 @@ enum PRDetect {
             .filter { !$0.isEmpty }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
+
+    /// `git diff` refreshes and rewrites `.git/index` even under
+    /// GIT_OPTIONAL_LOCKS=0. `--shortstat` still leaves stat-only changes
+    /// out without the refresh (`--name-only` would not).
+    private static let noIndexRefresh = ["-c", "diff.autoRefreshIndex=false"]
 
     private static func gitOutput(
         arguments: [String],
@@ -255,7 +274,8 @@ enum PRDetect {
         guard let result = BoundedProcess.run(
             executableURL: URL(fileURLWithPath: gitPath),
             arguments: arguments,
-            currentDirectoryURL: URL(fileURLWithPath: cwd)
+            currentDirectoryURL: URL(fileURLWithPath: cwd),
+            environment: GitDetect.readOnlyEnvironment
         ), result.terminationStatus == 0 else { return nil }
         return String(data: result.standardOutput, encoding: .utf8) ?? ""
     }

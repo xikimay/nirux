@@ -172,7 +172,7 @@ extension NiruxShellView {
         guard workspaces.indices.contains(activeWSIndex) else { return }
         workspaces[activeWSIndex].hasNotification = false
         relayout(animated: animated)
-        workspaces[activeWSIndex].detectGitBranch()
+        refreshGitContextNow(for: workspaces[activeWSIndex])
         updateSidebar()
         focusActiveTerminal(in: window)
     }
@@ -280,6 +280,7 @@ extension NiruxShellView {
         guard didChange else { return }
         refreshAfterWorkspaceMutation()
         if case .markActive = action {
+            refreshGitContextNow(for: workspaces[workspaceIndex])
             refreshPRInfo(for: [workspaces[workspaceIndex]])
         }
     }

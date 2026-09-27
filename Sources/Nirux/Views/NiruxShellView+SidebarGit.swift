@@ -421,21 +421,92 @@ extension NiruxShellView {
         return true
     }
 
-    func refreshGitBranches() {
-        for workspace in workspaces {
-            let workingDirectory = workspace.focusedWorkingDirectory
-            guard let observation = workspace.beginGitContextObservation(at: workingDirectory) else { continue }
-            GitDetect.contextAsync(at: workingDirectory) { [weak workspace] result in
-                workspace?.applyGitContextObservation(
-                    result,
-                    observation: observation
-                )
-            }
+    // MARK: - Metadata Refresh
+
+    func wireMetadataAndGitRefresh(_ workspace: WorkspaceState) {
+        workspace.onMetadataChanged = { [weak self] in self?.scheduleMetadataRefresh() }
+        // The title bar follows its title immediately (no "· path" flicker);
+        // the snapshot is only taken for shell titles such as "zsh".
+        workspace.onColumnTitleChanged = { $0.updateTitleBarLabel(snapshot: ProcessSnapshot()) }
+        workspace.onFocusedColumnChanged = { [weak self, weak workspace] in
+            guard let self, let workspace else { return }
+            self.refreshGitContextNow(for: workspace)
+        }
+        workspace.onGitContextChanged = { [weak self, weak workspace] in
+            guard let self, let workspace else { return }
+            self.gitRefresh.gitContextChanged(workspace)
+            self.scheduleMetadataRefresh()
+            self.refreshPRInfo(for: [workspace])
         }
     }
 
-    func refreshPRInfo() {
-        refreshPRInfo(for: workspaces)
+    /// Minimum spacing between metadata-driven refreshes. A spinning agent
+    /// title fires many times per second per column; each refresh walks the
+    /// whole process table.
+    static let metadataRefreshInterval: TimeInterval = 0.25
+
+    /// Coalesce sidebar/title-bar refreshes: the first request after a quiet
+    /// period runs on the next main-queue turn, later ones within the window
+    /// collapse into one trailing refresh.
+    func scheduleMetadataRefresh() {
+        guard !isMetadataRefreshScheduled else { return }
+        isMetadataRefreshScheduled = true
+        let delay = max(
+            0,
+            lastMetadataRefreshAt + Self.metadataRefreshInterval - ProcessInfo.processInfo.systemUptime
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            // The heartbeat may have refreshed in the meantime.
+            guard let self, self.isMetadataRefreshScheduled else { return }
+            self.refreshMetadata()
+        }
+    }
+
+    /// One process-table scan shared by the title bars and the sidebar.
+    func refreshMetadata(snapshot: ProcessSnapshot? = nil) {
+        isMetadataRefreshScheduled = false
+        lastMetadataRefreshAt = ProcessInfo.processInfo.systemUptime
+        let snapshot = snapshot ?? ProcessSnapshot()
+        refreshTitleBarLabels(snapshot: snapshot)
+        updateSidebar(snapshot: snapshot)
+    }
+
+    // MARK: - Git & PR Refresh
+
+    /// The workspace on screen is followed closely even when archived (its
+    /// PR still is not: PRDetect.shouldRefresh keeps archived ones offline).
+    func gitRefreshTier(for workspace: WorkspaceState) -> GitRefreshTier {
+        if workspace === activeWorkspace { return .focused }
+        if workspace.isInactive { return .archived }
+        if isPilotMode, workspace.profileID == activeProfileID { return .focused }
+        return .background
+    }
+
+    var gitRefreshTiers: [(workspace: WorkspaceState, tier: GitRefreshTier)] {
+        workspaces.map { ($0, gitRefreshTier(for: $0)) }
+    }
+
+    func refreshGitAndPullRequests() {
+        let tiers = gitRefreshTiers
+        gitRefresh.tick(tiers)
+        refreshPRInfo(for: gitRefresh.pullRequestsDue(tiers))
+        // After the PR pass, which recomputes diff stats for what it touched.
+        refreshDiffStats(for: gitRefresh.diffStatsDue(tiers))
+    }
+
+    /// Focus, a focused-column switch or an unarchive: read now instead of
+    /// waiting for the throttles.
+    func refreshGitContextNow(for workspace: WorkspaceState) {
+        gitRefresh.refreshNow(workspace, tier: gitRefreshTier(for: workspace))
+    }
+
+    /// App activation: events that arrived while inactive were only
+    /// recorded, so bring what is on screen up to date right away.
+    func resumeGitRefresh() {
+        gitRefresh.isSuspended = false
+        for (workspace, tier) in gitRefreshTiers where tier == .focused {
+            gitRefresh.refreshNow(workspace, tier: tier)
+        }
     }
 
     func refreshPRInfo(for candidates: [WorkspaceState]) {
@@ -447,10 +518,8 @@ extension NiruxShellView {
             let branch = requestedContext.branch
             let cwd = workspace.focusedWorkingDirectory
             guard let observation = workspace.beginPullRequestObservation(for: requestedContext) else { continue }
-            let diffObservation = workspace.beginDiffStatsObservation(
-                at: cwd,
-                for: requestedContext
-            )
+            gitRefresh.notePullRequestRefresh(workspace)
+            startDiffStatsRefresh(for: workspace, at: cwd, context: requestedContext)
             PRDetect.fetchAsync(branch: branch, cwd: cwd) { [weak self, weak workspace] result in
                 guard let workspace else { return }
                 guard !workspace.isInactive else {
@@ -477,18 +546,34 @@ extension NiruxShellView {
                         for: queriedContext,
                         observation: observation
                     ) else { return }
-                    self?.updateSidebar()
+                    self?.scheduleMetadataRefresh()
                 }
             }
-            guard let diffObservation else { continue }
-            PRDetect.diffStatsAsync(cwd: cwd) { [weak self, weak workspace] result in
-                guard let workspace, !workspace.isInactive,
-                      workspace.applyDiffStatsObservation(
-                          result,
-                          observation: diffObservation
-                      ) else { return }
-                self?.updateSidebar()
-            }
+        }
+    }
+
+    /// `git diff --shortstat` alone, between PR refreshes: the dirty bit
+    /// does not move while an agent keeps editing a dirty tree.
+    func refreshDiffStats(for candidates: [WorkspaceState]) {
+        for workspace in candidates {
+            guard PRDetect.shouldRefresh(
+                isInactive: workspace.isInactive,
+                branch: workspace.gitBranch
+            ), let context = workspace.gitContext else { continue }
+            startDiffStatsRefresh(for: workspace, at: workspace.focusedWorkingDirectory, context: context)
+        }
+    }
+
+    private func startDiffStatsRefresh(for workspace: WorkspaceState, at cwd: String, context: GitContext) {
+        guard let observation = workspace.beginDiffStatsObservation(at: cwd, for: context) else { return }
+        gitRefresh.noteDiffStatsRefresh(workspace)
+        PRDetect.diffStatsAsync(cwd: cwd) { [weak self, weak workspace] result in
+            guard let workspace else { return }
+            self?.gitRefresh.finishDiffStatsRefresh(workspace)
+            guard !workspace.isInactive,
+                  workspace.applyDiffStatsObservation(result, observation: observation)
+            else { return }
+            self?.scheduleMetadataRefresh()
         }
     }
 
