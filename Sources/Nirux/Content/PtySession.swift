@@ -100,15 +100,7 @@ final class ProcessSnapshot {
     }
 
     func foregroundProcess(shellPID: pid_t) -> ForegroundProcess? {
-        let processGroupID = terminalForegroundProcessGroupMap[shellPID]
-            .flatMap { $0 > 0 ? $0 : nil }
-        let groupedPID: pid_t? = processGroupID.flatMap { groupID -> pid_t? in
-            guard let members = processGroupMap[groupID], !members.isEmpty else { return nil }
-            return members.first(where: { $0 == groupID })
-                ?? members.first(where: { $0 != shellPID })
-                ?? members.first
-        }
-        let pid = groupedPID ?? childrenMap[shellPID]?.first ?? shellPID
+        let pid = foregroundPID(shellPID: shellPID)
         guard let instance = instanceMap[pid] else { return nil }
         let arguments: [String]
         if let capturedArguments {
@@ -118,6 +110,29 @@ final class ProcessSnapshot {
         }
         guard let name = Self.execName(from: arguments) ?? commMap[pid] else { return nil }
         return ForegroundProcess(instance: instance, name: name, arguments: arguments)
+    }
+
+    /// `foregroundProcess(shellPID:)`'s process, without reading its
+    /// arguments (a sysctl per call on a live snapshot).
+    func foregroundInstance(shellPID: pid_t) -> ProcessInstance? {
+        instanceMap[foregroundPID(shellPID: shellPID)]
+    }
+
+    private func foregroundPID(shellPID: pid_t) -> pid_t {
+        let processGroupID = terminalForegroundProcessGroupMap[shellPID]
+            .flatMap { $0 > 0 ? $0 : nil }
+        let groupedPID: pid_t? = processGroupID.flatMap { groupID -> pid_t? in
+            guard let members = processGroupMap[groupID], !members.isEmpty else { return nil }
+            return members.first(where: { $0 == groupID })
+                ?? members.first(where: { $0 != shellPID })
+                ?? members.first
+        }
+        return groupedPID ?? childrenMap[shellPID]?.first ?? shellPID
+    }
+
+    /// This exact process (pid and start time) is still running.
+    func contains(_ process: ProcessInstance) -> Bool {
+        instanceMap[process.pid] == process
     }
 
     /// The process-table sysctl failed and captured nothing — a caller
@@ -371,6 +386,11 @@ final class PtySession: @unchecked Sendable {
 
     func foregroundProcess(snapshot: ProcessSnapshot) -> ForegroundProcess? {
         state.foregroundProcess(snapshot: snapshot)
+    }
+
+    func foregroundInstance(snapshot: ProcessSnapshot) -> ProcessInstance? {
+        guard let shellPID else { return nil }
+        return snapshot.foregroundInstance(shellPID: shellPID)
     }
 
     func isProcessInForegroundJob(

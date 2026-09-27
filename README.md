@@ -10,6 +10,7 @@ Nirux is alpha software.
 - Horizontal columns: mix Ghostty-backed terminals, WKWebView browser columns, and Monaco editor columns in the same workspace. `Cmd+F` in a terminal searches its scrollback with Ghostty's native search, highlighting every match.
 - Agent launchers: start Claude Code or Codex from the command palette with configurable permission and sandbox presets.
 - Attention and Activity: per-column agent status (working / needs attention, with elapsed time) driven by real Claude Code hooks and Codex turn notifications — not output guessing — plus a persistent sidebar feed, edge glows for off-screen attention, native macOS notifications that focus the right workspace and column on click, and a Dock badge counting waiting workspaces.
+- Claude context usage: a Claude column's title bar shows how full its session's context window is (`ctx 62%`, or `ctx 124k` while the window size is unknown), with the session's token totals in a tooltip — read from the session transcript, see [Claude context usage](#claude-context-usage).
 - Opt-in Telegram Remote Access: pair one private Telegram user to list live agent sessions, inspect status and recent output, receive completion/attention alerts, and continue a selected session without exposing a webhook or general-purpose shell.
 - Worktree flow: create or open Git worktrees as new workspaces, optionally handing context from the current agent session into the new workspace.
 - Built-in editor: open files, keep tabs, search the workspace, browse the file tree with Finder icons, view Git changes, and toggle file diffs. Find/replace, word wrap, font zoom, per-tab scroll restore, and disk-conflict protection included.
@@ -155,6 +156,14 @@ Nirux installs lightweight lifecycle hooks so agent status is exact instead of g
 Each event carries the column's stable `NIRUX_AGENT_UUID`, so status and attention signals are attributed to the exact column that emitted them — across restarts. Agents launched outside Nirux (or before the hooks were installed) fall back to simple output-activity detection. To remove the hooks, delete the marked entries from those two files.
 
 Both files are global, so every Claude Code and Codex session on the Mac runs these hooks. They are guarded on `NIRUX_AGENT_UUID`, which Nirux terminals set and processes started from them inherit: a session without it stops at a shell test and never launches Nirux, and Nirux ignores any event that arrives without it. Symlinked config files (dotfiles) are updated in place; the link is kept.
+
+### Claude context usage
+
+The title bar of a column running Claude Code shows the context of its session's latest response — input, cache-write and cache-read tokens, as Claude Code's status line counts it — as `ctx 62%` of the context window, turning orange from 80%. Hover it for the exact count, the model, and the session's token totals (output, input, cache read, cache write; subagents, which Claude Code logs in separate files, are not included). There is no cost estimate.
+
+Nirux learns the session's transcript from the `transcript_path` of the [agent status hooks](#agent-status-hooks) (session start, prompt submit, stop) and follows it read-only: only what was appended since the last read, off the main thread, at most once a second for columns on screen, keeping token counts and the model ID but never message content. A long transcript is caught up once, in the background, before the label first shows. The label shows only while that session's own `claude` is the column's foreground process; subagents, nested `claude -p` runs and other sessions are ignored.
+
+Claude Code picks a 200k or 1M window depending on the model variant, the account and the provider, and the transcript doesn't record which. Until a response goes past 200k tokens, from which Nirux infers the 1M window, the label shows the token count instead (`ctx 124k`). Switching models starts over (the 200k and 1M variants of one model report the same ID, so a switch between them isn't seen), and models Claude Code may give another window always show the token count: `claude-sonnet-4-6`, and model IDs not in Claude Code's `claude-…` form (Bedrock IDs, non-Claude models). Right after a compaction it shows `ctx —` until the next response. Codex columns show nothing.
 
 ### Telegram Remote Access
 

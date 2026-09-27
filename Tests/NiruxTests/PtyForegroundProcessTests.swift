@@ -29,6 +29,22 @@ final class PtyForegroundProcessTests: XCTestCase {
         XCTAssertEqual(process?.flagValue("--sandbox"), "read-only")
     }
 
+    func testForegroundInstanceMatchesTheForegroundProcessWithoutItsArguments() {
+        let snapshot = ProcessSnapshot(entries: [
+            .init(pid: 10, parentPID: 1, processGroupID: 10, terminalForegroundProcessGroupID: 30,
+                  name: "zsh", startedAt: 10, arguments: ["zsh"]),
+            .init(pid: 30, parentPID: 10, processGroupID: 30, terminalForegroundProcessGroupID: 30,
+                  name: "claude", startedAt: 30, arguments: ["claude"])
+        ])
+        XCTAssertEqual(snapshot.foregroundInstance(shellPID: 10), snapshot.foregroundProcess(shellPID: 10)?.instance)
+        XCTAssertEqual(snapshot.foregroundInstance(shellPID: 10), ProcessInstance(pid: 30, startedAt: 30))
+        XCTAssertNil(snapshot.foregroundInstance(shellPID: 99))
+
+        XCTAssertTrue(snapshot.contains(ProcessInstance(pid: 30, startedAt: 30)))
+        XCTAssertFalse(snapshot.contains(ProcessInstance(pid: 30, startedAt: 31)), "a reused pid is another process")
+        XCTAssertFalse(snapshot.contains(ProcessInstance(pid: 31, startedAt: 30)))
+    }
+
     func testForegroundProcessFallsBackWhenGroupIsUnavailable() {
         let snapshot = ProcessSnapshot(entries: [
             .init(

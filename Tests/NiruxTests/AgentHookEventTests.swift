@@ -203,6 +203,30 @@ final class AgentHookEventTests: XCTestCase {
         XCTAssertEqual(decoded.toolSummary, "https://example.com")
     }
 
+    func testTurnLevelClaudeEventsCarryTheirTranscriptPath() throws {
+        let path = "/Users/me/.claude/projects/-tmp-proj/5f0c8a52.jsonl"
+        for hookName in ["SessionStart", "UserPromptSubmit", "Stop"] {
+            XCTAssertEqual(claudeEvent(["hook_event_name": hookName, "transcript_path": path])?.transcriptPath, path, hookName)
+        }
+        for hookName in ["PreToolUse", "PostToolUse", "Notification", "SessionEnd", "SubagentStop"] {
+            XCTAssertNil(claudeEvent(["hook_event_name": hookName, "transcript_path": path])?.transcriptPath, hookName)
+        }
+        for invalid in ["relative/session.jsonl", "/tmp/session.json", "/etc/passwd\u{0}.jsonl", ""] {
+            XCTAssertNil(claudeEvent(["hook_event_name": "Stop", "transcript_path": invalid])?.transcriptPath, invalid)
+        }
+        XCTAssertNil(claudeEvent(["hook_event_name": "Stop", "transcript_path": 42])?.transcriptPath)
+
+        let event = try XCTUnwrap(claudeEvent(["hook_event_name": "SessionStart", "transcript_path": path]))
+        let decoded = try JSONDecoder().decode(AgentHookEvent.self, from: JSONEncoder().encode(event))
+        XCTAssertEqual(decoded.transcriptPath, path)
+        // Lines queued by older builds have no transcript path.
+        let legacy = try JSONDecoder().decode(
+            AgentHookEvent.self,
+            from: Data(#"{"kind":"claude","name":"stop","sessionID":"s","timestamp":1}"#.utf8)
+        )
+        XCTAssertNil(legacy.transcriptPath)
+    }
+
     /// `claude -p` answers PermissionRequest itself (a denial) — no dialog.
     func testHeadlessClaudeDetection() {
         let instance = ProcessInstance(pid: 1, startedAt: 1)

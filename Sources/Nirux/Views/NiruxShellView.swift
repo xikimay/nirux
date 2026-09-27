@@ -305,6 +305,7 @@ final class NiruxShellView: NSView {
         for workspace in visibleWorkspaces {
             for col in workspace.columns {
                 col.updateTitleBarLabel(snapshot: snap)
+                col.refreshAgentUsage(snapshot: snap)
             }
         }
     }

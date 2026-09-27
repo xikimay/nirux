@@ -80,6 +80,12 @@ final class ColumnState {
     var findBar: TerminalFindBar?
     var terminalSearch: TerminalSearchSession?
 
+    /// Claude session transcript this column follows, its latest usage and
+    /// the title-bar label showing it (ColumnState+AgentUsage.swift).
+    var claudeTranscript: ClaudeTranscriptFollow?
+    var agentUsage: ClaudeSessionUsage?
+    var usageLabel: NSTextField?
+
     private func setupTitleBar() {
         let bar = WindowDragView()
         bar.wantsLayer = true
@@ -142,10 +148,12 @@ final class ColumnState {
 
     /// Title label on the left; the dev-server chip, when shown, on the
     /// right. The chip gets priority up to half the bar, then goes compact.
-    private func layoutTitleBarContents() {
+    /// The agent usage label sits before the chip while the title keeps
+    /// room to be read.
+    func layoutTitleBarContents() {
         guard let bar = titleBar else { return }
         let width = bar.bounds.width
-        var labelWidth = width - 24
+        var trailingX = width - 12
         if let chip = localServerChip, chip.url != nil {
             let chipWidth = chip.width(fitting: max(0, width / 2 - 12))
             chip.isHidden = chipWidth == 0
@@ -157,11 +165,22 @@ final class ColumnState {
                     width: chipWidth,
                     height: LocalServerChipView.height
                 )
-                labelWidth = chipX - 12 - 8
+                trailingX = chipX - 8
             }
         }
-        titleLabel?.frame = NSRect(x: 12, y: 8, width: max(0, labelWidth), height: 16)
+        if let usageLabel {
+            let usageWidth = ceil(usageLabel.intrinsicContentSize.width)
+            let fits = trailingX - usageWidth - 8 - 12 >= Self.minTitleWidthBesideUsage
+            usageLabel.isHidden = agentUsage?.titleBarText == nil || !fits
+            if !usageLabel.isHidden {
+                usageLabel.frame = NSRect(x: trailingX - usageWidth, y: 8, width: usageWidth, height: 16)
+                trailingX -= usageWidth + 8
+            }
+        }
+        titleLabel?.frame = NSRect(x: 12, y: 8, width: max(0, trailingX - 12), height: 16)
     }
+
+    private static let minTitleWidthBesideUsage: CGFloat = 80
 
     /// Show (or hide, with nil) the "open this dev server" chip.
     func setLocalServerChip(_ url: LocalServerURL?) {
@@ -368,13 +387,23 @@ final class ColumnState {
             shellPID: pty?.shellPID ?? 0,
             snapshot: snapshot
         )
-        return claudeSessionTracker.admit(
+        let admission = claudeSessionTracker.admit(
             event.name,
             sessionID: event.sessionID,
             source: event.source,
             emitter: emitter,
             foregroundProcess: foregroundProcess
         )
+        // Follow the transcript of the session now bound to the foreground
+        // `claude` — never one a subagent, teammate or nested run reports.
+        if admission != .rejected, event.agentID == nil,
+           let transcriptPath = event.transcriptPath.flatMap(AgentHookEvent.validTranscriptPath),
+           let sessionID = event.sessionID,
+           let foregroundProcess,
+           claudeSessionTracker.boundSessionID(for: foregroundProcess.instance) == sessionID {
+            followClaudeTranscript(at: transcriptPath, sessionID: sessionID, process: foregroundProcess.instance)
+        }
+        return admission
     }
 
     func persistedClaudeRestore(foregroundProcess: ForegroundProcess?) -> ClaudeSessionTracker.Restore? {
