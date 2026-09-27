@@ -268,8 +268,9 @@ roll back.
 
 Repository identity is `git rev-parse --path-format=absolute --git-common-dir`,
 with symlinks resolved. It is the same for the main checkout and every linked
-worktree (for this repo: `…/nirux-public/.git`). Nirux doesn't use it anywhere
-today; `--show-toplevel` returns the worktree's own folder instead.
+worktree (for this repo: `…/nirux-public/.git`). Today Nirux only uses it to
+place new worktrees next to the main checkout (`GitWorktree.mainWorktreeRoot`);
+`--show-toplevel` returns the worktree's own folder instead.
 
 Routing runs once, **before** the workspace is created, so the first agent
 starts with the right project, env and brief. Git detection today is
@@ -313,11 +314,12 @@ Anchoring:
   `.git/modules`), so they are separate repositories. Anchor them separately,
   or cover them with a `folder` anchor.
 
-Two side effects worth fixing separately, in the worktree creation code:
+Two side effects in the worktree creation code:
 
-- `GitWorktree.create` names worktrees after the current worktree's folder, so
-  a worktree created from a worktree nests names
-  (`nirux-public.feat-projects.feat-x`). Using the common dir fixes it.
+- Fixed: `GitWorktree.create` named worktrees after the current worktree's
+  folder, so a worktree created from a worktree nested names
+  (`nirux-public.feat-projects.feat-x`). It now places and names them after
+  the main checkout, found through the common dir.
 - Handover files stay untracked in every worktree. They block
   `git worktree remove` and can be committed by a `git add -A`. Adding their
   names to `<common dir>/info/exclude` covers every worktree, without touching

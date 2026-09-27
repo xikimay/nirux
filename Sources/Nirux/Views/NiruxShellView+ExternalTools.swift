@@ -175,7 +175,9 @@ extension NiruxShellView {
         1. **Determine the branch name** from the user's request. If not specified, check recent
            branch names (`git branch -a`) for a naming convention and follow it. Default to
            `feat/short-description` or `fix/short-description` if no convention is apparent.
-        2. **Detect the git repo root**:
+        2. **Detect the git repo root** — the top level of the current checkout, even inside a
+           linked worktree. Nirux still places the new worktree next to the main checkout, named
+           after it, and a new branch starts from the current checkout's HEAD:
            ```bash
            git rev-parse --show-toplevel
            ```
