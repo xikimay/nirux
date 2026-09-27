@@ -115,6 +115,16 @@ final class MenuShortcutTests: XCTestCase {
     }
 
     @MainActor
+    func testTerminalFindUsesTheStandardFindChords() {
+        let find = items(withAction: #selector(NiruxApp.showTerminalFind(_:)))
+        let next = items(withAction: #selector(NiruxApp.findNextInTerminal(_:)))
+        let previous = items(withAction: #selector(NiruxApp.findPreviousInTerminal(_:)))
+        XCTAssertEqual(find.compactMap(chord(of:)), [KeyChord("f")])
+        XCTAssertEqual(next.compactMap(chord(of:)), [KeyChord("g")])
+        XCTAssertEqual(previous.compactMap(chord(of:)), [KeyChord("g", [.command, .shift])])
+    }
+
+    @MainActor
     func testRenameWorkspaceHasNoChord() {
         let rename = items(withAction: #selector(NiruxApp.renameWorkspace(_:)))
         XCTAssertEqual(rename.count, 1)
