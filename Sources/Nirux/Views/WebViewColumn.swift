@@ -11,7 +11,11 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     private let reloadBtn: NSButton
     private let urlField: NSTextField
     private let progressBar: NSView
-    private(set) var currentURL: String = ""
+    private(set) var currentURL: String = "" {
+        didSet { if currentURL != oldValue { onURLChanged?() } }
+    }
+    /// Fires when the displayed URL changes (navigation, redirects).
+    var onURLChanged: (() -> Void)?
     private(set) var pageTitle: String = ""
     private var observations: [NSKeyValueObservation] = []
     /// Destination URLs of in-flight downloads, for the completion

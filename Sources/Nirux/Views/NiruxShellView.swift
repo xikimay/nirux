@@ -183,6 +183,7 @@ final class NiruxShellView: NSView {
         workspace.onTerminalOpenFile = { [weak self] targetWorkspace, path, line in
             self?.openInEditorColumn(path: path, line: line, in: targetWorkspace)
         }
+        wireLocalServerProposals(for: workspace)
     }
 
     /// Iterate every editor column across all workspaces. Used by the

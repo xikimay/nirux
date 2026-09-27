@@ -245,6 +245,13 @@ final class PtySession: @unchecked Sendable {
         set { state.onOsc9Received = newValue }
     }
 
+    /// Called on the main queue when the output shows a local dev-server
+    /// URL (`http://localhost:5173/`). Throttled per port.
+    var onLocalServerURL: ((LocalServerURL) -> Void)? {
+        get { state.onLocalServerURL }
+        set { state.onLocalServerURL = newValue }
+    }
+
     /// Called on the main queue when the shell process exits.
     var onProcessExit: (() -> Void)? {
         get { state.onProcessExit }
@@ -258,6 +265,9 @@ final class PtySession: @unchecked Sendable {
 
     /// Last applied grid size — the right starting size for a restart.
     var lastSize: (cols: Int, rows: Int) { (state.lastCols, state.lastRows) }
+
+    /// The shell's pid while it runs.
+    var shellPID: pid_t? { state.childPid > 0 ? state.childPid : nil }
 
     /// When the current foreground process took over (drives the "working
     /// · 12m" display in the sidebar). Nil while the idle shell runs.
@@ -394,12 +404,13 @@ final class PtySession: @unchecked Sendable {
     /// Used for keys that ghostty's inMemory backend doesn't route correctly
     /// (e.g. Enter when Claude Code enables kitty keyboard protocol).
     func sendRaw(_ data: Data) {
+        state.noteTypedInput(data)
         state.writeToPty(data)
     }
 
     func sendRaw(_ string: String) {
         if let data = string.data(using: .utf8) {
-            state.writeToPty(data)
+            sendRaw(data)
         }
     }
 
@@ -592,9 +603,32 @@ private final class PtyState: @unchecked Sendable {
     var onCwdChanged: ((String) -> Void)?
     var onTitleChanged: ((String) -> Void)?
     var onOsc9Received: (() -> Void)?
+    var onLocalServerURL: ((LocalServerURL) -> Void)?
     var onProcessExit: (() -> Void)?
     var machine = AgentStatusMachine()
     let outputBuffer = TerminalOutputBuffer()
+    /// Read-queue only. A (re)start sets `localServerStateIsStale` from
+    /// main instead of resetting them, so a straggling read handler of the
+    /// previous shell never sees them replaced mid-scan.
+    private var localServerScanner = LocalServerURLScanner()
+    private var localServerLastForwarded: [Int: TimeInterval] = [:]
+    private var localServerStateIsStale = false
+    private static let localServerForwardInterval: TimeInterval = 1
+    /// Something reached the PTY through `sendRaw` — keystrokes (including
+    /// the Enter after a ⌘V paste, which itself goes through ghostty),
+    /// dropped files, remote prompts, commands Nirux types. Unlike
+    /// `machine.hasUserInput` it ignores ghostty's own writes (replies to
+    /// the terminal queries Claude Code sends at startup) and the lone
+    /// Ctrl+L redraw nudge. Once open, a TUI repaint can still resurface
+    /// an old URL — at most one proposal per port, and only if listening.
+    private var hasTypedInput = false
+
+    func noteTypedInput(_ data: Data) {
+        guard !hasTypedInput, data != Self.redrawNudge else { return }
+        hasTypedInput = true
+    }
+
+    private static let redrawNudge = Data([0x0C])
 
     func foregroundProcess(snapshot: ProcessSnapshot) -> ForegroundProcess? {
         guard childPid > 0 else { return nil }
@@ -611,6 +645,8 @@ private final class PtyState: @unchecked Sendable {
 
     func markPtyStarted() {
         machine.reset()
+        localServerStateIsStale = true
+        hasTypedInput = false
     }
 
     func writeToPty(_ data: Data) {
@@ -713,6 +749,36 @@ private final class PtyState: @unchecked Sendable {
            str.contains("\u{1b}]") {
             parseOscSequences(str)
         }
+        // Output before the first typed input is launch noise — notably
+        // `claude --continue` replaying old transcripts.
+        if hasTypedInput, onLocalServerURL != nil {
+            detectLocalServerURLs(in: buffer, count: bytesRead)
+        }
+    }
+
+    private func detectLocalServerURLs(in buffer: [UInt8], count: Int) {
+        if localServerStateIsStale {
+            localServerStateIsStale = false
+            localServerScanner = LocalServerURLScanner()
+            localServerLastForwarded = [:]
+        }
+        let urls = buffer.withUnsafeBytes {
+            localServerScanner.scan(UnsafeRawBufferPointer(rebasing: $0[..<count]))
+        }
+        guard !urls.isEmpty, let callback = onLocalServerURL else { return }
+        // TUIs repaint the same URL on every frame; the workspace dedupes
+        // per port, this just keeps the main queue quiet. Short enough not
+        // to swallow the reprint of a quick server restart.
+        let now = ProcessInfo.processInfo.systemUptime
+        let fresh = urls.filter { url in
+            if let last = localServerLastForwarded[url.port],
+               now - last < Self.localServerForwardInterval { return false }
+            if localServerLastForwarded.count >= 64 { localServerLastForwarded.removeAll() }
+            localServerLastForwarded[url.port] = now
+            return true
+        }
+        guard !fresh.isEmpty else { return }
+        DispatchQueue.main.async { fresh.forEach(callback) }
     }
 
     /// Parse OSC sequences from terminal output (cwd, title).

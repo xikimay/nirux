@@ -32,6 +32,11 @@ final class CommandPalette: NSObject {
     var scrollIndicator: NSView?
     var urlSuggestions: [String] = []
     var urlSelectedIndex = 0
+    /// Dev-server URLs detected in the active workspace's terminals —
+    /// listed first in URL mode. Static: set once by the shell, whichever
+    /// code path creates the palette.
+    static var detectedURLsProvider: (() -> [String])?
+    var detectedURLs: Set<String> = []
 
     private var keyMonitor: Any?
     private var clickMonitor: Any?
