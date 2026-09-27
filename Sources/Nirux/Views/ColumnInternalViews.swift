@@ -162,15 +162,27 @@ final class EditorLoadFailureOverlay: NSView {
 /// Overlay shown over a terminal whose shell process exited. Previously a
 /// dead shell left a mute terminal with no explanation and no way back.
 /// Restart keeps the terminal surface — scrollback stays visible above.
+///
+/// Also shown when an agent died mid-turn in a shell that still runs: its
+/// button then resumes the agent's conversation, and Dismiss (or typing,
+/// which goes to the shell) takes the notice down.
 final class ShellExitedOverlay: NSView {
+    enum Content: Equatable {
+        case shellExited
+        case agentExited(processName: String)
+    }
+
     var onRestart: (() -> Void)?
+    var onDismiss: (() -> Void)?
+    private(set) var content: Content = .shellExited
 
-    private let label = NSTextField(labelWithString: "Session ended")
-    private let hint = NSTextField(labelWithString: "Press Enter to restart the shell")
-    private let restartButton = NSButton(title: "Restart Shell", target: nil, action: nil)
+    private let label = NSTextField(labelWithString: "")
+    private let hint = NSTextField(labelWithString: "")
+    private let restartButton = NSButton(title: "", target: nil, action: nil)
+    private let dismissButton = NSButton(title: "Dismiss", target: nil, action: nil)
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
+    init(content: Content = .shellExited) {
+        super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.10, alpha: 0.92).cgColor
 
@@ -182,30 +194,63 @@ final class ShellExitedOverlay: NSView {
         hint.font = .systemFont(ofSize: 11)
         hint.textColor = NSColor.white.withAlphaComponent(0.45)
         hint.alignment = .center
+        hint.lineBreakMode = .byTruncatingTail
         addSubview(hint)
 
-        restartButton.bezelStyle = .rounded
-        restartButton.font = .systemFont(ofSize: 12, weight: .medium)
-        restartButton.target = self
-        restartButton.action = #selector(restartClicked)
-        addSubview(restartButton)
+        for (button, action) in [
+            (restartButton, #selector(restartClicked)), (dismissButton, #selector(dismissClicked))
+        ] {
+            button.bezelStyle = .rounded
+            button.font = .systemFont(ofSize: 12, weight: .medium)
+            button.target = self
+            button.action = action
+            addSubview(button)
+        }
+        configure(content)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    func configure(_ content: Content) {
+        self.content = content
+        switch content {
+        case .shellExited:
+            label.stringValue = "Session ended"
+            hint.stringValue = "Press Enter to restart the shell"
+            restartButton.title = "Restart Shell"
+            dismissButton.isHidden = true
+        case .agentExited(let processName):
+            label.stringValue = "\(processName) exited mid-turn"
+            hint.stringValue = "It stopped without ending its session. Typing goes to the shell."
+            restartButton.title = "Resume Session"
+            dismissButton.isHidden = false
+        }
+        needsLayout = true
+    }
 
     override func layout() {
         super.layout()
         let midX = bounds.width / 2
         let midY = bounds.height / 2
         restartButton.sizeToFit()
-        let buttonWidth = restartButton.frame.width + 20
-        restartButton.frame = NSRect(x: midX - buttonWidth / 2, y: midY - 40, width: buttonWidth, height: 26)
+        dismissButton.sizeToFit()
+        let restartWidth = restartButton.frame.width + 20
+        let dismissWidth = dismissButton.isHidden ? 0 : dismissButton.frame.width + 20
+        let gap: CGFloat = dismissButton.isHidden ? 0 : 10
+        var x = midX - (restartWidth + gap + dismissWidth) / 2
+        if !dismissButton.isHidden {
+            // macOS order: the default action last.
+            dismissButton.frame = NSRect(x: x, y: midY - 40, width: dismissWidth, height: 26)
+            x += dismissWidth + gap
+        }
+        restartButton.frame = NSRect(x: x, y: midY - 40, width: restartWidth, height: 26)
         label.frame = NSRect(x: 0, y: midY + 18, width: bounds.width, height: 18)
-        hint.frame = NSRect(x: 0, y: midY - 4, width: bounds.width, height: 14)
+        hint.frame = NSRect(x: 16, y: midY - 4, width: max(0, bounds.width - 32), height: 14)
     }
 
     @objc private func restartClicked() { onRestart?() }
+    @objc private func dismissClicked() { onDismiss?() }
 }
 
 /// Draggable divider at a column's right edge — freeform width resize.

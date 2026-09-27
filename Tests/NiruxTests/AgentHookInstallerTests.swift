@@ -673,4 +673,84 @@ extension AgentHookInstallerTests {
         XCTAssertEqual(hookCommands(settings, event: "CwdChanged"), ["direnv export json"])
         XCTAssertNotNil(hooks["FileChanged"], "user keys without our entries stay as written")
     }
+
+    // MARK: - Versioned events (StopFailure)
+
+    private func claudeHooks() -> [String: Any] {
+        claudeSettings()["hooks"] as? [String: Any] ?? [:]
+    }
+
+    private func installClaude(_ version: String?) {
+        AgentHookInstaller.installClaudeHooks(
+            executablePath: "/Apps/Nirux", home: home, claudeVersion: version.flatMap(ClaudeCodeVersion.init)
+        )
+    }
+
+    /// Before 2.1.101, Claude Code ignores the whole settings file over an
+    /// event name it doesn't know: StopFailure (2.1.78) goes in only for a
+    /// claude known to have it.
+    func testStopFailureInstalledOnlyForAClaudeThatKnowsIt() {
+        installClaude(nil)
+        XCTAssertNil(claudeHooks()["StopFailure"], "unknown version")
+        installClaude("2.1.77")
+        XCTAssertNil(claudeHooks()["StopFailure"], "too old")
+
+        installClaude("2.1.78")
+        XCTAssertEqual(
+            hookCommands(claudeSettings(), event: "StopFailure"),
+            [AgentHookInstaller.claudeHookCommand(executablePath: "/Apps/Nirux")]
+        )
+        for event in AgentHookInstaller.claudeHookEvents {
+            XCTAssertEqual(hookCommands(claudeSettings(), event: event).count, 1, event)
+        }
+        XCTAssertTrue(AgentHookInstaller.hasClaudeHooks(home: home))
+    }
+
+    func testStopFailureRefreshIsIdempotent() throws {
+        installClaude("2.1.283")
+        let first = read(".claude/settings.json")
+        let mtime1 = try modificationDate(".claude/settings.json")
+        Thread.sleep(forTimeInterval: 0.01)
+        installClaude("2.1.283")
+        XCTAssertEqual(first, read(".claude/settings.json"))
+        XCTAssertEqual(mtime1, try modificationDate(".claude/settings.json"), "no rewrite when nothing changed")
+        XCTAssertEqual(hookCommands(claudeSettings(), event: "StopFailure").count, 1)
+    }
+
+    /// A claude downgraded (or no longer found) takes the entry back, and
+    /// only Nirux's: the user's own StopFailure hooks stay.
+    func testStopFailureTakenBackWhenTheVersionNoLongerAllowsIt() throws {
+        installClaude("2.1.283")
+        installClaude("2.1.50")
+        XCTAssertNil(claudeHooks()["StopFailure"], "no key left behind for an old claude to choke on")
+
+        installClaude("2.1.283")
+        var settings = claudeSettings()
+        var hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
+        var groups = try XCTUnwrap(hooks["StopFailure"] as? [[String: Any]])
+        groups.append(["matcher": "rate_limit", "hooks": [["type": "command", "command": "page-me"]]])
+        hooks["StopFailure"] = groups
+        settings["hooks"] = hooks
+        try JSONSerialization.data(withJSONObject: settings).write(to: home.appendingPathComponent(".claude/settings.json"))
+
+        installClaude(nil)
+        XCTAssertEqual(hookCommands(claudeSettings(), event: "StopFailure"), ["page-me"])
+    }
+
+    func testInstallAllReadsTheVersionOnlyWhenInstalling() {
+        var reads = 0
+        let version: () -> ClaudeCodeVersion? = {
+            reads += 1
+            return ClaudeCodeVersion("2.1.283")
+        }
+        AgentHookInstaller.installAll(
+            executablePath: "/Apps/Nirux", home: home, environment: [:], bundleURL: devBuild, claudeVersion: version()
+        )
+        XCTAssertEqual(reads, 0, "a dev build never looks")
+        AgentHookInstaller.installAll(
+            executablePath: "/Apps/Nirux", home: home, environment: [:], bundleURL: appBundle, claudeVersion: version()
+        )
+        XCTAssertEqual(reads, 1)
+        XCTAssertEqual(hookCommands(claudeSettings(), event: "StopFailure").count, 1)
+    }
 }

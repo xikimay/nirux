@@ -67,6 +67,12 @@ final class NiruxShellView: NSView {
     /// (see OnboardingChecklist.launchState).
     var onboardingState: OnboardingChecklistState?
 
+    /// How long a dialog may wait on the user before its agent reads as
+    /// stuck (Settings); nil turns the check off.
+    var stuckAgentWaitThreshold: TimeInterval? = NiruxShellView.stuckWaitThreshold(
+        minutes: NiruxShellView.currentStuckAgentMinutes()
+    )
+
     // Panel references (stored properties must live in main class declaration)
     var nameInputPanel: NameInputPanel?
     var workspaceContextPanel: WorkspaceContextPanel?
@@ -142,6 +148,9 @@ final class NiruxShellView: NSView {
                 workspaceIndex: wsIndex, columnIndex: colIndex, requestID: requestID, behavior: behavior
             )
         }
+        sidebar.onAgentResume = { [weak self] wsIndex, colIndex, failedAt in
+            self?.resumeFailedAgent(workspaceIndex: wsIndex, columnIndex: colIndex, failedAt: failedAt)
+        }
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
             if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }
@@ -205,6 +214,9 @@ final class NiruxShellView: NSView {
         }
         workspace.onTerminalOpenFile = { [weak self] targetWorkspace, path, line in
             self?.openInEditorColumn(path: path, line: line, in: targetWorkspace)
+        }
+        workspace.onResumeExitedAgent = { [weak self] targetWorkspace, column in
+            self?.resumeExitedAgent(in: targetWorkspace, column: column)
         }
         wireLocalServerProposals(for: workspace)
     }

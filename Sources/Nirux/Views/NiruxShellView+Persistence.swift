@@ -347,17 +347,23 @@ extension NiruxShellView {
     /// are *not* equivalent (the former bypasses protected dirs too), so they
     /// map to distinct enum cases.
     private func detectClaudeLaunchMode(process: ForegroundProcess) -> ClaudeLaunchMode? {
-        if process.hasFlag("--dangerously-skip-permissions") {
-            return .skipPermissions
-        }
-        if let value = process.flagValue("--permission-mode"),
-           let mode = ClaudeLaunchMode(rawValue: value) {
-            return mode
-        }
-        return nil
+        ClaudeLaunchMode.detect(arguments: process.arguments)
     }
 
     private func detectCodexLaunchMode(process: ForegroundProcess) -> CodexLaunchMode? {
         CodexLaunchMode.detect(arguments: process.arguments)
+    }
+}
+
+extension ClaudeLaunchMode {
+    /// The mode a `claude` argv was launched in (see
+    /// `detectClaudeLaunchMode`); nil when it names none.
+    static func detect(arguments: [String]) -> ClaudeLaunchMode? {
+        if arguments.contains("--dangerously-skip-permissions") {
+            return .skipPermissions
+        }
+        guard let index = arguments.firstIndex(of: "--permission-mode"),
+              arguments.indices.contains(index + 1) else { return nil }
+        return ClaudeLaunchMode(rawValue: arguments[index + 1])
     }
 }

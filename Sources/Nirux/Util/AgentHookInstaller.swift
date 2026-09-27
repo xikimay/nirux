@@ -47,17 +47,19 @@ enum AgentHookInstaller {
         return ["1", "true", "yes"].contains(flag.lowercased())
     }
 
+    /// `claudeVersion` is read only when the hooks are installed.
     static func installAll(
         executablePath: String = defaultExecutablePath,
         home: URL = URL(fileURLWithPath: NSHomeDirectory()),
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        bundleURL: URL = Bundle.main.bundleURL
+        bundleURL: URL = Bundle.main.bundleURL,
+        claudeVersion: @autoclosure () -> ClaudeCodeVersion? = ClaudeCodeVersion.detect()
     ) {
         guard shouldInstall(environment: environment, bundleURL: bundleURL) else {
             NSLog("[AgentHooks] dev build or NIRUX_SKIP_HOOK_INSTALL — leaving agent configs untouched")
             return
         }
-        installClaudeHooks(executablePath: executablePath, home: home)
+        installClaudeHooks(executablePath: executablePath, home: home, claudeVersion: claudeVersion())
         installCodexNotify(executablePath: executablePath, home: home)
     }
 
@@ -87,6 +89,27 @@ enum AgentHookInstaller {
         "SessionEnd"
     ]
 
+    /// Newer events, with the first Claude Code that knows each. They go in
+    /// only when the `claude` Nirux terminals run is known to be at least
+    /// that recent: an older one would drop the whole settings file (see
+    /// above). Unknown version, no entry — and a refresh takes back an
+    /// entry the version no longer allows.
+    ///
+    /// StopFailure (2.1.78) fires instead of Stop when a turn ends on an
+    /// API error. Claude doesn't wait for it, so the receiver never slows
+    /// the agent.
+    static let versionedClaudeHookEvents: [(event: String, minimumVersion: ClaudeCodeVersion)] = [
+        ("StopFailure", ClaudeCodeVersion(major: 2, minor: 1, patch: 78))
+    ]
+
+    /// Every event to install for a `claude` of `version`.
+    static func claudeHookEvents(for version: ClaudeCodeVersion?) -> [String] {
+        claudeHookEvents + versionedClaudeHookEvents.compactMap { entry in
+            guard let version, version >= entry.minimumVersion else { return nil }
+            return entry.event
+        }
+    }
+
     /// The command claude runs (via `sh -c`) on every hook event. The
     /// NIRUX_AGENT_UUID guard skips the binary outside Nirux terminals;
     /// `test -x` makes a deleted/moved binary (app uninstalled, dev build
@@ -102,7 +125,8 @@ enum AgentHookInstaller {
 
     static func installClaudeHooks(
         executablePath: String = defaultExecutablePath,
-        home: URL = URL(fileURLWithPath: NSHomeDirectory())
+        home: URL = URL(fileURLWithPath: NSHomeDirectory()),
+        claudeVersion: ClaudeCodeVersion? = nil
     ) {
         let dir = home.appendingPathComponent(".claude")
         guard let url = resolvingSymlinks(dir.appendingPathComponent("settings.json")) else {
@@ -110,6 +134,7 @@ enum AgentHookInstaller {
             return
         }
         let command = claudeHookCommand(executablePath: executablePath)
+        let events = claudeHookEvents(for: claudeVersion)
 
         var root: [String: Any] = [:]
         var existing: [String: Any]?
@@ -133,14 +158,14 @@ enum AgentHookInstaller {
         for event in hooks.keys.sorted() {
             guard let groups = hooks[event] as? [[String: Any]],
                   let cleaned = removingNiruxEntries(from: groups) else { continue }
-            if cleaned.isEmpty, !claudeHookEvents.contains(event) {
+            if cleaned.isEmpty, !events.contains(event) {
                 hooks.removeValue(forKey: event)
             } else {
                 hooks[event] = cleaned
             }
         }
         let entry: [String: Any] = ["type": "command", "command": command]
-        for event in claudeHookEvents {
+        for event in events {
             var groups = hooks[event] as? [[String: Any]] ?? []
             groups.append(["matcher": "", "hooks": [entry]])
             hooks[event] = groups

@@ -18,6 +18,13 @@ struct SidebarApprovalClick: Equatable {
     let behavior: PermissionApproval.Behavior
 }
 
+/// Resume clicked in the sidebar, where its button was released.
+struct SidebarResumeClick: Equatable {
+    let workspaceIndex: Int
+    let columnIndex: Int
+    let failedAt: TimeInterval
+}
+
 extension SidebarView {
     /// A block appears, moves or changes to the next request on its own
     /// (the agent asks, a decision lands, a card above grows): a button
@@ -41,6 +48,19 @@ extension SidebarView {
 
     func isApprovalButtonArmed(_ key: String, now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
         approvalButtonArming[key].map { now >= $0.armedAt } ?? false
+    }
+
+    /// The `approvalButtonViews` key of a button region: Allow, Deny,
+    /// Resume. Nil for anything else.
+    static func armedButtonKey(for region: SidebarHitRegion) -> String? {
+        switch region {
+        case let .permissionDecision(_, _, requestID, behavior):
+            return SidebarHoverTarget.approvalButtonKey(requestID: requestID, behavior: behavior)
+        case let .agentResume(workspaceIndex, columnIndex, _):
+            return SidebarHoverTarget.resumeButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
+        default:
+            return nil
+        }
     }
 
     func observeScrollingForApprovalArming() {
@@ -81,12 +101,27 @@ extension SidebarView {
         )
     }
 
-    /// A press on Allow / Deny decides only on its release (see
-    /// `approvalClickDecision`), never on the press. The loop also keeps
-    /// the press from moving the window.
+    /// The Resume a click makes, if any: the same rules as a decision, for
+    /// the same failure.
+    static func resumeClick(
+        pressed: SidebarHitRegion,
+        released: SidebarHitRegion?,
+        clickCount: Int,
+        armedAtPress: Bool,
+        armedAtRelease: Bool
+    ) -> SidebarResumeClick? {
+        guard clickCount == 1, armedAtPress, armedAtRelease,
+              case let .agentResume(_, _, pressedFailure) = pressed,
+              case let .agentResume(workspaceIndex, columnIndex, releasedFailure)? = released,
+              releasedFailure == pressedFailure else { return nil }
+        return SidebarResumeClick(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: releasedFailure)
+    }
+
+    /// A press on Allow / Deny / Resume acts only on its release (see
+    /// `approvalClickDecision`, `resumeClick`), never on the press. The
+    /// loop also keeps the press from moving the window.
     func trackApprovalClick(_ region: SidebarHitRegion, event: NSEvent) {
-        guard case let .permissionDecision(_, _, requestID, behavior) = region else { return }
-        let key = SidebarHoverTarget.approvalButtonKey(requestID: requestID, behavior: behavior)
+        guard let key = Self.armedButtonKey(for: region) else { return }
         let armedAtPress = isApprovalButtonArmed(key)
         guard event.clickCount == 1, armedAtPress, let window else { return }
         while true {
@@ -101,14 +136,18 @@ extension SidebarView {
             }
             guard next.type == .leftMouseUp else { continue }
             let point = contentDocumentView.convert(next.locationInWindow, from: nil)
+            let released = hitArea(at: point)?.region
+            let armedAtRelease = isApprovalButtonArmed(key)
             if let decision = Self.approvalClickDecision(
-                pressed: region,
-                released: hitArea(at: point)?.region,
-                clickCount: event.clickCount,
-                armedAtPress: armedAtPress,
-                armedAtRelease: isApprovalButtonArmed(key)
+                pressed: region, released: released, clickCount: event.clickCount,
+                armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
             ) {
                 onPermissionDecision?(decision.workspaceIndex, decision.columnIndex, decision.requestID, decision.behavior)
+            } else if let resume = Self.resumeClick(
+                pressed: region, released: released, clickCount: event.clickCount,
+                armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+            ) {
+                onAgentResume?(resume.workspaceIndex, resume.columnIndex, resume.failedAt)
             }
             return
         }

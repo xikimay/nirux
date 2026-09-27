@@ -21,6 +21,8 @@ struct ColumnInfo: Hashable {
     var attentionReason: AgentAttentionReason?
     /// A permission request the sidebar can answer (Allow / Deny).
     var permissionApproval: SidebarPermissionApproval?
+    /// An agent that won't go on by itself, whatever the status says.
+    var stuck: SidebarStuckState?
 
     /// Hashable is hand-written to compare `agentElapsedSeconds` at the
     /// granularity it's *displayed* ("12m" via shortDuration), not raw
@@ -46,6 +48,7 @@ struct ColumnInfo: Hashable {
             && lhs.elapsedDisplay == rhs.elapsedDisplay
             && lhs.attentionReason == rhs.attentionReason
             && lhs.permissionApproval == rhs.permissionApproval
+            && lhs.stuck == rhs.stuck
     }
 
     func hash(into hasher: inout Hasher) {
@@ -63,6 +66,63 @@ struct ColumnInfo: Hashable {
         hasher.combine(elapsedDisplay)
         hasher.combine(attentionReason)
         hasher.combine(permissionApproval)
+        hasher.combine(stuck)
+    }
+}
+
+/// What a column row shows of a stuck agent (see `AgentStuckState`), at
+/// display granularity.
+enum SidebarStuckState: Hashable {
+    /// A dialog waiting past the threshold, and for how long ("2h05m").
+    case waiting(AgentAttentionReason, duration: String)
+    /// The turn failed on an API error. `failedAt` tells the failure a
+    /// Resume click was aimed at from any later one.
+    case stoppedOnError(kind: String?, detail: String?, failedAt: TimeInterval, resume: Resume)
+    case exitedMidTurn(processName: String)
+
+    enum Resume: Hashable {
+        /// The button: `continue` can go out.
+        case offered
+        /// `continue` went out; the next turn has not started yet.
+        case sending
+        /// Claude is not at its prompt (or not in front).
+        case unavailable
+    }
+
+    /// " · <label>" after the process name: short enough for the row, the
+    /// rest in the tooltip (and the Resume block).
+    var label: String {
+        switch self {
+        case .waiting(_, let duration): return "waiting \(duration)"
+        case .stoppedOnError: return AgentAttentionReason.apiError(kind: nil, detail: nil).shortLabel
+        case .exitedMidTurn: return "exited mid-turn"
+        }
+    }
+
+    /// The name the row shows: the agent that died, not the shell that
+    /// took its place in front.
+    var agentName: String? {
+        if case .exitedMidTurn(let processName) = self { return processName }
+        return nil
+    }
+
+    var tooltip: String {
+        switch self {
+        case .waiting(let reason, let duration):
+            let detail = reason.detailLine.flatMap { AgentText.clean($0, maxLength: 300) }
+            return (["\(reason.headline) — waiting \(duration)", detail].compactMap { $0 }).joined(separator: " — ")
+        case .stoppedOnError(let kind, let detail, _, _):
+            let error = AgentAttentionReason.apiError(kind: kind, detail: detail).detailLine
+            return ["Stopped on an API error", error].compactMap { $0 }.joined(separator: " — ")
+        case .exitedMidTurn(let processName):
+            return "\(processName) exited in the middle of a turn, without ending its session"
+        }
+    }
+
+    /// Red when something broke, orange while a dialog waits.
+    var isFailure: Bool {
+        if case .waiting = self { return false }
+        return true
     }
 }
 
@@ -165,9 +225,12 @@ enum SidebarHitRegion {
     case permissionDecision(
         workspaceIndex: Int, columnIndex: Int, requestID: String, behavior: PermissionApproval.Behavior
     )
-    /// The rest of that block: clicks there do nothing (a press meant for
-    /// a button that just moved must not reach the card below).
-    case permissionBlock(workspaceIndex: Int)
+    /// Resume under a column whose turn failed on an API error.
+    case agentResume(workspaceIndex: Int, columnIndex: Int, failedAt: TimeInterval)
+    /// The rest of an Allow / Deny or Resume block: clicks there do nothing
+    /// (a press meant for a button that just moved must not reach the card
+    /// below).
+    case actionBlock(workspaceIndex: Int)
 }
 
 /// Full parameter set of SidebarView.update(...) — stashed while a
@@ -206,6 +269,12 @@ enum SidebarHoverTarget: Equatable {
     /// Key of an Allow / Deny button's view in `SidebarView.approvalButtonViews`.
     static func approvalButtonKey(requestID: String, behavior: PermissionApproval.Behavior) -> String {
         "\(requestID)|\(behavior.rawValue)"
+    }
+
+    /// Key of a Resume button's view, among the approval buttons (hover and
+    /// click arming treat them alike).
+    static func resumeButtonKey(workspaceIndex: Int, columnIndex: Int) -> String {
+        "resume|\(workspaceIndex)|\(columnIndex)"
     }
 }
 

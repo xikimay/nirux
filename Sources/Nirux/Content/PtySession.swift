@@ -338,6 +338,55 @@ final class PtySession: @unchecked Sendable {
         state.machine.dropApproval(requestID: requestID)
     }
 
+    // MARK: Stuck agents (see `AgentStuckState`)
+
+    func agentStuckState(now: TimeInterval, waitThreshold: TimeInterval?, foregroundName: String?) -> AgentStuckState? {
+        state.machine.stuckState(now: now, waitThreshold: waitThreshold, foregroundName: foregroundName)
+    }
+
+    func takeAgentStuckAlert(
+        now: TimeInterval,
+        waitThreshold: TimeInterval?,
+        foregroundName: String?
+    ) -> AgentAttentionReason? {
+        state.machine.takeStuckAlert(now: now, waitThreshold: waitThreshold, foregroundName: foregroundName)
+    }
+
+    var agentMidTurnExit: AgentMidTurnExit? { state.machine.midTurnExit }
+
+    var agentTurnFailure: AgentTurnFailure? { state.machine.turnFailure }
+
+    func noteAgentExited(_ exit: AgentMidTurnExit) {
+        state.machine.noteAgentExited(exit)
+    }
+
+    func clearAgentMidTurnExit() {
+        state.machine.clearMidTurnExit()
+    }
+
+    /// Why Resume can't type `continue` now, if it can't (see
+    /// `AgentStatusMachine.resumeRefusal`). The failed `claude` may be the
+    /// foreground process or run under it (a launcher that spawns it).
+    func agentResumeRefusal(snapshot: ProcessSnapshot, now: TimeInterval) -> AgentResumeRefusal? {
+        guard !hasExited, let foreground = foregroundProcess(snapshot: snapshot) else { return .notClaude }
+        return state.machine.resumeRefusal(
+            foreground: foreground,
+            ownsEmitter: { $0 == foreground.instance || snapshot.isProcess($0, childOf: foreground.instance.pid) },
+            now: now
+        )
+    }
+
+    /// Resume a turn that failed on an API error: `continue` and Enter,
+    /// typed only when `agentResumeRefusal` allows it. Returns the refusal
+    /// otherwise.
+    func resumeFailedTurn(snapshot: ProcessSnapshot, now: TimeInterval) -> AgentResumeRefusal? {
+        if let refusal = agentResumeRefusal(snapshot: snapshot, now: now) { return refusal }
+        guard let input = RemotePromptSanitizer.terminalInput(for: "continue") else { return .notStopped }
+        state.machine.markResumeSent(now: now)
+        sendRaw(input)
+        return nil
+    }
+
     /// The user's login shell ($SHELL) when it's a mainstream
     /// POSIX-compatible one, else zsh. Restricted to an allowlist because
     /// command-backed columns launch it with zsh-style `-i -l -c` flags

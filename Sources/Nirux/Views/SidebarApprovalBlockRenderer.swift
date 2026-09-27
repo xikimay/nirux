@@ -57,7 +57,7 @@ struct SidebarApprovalBlockRenderer {
         case .undelivered:
             views.append(status("Not delivered — answer in the terminal", y: buttonsY, alpha: 0.75))
         }
-        hitAreas.append(SidebarHitArea(frame: blockFrame, region: .permissionBlock(workspaceIndex: workspaceIndex)))
+        hitAreas.append(SidebarHitArea(frame: blockFrame, region: .actionBlock(workspaceIndex: workspaceIndex)))
         return Result(
             views: views, hitAreas: hitAreas, buttons: buttons, bottomY: top - height - metrics.approvalBottomGap
         )

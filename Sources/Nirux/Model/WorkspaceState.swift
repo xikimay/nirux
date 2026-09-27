@@ -127,6 +127,8 @@ final class WorkspaceState {
     /// A terminal file: link was cmd-clicked — the shell opens it in an
     /// editor column in this workspace, at the optional line.
     var onTerminalOpenFile: ((WorkspaceState, String, Int?) -> Void)?
+    /// A column's agent died mid-turn and the user asked to resume it.
+    var onResumeExitedAgent: ((WorkspaceState, ColumnState) -> Void)?
     /// Bring an existing column of this workspace into view and focus it.
     var onRevealColumn: ((WorkspaceState, Int) -> Void)?
     /// Dev-server proposals — see WorkspaceState+LocalServers.swift.
@@ -386,7 +388,7 @@ extension WorkspaceState {
         switch event.name {
         case .stop, .turnComplete:
             return recordAgentActivity(at: event.timestamp, automaticSummary: event.detail)
-        case .notification, .permissionRequest, .sessionStart, .sessionEnd, .userPromptSubmit:
+        case .notification, .permissionRequest, .sessionStart, .sessionEnd, .userPromptSubmit, .stopFailure:
             return recordAgentActivity(at: event.timestamp, automaticSummary: nil)
         case .preToolUse, .postToolUse, .subagentStop, .approvalResolved:
             return false
@@ -458,6 +460,10 @@ extension WorkspaceState {
         col.onOpenFile = { [weak self] path, line in
             guard let self else { return }
             self.onTerminalOpenFile?(self, path, line)
+        }
+        col.onResumeExitedAgent = { [weak self, weak col] in
+            guard let self, let col else { return }
+            self.onResumeExitedAgent?(self, col)
         }
     }
 

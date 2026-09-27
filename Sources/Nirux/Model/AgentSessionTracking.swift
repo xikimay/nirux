@@ -227,7 +227,8 @@ struct ClaudeSessionTracker {
         guard let sessionID else { return .accepted }
         if sessionID == boundSessionID {
             confirmedSessionID = sessionID
-            let isPrompted = [.userPromptSubmit, .stop, .preToolUse, .permissionRequest, .postToolUse].contains(name)
+            let isPrompted = [.userPromptSubmit, .stop, .stopFailure, .preToolUse, .permissionRequest, .postToolUse]
+                .contains(name)
                 || (name == .sessionStart && source == "compact")
             guard isPrompted, unpromptedSessionID == sessionID else { return .accepted }
             unpromptedSessionID = nil
@@ -242,7 +243,7 @@ struct ClaudeSessionTracker {
         switch name {
         case .sessionStart:
             break
-        case .userPromptSubmit, .notification, .stop:
+        case .userPromptSubmit, .notification, .stop, .stopFailure:
             guard boundSessionID == nil || boundSessionID == unpromptedSessionID else { return .accepted }
         case .sessionEnd:
             return boundSessionID == nil ? .accepted : .rejected
@@ -289,6 +290,15 @@ struct ClaudeSessionTracker {
     /// Session bound to this `claude` process, if any.
     func boundSessionID(for process: ProcessInstance) -> String? {
         session.sessionID(boundTo: process)
+    }
+
+    /// The conversation `process` confirmed through its own hooks — still
+    /// known after it exited, when its binding is gone. Nil for a session
+    /// never prompted: it has nothing to resume.
+    func lastConfirmedSessionID(of process: ProcessInstance) -> String? {
+        guard hookFiringForeground == process, let confirmedSessionID,
+              confirmedSessionID != unpromptedSessionID else { return nil }
+        return confirmedSessionID
     }
 
     /// The session whose permission requests the sidebar may answer: the

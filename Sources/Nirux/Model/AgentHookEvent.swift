@@ -15,6 +15,9 @@ struct AgentHookEvent: Codable, Equatable {
     enum Name: String, Codable {
         case sessionStart, userPromptSubmit, preToolUse, notification, stop, sessionEnd
         case permissionRequest, postToolUse, subagentStop
+        /// The turn ended on an API error (rate limit, auth, overload…):
+        /// Claude fires it instead of Stop.
+        case stopFailure
         case turnComplete // codex
         /// Not a Claude hook: the receiver reports what became of a
         /// PermissionRequest it held for a sidebar decision.
@@ -59,6 +62,9 @@ struct AgentHookEvent: Codable, Equatable {
     /// Claude Notification `notification_type` (permission_prompt,
     /// idle_prompt…); nil from Claude versions that predate it.
     let notificationType: String?
+    /// Claude StopFailure `error`: what ended the turn (`rate_limit`,
+    /// `overloaded`, `authentication_failed`…). Its details go in `detail`.
+    let errorKind: String?
     /// Claude session transcript (`transcript_path`), on the turn-level
     /// events only (see `carriesTranscriptPath`): enough to follow the
     /// column's session usage without growing every tool event's line.
@@ -118,11 +124,18 @@ struct AgentHookEvent: Codable, Equatable {
             transcriptPath = Self.carriesTranscriptPath(name)
                 ? (payload["transcript_path"] as? String).flatMap(Self.validTranscriptPath)
                 : nil
-            if name == .notification {
-                notificationType = payload["notification_type"] as? String
+            notificationType = name == .notification ? payload["notification_type"] as? String : nil
+            errorKind = name == .stopFailure
+                ? (payload["error"] as? String).flatMap { AgentText.clean($0, maxLength: 40) }
+                : nil
+            switch name {
+            case .notification:
                 detail = (payload["message"] as? String).flatMap { AgentText.clean($0, maxLength: 300) }
-            } else {
-                notificationType = nil
+            case .stopFailure:
+                // The error as the terminal showed it.
+                detail = ((payload["error_details"] as? String) ?? (payload["last_assistant_message"] as? String))
+                    .flatMap { AgentText.clean($0, maxLength: 300) }
+            default:
                 detail = toolName
             }
         case .codex:
@@ -140,6 +153,7 @@ struct AgentHookEvent: Codable, Equatable {
             toolKey = nil
             agentID = nil
             notificationType = nil
+            errorKind = nil
             transcriptPath = nil
         }
     }
@@ -165,6 +179,7 @@ struct AgentHookEvent: Codable, Equatable {
         case "Notification": return .notification
         case "SubagentStop": return .subagentStop
         case "Stop": return .stop
+        case "StopFailure": return .stopFailure
         case "SessionEnd": return .sessionEnd
         default: return nil
         }
@@ -186,6 +201,7 @@ struct AgentHookEvent: Codable, Equatable {
         toolKey: String? = nil,
         agentID: String? = nil,
         notificationType: String? = nil,
+        errorKind: String? = nil,
         transcriptPath: String? = nil,
         approvalRequestID: String? = nil,
         approvalDeadline: TimeInterval? = nil,
@@ -207,6 +223,7 @@ struct AgentHookEvent: Codable, Equatable {
         self.toolKey = toolKey
         self.agentID = agentID
         self.notificationType = notificationType
+        self.errorKind = errorKind
         self.transcriptPath = transcriptPath
         self.approvalRequestID = approvalRequestID
         self.approvalDeadline = approvalDeadline

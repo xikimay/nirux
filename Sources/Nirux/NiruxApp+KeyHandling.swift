@@ -186,6 +186,8 @@ extension NiruxApp {
             // Never let ghostty's keyDown handler see the event.
             let bytes = KeyMapper.bytesForEvent(event)
             if !bytes.isEmpty {
+                // Typing at the shell a dead agent left: the user took over.
+                col.dismissAgentExitOnTyping()
                 // After a search jumped up the scrollback, typing returns
                 // to the prompt first (Ghostty's scroll-to-bottom on
                 // keystroke never runs: keys bypass it).

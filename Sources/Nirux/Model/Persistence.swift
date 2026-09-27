@@ -382,6 +382,8 @@ struct PersistedSettings: Codable {
     /// Last update claimed before execution, giving prompt delivery
     /// at-most-once semantics across app restarts.
     var telegramLastUpdateID: Int64?
+    /// Minutes a dialog may wait before its agent reads as stuck; 0 = off.
+    var stuckAgentMinutes: Int?
     /// First-launch checklist. Nil in state files that predate it; see
     /// `OnboardingChecklist.launchState`.
     var onboardingChecklist: OnboardingChecklistState?
@@ -431,6 +433,7 @@ struct PersistedSettings: Codable {
         case telegramNotifyOnCompletion
         case telegramNotifyOnAttention
         case telegramLastUpdateID
+        case stuckAgentMinutes
         case onboardingChecklist
         case claudeBypassPermissions // legacy
     }
@@ -463,6 +466,7 @@ struct PersistedSettings: Codable {
             Bool.self, forKey: .telegramNotifyOnAttention
         ) ?? true
         telegramLastUpdateID = try container.decodeIfPresent(Int64.self, forKey: .telegramLastUpdateID)
+        stuckAgentMinutes = (try? container.decodeIfPresent(Int.self, forKey: .stuckAgentMinutes)).flatMap { $0 }.map { max(0, $0) }
         // A value from a newer build must not make the whole state file
         // undecodable: it reads as "no record" and is written back as is.
         if let raw = try? container.decodeIfPresent(String.self, forKey: .onboardingChecklist) {
@@ -488,6 +492,7 @@ struct PersistedSettings: Codable {
         try container.encode(telegramNotifyOnCompletion, forKey: .telegramNotifyOnCompletion)
         try container.encode(telegramNotifyOnAttention, forKey: .telegramNotifyOnAttention)
         try container.encodeIfPresent(telegramLastUpdateID, forKey: .telegramLastUpdateID)
+        try container.encodeIfPresent(stuckAgentMinutes, forKey: .stuckAgentMinutes)
         try container.encodeIfPresent(
             onboardingChecklist?.rawValue ?? unknownOnboardingChecklistRawValue, forKey: .onboardingChecklist
         )

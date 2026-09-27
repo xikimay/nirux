@@ -587,6 +587,11 @@ extension TelegramRemoteAccessController {
             // Informational notification types ask nothing.
             guard let attention = outcome.attention else { return }
             (eventLabel, detail) = RemoteDialogText.attentionNotification(attention, message: detail)
+        case .stopFailure where notifyOnAttention:
+            guard let attention = outcome.attention else { return }
+            eventLabel = RemoteDialogText.attentionLabel(attention)
+            // The error kind only: its details stay on the Mac.
+            detail = event.errorKind.map { "Error: \($0)" }
         case .stop where notifyOnCompletion,
              .turnComplete where notifyOnCompletion:
             eventLabel = "Agent turn completed"

@@ -4,7 +4,7 @@ import AppKit
 
 extension NiruxApp {
     static let settingsWidth: CGFloat = 520
-    static let settingsHeight: CGFloat = 750
+    static let settingsHeight: CGFloat = 810
 
     @objc func showSettings(_ sender: Any?) {
         if let existing = settingsPanel {
@@ -41,6 +41,7 @@ extension NiruxApp {
         let experimental = buildExperimentalSection(in: background, width: width, height: height)
         settingsMissionHandoffsCheckbox = experimental.missionHandoffs
         settingsSidebarApprovalsCheckbox = experimental.sidebarApprovals
+        settingsStuckAgentPopup = buildAgentsSection(in: background, width: width, height: height)
         let telegramControls = buildTelegramSection(in: background, width: width, height: height)
         settingsTelegramEnabledCheckbox = telegramControls.enabled
         settingsTelegramTokenField = telegramControls.token
@@ -190,6 +191,42 @@ extension NiruxApp {
         background.addSubview(approvalsHint)
 
         return (checkbox, approvals)
+    }
+
+    /// When a dialog left open marks its agent as stuck.
+    private func buildAgentsSection(in background: NSView, width: CGFloat, height: CGFloat) -> NSPopUpButton {
+        let sectionLabel = NSTextField(labelWithString: "Agents")
+        sectionLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        sectionLabel.textColor = NSColor.white.withAlphaComponent(0.6)
+        sectionLabel.frame = NSRect(x: 24, y: height - 720, width: width - 48, height: 16)
+        background.addSubview(sectionLabel)
+
+        let label = NSTextField(labelWithString: "Flag an agent waiting on a dialog after")
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = NSColor.white.withAlphaComponent(0.85)
+        label.frame = NSRect(x: 24, y: height - 750, width: 250, height: 18)
+        background.addSubview(label)
+
+        let popup = NSPopUpButton(frame: NSRect(x: 280, y: height - 754, width: width - 304, height: 26), pullsDown: false)
+        let current = NiruxShellView.currentStuckAgentMinutes()
+        // A value set outside Settings stays selectable as it is.
+        for minutes in Set(NiruxShellView.stuckAgentMinuteChoices + [current]).sorted() {
+            popup.addItem(withTitle: Self.stuckAgentChoiceTitle(minutes: minutes))
+            popup.lastItem?.representedObject = minutes
+        }
+        popup.selectItem(at: popup.indexOfItem(withRepresentedObject: current))
+        popup.toolTip = "A permission or question dialog open this long marks its agent as stuck: "
+            + "a badge on its card and one notification."
+        background.addSubview(popup)
+        return popup
+    }
+
+    static func stuckAgentChoiceTitle(minutes: Int) -> String {
+        switch minutes {
+        case 0: return "Never"
+        case 60: return "1 hour"
+        default: return minutes % 60 == 0 ? "\(minutes / 60) hours" : "\(minutes) minutes"
+        }
     }
 
     private struct TelegramSettingsControls {
@@ -367,6 +404,9 @@ extension NiruxApp {
                 settings.claudeNoFlicker = noFlicker
                 settings.missionHandoffsEnabled = missionHandoffsEnabled
                 settings.sidebarApprovalsEnabled = sidebarApprovalsEnabled
+                if let minutes = settingsStuckAgentPopup?.selectedItem?.representedObject as? Int {
+                    settings.stuckAgentMinutes = minutes
+                }
             }
             settings.telegramRemoteAccessEnabled = telegramEnabled
             settings.telegramNotifyOnCompletion = settingsTelegramCompletionCheckbox?.state != .off
@@ -393,11 +433,7 @@ extension NiruxApp {
             }
         }
         if !telegramOnly {
-            shell?.workspaces.forEach { $0.missionHandoffsEnabled = missionHandoffsEnabled }
-            if missionHandoffsEnabled {
-                MissionEventCenter.shared.deliverPendingEvents()
-            }
-            applySidebarApprovals(enabled: sidebarApprovalsEnabled)
+            applySavedAgentSettings(missionHandoffsEnabled: missionHandoffsEnabled, sidebarApprovalsEnabled: sidebarApprovalsEnabled)
         }
         telegramRemoteAccessController?.reloadFromPersistence()
         if let tokenSaveError {
@@ -414,6 +450,16 @@ extension NiruxApp {
             : "Stored in macOS Keychain — leave blank to keep"
         refreshTelegramSettingsState()
         return true
+    }
+
+    /// The saved agent options take effect in the running app.
+    private func applySavedAgentSettings(missionHandoffsEnabled: Bool, sidebarApprovalsEnabled: Bool) {
+        shell?.workspaces.forEach { $0.missionHandoffsEnabled = missionHandoffsEnabled }
+        if missionHandoffsEnabled {
+            MissionEventCenter.shared.deliverPendingEvents()
+        }
+        applySidebarApprovals(enabled: sidebarApprovalsEnabled)
+        shell?.stuckAgentWaitThreshold = NiruxShellView.stuckWaitThreshold(minutes: NiruxShellView.currentStuckAgentMinutes())
     }
 
     /// Turning the option off hands every held request back to its
@@ -501,6 +547,7 @@ extension NiruxApp {
         settingsCodexLaunchModePopup = nil
         settingsMissionHandoffsCheckbox = nil
         settingsSidebarApprovalsCheckbox = nil
+        settingsStuckAgentPopup = nil
         settingsTelegramEnabledCheckbox = nil
         settingsTelegramTokenField = nil
         settingsTelegramCompletionCheckbox = nil

@@ -294,7 +294,7 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         )
         // The rest of the block swallows clicks meant for what was there.
         let blockHit = try XCTUnwrap(result.hitAreas.firstIndex {
-            if case .permissionBlock(2) = $0.region { return true }
+            if case .actionBlock(2) = $0.region { return true }
             return false
         })
         XCTAssertGreaterThan(blockHit, try XCTUnwrap(result.hitAreas.lastIndex {
@@ -423,7 +423,7 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         XCTAssertTrue(decides(allow))
         XCTAssertFalse(decides(deny), "released on the other button")
         XCTAssertFalse(decides(other), "released on another request's button")
-        XCTAssertFalse(decides(.permissionBlock(workspaceIndex: 2)))
+        XCTAssertFalse(decides(.actionBlock(workspaceIndex: 2)))
         XCTAssertFalse(decides(nil))
         XCTAssertFalse(decides(allow, clicks: 2), "second click of a double click")
         XCTAssertFalse(decides(allow, armedAtPress: false))
