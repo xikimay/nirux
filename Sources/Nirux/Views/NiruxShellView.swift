@@ -129,7 +129,6 @@ final class NiruxShellView: NSView {
         sidebar.onMoveWorkspaceToProfile = { [weak self] workspaceID, profileID in
             self?.moveWorkspaceToSpace(workspaceID: workspaceID, profileID: profileID)
         }
-        sidebar.onInactiveSectionCollapsedChange = { [weak self] _ in self?.saveState() }
         sidebar.onDiffStatsClicked = { [weak self] index in self?.openDiffInEditor(workspaceIndex: index) }
         sidebar.onOnboardingAction = { [weak self] action in self?.handleOnboardingAction(action) }
         NotificationCenter.default.addObserver(

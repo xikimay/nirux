@@ -399,16 +399,12 @@ final class PersistedStateCodingTests: XCTestCase {
     // MARK: - Sidebar state
 
     func testSidebarExpandedRoundTripsThroughSettings() throws {
-        let original = PersistedSettings(
-            sidebarExpanded: true,
-            inactiveWorkspacesCollapsed: false
-        )
+        let original = PersistedSettings(sidebarExpanded: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(original)
         let decoded = try JSONDecoder().decode(PersistedSettings.self, from: data)
         XCTAssertEqual(decoded.sidebarExpanded, true)
-        XCTAssertEqual(decoded.inactiveWorkspacesCollapsed, false)
         // Other fields keep their defaults.
         XCTAssertEqual(decoded.claudeNoFlicker, true)
         XCTAssertNil(decoded.claudeLaunchMode)
@@ -427,6 +423,18 @@ final class PersistedStateCodingTests: XCTestCase {
         }
     }
 
+    /// The INACTIVE section folds at every launch, so its state isn't saved:
+    /// an unfolded session must not come back unfolded.
+    func testInactiveSectionStateIsNotSaved() throws {
+        let json = Data("""
+        { "sidebarExpanded": true, "inactiveWorkspacesCollapsed": false }
+        """.utf8)
+        let settings = try JSONDecoder().decode(PersistedSettings.self, from: json)
+        let encoded = try XCTUnwrap(String(data: JSONEncoder().encode(settings), encoding: .utf8))
+        XCTAssertTrue(encoded.contains("sidebarExpanded"))
+        XCTAssertFalse(encoded.contains("inactiveWorkspacesCollapsed"))
+    }
+
     func testSettingsWithoutSidebarFieldDecodeToNil() throws {
         // States written before sidebar persistence existed have no key.
         let json = Data("""
@@ -434,7 +442,6 @@ final class PersistedStateCodingTests: XCTestCase {
         """.utf8)
         let settings = try JSONDecoder().decode(PersistedSettings.self, from: json)
         XCTAssertNil(settings.sidebarExpanded)
-        XCTAssertNil(settings.inactiveWorkspacesCollapsed)
         XCTAssertEqual(settings.claudeLaunchMode, .plan)
         XCTAssertEqual(settings.claudeNoFlicker, false)
         XCTAssertFalse(settings.missionHandoffsEnabled)

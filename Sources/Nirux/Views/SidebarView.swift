@@ -6,6 +6,23 @@ final class SidebarBackgroundView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
+/// Laid over the INACTIVE section header's row. It takes the first click
+/// on a window in the background, so that click toggles instead of only
+/// bringing the window forward, and hands mouse events on up the
+/// responder chain to the sidebar's hit regions. VoiceOver sees it as the
+/// header's toggle button.
+final class SidebarSectionToggleView: NSView {
+    var onPress: (() -> Void)?
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    override func accessibilityPerformPress() -> Bool {
+        onPress?()
+        return true
+    }
+}
+
 /// Sidebar: minimal dots in normal mode, expanded detail panel (pilot-style) in expanded mode.
 /// Dragging on empty sidebar area moves the window.
 final class SidebarView: NSView {
@@ -34,7 +51,6 @@ final class SidebarView: NSView {
     /// (workspace id, space id). By id: a close that finishes while the menu
     /// is open can leave a card's index stale.
     var onMoveWorkspaceToProfile: ((String, String) -> Void)?
-    var onInactiveSectionCollapsedChange: ((Bool) -> Void)?
     var isExpanded: Bool = false {
         didSet {
             // Clear dot pulse layers when switching modes
@@ -69,9 +85,13 @@ final class SidebarView: NSView {
     var onboardingCardView: OnboardingChecklistView?
     /// Set by `revealOnboardingCard()` while the card isn't laid out yet.
     var revealsOnboardingCardOnNextBuild = false
-    /// Inactive workspaces default to hidden so a large archive cannot
-    /// consume the whole sidebar. Persisted by NiruxShellView.
-    var isInactiveSectionCollapsed = true
+    /// Inactive workspaces are finished work: the section starts folded at
+    /// every launch and only `toggleInactiveSection` (the header, View ▸
+    /// Show Inactive Workspaces, ⌘P) unfolds it — not the workspace on screen
+    /// (see `listsWorkspace`), not a refresh. Unfolding is a look at this
+    /// space's section: `update` folds it back on a space switch or once
+    /// the section is empty, so it never reappears unfolded. Not saved.
+    private(set) var isInactiveSectionCollapsed = true
     var expandedViews: [NSView] = []
     var profileIndicatorView: SidebarDotIndicatorView?
     var hitAreas: [SidebarHitArea] = []
@@ -160,12 +180,10 @@ final class SidebarView: NSView {
             deferredDragUpdate = SidebarUpdatePayload(profiles: profiles, workspaces: workspaces)
             return
         }
-        let shouldRevealInactive = isInactiveSectionCollapsed
-            && workspaces.contains { $0.isInactive && $0.isActive }
-        if shouldRevealInactive { isInactiveSectionCollapsed = false }
+        let spaceChanged = profiles.first(where: \.isActive)?.id != lastProfiles.first(where: \.isActive)?.id
+        if spaceChanged || !workspaces.contains(where: \.isInactive) { isInactiveSectionCollapsed = true }
         lastProfiles = profiles
         lastInfos = workspaces
-        if shouldRevealInactive { onInactiveSectionCollapsedChange?(false) }
         guard isExpanded else { setNeedsDisplay(bounds); return }
         // The 2s heartbeat calls this even when nothing visible changed.
         // Rebuilding then is not just wasted work: it tears down every
@@ -311,22 +329,7 @@ final class SidebarView: NSView {
     }
 
     var dotWorkspaceInfos: [WorkspaceInfo] {
-        isInactiveSectionCollapsed
-            ? displayedWorkspaceInfos.filter { !$0.isInactive }
-            : displayedWorkspaceInfos
-    }
-
-    func setInactiveSectionCollapsed(_ collapsed: Bool, notify: Bool = false) {
-        // Never hide the workspace currently on screen. This can happen when
-        // every workspace in a space is inactive and keyboard navigation
-        // selects one of them.
-        let effectiveValue = collapsed
-            && !lastInfos.contains { $0.isInactive && $0.isActive }
-        guard effectiveValue != isInactiveSectionCollapsed else { return }
-        isInactiveSectionCollapsed = effectiveValue
-        lastRenderSignature = nil
-        if isExpanded { rebuildContent() } else { setNeedsDisplay(bounds) }
-        if notify { onInactiveSectionCollapsedChange?(effectiveValue) }
+        displayedWorkspaceInfos.filter { listsWorkspace(isInactive: $0.isInactive, isActive: $0.isActive) }
     }
 
     // MARK: - Click handling
@@ -474,7 +477,7 @@ final class SidebarView: NSView {
             showSpaceMenu(at: point)
         case .link(let url, _):
             if url == Self.inactiveSectionActionURL {
-                setInactiveSectionCollapsed(!isInactiveSectionCollapsed, notify: true)
+                toggleInactiveSection()
             } else if let workspaceIndex = Self.diffActionWorkspaceIndex(url) {
                 onDiffStatsClicked?(workspaceIndex)
             } else if let url = URL(string: url) {
@@ -657,5 +660,55 @@ final class SidebarView: NSView {
         let prefix = "action:diff:"
         guard value.hasPrefix(prefix) else { return nil }
         return Int(value.dropFirst(prefix.count))
+    }
+}
+
+// MARK: - Inactive section
+
+extension SidebarView {
+    /// Whether the sidebar lists a workspace. The folded section still
+    /// lists the inactive workspace on screen, alone, until the user moves
+    /// to another one — the section itself stays folded.
+    func listsWorkspace(isInactive: Bool, isActive: Bool) -> Bool {
+        !isInactive || isActive || !isInactiveSectionCollapsed
+    }
+
+    var hasInactiveWorkspaces: Bool { lastInfos.contains(where: \.isInactive) }
+
+    /// The header row's hit area, in document coordinates.
+    var inactiveSectionHeaderFrame: NSRect? {
+        hitAreas.first {
+            if case .link(let url, _) = $0.region { return url == Self.inactiveSectionActionURL }
+            return false
+        }?.frame
+    }
+
+    /// No-op without an inactive workspace: an unfold nobody sees would
+    /// show up later, when one is parked.
+    func toggleInactiveSection() {
+        guard hasInactiveWorkspaces else { return }
+        isInactiveSectionCollapsed.toggle()
+        lastRenderSignature = nil
+        // Mid-drag the rebuild is deferred to the drag's end.
+        guard isExpanded, workspaceDrag == nil else {
+            if isExpanded { rebuildContent() } else { setNeedsDisplay(bounds) }
+            return
+        }
+        // Keep the header under the pointer for the next click. Only rows
+        // below it change, but the document view isn't flipped, so a
+        // rebuild keeps the distance to the bottom: keep the one to the top.
+        let clip = contentScrollView.contentView
+        let visibleTopFromDocumentTop = contentDocumentView.frame.height - clip.bounds.maxY
+        rebuildContent()
+        let highestOrigin = max(0, contentDocumentView.frame.height - clip.bounds.height)
+        let originY = contentDocumentView.frame.height - visibleTopFromDocumentTop - clip.bounds.height
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(max(0, originY), highestOrigin)))
+        contentScrollView.reflectScrolledClipView(clip)
+        // From the menu or ⌘P the header may be out of view.
+        if let header = inactiveSectionHeaderFrame { contentDocumentView.scrollToVisible(header) }
+        // The rebuild read the pointer before the rows moved under it.
+        setHoverTarget(nil)
+        refreshHoverTargetFromMouse()
+        lastRenderSignature = renderSignature()
     }
 }

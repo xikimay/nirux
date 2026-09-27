@@ -94,6 +94,12 @@ extension NiruxShellView {
             ) { [weak self] in
                 self?.toggleSidebar()
             },
+            PaletteAction(
+                icon: "▸", title: "Show/Hide Inactive Workspaces", subtitle: "Unfold or fold the sidebar's INACTIVE section",
+                shortcut: nil
+            ) { [weak self] in
+                self?.sidebar.toggleInactiveSection()
+            },
             PaletteAction(icon: "✏", title: "Rename Workspace", subtitle: "Change the name of the current workspace", shortcut: nil) { [weak self] in
                 self?.showRenamePanel()
             },
