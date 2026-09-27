@@ -4,14 +4,23 @@ import Foundation
 /// Filesystem mailbox CLI used by both sides of a Mission. Commands append
 /// events to the app-owned queue; wait commands only read the atomically
 /// written mission ledger, so no CLI process races the app for state writes.
+///
+/// Exit statuses, as the installed skill and the child's startup prompt
+/// explain them to agents: 0 done, 1 Nirux state could not be read or
+/// written, 2 invalid usage, 3 nothing yet (run the same command again),
+/// 4 stop (handoffs off, Mission over, or not this terminal's to answer).
 enum MissionEventCLI {
     static let maxMessageLength = 500
     /// Agent shell tools stop foreground commands after a few minutes (two
-    /// by default in Claude Code), so a wait ends on its own well before that
-    /// and the agent runs the same command again to keep waiting.
+    /// by default in Claude Code), so a wait never lasts longer than this and
+    /// the agent runs the same command again to keep waiting.
     static let defaultWaitTimeout: TimeInterval = 90
     /// Upper bound of the wait-loop backoff while the ledger is unchanged.
     static let maxPollInterval: TimeInterval = 1
+    /// How long an identical `ask` still prints an answer the child already
+    /// received, so rerunning a command whose output the shell tool cut short
+    /// is harmless. After that, the same text is a new question.
+    static let answerReplayWindow: TimeInterval = 60
 
     private struct ChildContext {
         let missionID: String
@@ -32,19 +41,53 @@ enum MissionEventCLI {
         let message: String
     }
 
+    /// Entry point for `Nirux --mission <command> [options]`.
+    static func main(
+        _ arguments: [String],
+        handoffsEnabled: () -> Bool? = {
+            Persistence.load().map { $0.settings?.missionHandoffsEnabled == true }
+        }
+    ) -> Int32 {
+        let commands = "ask|completed|receive|reply [options]"
+        guard let command = arguments.first else { return usage(commands) }
+        // Terminals keep their Mission environment after the setting is
+        // turned off, while Nirux drops their events: say so, don't wait.
+        guard handoffsEnabled() != false else {
+            writeStandardError("Mission handoffs are turned off in Nirux Settings; stop using Mission commands.")
+            return 4
+        }
+        let options = Array(arguments.dropFirst())
+        switch command {
+        case "ask": return ask(arguments: options)
+        case "receive": return receive(arguments: options)
+        case "reply": return reply(arguments: options)
+        case MissionEvent.Kind.question.rawValue: return run(kind: .question, arguments: options)
+        case MissionEvent.Kind.completed.rawValue: return run(kind: .completed, arguments: options)
+        default: return usage(commands)
+        }
+    }
+
     static func run(
         kind: MissionEvent.Kind,
         arguments: [String],
         environment: [String: String] = ProcessInfo.processInfo.environment,
         now: TimeInterval = Date().timeIntervalSince1970,
-        eventsURL: URL = MissionEventCenter.defaultEventsURL
+        eventsURL: URL = MissionEventCenter.defaultEventsURL,
+        missionsURL: URL = MissionStore.defaultFileURL
     ) -> Int32 {
-        guard kind == .question || kind == .completed,
-              let context = childContext(environment),
-              let options = parseOptions(arguments, allowed: ["--message"]),
+        guard kind == .question || kind == .completed else { return usage("completed --message <text>") }
+        guard let context = childContext(environment) else { return notAMissionTerminal(child: true) }
+        guard let options = parseOptions(arguments, allowed: ["--message"]),
               let message = validMessage(options["--message"])
-        else { return 2 }
+        else { return usage("\(kind.rawValue) --message <1-\(maxMessageLength) characters>") }
 
+        // An unreadable ledger still queues the event, as before: Nirux
+        // validates it again when draining the queue.
+        var ledger = MissionLedgerReader(url: missionsURL)
+        if ledger.refresh(), case let .unavailable(problem) = childMission(context, in: ledger.missions) {
+            writeStandardError(problem)
+            return 4
+        }
         let event = MissionEvent(
             id: UUID().uuidString,
             missionID: context.missionID,
@@ -68,24 +111,27 @@ enum MissionEventCLI {
         eventsURL: URL = MissionEventCenter.defaultEventsURL,
         missionsURL: URL = MissionStore.defaultFileURL,
         pollInterval: TimeInterval = 0.2,
-        confirmationTimeout: TimeInterval = 5,
         output: (String) -> Void = writeStandardOutput
     ) -> Int32 {
-        guard let context = childContext(environment),
-              let options = parseOptions(arguments, allowed: ["--message", "--timeout"]),
+        guard let context = childContext(environment) else { return notAMissionTerminal(child: true) }
+        guard let options = parseOptions(arguments, allowed: ["--message", "--timeout"]),
               let message = validMessage(options["--message"]),
               let timeout = validTimeout(options["--timeout"])
-        else { return 2 }
+        else {
+            return usage("ask --message <1-\(maxMessageLength) characters> [--timeout <seconds>]")
+        }
 
         var ledger = MissionLedgerReader(url: missionsURL)
-        ledger.refresh()
-        guard let mission = ledger.missions.first(where: { $0.id == context.missionID }),
-              mission.status == .active
-        else {
-            writeStandardError("This Mission is not active; there is no parent to ask.")
-            return 1
+        guard ledger.refresh() else { return unreadableLedger(missionsURL) }
+        let mission: Mission
+        switch childMission(context, in: ledger.missions) {
+        case let .active(active):
+            mission = active
+        case let .unavailable(problem):
+            writeStandardError(problem)
+            return 4
         }
-        let questionID = questionID(for: message, context: context, in: mission)
+        let questionID = questionID(for: message, context: context, in: mission, now: now())
         if !mission.events.contains(where: { $0.id == questionID }) {
             let question = MissionEvent(
                 id: questionID,
@@ -110,26 +156,22 @@ enum MissionEventCLI {
             }) {
                 return .answered(response)
             }
-            return mission.status == .active ? nil : .missionInactive
+            return mission.status == .active ? nil : .missionCompleted
         }
         switch outcome {
         case let .answered(response):
             output(response.message)
-            acknowledge(
-                response,
-                ledger: &ledger,
-                timestamp: now(),
-                eventsURL: eventsURL,
-                confirmationTimeout: confirmationTimeout
-            )
+            // The answer is printed either way; a lost receipt only means a
+            // later identical `ask` prints it once more and queues another.
+            _ = append(receipt(for: response, at: now()), to: eventsURL)
             return 0
-        case .missionInactive:
+        case .missionCompleted:
             writeStandardError("This Mission completed before the question was answered.")
-            return 1
+            return 4
         case nil:
             writeStandardError(
-                "No Mission response yet. Run the same command again to keep waiting; "
-                    + "it resumes this question instead of asking it twice."
+                "No answer yet; the question stays queued and appears in Nirux Activity. "
+                    + "Run the exact same command again to keep waiting."
             )
             return 3
         }
@@ -137,20 +179,49 @@ enum MissionEventCLI {
 
     private enum AskOutcome {
         case answered(MissionEvent)
-        case missionInactive
+        case missionCompleted
+    }
+
+    private enum ChildMission {
+        case active(Mission)
+        case unavailable(String)
+    }
+
+    /// The Mission this child terminal may ask or report to, or why not.
+    private static func childMission(_ context: ChildContext, in missions: [Mission]) -> ChildMission {
+        guard let mission = missions.first(where: { $0.id == context.missionID }) else {
+            return .unavailable("Nirux has no record of this Mission.")
+        }
+        // Every column of the child workspace sees the Mission ID, but Nirux
+        // only accepts events from the agent it launched for the Mission.
+        guard mission.childWorkspaceID == context.workspaceID,
+              mission.childAgentUUID == context.agentUUID
+        else {
+            return .unavailable(
+                "Only the agent Nirux launched for this Mission can ask or report; this terminal is another one."
+            )
+        }
+        guard mission.status == .active else {
+            return .unavailable("This Mission has already completed.")
+        }
+        return .active(mission)
     }
 
     /// Identical questions share a derived ID, so a retry after a shell-tool
-    /// timeout never queues a duplicate. Every answer the child has already
-    /// printed for that text moves the next identical question to a new ID.
+    /// timeout never queues a duplicate. An answer the child received more
+    /// than `answerReplayWindow` ago moves the same text to a new ID.
     private static func questionID(
-        for message: String, context: ChildContext, in mission: Mission
+        for message: String, context: ChildContext, in mission: Mission, now: TimeInterval
     ) -> String {
-        let received = Set(mission.events.compactMap { event in
-            event.kind == .response && event.childConsumedAt != nil ? event.inReplyTo : nil
+        let settled = Set(mission.events.compactMap { event -> String? in
+            guard event.kind == .response,
+                  let receivedAt = event.childConsumedAt,
+                  now - receivedAt >= answerReplayWindow
+            else { return nil }
+            return event.inReplyTo
         })
         let generation = mission.events.filter { event in
-            event.kind == .question && event.message == message && received.contains(event.id)
+            event.kind == .question && event.message == message && settled.contains(event.id)
         }.count
         return derivedEventID([
             "nirux.mission.question",
@@ -171,17 +242,9 @@ enum MissionEventCLI {
         return (NSUUID(uuidBytes: bytes) as UUID).uuidString
     }
 
-    /// Record that the child agent received this response, and briefly wait
-    /// for Nirux to persist it so an immediate identical question gets a new
-    /// ID. The answer was already printed, so failures are only reported.
-    private static func acknowledge(
-        _ response: MissionEvent,
-        ledger: inout MissionLedgerReader,
-        timestamp: TimeInterval,
-        eventsURL: URL,
-        confirmationTimeout: TimeInterval
-    ) {
-        let acknowledgement = MissionEvent(
+    /// Child acknowledgement that its agent received this response.
+    private static func receipt(for response: MissionEvent, at timestamp: TimeInterval) -> MissionEvent {
+        MissionEvent(
             id: UUID().uuidString,
             missionID: response.missionID,
             childWorkspaceID: response.childWorkspaceID,
@@ -191,16 +254,6 @@ enum MissionEventCLI {
             inReplyTo: response.id,
             timestamp: timestamp
         )
-        guard append(acknowledgement, to: eventsURL) else {
-            writeStandardError("The answer could not be marked as received.")
-            return
-        }
-        guard confirmationTimeout > 0 else { return }
-        _ = waitForLedger(&ledger, timeout: confirmationTimeout, pollInterval: 0.05) { missions in
-            missions.lazy.flatMap(\.events).contains(where: {
-                $0.id == response.id && $0.childConsumedAt != nil
-            }) ? true : nil
-        }
     }
 
     /// Wait for the next unconsumed child question/completion belonging to
@@ -214,10 +267,10 @@ enum MissionEventCLI {
         missionsURL: URL = MissionStore.defaultFileURL,
         pollInterval: TimeInterval = 0.2
     ) -> Int32 {
-        guard let context = parentContext(environment),
-              let options = parseOptions(arguments, allowed: ["--timeout"]),
+        guard let context = parentContext(environment) else { return notAMissionTerminal(child: false) }
+        guard let options = parseOptions(arguments, allowed: ["--timeout"]),
               let timeout = validTimeout(options["--timeout"])
-        else { return 2 }
+        else { return usage("receive [--timeout <seconds>]") }
 
         var ledger = MissionLedgerReader(url: missionsURL)
         ledger.refresh()
@@ -225,9 +278,17 @@ enum MissionEventCLI {
             nextParentEvent(context: context, in: missions)
         }
         guard let (mission, event) = next else {
-            writeStandardError(
-                "No Mission event yet. Run the same command again to keep waiting."
-            )
+            // Checked only after a full wait: a Mission requested just before
+            // this call appears once Nirux has created its worktree.
+            guard ledger.missions.contains(where: { mission in
+                mission.parentWorkspaceID == context.workspaceID
+                    && mission.parentAgentUUID == context.agentUUID
+                    && mission.status == .active
+            }) else {
+                writeStandardError("No active Mission for this terminal; stop waiting.")
+                return 4
+            }
+            writeStandardError("No Mission event yet. Run the same command again to keep waiting.")
             return 3
         }
         let output = InboxMessage(
@@ -271,14 +332,16 @@ enum MissionEventCLI {
         confirmationTimeout: TimeInterval = 5,
         pollInterval: TimeInterval = 0.05
     ) -> Int32 {
-        guard let context = parentContext(environment),
-              let options = parseOptions(arguments, allowed: ["--event", "--message"]),
+        guard let context = parentContext(environment) else { return notAMissionTerminal(child: false) }
+        guard let options = parseOptions(arguments, allowed: ["--event", "--message"]),
               let eventID = options["--event"],
               UUID(uuidString: eventID) != nil,
               let message = validMessage(options["--message"])
-        else { return 2 }
+        else {
+            return usage("reply --event <question-event-id> --message <1-\(maxMessageLength) characters>")
+        }
         var ledger = MissionLedgerReader(url: missionsURL)
-        ledger.refresh()
+        guard ledger.refresh() else { return unreadableLedger(missionsURL) }
         guard let mission = ledger.missions.first(where: { mission in
             mission.parentWorkspaceID == context.workspaceID
                 && mission.parentAgentUUID == context.agentUUID
@@ -289,7 +352,13 @@ enum MissionEventCLI {
                 && !mission.events.contains(where: {
                     $0.kind == .response && $0.inReplyTo == eventID
                 })
-        }) else { return 2 }
+        }) else {
+            writeStandardError(
+                "This question is not waiting for an answer from this terminal: it was already answered "
+                    + "(perhaps from Nirux Activity), its Mission ended, or it belongs to another parent."
+            )
+            return 4
+        }
 
         let responseID = UUID().uuidString
         let response = MissionEvent(
@@ -313,7 +382,7 @@ enum MissionEventCLI {
             missions.lazy.flatMap(\.events).contains(where: { $0.id == responseID }) ? true : nil
         }
         guard confirmed == nil else { return 0 }
-        writeStandardError("Mission response was queued but not confirmed by Nirux.")
+        writeStandardError("The answer is queued but Nirux has not confirmed it yet; do not send it again.")
         return 3
     }
 
@@ -384,10 +453,12 @@ enum MissionEventCLI {
         return !message.isEmpty && message.count <= maxMessageLength ? message : nil
     }
 
-    private static func validTimeout(_ raw: String?) -> TimeInterval? {
+    /// `--timeout` can shorten a wait but never extend it past the default:
+    /// skills installed before waits were bounded still pass 900 seconds.
+    static func validTimeout(_ raw: String?) -> TimeInterval? {
         guard let raw else { return defaultWaitTimeout }
-        guard let value = TimeInterval(raw), value >= 0, value <= 3600 else { return nil }
-        return value
+        guard let value = TimeInterval(raw), value >= 0 else { return nil }
+        return min(value, defaultWaitTimeout)
     }
 
     private static func nextParentEvent(
@@ -413,13 +484,47 @@ enum MissionEventCLI {
         guard var line = try? JSONEncoder().encode(event) else { return false }
         line.append(0x0A)
         let fd = open(url.path, O_WRONLY | O_CREAT | O_APPEND, 0o600)
-        guard fd >= 0 else { return false }
+        guard fd >= 0 else {
+            reportQueueFailure(url, code: errno)
+            return false
+        }
         let written = line.withUnsafeBytes { buffer -> Int in
             guard let pointer = buffer.baseAddress else { return 0 }
             return write(fd, pointer, buffer.count)
         }
+        let writeError = errno
         close(fd)
-        return written == line.count
+        guard written == line.count else {
+            reportQueueFailure(url, code: written < 0 ? writeError : EIO)
+            return false
+        }
+        return true
+    }
+
+    /// Agent sandboxes often allow reads but block writes outside the
+    /// project, so name the path and the cause instead of failing silently.
+    private static func reportQueueFailure(_ url: URL, code: Int32) {
+        writeStandardError(
+            "Could not write the Mission queue at \(url.path): \(String(cString: strerror(code))). "
+                + "If a sandbox blocks writes there, run the command outside the sandbox."
+        )
+    }
+
+    private static func unreadableLedger(_ url: URL) -> Int32 {
+        writeStandardError("Could not read the Mission ledger at \(url.path).")
+        return 1
+    }
+
+    private static func usage(_ synopsis: String) -> Int32 {
+        writeStandardError("Usage: \"$NIRUX_CLI_PATH\" --mission \(synopsis)")
+        return 2
+    }
+
+    private static func notAMissionTerminal(child: Bool) -> Int32 {
+        writeStandardError(child
+            ? "Run this from the agent terminal of a Nirux Mission workspace."
+            : "Run this from a Nirux terminal opened after Mission handoffs were enabled.")
+        return 2
     }
 
     private static func writeStandardOutput(_ line: String) {

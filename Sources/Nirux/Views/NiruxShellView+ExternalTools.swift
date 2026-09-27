@@ -255,16 +255,26 @@ extension NiruxShellView {
         "$NIRUX_CLI_PATH" --mission reply --event <question-event-id> --message "<concise answer>"
         ```
 
-        `ask` and `receive` wait up to 90 seconds, which stays under the default 2-minute limit of
-        the Claude Code shell tool, so keep the default wait. Exit status 3 means nothing arrived
-        yet: run the exact same command again to keep waiting, and do the same if the shell tool
-        stops the command first. Repeating an identical `ask` resumes the same question instead of
-        sending it twice, and prints the answer if it arrived meanwhile. `ask` exits with status 1
-        once the Mission is no longer active; do not retry it then.
+        Messages hold at most \(MissionEventCLI.maxMessageLength) characters. `ask` and `receive`
+        wait at most \(Int(MissionEventCLI.defaultWaitTimeout)) seconds, under the default 2-minute
+        limit of the Claude Code shell tool; if your shell tool takes a timeout, allow at least 120
+        seconds. Exit statuses:
+
+        - 0: done. The output is the answer or the event, even if the shell tool also reported a
+          timeout.
+        - 3: nothing yet. Run the exact same command again to keep waiting, and do the same if the
+          shell tool stops the command before it prints anything. An identical `ask` resumes the
+          same question instead of sending it twice, and prints the answer if it arrived meanwhile.
+          For `reply`, 3 means Nirux has not confirmed the answer yet: do not send it again.
+        - 4: stop. Mission handoffs are off, the Mission has ended, the terminal is not part of it,
+          or the question no longer waits for an answer.
+        - 1: Nirux's state could not be read or written. If a sandbox blocks it, run the command
+          outside the sandbox.
 
         `receive` prints one JSON object. For a `question`, reply before calling `receive` again;
-        for `completed`, the event is acknowledged automatically. A human can also click the
-        question in Nirux Activity and use the Reply action.
+        for `completed`, the event is acknowledged automatically, so stop calling `receive` unless
+        another child Mission is still running. A human can also click the question in Nirux
+        Activity and use the Reply action.
 
         Do not report completion from a Stop/turn-complete hook. Use `completed` only when the
         delegated task is genuinely complete; use `ask` only when parent input is needed.

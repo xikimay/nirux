@@ -297,7 +297,9 @@ final class MissionTests: XCTestCase {
 
 extension MissionTests {
     func testCLIRequiresMissionEnvironmentAndWritesOneJSONLine() throws {
-        let eventsURL = try makeDirectory().appendingPathComponent("mission-events.jsonl")
+        let directory = try makeDirectory()
+        let eventsURL = directory.appendingPathComponent("mission-events.jsonl")
+        let missionsURL = directory.appendingPathComponent("missions.json")
         let environment = [
             "NIRUX_MISSION_HANDOFFS": "1",
             "NIRUX_MISSION_ID": missionID,
@@ -310,7 +312,8 @@ extension MissionTests {
             arguments: ["--message", " Need an answer "],
             environment: environment,
             now: 42,
-            eventsURL: eventsURL
+            eventsURL: eventsURL,
+            missionsURL: missionsURL
         ), 0)
 
         let lines = try Data(contentsOf: eventsURL).split(separator: 0x0A)
@@ -327,7 +330,8 @@ extension MissionTests {
             kind: .completed,
             arguments: ["--message", "Done"],
             environment: [:],
-            eventsURL: eventsURL
+            eventsURL: eventsURL,
+            missionsURL: missionsURL
         ), 2)
         XCTAssertEqual(try Data(contentsOf: eventsURL).split(separator: 0x0A).count, 1)
     }
