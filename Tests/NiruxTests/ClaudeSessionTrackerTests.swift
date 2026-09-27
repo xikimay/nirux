@@ -1,0 +1,381 @@
+import XCTest
+@testable import Nirux
+
+final class ClaudeSessionTrackerTests: XCTestCase {
+    private let parent = ForegroundProcess(
+        instance: ProcessInstance(pid: 700, startedAt: 70),
+        name: "claude",
+        arguments: ["claude", "--permission-mode", "auto"]
+    )
+    /// A `claude -p` the parent launched from its Bash tool: same column
+    /// UUID, its own process, session and (detached) process group.
+    private let nested = ProcessInstance(pid: 900, startedAt: 90)
+    private var tracker = ClaudeSessionTracker()
+
+    private func admit(
+        _ name: AgentHookEvent.Name,
+        _ sessionID: String?,
+        from emitter: ProcessInstance?,
+        inForegroundJob: Bool = false,
+        asChild: Bool = false,
+        foreground: ForegroundProcess?,
+        source: String? = nil
+    ) -> ClaudeSessionTracker.Admission {
+        let placement: ClaudeSessionTracker.Emitter
+        if let emitter {
+            if emitter == foreground?.instance {
+                placement = .foregroundProcess
+            } else if inForegroundJob {
+                placement = asChild ? .foregroundChild : .foregroundJob
+            } else {
+                placement = .elsewhere
+            }
+        } else {
+            placement = .unknown
+        }
+        return tracker.admit(name, sessionID: sessionID, source: source, emitter: placement, foregroundProcess: foreground)
+    }
+
+    private func restore() -> ClaudeSessionTracker.Restore? {
+        tracker.restore(for: parent)
+    }
+
+    func testColumnAgentBindsItsSession() {
+        XCTAssertEqual(admit(.sessionStart, "parent", from: parent.instance, foreground: parent), .restoreChanged)
+        XCTAssertEqual(admit(.userPromptSubmit, "parent", from: parent.instance, foreground: parent), .accepted)
+        XCTAssertEqual(restore(), .resume("parent"))
+    }
+
+    func testNestedClaudeCannotDriveTheColumnOrTakeItsSession() {
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
+
+        let names: [AgentHookEvent.Name] = [.sessionStart, .userPromptSubmit, .preToolUse, .notification, .stop, .sessionEnd]
+        for name in names {
+            XCTAssertEqual(admit(name, "nested", from: nested, foreground: parent), .rejected, "\(name)")
+        }
+        // `claude -p --resume <parent>` shares the ID but not the process.
+        XCTAssertEqual(admit(.sessionEnd, "parent", from: nested, foreground: parent), .rejected)
+        XCTAssertEqual(restore(), .resume("parent"))
+    }
+
+    func testNestedClaudeIsRejectedBeforeTheParentBinds() {
+        XCTAssertEqual(admit(.sessionStart, "nested", from: nested, foreground: parent), .rejected)
+        XCTAssertNil(restore())
+    }
+
+    func testClaudeHooksUnderACodexColumnAreNested() {
+        let codex = ForegroundProcess(
+            instance: ProcessInstance(pid: 800, startedAt: 80),
+            name: "codex",
+            arguments: ["codex"]
+        )
+
+        XCTAssertEqual(admit(.stop, "nested", from: nested, foreground: codex), .rejected)
+        XCTAssertEqual(admit(.stop, "legacy", from: nil, foreground: codex), .rejected)
+    }
+
+    func testReceiverWithoutEmitterRoutesButNeverBinds() {
+        // An older Nirux build still registered as the hook command.
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
+        _ = admit(.userPromptSubmit, "parent", from: parent.instance, foreground: parent)
+
+        XCTAssertEqual(admit(.sessionStart, "legacy", from: nil, foreground: parent), .accepted)
+        XCTAssertEqual(admit(.stop, "legacy", from: nil, foreground: parent), .accepted)
+        XCTAssertEqual(restore(), .resume("parent"))
+    }
+
+    func testForegroundJobMemberIsNestedOnceTheSessionIsConfirmed() {
+        // An MCP server's `claude -p` shares the terminal's foreground
+        // process group without being its leader.
+        let member = ProcessInstance(pid: 701, startedAt: 71)
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
+
+        for name in [.sessionStart, .stop, .sessionEnd] as [AgentHookEvent.Name] {
+            XCTAssertEqual(admit(name, "mcp", from: member, inForegroundJob: true, foreground: parent), .rejected, "\(name)")
+        }
+        XCTAssertEqual(admit(.stop, "parent", from: member, inForegroundJob: true, foreground: parent), .accepted)
+        XCTAssertEqual(restore(), .resume("parent"))
+    }
+
+    func testLauncherChildIsTheColumnsAgent() {
+        // A launcher that spawns the real `claude` (a Volta shim) is the
+        // foreground process but never fires hooks; its child does.
+        let shim = ForegroundProcess(
+            instance: ProcessInstance(pid: 720, startedAt: 72),
+            name: "claude",
+            arguments: ["claude"]
+        )
+        let child = ProcessInstance(pid: 721, startedAt: 73)
+
+        XCTAssertEqual(
+            admit(.sessionStart, "session", from: child, inForegroundJob: true, asChild: true, foreground: shim, source: "startup"),
+            .restoreChanged
+        )
+        _ = admit(.userPromptSubmit, "session", from: child, inForegroundJob: true, asChild: true, foreground: shim)
+        XCTAssertEqual(tracker.restore(for: shim), .resume("session"))
+        XCTAssertEqual(admit(.stop, "nested", from: nil, foreground: shim), .accepted)
+    }
+
+    func testChildrenOfAHookFiringForegroundAreJobMembers() {
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
+        let mcpServer = ProcessInstance(pid: 702, startedAt: 72)
+
+        XCTAssertEqual(
+            admit(.sessionStart, "mcp", from: mcpServer, inForegroundJob: true, asChild: true, foreground: parent),
+            .rejected
+        )
+        XCTAssertEqual(restore(), .resume("parent"))
+    }
+
+    func testShimChildBindsThenNestedJobMembersAreRejected() {
+        let shim = ForegroundProcess(
+            instance: ProcessInstance(pid: 720, startedAt: 72),
+            name: "claude",
+            arguments: ["claude"]
+        )
+        let child = ProcessInstance(pid: 721, startedAt: 73)
+        let mcpClaude = ProcessInstance(pid: 723, startedAt: 74)
+        _ = admit(.sessionStart, "session", from: child, inForegroundJob: true, asChild: true, foreground: shim)
+
+        XCTAssertEqual(admit(.stop, "mcp", from: mcpClaude, inForegroundJob: true, foreground: shim), .rejected)
+        XCTAssertEqual(tracker.restore(for: shim), .resume("session"))
+    }
+
+    func testANewForegroundLetsItsChildBindAgain() {
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
+        let shim = ForegroundProcess(
+            instance: ProcessInstance(pid: 730, startedAt: 90),
+            name: "claude",
+            arguments: ["claude"]
+        )
+        let child = ProcessInstance(pid: 731, startedAt: 91)
+
+        XCTAssertEqual(
+            admit(.sessionStart, "next", from: child, inForegroundJob: true, asChild: true, foreground: shim),
+            .restoreChanged
+        )
+        XCTAssertEqual(tracker.restore(for: shim), .resume("next"))
+    }
+
+    func testEmitterPlacement() {
+        // zsh 10 → claude 20 (foreground group 20) → child 21 → grandchild
+        // 22; the Bash tool's detached group 30 runs a nested claude 31.
+        let snapshot = ProcessSnapshot(entries: [
+            .init(pid: 10, parentPID: 1, processGroupID: 10, terminalForegroundProcessGroupID: 20,
+                  name: "zsh", startedAt: 10, arguments: ["zsh"]),
+            .init(pid: 20, parentPID: 10, processGroupID: 20, terminalForegroundProcessGroupID: 20,
+                  name: "claude", startedAt: 20, arguments: ["claude"]),
+            .init(pid: 21, parentPID: 20, processGroupID: 20, terminalForegroundProcessGroupID: 20,
+                  name: "claude", startedAt: 21, arguments: ["claude"]),
+            .init(pid: 22, parentPID: 21, processGroupID: 20, terminalForegroundProcessGroupID: 20,
+                  name: "node", startedAt: 22, arguments: ["node", "server.js"]),
+            .init(pid: 30, parentPID: 20, processGroupID: 30, terminalForegroundProcessGroupID: 0,
+                  name: "zsh", startedAt: 30, arguments: ["/bin/zsh", "-c", "claude -p hi"]),
+            .init(pid: 31, parentPID: 30, processGroupID: 30, terminalForegroundProcessGroupID: 0,
+                  name: "claude", startedAt: 31, arguments: ["claude", "-p", "hi"])
+        ])
+        let foreground = snapshot.foregroundProcess(shellPID: 10)
+        func place(_ pid: pid_t?, startedAt: TimeInterval? = nil) -> ClaudeSessionTracker.Emitter {
+            ClaudeSessionTracker.Emitter.placing(
+                pid.map { ProcessInstance(pid: $0, startedAt: startedAt ?? TimeInterval($0)) },
+                foreground: foreground,
+                shellPID: 10,
+                snapshot: snapshot
+            )
+        }
+
+        XCTAssertEqual(foreground?.instance.pid, 20)
+        XCTAssertEqual(place(nil), .unknown)
+        XCTAssertEqual(place(20), .foregroundProcess)
+        XCTAssertEqual(place(21), .foregroundChild)
+        XCTAssertEqual(place(22), .foregroundJob)
+        XCTAssertEqual(place(31), .elsewhere)
+        XCTAssertEqual(place(21, startedAt: 5), .elsewhere, "exited, pid reused")
+    }
+
+    func testCodexHooksUnderAnotherAgentAreNested() {
+        XCTAssertTrue(AgentHookCenter.isNestedCodexHook(foregroundName: "claude"))
+        XCTAssertFalse(AgentHookCenter.isNestedCodexHook(foregroundName: "codex"))
+        XCTAssertFalse(AgentHookCenter.isNestedCodexHook(foregroundName: "zsh"))
+        XCTAssertFalse(AgentHookCenter.isNestedCodexHook(foregroundName: nil))
+    }
+
+    func testSuspendingClaudeKeepsItsBinding() {
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
+        let shell = ForegroundProcess(
+            instance: ProcessInstance(pid: 600, startedAt: 60),
+            name: "zsh",
+            arguments: ["-zsh"]
+        )
+
+        // Ctrl-Z hands the terminal to the shell; `fg` brings the same claude back.
+        XCTAssertFalse(tracker.invalidateBinding(ifProcessChangedTo: shell))
+        XCTAssertEqual(restore(), .resume("parent"))
+    }
+
+    func testClearRebindsAndDropsTheLeftSessionsEnd() {
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent, source: "startup")
+        _ = admit(.userPromptSubmit, "parent", from: parent.instance, foreground: parent)
+
+        // The new session's SessionStart may land before the old SessionEnd.
+        XCTAssertEqual(admit(.sessionStart, "cleared", from: parent.instance, foreground: parent, source: "clear"), .restoreChanged)
+        XCTAssertEqual(admit(.sessionEnd, "parent", from: parent.instance, foreground: parent), .rejected)
+        XCTAssertEqual(restore(), .fresh, "nothing was said in the cleared session yet")
+
+        _ = admit(.userPromptSubmit, "cleared", from: parent.instance, foreground: parent)
+        XCTAssertEqual(restore(), .resume("cleared"))
+    }
+
+    func testOnlySessionStartSwitchesABoundSession() {
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
+
+        for name in [.userPromptSubmit, .notification, .stop, .preToolUse] as [AgentHookEvent.Name] {
+            XCTAssertEqual(admit(name, "teammate", from: parent.instance, foreground: parent), .accepted, "\(name)")
+        }
+        XCTAssertEqual(restore(), .resume("parent"))
+    }
+
+    func testTurnEventsAdoptAnUnboundColumn() {
+        XCTAssertEqual(admit(.preToolUse, "parent", from: parent.instance, foreground: parent), .accepted)
+        XCTAssertEqual(admit(.userPromptSubmit, "parent", from: parent.instance, foreground: parent), .restoreChanged)
+        XCTAssertEqual(restore(), .resume("parent"))
+    }
+
+    func testUnpromptedSessionRestoresFresh() {
+        XCTAssertEqual(admit(.sessionStart, "parent", from: parent.instance, foreground: parent, source: "startup"), .restoreChanged)
+        XCTAssertEqual(restore(), .fresh)
+
+        // Ending the session or notifying says nothing was prompted.
+        _ = admit(.sessionEnd, "parent", from: parent.instance, foreground: parent)
+        _ = admit(.notification, "parent", from: parent.instance, foreground: parent)
+        XCTAssertEqual(restore(), .fresh)
+
+        // The first prompt changes what restore does: persist it now.
+        XCTAssertEqual(admit(.userPromptSubmit, "parent", from: parent.instance, foreground: parent), .restoreChanged)
+        XCTAssertEqual(admit(.stop, "parent", from: parent.instance, foreground: parent), .accepted)
+        XCTAssertEqual(restore(), .resume("parent"))
+    }
+
+    func testUnpromptedLeadAdoptsTheSessionItFirstPromptsIn() {
+        _ = admit(.sessionStart, "announced", from: parent.instance, foreground: parent, source: "startup")
+
+        XCTAssertEqual(admit(.userPromptSubmit, "actual", from: parent.instance, foreground: parent), .restoreChanged)
+        XCTAssertEqual(restore(), .resume("actual"))
+    }
+
+    func testResumedForkedAndCompactedSessionsHaveAConversation() {
+        for source in ["resume", "fork", "compact", "some-future-source"] {
+            var tracker = ClaudeSessionTracker()
+            _ = tracker.admit(
+                .sessionStart, sessionID: source, source: source,
+                emitter: .foregroundProcess, foregroundProcess: parent
+            )
+            XCTAssertEqual(tracker.restore(for: parent), .resume(source), source)
+        }
+    }
+
+    func testCompactionMarksABoundSessionPrompted() {
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent, source: "startup")
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent, source: "compact")
+        XCTAssertEqual(restore(), .resume("parent"))
+    }
+
+    func testRestartedClaudeReplacesAKilledOne() {
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
+        let restarted = ForegroundProcess(
+            instance: ProcessInstance(pid: 701, startedAt: 80),
+            name: "claude",
+            arguments: ["claude"]
+        )
+
+        // SIGKILL left no SessionEnd; the new process still binds.
+        XCTAssertEqual(admit(.sessionStart, "new", from: restarted.instance, foreground: restarted), .restoreChanged)
+        XCTAssertEqual(tracker.restore(for: restarted), .resume("new"))
+        XCTAssertEqual(admit(.sessionEnd, "parent", from: parent.instance, foreground: restarted), .rejected)
+    }
+
+    func testWithoutAnAgentInTheForegroundEventsRouteButBindNothing() {
+        let shell = ForegroundProcess(
+            instance: ProcessInstance(pid: 600, startedAt: 60),
+            name: "zsh",
+            arguments: ["-zsh"]
+        )
+
+        XCTAssertEqual(admit(.sessionEnd, "finished", from: parent.instance, foreground: shell), .accepted)
+        XCTAssertEqual(admit(.stop, "queued", from: nested, foreground: nil), .accepted)
+        XCTAssertNil(restore())
+    }
+
+    func testRestoredSessionPersistsBeforeItsFirstHook() {
+        let restored = ForegroundProcess(
+            instance: ProcessInstance(pid: 710, startedAt: 71),
+            name: "claude",
+            arguments: ["claude", "--resume", "restored", "--permission-mode", "auto"]
+        )
+        tracker.prepareResume(sessionID: "restored")
+
+        XCTAssertEqual(tracker.restore(for: restored), .resume("restored"))
+        XCTAssertEqual(admit(.sessionStart, "restored", from: restored.instance, foreground: restored, source: "resume"), .accepted)
+        XCTAssertEqual(tracker.restore(for: restored), .resume("restored"))
+    }
+
+    func testRestoreThatStartedAnotherSessionFollowsTheHook() {
+        let restored = ForegroundProcess(
+            instance: ProcessInstance(pid: 710, startedAt: 71),
+            name: "claude",
+            arguments: ["claude", "--resume", "restored"]
+        )
+        tracker.prepareResume(sessionID: "restored")
+
+        XCTAssertEqual(admit(.sessionStart, "forked", from: restored.instance, foreground: restored), .restoreChanged)
+        XCTAssertEqual(tracker.restore(for: restored), .resume("forked"))
+    }
+
+    func testRestoreIsNotLentToAPickerOrFreshProcess() {
+        let picker = ForegroundProcess(
+            instance: ProcessInstance(pid: 711, startedAt: 72),
+            name: "claude",
+            arguments: ["claude", "--resume", "--permission-mode", "auto"]
+        )
+        tracker.prepareResume(sessionID: "restored")
+
+        XCTAssertNil(tracker.restore(for: picker))
+    }
+
+    func testReplacedProcessDropsItsBinding() {
+        _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
+        let replacement = ForegroundProcess(
+            instance: ProcessInstance(pid: 700, startedAt: 75),
+            name: "claude",
+            arguments: ["claude"]
+        )
+
+        XCTAssertTrue(tracker.invalidateBinding(ifProcessChangedTo: replacement))
+        XCTAssertNil(tracker.restore(for: replacement))
+    }
+
+    func testHookEmitterSkipsTheHookShell() throws {
+        let me = try XCTUnwrap(ProcessInstance.running(pid: getpid()))
+        XCTAssertEqual(ProcessInstance.firstNonShellAncestor(from: getpid()), me)
+
+        // A live shell whose parent (this test) fired it, like Claude's
+        // `sh -c <hook command>`. `read` is a builtin: no grandchild to leak.
+        let shell = Process()
+        shell.executableURL = URL(fileURLWithPath: "/bin/sh")
+        shell.arguments = ["-c", "read line; true"]
+        shell.standardInput = Pipe()
+        try shell.run()
+        defer {
+            shell.terminate()
+            shell.waitUntilExit()
+        }
+
+        XCTAssertEqual(ProcessInstance.firstNonShellAncestor(from: shell.processIdentifier), me)
+        XCTAssertNil(ProcessInstance.firstNonShellAncestor(from: 1))
+    }
+
+    func testHookEmitterWiring() {
+        XCTAssertEqual(ProcessInstance.hookEmitter(for: .claude), ProcessInstance.firstNonShellAncestor(from: getppid()))
+        XCTAssertEqual(ProcessInstance.hookEmitter(for: .codex), ProcessInstance.running(pid: getppid()))
+    }
+}

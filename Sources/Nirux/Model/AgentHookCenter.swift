@@ -32,6 +32,9 @@ final class AgentHookCenter {
     struct AppliedEvent {
         let event: AgentHookEvent
         let resolution: Resolution
+        /// What the column's Claude would restore to changed (another
+        /// session, or its first prompt) — the state file must learn it.
+        var claudeRestoreChanged = false
     }
 
     /// Given NIRUX_AGENT_UUID, locate the owning column. Set by the shell.
@@ -146,9 +149,10 @@ final class AgentHookCenter {
 
         let decoder = JSONDecoder()
         var appliedEvents: [AppliedEvent] = []
+        var snapshot: ProcessSnapshot?
         for line in slice.split(separator: 0x0A) {
             guard let event = try? decoder.decode(AgentHookEvent.self, from: Data(line)) else { continue }
-            if let appliedEvent = dispatch(event) { appliedEvents.append(appliedEvent) }
+            if let appliedEvent = dispatch(event, snapshot: &snapshot) { appliedEvents.append(appliedEvent) }
         }
         // One sidebar refresh per drain, not per event: updateSidebar does a
         // full process-table scan, and a PreToolUse storm (or launch replay
@@ -159,7 +163,35 @@ final class AgentHookCenter {
 
     @discardableResult
     func dispatch(_ event: AgentHookEvent) -> AppliedEvent? {
+        var snapshot: ProcessSnapshot?
+        return dispatch(event, snapshot: &snapshot)
+    }
+
+    /// `snapshot` is taken on the first routed event and shared by the rest
+    /// of the drain — one process-table scan per burst, not per event.
+    private func dispatch(_ event: AgentHookEvent, snapshot: inout ProcessSnapshot?) -> AppliedEvent? {
         let resolution = event.agentUUID.flatMap { resolver?($0) }
+        var claudeRestoreChanged = false
+        if let resolution, let pty = resolution.column.pty {
+            let processes = snapshot ?? ProcessSnapshot()
+            snapshot = processes
+            let foregroundProcess = pty.foregroundProcess(snapshot: processes)
+            switch event.kind {
+            case .claude:
+                switch resolution.column.admitClaudeHook(event, foregroundProcess: foregroundProcess, snapshot: processes) {
+                case .rejected:
+                    // Not the column's agent (a nested `claude -p` inheriting
+                    // its UUID, a `claude` under Codex) or a session it left.
+                    return nil
+                case .accepted:
+                    break
+                case .restoreChanged:
+                    claudeRestoreChanged = true
+                }
+            case .codex:
+                if Self.isNestedCodexHook(foregroundName: foregroundProcess?.name) { return nil }
+            }
+        }
         onEventReceived?(event, resolution)
         if let resolution, let pty = resolution.column.pty {
             let firedAttention = pty.applyAgentHook(event, isUserFocused: resolution.isUserFocused)
@@ -167,7 +199,16 @@ final class AgentHookCenter {
                 resolution.column.notifyAgentAttention()
             }
         }
-        return resolution.map { AppliedEvent(event: event, resolution: $0) }
+        return resolution.map {
+            AppliedEvent(event: event, resolution: $0, claudeRestoreChanged: claudeRestoreChanged)
+        }
+    }
+
+    /// A Codex hook while another agent owns the terminal came from a
+    /// `codex exec` that agent launched.
+    nonisolated static func isNestedCodexHook(foregroundName: String?) -> Bool {
+        guard let foregroundName, AgentStatusMachine.isRecognizedAgentProcess(foregroundName) else { return false }
+        return foregroundName != "codex"
     }
 
     func stop() {

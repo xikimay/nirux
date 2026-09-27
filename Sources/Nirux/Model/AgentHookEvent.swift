@@ -28,14 +28,17 @@ struct AgentHookEvent: Codable, Equatable {
     let workspaceID: String?
     /// Claude session_id / Codex thread-id.
     let sessionID: String?
-    /// Parent of the Codex hook receiver. Its process identity proves that a
-    /// reported thread belongs to the column's current foreground job. Legacy
-    /// queue entries and Claude events omit it.
+    /// Agent process that fired the hook (`ProcessInstance.hookEmitter`).
+    /// Its identity proves the event comes from the column's foreground
+    /// agent rather than a nested one sharing its NIRUX_AGENT_UUID. Legacy
+    /// queue entries omit it.
     let emitterProcess: ProcessInstance?
     let cwd: String?
     /// Tool name (PreToolUse), notification message (Notification), or final
     /// assistant message (Codex turnComplete, truncated).
     let detail: String?
+    /// Claude SessionStart `source`: startup, resume, clear, compact, fork.
+    let source: String?
     /// Receiver-side timestamp (epoch seconds) — the emitter's clock and
     /// timezone are irrelevant.
     let timestamp: TimeInterval
@@ -70,6 +73,7 @@ struct AgentHookEvent: Codable, Equatable {
             }
             sessionID = payload["session_id"] as? String
             cwd = payload["cwd"] as? String
+            source = name == .sessionStart ? payload["source"] as? String : nil
             if name == .preToolUse {
                 detail = payload["tool_name"] as? String
             } else if name == .notification {
@@ -84,6 +88,7 @@ struct AgentHookEvent: Codable, Equatable {
             name = .turnComplete
             sessionID = payload["thread-id"] as? String
             cwd = payload["cwd"] as? String
+            source = nil
             let message = payload["last-assistant-message"] as? String
             detail = message.map { String($0.prefix(500)) }
         }
@@ -113,9 +118,7 @@ enum AgentHookCLI {
 
         let env = ProcessInfo.processInfo.environment
         guard isFromNiruxTerminal(env: env) else { return 0 }
-        let emitterProcess = kind == .codex
-            ? ProcessInstance.running(pid: getppid())
-            : nil
+        let emitterProcess = ProcessInstance.hookEmitter(for: kind)
         guard let event = AgentHookEvent(
             kind: kind,
             payload: raw,

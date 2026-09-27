@@ -105,4 +105,19 @@ final class PtyForegroundProcessTests: XCTestCase {
 
         XCTAssertNil(snapshot.foregroundProcess(shellPID: 10))
     }
+
+    func testChildOfMatchesOnlyALiveDirectChild() {
+        let snapshot = ProcessSnapshot(entries: [
+            .init(pid: 20, parentPID: 10, processGroupID: 20, terminalForegroundProcessGroupID: 20,
+                  name: "claude", startedAt: 20, arguments: ["claude"]),
+            .init(pid: 21, parentPID: 20, processGroupID: 20, terminalForegroundProcessGroupID: 20,
+                  name: "claude", startedAt: 21, arguments: ["claude"]),
+            .init(pid: 22, parentPID: 21, processGroupID: 20, terminalForegroundProcessGroupID: 20,
+                  name: "node", startedAt: 22, arguments: ["node", "server.js"])
+        ])
+
+        XCTAssertTrue(snapshot.isProcess(ProcessInstance(pid: 21, startedAt: 21), childOf: 20))
+        XCTAssertFalse(snapshot.isProcess(ProcessInstance(pid: 22, startedAt: 22), childOf: 20), "grandchild")
+        XCTAssertFalse(snapshot.isProcess(ProcessInstance(pid: 21, startedAt: 5), childOf: 20), "reused pid")
+    }
 }

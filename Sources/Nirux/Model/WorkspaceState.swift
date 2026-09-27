@@ -575,9 +575,9 @@ extension WorkspaceState {
         insertColumn(col)
     }
 
-    func addColumn(command: String, agentUUID: String = UUID().uuidString) {
+    func addColumn(command: String, agentUUID: String = UUID().uuidString, cwd: String? = nil) {
         let col = ColumnState(
-            cwd: focusedWorkingDirectory,
+            cwd: cwd ?? focusedWorkingDirectory,
             command: command,
             environment: terminalEnvironment(agentUUID: agentUUID)
         )

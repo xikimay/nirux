@@ -538,25 +538,27 @@ extension PersistedStateCodingTests {
     @MainActor
     func testCodexRestoreClaimsEachExactSessionOnlyOnce() {
         var claimed = Set<String>()
+        let threadA = "01999999-1111-7222-8333-444444444444"
+        let threadB = "01999999-5555-7666-8777-888888888888"
 
         XCTAssertEqual(
-            NiruxShellView.codexRestoreTarget(sessionID: "thread-a", claimedSessionIDs: &claimed),
-            .session("thread-a")
+            NiruxShellView.agentRestoreTarget(sessionID: threadA, claimedSessionIDs: &claimed),
+            .session(threadA)
         )
         XCTAssertEqual(
-            NiruxShellView.codexRestoreTarget(sessionID: "thread-b", claimedSessionIDs: &claimed),
-            .session("thread-b")
+            NiruxShellView.agentRestoreTarget(sessionID: threadB, claimedSessionIDs: &claimed),
+            .session(threadB)
         )
         XCTAssertEqual(
-            NiruxShellView.codexRestoreTarget(sessionID: "thread-a", claimedSessionIDs: &claimed),
+            NiruxShellView.agentRestoreTarget(sessionID: threadA, claimedSessionIDs: &claimed),
             .picker
         )
         XCTAssertEqual(
-            NiruxShellView.codexRestoreTarget(sessionID: nil, claimedSessionIDs: &claimed),
+            NiruxShellView.agentRestoreTarget(sessionID: nil, claimedSessionIDs: &claimed),
             .picker
         )
         XCTAssertEqual(
-            NiruxShellView.codexRestoreTarget(sessionID: "", claimedSessionIDs: &claimed),
+            NiruxShellView.agentRestoreTarget(sessionID: "", claimedSessionIDs: &claimed),
             .picker
         )
     }

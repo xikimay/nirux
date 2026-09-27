@@ -11,18 +11,7 @@ struct ProcessInstance: Codable, Equatable {
     let startedAt: TimeInterval
 
     static func running(pid: pid_t) -> ProcessInstance? {
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
-        var process = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.size
-        guard sysctl(&mib, 4, &process, &size, nil, 0) == 0,
-              size == MemoryLayout<kinfo_proc>.size,
-              process.kp_proc.p_pid == pid else { return nil }
-        let startTime = process.kp_proc.p_starttime
-        return ProcessInstance(
-            pid: pid,
-            startedAt: TimeInterval(startTime.tv_sec)
-                + TimeInterval(startTime.tv_usec) / 1_000_000
-        )
+        kernelEntry(pid: pid)?.instance
     }
 }
 
@@ -161,6 +150,10 @@ final class ProcessSnapshot {
         return nil
     }
 
+    func isProcess(_ process: ProcessInstance, childOf parentPID: pid_t) -> Bool {
+        instanceMap[process.pid] == process && childrenMap[parentPID]?.contains(process.pid) == true
+    }
+
     func isProcess(
         _ process: ProcessInstance,
         inForegroundProcessGroupOf shellPID: pid_t
@@ -175,7 +168,7 @@ final class ProcessSnapshot {
         "node", "python", "python3", "ruby", "perl", "java", "deno", "bun"
     ]
 
-    fileprivate static func execName(from argv: [String]) -> String? {
+    static func execName(from argv: [String]) -> String? {
         guard let first = argv.first else { return nil }
         let name0 = (first as NSString).lastPathComponent
         // If argv[0] is a known runtime, try argv[1] for the real command name
@@ -206,7 +199,7 @@ final class ProcessSnapshot {
         while i < size && buf[i] == 0 { i += 1 }
         // Read argv entries
         var args: [String] = []
-        let limit = min(Int(argc), maxArgs)
+        let limit = max(0, min(Int(argc), maxArgs))
         for _ in 0..<limit {
             guard i < size else { break }
             var end = i
@@ -305,7 +298,9 @@ final class PtySession: @unchecked Sendable {
     /// fires the workspace-level notification path.
     @discardableResult
     func applyAgentHook(_ event: AgentHookEvent, isUserFocused: Bool) -> Bool {
-        state.machine.applyHook(event.name, kind: event.kind, isUserFocused: isUserFocused)
+        state.machine.applyHook(
+            event.name, kind: event.kind, source: event.source, isUserFocused: isUserFocused
+        )
     }
 
     /// Last computed agent state (no snapshot needed — read from persistent state)

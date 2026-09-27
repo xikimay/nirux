@@ -64,6 +64,20 @@ final class AgentStatusMachineTests: XCTestCase {
         XCTAssertEqual(machine.tick(fgName: "zsh", isUserFocused: false, now: t0 + 10), .idle)
     }
 
+    /// Auto-compaction fires SessionStart(compact) mid-turn: the turn goes on.
+    func testCompactionKeepsTheTurnRunning() {
+        _ = machine.tick(fgName: "claude", isUserFocused: false, now: t0)
+        _ = machine.applyHook(.sessionStart, kind: .claude, source: "startup", isUserFocused: false)
+        _ = machine.applyHook(.userPromptSubmit, kind: .claude, isUserFocused: false)
+
+        XCTAssertFalse(machine.applyHook(.sessionStart, kind: .claude, source: "compact", isUserFocused: false))
+        XCTAssertEqual(machine.state, .working)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 30), .working)
+
+        _ = machine.applyHook(.sessionStart, kind: .claude, source: "clear", isUserFocused: false)
+        XCTAssertEqual(machine.state, .idle)
+    }
+
     /// SessionStart can arrive BEFORE the process-table snapshot notices the
     /// new foreground process — clearing hook capability on the foreground
     /// change would knock the session back into the flaky fallback.

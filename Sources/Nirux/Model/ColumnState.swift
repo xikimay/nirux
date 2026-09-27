@@ -1,75 +1,6 @@
 import AppKit
 import GhosttyTerminal
 
-struct CodexSessionTracker {
-    private struct Binding: Equatable {
-        let sessionID: String
-        let process: ProcessInstance
-    }
-
-    private var binding: Binding?
-    private var pendingResumeSessionID: String?
-
-    mutating func prepareResume(sessionID: String) {
-        binding = nil
-        pendingResumeSessionID = sessionID
-    }
-
-    @discardableResult
-    mutating func capture(
-        sessionID: String?,
-        emitterBelongsToForegroundJob: Bool,
-        foregroundProcess: ForegroundProcess?
-    ) -> Bool {
-        guard let sessionID, !sessionID.isEmpty,
-              let foregroundProcess, foregroundProcess.name == "codex",
-              emitterBelongsToForegroundJob else {
-            return false
-        }
-        let next = Binding(sessionID: sessionID, process: foregroundProcess.instance)
-        guard binding != next || pendingResumeSessionID != nil else { return false }
-        binding = next
-        pendingResumeSessionID = nil
-        return true
-    }
-
-    mutating func sessionID(for foregroundProcess: ForegroundProcess?) -> String? {
-        _ = invalidateBinding(ifProcessChangedTo: foregroundProcess)
-        guard let foregroundProcess, foregroundProcess.name == "codex" else {
-            binding = nil
-            pendingResumeSessionID = nil
-            return nil
-        }
-        if binding?.process == foregroundProcess.instance {
-            return binding?.sessionID
-        }
-        binding = nil
-        guard let pendingResumeSessionID else { return nil }
-        guard let resumeIndex = foregroundProcess.arguments.firstIndex(of: "resume"),
-              foregroundProcess.arguments.indices.contains(resumeIndex + 1),
-              foregroundProcess.arguments[resumeIndex + 1] == pendingResumeSessionID else {
-            if !foregroundProcess.arguments.isEmpty {
-                self.pendingResumeSessionID = nil
-            }
-            return nil
-        }
-        binding = Binding(
-            sessionID: pendingResumeSessionID,
-            process: foregroundProcess.instance
-        )
-        self.pendingResumeSessionID = nil
-        return pendingResumeSessionID
-    }
-
-    @discardableResult
-    mutating func invalidateBinding(ifProcessChangedTo foregroundProcess: ForegroundProcess?) -> Bool {
-        guard let binding, let foregroundProcess,
-              binding.process != foregroundProcess.instance else { return false }
-        self.binding = nil
-        return true
-    }
-}
-
 // WindowDragView and DropTargetView now live in Views/ColumnInternalViews.swift
 // — NSView subclasses don't belong in the model layer.
 
@@ -117,6 +48,11 @@ final class ColumnState {
     let agentUUID: String?
 
     private var codexSessionTracker = CodexSessionTracker()
+    private var claudeSessionTracker = ClaudeSessionTracker()
+    /// State this agent column was restored from — saved as-is while its
+    /// launch command hasn't started the agent yet (see
+    /// `NiruxShellView.isLaunchingRestoredAgent`), then dropped.
+    var restoredColumn: PersistedColumn?
 
     /// Terminal title from OSC 0/2 (agent context, vim filename, etc.)
     var terminalTitle: String? {
@@ -252,7 +188,7 @@ final class ColumnState {
         self.init(cwd: cwd, shellArgs: ["-l"], environment: environment)
     }
 
-    /// Init for a terminal that runs a command immediately (e.g. claude --continue).
+    /// Init for a terminal that runs a command immediately (e.g. claude --resume <id>).
     /// When the command exits, drops into an interactive shell.
     convenience init(cwd: String, command: String, environment: [String: String] = [:]) {
         // Match a normal terminal launch: interactive + login shell. This
@@ -408,10 +344,44 @@ final class ColumnState {
         codexSessionTracker.sessionID(for: foregroundProcess)
     }
 
-    func invalidateCodexSessionIfProcessChanged(
+    func prepareClaudeResume(sessionID: String) {
+        claudeSessionTracker.prepareResume(sessionID: sessionID)
+    }
+
+    /// Whether a Claude hook event comes from this column's own `claude`
+    /// (see ClaudeSessionTracker) — and bind the session it reports.
+    func admitClaudeHook(
+        _ event: AgentHookEvent,
+        foregroundProcess: ForegroundProcess?,
+        snapshot: ProcessSnapshot
+    ) -> ClaudeSessionTracker.Admission {
+        let emitter = ClaudeSessionTracker.Emitter.placing(
+            event.emitterProcess,
+            foreground: foregroundProcess,
+            shellPID: pty?.shellPID ?? 0,
+            snapshot: snapshot
+        )
+        return claudeSessionTracker.admit(
+            event.name,
+            sessionID: event.sessionID,
+            source: event.source,
+            emitter: emitter,
+            foregroundProcess: foregroundProcess
+        )
+    }
+
+    func persistedClaudeRestore(foregroundProcess: ForegroundProcess?) -> ClaudeSessionTracker.Restore? {
+        claudeSessionTracker.restore(for: foregroundProcess)
+    }
+
+    /// Drop Codex/Claude session bindings whose process was replaced, so
+    /// the next save cannot hand a dead session to its successor.
+    func invalidateAgentSessionsIfProcessChanged(
         foregroundProcess: ForegroundProcess?
     ) -> Bool {
-        codexSessionTracker.invalidateBinding(ifProcessChangedTo: foregroundProcess)
+        let codexChanged = codexSessionTracker.invalidateBinding(ifProcessChangedTo: foregroundProcess)
+        let claudeChanged = claudeSessionTracker.invalidateBinding(ifProcessChangedTo: foregroundProcess)
+        return codexChanged || claudeChanged
     }
 
     // MARK: - Shell exit / restart

@@ -3,10 +3,11 @@ import AppKit
 // MARK: - External Tools, Cookie Import, URL Input
 
 extension NiruxShellView {
-    enum CodexResumeTarget: Equatable {
-        /// No stored thread ID (state written by an older Nirux, or a Codex
-        /// session that has not completed a turn yet). Let the user choose;
-        /// silently using `--last` can attach several columns to one thread.
+    enum AgentResumeTarget: Equatable {
+        /// No usable stored ID (state written by an older Nirux, a session
+        /// never bound, or one another column already claimed). Let the user
+        /// choose; `codex resume --last` / `claude --continue` would attach
+        /// several columns to the most recent conversation.
         case picker
         case session(String)
     }
@@ -16,6 +17,8 @@ extension NiruxShellView {
     }
 
     /// Build a `claude …` shell command for the given launch mode.
+    /// Restores use an exact session ID, Claude's interactive picker, or a
+    /// fresh session (nil); they deliberately never guess with `--continue`.
     /// `handoverPrompt` is appended as a single-quoted positional argument
     /// (used by the worktree handover flow).
     ///
@@ -23,12 +26,17 @@ extension NiruxShellView {
     /// `alias claude="claude --dangerously-skip-permissions"` doesn't override
     /// the launch mode Nirux selected.
     static func claudeCommand(
-        continueSession: Bool = false,
+        resume: AgentResumeTarget? = nil,
         mode: ClaudeLaunchMode,
         handoverPrompt: String? = nil
     ) -> String {
         var parts = ["command", "claude"]
-        if continueSession { parts.append("--continue") }
+        if let resume {
+            parts.append("--resume")
+            if case .session(let sessionID) = resume {
+                parts.append(Self.shellQuotedArgument(sessionID))
+            }
+        }
         parts.append(contentsOf: mode.cliArgs)
         if let prompt = handoverPrompt {
             parts.append(Self.shellQuotedArgument(prompt))
@@ -49,7 +57,7 @@ extension NiruxShellView {
     /// `command` prefix mirrors `claudeCommand` so any user alias on `codex`
     /// can't override the launch flags Nirux selected.
     static func codexCommand(
-        resume: CodexResumeTarget? = nil,
+        resume: AgentResumeTarget? = nil,
         mode: CodexLaunchMode,
         handoverPrompt: String? = nil
     ) -> String {
