@@ -153,7 +153,8 @@ enum SpaceBrief {
         return false
     }
 
-    private static func readBrief(at url: URL) -> String? {
+    /// Nil unless a regular file of at most `maxFileBytes` (a FIFO would block).
+    static func readBrief(at url: URL) -> String? {
         // attributesOfItem doesn't follow a symlinked brief.md; resolve it.
         let url = url.resolvingSymlinksInPath()
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),

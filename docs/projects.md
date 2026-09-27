@@ -164,7 +164,8 @@ stored and managed:
   build that couldn't write the file (read-only, write error) leaves it out and
   the next launch merges the mirror. When the file is missing or unreadable:
   - with the marker, the mirror is the latest list, since it was saved together
-    with the file. A space only the backup has counts as deleted.
+    with the file. A space only the backup has is left out (and its brief
+    doesn't bring it back), but isn't recorded as deleted.
   - without the marker, the backup and the mirror are merged.
   - This needs revisiting once projects carry more than the mirror does.
 - **Empty spaces persist**, drawn as a ring in the switcher. Clicking one opens

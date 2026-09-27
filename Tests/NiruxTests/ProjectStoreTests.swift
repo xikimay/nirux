@@ -257,4 +257,45 @@ final class ProjectStoreTests: XCTestCase {
         XCTAssertTrue(reloaded.save([main, work]))
         XCTAssertEqual(try inode(), first)
     }
+
+    @MainActor
+    func testAFileANewerInstanceWroteMeanwhileIsNotOverwritten() throws {
+        let store = savedStore([main, work])
+        try writeFile(##"{"schemaVersion": 2, "projects": [{"id": "work", "name": "Work", "colorHex": "#9ECE6A"}]}"##)
+        let newer = try Data(contentsOf: fileURL)
+
+        XCTAssertFalse(store.save([main, work, home]))
+        XCTAssertEqual(try Data(contentsOf: fileURL), newer)
+        XCTAssertEqual(store.availability, .readOnlyNewerSchema(2))
+    }
+
+    @MainActor
+    func testASpaceThisInstanceStillListsIsNotRecordedAsDeleted() throws {
+        let first = savedStore([main, work])
+        let second = ProjectStore(fileURL: fileURL)
+        _ = second.load(mirror: nil, markerPresent: true)
+        second.markDeleted("work")
+        second.save([main])
+
+        first.save([main, work])
+
+        guard case .ok(let file, _) = ProjectStore.read(fileURL) else { return XCTFail("unreadable") }
+        XCTAssertEqual(file.projects.map(\.id), [main.id, "work"])
+        XCTAssertTrue(file.deletedIDs.isEmpty)
+    }
+
+    @MainActor
+    func testABriefDoesNotBringBackASpaceTheMirrorDroppedOrTheDefaultSpace() throws {
+        for id in ["home", WorkspaceProfile.defaultID] {
+            let url = try XCTUnwrap(SpaceBrief.briefURL(spaceID: id, stateDirectory: directory))
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("<!--\nBrief for the space \"X\": goals\n-->\nRule.".utf8).write(to: url)
+        }
+        _ = savedStore([main, work, home], [main, work]) // .bak holds home
+        try FileManager.default.removeItem(at: fileURL)
+
+        let loaded = ProjectStore(fileURL: fileURL).load(mirror: [work], markerPresent: true)
+
+        XCTAssertEqual(loaded.map(\.id), ["work"], "home was dropped; the default space is added by the store")
+    }
 }

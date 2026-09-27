@@ -43,6 +43,9 @@ final class ProjectStore {
     /// `state.json` carry the marker.
     private(set) var isFileCurrent = false
     private var hasLoaded = false
+    /// Spaces only the backup had, left out because the mirror dropped them:
+    /// their briefs mustn't bring them back (see `orphanedBriefSpaces`).
+    private var droppedSinceBackup: Set<String> = []
 
     init(fileURL: URL = Persistence.stateDirectory.appendingPathComponent("projects.json")) {
         self.fileURL = fileURL
@@ -113,6 +116,7 @@ final class ProjectStore {
         // more than the mirror) and nothing the mirror has dropped.
         let mirrorIDs = Set(mirror.map(\.id))
         let kept = backup.projects.filter { mirrorIDs.contains($0.id) }
+        droppedSinceBackup = Set(backup.projects.map(\.id)).subtracting(mirrorIDs)
         return Self.merged(kept, withMirror: mirror, deletedIDs: deletedIDs)
     }
 
@@ -133,9 +137,26 @@ final class ProjectStore {
         // Nirux (a second copy, a debug build without NIRUX_STATE_DIR) may
         // have written since. Keep the deletions it recorded.
         let current = try? Data(contentsOf: fileURL)
-        if let current, case .ok(let onDisk, _) = Self.decode(current) {
-            deletedIDs.formUnion(onDisk.deletedIDs)
+        if let current {
+            switch Self.decode(current) {
+            case .ok(let onDisk, _) where onDisk.schemaVersion > Self.schemaVersion || Self.hasUnknownKeys(current):
+                availability = .readOnlyNewerSchema(onDisk.schemaVersion)
+            case .newerSchemaUnreadable(let version):
+                availability = .readOnlyNewerSchema(version)
+            case .ok(let onDisk, _):
+                deletedIDs.formUnion(onDisk.deletedIDs)
+            default:
+                break
+            }
+            guard availability == .writable else {
+                NiruxDebugLog.log("ProjectStore: a newer Nirux wrote projects.json; read-only")
+                isFileCurrent = false
+                return false
+            }
         }
+        // A space this instance still lists isn't deleted, whatever another
+        // instance recorded.
+        deletedIDs.subtract(profiles.map(\.id))
         let file = ProjectsFile(schemaVersion: Self.schemaVersion, projects: profiles, deletedIDs: deletedIDs.sorted())
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -172,14 +193,15 @@ final class ProjectStore {
     /// dropped a space once it had no workspace, which left its brief behind.
     /// Each comes back under the name its brief's template recorded.
     private func orphanedBriefSpaces(known: [WorkspaceProfile]) -> [WorkspaceProfile] {
-        let knownIDs = Set(known.map(\.id)).union(deletedIDs)
+        let knownIDs = Set(known.map(\.id)).union(deletedIDs).union(droppedSinceBackup)
+            .union([WorkspaceProfile.defaultID])
         guard let folders = try? FileManager.default.contentsOfDirectory(atPath: briefsFolder.path) else { return [] }
         var names = known.map(\.name)
         var used = Set(known.map { $0.colorHex.uppercased() })
         var adopted: [WorkspaceProfile] = []
         for id in folders.sorted() where !knownIDs.contains(id) {
             guard let briefURL = SpaceBrief.briefURL(spaceID: id, stateDirectory: fileURL.deletingLastPathComponent()),
-                  let text = try? String(contentsOf: briefURL, encoding: .utf8),
+                  let text = SpaceBrief.readBrief(at: briefURL),
                   SpaceBrief.body(of: text) != nil
             else { continue }
             let name = Self.uniqueName(Self.templateSpaceName(in: text) ?? "space", among: names)
