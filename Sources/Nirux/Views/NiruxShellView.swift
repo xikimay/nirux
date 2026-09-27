@@ -92,6 +92,10 @@ final class NiruxShellView: NSView {
     /// Worktrees a "Clean Up Worktree…" is checking or confirming, so a
     /// second click doesn't start another.
     var worktreeCleanupsInFlight: Set<String> = []
+    var boardSettingsPanel: BoardSettingsPanel?
+    /// A "Board Settings…" reading board.json and the checkouts, so a
+    /// second click doesn't open a second form.
+    var isReadingBoardSettings = false
 
     /// Debounce timer used to nudge TUI agents (claude, codex, vim…) to
     /// redraw after the window stops resizing. Without this, agents that
@@ -137,6 +141,7 @@ final class NiruxShellView: NSView {
         sidebar.onCreateProfile = { [weak self] in self?.createProfileFromActiveContext() }
         sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }
         sidebar.onEditProfileBrief = { [weak self] profileID in self?.editSpaceBrief(profileID: profileID) }
+        sidebar.onEditBoardSettings = { [weak self] profileID in self?.showBoardSettings(profileID: profileID) }
         sidebar.onRecolorProfile = { [weak self] profileID, hex in self?.recolorSpace(profileID: profileID, colorHex: hex) }
         sidebar.onDeleteProfile = { [weak self] profileID in self?.confirmDeleteSpace(profileID: profileID) }
         sidebar.onMoveWorkspaceToProfile = { [weak self] workspaceID, profileID in
