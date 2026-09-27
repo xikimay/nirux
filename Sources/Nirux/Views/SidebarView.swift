@@ -34,6 +34,8 @@ final class SidebarView: NSView {
     var onColumnClicked: ((Int, Int) -> Void)?  // (workspaceIndex, columnIndex)
     /// Allow / Deny clicked: (workspaceIndex, columnIndex, request ID, decision).
     var onPermissionDecision: ((Int, Int, String, PermissionApproval.Behavior) -> Void)?
+    /// Resume clicked: (workspaceIndex, columnIndex, the failure it was for).
+    var onAgentResume: ((Int, Int, TimeInterval) -> Void)?
     var onDiffStatsClicked: ((Int) -> Void)?
     var onWorkspaceAction: ((WorkspaceSidebarAction, Int) -> Void)?
     /// Whether the workspace's menu offers "Clean Up Worktree…" (it's open
@@ -353,7 +355,7 @@ final class SidebarView: NSView {
                     trackWorkspaceDrag(workspaceIndex: workspaceIndex, rowFrame: area.frame, startPoint: docLocation)
                     return
                 }
-                if case .permissionDecision = area.region {
+                if Self.armedButtonKey(for: area.region) != nil {
                     trackApprovalClick(area.region, event: event)
                     return
                 }
@@ -452,14 +454,13 @@ final class SidebarView: NSView {
             clearHover()
             setHoverTarget(.columnRow(workspaceIndex: workspaceIndex, columnIndex: columnIndex))
             NSCursor.pointingHand.set()
-        case .permissionDecision(let workspaceIndex, _, let requestID, let behavior):
+        case .permissionDecision(let workspaceIndex, _, _, _), .agentResume(let workspaceIndex, _, _):
             clearHover()
-            setHoverTarget(.approvalButton(
-                workspaceIndex: workspaceIndex,
-                key: SidebarHoverTarget.approvalButtonKey(requestID: requestID, behavior: behavior)
-            ))
+            if let key = Self.armedButtonKey(for: area.region) {
+                setHoverTarget(.approvalButton(workspaceIndex: workspaceIndex, key: key))
+            }
             NSCursor.pointingHand.set()
-        case .permissionBlock(let workspaceIndex):
+        case .actionBlock(let workspaceIndex):
             clearHover()
             setHoverTarget(.workspaceCard(workspaceIndex))
             NSCursor.arrow.set()
@@ -491,8 +492,8 @@ final class SidebarView: NSView {
             let point = convert(event.locationInWindow, from: nil)
             workspaceActionMenu(workspaceIndex: workspaceIndex, columnIndex: nil)
                 .popUp(positioning: nil, at: point, in: self)
-        case .permissionDecision, .permissionBlock:
-            break // decisions go through trackApprovalClick; the block is inert
+        case .permissionDecision, .agentResume, .actionBlock:
+            break // buttons go through trackApprovalClick; the block is inert
         }
     }
 
@@ -600,10 +601,11 @@ final class SidebarView: NSView {
             for area in hitAreas where area.frame.contains(docLocation) {
                 switch area.region {
                 case .column(let workspaceIndex, let columnIndex),
-                     .permissionDecision(let workspaceIndex, let columnIndex, _, _):
+                     .permissionDecision(let workspaceIndex, let columnIndex, _, _),
+                     .agentResume(let workspaceIndex, let columnIndex, _):
                     return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
                 case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
-                     .permissionBlock(let workspaceIndex):
+                     .actionBlock(let workspaceIndex):
                     return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: nil)
                 case .spaceHeader, .link:
                     continue

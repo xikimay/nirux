@@ -66,6 +66,20 @@ extension NiruxApp {
         return true
     }
 
+    /// A key that types into the terminal (bytes for the PTY, or ⌘V,
+    /// which ghostty pastes and notes as input — see
+    /// `PtySession.isUserText`) takes the agent-exit notice down at once.
+    private static func dismissAgentExitIfTyping(_ event: NSEvent, in column: ColumnState) {
+        let pastes = event.modifierFlags.contains(.command) && WebContentKeyRouting.typesLetter(
+            "v", ansiKeyCode: 0x09,
+            characters: event.characters,
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+            keyCode: event.keyCode
+        )
+        guard pastes || !KeyMapper.bytesForEvent(event).isEmpty else { return }
+        column.dismissAgentExitOnTyping()
+    }
+
     /// Route ALL key input directly to PTY, bypassing ghostty entirely.
     /// Ghostty only handles rendering — we handle ALL input.
     /// This prevents ghostty's broken inMemory key handling from interfering.
@@ -152,6 +166,7 @@ extension NiruxApp {
             if Self.closeFindBarOnEscape(event, in: col) { return nil }
 
             guard let pty = col.pty else { return event }
+            Self.dismissAgentExitIfTyping(event, in: col)
 
             // Cmd+key: some go to PTY (Cmd+Backspace), rest to menu system
             if event.modifierFlags.contains(.command) {

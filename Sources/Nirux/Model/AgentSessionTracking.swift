@@ -227,7 +227,8 @@ struct ClaudeSessionTracker {
         guard let sessionID else { return .accepted }
         if sessionID == boundSessionID {
             confirmedSessionID = sessionID
-            let isPrompted = [.userPromptSubmit, .stop, .preToolUse, .permissionRequest, .postToolUse].contains(name)
+            let isPrompted = [.userPromptSubmit, .stop, .stopFailure, .preToolUse, .permissionRequest, .postToolUse]
+                .contains(name)
                 || (name == .sessionStart && source == "compact")
             guard isPrompted, unpromptedSessionID == sessionID else { return .accepted }
             unpromptedSessionID = nil
@@ -244,6 +245,10 @@ struct ClaudeSessionTracker {
             break
         case .userPromptSubmit, .notification, .stop:
             guard boundSessionID == nil || boundSessionID == unpromptedSessionID else { return .accepted }
+        case .stopFailure:
+            // Another conversation's failure (a teammate's, one left by
+            // /clear) must not stop this one's turn or offer Resume here.
+            return boundSessionID == nil ? .accepted : .rejected
         case .sessionEnd:
             return boundSessionID == nil ? .accepted : .rejected
         case .preToolUse, .permissionRequest, .postToolUse, .subagentStop, .turnComplete, .approvalResolved:
@@ -289,6 +294,21 @@ struct ClaudeSessionTracker {
     /// Session bound to this `claude` process, if any.
     func boundSessionID(for process: ProcessInstance) -> String? {
         session.sessionID(boundTo: process)
+    }
+
+    /// `process` fired hooks itself: it would send SessionEnd on a clean
+    /// exit.
+    func hasFiredHooks(_ process: ProcessInstance) -> Bool {
+        hookFiringForeground == process
+    }
+
+    /// The conversation `process` confirmed through its own hooks — still
+    /// known after it exited, when its binding is gone. Nil for a session
+    /// never prompted: it has nothing to resume.
+    func lastConfirmedSessionID(of process: ProcessInstance) -> String? {
+        guard hookFiringForeground == process, let confirmedSessionID,
+              confirmedSessionID != unpromptedSessionID else { return nil }
+        return confirmedSessionID
     }
 
     /// The session whose permission requests the sidebar may answer: the

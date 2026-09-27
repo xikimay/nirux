@@ -312,7 +312,7 @@ final class SidebarWorkspaceCardRenderer {
             label.toolTip = PilotSidebarRenderer.attentionTooltip(for: column)
             append(label)
 
-            let dot = statusDot(status: column.agentStatus)
+            let dot = statusDot(for: column)
             dot.frame = NSRect(
                 x: sidebarWidth - padding - rightDotSize,
                 y: rowY + (rowHeight - rightDotSize) / 2,
@@ -336,6 +336,17 @@ final class SidebarWorkspaceCardRenderer {
             if let approval = column.permissionApproval {
                 let block = SidebarApprovalBlockRenderer(
                     approval: approval, workspaceIndex: workspace.index, columnIndex: column.index,
+                    x: padding, width: sidebarWidth - padding * 2, top: currentY
+                ).render()
+                views += block.views
+                hitAreas += block.hitAreas
+                approvalButtons.merge(block.buttons) { _, new in new }
+                currentY = block.bottomY
+            }
+            if case let .stoppedOnError(kind, detail, failedAt, resume)? = column.stuck {
+                let block = SidebarResumeBlockRenderer(
+                    kind: kind, detail: detail, failedAt: failedAt, resume: resume,
+                    workspaceIndex: workspace.index, columnIndex: column.index,
                     x: padding, width: sidebarWidth - padding * 2, top: currentY
                 ).render()
                 views += block.views
@@ -477,17 +488,21 @@ final class SidebarWorkspaceCardRenderer {
         )
     }
 
-    private func statusDot(status: AgentStatus) -> NSView {
+    /// A stuck agent's dot says so whatever its status: red when it broke,
+    /// orange while its dialog waits.
+    private func statusDot(for column: ColumnInfo) -> NSView {
         let dot = SidebarBackgroundView()
         dot.wantsLayer = true
         dot.layer?.cornerRadius = 4
         let color: NSColor
-        switch status {
-        case .working:
+        switch (column.stuck, column.agentStatus) {
+        case let (stuck?, _):
+            color = stuck.isFailure ? .systemRed : .systemOrange
+        case (nil, .working):
             color = .systemGreen
-        case .needsAttention:
+        case (nil, .needsAttention):
             color = .systemOrange
-        case .idle:
+        case (nil, .idle):
             color = NSColor.white.withAlphaComponent(0.22)
         }
         dot.layer?.backgroundColor = color.cgColor

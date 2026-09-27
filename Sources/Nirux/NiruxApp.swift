@@ -14,6 +14,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     weak var settingsCodexLaunchModePopup: NSPopUpButton?
     weak var settingsMissionHandoffsCheckbox: NSButton?
     weak var settingsSidebarApprovalsCheckbox: NSButton?
+    weak var settingsStuckAgentPopup: NSPopUpButton?
     weak var settingsTelegramEnabledCheckbox: NSButton?
     weak var settingsTelegramTokenField: NSSecureTextField?
     weak var settingsTelegramCompletionCheckbox: NSButton?
@@ -123,6 +124,11 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             liveLayout: { [weak shellView] in shellView?.persistedState() }
         )
         telegramRemoteAccessController = remoteAccess
+        shellView.onStuckAgentAlert = { [weak remoteAccess] reason, workspace, columnIndex, column in
+            remoteAccess?.handleStuckAgent(
+                reason, workspaceTitle: workspace.title, columnIndex: columnIndex, agentUUID: column.agentUUID
+            )
+        }
         remoteAccess.onStateChange = { [weak self] in
             self?.refreshTelegramSettingsState()
         }

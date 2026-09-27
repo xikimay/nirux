@@ -74,6 +74,18 @@ enum SidebarExpandedMetrics {
         column.permissionApproval.map { approvalBlockHeight(for: $0) + approvalBottomGap } ?? 0
     }
 
+    // Resume block under a column whose turn failed on an API error: the
+    // error on one line, then the button or where it stands.
+    static let resumeLineHeight: CGFloat = 14
+    static let resumeButtonWidth: CGFloat = 66
+    static let resumeBlockHeight: CGFloat = approvalInset + resumeLineHeight + approvalButtonGap
+        + approvalButtonHeight + approvalInset
+
+    static func resumeBlockAdvance(for column: ColumnInfo) -> CGFloat {
+        guard case .stoppedOnError? = column.stuck else { return 0 }
+        return resumeBlockHeight + approvalBottomGap
+    }
+
     static func groupHeight(for infos: [WorkspaceInfo]) -> CGFloat {
         infos.reduce(CGFloat(0)) { total, info in
             total + workspaceHeight(for: info) + workspaceGap
@@ -96,7 +108,9 @@ enum SidebarExpandedMetrics {
             }
         }
         height += columnGap + CGFloat(workspace.columns.count) * columnRowAdvance
-        height += workspace.columns.reduce(CGFloat(0)) { $0 + approvalBlockAdvance(for: $1) }
+        height += workspace.columns.reduce(CGFloat(0)) {
+            $0 + approvalBlockAdvance(for: $1) + resumeBlockAdvance(for: $1)
+        }
         return height
     }
 }

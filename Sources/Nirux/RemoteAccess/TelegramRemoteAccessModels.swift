@@ -50,6 +50,9 @@ enum RemoteDialogText {
         case .question: return "Agent has a question"
         case .turnFinished: return "Agent is waiting for input"
         case .message: return "Agent needs attention"
+        case .apiError: return "Agent stopped on an API error"
+        case .exitedMidTurn: return "Agent exited mid-turn"
+        case .stillWaiting(let dialog, _): return attentionLabel(dialog)
         }
     }
 
@@ -64,6 +67,16 @@ enum RemoteDialogText {
             detail = ["Tool: \(tool)", message].compactMap { $0 }.joined(separator: "\n")
         }
         return (attentionLabel(attention), detail)
+    }
+
+    /// Label and body of a stuck-agent alert: how long, and the tool a
+    /// permission is for — never its command or the question's text.
+    static func stuckNotification(_ reason: AgentAttentionReason) -> (label: String, detail: String?) {
+        guard case .stillWaiting(let dialog, let waited) = reason else { return (attentionLabel(reason), nil) }
+        var lines: [String] = []
+        if case .permission(let tool?, _) = dialog, tool != "ExitPlanMode" { lines.append("Tool: \(tool)") }
+        lines.append("Waiting for \(PilotSidebarRenderer.shortDuration(waited))")
+        return (attentionLabel(dialog), lines.joined(separator: "\n"))
     }
 
     static func blockedPromptMessage(for session: RemoteAgentSession) -> String {

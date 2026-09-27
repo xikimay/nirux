@@ -15,13 +15,32 @@ enum AgentAttentionReason: Hashable, Sendable {
     case turnFinished
     /// Any other notification, with its message.
     case message(String?)
+    /// The turn ended on an API error (Claude's StopFailure): what ended it
+    /// (`rate_limit`…) and the error as the terminal showed it.
+    case apiError(kind: String?, detail: String?)
+    /// The agent process exited in the middle of a turn, without ending
+    /// its session.
+    case exitedMidTurn
+    /// A dialog still waits on the user after `waited` seconds: the
+    /// dialog's own reason. Only ever an alert, never a column's state.
+    indirect case stillWaiting(AgentAttentionReason, waited: TimeInterval)
 
     /// A dialog is open in the terminal: typed input answers it rather
     /// than reaching the prompt.
     var isBlockingDialog: Bool {
         switch self {
         case .permission, .question: return true
-        case .turnFinished, .message: return false
+        case .turnFinished, .message, .apiError, .exitedMidTurn: return false
+        case .stillWaiting(let dialog, _): return dialog.isBlockingDialog
+        }
+    }
+
+    /// Something went wrong rather than the agent simply waiting: drawn in
+    /// red.
+    var isFailure: Bool {
+        switch self {
+        case .apiError, .exitedMidTurn: return true
+        default: return false
         }
     }
 
@@ -40,6 +59,10 @@ enum AgentAttentionReason: Hashable, Sendable {
         case .question: return "question"
         case .turnFinished: return "done"
         case .message: return "needs you"
+        case .apiError: return "API error"
+        case .exitedMidTurn: return "exited mid-turn"
+        case .stillWaiting(let dialog, let waited):
+            return "waiting \(PilotSidebarRenderer.shortDuration(waited)) · \(dialog.shortLabel)"
         }
     }
 
@@ -50,6 +73,10 @@ enum AgentAttentionReason: Hashable, Sendable {
         case .question: return "has a question"
         case .turnFinished: return "finished its turn"
         case .message: return "needs you"
+        case .apiError: return "stopped on an API error"
+        case .exitedMidTurn: return "exited mid-turn"
+        case .stillWaiting(let dialog, let waited):
+            return "\(dialog.headline) — waiting \(PilotSidebarRenderer.shortDuration(waited))"
         }
     }
 
@@ -65,7 +92,11 @@ enum AgentAttentionReason: Hashable, Sendable {
             case let (nil, summary): return summary
             }
         case .question(let text), .message(let text): return text
-        case .turnFinished: return nil
+        case .turnFinished, .exitedMidTurn: return nil
+        case .apiError(let kind, let detail):
+            let parts = [kind, detail].compactMap { $0 }
+            return parts.isEmpty ? nil : parts.joined(separator: ": ")
+        case .stillWaiting(let dialog, _): return dialog.detailLine
         }
     }
 
@@ -79,6 +110,11 @@ enum AgentAttentionReason: Hashable, Sendable {
         case .question(let text): return "question: \(text ?? "needs input")"
         case .turnFinished: return "turn finished"
         case .message(let text): return text ?? "needs input"
+        case .apiError(let kind, let detail):
+            return ["stopped on error: \(kind ?? "unknown")", detail].compactMap { $0 }.joined(separator: " · ")
+        case .exitedMidTurn: return "exited mid-turn"
+        case .stillWaiting(let dialog, let waited):
+            return "waiting \(PilotSidebarRenderer.shortDuration(waited)) · \(dialog.activitySummary)"
         }
     }
 }

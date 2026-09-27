@@ -83,6 +83,12 @@ struct ActivityEntry: Codable, Hashable {
             guard let attention = outcome.attention else { return nil }
             category = .attention
             if outcome.isRepeat { detail = attention.activitySummary }
+        case .stopFailure:
+            // Stored as attention: a build that predates it can't decode an
+            // unknown category, and would drop the whole history.
+            guard let attention = outcome.attention else { return nil }
+            category = .attention
+            detail = attention.activitySummary
         case .stop, .turnComplete: category = .turnComplete
         case .sessionStart: category = .sessionStart
         case .sessionEnd: category = .sessionEnd

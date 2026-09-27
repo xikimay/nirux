@@ -5,22 +5,9 @@ import AppKit
 extension NiruxShellView {
     func updateSidebar(snapshot: ProcessSnapshot? = nil) {
         let snapshot = snapshot ?? ProcessSnapshot()
-        var foregroundProcesses: [ObjectIdentifier: ForegroundProcess] = [:]
-        var invalidatedSessionBinding = false
-        for workspace in workspaces {
-            for column in workspace.columns {
-                let foregroundProcess = column.pty?.foregroundProcess(snapshot: snapshot)
-                if let foregroundProcess {
-                    foregroundProcesses[ObjectIdentifier(column)] = foregroundProcess
-                }
-                if column.invalidateAgentSessionsIfProcessChanged(
-                    foregroundProcess: foregroundProcess
-                ) {
-                    invalidatedSessionBinding = true
-                }
-            }
-        }
+        let now = Date().timeIntervalSince1970
         let visibleIndices = visibleWorkspaceIndices
+        let (foregroundProcesses, invalidatedSessionBinding) = followForegroundProcesses(snapshot: snapshot, now: now)
         let approvalHolds = releaseApprovalsNotHeld()
         let infos = visibleIndices.map { index in
             let workspace = workspaces[index]
@@ -58,7 +45,8 @@ extension NiruxShellView {
                     agentElapsedSeconds: col.pty?.agentTurnStartedAt
                         .map { Date().timeIntervalSince($0) },
                     attentionReason: agentStatus == .needsAttention ? col.pty?.agentAttentionReason : nil,
-                    permissionApproval: permissionApproval
+                    permissionApproval: permissionApproval,
+                    stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now)
                 )
             }
             return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
@@ -89,6 +77,36 @@ extension NiruxShellView {
         updateSidebarAttention(infos: infos)
         if invalidatedSessionBinding { saveState(snapshot: snapshot) }
         scheduleActivityReadMark()
+    }
+
+    /// Every column's foreground process, shown or not, and what follows
+    /// from it before statuses are read: session bindings of a replaced
+    /// agent, stuck agents (the one in another space is the one nobody
+    /// watches). True when a binding changed and state must be saved.
+    private func followForegroundProcesses(
+        snapshot: ProcessSnapshot,
+        now: TimeInterval
+    ) -> ([ObjectIdentifier: ForegroundProcess], Bool) {
+        var foregroundProcesses: [ObjectIdentifier: ForegroundProcess] = [:]
+        var invalidatedSessionBinding = false
+        for workspace in workspaces {
+            for (columnIndex, column) in workspace.columns.enumerated() {
+                let foregroundProcess = column.pty?.foregroundProcess(snapshot: snapshot)
+                if let foregroundProcess {
+                    foregroundProcesses[ObjectIdentifier(column)] = foregroundProcess
+                }
+                if column.invalidateAgentSessionsIfProcessChanged(
+                    foregroundProcess: foregroundProcess
+                ) {
+                    invalidatedSessionBinding = true
+                }
+                refreshStuckAgent(
+                    column, at: StuckAgentPlace(workspace: workspace, columnIndex: columnIndex),
+                    foregroundProcess: foregroundProcess, snapshot: snapshot, now: now
+                )
+            }
+        }
+        return (foregroundProcesses, invalidatedSessionBinding)
     }
 
     private func updateSidebarAttention(infos: [WorkspaceInfo]) {

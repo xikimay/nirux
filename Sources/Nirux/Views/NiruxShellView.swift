@@ -67,6 +67,19 @@ final class NiruxShellView: NSView {
     /// (see OnboardingChecklist.launchState).
     var onboardingState: OnboardingChecklistState?
 
+    /// How long a dialog may wait on the user before its agent reads as
+    /// stuck (Settings); nil turns the check off.
+    var stuckAgentWaitThreshold: TimeInterval? = NiruxShellView.stuckWaitThreshold(
+        minutes: NiruxShellView.currentStuckAgentMinutes()
+    )
+    /// Keeps stuck-agent alerts going while the heartbeat is stopped.
+    var stuckWatchTimer: Timer?
+    /// Where stuck-agent alerts are recorded (tests use their own).
+    var stuckAgentActivity = ActivityStore.shared
+    /// A stuck-agent alert went out (Telegram relays it): the reason, the
+    /// workspace, the column's index, the column.
+    var onStuckAgentAlert: ((AgentAttentionReason, WorkspaceState, Int, ColumnState) -> Void)?
+
     // Panel references (stored properties must live in main class declaration)
     var nameInputPanel: NameInputPanel?
     var workspaceContextPanel: WorkspaceContextPanel?
@@ -142,6 +155,9 @@ final class NiruxShellView: NSView {
                 workspaceIndex: wsIndex, columnIndex: colIndex, requestID: requestID, behavior: behavior
             )
         }
+        sidebar.onAgentResume = { [weak self] wsIndex, colIndex, failedAt in
+            self?.resumeFailedAgent(workspaceIndex: wsIndex, columnIndex: colIndex, failedAt: failedAt)
+        }
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
             if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }
@@ -205,6 +221,9 @@ final class NiruxShellView: NSView {
         }
         workspace.onTerminalOpenFile = { [weak self] targetWorkspace, path, line in
             self?.openInEditorColumn(path: path, line: line, in: targetWorkspace)
+        }
+        workspace.onResumeExitedAgent = { [weak self] targetWorkspace, column in
+            self?.resumeExitedAgent(in: targetWorkspace, column: column)
         }
         wireLocalServerProposals(for: workspace)
     }
@@ -387,6 +406,7 @@ final class NiruxShellView: NSView {
                 guard let self else { return }
                 self.clearAllAgentAttention()
                 self.resumeGitRefresh()
+                self.stopStuckWatch()
                 self.startHeartbeat()
                 if self.isPilotMode { self.startPilotRefresh() }
                 self.forEachEditorColumn { $0.resumeFileWatch() }
@@ -400,6 +420,7 @@ final class NiruxShellView: NSView {
                 // dialog must not wait on them (the heartbeat stops too).
                 if AgentHookCenter.shared.approvalsEnabled { self.updateSidebar() }
                 self.stopHeartbeat()
+                self.startStuckWatch()
                 self.stopPilotRefresh()
                 self.forEachEditorColumn { $0.pauseFileWatch() }
             }

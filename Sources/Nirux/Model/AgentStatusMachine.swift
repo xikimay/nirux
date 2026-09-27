@@ -24,7 +24,7 @@ struct AgentStatusMachine {
     }
     /// Set by UserPromptSubmit/PreToolUse/PostToolUse, cleared by
     /// Stop/SessionEnd and by a dialog opening.
-    private var hookWorking = false
+    private(set) var hookWorking = false
     /// Dialogs Claude may be showing (permission, AskUserQuestion,
     /// elicitation), oldest first. Independent of `state`: a focused
     /// column shows `.idle` while its dialog stays open. Entries leave only
@@ -50,6 +50,10 @@ struct AgentStatusMachine {
     /// the first turn event seen (a turn already running at launch). Nil
     /// between turns. Drives the "working · 12m" display.
     private(set) var turnStartedAt: TimeInterval?
+    /// A turn is in flight by hook evidence alone: unlike `turnStartedAt`,
+    /// which the output fallback also drives, a suspend (Ctrl-Z) and `fg`
+    /// leave it as it was.
+    private(set) var hookTurnInFlight = false
     /// Agent kind ("claude") once this session has emitted a hook event —
     /// proof that hooks are installed and authoritative for this session.
     private(set) var hookKind: String?
@@ -64,7 +68,13 @@ struct AgentStatusMachine {
     private var lastInteractionAt: TimeInterval = 0
     /// Epoch seconds of the last keystroke Nirux sent (`PtySession.sendRaw`)
     /// — unlike `lastInteractionAt`, never terminal replies or resizes.
-    private var lastKeystrokeAt: TimeInterval = 0
+    private(set) var lastKeystrokeAt: TimeInterval = 0
+    /// Every keystroke or paste, never reset by Claude's reminders: input
+    /// that may have reached a shell an agent just left.
+    private(set) var lastInputAt: TimeInterval = 0
+    /// The same, typed while no dialog was believed open: text that may sit
+    /// in the agent's prompt as a draft.
+    private(set) var lastDraftInputAt: TimeInterval = 0
 
     /// The user has typed at least once since the shell started. Fallback
     /// attention is gated on this: output before the first keystroke is
@@ -76,6 +86,25 @@ struct AgentStatusMachine {
     private(set) var lastForegroundName: String?
     private(set) var foregroundSince: Date?
 
+    /// The last turn ended on an API error (StopFailure). Unlike the
+    /// attention it raised, it lasts until the agent moves again: a new
+    /// prompt or tool call, another turn's end, the session's end.
+    private(set) var turnFailure: AgentTurnFailure?
+    /// The agent process died mid-turn (see `noteAgentExited`). Cleared by
+    /// a new session, an agent back in the foreground, or the user.
+    private(set) var midTurnExit: AgentMidTurnExit?
+    /// `requestedAt` of the dialogs whose long wait already alerted: one
+    /// alert per dialog.
+    private var longWaitAlerted: Set<TimeInterval> = []
+    /// The main thread's prompts: when the last one went in, and the
+    /// `prompt_id`s of the current and recent ones. A StopFailure about an
+    /// earlier prompt arrived late (Claude doesn't wait for it) and ends
+    /// nothing; one about a prompt never seen (a turn Claude started by
+    /// itself) counts.
+    private var lastPromptAt: TimeInterval?
+    private var turnPromptID: String?
+    private var recentPromptIDs: [String] = []
+
     private static let echoWindow: TimeInterval = 0.3
     private static let activityWindow: TimeInterval = 3.0
     /// Ignore fallback transitions right after a foreground-process change —
@@ -86,6 +115,13 @@ struct AgentStatusMachine {
     /// reminder (~6 s without typing) to be due.
     private static let reminderRaceWindow: TimeInterval = 3.0
     private static let reminderDelay: TimeInterval = 5.0
+    /// A mid-turn exit counts once its SessionEnd, which Claude sends
+    /// before exiting, has had time to arrive: the queue drains 0.15 s
+    /// after a receiver writes, and a heartbeat may see the process gone
+    /// first.
+    static let exitConfirmationDelay: TimeInterval = 3.0
+    /// Resume offers `continue` again after this long without a new turn.
+    static let resumeRetryDelay: TimeInterval = 15.0
 
     /// Agents Nirux integrates with: lifecycle hooks (Claude Code), turn
     /// notifications (Codex), launch presets and session restore.
@@ -123,12 +159,13 @@ struct AgentStatusMachine {
         if let lastForegroundName, Self.activityOnlyAgentProcesses.contains(lastForegroundName) {
             return lastAttentionReason
         }
-        return openDialogs.first?.reason ?? lastAttentionReason
+        // A failed turn outranks the idle reminder that may follow it.
+        return openDialogs.first?.reason ?? turnFailure?.reason ?? lastAttentionReason
     }
 
     /// Pending dialogs no later tool event of their agent has superseded —
     /// what the column's own status believes is on screen.
-    private var openDialogs: [AgentPermissionRequest] {
+    var openDialogs: [AgentPermissionRequest] {
         pendingDialogs.filter { !$0.mayBeAnswered }
     }
 
@@ -175,23 +212,17 @@ struct AgentStatusMachine {
         case .sessionStart:
             startConversation(event)
         case .userPromptSubmit:
-            hookKind = event.kind.rawValue
-            // A prompt was typed at the session's input, which no dialog of
-            // it covered: they are all closed. This also frees the subagent
-            // dialogs an interrupt (Esc) left behind with no hook. (Missed
-            // race: a message queued earlier and sent while a background
-            // subagent's dialog is up.)
-            closeDialogs { $0.sessionID == event.sessionID }
-            turnStartedAt = now
-            resumeUnlessBlocked()
+            startTurn(event, now: now)
         case .preToolUse:
             hookKind = event.kind.rawValue
             noteTurnActivity(at: now)
+            noteMainThreadMoved(event)
             noteProgress(of: event)
             resumeUnlessBlocked()
         case .postToolUse:
             hookKind = event.kind.rawValue
             noteTurnActivity(at: now)
+            noteMainThreadMoved(event)
             // The call ran: its dialog, if it had one, was answered.
             if let key = event.toolKey,
                let index = pendingDialogs.firstIndex(where: { $0.isSameCall(key: key, as: event) }) {
@@ -202,6 +233,7 @@ struct AgentStatusMachine {
         case .permissionRequest:
             hookKind = event.kind.rawValue
             noteTurnActivity(at: now)
+            noteMainThreadMoved(event)
             var request = AgentPermissionRequest(
                 toolName: event.toolName,
                 summary: event.toolSummary,
@@ -230,18 +262,16 @@ struct AgentStatusMachine {
             if let agentID = event.agentID {
                 closeDialogs { $0.agentID == agentID }
             }
-        case .stop:
-            hookKind = event.kind.rawValue
-            // The main thread finished: none of its dialogs is open.
-            closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
-            endTurn()
-            outcome.attention = .turnFinished
-            outcome.firedAttention = block(for: .turnFinished, isUserFocused: isUserFocused)
+        case .stop, .stopFailure:
+            applyTurnEnd(event, now: now, isUserFocused: isUserFocused, outcome: &outcome)
         case .sessionEnd:
             endTurn()
             closeDialogs { event.sessionID == nil || $0.sessionID == event.sessionID }
             lastAttentionReason = nil
             hookKind = nil
+            turnFailure = nil
+            // The exit was a clean one after all.
+            midTurnExit = nil
             state = .idle
         case .turnComplete:
             // Codex: no working-state hooks — output fallback covers that.
@@ -255,6 +285,25 @@ struct AgentStatusMachine {
         }
     }
 
+    private mutating func startTurn(_ event: AgentHookEvent, now: TimeInterval) {
+        hookKind = event.kind.rawValue
+        // A prompt was typed at the session's input, which no dialog of
+        // it covered: they are all closed. This also frees the subagent
+        // dialogs an interrupt (Esc) left behind with no hook. (Missed
+        // race: a message queued earlier and sent while a background
+        // subagent's dialog is up.)
+        closeDialogs { $0.sessionID == event.sessionID }
+        turnStartedAt = now
+        hookTurnInFlight = true
+        turnFailure = nil
+        if event.agentID == nil {
+            lastPromptAt = now
+            turnPromptID = event.promptID
+            if let promptID = event.promptID { recentPromptIDs = Array((recentPromptIDs + [promptID]).suffix(8)) }
+        }
+        resumeUnlessBlocked()
+    }
+
     private mutating func startConversation(_ event: AgentHookEvent) {
         hookKind = event.kind.rawValue
         // Auto (mid-turn) or /compact: same conversation, no turn ends.
@@ -264,7 +313,46 @@ struct AgentStatusMachine {
         endTurn()
         closeDialogs { _ in true }
         lastAttentionReason = nil
+        turnFailure = nil
+        midTurnExit = nil
         state = .idle
+    }
+
+    /// The main thread's turn ended: Stop, or StopFailure in its place when
+    /// an API error ended it. Either way none of its dialogs is open. A
+    /// failed turn leaves the agent at its prompt, saying so until it
+    /// moves again.
+    private mutating func applyTurnEnd(
+        _ event: AgentHookEvent,
+        now: TimeInterval,
+        isUserFocused: Bool,
+        outcome: inout AgentHookOutcome
+    ) {
+        hookKind = event.kind.rawValue
+        if event.name == .stopFailure {
+            // Claude reports the main thread's failures only; a subagent's
+            // would end nothing of the main thread's.
+            guard event.agentID == nil else { return }
+            // Claude doesn't wait for StopFailure: a new prompt may have
+            // started the next turn before it arrived.
+            if let failed = event.promptID, failed != turnPromptID, recentPromptIDs.contains(failed) { return }
+        }
+        closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
+        endTurn()
+        turnFailure = event.name == .stopFailure
+            ? AgentTurnFailure(
+                kind: event.errorKind, detail: event.detail, failedAt: now,
+                promptAt: lastPromptAt, emitter: event.emitterProcess
+            )
+            : nil
+        let reason = turnFailure?.reason ?? .turnFinished
+        outcome.attention = reason
+        outcome.firedAttention = block(for: reason, isUserFocused: isUserFocused)
+    }
+
+    /// A main-thread tool event: the failed turn is behind.
+    private mutating func noteMainThreadMoved(_ event: AgentHookEvent) {
+        if event.agentID == nil { turnFailure = nil }
     }
 
     /// The receiver's report on a sidebar approval. A decision that
@@ -356,7 +444,11 @@ struct AgentStatusMachine {
     ) {
         let reason: AgentAttentionReason
         switch event.notificationType {
-        case "auth_success", "agent_completed", "quota_auto_resume_fired":
+        case "auth_success", "agent_completed":
+            return
+        case "quota_auto_resume_fired":
+            // Claude resumes the turn by itself.
+            if event.agentID == nil { turnFailure = nil }
             return
         case "elicitation_complete", "elicitation_response":
             // The form was answered: its dialog is gone.
@@ -467,11 +559,13 @@ struct AgentStatusMachine {
     /// A turn already running when Nirux first heard of it starts here.
     private mutating func noteTurnActivity(at timestamp: TimeInterval) {
         if turnStartedAt == nil { turnStartedAt = timestamp }
+        hookTurnInFlight = true
     }
 
     private mutating func endTurn() {
         hookWorking = false
         turnStartedAt = nil
+        hookTurnInFlight = false
     }
 
     /// PTY output arrived. Echo right after a keystroke/resize is not work.
@@ -491,7 +585,15 @@ struct AgentStatusMachine {
     /// Nirux sent typed input (keys, a paste) — the only way a dialog gets
     /// answered, which terminal replies and focus reports never do.
     mutating func noteKeystroke(now: Date) {
-        lastKeystrokeAt = now.timeIntervalSince1970
+        let time = now.timeIntervalSince1970
+        // A key answers a dialog only while none reached it yet: answered, it stays
+        // listed until its tool ends (no hook between); later keys reach the prompt.
+        let answersDialog = openDialogs.contains { $0.requestedAt >= lastKeystrokeAt }
+        lastKeystrokeAt = time
+        lastInputAt = time
+        if !answersDialog { lastDraftInputAt = time }
+        // Typing at the shell an agent left: the user took over.
+        midTurnExit = nil
     }
 
     /// The terminal resized/redrew — following output is echo, not work.
@@ -612,6 +714,61 @@ struct AgentStatusMachine {
         if state == .needsAttention { state = .idle }
     }
 
+    // MARK: - Stuck agents
+
+    /// The column's foreground agent process is gone — exited, not
+    /// suspended. A `claude` whose hooks run would have sent SessionEnd
+    /// first; if its turn was still in flight, it crashed or was killed.
+    /// (Codex and activity-only agents report no session end: their exit
+    /// can't be told from a quit.)
+    ///
+    /// A keystroke since the agent was last seen alive may have reached the
+    /// shell: the user is there and took over.
+    mutating func noteAgentExited(_ exit: AgentMidTurnExit) {
+        guard exit.processName == "claude", exit.firedHooks || hookKind == "claude", hookTurnInFlight,
+              lastInputAt <= exit.lastSeenAt else { return }
+        midTurnExit = exit
+    }
+
+    /// An agent is back in the foreground, or the user dealt with the exit.
+    mutating func clearMidTurnExit() {
+        midTurnExit = nil
+    }
+
+    /// The alert a stuck state owes, once: a dialog crossing the wait
+    /// threshold (each dialog alerts once; an answered one and the next
+    /// start over), an exit once confirmed. A failed turn alerted as its
+    /// StopFailure arrived.
+    mutating func takeStuckAlert(
+        now: TimeInterval,
+        waitThreshold: TimeInterval?,
+        foreground: ForegroundProcess?
+    ) -> AgentAttentionReason? {
+        switch stuckState(now: now, waitThreshold: waitThreshold, foreground: foreground) {
+        case .exitedMidTurn(let exit)?:
+            guard !exit.alerted else { return nil }
+            midTurnExit?.alerted = true
+            return .exitedMidTurn
+        case .waiting(let reason, let since)?:
+            // Forget dialogs gone; each one still listed alerts once.
+            longWaitAlerted.formIntersection(pendingDialogs.map(\.requestedAt))
+            guard longWaitAlerted.insert(since).inserted else { return nil }
+            return .stillWaiting(reason, waited: now - since)
+        case .stoppedOnError?, nil:
+            return nil
+        }
+    }
+
+    /// `continue` is about to be typed: its own keystroke follows, and is
+    /// not the user's (see `noteResumeTyped`).
+    mutating func markResumeSent(now: TimeInterval) {
+        turnFailure?.resumeSentAt = now
+    }
+
+    mutating func noteResumeTyped() {
+        turnFailure?.resumeKeystrokeAt = lastDraftInputAt
+    }
+
     /// New shell in the same terminal (start/restart) — everything resets.
     mutating func reset() {
         state = .idle
@@ -630,5 +787,14 @@ struct AgentStatusMachine {
         hasUserInput = false
         lastForegroundName = nil
         foregroundSince = nil
+        turnFailure = nil
+        midTurnExit = nil
+        longWaitAlerted = []
+        lastPromptAt = nil
+        turnPromptID = nil
+        recentPromptIDs = []
+        hookTurnInFlight = false
+        lastInputAt = 0
+        lastDraftInputAt = 0
     }
 }

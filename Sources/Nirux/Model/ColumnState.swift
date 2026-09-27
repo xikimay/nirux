@@ -74,6 +74,15 @@ final class ColumnState {
     /// Spec needed to respawn the shell after it exits.
     private var terminalSpec: (cwd: String, shellArgs: [String], environment: [String: String])?
     private var shellExitedOverlay: ShellExitedOverlay?
+    /// An agent died mid-turn in the shell that still runs here
+    /// (ColumnState+StuckAgent.swift).
+    var agentExitOverlay: ShellExitedOverlay?
+    /// The agent last seen in the foreground, and when: gone from the
+    /// process table once it leaves, it exited rather than being suspended.
+    var lastForegroundAgent: ForegroundProcess?
+    var lastForegroundAgentSeenAt: TimeInterval = 0
+    /// The user asked to resume the agent that died mid-turn.
+    var onResumeExitedAgent: (() -> Void)?
 
     /// ⌘F find bar and the search it drives, created on first use
     /// (ColumnState+TerminalFind.swift).
@@ -142,6 +151,7 @@ final class ColumnState {
         if resizeTerminal, let terminal = terminalView {
             terminal.frame = NSRect(x: 0, y: 0, width: width, height: height - barHeight)
             shellExitedOverlay?.frame = terminal.frame
+            agentExitOverlay?.frame = terminal.frame
         }
         layoutFindBar()
     }
@@ -429,6 +439,16 @@ final class ColumnState {
         foregroundProcess.flatMap { claudeSessionTracker.confirmedSessionID(of: $0) }
     }
 
+    /// The conversation a `claude` of this column confirmed through its own
+    /// hooks, known even after it exited.
+    func lastConfirmedClaudeSessionID(of process: ProcessInstance) -> String? {
+        claudeSessionTracker.lastConfirmedSessionID(of: process)
+    }
+
+    func claudeHooksFired(by process: ProcessInstance) -> Bool {
+        claudeSessionTracker.hasFiredHooks(process)
+    }
+
     func persistedClaudeRestore(foregroundProcess: ForegroundProcess?) -> ClaudeSessionTracker.Restore? {
         claudeSessionTracker.restore(for: foregroundProcess)
     }
@@ -451,6 +471,8 @@ final class ColumnState {
         // The overlay would cover the find bar while its field kept the
         // keyboard, and Enter would navigate instead of restarting.
         closeFindBar()
+        // The shell went with the agent's notice.
+        agentExitOverlay?.isHidden = true
         if shellExitedOverlay == nil {
             let overlay = ShellExitedOverlay()
             overlay.onRestart = { [weak self] in self?.restartShell() }

@@ -194,7 +194,7 @@ enum PilotSidebarRenderer {
         } else if column.isWebView {
             displayName = column.webTitle?.isEmpty == false ? column.webTitle! : "web"
         } else {
-            displayName = column.processName ?? "shell"
+            displayName = column.stuck?.agentName ?? column.processName ?? "shell"
         }
         // Unsaved-changes dot — same amber as the editor tab bar's. Before
         // the name: these labels truncate tail-first, and a state indicator
@@ -215,6 +215,17 @@ enum PilotSidebarRenderer {
                 .foregroundColor: NSColor.systemGreen.withAlphaComponent(0.65)
             ]))
         }
+        // A stuck agent says so whatever its status — focusing the column
+        // or the app clears attention, not the wait or the failure.
+        if let stuck = column.stuck {
+            result.append(NSAttributedString(string: " · \(stuck.label)", attributes: [
+                .font: font,
+                .foregroundColor: stuck.isFailure
+                    ? NSColor.systemRed.withAlphaComponent(0.9)
+                    : NSColor.systemOrange.withAlphaComponent(0.8)
+            ]))
+            return result
+        }
         // Why a waiting agent waits — "· permission · Bash" in orange when
         // it is blocked on the user, a muted "· done" when its turn ended.
         if column.agentStatus == .needsAttention, let reason = column.attentionReason {
@@ -229,13 +240,15 @@ enum PilotSidebarRenderer {
 
     /// Row tooltip: what exactly the agent waits on ("Bash: git push").
     static func attentionTooltip(for column: ColumnInfo) -> String? {
+        if let stuck = column.stuck { return stuck.tooltip }
         guard column.agentStatus == .needsAttention, let reason = column.attentionReason else { return nil }
         let detail = reason.detailLine.flatMap { AgentText.clean($0, maxLength: 300) }
         return [reason.headline, detail].compactMap { $0 }.joined(separator: " — ")
     }
 
     static func attentionTextColor(for reason: AgentAttentionReason) -> NSColor {
-        reason == .turnFinished
+        if reason.isFailure { return NSColor.systemRed.withAlphaComponent(0.9) }
+        return reason == .turnFinished
             ? NSColor.white.withAlphaComponent(0.45)
             : NSColor.systemOrange.withAlphaComponent(0.8)
     }

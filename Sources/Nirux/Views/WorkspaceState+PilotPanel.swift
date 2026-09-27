@@ -269,7 +269,7 @@ extension WorkspaceState {
     func pilotFingerprint(_ info: WorkspaceInfo) -> String {
         let cols = info.columns.map {
             "\($0.processName ?? "")|\($0.isFocused)|\($0.agentStatus)"
-                + "|\($0.attentionReason?.shortLabel ?? "")|\($0.elapsedDisplay ?? "")"
+                + "|\($0.attentionReason?.shortLabel ?? "")|\($0.elapsedDisplay ?? "")|\($0.stuck?.label ?? "")"
         }.joined(separator: ",")
         let prString = info.prInfo.map {
             "#\($0.number)|\($0.ciStatus ?? "")|\($0.reviewDecision ?? "")|\($0.isDraft)"

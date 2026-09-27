@@ -4,7 +4,7 @@ import AppKit
 
 extension NiruxApp {
     static let settingsWidth: CGFloat = 520
-    static let settingsHeight: CGFloat = 750
+    static let settingsHeight: CGFloat = 784
 
     @objc func showSettings(_ sender: Any?) {
         if let existing = settingsPanel {
@@ -37,6 +37,7 @@ extension NiruxApp {
         let (modePopup, noFlickerCheck) = buildClaudeSection(in: background, width: width, height: height)
         settingsLaunchModePopup = modePopup
         settingsNoFlickerCheckbox = noFlickerCheck
+        settingsStuckAgentPopup = buildStuckAgentRow(in: background, width: width, height: height)
         settingsCodexLaunchModePopup = buildCodexSection(in: background, width: width, height: height)
         let experimental = buildExperimentalSection(in: background, width: width, height: height)
         settingsMissionHandoffsCheckbox = experimental.missionHandoffs
@@ -104,7 +105,7 @@ extension NiruxApp {
         claudeHint.font = .systemFont(ofSize: 11)
         claudeHint.textColor = NSColor.white.withAlphaComponent(0.3)
         claudeHint.maximumNumberOfLines = 2
-        claudeHint.frame = NSRect(x: 24, y: height - 134, width: width - 48, height: 28)
+        claudeHint.frame = NSRect(x: 24, y: height - 168, width: width - 48, height: 28)
         background.addSubview(claudeHint)
 
         return (modePopup, noFlickerCheck)
@@ -114,16 +115,16 @@ extension NiruxApp {
         let codexLabel = NSTextField(labelWithString: "Codex")
         codexLabel.font = .systemFont(ofSize: 12, weight: .medium)
         codexLabel.textColor = NSColor.white.withAlphaComponent(0.6)
-        codexLabel.frame = NSRect(x: 24, y: height - 172, width: width - 48, height: 16)
+        codexLabel.frame = NSRect(x: 24, y: height - 206, width: width - 48, height: 16)
         background.addSubview(codexLabel)
 
         let modeLabel = NSTextField(labelWithString: "Launch mode")
         modeLabel.font = .systemFont(ofSize: 12)
         modeLabel.textColor = NSColor.white.withAlphaComponent(0.85)
-        modeLabel.frame = NSRect(x: 24, y: height - 200, width: 110, height: 18)
+        modeLabel.frame = NSRect(x: 24, y: height - 234, width: 110, height: 18)
         background.addSubview(modeLabel)
 
-        let modePopup = NSPopUpButton(frame: NSRect(x: 140, y: height - 204, width: width - 164, height: 26), pullsDown: false)
+        let modePopup = NSPopUpButton(frame: NSRect(x: 140, y: height - 238, width: width - 164, height: 26), pullsDown: false)
         for mode in CodexLaunchMode.allCases {
             modePopup.addItem(withTitle: mode.displayName)
             modePopup.lastItem?.representedObject = mode.rawValue
@@ -140,7 +141,7 @@ extension NiruxApp {
         codexHint.font = .systemFont(ofSize: 11)
         codexHint.textColor = NSColor.white.withAlphaComponent(0.3)
         codexHint.maximumNumberOfLines = 2
-        codexHint.frame = NSRect(x: 24, y: height - 242, width: width - 48, height: 28)
+        codexHint.frame = NSRect(x: 24, y: height - 276, width: width - 48, height: 28)
         background.addSubview(codexHint)
 
         return modePopup
@@ -154,13 +155,13 @@ extension NiruxApp {
         let sectionLabel = NSTextField(labelWithString: "Experimental")
         sectionLabel.font = .systemFont(ofSize: 12, weight: .medium)
         sectionLabel.textColor = NSColor.white.withAlphaComponent(0.6)
-        sectionLabel.frame = NSRect(x: 24, y: height - 560, width: width - 48, height: 16)
+        sectionLabel.frame = NSRect(x: 24, y: height - 594, width: width - 48, height: 16)
         background.addSubview(sectionLabel)
 
         let checkbox = NSButton(checkboxWithTitle: "Mission handoffs", target: nil, action: nil)
         checkbox.contentTintColor = NSColor.white.withAlphaComponent(0.85)
         checkbox.font = .systemFont(ofSize: 12)
-        checkbox.frame = NSRect(x: 22, y: height - 590, width: width - 44, height: 20)
+        checkbox.frame = NSRect(x: 22, y: height - 624, width: width - 44, height: 20)
         checkbox.state = Persistence.load()?.settings?.missionHandoffsEnabled == true ? .on : .off
         background.addSubview(checkbox)
 
@@ -170,13 +171,13 @@ extension NiruxApp {
         hint.font = .systemFont(ofSize: 11)
         hint.textColor = NSColor.white.withAlphaComponent(0.3)
         hint.maximumNumberOfLines = 2
-        hint.frame = NSRect(x: 24, y: height - 624, width: width - 48, height: 28)
+        hint.frame = NSRect(x: 24, y: height - 658, width: width - 48, height: 28)
         background.addSubview(hint)
 
         let approvals = NSButton(checkboxWithTitle: "Answer Claude permissions from the sidebar", target: nil, action: nil)
         approvals.contentTintColor = NSColor.white.withAlphaComponent(0.85)
         approvals.font = .systemFont(ofSize: 12)
-        approvals.frame = NSRect(x: 22, y: height - 660, width: width - 44, height: 20)
+        approvals.frame = NSRect(x: 22, y: height - 694, width: width - 44, height: 20)
         approvals.state = NiruxShellView.currentSidebarApprovalsEnabled() ? .on : .off
         background.addSubview(approvals)
 
@@ -186,10 +187,42 @@ extension NiruxApp {
         approvalsHint.font = .systemFont(ofSize: 11)
         approvalsHint.textColor = NSColor.white.withAlphaComponent(0.3)
         approvalsHint.maximumNumberOfLines = 2
-        approvalsHint.frame = NSRect(x: 24, y: height - 694, width: width - 48, height: 28)
+        approvalsHint.frame = NSRect(x: 24, y: height - 728, width: width - 48, height: 28)
         background.addSubview(approvalsHint)
 
         return (checkbox, approvals)
+    }
+
+    /// Claude Code section, under No-flicker: when a dialog left open marks
+    /// its agent as stuck.
+    private func buildStuckAgentRow(in background: NSView, width: CGFloat, height: CGFloat) -> NSPopUpButton {
+        let label = NSTextField(labelWithString: "Flag a dialog waiting after")
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = NSColor.white.withAlphaComponent(0.85)
+        label.frame = NSRect(x: 24, y: height - 126, width: 200, height: 18)
+        background.addSubview(label)
+
+        let popup = NSPopUpButton(frame: NSRect(x: 230, y: height - 130, width: width - 254, height: 26), pullsDown: false)
+        let current = NiruxShellView.currentStuckAgentMinutes()
+        // A value set outside Settings stays selectable as it is.
+        for minutes in Set(NiruxShellView.stuckAgentMinuteChoices + [current]).sorted() {
+            popup.addItem(withTitle: Self.stuckAgentChoiceTitle(minutes: minutes))
+            popup.lastItem?.representedObject = minutes
+        }
+        popup.selectItem(at: popup.indexOfItem(withRepresentedObject: current))
+        popup.toolTip = "A permission or question dialog open this long marks its agent as stuck: "
+            + "a badge on its card and one notification."
+        background.addSubview(popup)
+        return popup
+    }
+
+    static func stuckAgentChoiceTitle(minutes: Int) -> String {
+        switch minutes {
+        case 0: return "Never"
+        case 1: return "1 minute"
+        case 60: return "1 hour"
+        default: return minutes % 60 == 0 ? "\(minutes / 60) hours" : "\(minutes) minutes"
+        }
     }
 
     private struct TelegramSettingsControls {
@@ -211,7 +244,7 @@ extension NiruxApp {
         let heading = NSTextField(labelWithString: "Telegram Remote Access")
         heading.font = .systemFont(ofSize: 12, weight: .medium)
         heading.textColor = NSColor.white.withAlphaComponent(0.6)
-        heading.frame = NSRect(x: 24, y: height - 280, width: width - 48, height: 16)
+        heading.frame = NSRect(x: 24, y: height - 314, width: width - 48, height: 16)
         background.addSubview(heading)
 
         let enabled = NSButton(
@@ -222,16 +255,16 @@ extension NiruxApp {
         enabled.contentTintColor = NSColor.white.withAlphaComponent(0.85)
         enabled.font = .systemFont(ofSize: 12)
         enabled.state = current.telegramRemoteAccessEnabled ? .on : .off
-        enabled.frame = NSRect(x: 22, y: height - 315, width: width - 44, height: 20)
+        enabled.frame = NSRect(x: 22, y: height - 349, width: width - 44, height: 20)
         background.addSubview(enabled)
 
         let tokenLabel = NSTextField(labelWithString: "Bot token")
         tokenLabel.font = .systemFont(ofSize: 12)
         tokenLabel.textColor = NSColor.white.withAlphaComponent(0.85)
-        tokenLabel.frame = NSRect(x: 24, y: height - 350, width: 80, height: 18)
+        tokenLabel.frame = NSRect(x: 24, y: height - 384, width: 80, height: 18)
         background.addSubview(tokenLabel)
 
-        let token = NSSecureTextField(frame: NSRect(x: 104, y: height - 354, width: width - 128, height: 24))
+        let token = NSSecureTextField(frame: NSRect(x: 104, y: height - 388, width: width - 128, height: 24))
         token.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         token.placeholderString = (try? telegramTokenLoader()) != nil
             ? "Stored in macOS Keychain — leave blank to keep"
@@ -243,38 +276,38 @@ extension NiruxApp {
         tokenHint.font = .systemFont(ofSize: 10.5)
         tokenHint.textColor = NSColor.white.withAlphaComponent(0.3)
         tokenHint.maximumNumberOfLines = 2
-        tokenHint.frame = NSRect(x: 24, y: height - 387, width: width - 48, height: 28)
+        tokenHint.frame = NSRect(x: 24, y: height - 421, width: width - 48, height: 28)
         background.addSubview(tokenHint)
 
         let completion = NSButton(checkboxWithTitle: "Notify when an agent turn completes", target: nil, action: nil)
         completion.contentTintColor = NSColor.white.withAlphaComponent(0.85)
         completion.font = .systemFont(ofSize: 12)
         completion.state = current.telegramNotifyOnCompletion ? .on : .off
-        completion.frame = NSRect(x: 22, y: height - 416, width: width - 44, height: 20)
+        completion.frame = NSRect(x: 22, y: height - 450, width: width - 44, height: 20)
         background.addSubview(completion)
 
         let attention = NSButton(checkboxWithTitle: "Notify when an agent needs attention", target: nil, action: nil)
         attention.contentTintColor = NSColor.white.withAlphaComponent(0.85)
         attention.font = .systemFont(ofSize: 12)
         attention.state = current.telegramNotifyOnAttention ? .on : .off
-        attention.frame = NSRect(x: 22, y: height - 442, width: width - 44, height: 20)
+        attention.frame = NSRect(x: 22, y: height - 476, width: width - 44, height: 20)
         background.addSubview(attention)
 
         let status = NSTextField(wrappingLabelWithString: "")
         status.font = .systemFont(ofSize: 11)
         status.textColor = NSColor.white.withAlphaComponent(0.5)
         status.maximumNumberOfLines = 2
-        status.frame = NSRect(x: 24, y: height - 486, width: width - 48, height: 34)
+        status.frame = NSRect(x: 24, y: height - 520, width: width - 48, height: 34)
         background.addSubview(status)
 
-        let pair = NSButton(frame: NSRect(x: 24, y: height - 526, width: 154, height: 28))
+        let pair = NSButton(frame: NSRect(x: 24, y: height - 560, width: 154, height: 28))
         pair.title = "Generate Pairing Code"
         pair.bezelStyle = .rounded
         pair.target = self
         pair.action = #selector(settingsTelegramPair(_:))
         background.addSubview(pair)
 
-        let clearToken = NSButton(frame: NSRect(x: 188, y: height - 526, width: 104, height: 28))
+        let clearToken = NSButton(frame: NSRect(x: 188, y: height - 560, width: 104, height: 28))
         clearToken.title = "Clear Token"
         clearToken.bezelStyle = .rounded
         clearToken.target = self
@@ -367,6 +400,9 @@ extension NiruxApp {
                 settings.claudeNoFlicker = noFlicker
                 settings.missionHandoffsEnabled = missionHandoffsEnabled
                 settings.sidebarApprovalsEnabled = sidebarApprovalsEnabled
+                if let minutes = settingsStuckAgentPopup?.selectedItem?.representedObject as? Int {
+                    settings.stuckAgentMinutes = minutes
+                }
             }
             settings.telegramRemoteAccessEnabled = telegramEnabled
             settings.telegramNotifyOnCompletion = settingsTelegramCompletionCheckbox?.state != .off
@@ -393,11 +429,7 @@ extension NiruxApp {
             }
         }
         if !telegramOnly {
-            shell?.workspaces.forEach { $0.missionHandoffsEnabled = missionHandoffsEnabled }
-            if missionHandoffsEnabled {
-                MissionEventCenter.shared.deliverPendingEvents()
-            }
-            applySidebarApprovals(enabled: sidebarApprovalsEnabled)
+            applySavedAgentSettings(missionHandoffsEnabled: missionHandoffsEnabled, sidebarApprovalsEnabled: sidebarApprovalsEnabled)
         }
         telegramRemoteAccessController?.reloadFromPersistence()
         if let tokenSaveError {
@@ -414,6 +446,16 @@ extension NiruxApp {
             : "Stored in macOS Keychain — leave blank to keep"
         refreshTelegramSettingsState()
         return true
+    }
+
+    /// The saved agent options take effect in the running app.
+    private func applySavedAgentSettings(missionHandoffsEnabled: Bool, sidebarApprovalsEnabled: Bool) {
+        shell?.workspaces.forEach { $0.missionHandoffsEnabled = missionHandoffsEnabled }
+        if missionHandoffsEnabled {
+            MissionEventCenter.shared.deliverPendingEvents()
+        }
+        applySidebarApprovals(enabled: sidebarApprovalsEnabled)
+        shell?.stuckAgentWaitThreshold = NiruxShellView.stuckWaitThreshold(minutes: NiruxShellView.currentStuckAgentMinutes())
     }
 
     /// Turning the option off hands every held request back to its
@@ -501,6 +543,7 @@ extension NiruxApp {
         settingsCodexLaunchModePopup = nil
         settingsMissionHandoffsCheckbox = nil
         settingsSidebarApprovalsCheckbox = nil
+        settingsStuckAgentPopup = nil
         settingsTelegramEnabledCheckbox = nil
         settingsTelegramTokenField = nil
         settingsTelegramCompletionCheckbox = nil
