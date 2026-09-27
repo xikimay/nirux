@@ -28,6 +28,16 @@ enum WebContentKeyRouting {
            modifiers == [.command] || modifiers == [.command, .shift] {
             return true
         }
+        // Cmd+F, Cmd+G, Shift+Cmd+G: Edit > Find in Terminal and Find
+        // Next/Previous only act on terminal columns. Monaco's find widget
+        // and web apps' own search keep these chords.
+        if types("f", ansiKeyCode: 0x03), modifiers == [.command] {
+            return true
+        }
+        if types("g", ansiKeyCode: 0x05),
+           modifiers == [.command] || modifiers == [.command, .shift] {
+            return true
+        }
         guard isEditor else { return false }
 
         // Cmd+P: Monaco rebinds it to the workspace file picker. The command

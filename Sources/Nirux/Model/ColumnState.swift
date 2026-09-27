@@ -74,6 +74,11 @@ final class ColumnState {
     private var terminalSpec: (cwd: String, shellArgs: [String], environment: [String: String])?
     private var shellExitedOverlay: ShellExitedOverlay?
 
+    /// ⌘F find bar and the search it drives, created on first use
+    /// (ColumnState+TerminalFind.swift).
+    var findBar: TerminalFindBar?
+    var terminalSearch: TerminalSearchSession?
+
     private func setupTitleBar() {
         let bar = WindowDragView()
         bar.wantsLayer = true
@@ -131,6 +136,7 @@ final class ColumnState {
             terminal.frame = NSRect(x: 0, y: 0, width: width, height: height - barHeight)
             shellExitedOverlay?.frame = terminal.frame
         }
+        layoutFindBar()
     }
 
     /// Title label on the left; the dev-server chip, when shown, on the
@@ -389,6 +395,9 @@ final class ColumnState {
     private func showShellExitedOverlay() {
         // Column closing also detaches the view — no overlay on a dead column.
         guard view.window != nil, let terminal = terminalView else { return }
+        // The overlay would cover the find bar while its field kept the
+        // keyboard, and Enter would navigate instead of restarting.
+        closeFindBar()
         if shellExitedOverlay == nil {
             let overlay = ShellExitedOverlay()
             overlay.onRestart = { [weak self] in self?.restartShell() }

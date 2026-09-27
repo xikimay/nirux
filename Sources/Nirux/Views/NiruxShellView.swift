@@ -692,6 +692,10 @@ extension NiruxShellView {
               let window else { return }
         if let webView = col.webViewColumn {
             window.makeFirstResponder(webView.webView)
+        } else if col.isFindBarOpen {
+            // An open find bar keeps the keyboard: text typed for it must
+            // not reach the agent. A click on the terminal takes it back.
+            if !col.isEditingFind { col.findBar?.focusField() }
         } else if let terminal = col.terminalView {
             window.makeFirstResponder(terminal)
         }

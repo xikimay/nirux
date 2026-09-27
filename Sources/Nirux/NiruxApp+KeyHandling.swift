@@ -26,22 +26,51 @@ extension NiruxApp {
         }
     }
 
-    /// Route ALL key input directly to PTY, bypassing ghostty entirely.
-    /// Ghostty only handles rendering — we handle ALL input.
-    /// This prevents ghostty's broken inMemory key handling from interfering.
-    func setupKeyInterceptor() {
-        // Also consume flagsChanged to prevent ghostty from sending modifier
-        // key events to the PTY (breaks Claude Code's kitty keyboard protocol)
+    /// Also consume flagsChanged to prevent ghostty from sending modifier
+    /// key events to the PTY (breaks Claude Code's kitty keyboard protocol)
+    private func setupModifierInterceptor() {
         NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged]) { [weak self] event in
             guard let shell = self?.shell, event.window === self?.mainWindow else { return event }
             if shell.isOverlayActive { return event }
             guard let workspace = shell.activeWorkspaceForKeyIntercept,
                   let col = workspace.columns[safe: workspace.focusedIndex]
             else { return event }
-            // Don't consume modifiers for WebView or editor columns
-            if col.isWebView || col.isEditor { return event }
+            // Don't consume modifiers for WebView or editor columns, or while
+            // a terminal's find field is typing.
+            if col.isWebView || col.isEditor || workspace.findFieldColumn != nil { return event }
             return nil
         }
+    }
+
+    /// A key typed while a terminal's find field has the focus edits the
+    /// field, never a PTY (see TerminalFindKeyRouting).
+    private static func routeFindFieldKey(_ event: NSEvent, in column: ColumnState) -> NSEvent? {
+        switch TerminalFindKeyRouting.routeInField(keyCode: event.keyCode, modifierFlags: event.modifierFlags) {
+        case .field:
+            return event
+        case .menuThenField:
+            return NSApp.mainMenu?.performKeyEquivalent(with: event) == true ? nil : event
+        case .fieldEditor:
+            column.findBar?.field.currentEditor()?.keyDown(with: event)
+            return nil
+        }
+    }
+
+    /// Escape with the terminal's find bar open closes the bar instead of
+    /// reaching the PTY (see TerminalFindKeyRouting). True when consumed.
+    private static func closeFindBarOnEscape(_ event: NSEvent, in column: ColumnState) -> Bool {
+        guard column.isFindBarOpen,
+              TerminalFindKeyRouting.closesOpenFindBar(keyCode: event.keyCode, modifierFlags: event.modifierFlags)
+        else { return false }
+        column.closeFindBar()
+        return true
+    }
+
+    /// Route ALL key input directly to PTY, bypassing ghostty entirely.
+    /// Ghostty only handles rendering — we handle ALL input.
+    /// This prevents ghostty's broken inMemory key handling from interfering.
+    func setupKeyInterceptor() {
+        setupModifierInterceptor()
 
         NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             // Only the main window's columns are routed here. Other windows —
@@ -55,6 +84,13 @@ extension NiruxApp {
             guard let workspace = shell.activeWorkspaceForKeyIntercept,
                   let col = workspace.columns[safe: workspace.focusedIndex]
             else { return event }
+
+            // Keys follow a terminal's find field while it has the focus,
+            // even when the focused column changed without moving the
+            // keyboard (a resize drag, an agent opening an editor column).
+            if let findColumn = workspace.findFieldColumn {
+                return Self.routeFindFieldKey(event, in: findColumn)
+            }
 
             // WebView and Editor (Monaco) columns handle their own keyboard
             // input, but Cmd+key combos must bypass the WebView so menu
@@ -113,12 +149,15 @@ extension NiruxApp {
                 return event
             }
 
+            if Self.closeFindBarOnEscape(event, in: col) { return nil }
+
             guard let pty = col.pty else { return event }
 
             // Cmd+key: some go to PTY (Cmd+Backspace), rest to menu system
             if event.modifierFlags.contains(.command) {
                 let bytes = KeyMapper.bytesForEvent(event)
                 if !bytes.isEmpty {
+                    col.terminalSearch?.returnToPrompt()
                     pty.sendRaw(bytes)
                     return nil
                 }
@@ -147,6 +186,10 @@ extension NiruxApp {
             // Never let ghostty's keyDown handler see the event.
             let bytes = KeyMapper.bytesForEvent(event)
             if !bytes.isEmpty {
+                // After a search jumped up the scrollback, typing returns
+                // to the prompt first (Ghostty's scroll-to-bottom on
+                // keystroke never runs: keys bypass it).
+                col.terminalSearch?.returnToPrompt()
                 pty.sendRaw(bytes)
             }
             return nil // ALWAYS consume — even if bytes is empty (modifier-only)

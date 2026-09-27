@@ -74,6 +74,24 @@ extension NiruxApp {
         shell?.showWorkspaceSearch()
     }
 
+    // The find items act on the main window's focused terminal column only:
+    // with a panel or a detached Web Inspector key, the bar would open
+    // behind it.
+    @objc func showTerminalFind(_ sender: Any?) {
+        guard NSApp.keyWindow === mainWindow else { return }
+        shell?.showTerminalFind()
+    }
+
+    @objc func findNextInTerminal(_ sender: Any?) {
+        guard NSApp.keyWindow === mainWindow else { return }
+        shell?.findNextInTerminal()
+    }
+
+    @objc func findPreviousInTerminal(_ sender: Any?) {
+        guard NSApp.keyWindow === mainWindow else { return }
+        shell?.findPreviousInTerminal()
+    }
+
     @objc func toggleEditorDiff(_ sender: Any?) {
         shell?.toggleEditorDiff()
     }
@@ -178,6 +196,14 @@ extension NiruxApp {
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(NSMenuItem.separator())
+        editMenu.addItem(withTitle: "Find in Terminal…", action: #selector(showTerminalFind(_:)), keyEquivalent: "f")
+        editMenu.addItem(withTitle: "Find Next", action: #selector(findNextInTerminal(_:)), keyEquivalent: "g")
+        let findPreviousItem = editMenu.addItem(
+            withTitle: "Find Previous",
+            action: #selector(findPreviousInTerminal(_:)),
+            keyEquivalent: "g"
+        )
+        findPreviousItem.keyEquivalentModifierMask = [.command, .shift]
         editMenu.addItem(
             withTitle: "Search Workspace…",
             action: #selector(showWorkspaceSearch(_:)),
