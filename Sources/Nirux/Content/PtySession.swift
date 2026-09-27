@@ -394,12 +394,6 @@ final class PtySession: @unchecked Sendable {
         return nil
     }
 
-    /// The user pasted into the terminal (⌘V): input like a keystroke,
-    /// though ghostty writes it.
-    func noteUserPaste() {
-        state.machine.noteKeystroke(now: Date())
-    }
-
     /// The user's login shell ($SHELL) when it's a mainstream
     /// POSIX-compatible one, else zsh. Restricted to an allowlist because
     /// command-backed columns launch it with zsh-style `-i -l -c` flags
@@ -535,6 +529,7 @@ final class PtySession: @unchecked Sendable {
         let st = state
         terminalSession = InMemoryTerminalSession(
             write: { data in
+                st.noteTerminalWrite(data)
                 st.writeToPty(data)
             },
             resize: { viewport in
@@ -549,6 +544,14 @@ final class PtySession: @unchecked Sendable {
     func sendRaw(_ data: Data) {
         state.noteTypedInput(data)
         state.writeToPty(data)
+    }
+
+    /// Whether ghostty writes the user's text (see `PtyState.noteTerminalWrite`):
+    /// terminal replies (device attributes, focus and mouse reports…) all
+    /// start with ESC; a bracketed paste does too, with its own marker.
+    static func isUserText(_ data: Data) -> Bool {
+        guard let first = data.first else { return false }
+        return first != 0x1B || data.starts(with: [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]) // ESC[200~
     }
 
     func sendRaw(_ string: String) {
@@ -773,6 +776,18 @@ private final class PtyState: @unchecked Sendable {
     }
 
     private static let redrawNudge = Data([0x0C])
+
+    /// Ghostty writes to the PTY for text the user enters through it — a
+    /// paste (any way: ⌘V, the Edit menu, a right-click), dictation, the
+    /// emoji picker — and for its own replies to terminal queries, which
+    /// may come on the read queue. The user's text counts as a keystroke,
+    /// noted on the main queue like every other.
+    func noteTerminalWrite(_ data: Data) {
+        guard PtySession.isUserText(data) else { return }
+        DispatchQueue.main.async { [self] in
+            machine.noteKeystroke(now: Date())
+        }
+    }
 
     func foregroundProcess(snapshot: ProcessSnapshot) -> ForegroundProcess? {
         guard childPid > 0 else { return nil }

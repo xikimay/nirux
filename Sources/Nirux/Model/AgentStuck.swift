@@ -9,6 +9,9 @@ struct AgentTurnFailure: Equatable, Sendable {
     let detail: String?
     /// Epoch seconds.
     let failedAt: TimeInterval
+    /// When the failed turn's prompt went in (epoch seconds), if seen: text
+    /// typed at the prompt since is a draft.
+    let promptAt: TimeInterval?
     /// The `claude` that reported it: Resume types into that process only.
     let emitter: ProcessInstance?
     /// When Resume last typed `continue` (epoch seconds), and the
@@ -70,8 +73,8 @@ enum AgentResumeRefusal: Equatable, Sendable {
     /// Claude is not back at its prompt: a dialog may be open, or work
     /// goes on.
     case notAtPrompt
-    /// The user typed since the failure: `continue` would join their
-    /// draft, and Enter would send it.
+    /// The user typed at the prompt since the failed turn's prompt went
+    /// in: `continue` would join their draft, and Enter would send it.
     case userTyped
     /// The error needs the user first (see `AgentTurnFailure.isResumable`).
     case needsFix

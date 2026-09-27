@@ -66,16 +66,17 @@ extension NiruxApp {
         return true
     }
 
-    /// ⌘V pastes through ghostty, not `sendRaw`: note it as the user's
-    /// input all the same (a draft in Claude's prompt, a partial shell line).
-    private static func notePaste(_ event: NSEvent, in column: ColumnState) {
-        guard WebContentKeyRouting.typesLetter(
+    /// A key that types into the terminal (bytes for the PTY, or ⌘V,
+    /// which ghostty pastes and notes as input — see
+    /// `PtySession.isUserText`) takes the agent-exit notice down at once.
+    private static func dismissAgentExitIfTyping(_ event: NSEvent, in column: ColumnState) {
+        let pastes = event.modifierFlags.contains(.command) && WebContentKeyRouting.typesLetter(
             "v", ansiKeyCode: 0x09,
             characters: event.characters,
             charactersIgnoringModifiers: event.charactersIgnoringModifiers,
             keyCode: event.keyCode
-        ) else { return }
-        column.pty?.noteUserPaste()
+        )
+        guard pastes || !KeyMapper.bytesForEvent(event).isEmpty else { return }
         column.dismissAgentExitOnTyping()
     }
 
@@ -165,6 +166,7 @@ extension NiruxApp {
             if Self.closeFindBarOnEscape(event, in: col) { return nil }
 
             guard let pty = col.pty else { return event }
+            Self.dismissAgentExitIfTyping(event, in: col)
 
             // Cmd+key: some go to PTY (Cmd+Backspace), rest to menu system
             if event.modifierFlags.contains(.command) {
@@ -180,7 +182,6 @@ extension NiruxApp {
                 // menu sees them, so Cmd+T/Cmd+arrow/etc. silently die if we
                 // just return the event here. Mirror the WebView/Editor path
                 // above: invoke the menu key equivalent and consume on hit.
-                Self.notePaste(event, in: col)
                 if NSApp.mainMenu?.performKeyEquivalent(with: event) == true {
                     return nil
                 }
@@ -200,8 +201,6 @@ extension NiruxApp {
             // Never let ghostty's keyDown handler see the event.
             let bytes = KeyMapper.bytesForEvent(event)
             if !bytes.isEmpty {
-                // Typing at the shell a dead agent left: the user took over.
-                col.dismissAgentExitOnTyping()
                 // After a search jumped up the scrollback, typing returns
                 // to the prompt first (Ghostty's scroll-to-bottom on
                 // keystroke never runs: keys bypass it).

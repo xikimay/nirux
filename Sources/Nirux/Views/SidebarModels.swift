@@ -85,7 +85,8 @@ enum SidebarStuckState: Hashable {
         case offered
         /// `continue` went out; the next turn has not started yet.
         case sending
-        /// The user typed at its prompt since: their draft, their Enter.
+        /// The user typed at its prompt since the turn began: their draft,
+        /// their Enter.
         case userTyped
         /// The error needs the user first (log in, billing, a limit…).
         case needsFix
@@ -107,7 +108,7 @@ enum SidebarStuckState: Hashable {
             switch self {
             case .offered: return nil
             case .sending: return "Resuming…"
-            case .userTyped: return "Text in its prompt: send it from the terminal"
+            case .userTyped: return "Typed in its prompt: go on from the terminal"
             case .needsFix: return "Needs a fix in the terminal first"
             case .unavailable: return "Resume once claude is back at its prompt"
             }

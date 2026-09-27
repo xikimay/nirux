@@ -50,7 +50,11 @@ extension AgentStatusMachine {
         guard pendingDialogs.isEmpty, !hookWorking, turnStartedAt == nil else { return .notAtPrompt }
         // (A clock set back since reads as the delay over.)
         if let sent = turnFailure.resumeSentAt, (0..<Self.resumeRetryDelay).contains(now - sent) { return .alreadySent }
-        guard lastKeystrokeAt <= max(turnFailure.failedAt, turnFailure.resumeKeystrokeAt ?? 0) else { return .userTyped }
+        // Text typed at the prompt since the failed turn's own prompt went
+        // in — during the turn or after — is a draft: `continue` would join
+        // it, and Enter would send it. Keys that answered a dialog aren't.
+        let promptWentIn = max(turnFailure.promptAt ?? 0, turnFailure.resumeKeystrokeAt ?? 0)
+        guard lastDraftInputAt <= promptWentIn else { return .userTyped }
         return nil
     }
 }

@@ -7,9 +7,7 @@ extension NiruxShellView {
         let snapshot = snapshot ?? ProcessSnapshot()
         let now = Date().timeIntervalSince1970
         let visibleIndices = visibleWorkspaceIndices
-        let (foregroundProcesses, invalidatedSessionBinding) = followForegroundProcesses(
-            snapshot: snapshot, now: now, visibleIndices: visibleIndices
-        )
+        let (foregroundProcesses, invalidatedSessionBinding) = followForegroundProcesses(snapshot: snapshot, now: now)
         let approvalHolds = releaseApprovalsNotHeld()
         let infos = visibleIndices.map { index in
             let workspace = workspaces[index]
@@ -87,12 +85,11 @@ extension NiruxShellView {
     /// watches). True when a binding changed and state must be saved.
     private func followForegroundProcesses(
         snapshot: ProcessSnapshot,
-        now: TimeInterval,
-        visibleIndices: [Int]
+        now: TimeInterval
     ) -> ([ObjectIdentifier: ForegroundProcess], Bool) {
         var foregroundProcesses: [ObjectIdentifier: ForegroundProcess] = [:]
         var invalidatedSessionBinding = false
-        for (workspaceIndex, workspace) in workspaces.enumerated() {
+        for workspace in workspaces {
             for (columnIndex, column) in workspace.columns.enumerated() {
                 let foregroundProcess = column.pty?.foregroundProcess(snapshot: snapshot)
                 if let foregroundProcess {
@@ -103,10 +100,8 @@ extension NiruxShellView {
                 ) {
                     invalidatedSessionBinding = true
                 }
-                let isWatched = columnIndex == workspace.focusedIndex
-                    && (workspaceIndex == activeWSIndex || (isPilotMode && visibleIndices.contains(workspaceIndex)))
                 refreshStuckAgent(
-                    column, at: StuckAgentPlace(workspace: workspace, columnIndex: columnIndex, isWatched: isWatched),
+                    column, at: StuckAgentPlace(workspace: workspace, columnIndex: columnIndex),
                     foregroundProcess: foregroundProcess, snapshot: snapshot, now: now
                 )
             }

@@ -69,6 +69,12 @@ struct AgentStatusMachine {
     /// Epoch seconds of the last keystroke Nirux sent (`PtySession.sendRaw`)
     /// — unlike `lastInteractionAt`, never terminal replies or resizes.
     private(set) var lastKeystrokeAt: TimeInterval = 0
+    /// Every keystroke or paste, never reset by Claude's reminders: input
+    /// that may have reached a shell an agent just left.
+    private(set) var lastInputAt: TimeInterval = 0
+    /// The same, typed while no dialog was believed open: text that may sit
+    /// in the agent's prompt as a draft.
+    private(set) var lastDraftInputAt: TimeInterval = 0
 
     /// The user has typed at least once since the shell started. Fallback
     /// attention is gated on this: output before the first keystroke is
@@ -90,10 +96,14 @@ struct AgentStatusMachine {
     /// `requestedAt` of the dialogs whose long wait already alerted: one
     /// alert per dialog.
     private var longWaitAlerted: Set<TimeInterval> = []
-    /// Claude's `prompt_id` of the main thread's current turn: a
-    /// StopFailure about another prompt arrived late (Claude doesn't wait
-    /// for it) and ends nothing.
+    /// The main thread's prompts: when the last one went in, and the
+    /// `prompt_id`s of the current and recent ones. A StopFailure about an
+    /// earlier prompt arrived late (Claude doesn't wait for it) and ends
+    /// nothing; one about a prompt never seen (a turn Claude started by
+    /// itself) counts.
+    private var lastPromptAt: TimeInterval?
     private var turnPromptID: String?
+    private var recentPromptIDs: [String] = []
 
     private static let echoWindow: TimeInterval = 0.3
     private static let activityWindow: TimeInterval = 3.0
@@ -286,7 +296,11 @@ struct AgentStatusMachine {
         turnStartedAt = now
         hookTurnInFlight = true
         turnFailure = nil
-        if event.agentID == nil { turnPromptID = event.promptID }
+        if event.agentID == nil {
+            lastPromptAt = now
+            turnPromptID = event.promptID
+            if let promptID = event.promptID { recentPromptIDs = Array((recentPromptIDs + [promptID]).suffix(8)) }
+        }
         resumeUnlessBlocked()
     }
 
@@ -321,12 +335,15 @@ struct AgentStatusMachine {
             guard event.agentID == nil else { return }
             // Claude doesn't wait for StopFailure: a new prompt may have
             // started the next turn before it arrived.
-            if let failed = event.promptID, let current = turnPromptID, failed != current { return }
+            if let failed = event.promptID, failed != turnPromptID, recentPromptIDs.contains(failed) { return }
         }
         closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
         endTurn()
         turnFailure = event.name == .stopFailure
-            ? AgentTurnFailure(kind: event.errorKind, detail: event.detail, failedAt: now, emitter: event.emitterProcess)
+            ? AgentTurnFailure(
+                kind: event.errorKind, detail: event.detail, failedAt: now,
+                promptAt: lastPromptAt, emitter: event.emitterProcess
+            )
             : nil
         let reason = turnFailure?.reason ?? .turnFinished
         outcome.attention = reason
@@ -568,7 +585,11 @@ struct AgentStatusMachine {
     /// Nirux sent typed input (keys, a paste) — the only way a dialog gets
     /// answered, which terminal replies and focus reports never do.
     mutating func noteKeystroke(now: Date) {
-        lastKeystrokeAt = now.timeIntervalSince1970
+        let time = now.timeIntervalSince1970
+        lastKeystrokeAt = time
+        lastInputAt = time
+        // Keys while a dialog is believed open go to it, not to the prompt.
+        if openDialogs.isEmpty { lastDraftInputAt = time }
         // Typing at the shell an agent left: the user took over.
         midTurnExit = nil
     }
@@ -703,7 +724,7 @@ struct AgentStatusMachine {
     /// shell: the user is there and took over.
     mutating func noteAgentExited(_ exit: AgentMidTurnExit) {
         guard exit.processName == "claude", exit.firedHooks || hookKind == "claude", hookTurnInFlight,
-              lastKeystrokeAt <= exit.lastSeenAt else { return }
+              lastInputAt <= exit.lastSeenAt else { return }
         midTurnExit = exit
     }
 
@@ -743,7 +764,7 @@ struct AgentStatusMachine {
     }
 
     mutating func noteResumeTyped() {
-        turnFailure?.resumeKeystrokeAt = lastKeystrokeAt
+        turnFailure?.resumeKeystrokeAt = lastDraftInputAt
     }
 
     /// New shell in the same terminal (start/restart) — everything resets.
@@ -767,7 +788,11 @@ struct AgentStatusMachine {
         turnFailure = nil
         midTurnExit = nil
         longWaitAlerted = []
+        lastPromptAt = nil
         turnPromptID = nil
+        recentPromptIDs = []
         hookTurnInFlight = false
+        lastInputAt = 0
+        lastDraftInputAt = 0
     }
 }

@@ -41,9 +41,10 @@ struct ClaudeCodeVersion: Comparable, CustomStringConvertible {
     /// read.
     static func detect(
         path: String = PtySession.effectivePath,
-        home: String = NSHomeDirectory()
+        home: String = NSHomeDirectory(),
+        systemDirectories: [String] = AgentCLILocator.systemInstallDirectories
     ) -> ClaudeCodeVersion? {
-        let directories = AgentCLILocator.searchDirectories(path: path, home: home)
+        let directories = AgentCLILocator.searchDirectories(path: path, home: home, systemDirectories: systemDirectories)
         let binaries = directories.compactMap { AgentCLILocator.executable(named: "claude", in: [$0]) }
         guard !binaries.isEmpty else { return nil }
         var oldest: ClaudeCodeVersion?

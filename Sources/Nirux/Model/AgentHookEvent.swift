@@ -168,7 +168,7 @@ struct AgentHookEvent: Codable, Equatable {
     /// Events that bind or confirm the column's session — where its
     /// transcript is worth knowing.
     static func carriesTranscriptPath(_ name: Name) -> Bool {
-        [.sessionStart, .userPromptSubmit, .stop].contains(name)
+        [.sessionStart, .userPromptSubmit, .stop, .stopFailure].contains(name)
     }
 
     /// An absolute `.jsonl` path, or nil.

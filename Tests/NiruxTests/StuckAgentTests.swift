@@ -300,6 +300,37 @@ final class StuckAgentTests: XCTestCase {
         XCTAssertEqual(refusal(), .userTyped)
     }
 
+    /// A draft typed while the turn still ran sits in the prompt too.
+    func testResumeRefusedOverADraftTypedBeforeTheFailure() {
+        _ = machine.tick(fgName: "claude", isUserFocused: false, now: Date(timeIntervalSince1970: t0))
+        _ = apply(event(.sessionStart))
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 0.5)) // the prompt itself
+        _ = apply(event(.userPromptSubmit, at: 1))
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 3)) // a draft, no Enter
+        _ = apply(event(.stopFailure, at: 5, errorKind: "overloaded"))
+        XCTAssertEqual(refusal(), .userTyped)
+    }
+
+    /// Keys that answered a dialog went to it, and the reminder that
+    /// clears the dialog's keystroke doesn't erase a draft.
+    func testDialogAnswersAreNoDraftAndRemindersEraseNone() {
+        startTurn()
+        _ = apply(event(.userPromptSubmit, at: 1))
+        _ = apply(event(.permissionRequest, at: 2, tool: "Bash", key: "k"))
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 3)) // approves it
+        _ = apply(event(.postToolUse, at: 4, tool: "Bash", key: "k"))
+        _ = apply(event(.stopFailure, at: 5, errorKind: "overloaded"))
+        XCTAssertNil(refusal())
+
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 6)) // a draft
+        // A form asks, then closes: its notification cleared the keystroke
+        // the dialog logic tracks, not the draft.
+        _ = apply(event(.notification, at: 7, type: "agent_needs_input"))
+        XCTAssertEqual(machine.lastKeystrokeAt, 0)
+        _ = apply(event(.notification, at: 8, type: "elicitation_complete"))
+        XCTAssertEqual(refusal(), .userTyped)
+    }
+
     func testResumesOwnKeystrokeIsNotADraft() {
         startTurn()
         _ = apply(event(.stopFailure, at: 5, errorKind: "overloaded"))
@@ -322,6 +353,7 @@ final class StuckAgentTests: XCTestCase {
     /// prompt is about the turn before, and ends nothing.
     func testLateStopFailureOfAnEarlierPromptEndsNothing() {
         startTurn()
+        _ = apply(AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "lead", promptID: "p1", timestamp: t0 + 1))
         _ = apply(AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "lead", promptID: "p2", timestamp: t0 + 6))
         _ = apply(AgentHookEvent(
             kind: .claude, name: .stopFailure, sessionID: "lead", errorKind: "overloaded", promptID: "p1", timestamp: t0 + 7
@@ -333,6 +365,39 @@ final class StuckAgentTests: XCTestCase {
             kind: .claude, name: .stopFailure, sessionID: "lead", errorKind: "overloaded", promptID: "p2", timestamp: t0 + 9
         ))
         XCTAssertNotNil(machine.turnFailure, "its own prompt's failure counts")
+    }
+
+    /// A turn Claude started by itself (no prompt seen) still fails.
+    func testStopFailureOfAnUnseenPromptCounts() {
+        startTurn()
+        _ = apply(AgentHookEvent(kind: .claude, name: .userPromptSubmit, sessionID: "lead", promptID: "p1", timestamp: t0 + 1))
+        _ = apply(AgentHookEvent(kind: .claude, name: .stop, sessionID: "lead", timestamp: t0 + 2))
+        _ = apply(AgentHookEvent(
+            kind: .claude, name: .stopFailure, sessionID: "lead", errorKind: "overloaded", promptID: "wakeup", timestamp: t0 + 9
+        ))
+        XCTAssertNotNil(machine.turnFailure)
+    }
+
+    /// The tracker routes a failure to the column only when it is the
+    /// column's conversation (or none is bound yet).
+    func testStopFailureOfAnotherConversationIsNotTheColumns() {
+        var tracker = ClaudeSessionTracker()
+        let process = claude()
+        XCTAssertEqual(tracker.admit(.stopFailure, sessionID: "lead", source: nil, emitter: .foregroundProcess,
+                                     foregroundProcess: process), .accepted, "unbound: routed")
+        _ = tracker.admit(.sessionStart, sessionID: "lead", source: "startup", emitter: .foregroundProcess, foregroundProcess: process)
+        XCTAssertEqual(tracker.admit(.stopFailure, sessionID: "teammate", source: nil, emitter: .foregroundProcess,
+                                     foregroundProcess: process), .rejected)
+        XCTAssertNotEqual(tracker.admit(.stopFailure, sessionID: "lead", source: nil, emitter: .foregroundProcess,
+                                        foregroundProcess: process), .rejected)
+    }
+
+    func testTerminalWritesThatAreTheUsersText() {
+        XCTAssertTrue(PtySession.isUserText(Data("hello".utf8)), "dictation, the emoji picker")
+        XCTAssertTrue(PtySession.isUserText(Data("\u{1B}[200~git status\u{1B}[201~".utf8)), "a bracketed paste")
+        XCTAssertFalse(PtySession.isUserText(Data("\u{1B}[?62;22c".utf8)), "a device-attributes reply")
+        XCTAssertFalse(PtySession.isUserText(Data("\u{1B}[I".utf8)), "a focus report")
+        XCTAssertFalse(PtySession.isUserText(Data()))
     }
 
     func testQuotaAutoResumeClearsTheFailure() {
@@ -426,10 +491,14 @@ final class StuckAgentTests: XCTestCase {
             "session_id": "s",
             "error": "rate_limit",
             "error_details": "429 {\"type\":\"error\"}\n\u{1B}[31m",
-            "last_assistant_message": "API Error: Rate limit reached"
+            "last_assistant_message": "API Error: Rate limit reached",
+            "prompt_id": "p-42",
+            "transcript_path": "/tmp/s.jsonl"
         ]
         let event = AgentHookEvent(kind: .claude, payload: payload, env: ["NIRUX_AGENT_UUID": "u"], now: 5)
         XCTAssertEqual(event?.name, .stopFailure)
+        XCTAssertEqual(event?.promptID, "p-42")
+        XCTAssertEqual(event?.transcriptPath, "/tmp/s.jsonl", "a failed turn refreshes usage too")
         XCTAssertEqual(event?.errorKind, "rate_limit")
         XCTAssertEqual(event?.detail, "429 {\"type\":\"error\"} [31m", "cleaned: no control characters")
 

@@ -83,19 +83,22 @@ final class ClaudeCodeVersionTests: XCTestCase {
         let home = root.appendingPathComponent("home").path
         let native = try file("home/.local/share/claude/versions/2.1.283")
         _ = try link("home/.local/bin/claude", to: native)
-        XCTAssertEqual(ClaudeCodeVersion.detect(path: "", home: home), ClaudeCodeVersion("2.1.283"))
+        func detect(_ path: String, home: String = home) -> ClaudeCodeVersion? {
+            ClaudeCodeVersion.detect(path: path, home: home, systemDirectories: [])
+        }
+        XCTAssertEqual(detect(""), ClaudeCodeVersion("2.1.283"))
 
         try file("usr/lib/node_modules/@anthropic-ai/claude-code/package.json", manifest(version: "2.1.70"))
         let cli = try file("usr/lib/node_modules/@anthropic-ai/claude-code/cli.js")
         _ = try link("usr/bin/claude", to: cli)
         let npmBin = root.appendingPathComponent("usr/bin").path
-        XCTAssertEqual(ClaudeCodeVersion.detect(path: npmBin, home: home), ClaudeCodeVersion("2.1.70"),
+        XCTAssertEqual(detect(npmBin), ClaudeCodeVersion("2.1.70"),
                        "an older npm install elsewhere on PATH")
 
         try file("shims/claude")
         let shims = root.appendingPathComponent("shims").path
-        XCTAssertNil(ClaudeCodeVersion.detect(path: shims, home: home), "one unreadable: unknown")
-        XCTAssertNil(ClaudeCodeVersion.detect(path: "", home: root.appendingPathComponent("nobody").path), "none found")
+        XCTAssertNil(detect(shims), "one unreadable: unknown")
+        XCTAssertNil(detect("", home: root.appendingPathComponent("nobody").path), "none found")
     }
 
     func testUnknownLayoutsReadAsUnknown() throws {

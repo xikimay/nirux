@@ -17,18 +17,18 @@ extension NiruxShellView {
         minutes > 0 ? TimeInterval(minutes) * 60 : nil
     }
 
-    /// Where a column sits on a status refresh. `isWatched`: the column the
-    /// user looks at, whose stuck state needs no alert while Nirux is in
-    /// front.
+    /// Where a column sits on a status refresh.
     struct StuckAgentPlace {
         let workspace: WorkspaceState
         let columnIndex: Int
-        let isWatched: Bool
     }
 
     /// One column on a status refresh: follow its foreground agent, send
     /// the alert a stuck state owes (once), and show or take down the
-    /// notice of an agent that died mid-turn.
+    /// notice of an agent that died mid-turn. The alert goes out even for
+    /// the column on screen: a dialog nobody touched for the whole
+    /// threshold says nobody is watching (the system notification waits
+    /// for Nirux to be in the background anyway).
     func refreshStuckAgent(
         _ column: ColumnState,
         at place: StuckAgentPlace,
@@ -41,7 +41,7 @@ extension NiruxShellView {
         guard let pty = column.pty else { return }
         if let reason = pty.takeAgentStuckAlert(
             now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess
-        ), !(place.isWatched && NSApp.isActive) {
+        ) {
             column.notifyAgentAttention(reason: reason)
             onStuckAgentAlert?(reason, workspace, place.columnIndex, column)
             stuckAgentActivity.record(ActivityEntry(
@@ -88,7 +88,7 @@ extension NiruxShellView {
         for workspace in workspaces {
             for (columnIndex, column) in workspace.columns.enumerated() {
                 refreshStuckAgent(
-                    column, at: StuckAgentPlace(workspace: workspace, columnIndex: columnIndex, isWatched: false),
+                    column, at: StuckAgentPlace(workspace: workspace, columnIndex: columnIndex),
                     foregroundProcess: column.pty?.foregroundProcess(snapshot: snapshot), snapshot: snapshot, now: now
                 )
             }

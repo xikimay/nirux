@@ -120,7 +120,7 @@ final class StuckAgentSidebarTests: XCTestCase {
     func testNoResumeButtonUnlessOffered() {
         for (resume, text) in [
             (SidebarStuckState.Resume.sending, "Resuming…"),
-            (.userTyped, "Text in its prompt: send it from the terminal"),
+            (.userTyped, "Typed in its prompt: go on from the terminal"),
             (.needsFix, "Needs a fix in the terminal first"),
             (.unavailable, "Resume once claude is back at its prompt")
         ] {
@@ -308,6 +308,13 @@ final class StuckAgentSidebarTests: XCTestCase {
         let typed = try await waitUntil { pty.recentOutput().contains("continue") }
         XCTAssertTrue(typed)
         XCTAssertEqual(pty.resumeFailedTurn(snapshot: ProcessSnapshot(), now: now + 2), .alreadySent, "one click, one continue")
+        XCTAssertNil(
+            pty.agentResumeRefusal(
+                foreground: pty.foregroundProcess(snapshot: ProcessSnapshot()), snapshot: ProcessSnapshot(),
+                now: now + 1 + AgentStatusMachine.resumeRetryDelay
+            ),
+            "no turn started: offered again — its own keystroke is no draft"
+        )
     }
 
     // MARK: - Nirux in the background
