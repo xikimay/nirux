@@ -57,7 +57,7 @@ final class SpaceBriefTests: XCTestCase {
         XCTAssertFalse(codex.contains("\n"), "one line, so the shell passes it whole")
     }
 
-    func testEmptyingTheBriefRemovesFilesFromEarlierLaunches() throws {
+    func testEmptyingTheBriefEmptiesFilesFromEarlierLaunches() throws {
         let url = try XCTUnwrap(SpaceBrief.briefURL(spaceID: "space-1", stateDirectory: stateDirectory))
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("Rule.".utf8).write(to: url)
@@ -68,8 +68,9 @@ final class SpaceBriefTests: XCTestCase {
         try Data("<!-- nothing -->".utf8).write(to: url)
 
         XCTAssertNil(SpaceBrief.prepareInjection(spaceID: "space-1", spaceName: "S", stateDirectory: stateDirectory))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: injection.claudePromptFile))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: injection.codexInstructionsFile))
+        // Emptied, not deleted: a restarted column replays a command naming them.
+        XCTAssertEqual(try String(contentsOfFile: injection.claudePromptFile, encoding: .utf8), "")
+        XCTAssertEqual(try String(contentsOfFile: injection.codexInstructionsFile, encoding: .utf8), "\"\"")
     }
 
     func testABriefThatIsNotARegularFileIsIgnored() throws {
@@ -82,9 +83,12 @@ final class SpaceBriefTests: XCTestCase {
     }
 
     func testSpaceNameCannotCloseTheTemplateComment() throws {
-        _ = try SpaceBrief.ensureBriefFile(spaceID: "space-1", spaceName: "a --> b", stateDirectory: stateDirectory)
+        for (index, name) in ["a --> b", "a ----> b", "a ---> b"].enumerated() {
+            let id = "space-\(index)"
+            _ = try SpaceBrief.ensureBriefFile(spaceID: id, spaceName: name, stateDirectory: stateDirectory)
 
-        XCTAssertNil(SpaceBrief.prepareInjection(spaceID: "space-1", spaceName: "a --> b", stateDirectory: stateDirectory))
+            XCTAssertNil(SpaceBrief.prepareInjection(spaceID: id, spaceName: name, stateDirectory: stateDirectory), name)
+        }
     }
 
     func testBodyDropsHtmlCommentsAndBlankResults() {
@@ -133,7 +137,8 @@ final class SpaceBriefTests: XCTestCase {
         XCTAssertTrue(SpaceBrief.codexConfigSetsDeveloperInstructions(
             "model = \"x\"\ndeveloper_instructions = \"mine\"\n[features]\n"
         ))
-        XCTAssertFalse(SpaceBrief.codexConfigSetsDeveloperInstructions(
+        // In any table: skipping the brief is the safe way to be wrong.
+        XCTAssertTrue(SpaceBrief.codexConfigSetsDeveloperInstructions(
             "model = \"x\"\n[profiles.p]\ndeveloper_instructions = \"scoped\"\n"
         ))
         XCTAssertFalse(SpaceBrief.codexConfigSetsDeveloperInstructions("developer_instructions_file = \"x\"\n"))

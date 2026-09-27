@@ -51,7 +51,8 @@ enum SpaceBrief {
     /// Writes the files a launch needs from the current `brief.md`, or
     /// returns nil when the space has no brief (missing, only comments, or
     /// not a readable regular file). Without a brief, files left by an
-    /// earlier launch are removed, so a restarted command can't re-send it.
+    /// earlier launch are emptied rather than deleted: restarting a column
+    /// replays its original command, which still names them.
     static func prepareInjection(
         spaceID: String, spaceName: String, stateDirectory: URL = Persistence.stateDirectory
     ) -> Injection? {
@@ -60,8 +61,10 @@ enum SpaceBrief {
         let claudeFile = folder.appendingPathComponent("brief.injected.md")
         let codexFile = folder.appendingPathComponent("brief.codex.toml")
         guard let text = readBrief(at: briefURL), let body = body(of: text) else {
-            try? FileManager.default.removeItem(at: claudeFile)
-            try? FileManager.default.removeItem(at: codexFile)
+            for (file, empty) in [(claudeFile, ""), (codexFile, tomlBasicString(""))]
+            where FileManager.default.fileExists(atPath: file.path) {
+                try? Data(empty.utf8).write(to: file, options: .atomic)
+            }
             return nil
         }
         let injected = injectedText(body: body, spaceName: spaceName, briefPath: briefURL.path)
@@ -131,14 +134,14 @@ enum SpaceBrief {
         return out + "\""
     }
 
-    /// Whether a Codex config file sets `developer_instructions` at its top
-    /// level. Nirux then leaves it alone rather than override it (`-c`
-    /// replaces the value, it doesn't merge).
+    /// Whether a Codex config file sets `developer_instructions`. Nirux then
+    /// leaves it alone rather than override it (`-c` replaces the value, it
+    /// doesn't merge). Any line assigning the key counts, whatever table it
+    /// sits in: skipping the brief is the safe way to be wrong.
     static func codexConfigSetsDeveloperInstructions(_ configText: String) -> Bool {
         let keys = ["developer_instructions", "\"developer_instructions\"", "'developer_instructions'"]
         for line in configText.split(separator: "\n", omittingEmptySubsequences: false) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if isTableHeader(trimmed) { return false } // top level is over
             for key in keys where trimmed.hasPrefix(key) {
                 if trimmed.dropFirst(key.count).trimmingCharacters(in: .whitespaces).hasPrefix("=") {
                     return true
@@ -146,16 +149,6 @@ enum SpaceBrief {
             }
         }
         return false
-    }
-
-    /// `[table]` or `[[array.of.tables]]`, not a line of a multi-line array.
-    private static func isTableHeader(_ line: String) -> Bool {
-        let code = line.split(separator: "#", maxSplits: 1).first.map(String.init)?
-            .trimmingCharacters(in: .whitespaces) ?? line
-        guard code.hasPrefix("["), code.hasSuffix("]") else { return false }
-        let name = code.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-.\"' /:@~"))
-        return !name.isEmpty && name.unicodeScalars.allSatisfy(allowed.contains)
     }
 
     private static func readBrief(at url: URL) -> String? {
@@ -177,7 +170,8 @@ enum SpaceBrief {
 
     private static func template(spaceName: String) -> String {
         // A "-->" in the name would end the comment and send the rest.
-        let name = spaceName.replacingOccurrences(of: "--", with: "-")
+        var name = spaceName
+        while name.contains("--") { name = name.replacingOccurrences(of: "--", with: "-") }
         return """
         <!--
         Brief for the space "\(name)": goals, priorities and workflow rules
