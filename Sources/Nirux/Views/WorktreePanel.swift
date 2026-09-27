@@ -87,8 +87,11 @@ enum GitWorktree {
     /// Both inputs can come from a `nirux://new-worktree` URL, so they are
     /// validated here rather than trusted: `repoRoot` must be the top level
     /// of a git work tree, `branch` a valid branch name (a leading "-" would
-    /// otherwise be parsed as a git option), and an existing directory at the
-    /// target path is only reused when git lists it as a worktree of the repo.
+    /// otherwise be parsed as a git option), and an existing directory is
+    /// only reused when git lists it as a worktree of the repo on `branch`.
+    /// `repoRoot` may be a linked worktree: the new one still goes next to
+    /// the main checkout (see `mainWorktreeRoot(of:)`), but git runs in
+    /// `repoRoot`, so a new branch starts from its HEAD.
     static func create(branch: String, repoRoot: String) -> (path: String?, error: String?) {
         if let problem = repositoryTopLevelProblem(repoRoot) {
             return (nil, problem)
@@ -99,23 +102,45 @@ enum GitWorktree {
 
         // Sanitize branch name for directory path
         let dirName = branch.replacingOccurrences(of: "/", with: "-")
-        let repoName = URL(fileURLWithPath: repoRoot).lastPathComponent
-        let worktreePath = URL(fileURLWithPath: repoRoot)
+        let mainRoot = mainWorktreeRoot(of: repoRoot)
+        let repoName = URL(fileURLWithPath: mainRoot).lastPathComponent
+        let worktreePath = URL(fileURLWithPath: mainRoot)
             .deletingLastPathComponent()
             .appendingPathComponent("\(repoName).\(dirName)")
             .path
 
-        // Reuse an existing checkout only if it really is one of this repo's
-        // worktrees, on the requested branch ("a/b" and "a-b" share a folder
-        // name); any other directory would get a handover and an agent.
+        // A branch is checked out in one worktree at most: open that one,
+        // wherever it is (older versions named a worktree made from another
+        // one `repo.feat-a.feat-b`). Not the main checkout (listed first) or
+        // the requesting one, though: a second agent there would share its
+        // files and replace its handover.
+        let worktrees = list(repoRoot: repoRoot)
+        if let index = worktrees.firstIndex(where: { $0.branch == branch }) {
+            if index == 0 {
+                return (nil, "\(branch) is already checked out in the main checkout")
+            }
+            if worktrees[index].path.realPath == repoRoot.realPath {
+                return (nil, "\(branch) is already checked out in \(repoRoot)")
+            }
+            let existing = worktrees[index].path
+            if let reusable = reusableWorktree(existing, branch: branch, requester: repoRoot, worktrees: worktrees) {
+                return (reusable, nil)
+            }
+            if FileManager.default.fileExists(atPath: existing) {
+                return (nil, "\(existing) is listed for \(branch) but can’t be reused from \(repoRoot)")
+            }
+            // Its folder is gone: `worktree add` below reports it.
+        }
+
+        // Any other directory at the target path would get a handover and
+        // an agent ("a/b" and "a-b" share a folder name).
         if FileManager.default.fileExists(atPath: worktreePath) {
-            guard let existing = worktree(at: worktreePath, of: repoRoot) else {
-                return (nil, "\(worktreePath) already exists and is not a worktree of \(repoRoot)")
+            guard let resolved = worktreePath.realPath,
+                  let other = worktrees.first(where: { $0.path.realPath == resolved })
+            else {
+                return (nil, "\(worktreePath) already exists and is not a worktree of \(mainRoot)")
             }
-            guard existing.branch == branch else {
-                return (nil, "\(worktreePath) already exists on \(existing.branch ?? "a detached HEAD"), not \(branch)")
-            }
-            return (worktreePath, nil)
+            return (nil, "\(worktreePath) already exists on \(other.branch ?? "a detached HEAD"), not \(branch)")
         }
 
         // Check if branch exists locally or remotely
@@ -124,13 +149,15 @@ enum GitWorktree {
         let remoteBranchExists = !branchExists && gitRun(["branch", "-r", "--list", "*/\(branch)"], cwd: repoRoot)
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
 
+        // --quiet: no "Preparing worktree" line ahead of an error, which the
+        // panel's one-line status would show instead of the error.
         let args: [String]
         if branchExists {
-            args = ["worktree", "add", worktreePath, branch]
+            args = ["worktree", "add", "--quiet", worktreePath, branch]
         } else if remoteBranchExists {
-            args = ["worktree", "add", "--track", "-b", branch, worktreePath, "origin/\(branch)"]
+            args = ["worktree", "add", "--quiet", "--track", "-b", branch, worktreePath, "origin/\(branch)"]
         } else {
-            args = ["worktree", "add", "-b", branch, worktreePath]
+            args = ["worktree", "add", "--quiet", "-b", branch, worktreePath]
         }
 
         let result = gitRunFull(args, cwd: repoRoot)
@@ -201,20 +228,87 @@ enum GitWorktree {
         return topLevel.realPath == resolved ? nil : notTopLevel
     }
 
+    /// The main checkout of the repository `repoRoot` is a work tree of:
+    /// `repoRoot` itself, or the folder its linked worktrees hang off. New
+    /// worktrees are placed and named after it, so one created from inside
+    /// `repo.feat-a` is `repo.feat-b`, not `repo.feat-a.feat-b`. Resolved
+    /// with realpath. Falls back to `repoRoot` when git can't tell where the
+    /// main checkout is: a bare repository, a separate git dir, a submodule.
+    static func mainWorktreeRoot(of repoRoot: String) -> String {
+        let fallback = repoRoot.realPath ?? repoRoot
+        // Same git dir and common dir: `repoRoot` is the main checkout.
+        guard let dirs = absoluteGitPaths(["--git-dir", "--git-common-dir"], in: repoRoot),
+              dirs[0].realPath != dirs[1].realPath
+        else { return fallback }
+        // git's own rule (worktree.c, get_main_worktree): the common git
+        // dir without its trailing "/.git".
+        let commonDir = dirs[1]
+        guard (commonDir as NSString).lastPathComponent == ".git",
+              let candidate = (commonDir as NSString).deletingLastPathComponent.realPath
+        else { return fallback }
+        // A bare repository kept in a ".git" folder has no work tree above
+        // it: only trust the parent if git sees it as the top level of a
+        // work tree sharing this very common dir…
+        guard let paths = absoluteGitPaths(["--show-toplevel", "--git-common-dir"], in: candidate),
+              paths[0].realPath == candidate,
+              paths[1].realPath == commonDir.realPath
+        else { return fallback }
+        // …and that lists `repoRoot` as one of its worktrees: a ".git" file
+        // with a crafted `commondir` can tie any folder to another repository.
+        guard list(repoRoot: candidate).contains(where: { $0.path.realPath == fallback }) else {
+            return fallback
+        }
+        return candidate
+    }
+
+    /// `path` resolved, if the agent can be handed the worktree git lists
+    /// there for `branch`. Checked on the folder itself, since an entry not
+    /// pruned yet can outlive its folder or have it replaced: it must be a
+    /// linked worktree of this repository with `branch` checked out. And git
+    /// must know `requester` as a checkout of the repository, not just as a
+    /// folder whose `.git` file points into it.
+    private static func reusableWorktree(
+        _ path: String, branch: String, requester: String, worktrees: [WorktreeEntry]
+    ) -> String? {
+        guard let resolved = path.realPath,
+              let requesterPath = requester.realPath,
+              let own = absoluteGitPaths(["--git-dir", "--git-common-dir"], in: requester),
+              let commonDir = own[1].realPath,
+              let target = absoluteGitPaths(["--show-toplevel", "--git-dir", "--git-common-dir"], in: resolved),
+              target[0].realPath == resolved,
+              target[2].realPath == commonDir,
+              let targetGitDir = target[1].realPath,
+              (targetGitDir as NSString).deletingLastPathComponent == commonDir + "/worktrees",
+              gitRunFull(["symbolic-ref", "-q", "HEAD"], cwd: resolved).stdout
+                  .trimmingCharacters(in: .newlines) == "refs/heads/\(branch)"
+        else { return nil }
+        // git lists the main checkout first, except for a separate git dir or
+        // a submodule: their common dir is not a ".git" folder.
+        let requesterIsKnown = worktrees.contains { $0.path.realPath == requesterPath }
+            || (own[0].realPath == commonDir && (commonDir as NSString).lastPathComponent != ".git")
+        return requesterIsKnown ? resolved : nil
+    }
+
     static func isValidBranchName(_ branch: String, repoRoot: String) -> Bool {
         guard !branch.isEmpty, !branch.hasPrefix("-") else { return false }
         return gitRunFull(["check-ref-format", "refs/heads/\(branch)"], cwd: repoRoot).status == 0
-    }
-
-    static func worktree(at path: String, of repoRoot: String) -> WorktreeEntry? {
-        guard let resolved = path.realPath else { return nil }
-        return list(repoRoot: repoRoot).first { $0.path.realPath == resolved }
     }
 
     // MARK: - Helpers
 
     private static func gitRun(_ args: [String], cwd: String) -> String {
         return gitRunFull(args, cwd: cwd).stdout
+    }
+
+    /// `git rev-parse --path-format=absolute <queries>`: one absolute path
+    /// per query, or nil (including for a path containing a newline).
+    private static func absoluteGitPaths(_ queries: [String], in directory: String) -> [String]? {
+        let result = gitRunFull(["rev-parse", "--path-format=absolute"] + queries, cwd: directory)
+        let lines = result.stdout.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard result.status == 0, lines.last == "" else { return nil }
+        let paths = Array(lines.dropLast())
+        guard paths.count == queries.count, paths.allSatisfy({ $0.hasPrefix("/") }) else { return nil }
+        return paths
     }
 
     /// `repoRoot(at:)` runs on the main thread, which this blocks.
