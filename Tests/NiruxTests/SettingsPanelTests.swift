@@ -197,6 +197,40 @@ final class SettingsPanelTests: XCTestCase {
         }
     }
 
+    // MARK: - Sidebar approvals
+
+    /// Opt-in: an untouched Save keeps it off, and receivers only wait on
+    /// a running app that turned it on.
+    @MainActor
+    func testSidebarApprovalsStayOffUntilSavedOn() throws {
+        try withIsolatedState {
+            let hooks = AgentHookCenter.shared
+            defer { hooks.approvalsEnabled = false }
+            let app = try openSettings()
+            defer { close(app) }
+            XCTAssertEqual(app.settingsSidebarApprovalsCheckbox?.state, .off)
+            app.settingsSave(NSButton())
+            XCTAssertEqual(Persistence.load()?.settings?.sidebarApprovalsEnabled, false)
+            XCTAssertFalse(PermissionApprovalChannel.standard.isAppListening())
+
+            let enabling = try openSettings()
+            defer { close(enabling) }
+            enabling.settingsSidebarApprovalsCheckbox?.state = .on
+            enabling.settingsSave(NSButton())
+            XCTAssertEqual(Persistence.load()?.settings?.sidebarApprovalsEnabled, true)
+            XCTAssertTrue(hooks.approvalsEnabled)
+            XCTAssertTrue(PermissionApprovalChannel.standard.isAppListening(), "receivers see this app")
+
+            let disabling = try openSettings()
+            defer { close(disabling) }
+            XCTAssertEqual(disabling.settingsSidebarApprovalsCheckbox?.state, .on)
+            disabling.settingsSidebarApprovalsCheckbox?.state = .off
+            disabling.settingsSave(NSButton())
+            XCTAssertFalse(hooks.approvalsEnabled)
+            XCTAssertFalse(PermissionApprovalChannel.standard.isAppListening())
+        }
+    }
+
     // MARK: - Helpers
 
     private static let oldToken = "123456:old-token-aaaaaaaaaaaaaaaa"

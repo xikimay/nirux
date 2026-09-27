@@ -19,6 +19,8 @@ struct ColumnInfo: Hashable {
     var agentElapsedSeconds: TimeInterval?
     /// Why the agent waits on the user (set with `.needsAttention`).
     var attentionReason: AgentAttentionReason?
+    /// A permission request the sidebar can answer (Allow / Deny).
+    var permissionApproval: SidebarPermissionApproval?
 
     /// Hashable is hand-written to compare `agentElapsedSeconds` at the
     /// granularity it's *displayed* ("12m" via shortDuration), not raw
@@ -43,6 +45,7 @@ struct ColumnInfo: Hashable {
             && lhs.editorIsDirty == rhs.editorIsDirty
             && lhs.elapsedDisplay == rhs.elapsedDisplay
             && lhs.attentionReason == rhs.attentionReason
+            && lhs.permissionApproval == rhs.permissionApproval
     }
 
     func hash(into hasher: inout Hasher) {
@@ -59,6 +62,27 @@ struct ColumnInfo: Hashable {
         hasher.combine(editorIsDirty)
         hasher.combine(elapsedDisplay)
         hasher.combine(attentionReason)
+        hasher.combine(permissionApproval)
+    }
+}
+
+/// A permission request answerable from the sidebar (see
+/// `PermissionApproval`).
+struct SidebarPermissionApproval: Hashable {
+    let requestID: String
+    let toolName: String
+    /// Exactly what the call does, as the receiver checked it.
+    let text: String
+    /// Buttons, the decision on its way, or its failure.
+    let display: PermissionApprovalTicket.Display
+
+    init?(_ request: AgentPermissionRequest, now: TimeInterval) {
+        guard let ticket = request.approval, let toolName = request.toolName,
+              let display = ticket.display(now: now) else { return nil }
+        requestID = ticket.requestID
+        self.toolName = toolName
+        text = ticket.text
+        self.display = display
     }
 }
 
@@ -137,6 +161,13 @@ enum SidebarHitRegion {
     case workspace(Int)
     /// The "⋯" button on a workspace card — opens the workspace action menu.
     case workspaceMenu(Int)
+    /// Allow / Deny under a column holding a permission request.
+    case permissionDecision(
+        workspaceIndex: Int, columnIndex: Int, requestID: String, behavior: PermissionApproval.Behavior
+    )
+    /// The rest of that block: clicks there do nothing (a press meant for
+    /// a button that just moved must not reach the card below).
+    case permissionBlock(workspaceIndex: Int)
 }
 
 /// Full parameter set of SidebarView.update(...) — stashed while a
@@ -159,6 +190,7 @@ enum SidebarHoverTarget: Equatable {
     case workspaceCard(Int)
     case menuBadge(Int)
     case columnRow(workspaceIndex: Int, columnIndex: Int)
+    case approvalButton(workspaceIndex: Int, key: String)
 
     /// The card containing the target — hovering any sub-region keeps the
     /// whole card lit. Nil for targets outside the workspace list.
@@ -166,8 +198,13 @@ enum SidebarHoverTarget: Equatable {
         switch self {
         case .spaceHeader: return nil
         case .workspaceCard(let index), .menuBadge(let index): return index
-        case .columnRow(let workspaceIndex, _): return workspaceIndex
+        case .columnRow(let workspaceIndex, _), .approvalButton(let workspaceIndex, _): return workspaceIndex
         }
+    }
+
+    /// Key of an Allow / Deny button's view in `SidebarView.approvalButtonViews`.
+    static func approvalButtonKey(requestID: String, behavior: PermissionApproval.Behavior) -> String {
+        "\(requestID)|\(behavior.rawValue)"
     }
 }
 

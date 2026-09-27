@@ -12,6 +12,8 @@ struct SidebarWorkspaceCardRenderResult {
     /// Initially-clear backing view per column row (keyed by column index)
     /// for the row hover highlight.
     let columnHoverViews: [Int: NSView]
+    /// Allow / Deny buttons, keyed by `SidebarHoverTarget.approvalButtonKey`.
+    let approvalButtons: [String: SidebarBadgeView]
 }
 
 @MainActor
@@ -25,6 +27,7 @@ final class SidebarWorkspaceCardRenderer {
     private var hitAreas: [SidebarHitArea] = []
     private var menuBadge: SidebarBadgeView?
     private var columnHoverViews: [Int: NSView] = [:]
+    private var approvalButtons: [String: SidebarBadgeView] = [:]
 
     init(workspace: WorkspaceInfo, sidebarWidth: CGFloat, padding: CGFloat, yOffset: CGFloat) {
         self.workspace = workspace
@@ -82,7 +85,8 @@ final class SidebarWorkspaceCardRenderer {
             hitAreas: hitAreas,
             cardHoverView: cardHover,
             menuBadge: menuBadge,
-            columnHoverViews: columnHoverViews
+            columnHoverViews: columnHoverViews,
+            approvalButtons: approvalButtons
         )
     }
 
@@ -329,6 +333,16 @@ final class SidebarWorkspaceCardRenderer {
             ))
 
             currentY -= SidebarExpandedMetrics.columnRowAdvance
+            if let approval = column.permissionApproval {
+                let block = SidebarApprovalBlockRenderer(
+                    approval: approval, workspaceIndex: workspace.index, columnIndex: column.index,
+                    x: padding, width: sidebarWidth - padding * 2, top: currentY
+                ).render()
+                views += block.views
+                hitAreas += block.hitAreas
+                approvalButtons.merge(block.buttons) { _, new in new }
+                currentY = block.bottomY
+            }
         }
 
         return currentY

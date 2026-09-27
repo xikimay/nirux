@@ -109,6 +109,8 @@ struct AgentPermissionRequest: Hashable, Sendable {
     /// answered (a denial fires no hook). Only the column's status trusts
     /// that; the Telegram gate waits for proof.
     var mayBeAnswered = false
+    /// The hook receiver waits for a sidebar decision on this request.
+    var approval: PermissionApprovalTicket?
 
     init(
         toolName: String?,
@@ -148,6 +150,10 @@ struct AgentHookOutcome: Equatable {
     /// The event reports a request already reported: the delayed
     /// `permission_prompt` notification after its PermissionRequest.
     var isRepeat = false
+    /// Requests whose receiver still waits for a sidebar decision that
+    /// the event closed by other means (answered at the terminal, turn or
+    /// session over): release them, nothing will be decided.
+    var abandonedApprovals: [AgentPermissionRequest] = []
 }
 
 /// Display-safe text from agent payloads (notification messages, tool
@@ -230,6 +236,59 @@ enum AgentToolInput {
             }
         }
         return AgentText.clean(value, maxLength: maxSummaryLength)
+    }
+
+    /// The exact text a sidebar approval shows, or nil when the sidebar
+    /// can't offer one. Only tools whose whole meaning is one short value
+    /// qualify: a command, a URL, a search query, a file to read (by its
+    /// absolute or `~/` path, never relative to a directory the card
+    /// doesn't show). Edits and writes (whose change can't be shown),
+    /// Grep/Glob (whose excerpt omits the path) and MCP tools answer in the
+    /// terminal. The value must also reach the screen unchanged
+    /// (`isExactDisplay`): approving then means approving exactly the text
+    /// on screen.
+    static func approvalText(toolName: String, input: [String: Any], home: String?) -> String? {
+        let value: String?
+        switch toolName {
+        case "Bash", "PowerShell":
+            // Leaving the sandbox changes what the command may reach; the
+            // terminal dialog says so, the sidebar would not. Only an
+            // explicit "no" counts: any other value may mean yes.
+            switch input["dangerouslyDisableSandbox"] {
+            case nil: break
+            case let flag as Bool where !flag: break
+            case let flag as String where flag == "false": break
+            default: return nil
+            }
+            value = input["command"] as? String
+        case "Read":
+            guard let path = input["file_path"] as? String, path.hasPrefix("/") else { return nil }
+            if let home, !home.isEmpty, path.hasPrefix(home + "/") {
+                value = "~/" + path.dropFirst(home.count + 1)
+            } else {
+                value = path
+            }
+        case "WebFetch":
+            value = input["url"] as? String
+        case "WebSearch":
+            value = input["query"] as? String
+        default:
+            return nil
+        }
+        guard let value, isExactDisplay(value) else { return nil }
+        return value
+    }
+
+    /// Printable ASCII on one line, with no leading, trailing or doubled
+    /// space, at most `maxSummaryLength` characters: every character then
+    /// takes one visible cell of the sidebar's monospaced text, with no
+    /// hidden newline, look-alike, wide or right-to-left glyph.
+    static func isExactDisplay(_ text: String) -> Bool {
+        !text.isEmpty
+            && text.utf8.count <= maxSummaryLength
+            && text.utf8.allSatisfy { (0x20...0x7E).contains($0) }
+            && !text.hasPrefix(" ") && !text.hasSuffix(" ")
+            && !text.contains("  ")
     }
 
     /// Stable across processes (each hook runs its own receiver, so no

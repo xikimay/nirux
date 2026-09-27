@@ -21,6 +21,7 @@ extension NiruxShellView {
             }
         }
         let visibleIndices = visibleWorkspaceIndices
+        let approvalHolds = releaseApprovalsNotHeld()
         let infos = visibleIndices.map { index in
             let workspace = workspaces[index]
             let isActive = index == activeWSIndex
@@ -41,6 +42,7 @@ extension NiruxShellView {
                     foregroundProcess: foregroundProcess,
                     isUserFocused: isUserFocused
                 ) ?? .idle
+                let permissionApproval = sidebarApproval(for: col, hold: approvalHolds[ObjectIdentifier(col)])
                 return ColumnInfo(
                     index: colIndex,
                     processName: foregroundProcess?.name,
@@ -55,7 +57,8 @@ extension NiruxShellView {
                     editorIsDirty: col.editorColumn?.isDirty ?? false,
                     agentElapsedSeconds: col.pty?.agentTurnStartedAt
                         .map { Date().timeIntervalSince($0) },
-                    attentionReason: agentStatus == .needsAttention ? col.pty?.agentAttentionReason : nil
+                    attentionReason: agentStatus == .needsAttention ? col.pty?.agentAttentionReason : nil,
+                    permissionApproval: permissionApproval
                 )
             }
             return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,

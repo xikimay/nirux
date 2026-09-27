@@ -315,6 +315,29 @@ final class PtySession: @unchecked Sendable {
     /// even while the column is focused and reads as idle.
     var pendingAgentDialog: AgentPermissionRequest? { state.machine.pendingDialogs.first }
 
+    /// The request the sidebar can answer, or whose answer is on its way.
+    func sidebarApproval(now: TimeInterval) -> AgentPermissionRequest? {
+        state.machine.sidebarApproval(now: now)
+    }
+
+    func markApprovalSent(
+        requestID: String,
+        behavior: PermissionApproval.Behavior,
+        now: TimeInterval
+    ) -> AgentPermissionRequest? {
+        state.machine.markApprovalSent(requestID: requestID, behavior: behavior, now: now)
+    }
+
+    func takeUndecidedApprovals(
+        where shouldTake: (AgentPermissionRequest) -> Bool = { _ in true }
+    ) -> [AgentPermissionRequest] {
+        state.machine.takeUndecidedApprovals(where: shouldTake)
+    }
+
+    func dropApproval(requestID: String) -> AgentPermissionRequest? {
+        state.machine.dropApproval(requestID: requestID)
+    }
+
     /// The user's login shell ($SHELL) when it's a mainstream
     /// POSIX-compatible one, else zsh. Restricted to an allowlist because
     /// command-backed columns launch it with zsh-style `-i -l -c` flags

@@ -56,7 +56,7 @@ extension SidebarView {
             return
         }
         resetRenderState()
-        guard isExpanded else { setNeedsDisplay(bounds); return }
+        guard isExpanded else { approvalButtonArming.removeAll(); setNeedsDisplay(bounds); return }
 
         rebuildBottomIndicators()
 
@@ -121,6 +121,7 @@ extension SidebarView {
         }
 
         refreshHoverTargetFromMouse()
+        refreshApprovalArming()
         let clip = contentScrollView.contentView
         let activeIndex = activeWorkspaceIndex
         let activeChanged = activeIndex != lastFollowedActiveIndex
@@ -187,6 +188,7 @@ extension SidebarView {
         cardHoverViews.removeAll()
         menuBadgeViews.removeAll()
         columnHoverViews.removeAll()
+        approvalButtonViews.removeAll()
         spaceHeaderHoverView = nil
         spaceHeaderBadge = nil
         hoveredTarget = nil
@@ -704,6 +706,7 @@ extension SidebarView {
         cardHoverViews[workspace.index] = result.cardHoverView
         if let badge = result.menuBadge { menuBadgeViews[workspace.index] = badge }
         columnHoverViews[workspace.index] = result.columnHoverViews
+        approvalButtonViews.merge(result.approvalButtons) { _, new in new }
         return result.bottomY
     }
 

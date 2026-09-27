@@ -126,6 +126,11 @@ final class NiruxShellView: NSView {
             name: .niruxSidebarActivityEntryActivated,
             object: sidebar
         )
+        sidebar.onPermissionDecision = { [weak self] wsIndex, colIndex, requestID, behavior in
+            self?.decidePermission(
+                workspaceIndex: wsIndex, columnIndex: colIndex, requestID: requestID, behavior: behavior
+            )
+        }
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
             if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }
@@ -380,6 +385,9 @@ final class NiruxShellView: NSView {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.gitRefresh.isSuspended = true
+                // Nobody sees the buttons now: a background subagent's
+                // dialog must not wait on them (the heartbeat stops too).
+                if AgentHookCenter.shared.approvalsEnabled { self.updateSidebar() }
                 self.stopHeartbeat()
                 self.stopPilotRefresh()
                 self.forEachEditorColumn { $0.pauseFileWatch() }

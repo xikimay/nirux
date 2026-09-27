@@ -27,6 +27,8 @@ final class AgentHookCenter {
         /// App active AND focused column of the active workspace (or any
         /// focused column in pilot mode) — see resolveAgentColumn.
         let isUserFocused: Bool
+        /// Whether the sidebar may hold the column's permission requests.
+        let approvalHold: PermissionApprovalHold
     }
 
     struct AppliedEvent {
@@ -44,6 +46,12 @@ final class AgentHookCenter {
     /// what it asked of the user (from the column's state when it has one,
     /// else from the event alone).
     var onEventReceived: ((AgentHookEvent, Resolution?, AgentHookOutcome) -> Void)?
+    /// Sidebar approvals (Settings → Experimental). Off, every request a
+    /// receiver still holds for a decision is released.
+    var approvalsEnabled = false
+    /// Where sidebar decisions go; tests point it at a temporary directory.
+    var approvalChannel: () -> PermissionApprovalChannel = { .standard }
+    private var lastApprovalSweep: TimeInterval = 0
 
     private var dirSource: DispatchSourceFileSystemObject?
     private var fileSource: DispatchSourceFileSystemObject?
@@ -173,8 +181,10 @@ final class AgentHookCenter {
     /// `snapshot` is taken on the first routed event and shared by the rest
     /// of the drain — one process-table scan per burst, not per event.
     private func dispatch(_ event: AgentHookEvent, snapshot: inout ProcessSnapshot?) -> AppliedEvent? {
+        var event = event
         let resolution = event.agentUUID.flatMap { resolver?($0) }
         var claudeRestoreChanged = false
+        var isApprovalEligible = false
         if let resolution, let pty = resolution.column.pty {
             let processes = snapshot ?? ProcessSnapshot()
             snapshot = processes
@@ -183,24 +193,47 @@ final class AgentHookCenter {
             case .claude:
                 // `claude -p` runs PermissionRequest hooks with no dialog to
                 // show, then denies the call itself: nobody is asked.
-                if event.name == .permissionRequest, Self.isHeadlessClaude(foregroundProcess) { return nil }
+                if event.name == .permissionRequest, Self.isHeadlessClaude(foregroundProcess) {
+                    releaseHeldRequest(event)
+                    return nil
+                }
                 switch resolution.column.admitClaudeHook(event, foregroundProcess: foregroundProcess, snapshot: processes) {
                 case .rejected:
                     // Not the column's agent (a nested `claude -p` inheriting
                     // its UUID, a `claude` under Codex) or a session it left.
+                    releaseHeldRequest(event)
                     return nil
                 case .accepted:
                     break
                 case .restoreChanged:
                     claudeRestoreChanged = true
                 }
+                isApprovalEligible = event.name == .permissionRequest && event.approvalRequestID != nil
+                    && PermissionApproval.isDisplayable(toolName: event.toolName, text: event.approvalText)
+                    && resolution.column.isApprovalEligible(event, foregroundProcess: foregroundProcess, snapshot: processes)
             case .codex:
                 if Self.isNestedCodexHook(foregroundName: foregroundProcess?.name) { return nil }
             }
         }
+        if event.name == .permissionRequest, event.approvalRequestID != nil,
+           !Self.keepsApproval(
+               eligible: approvalsEnabled && isApprovalEligible,
+               hold: resolution?.approvalHold ?? .never,
+               isSubagent: event.agentID != nil,
+               deadline: event.approvalDeadline,
+               now: Date().timeIntervalSince1970
+           ) {
+            releaseHeldRequest(event)
+            event.approvalRequestID = nil
+            event.approvalDeadline = nil
+            event.approvalText = nil
+        }
         let outcome = resolution?.column.pty.map {
             $0.applyAgentHook(event, isUserFocused: resolution?.isUserFocused ?? false)
         } ?? AgentStatusMachine.standaloneOutcome(for: event)
+        for request in outcome.abandonedApprovals {
+            release(request, agentUUID: event.agentUUID)
+        }
         onEventReceived?(event, resolution, outcome)
         if outcome.firedAttention, let resolution {
             resolution.column.notifyAgentAttention(reason: outcome.attention)
@@ -208,6 +241,59 @@ final class AgentHookCenter {
         return resolution.map {
             AppliedEvent(event: event, resolution: $0, claudeRestoreChanged: claudeRestoreChanged)
         }
+    }
+
+    /// Whether the sidebar holds a request its receiver waits on:
+    /// `eligible` (the option is on, and the column's own `claude` asked
+    /// for the column's session), the column's card can show the buttons
+    /// (see `PermissionApprovalHold`), and the wait is not about to end.
+    nonisolated static func keepsApproval(
+        eligible: Bool,
+        hold: PermissionApprovalHold,
+        isSubagent: Bool,
+        deadline: TimeInterval?,
+        now: TimeInterval
+    ) -> Bool {
+        guard eligible, hold.holds(isSubagent: isSubagent), let deadline else { return false }
+        return now < deadline - PermissionApproval.sendMargin
+    }
+
+    /// Clear decisions no receiver claimed, at most once a minute.
+    func sweepApprovalsIfDue(now: TimeInterval = Date().timeIntervalSince1970) {
+        guard approvalsEnabled, now - lastApprovalSweep >= 60 else { return }
+        lastApprovalSweep = now
+        approvalChannel().sweep()
+    }
+
+    /// Tell the receiver of a held PermissionRequest to stop waiting: the
+    /// sidebar won't answer it.
+    private func releaseHeldRequest(_ event: AgentHookEvent) {
+        guard event.name == .permissionRequest, let requestID = event.approvalRequestID else { return }
+        sendRelease(
+            requestID: requestID, sessionID: event.sessionID, agentUUID: event.agentUUID,
+            deadline: event.approvalDeadline
+        )
+    }
+
+    func release(_ request: AgentPermissionRequest, agentUUID: String?) {
+        guard let ticket = request.approval else { return }
+        sendRelease(
+            requestID: ticket.requestID, sessionID: request.sessionID, agentUUID: agentUUID,
+            deadline: ticket.deadline
+        )
+    }
+
+    private func sendRelease(requestID: String, sessionID: String?, agentUUID: String?, deadline: TimeInterval?) {
+        let now = Date().timeIntervalSince1970
+        // A receiver past its deadline is gone: nothing to release.
+        guard let deadline, now < deadline else { return }
+        approvalChannel().send(PermissionApprovalDecision(
+            requestID: requestID,
+            sessionID: sessionID ?? "",
+            agentUUID: agentUUID ?? "",
+            behavior: .release,
+            issuedAt: now
+        ))
     }
 
     nonisolated static func isHeadlessClaude(_ process: ForegroundProcess?) -> Bool {

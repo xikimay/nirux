@@ -4,7 +4,7 @@ import AppKit
 
 extension NiruxApp {
     static let settingsWidth: CGFloat = 520
-    static let settingsHeight: CGFloat = 680
+    static let settingsHeight: CGFloat = 750
 
     @objc func showSettings(_ sender: Any?) {
         if let existing = settingsPanel {
@@ -38,7 +38,9 @@ extension NiruxApp {
         settingsLaunchModePopup = modePopup
         settingsNoFlickerCheckbox = noFlickerCheck
         settingsCodexLaunchModePopup = buildCodexSection(in: background, width: width, height: height)
-        settingsMissionHandoffsCheckbox = buildExperimentalSection(in: background, width: width, height: height)
+        let experimental = buildExperimentalSection(in: background, width: width, height: height)
+        settingsMissionHandoffsCheckbox = experimental.missionHandoffs
+        settingsSidebarApprovalsCheckbox = experimental.sidebarApprovals
         let telegramControls = buildTelegramSection(in: background, width: width, height: height)
         settingsTelegramEnabledCheckbox = telegramControls.enabled
         settingsTelegramTokenField = telegramControls.token
@@ -144,7 +146,11 @@ extension NiruxApp {
         return modePopup
     }
 
-    private func buildExperimentalSection(in background: NSView, width: CGFloat, height: CGFloat) -> NSButton {
+    private func buildExperimentalSection(
+        in background: NSView,
+        width: CGFloat,
+        height: CGFloat
+    ) -> (missionHandoffs: NSButton, sidebarApprovals: NSButton) {
         let sectionLabel = NSTextField(labelWithString: "Experimental")
         sectionLabel.font = .systemFont(ofSize: 12, weight: .medium)
         sectionLabel.textColor = NSColor.white.withAlphaComponent(0.6)
@@ -158,7 +164,7 @@ extension NiruxApp {
         checkbox.state = Persistence.load()?.settings?.missionHandoffsEnabled == true ? .on : .off
         background.addSubview(checkbox)
 
-        let hint = NSTextField(labelWithString:
+        let hint = NSTextField(wrappingLabelWithString:
             "Allows worktree agents to exchange questions, answers, and completion results. "
             + "New terminals pick up changes.")
         hint.font = .systemFont(ofSize: 11)
@@ -167,7 +173,23 @@ extension NiruxApp {
         hint.frame = NSRect(x: 24, y: height - 624, width: width - 48, height: 28)
         background.addSubview(hint)
 
-        return checkbox
+        let approvals = NSButton(checkboxWithTitle: "Answer Claude permissions from the sidebar", target: nil, action: nil)
+        approvals.contentTintColor = NSColor.white.withAlphaComponent(0.85)
+        approvals.font = .systemFont(ofSize: 12)
+        approvals.frame = NSRect(x: 22, y: height - 660, width: width - 44, height: 20)
+        approvals.state = NiruxShellView.currentSidebarApprovalsEnabled() ? .on : .off
+        background.addSubview(approvals)
+
+        let approvalsHint = NSTextField(wrappingLabelWithString:
+            "Allow or deny once for columns you are not looking at: short commands, reads, "
+            + "web fetches and searches, shown in full. Never \"always allow\".")
+        approvalsHint.font = .systemFont(ofSize: 11)
+        approvalsHint.textColor = NSColor.white.withAlphaComponent(0.3)
+        approvalsHint.maximumNumberOfLines = 2
+        approvalsHint.frame = NSRect(x: 24, y: height - 694, width: width - 48, height: 28)
+        background.addSubview(approvalsHint)
+
+        return (checkbox, approvals)
     }
 
     private struct TelegramSettingsControls {
@@ -311,6 +333,7 @@ extension NiruxApp {
     private func persistSettingsFromPanel(telegramOnly: Bool = false) -> Bool {
         let noFlicker = settingsNoFlickerCheckbox?.state == .on
         let missionHandoffsEnabled = settingsMissionHandoffsCheckbox?.state == .on
+        let sidebarApprovalsEnabled = settingsSidebarApprovalsCheckbox?.state == .on
         let telegramEnabled = settingsTelegramEnabledCheckbox?.state == .on
         let enteredToken = settingsTelegramTokenField?.stringValue
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -343,6 +366,7 @@ extension NiruxApp {
                 }
                 settings.claudeNoFlicker = noFlicker
                 settings.missionHandoffsEnabled = missionHandoffsEnabled
+                settings.sidebarApprovalsEnabled = sidebarApprovalsEnabled
             }
             settings.telegramRemoteAccessEnabled = telegramEnabled
             settings.telegramNotifyOnCompletion = settingsTelegramCompletionCheckbox?.state != .off
@@ -373,6 +397,7 @@ extension NiruxApp {
             if missionHandoffsEnabled {
                 MissionEventCenter.shared.deliverPendingEvents()
             }
+            applySidebarApprovals(enabled: sidebarApprovalsEnabled)
         }
         telegramRemoteAccessController?.reloadFromPersistence()
         if let tokenSaveError {
@@ -389,6 +414,18 @@ extension NiruxApp {
             : "Stored in macOS Keychain — leave blank to keep"
         refreshTelegramSettingsState()
         return true
+    }
+
+    /// Turning the option off hands every held request back to its
+    /// terminal dialog.
+    private func applySidebarApprovals(enabled: Bool) {
+        let hooks = AgentHookCenter.shared
+        let wasEnabled = hooks.approvalsEnabled
+        hooks.applySidebarApprovals(enabled: enabled)
+        if wasEnabled, !hooks.approvalsEnabled {
+            shell?.releaseAllPermissionApprovals()
+            shell?.updateSidebar()
+        }
     }
 
     @objc func settingsTelegramPair(_ sender: NSButton) {
@@ -463,6 +500,7 @@ extension NiruxApp {
         settingsNoFlickerCheckbox = nil
         settingsCodexLaunchModePopup = nil
         settingsMissionHandoffsCheckbox = nil
+        settingsSidebarApprovalsCheckbox = nil
         settingsTelegramEnabledCheckbox = nil
         settingsTelegramTokenField = nil
         settingsTelegramCompletionCheckbox = nil

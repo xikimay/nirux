@@ -406,6 +406,29 @@ final class ColumnState {
         return admission
     }
 
+    /// Whether the sidebar may answer this PermissionRequest (#23, #28):
+    /// fired by the column's own `claude` for the session bound to it.
+    func isApprovalEligible(
+        _ event: AgentHookEvent,
+        foregroundProcess: ForegroundProcess?,
+        snapshot: ProcessSnapshot
+    ) -> Bool {
+        guard let foregroundProcess, let sessionID = event.sessionID, !sessionID.isEmpty else { return false }
+        let emitter = ClaudeSessionTracker.Emitter.placing(
+            event.emitterProcess,
+            foreground: foregroundProcess,
+            shellPID: pty?.shellPID ?? 0,
+            snapshot: snapshot
+        )
+        return claudeSessionTracker.approvableSessionID(emitter: emitter, foregroundProcess: foregroundProcess)
+            == sessionID
+    }
+
+    /// The session the column's `claude` confirmed, if it still runs.
+    func confirmedClaudeSessionID(foregroundProcess: ForegroundProcess?) -> String? {
+        foregroundProcess.flatMap { claudeSessionTracker.confirmedSessionID(of: $0) }
+    }
+
     func persistedClaudeRestore(foregroundProcess: ForegroundProcess?) -> ClaudeSessionTracker.Restore? {
         claudeSessionTracker.restore(for: foregroundProcess)
     }

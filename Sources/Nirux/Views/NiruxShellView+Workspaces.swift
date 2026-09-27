@@ -179,7 +179,10 @@ extension NiruxShellView {
                 workspace: workspace,
                 column: workspace.columns[colIndex],
                 columnIndex: colIndex,
-                isUserFocused: isUserFocused
+                isUserFocused: isUserFocused,
+                approvalHold: approvalHold(
+                    workspaceIndex: wsIndex, columnIndex: colIndex, listed: Set(visibleWorkspaceIndices)
+                )
             )
         }
         return nil

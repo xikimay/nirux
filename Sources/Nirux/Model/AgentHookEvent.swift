@@ -16,6 +16,9 @@ struct AgentHookEvent: Codable, Equatable {
         case sessionStart, userPromptSubmit, preToolUse, notification, stop, sessionEnd
         case permissionRequest, postToolUse, subagentStop
         case turnComplete // codex
+        /// Not a Claude hook: the receiver reports what became of a
+        /// PermissionRequest it held for a sidebar decision.
+        case approvalResolved
     }
 
     let kind: Kind
@@ -60,6 +63,14 @@ struct AgentHookEvent: Codable, Equatable {
     /// events only (see `carriesTranscriptPath`): enough to follow the
     /// column's session usage without growing every tool event's line.
     let transcriptPath: String?
+    /// Sidebar approval (see `PermissionApproval`): on a PermissionRequest,
+    /// the request ID and deadline (epoch seconds) the receiver waits
+    /// under; on approvalResolved, the request and what became of it.
+    var approvalRequestID: String?
+    var approvalDeadline: TimeInterval?
+    /// The call's exact text, as the receiver checked it.
+    var approvalText: String?
+    var approvalOutcome: PermissionApproval.Outcome?
     /// Receiver-side timestamp (epoch seconds) — the emitter's clock and
     /// timezone are irrelevant.
     let timestamp: TimeInterval
@@ -176,6 +187,10 @@ struct AgentHookEvent: Codable, Equatable {
         agentID: String? = nil,
         notificationType: String? = nil,
         transcriptPath: String? = nil,
+        approvalRequestID: String? = nil,
+        approvalDeadline: TimeInterval? = nil,
+        approvalText: String? = nil,
+        approvalOutcome: PermissionApproval.Outcome? = nil,
         timestamp: TimeInterval = 0
     ) {
         self.kind = kind
@@ -193,7 +208,34 @@ struct AgentHookEvent: Codable, Equatable {
         self.agentID = agentID
         self.notificationType = notificationType
         self.transcriptPath = transcriptPath
+        self.approvalRequestID = approvalRequestID
+        self.approvalDeadline = approvalDeadline
+        self.approvalText = approvalText
+        self.approvalOutcome = approvalOutcome
         self.timestamp = timestamp
+    }
+
+    /// The receiver's report on the sidebar approval of `request`.
+    static func approvalResolved(
+        _ request: AgentHookEvent,
+        outcome: PermissionApproval.Outcome,
+        now: TimeInterval
+    ) -> AgentHookEvent {
+        AgentHookEvent(
+            kind: request.kind,
+            name: .approvalResolved,
+            agentUUID: request.agentUUID,
+            workspaceID: request.workspaceID,
+            sessionID: request.sessionID,
+            emitterProcess: request.emitterProcess,
+            cwd: request.cwd,
+            detail: request.toolName,
+            toolName: request.toolName,
+            agentID: request.agentID,
+            approvalRequestID: request.approvalRequestID,
+            approvalOutcome: outcome,
+            timestamp: now
+        )
     }
 }
 
@@ -204,6 +246,10 @@ struct AgentHookEvent: Codable, Equatable {
 /// sync hook surfaces inside the agent's UI.
 enum AgentHookCLI {
     static func run(kind: AgentHookEvent.Kind, payload: String?) -> Int32 {
+        // Claude runs each hook under a shell it kills when it gives up on
+        // the hook (an interrupted turn): this process is then reparented.
+        // Read first, before anything slow.
+        let parent = getppid()
         let raw: [String: Any]
         if kind == .codex {
             guard let payload,
@@ -221,16 +267,87 @@ enum AgentHookCLI {
         let env = ProcessInfo.processInfo.environment
         guard isFromNiruxTerminal(env: env) else { return 0 }
         let emitterProcess = ProcessInstance.hookEmitter(for: kind)
-        guard let event = AgentHookEvent(
+        let now = Date().timeIntervalSince1970
+        guard var event = AgentHookEvent(
             kind: kind,
             payload: raw,
             env: env,
-            now: Date().timeIntervalSince1970,
+            now: now,
             emitterProcess: emitterProcess
         ) else { return 0 }
 
+        let channel = PermissionApprovalChannel.standard
+        let wait = event.name == .permissionRequest && parent > 1
+            ? PermissionApprovalWait.prepare(payload: raw, env: env, now: now) { channel.isAppListening() }
+            : nil
+        event.approvalRequestID = wait?.requestID
+        event.approvalDeadline = wait?.deadline
+        event.approvalText = wait?.text
         append(event)
+        guard let wait else { return 0 }
+
+        let outcome = waitForDecision(wait, on: channel, parent: parent)
+        // Reported before the decision reaches Claude, so it precedes the
+        // events the decision causes (PostToolUse) in the queue.
+        append(.approvalResolved(event, outcome: outcome, now: Date().timeIntervalSince1970))
+        let behavior: PermissionApproval.Behavior? = switch outcome {
+        case .allow: .allow
+        case .deny: .deny
+        case .release, .expired, .invalid: nil
+        }
+        if let behavior, let output = PermissionApproval.hookOutput(for: behavior) {
+            try? FileHandle.standardOutput.write(contentsOf: output)
+        }
         return 0
+    }
+
+    /// Waits on a monotonic clock, so a wall-clock step never stretches
+    /// the wait; stops early once Claude abandons the hook or the app that
+    /// would answer is gone (checked about once a second). Claude abandons
+    /// a hook with SIGTERM (then SIGKILL): caught, so the report still
+    /// goes out and the app drops the request at once.
+    private static func waitForDecision(
+        _ wait: PermissionApprovalWait,
+        on channel: PermissionApprovalChannel,
+        parent: pid_t
+    ) -> PermissionApproval.Outcome {
+        let terminated = SignalFlag()
+        signal(SIGTERM, SIG_IGN)
+        let termination = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+        termination.setEventHandler { terminated.raise() }
+        termination.resume()
+        defer { termination.cancel() }
+
+        let start = clock_gettime_nsec_np(CLOCK_MONOTONIC)
+        var checks = 0
+        return wait.waitForDecision(
+            on: channel,
+            now: { wait.startedAt + Double(clock_gettime_nsec_np(CLOCK_MONOTONIC) - start) / 1e9 },
+            sleep: { Thread.sleep(forTimeInterval: $0) },
+            isAbandoned: {
+                checks += 1
+                if terminated.isRaised || getppid() != parent { return true }
+                return checks % 10 == 0 && !channel.isAppListening()
+            }
+        )
+    }
+
+    /// Set from a signal handler's queue, read by the waiting loop.
+    private final class SignalFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var raised = false
+
+        func raise() {
+            lock.lock()
+            raised = true
+            lock.unlock()
+        }
+
+        var isRaised: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return raised
+        }
     }
 
     /// Only Nirux terminals export NIRUX_AGENT_UUID. An event without it

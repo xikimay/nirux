@@ -15,6 +15,8 @@ final class SidebarView: NSView {
     override var mouseDownCanMoveWindow: Bool { true }
     var onWorkspaceClicked: ((Int) -> Void)?
     var onColumnClicked: ((Int, Int) -> Void)?  // (workspaceIndex, columnIndex)
+    /// Allow / Deny clicked: (workspaceIndex, columnIndex, request ID, decision).
+    var onPermissionDecision: ((Int, Int, String, PermissionApproval.Behavior) -> Void)?
     var onDiffStatsClicked: ((Int) -> Void)?
     var onWorkspaceAction: ((WorkspaceSidebarAction, Int) -> Void)?
     /// Drag-reorder drop: (store index of dragged workspace, target
@@ -90,6 +92,9 @@ final class SidebarView: NSView {
     var cardHoverViews: [Int: NSView] = [:]
     var menuBadgeViews: [Int: SidebarBadgeView] = [:]
     var columnHoverViews: [Int: [Int: NSView]] = [:]
+    var approvalButtonViews: [String: SidebarBadgeView] = [:]
+    /// Kept across rebuilds: see `refreshApprovalArming`.
+    var approvalButtonArming: [String: SidebarApprovalButtonArming] = [:]
     var spaceHeaderHoverView: NSView?
     /// "⋯" badge in the space header — brightens with the header hover.
     var spaceHeaderBadge: SidebarBadgeView?
@@ -129,6 +134,7 @@ final class SidebarView: NSView {
         contentScrollView.documentView = contentDocumentView
         contentScrollView.isHidden = true
         addSubview(contentScrollView)
+        observeScrollingForApprovalArming()
     }
 
     @available(*, unavailable)
@@ -335,6 +341,10 @@ final class SidebarView: NSView {
                     trackWorkspaceDrag(workspaceIndex: workspaceIndex, rowFrame: area.frame, startPoint: docLocation)
                     return
                 }
+                if case .permissionDecision = area.region {
+                    trackApprovalClick(area.region, event: event)
+                    return
+                }
                 handleHit(area.region, event: event)
                 return
             }
@@ -430,6 +440,17 @@ final class SidebarView: NSView {
             clearHover()
             setHoverTarget(.columnRow(workspaceIndex: workspaceIndex, columnIndex: columnIndex))
             NSCursor.pointingHand.set()
+        case .permissionDecision(let workspaceIndex, _, let requestID, let behavior):
+            clearHover()
+            setHoverTarget(.approvalButton(
+                workspaceIndex: workspaceIndex,
+                key: SidebarHoverTarget.approvalButtonKey(requestID: requestID, behavior: behavior)
+            ))
+            NSCursor.pointingHand.set()
+        case .permissionBlock(let workspaceIndex):
+            clearHover()
+            setHoverTarget(.workspaceCard(workspaceIndex))
+            NSCursor.arrow.set()
         }
     }
 
@@ -458,6 +479,8 @@ final class SidebarView: NSView {
             let point = convert(event.locationInWindow, from: nil)
             workspaceActionMenu(workspaceIndex: workspaceIndex, columnIndex: nil)
                 .popUp(positioning: nil, at: point, in: self)
+        case .permissionDecision, .permissionBlock:
+            break // decisions go through trackApprovalClick; the block is inert
         }
     }
 
@@ -564,9 +587,11 @@ final class SidebarView: NSView {
             let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
             for area in hitAreas where area.frame.contains(docLocation) {
                 switch area.region {
-                case .column(let workspaceIndex, let columnIndex):
+                case .column(let workspaceIndex, let columnIndex),
+                     .permissionDecision(let workspaceIndex, let columnIndex, _, _):
                     return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
-                case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex):
+                case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
+                     .permissionBlock(let workspaceIndex):
                     return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: nil)
                 case .spaceHeader, .link:
                     continue
