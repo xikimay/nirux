@@ -122,4 +122,14 @@ final class AgentHookEventTests: XCTestCase {
 
         XCTAssertNil(decoded.emitterProcess)
     }
+
+    func testReceiverOnlyAcceptsNiruxTerminals() {
+        XCTAssertTrue(AgentHookCLI.isFromNiruxTerminal(env: env))
+        XCTAssertFalse(AgentHookCLI.isFromNiruxTerminal(env: [:]), "agent outside Nirux")
+        XCTAssertFalse(AgentHookCLI.isFromNiruxTerminal(env: ["NIRUX_AGENT_UUID": ""]))
+        XCTAssertFalse(
+            AgentHookCLI.isFromNiruxTerminal(env: ["NIRUX_WORKSPACE_ID": "ws-1"]),
+            "the column UUID is what routes an event"
+        )
+    }
 }

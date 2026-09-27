@@ -124,8 +124,11 @@ final class WorkspaceStore {
         return index
     }
 
+    /// Workspaces left once the closes in flight finish.
+    var remainingWorkspaceCount: Int { workspaces.filter { !$0.isClosing }.count }
+
     func fallbackIndexAfterClosingWorkspace(at index: Int) -> Int? {
-        let visible = visibleWorkspaceIndices.filter { $0 != index }
+        let visible = visibleWorkspaceIndices.filter { $0 != index && !workspaces[$0].isClosing }
         return visible.last(where: { $0 < index }) ?? visible.first ?? fallbackGlobalIndex(excluding: index)
     }
 
@@ -247,7 +250,7 @@ final class WorkspaceStore {
     }
 
     private func fallbackGlobalIndex(excluding index: Int) -> Int? {
-        workspaces.indices.first { $0 != index }
+        workspaces.indices.first { $0 != index && !workspaces[$0].isClosing }
     }
 
     private func uniqueProfileName(_ base: String, excluding excludedID: String? = nil) -> String {

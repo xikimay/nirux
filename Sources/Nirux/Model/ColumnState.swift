@@ -87,6 +87,8 @@ final class ColumnState {
     /// named stops the width cycler snaps to.
     var widthFraction: CGFloat = ColumnWidth.half.fraction
     private(set) var pty: PtySession?
+    /// Close in flight: ⌘W removes the column after its exit animation.
+    var isClosing = false
     var onCwdChanged: ((String) -> Void)?
     var onTitleChanged: (() -> Void)?
     /// Fires when the agent asks for attention (hook-routed turn end /

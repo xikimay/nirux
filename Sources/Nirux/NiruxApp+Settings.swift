@@ -28,6 +28,7 @@ extension NiruxApp {
         panel.isOpaque = true
         panel.hasShadow = true
         panel.appearance = NSAppearance(named: .darkAqua)
+        panel.delegate = self
 
         let background = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
         background.wantsLayer = true
@@ -73,7 +74,9 @@ extension NiruxApp {
             modePopup.addItem(withTitle: mode.displayName)
             modePopup.lastItem?.representedObject = mode.rawValue
         }
-        let current = Persistence.load()?.settings?.claudeLaunchMode ?? .default
+        // Show the mode a launch would actually use, so an untouched Save
+        // can't silently change it.
+        let current = NiruxShellView.currentClaudeLaunchMode()
         if let idx = ClaudeLaunchMode.allCases.firstIndex(of: current) {
             modePopup.selectItem(at: idx)
         }
@@ -94,7 +97,7 @@ extension NiruxApp {
         background.addSubview(noFlickerCheck)
 
         let claudeHint = NSTextField(labelWithString:
-            "Launch mode: passed as --permission-mode (or --dangerously-skip-permissions for Bypass).\n"
+            "Launch mode: --permission-mode (--dangerously-skip-permissions for Skip all).\n"
             + "No-flicker: sets CLAUDE_CODE_NO_FLICKER=1.")
         claudeHint.font = .systemFont(ofSize: 11)
         claudeHint.textColor = NSColor.white.withAlphaComponent(0.3)
@@ -123,15 +126,15 @@ extension NiruxApp {
             modePopup.addItem(withTitle: mode.displayName)
             modePopup.lastItem?.representedObject = mode.rawValue
         }
-        let current = Persistence.load()?.settings?.codexLaunchMode ?? CodexLaunchMode.niruxDefault
+        let current = NiruxShellView.currentCodexLaunchMode()
         if let idx = CodexLaunchMode.allCases.firstIndex(of: current) {
             modePopup.selectItem(at: idx)
         }
         background.addSubview(modePopup)
 
         let codexHint = NSTextField(labelWithString:
-            "Full Auto = no sandbox + non-blocking + web search.\n"
-            + "Workspace Write = old sandboxed mode.")
+            "Default = no flags; Codex's own config applies.\n"
+            + "Full Auto = no sandbox, never asks, web search. Workspace Write = sandboxed.")
         codexHint.font = .systemFont(ofSize: 11)
         codexHint.textColor = NSColor.white.withAlphaComponent(0.3)
         codexHint.maximumNumberOfLines = 2
@@ -208,7 +211,7 @@ extension NiruxApp {
 
         let token = NSSecureTextField(frame: NSRect(x: 104, y: height - 354, width: width - 128, height: 24))
         token.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        token.placeholderString = (try? TelegramTokenStore.load()) != nil
+        token.placeholderString = (try? telegramTokenLoader()) != nil
             ? "Stored in macOS Keychain — leave blank to keep"
             : "Paste the token from @BotFather"
         background.addSubview(token)
@@ -303,21 +306,9 @@ extension NiruxApp {
         closeSettingsPanel()
     }
 
-    private func persistSettingsFromPanel() -> Bool {
-        let claudeMode: ClaudeLaunchMode = {
-            if let raw = settingsLaunchModePopup?.selectedItem?.representedObject as? String,
-               let mode = ClaudeLaunchMode(rawValue: raw) {
-                return mode
-            }
-            return .default
-        }()
-        let codexMode: CodexLaunchMode = {
-            if let raw = settingsCodexLaunchModePopup?.selectedItem?.representedObject as? String,
-               let mode = CodexLaunchMode(rawValue: raw) {
-                return mode
-            }
-            return CodexLaunchMode.niruxDefault
-        }()
+    /// `telegramOnly` (pairing) leaves the other sections' drafts unsaved, so
+    /// Cancel or closing the window still discards them.
+    private func persistSettingsFromPanel(telegramOnly: Bool = false) -> Bool {
         let noFlicker = settingsNoFlickerCheckbox?.state == .on
         let missionHandoffsEnabled = settingsMissionHandoffsCheckbox?.state == .on
         let telegramEnabled = settingsTelegramEnabledCheckbox?.state == .on
@@ -325,16 +316,13 @@ extension NiruxApp {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let existingToken: String?
         do {
-            existingToken = try TelegramTokenStore.load()
-            if !enteredToken.isEmpty {
-                guard TelegramBotToken.isPlausible(enteredToken) else {
-                    showSettingsError("The Telegram bot token does not match BotFather's token format.")
-                    return false
-                }
-                try TelegramTokenStore.save(enteredToken)
-            }
+            existingToken = try telegramTokenLoader()
         } catch {
             showSettingsError("Could not update the Telegram token in Keychain: \(error.localizedDescription)")
+            return false
+        }
+        if !enteredToken.isEmpty, !TelegramBotToken.isPlausible(enteredToken) {
+            showSettingsError("The Telegram bot token does not match BotFather's token format.")
             return false
         }
         let effectiveToken = enteredToken.isEmpty ? existingToken : enteredToken
@@ -344,10 +332,19 @@ extension NiruxApp {
         }
         var state = Persistence.load() ?? PersistedState(workspaces: [], activeWorkspaceIndex: 0)
         var settings = state.settings ?? PersistedSettings()
-        settings.claudeLaunchMode = claudeMode
-        settings.claudeNoFlicker = noFlicker
-        settings.codexLaunchMode = codexMode
-        settings.missionHandoffsEnabled = missionHandoffsEnabled
+        if !telegramOnly {
+            // Without a readable popup selection, keep the saved mode.
+            if let raw = settingsLaunchModePopup?.selectedItem?.representedObject as? String,
+               let mode = ClaudeLaunchMode(rawValue: raw) {
+                settings.claudeLaunchMode = mode
+            }
+            if let raw = settingsCodexLaunchModePopup?.selectedItem?.representedObject as? String,
+               let mode = CodexLaunchMode(rawValue: raw) {
+                settings.codexLaunchMode = mode
+            }
+            settings.claudeNoFlicker = noFlicker
+            settings.missionHandoffsEnabled = missionHandoffsEnabled
+        }
         settings.telegramRemoteAccessEnabled = telegramEnabled
         settings.telegramNotifyOnCompletion = settingsTelegramCompletionCheckbox?.state != .off
         settings.telegramNotifyOnAttention = settingsTelegramAttentionCheckbox?.state != .off
@@ -358,12 +355,35 @@ extension NiruxApp {
             settings.telegramLastUpdateID = nil
         }
         state.settings = settings
-        Persistence.save(state)
-        shell?.workspaces.forEach { $0.missionHandoffsEnabled = missionHandoffsEnabled }
-        if missionHandoffsEnabled {
-            MissionEventCenter.shared.deliverPendingEvents()
+        guard Persistence.save(state) else {
+            showSettingsError("Could not write the settings file. Check the disk and try again.", title: "Settings")
+            return false
+        }
+        // Store a new token only once its pairing reset is on disk; otherwise
+        // a retry would see it as unchanged and keep the old bot's pairing.
+        var tokenSaveError: Error?
+        if !enteredToken.isEmpty, enteredToken != existingToken {
+            do {
+                try telegramTokenSaver(enteredToken)
+            } catch {
+                tokenSaveError = error
+            }
+        }
+        if !telegramOnly {
+            shell?.workspaces.forEach { $0.missionHandoffsEnabled = missionHandoffsEnabled }
+            if missionHandoffsEnabled {
+                MissionEventCenter.shared.deliverPendingEvents()
+            }
         }
         telegramRemoteAccessController?.reloadFromPersistence()
+        if let tokenSaveError {
+            refreshTelegramSettingsState()
+            showSettingsError(
+                "Other settings were saved, but the new Telegram token could not be stored in Keychain: "
+                    + tokenSaveError.localizedDescription
+            )
+            return false
+        }
         settingsTelegramTokenField?.stringValue = ""
         settingsTelegramTokenField?.placeholderString = effectiveToken == nil
             ? "Paste the token from @BotFather"
@@ -373,7 +393,7 @@ extension NiruxApp {
     }
 
     @objc func settingsTelegramPair(_ sender: NSButton) {
-        guard persistSettingsFromPanel() else { return }
+        guard persistSettingsFromPanel(telegramOnly: true) else { return }
         if telegramRemoteAccessController?.displayState.isPaired == true {
             telegramRemoteAccessController?.unpair()
         } else {
@@ -420,10 +440,10 @@ extension NiruxApp {
             || (display?.enabled == true && display?.hasToken == true)
     }
 
-    private func showSettingsError(_ message: String) {
+    private func showSettingsError(_ message: String, title: String = "Telegram Remote Access") {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Telegram Remote Access"
+        alert.messageText = title
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
         if let settingsPanel {
@@ -433,9 +453,14 @@ extension NiruxApp {
         }
     }
 
+    /// `windowWillClose` drops the references, for every way the panel closes.
     private func closeSettingsPanel() {
-
         settingsPanel?.close()
+    }
+
+    /// Drops the panel and its controls so the next `showSettings` rebuilds
+    /// from persisted state instead of re-showing abandoned edits.
+    private func clearSettingsPanelReferences() {
         settingsPanel = nil
         settingsLaunchModePopup = nil
         settingsNoFlickerCheckbox = nil
@@ -451,5 +476,13 @@ extension NiruxApp {
 
     @objc func settingsCancel(_ sender: NSButton) {
         closeSettingsPanel()
+    }
+}
+
+// Closing via the title bar discards edits, like Cancel.
+extension NiruxApp: NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        guard let panel = notification.object as? NSPanel, panel === settingsPanel else { return }
+        clearSettingsPanelReferences()
     }
 }
