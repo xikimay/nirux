@@ -74,10 +74,12 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         parentWindow = window
         spaceID = content.spaceID
         isWritable = content.loaded.isWritable
-        // A sheet hangs from the title bar: it must fit in the window and on
-        // the screen, or Save ends up under the Dock.
-        let screenHeight = (window.screen ?? NSScreen.main)?.visibleFrame.height ?? .greatestFiniteMagnitude
-        maxHeight = max(320, min(window.contentLayoutRect.height, screenHeight) - 40)
+        // A sheet hangs from the top of the window's content: it must end
+        // above the window's bottom and above the Dock, or Save ends up
+        // out of reach.
+        let top = window.frame.minY + window.contentLayoutRect.maxY
+        let visibleBottom = (window.screen ?? NSScreen.main)?.visibleFrame.minY ?? window.frame.minY
+        maxHeight = max(320, top - max(window.frame.minY, visibleBottom) - 40)
         let panel = buildPanel(content)
         self.panel = panel
         layoutPanel()
@@ -174,6 +176,8 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         let height = min(documentHeight + bottom, max(maxHeight, bottom + 120))
         panel.setContentSize(NSSize(width: Self.width, height: height))
         scrollView.frame = NSRect(x: 0, y: bottom, width: Self.width, height: height - bottom)
+        // No sideways scrolling when scroll bars take room of their own.
+        scrollView.documentView?.setFrameSize(NSSize(width: scrollView.contentSize.width, height: documentHeight))
         errorLabel.frame = NSRect(x: 24, y: Self.buttonsHeight - 4, width: Self.width - 48, height: errorHeight)
         cancelButton.frame = NSRect(x: Self.width - 222, y: 18, width: 96, height: 30)
         saveButton.frame = NSRect(x: Self.width - 120, y: 18, width: 96, height: 30)
@@ -255,6 +259,11 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         y = addLabel("Merge method", y: y, in: view)
         mergeMethodPopup.addItems(withTitles: BoardConfig.MergeMethod.allCases.map(Self.title(of:)))
         mergeMethodPopup.selectItem(at: BoardConfig.MergeMethod.allCases.firstIndex(of: saved?.mergeMethod ?? .merge) ?? 0)
+        if case .readOnly(.unsupportedMergeMethod(let method)) = content.loaded.status {
+            // What the file says, not the merge it reads as.
+            mergeMethodPopup.addItem(withTitle: "\(method) (not supported)")
+            mergeMethodPopup.selectItem(at: mergeMethodPopup.numberOfItems - 1)
+        }
         mergeMethodPopup.frame = NSRect(x: Self.fieldX, y: y - 1, width: 200, height: 26)
         view.addSubview(mergeMethodPopup)
         y += 28
@@ -315,7 +324,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         saveButton.isEnabled = isWritable
         container.addSubview(saveButton)
 
-        let panel = NSPanel(
+        let panel = BoardSettingsSheet(
             contentRect: container.frame,
             styleMask: [.titled, .fullSizeContentView],
             backing: .buffered,
@@ -328,6 +337,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         panel.isReleasedWhenClosed = false
         panel.autorecalculatesKeyViewLoop = true
         panel.contentView = container
+        panel.multilineView = checksView
         return panel
     }
 
@@ -535,6 +545,25 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         case .merge: return "Merge commit"
         case .squash: return "Squash"
         }
+    }
+}
+
+/// Return in the checks list adds a line: the Save button, the default
+/// button that answers Return in the other fields, mustn't take it first
+/// when AppKit offers Return as a key equivalent.
+final class BoardSettingsSheet: NSPanel {
+    weak var multilineView: NSTextView?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if Self.leavesToTextView(event, firstResponder: firstResponder, multilineView: multilineView) { return false }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    /// Return or Enter, without modifiers, while `multilineView` has the focus.
+    static func leavesToTextView(_ event: NSEvent, firstResponder: NSResponder?, multilineView: NSTextView?) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        guard let multilineView, firstResponder === multilineView, modifiers.isEmpty else { return false }
+        return event.charactersIgnoringModifiers == "\r" || event.charactersIgnoringModifiers == "\u{3}"
     }
 }
 

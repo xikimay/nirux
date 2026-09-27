@@ -509,7 +509,7 @@ and the journal:
     other than `merge` and `squash` (`rebase` included). The merge queue
     refuses to start with such a file, since the settings it doesn't know
     would be ignored (decided with the user on 2026-09-27). Rebase, for
-    instance, reads as `merge` on screen but never runs as `merge`;
+    instance, is shown as it is, read-only, and never runs as `merge`;
   - an unreadable file is copied aside (`board.corrupt.<time>-<random>.json`)
     when Save replaces it, not when it is read, so opening the form doesn't
     pile up copies. If the copy fails, the file stays as it is;
@@ -523,7 +523,8 @@ and the journal:
   repository, a base branch, at least one required check, timeouts in range,
   and a post-merge workflow chosen, a file or `"none"`. B2 and B3 read
   `BoardConfigStore(spaceID:).load().queueSettings`, which is nil otherwise
-  (`queueStartProblems` says why) and holds no optional value.
+  (`queueStartProblems` says why). Every value in it is set; a nil
+  `postMergeWorkflow` there means None.
   - GitHub ignores case in `owner/name`: compare
     `QueueSettings.gitHubRepository`, for "one queue per repository" and a
     PR's head repository.

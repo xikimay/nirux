@@ -241,6 +241,39 @@ final class BoardSettingsPanelTests: XCTestCase {
         }
     }
 
+    /// Save is the default button, which answers Return in the fields; in
+    /// the checks list Return adds a line, so the sheet never hands it to
+    /// Save as a key equivalent. (A window that is never shown doesn't press
+    /// its default button, so the rule is checked rather than a key press.)
+    @MainActor
+    func testReturnInTheChecksListIsLeftToTheList() throws {
+        try withShell { shell, space in
+            let form = try open(shell, space)
+            let panel = try XCTUnwrap(form.panel as? BoardSettingsSheet)
+            XCTAssertTrue(panel.defaultButtonCell === form.saveButton.cell, "Save is the default button")
+            XCTAssertTrue(panel.multilineView === form.checksView)
+            func key(_ characters: String, _ keyCode: UInt16, _ modifiers: NSEvent.ModifierFlags = []) throws -> NSEvent {
+                try XCTUnwrap(NSEvent.keyEvent(
+                    with: .keyDown, location: .zero, modifierFlags: modifiers,
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: panel.windowNumber,
+                    context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                    isARepeat: false, keyCode: keyCode
+                ))
+            }
+            let rule = BoardSettingsSheet.leavesToTextView
+            XCTAssertTrue(rule(try key("\r", 36), form.checksView, form.checksView))
+            XCTAssertTrue(rule(try key("\u{3}", 76), form.checksView, form.checksView))
+            XCTAssertFalse(rule(try key("\r", 36), form.baseBranchField, form.checksView), "a field saves")
+            XCTAssertFalse(rule(try key("\r", 36, .command), form.checksView, form.checksView))
+            XCTAssertFalse(rule(try key("a", 0), form.checksView, form.checksView))
+
+            panel.makeFirstResponder(form.checksView)
+            XCTAssertFalse(panel.performKeyEquivalent(with: try key("\r", 36)))
+            XCTAssertTrue(shell.boardSettingsPanel === form, "not saved")
+            try click(form.cancelButton)
+        }
+    }
+
     // MARK: - Files this build can't write
 
     @MainActor
@@ -285,6 +318,18 @@ final class BoardSettingsPanelTests: XCTestCase {
             XCTAssertEqual(form.baseBranchField.stringValue, "")
             XCTAssertEqual(form.checksView.string, "build")
             XCTAssertEqual(form.cancelButton.title, "Close")
+            try click(form.cancelButton)
+        }
+    }
+
+    @MainActor
+    func testAnUnsupportedMergeMethodIsShownAsItIs() throws {
+        try withShell { shell, space in
+            try write(#"{"repository": "acme/widgets", "mergeMethod": "rebase"}"#, for: space)
+            let form = try open(shell, space)
+            XCTAssertEqual(form.mergeMethodPopup.titleOfSelectedItem, "rebase (not supported)")
+            XCTAssertFalse(form.mergeMethodPopup.isEnabled)
+            XCTAssertFalse(form.saveButton.isEnabled)
             try click(form.cancelButton)
         }
     }

@@ -197,15 +197,18 @@ final class BoardConfigStoreTests: XCTestCase {
         XCTAssertNil(settings.postMergeWorkflow)
     }
 
-    /// Only a missing or null version is the current one. Any number above
-    /// it is newer; anything else can't be trusted, so it is unreadable and
-    /// copied aside before a Save replaces it.
+    /// A missing or null version, or a whole number up to the current one,
+    /// is the current one. Any number above it is newer; anything else can't
+    /// be trusted, so it is unreadable and copied aside before a Save
+    /// replaces it.
     func testASchemaVersionThatIsntAWholeNumberIsNeverTakenForTheCurrentOne() throws {
         let body = #""repository": "a/b", "baseBranch": "main", "postMergeWorkflow": "none""#
         for (version, expected) in [
             ("null", BoardConfigStore.Loaded.Status.loaded),
             ("1", .loaded),
             ("1.0", .loaded),
+            ("0", .loaded),
+            ("-1", .loaded),
             ("2.5", .readOnly(.newerSchema(2))),
             ("99999999999999999999", .readOnly(.newerSchema(Int.max))),
             ("\"2\"", .unreadable),
