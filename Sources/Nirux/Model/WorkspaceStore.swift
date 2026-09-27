@@ -132,9 +132,28 @@ final class WorkspaceStore {
     /// Workspaces left once the closes in flight finish.
     var remainingWorkspaceCount: Int { workspaces.filter { !$0.isClosing }.count }
 
+    /// The workspace to select when the one at `index` closes: the nearest
+    /// active card in its space's sidebar list, below it first, then above;
+    /// else the top active card of the first space that has one, in the
+    /// space order `reconcileSelection` follows. Inactive workspaces are
+    /// parked work: one takes over only when no active one is left, its own
+    /// space's first. Workspaces with a close in flight don't count.
     func fallbackIndexAfterClosingWorkspace(at index: Int) -> Int? {
-        let visible = visibleWorkspaceIndices.filter { $0 != index && !workspaces[$0].isClosing }
-        return visible.last(where: { $0 < index }) ?? visible.first ?? fallbackGlobalIndex(excluding: index)
+        guard workspaces.indices.contains(index) else { return nil }
+        let isOpen = { (candidate: Int) in candidate != index && !self.workspaces[candidate].isClosing }
+        let isActive = { (candidate: Int) in !self.workspaces[candidate].isInactive }
+        let profileID = workspaces[index].profileID
+        let list = visibleWorkspaceIndices(in: profileID)
+        let position = list.firstIndex(of: index) ?? list.count
+        let neighbours = (Array(list[position...]) + list[..<position].reversed()).filter(isOpen)
+        if let neighbour = neighbours.first(where: isActive) { return neighbour }
+        let otherSpaces = profiles.filter { $0.id != profileID }
+            .flatMap { visibleWorkspaceIndices(in: $0.id) }
+            .filter(isOpen)
+        return otherSpaces.first(where: isActive)
+            ?? neighbours.first
+            ?? otherSpaces.first
+            ?? workspaces.indices.first(where: isOpen)
     }
 
     @discardableResult
@@ -305,10 +324,6 @@ final class WorkspaceStore {
     private func firstProfileIDWithWorkspaces() -> String? {
         let profileIDs = Set(workspaces.map { $0.profileID })
         return profiles.first { profileIDs.contains($0.id) }?.id ?? workspaces.first?.profileID
-    }
-
-    private func fallbackGlobalIndex(excluding index: Int) -> Int? {
-        workspaces.indices.first { $0 != index && !workspaces[$0].isClosing }
     }
 
     private func uniqueProfileName(_ base: String, excluding excludedID: String? = nil) -> String {

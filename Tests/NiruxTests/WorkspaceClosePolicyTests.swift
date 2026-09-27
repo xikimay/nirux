@@ -158,10 +158,10 @@ final class WorkspaceClosePolicyTests: XCTestCase {
     @MainActor
     func testFallbackSelectionSkipsClosingWorkspaces() {
         let store = makeStore(["a", "b", "c"])
-        store.workspaces[0].isClosing = true
-        // Closing "b": the previous neighbour "a" is on its way out too.
-        XCTAssertEqual(store.fallbackIndexAfterClosingWorkspace(at: 1), 2)
         store.workspaces[2].isClosing = true
+        // Closing "b": the next neighbour "c" is on its way out too.
+        XCTAssertEqual(store.fallbackIndexAfterClosingWorkspace(at: 1), 0)
+        store.workspaces[0].isClosing = true
         XCTAssertNil(store.fallbackIndexAfterClosingWorkspace(at: 1))
     }
 }

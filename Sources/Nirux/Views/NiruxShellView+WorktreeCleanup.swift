@@ -382,7 +382,11 @@ extension NiruxShellView {
         if workspaceStore.remainingWorkspaceCount <= closing.count {
             addWorkspace(cwd: NSHomeDirectory())
         }
-        for workspace in closing {
+        // The selected one last: its successor is then picked among the
+        // workspaces left, in one hop.
+        let selected = activeWorkspace
+        let selectedLast = closing.filter { $0 !== selected } + closing.filter { $0 === selected }
+        for workspace in selectedLast {
             guard let index = workspaces.firstIndex(where: { $0 === workspace }) else { continue }
             closeWorkspace(at: index)
         }

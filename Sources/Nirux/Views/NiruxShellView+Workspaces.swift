@@ -193,7 +193,7 @@ extension NiruxShellView {
         return nil
     }
 
-    private func refreshAfterWorkspaceSelection(animated: Bool) {
+    func refreshAfterWorkspaceSelection(animated: Bool) {
         guard workspaces.indices.contains(activeWSIndex) else { return }
         workspaces[activeWSIndex].hasNotification = false
         relayout(animated: animated)
