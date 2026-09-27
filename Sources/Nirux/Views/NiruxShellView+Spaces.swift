@@ -49,6 +49,8 @@ extension NiruxShellView {
     func deleteSpace(profileID: String) {
         guard workspaceStore.deleteProfile(id: profileID) else { return }
         projectStore.markDeleted(profileID)
+        // Opened while the confirmation was up: its space is gone.
+        if boardSettingsPanel?.spaceID == profileID { boardSettingsPanel?.dismiss() }
         refreshAfterWorkspaceMutation()
     }
 }

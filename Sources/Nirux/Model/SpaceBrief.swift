@@ -164,7 +164,10 @@ enum SpaceBrief {
         return try? String(contentsOf: url, encoding: .utf8)
     }
 
-    private static func directory(spaceID: String, stateDirectory: URL) -> URL? {
+    /// `<state dir>/projects/<space id>/`, where a space keeps its brief and
+    /// its board config (BoardConfigStore). Nil for an id that isn't a
+    /// plain name.
+    static func directory(spaceID: String, stateDirectory: URL) -> URL? {
         // Space ids are UUIDs or "default"; refuse anything that could escape
         // the projects folder.
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))

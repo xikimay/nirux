@@ -1,6 +1,7 @@
 # Project Board
 
-Status: design, validated by the user on 2026-09-27. Nothing implemented.
+Status: design, validated by the user on 2026-09-27. B4 (the config) is
+implemented; the rest isn't.
 
 On the night of 2026-09-26, one Claude session coordinated about fifteen
 parallel pull requests by hand:
@@ -490,21 +491,63 @@ and the journal:
 | Key | Default | Notes |
 | --- | --- | --- |
 | `repository` | The push remote of the project's workspaces, when they share one | Asked for otherwise |
-| `baseBranch` | The repository's default branch | |
+| `baseBranch` | The repository's default branch, as the local checkout knows it | Asked for otherwise |
 | `requiredChecks` | `["test"]` | Check run names, or `Workflow / job`. A name missing on the PR fails closed |
 | `postMergeWorkflow` | None: must be set | A workflow file, or `"none"` to merge the next PR right after a merge |
 | `mergeMethod` | `merge` | `merge` or `squash`, among the methods the repository allows. Not `rebase`: its last commit's first parent isn't the base tip, so step 4's check can't hold |
-| timeouts | 30 min | |
+| timeouts | 30 min | `checksTimeoutMinutes`, `postMergeTimeoutMinutes`: 1 to 240 |
 
 - **Why not `projects.json`:** `ProjectStore` treats a file with unknown keys as
   read-only. A `board` key there would stop an older nightly from deleting
   spaces after a rollback. A separate file leaves `projects.json`, and
   rollbacks, as they are.
-- The file follows `ProjectStore`'s rules: lenient decoding; a newer
-  `schemaVersion` is read but never written; an unreadable file is set aside,
-  never overwritten.
-- **Editing:** "Board Settings…" in the board header, a small form. It also
-  opens the first time a board lacks a repository.
+- The file follows `ProjectStore`'s rules (`BoardConfigStore`):
+  - lenient decoding: a missing key gets its default, and invalid values are
+    kept as read, so a rewrite loses nothing;
+  - a file this build can't write back as it found it is read but never
+    written: a newer `schemaVersion`, keys it doesn't know, or a merge method
+    other than `merge` and `squash` (`rebase` included). The merge queue
+    refuses to start with such a file, since the settings it doesn't know
+    would be ignored (decided with the user on 2026-09-27). Rebase, for
+    instance, is shown as it is, read-only, and never runs as `merge`;
+  - an unreadable file is copied aside (`board.corrupt.<time>-<random>.json`)
+    when Save replaces it, not when it is read, so opening the form doesn't
+    pile up copies. If the copy fails, the file stays as it is;
+  - anything but a regular file (a folder, a link) or a file over 1 MB is
+    neither read nor replaced;
+  - Save refuses values `BoardConfig.problems` rejects, and a file another
+    Nirux saved since the form read it;
+  - writes are atomic, and the file is 0600. Deleting the space leaves it, like
+    the brief.
+- **The queue starts only** when the file is writable and complete: a
+  repository, a base branch, at least one required check, timeouts in range,
+  and a post-merge workflow chosen, a file or `"none"`. B2 and B3 read
+  `BoardConfigStore(spaceID:).load().queueSettings`, which is nil otherwise
+  (`queueStartProblems` says why). Every value in it is set; a nil
+  `postMergeWorkflow` there means None.
+  - GitHub ignores case in `owner/name`: compare
+    `QueueSettings.gitHubRepository`, for "one queue per repository" and a
+    PR's head repository.
+  - `gh --repo owner/name` follows `GH_HOST`, which a terminal may set: pass
+    `github.com/owner/name`.
+  - A base branch may hold `#` or `%`: percent-encode it in REST paths.
+- `BoardConfigStore.didSaveNotification` announces each save, with the
+  space's id, for the board to reload.
+- **Editing:** "Board Settings…" in the space's menu (B4), a small form in a
+  sheet. B1 adds it to the board header, and opens it the first time a board
+  lacks a repository.
+  - Fields show the saved values, else values read from the local checkouts,
+    never from the network: the repository every workspace in a repository
+    pushes to (github.com only, spelled as its remote spells it), and the
+    branch its remote's `HEAD` points to, if that branch is there. A pasted
+    github.com URL is saved as `owner/name`. Nothing is written before Save.
+  - The post-merge workflow is never preselected. The form lists the
+    `.github/workflows/*.yml|yaml` files of the base branch as that
+    repository's main checkout last fetched it (else of the checkout's own
+    files), None, and Other file… for a name typed by hand.
+  - Required checks go one per line: matrix job names hold commas.
+  - A read-only file is shown as it is, without suggestions, and Save is
+    disabled.
 
 ## 6. Data
 
