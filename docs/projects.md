@@ -146,6 +146,34 @@ Remote Control on).
 
 ## 2. Model and migration
 
+**Shipped: the first step.** Spaces keep their type (`WorkspaceProfile`: id,
+name, color) and their name in the UI ("Space"). What changed is how they are
+stored and managed:
+
+- **`projects.json`** (`ProjectStore`) holds schema version 1, the spaces and
+  the ids of deleted spaces. Decoding is lenient. A file from a newer schema is
+  read but never written; that is logged, with no banner yet.
+- **Backups:** the previous readable version is kept as `projects.json.bak`,
+  not the rotation and dailies of `state.json`. An unreadable file is copied
+  aside as `projects.corrupt.<time>.json`. If that copy fails, the file is
+  never overwritten.
+- **Migration and rollback** use the `projectsFileVersion` marker described
+  below. A missing file with the marker present is rebuilt from the mirror:
+  today the mirror holds every field a space has, so only a deletion could come
+  back, and only from an older `state.json` backup. This needs revisiting once
+  projects carry more than the mirror does.
+- **Empty spaces persist**, drawn as a ring in the switcher; selecting one opens
+  a workspace in it.
+- **Space menu:** "Space Color" and "Delete Space…". The deleted space's
+  workspaces move to the default space, and its brief stays on disk.
+- **Workspace card menu:** "Move to Space". The moved workspace's shells keep
+  their old `NIRUX_PROFILE_ID` until they restart, so a worktree they create
+  lands in the old space until routing (section 3) resolves the parent's
+  current project.
+- **Not yet:** archiving, anchors, defaults, and the `Project` type name.
+
+The rest of this section is the full design.
+
 ```swift
 struct Project: Codable, Equatable {
     var id: String              // = former WorkspaceProfile.id
@@ -355,8 +383,8 @@ never because a file, web page, tool output or another agent says so.
   agents where it is. An agent edits it only when the user asks, which also
   works from the phone through any Remote Control session. Like
   `NIRUX_PROFILE_ID`, the variable is fixed when the shell starts.
-- Until the Project model keeps empty spaces (PR 4), closing a space's last
-  workspace makes its brief unreachable from the UI. The file stays on disk.
+- Spaces persist once their last workspace closes (section 2), so a brief stays
+  reachable. Deleting a space leaves its brief on disk.
 - Left for later:
   - a size warning in the editor;
   - a brief chip on workspace cards;

@@ -230,7 +230,8 @@ extension NiruxShellView {
         guard profileAlreadySelected || workspaceStore.selectProfile(profileID) else { return }
         guard profileAlreadySelected || previousProfileID != activeProfileID else { return }
 
-        if activeWorkspace != nil {
+        // An empty space (spaces persist) gets a workspace when selected.
+        if !workspaceStore.visibleWorkspaceIndices.isEmpty {
             refreshAfterWorkspaceSelection(animated: false)
         } else {
             addWorkspace(title: activeProfile.name, cwd: NSHomeDirectory())
@@ -304,6 +305,9 @@ extension NiruxShellView {
         case .closeColumn(let columnIndex):
             closeColumn(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
             return
+        case .moveToProfile(let profileID):
+            // Its shells keep the old NIRUX_PROFILE_ID until they restart.
+            didChange = workspaceStore.moveWorkspace(at: workspaceIndex, toProfile: profileID)
         }
         guard didChange else { return }
         refreshAfterWorkspaceMutation()
@@ -327,7 +331,7 @@ extension NiruxShellView {
         refreshAfterWorkspaceMutation()
     }
 
-    private func refreshAfterWorkspaceMutation() {
+    func refreshAfterWorkspaceMutation() {
         relayout(animated: true)
         updateSidebar()
         focusActiveTerminal(in: window)

@@ -26,10 +26,9 @@ final class WorkspaceStore {
         profiles.first { $0.id == activeProfileID } ?? WorkspaceProfile.defaultProfile
     }
 
-    var navigableProfiles: [WorkspaceProfile] {
-        let profileIDsWithWorkspaces = Set(workspaces.map { $0.profileID })
-        return profiles.filter { profileIDsWithWorkspaces.contains($0.id) }
-    }
+    /// Every space, empty ones included: spaces persist (see `ProjectStore`),
+    /// and selecting an empty one opens a workspace in it.
+    var navigableProfiles: [WorkspaceProfile] { profiles }
 
     var visibleWorkspaceIndices: [Int] {
         visibleWorkspaceIndices(in: activeProfileID)
@@ -88,13 +87,13 @@ final class WorkspaceStore {
         return selectWorkspace(at: index)
     }
 
+    /// Selects a space. An empty one is selected with no active workspace:
+    /// the caller opens one in it.
     @discardableResult
     func selectProfile(_ profileID: String) -> Bool {
-        guard profiles.contains(where: { $0.id == profileID }),
-              let first = visibleWorkspaceIndices(in: profileID).first
-        else { return false }
+        guard profiles.contains(where: { $0.id == profileID }) else { return false }
         activeProfileID = profileID
-        activeWorkspaceID = workspaces[first].id
+        activeWorkspaceID = visibleWorkspaceIndices(in: profileID).first.map { workspaces[$0].id }
         return true
     }
 
@@ -203,6 +202,43 @@ final class WorkspaceStore {
         else { return false }
 
         profiles[index].name = uniqueProfileName(trimmed, excluding: id)
+        return true
+    }
+
+    /// Deletes a space. Its workspaces move to the default space, which can't
+    /// be deleted. Returns false for the default or an unknown space.
+    @discardableResult
+    func deleteProfile(id: String) -> Bool {
+        guard id != WorkspaceProfile.defaultID,
+              let index = profiles.firstIndex(where: { $0.id == id })
+        else { return false }
+        for workspace in workspaces where workspace.profileID == id {
+            workspace.profileID = WorkspaceProfile.defaultID
+        }
+        profiles.remove(at: index)
+        if activeProfileID == id { activeProfileID = WorkspaceProfile.defaultID }
+        reconcileSelection(preferActiveProfile: true)
+        return true
+    }
+
+    @discardableResult
+    func setProfileColor(id: String, colorHex: String) -> Bool {
+        guard let index = profiles.firstIndex(where: { $0.id == id }) else { return false }
+        profiles[index].colorHex = colorHex
+        return true
+    }
+
+    /// Moves a workspace to another space. The current space keeps its
+    /// selection when it still has workspaces; otherwise the selection
+    /// follows the workspace.
+    @discardableResult
+    func moveWorkspace(at index: Int, toProfile profileID: String) -> Bool {
+        guard workspaces.indices.contains(index),
+              profiles.contains(where: { $0.id == profileID }),
+              workspaces[index].profileID != profileID
+        else { return false }
+        workspaces[index].profileID = profileID
+        reconcileSelection(preferActiveProfile: true)
         return true
     }
 

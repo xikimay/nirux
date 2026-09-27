@@ -316,7 +316,8 @@ extension SidebarView {
                 colorHex: profile.colorHex,
                 isActive: profile.isActive,
                 hasAttention: profile.hasAttention,
-                label: nil
+                label: nil,
+                isEmpty: profile.workspaceCount == 0
             )
         }
         items.append(SidebarDotIndicatorItem(

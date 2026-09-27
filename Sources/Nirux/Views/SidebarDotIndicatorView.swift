@@ -92,8 +92,14 @@ final class SidebarDotIndicatorView: NSView {
                     ctx.fillEllipse(in: rect.insetBy(dx: -5, dy: -5))
                 }
                 let dimAlpha: CGFloat = isHovered ? 0.75 : 0.45
-                ctx.setFillColor((item.isActive ? color : color.withAlphaComponent(dimAlpha)).cgColor)
-                ctx.fillEllipse(in: rect)
+                if item.isEmpty && !item.isActive {
+                    ctx.setStrokeColor(color.withAlphaComponent(dimAlpha).cgColor)
+                    ctx.setLineWidth(1.5)
+                    ctx.strokeEllipse(in: rect.insetBy(dx: 0.75, dy: 0.75))
+                } else {
+                    ctx.setFillColor((item.isActive ? color : color.withAlphaComponent(dimAlpha)).cgColor)
+                    ctx.fillEllipse(in: rect)
+                }
                 if item.isActive {
                     ctx.setStrokeColor(color.withAlphaComponent(0.9).cgColor)
                     ctx.setLineWidth(1.5)

@@ -184,7 +184,7 @@ enum SpaceBrief {
         with until Nirux restarts them and they compact.
         Repository rules belong in CLAUDE.md / AGENTS.md. Keep it short: it is sent
         with every request. Text inside this comment is not sent.
-        A space goes away when its last workspace closes; this file stays here.
+        Deleting the space leaves this file here.
         -->
 
         """

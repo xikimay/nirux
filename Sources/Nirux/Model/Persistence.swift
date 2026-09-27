@@ -256,6 +256,7 @@ struct PersistedState: Codable {
     var workspaceProfiles: [WorkspaceProfile]?
     var activeProfileID: String?
     var activeWorkspaceID: String?
+    var projectsFileVersion: Int? // mirror/marker rules: see ProjectStore
 }
 
 /// Mirrors Claude Code's `--permission-mode` values plus the legacy

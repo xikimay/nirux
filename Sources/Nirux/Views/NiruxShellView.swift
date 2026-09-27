@@ -23,6 +23,7 @@ final class NiruxShellView: NSView {
     let edgeGlowBottom = EdgeGlowView(edge: .bottom)
 
     let workspaceStore = WorkspaceStore()
+    let projectStore = ProjectStore()
     var workspaces: [WorkspaceState] {
         get { workspaceStore.workspaces }
         set { workspaceStore.replaceWorkspaces(newValue) }
@@ -118,6 +119,8 @@ final class NiruxShellView: NSView {
         sidebar.onCreateProfile = { [weak self] in self?.createProfileFromActiveContext() }
         sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }
         sidebar.onEditProfileBrief = { [weak self] profileID in self?.editSpaceBrief(profileID: profileID) }
+        sidebar.onRecolorProfile = { [weak self] profileID, hex in self?.recolorSpace(profileID: profileID, colorHex: hex) }
+        sidebar.onDeleteProfile = { [weak self] profileID in self?.confirmDeleteSpace(profileID: profileID) }
         sidebar.onInactiveSectionCollapsedChange = { [weak self] _ in self?.saveState() }
         sidebar.onDiffStatsClicked = { [weak self] index in self?.openDiffInEditor(workspaceIndex: index) }
         sidebar.onOnboardingAction = { [weak self] action in self?.handleOnboardingAction(action) }

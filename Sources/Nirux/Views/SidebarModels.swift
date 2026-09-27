@@ -181,6 +181,7 @@ enum WorkspaceSidebarAction {
     case moveUp, moveDown, markActive, markInactive
     case close, rename, editContext, newWorkspace
     case closeColumn(columnIndex: Int)
+    case moveToProfile(String)
 }
 
 /// Hover highlight target in the expanded sidebar. Links have their own
@@ -219,4 +220,6 @@ struct SidebarDotIndicatorItem: Equatable {
     let isActive: Bool
     let hasAttention: Bool
     let label: String?
+    /// A space with no workspaces: drawn as a ring rather than a filled dot.
+    var isEmpty: Bool = false
 }
