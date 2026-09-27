@@ -18,13 +18,14 @@ final class StuckAgentTests: XCTestCase {
         key: String? = nil,
         agent: String? = nil,
         errorKind: String? = nil,
+        type: String? = nil,
         message: String? = nil,
         emitter: ProcessInstance? = nil
     ) -> AgentHookEvent {
         AgentHookEvent(
             kind: .claude, name: name, sessionID: "lead", emitterProcess: emitter,
             detail: message ?? tool, toolName: tool, toolSummary: summary, toolKey: key,
-            agentID: agent, errorKind: errorKind, timestamp: t0 + offset
+            agentID: agent, notificationType: type, errorKind: errorKind, timestamp: t0 + offset
         )
     }
 
@@ -39,12 +40,18 @@ final class StuckAgentTests: XCTestCase {
         _ = apply(event(.preToolUse, tool: "Bash"))
     }
 
+    /// The column's foreground process by name: the claude that fired the
+    /// events, or a shell.
+    private func front(_ name: String?) -> ForegroundProcess? {
+        name.map { ForegroundProcess(instance: claudeProcess, name: $0, arguments: [$0]) }
+    }
+
     private func alert(at offset: TimeInterval, foreground: String? = "claude") -> AgentAttentionReason? {
-        machine.takeStuckAlert(now: t0 + offset, waitThreshold: threshold, foregroundName: foreground)
+        machine.takeStuckAlert(now: t0 + offset, waitThreshold: threshold, foreground: front(foreground))
     }
 
     private func stuck(at offset: TimeInterval, foreground: String? = "claude") -> AgentStuckState? {
-        machine.stuckState(now: t0 + offset, waitThreshold: threshold, foregroundName: foreground)
+        machine.stuckState(now: t0 + offset, waitThreshold: threshold, foreground: front(foreground))
     }
 
     private func claude(_ instance: ProcessInstance? = nil) -> ForegroundProcess {
@@ -106,11 +113,38 @@ final class StuckAgentTests: XCTestCase {
     func testLongWaitOffWithoutThresholdOrClaudeInFront() {
         startTurn()
         _ = apply(event(.permissionRequest, at: 1, tool: "Bash", key: "k"))
-        XCTAssertNil(machine.stuckState(now: t0 + 9_999, waitThreshold: nil, foregroundName: "claude"))
-        XCTAssertNil(machine.takeStuckAlert(now: t0 + 9_999, waitThreshold: nil, foregroundName: "claude"))
+        XCTAssertNil(machine.stuckState(now: t0 + 9_999, waitThreshold: nil, foreground: front("claude")))
+        XCTAssertNil(machine.takeStuckAlert(now: t0 + 9_999, waitThreshold: nil, foreground: front("claude")))
         // Suspended behind a shell: its dialog says nothing about the shell.
         XCTAssertNil(stuck(at: 9_999, foreground: "zsh"))
         XCTAssertNil(alert(at: 9_999, foreground: "zsh"))
+    }
+
+    /// A keystroke went to the dialog: approved (the tool then runs,
+    /// silent, until PostToolUse) or denied with Esc (no hook at all).
+    func testDialogTypedIntoIsNotAWait() {
+        startTurn()
+        _ = apply(event(.permissionRequest, at: 1, tool: "Bash", key: "k"))
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 30))
+        XCTAssertNil(stuck(at: 3_600))
+        XCTAssertNil(alert(at: 3_600))
+
+        // Claude's reminder says the dialog still waits unanswered.
+        _ = apply(event(.notification, at: 3_700, type: "permission_prompt"))
+        XCTAssertNotNil(stuck(at: 3_701))
+    }
+
+    /// Events queued while Nirux was closed replay at launch: a dialog of
+    /// an earlier claude is not the one now in front.
+    func testDialogOlderThanTheClaudeInFrontIsNotAWait() {
+        startTurn()
+        _ = apply(event(.permissionRequest, at: 1, tool: "Bash", key: "k"))
+        let newer = ForegroundProcess(
+            instance: ProcessInstance(pid: 77, startedAt: t0 + 100), name: "claude", arguments: ["claude"]
+        )
+        XCTAssertNil(machine.stuckState(now: t0 + 3_600, waitThreshold: threshold, foreground: newer))
+        _ = apply(event(.stopFailure, at: 2, errorKind: "overloaded"))
+        XCTAssertNil(machine.stuckState(now: t0 + 3_600, waitThreshold: threshold, foreground: newer))
     }
 
     func testTurnFinishedIsNotAWait() {

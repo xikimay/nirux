@@ -683,20 +683,28 @@ struct AgentStatusMachine {
         midTurnExit = nil
     }
 
-    /// What keeps the agent from going on, if anything. `foregroundName`
-    /// is the column's foreground process now; `waitThreshold` nil turns
-    /// the long-wait check off.
-    func stuckState(now: TimeInterval, waitThreshold: TimeInterval?, foregroundName: String?) -> AgentStuckState? {
+    /// What keeps the agent from going on, if anything. `foreground` is
+    /// the column's foreground process now; `waitThreshold` nil turns the
+    /// long-wait check off.
+    func stuckState(now: TimeInterval, waitThreshold: TimeInterval?, foreground: ForegroundProcess?) -> AgentStuckState? {
         if let midTurnExit {
-            let agentInFront = foregroundName.map(Self.isRecognizedAgentProcess) ?? false
+            let agentInFront = foreground.map { Self.isRecognizedAgentProcess($0.name) } ?? false
             guard !agentInFront, now - midTurnExit.exitedAt >= Self.exitConfirmationDelay else { return nil }
             return .exitedMidTurn(midTurnExit)
         }
-        // A failure and dialogs are the foreground claude's: a suspended
-        // one's say nothing about what runs in front of it.
-        guard foregroundName == "claude" else { return nil }
-        if let turnFailure { return .stoppedOnError(turnFailure) }
-        if let waitThreshold, let dialog = openDialogs.first, now - dialog.requestedAt >= waitThreshold {
+        // A failure and dialogs are the foreground claude's own: not those
+        // of one suspended behind a shell, nor of an earlier claude (events
+        // queued while Nirux was closed replay at launch).
+        guard let foreground, foreground.name == "claude" else { return nil }
+        let startedAt = foreground.instance.startedAt
+        if let turnFailure, turnFailure.failedAt >= startedAt { return .stoppedOnError(turnFailure) }
+        // A keystroke since a dialog opened went to it: it was answered
+        // (the tool may then run long, silently) or denied with Esc, which
+        // fires no hook. Claude's reminder clears the keystroke once a
+        // dialog sits unanswered.
+        if let waitThreshold, let dialog = openDialogs.first(where: {
+            $0.requestedAt >= startedAt && $0.requestedAt >= lastKeystrokeAt
+        }), now - dialog.requestedAt >= waitThreshold {
             return .waiting(dialog.reason, since: dialog.requestedAt)
         }
         return nil
@@ -709,9 +717,9 @@ struct AgentStatusMachine {
     mutating func takeStuckAlert(
         now: TimeInterval,
         waitThreshold: TimeInterval?,
-        foregroundName: String?
+        foreground: ForegroundProcess?
     ) -> AgentAttentionReason? {
-        switch stuckState(now: now, waitThreshold: waitThreshold, foregroundName: foregroundName) {
+        switch stuckState(now: now, waitThreshold: waitThreshold, foreground: foreground) {
         case .exitedMidTurn(let exit)?:
             guard !exit.alerted else { return nil }
             midTurnExit?.alerted = true

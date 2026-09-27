@@ -229,8 +229,8 @@ final class StuckAgentSidebarTests: XCTestCase {
         XCTAssertEqual(exit.exitedAt, 106)
         XCTAssertEqual(exit.sessionID, "conv", "its conversation, to resume")
         XCTAssertEqual(ClaudeLaunchMode.detect(arguments: exit.arguments), .plan, "and the flags it ran with")
-        XCTAssertNil(pty.agentStuckState(now: 107, waitThreshold: nil, foregroundName: "zsh"), "SessionEnd may still come")
-        XCTAssertEqual(pty.agentStuckState(now: 110, waitThreshold: nil, foregroundName: "zsh"), .exitedMidTurn(exit))
+        XCTAssertNil(pty.agentStuckState(now: 107, waitThreshold: nil, foreground: shell), "SessionEnd may still come")
+        XCTAssertEqual(pty.agentStuckState(now: 110, waitThreshold: nil, foreground: shell), .exitedMidTurn(exit))
 
         // An agent in front again ends it.
         column.trackForegroundAgent(claude, snapshot: bothAlive, now: 112)

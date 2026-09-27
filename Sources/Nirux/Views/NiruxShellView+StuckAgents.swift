@@ -39,9 +39,8 @@ extension NiruxShellView {
         let workspace = place.workspace
         column.trackForegroundAgent(foregroundProcess, snapshot: snapshot, now: now)
         guard let pty = column.pty else { return }
-        let foregroundName = foregroundProcess?.name
         if let reason = pty.takeAgentStuckAlert(
-            now: now, waitThreshold: stuckAgentWaitThreshold, foregroundName: foregroundName
+            now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess
         ), !(place.isWatched && NSApp.isActive) {
             column.notifyAgentAttention(reason: reason)
             ActivityStore.shared.record(ActivityEntry(
@@ -55,7 +54,7 @@ extension NiruxShellView {
                 timestamp: now
             ))
         }
-        let stuck = pty.agentStuckState(now: now, waitThreshold: stuckAgentWaitThreshold, foregroundName: foregroundName)
+        let stuck = pty.agentStuckState(now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess)
         if case .exitedMidTurn(let exit)? = stuck {
             column.showAgentExit(exit)
         } else {
@@ -71,7 +70,7 @@ extension NiruxShellView {
         now: TimeInterval
     ) -> SidebarStuckState? {
         guard let pty = column.pty else { return nil }
-        switch pty.agentStuckState(now: now, waitThreshold: stuckAgentWaitThreshold, foregroundName: foregroundProcess?.name) {
+        switch pty.agentStuckState(now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess) {
         case .waiting(let reason, let since)?:
             return .waiting(reason, duration: PilotSidebarRenderer.shortDuration(now - since))
         case .stoppedOnError(let failure)?:

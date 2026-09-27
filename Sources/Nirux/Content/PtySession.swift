@@ -340,16 +340,16 @@ final class PtySession: @unchecked Sendable {
 
     // MARK: Stuck agents (see `AgentStuckState`)
 
-    func agentStuckState(now: TimeInterval, waitThreshold: TimeInterval?, foregroundName: String?) -> AgentStuckState? {
-        state.machine.stuckState(now: now, waitThreshold: waitThreshold, foregroundName: foregroundName)
+    func agentStuckState(now: TimeInterval, waitThreshold: TimeInterval?, foreground: ForegroundProcess?) -> AgentStuckState? {
+        state.machine.stuckState(now: now, waitThreshold: waitThreshold, foreground: foreground)
     }
 
     func takeAgentStuckAlert(
         now: TimeInterval,
         waitThreshold: TimeInterval?,
-        foregroundName: String?
+        foreground: ForegroundProcess?
     ) -> AgentAttentionReason? {
-        state.machine.takeStuckAlert(now: now, waitThreshold: waitThreshold, foregroundName: foregroundName)
+        state.machine.takeStuckAlert(now: now, waitThreshold: waitThreshold, foreground: foreground)
     }
 
     var agentMidTurnExit: AgentMidTurnExit? { state.machine.midTurnExit }
