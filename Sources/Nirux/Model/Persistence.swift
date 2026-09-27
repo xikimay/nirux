@@ -142,9 +142,10 @@ enum ClaudeLaunchMode: String, Codable, CaseIterable {
 }
 
 /// Curated presets over Codex's two CLI axes (`--ask-for-approval` and
-/// `--sandbox`). Full Auto removes Codex's sandbox, enables web search, and
-/// runs without approval prompts. Workspace Write preserves the old sandboxed
-/// non-blocking mode.
+/// `--sandbox`). Default passes no flags, so Codex's own config applies; it is
+/// also what launches use when nothing is saved. Full Auto removes Codex's
+/// sandbox, enables web search, and runs without approval prompts. Workspace
+/// Write keeps the sandbox and lets Codex ask before escalating.
 enum CodexLaunchMode: String, Codable, CaseIterable {
     case `default`
     case fullAccess
@@ -152,8 +153,6 @@ enum CodexLaunchMode: String, Codable, CaseIterable {
     case readOnly
     case fullAuto
     case bypass
-
-    static let niruxDefault: CodexLaunchMode = .fullAuto
 
     var displayName: String {
         switch self {
