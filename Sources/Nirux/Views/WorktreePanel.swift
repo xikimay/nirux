@@ -9,8 +9,8 @@ struct GitResult {
 /// Raycast-style floating panel for creating a git worktree + workspace
 @MainActor
 final class WorktreePanel {
-    /// (branch, worktreePath, repoRoot, branch checked out there — `create`
-    /// can reuse an existing folder on another branch).
+    /// (branch, worktreePath, repoRoot, branch read back from the checkout,
+    /// which names the Claude session; see `SessionName`).
     var onCreated: ((String, String, String, String?) -> Void)?
 
     private var panel: NSPanel?

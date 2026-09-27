@@ -105,39 +105,35 @@ than the prompt-based title. The name is `<label> · <project>`, for example
 `feat/projects · Nirux`, with the distinctive part first because phone lists
 truncate.
 
-- **Label**, first match wins:
-  1. The workspace title, if the user renamed the workspace. Today's
-     `titleIsManual` can't tell this apart: every new workspace gets a
-     placeholder title ("ws N") marked manual, and the flag isn't persisted.
-     This PR adds a persisted "renamed by the user" flag.
-  2. The branch of a worktree Nirux created. It comes from the `new-worktree`
-     request and is persisted with the workspace, since the request is gone
-     after a restart. When `GitWorktree.create` reuses an existing folder, the
-     actual branch is read once, in the background step of worktree creation.
-     This covers every handover launch.
-  3. Otherwise no `-n`. This includes the main checkout, even on a feature
-     branch: its branch changes, and a name would freeze a stale title.
+- **Label:** the branch of the worktree Nirux just created, read back from the
+  checkout in the background step of worktree creation. This covers every
+  handover launch. Any other session gets no `-n`, including the main checkout
+  even on a feature branch: its branch changes, and a name would freeze a stale
+  title. A workspace title the user chose as the label is left for the
+  follow-up below: `launchAgent` only runs on a brand-new workspace, which has
+  no such title yet.
 - **Project** is the space name until Projects exist. It is left out for the
   default space while it still has its default name ("main"), and when it
   equals the label.
-- **Where:** `claudeCommand` gains a shell-quoted `name` argument. Fresh launches
-  go through `launchAgent` (new workspaces and worktrees) and `openClaudeCode`
-  (new columns).
+- **Where:** `claudeCommand` gains a `sessionName` argument, passed as one
+  shell-quoted `--name=<name>` so a name starting with "-" can't read as a flag,
+  and ignored with `--resume`. Only `launchAgent` passes it. A column opened with
+  "Open Claude Code" has no prompt yet, so Claude titles it from the user's
+  first message; a fixed name would make every such column read the same.
+- **Cleaning:** whitespace and control characters collapse to single spaces;
+  `\` (fish quoting), `!` (tcsh history expansion) and bidi controls are
+  dropped. The branch is capped at 60 characters and the space at 30.
 - **Duplicates:** if another live session already has the name (two Claude
   columns in one workspace), Claude Code keeps the first and gives the second a
   suffixed variant ([sessions][sessions]).
 - **Restores don't pass `-n`**, so they never overwrite a name set with
   `/rename` or from the phone. With this PR alone, sessions already titled
   ".claude-handover.md" keep that title.
-- **Handover prompt.** The prompt `launchAgent` types today starts with "Read
-  .claude-handover.md". It will start with the branch instead, for example
-  "feat/projects: read .claude-handover.md…". That also helps sessions that get
-  no name, including Codex's.
 - **Codex:** no launch-time name flag (only `/rename` in the TUI), and its
   sessions don't reach claude.ai. Nothing more for Codex.
-- **One source for the name.** The app computes the name whenever its inputs
-  change (workspace rename, project rename) and writes it to a small file per
-  column in the state directory. `-n` and the follow-up hook both read it.
+- **Left for later:** starting the handover prompt with the branch (it would
+  help unnamed sessions, Codex's included), and a per-column name file the
+  follow-up hook could read.
 
 **Follow-up PR: restored sessions.** A SessionStart hook can return
 `sessionTitle`, with the same effect as `/rename`, on `startup`, `resume` and
