@@ -643,20 +643,29 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         let generation = diffLoadGeneration
         let cwd = workspaceCwd
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let original = Self.gitOriginalContent(of: path, cwd: cwd, mode: mode)
+            let original = Self.gitOriginalContent(
+                of: path,
+                cwd: cwd,
+                mode: mode,
+                maxBytes: EditorFileLimits.maxEditableBytes
+            )
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 guard self.diffLoadGeneration == generation else { return }
                 guard self.activePath == path else { return } // stale request
-                if original == nil {
-                    NSLog("[EditorColumn] no git \(mode.rawValue) content for \(path) — file untracked, git missing, or branch base unavailable")
+                switch original {
+                case nil:
+                    NSLog("%@", "[EditorColumn] no git \(mode.rawValue) content for \(path) — file untracked, git missing, or branch base unavailable")
                     NSSound.beep()
-                    return
+                case .tooLarge(let byteCount):
+                    NSLog("%@", "[EditorColumn] git \(mode.rawValue) original of \(path) too large to diff (\(byteCount) bytes)")
+                    NSSound.beep()
+                case .text(let original):
+                    self.diffActivePath = path
+                    self.diffActiveMode = mode
+                    self.refreshTabBar()
+                    self.sendBridge(["type": "enterDiff", "path": path, "original": original])
                 }
-                self.diffActivePath = path
-                self.diffActiveMode = mode
-                self.refreshTabBar()
-                self.sendBridge(["type": "enterDiff", "path": path, "original": original ?? ""])
             }
         }
     }
@@ -1005,28 +1014,36 @@ private struct DiffGroupTab {
 
 // MARK: - Git / diff content helpers (nonisolated statics)
 
-private extension EditorColumn {
+extension EditorColumn {
+    /// The comparison side of a diff.
+    enum DiffOriginal: Equatable, Sendable {
+        case text(String)
+        /// Over the caller's size limit, so never loaded.
+        case tooLarge(byteCount: UInt64)
+    }
+
     /// Reads the comparison-side content for the requested diff mode.
     /// Nonisolated so we can call it from a background queue.
-    private nonisolated static func gitOriginalContent(
+    nonisolated static func gitOriginalContent(
         of absPath: String,
         cwd: String,
-        mode: EditorDiffMode
-    ) -> String? {
+        mode: EditorDiffMode,
+        maxBytes: UInt64
+    ) -> DiffOriginal? {
         guard let rel = relativeGitPath(of: absPath, cwd: cwd) else { return nil }
         switch mode {
         case .head:
-            if let content = gitContent(relativePath: rel, ref: "HEAD", cwd: cwd) {
-                return content
+            if let original = gitContent(relativePath: rel, ref: "HEAD", cwd: cwd, maxBytes: maxBytes) {
+                return original
             }
             // New or untracked files have no blob in HEAD. Treat them as an
             // empty original so clicking a change always opens a useful diff.
-            return FileManager.default.fileExists(atPath: absPath) ? "" : nil
+            return FileManager.default.fileExists(atPath: absPath) ? .text("") : nil
         case .branch:
-            guard let base = branchBaseRef(cwd: cwd) else { return nil }
+            guard let base = GitCommand.branchBaseRef(cwd: cwd) else { return nil }
             // A file added on the branch has no blob at the merge-base; an
             // empty original gives Monaco the expected "whole file added" diff.
-            return gitContent(relativePath: rel, ref: base, cwd: cwd) ?? ""
+            return gitContent(relativePath: rel, ref: base, cwd: cwd, maxBytes: maxBytes) ?? .text("")
         }
     }
 
@@ -1054,27 +1071,33 @@ private extension EditorColumn {
         mode: EditorDiffMode
     ) -> [String: Any]? {
         guard let rel = relativeGitPath(of: absPath, cwd: cwd) else { return nil }
-        if let largePayload = largeDiffPlaceholderPayload(of: absPath, relativePath: rel) {
-            return largePayload
+        if let byteCount = fileByteCount(path: absPath), byteCount > maxDiffCollectionFileBytes {
+            return largeDiffPlaceholderPayload(of: absPath, relativePath: rel, byteCount: byteCount)
         }
-        guard let original = gitOriginalContent(of: absPath, cwd: cwd, mode: mode) else { return nil }
-        let modified = fileContent(at: absPath) ?? ""
-        return [
-            "path": rel,
-            "name": rel,
-            "original": original,
-            "modified": modified
-        ]
+        // The original can be large even when the file is not: deleted or
+        // shrunk since `mode`'s base.
+        switch gitOriginalContent(of: absPath, cwd: cwd, mode: mode, maxBytes: maxDiffCollectionFileBytes) {
+        case nil:
+            return nil
+        case .tooLarge(let byteCount):
+            return largeDiffPlaceholderPayload(of: absPath, relativePath: rel, byteCount: byteCount)
+        case .text(let original):
+            let modified = fileContent(at: absPath) ?? ""
+            return [
+                "path": rel,
+                "name": rel,
+                "original": original,
+                "modified": modified
+            ]
+        }
     }
 
     private nonisolated static func largeDiffPlaceholderPayload(
         of absPath: String,
-        relativePath rel: String
-    ) -> [String: Any]? {
-        guard let byteCount = fileByteCount(path: absPath),
-              byteCount > maxDiffCollectionFileBytes
-        else { return nil }
-        NSLog("[EditorColumn] replacing large visual diff file \(absPath) (\(byteCount) bytes)")
+        relativePath rel: String,
+        byteCount: UInt64
+    ) -> [String: Any] {
+        NSLog("%@", "[EditorColumn] replacing large visual diff file \(absPath) (\(byteCount) bytes)")
         return [
             "path": rel,
             "name": rel,
@@ -1096,39 +1119,21 @@ private extension EditorColumn {
         return content
     }
 
-    private nonisolated static func gitContent(relativePath rel: String, ref: String, cwd: String) -> String? {
-        guard let result = runGit(["show", "\(ref):\(rel)"], cwd: cwd),
-              result.status == 0
+    /// The blob at `ref:rel`, or only its size when over `maxBytes`. Nil
+    /// when there is no such blob (or git fails). `cat-file blob` prints
+    /// exactly the bytes `-s` counted; `show` would list a tree or print a
+    /// submodule commit's whole patch.
+    private nonisolated static func gitContent(
+        relativePath rel: String,
+        ref: String,
+        cwd: String,
+        maxBytes: UInt64
+    ) -> DiffOriginal? {
+        let object = "\(ref):\(rel)"
+        guard let byteCount = GitCommand.output(["cat-file", "-s", object], cwd: cwd)
+            .flatMap({ UInt64($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
         else { return nil }
-        return result.output
-    }
-
-    private nonisolated static func branchBaseRef(cwd: String) -> String? {
-        for candidate in ["@{upstream}", "origin/main", "origin/master", "main", "master"] {
-            guard let result = runGit(["merge-base", "HEAD", candidate], cwd: cwd),
-                  result.status == 0
-            else { continue }
-            let sha = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !sha.isEmpty { return sha }
-        }
-        return nil
-    }
-
-    private nonisolated static func runGit(_ arguments: [String], cwd: String) -> (status: Int32, output: String)? {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = arguments
-        process.currentDirectoryURL = URL(fileURLWithPath: cwd)
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return nil
-        }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+        guard byteCount <= maxBytes else { return .tooLarge(byteCount: byteCount) }
+        return GitCommand.output(["cat-file", "blob", object], cwd: cwd).map(DiffOriginal.text)
     }
 }
