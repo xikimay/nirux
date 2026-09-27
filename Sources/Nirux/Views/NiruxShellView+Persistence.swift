@@ -4,7 +4,13 @@ import AppKit
 
 extension NiruxShellView {
     func restoreState() {
-        guard let state = Persistence.load(), !state.workspaces.isEmpty else { return }
+        let persisted = Persistence.load()
+        // Before anything saves: the decision needs this launch's starting point.
+        decideOnboardingChecklist(
+            persisted: persisted,
+            hasUnreadableState: persisted == nil && Persistence.hasStoredState
+        )
+        guard let state = persisted, !state.workspaces.isEmpty else { return }
         for workspace in workspaces { workspace.containerView.removeFromSuperview() }
         workspaces.removeAll()
         // A corrupt/hand-edited state file (or an older collision) may map
@@ -189,11 +195,14 @@ extension NiruxShellView {
     }
 
     /// The layout on screen, with the saved settings (defaults when none
-    /// load) and the sidebar's state. Meant to be saved: a restored agent
+    /// load), the sidebar's state and the Getting Started checklist's.
+    /// Meant to be saved: a restored agent
     /// column that has launched drops its restore state.
     func persistedState(snapshot: ProcessSnapshot? = nil) -> PersistedState {
         let snapshot = snapshot ?? ProcessSnapshot()
-        var settings = Persistence.load()?.settings ?? PersistedSettings()
+        var settings = OnboardingChecklist.settings(
+            Persistence.load()?.settings ?? PersistedSettings(), recording: onboardingState
+        )
         // The shell is the source of truth for sidebar state — carry the rest.
         settings.sidebarExpanded = isSidebarExpanded
         settings.inactiveWorkspacesCollapsed = sidebar.isInactiveSectionCollapsed

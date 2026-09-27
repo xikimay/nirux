@@ -51,6 +51,15 @@ Nirux is organized around workspaces.
 
 A workspace is a persistent task context: it has a current directory, a short title, optional task notes, and a horizontal strip of columns. Columns can be terminals, browser tabs, or editor views. Workspaces are stacked vertically, so you can keep several tasks alive without mixing their terminals, files, and browser context.
 
+On first launch, Nirux opens the sidebar on a **Getting Started** checklist, shown below the workspaces. It never blocks the app, and it covers:
+
+- whether `claude` or `codex` is installed where a Nirux terminal finds it, with copyable install commands (Claude Code's native installer, Homebrew for Codex) and a **Check again** link otherwise. Nirux reads the terminal `PATH` and the usual per-user install locations (`~/.local/bin`, the npm prefix from `~/.npmrc`, nvm, fnm, Volta, asdf, mise, Nix profiles) without running your shell's startup files, so a CLI installed elsewhere shows as missing: close the card if you already have one;
+- whether the bundled Agent Skills are installed and match this version, with an **Install**/**Update** button;
+- whether the [agent status hooks](#agent-status-hooks) are present in `~/.claude/settings.json` and `~/.codex/config.toml`;
+- the main shortcuts: `Cmd+P` palette, `Cmd+T` column, `Cmd+N` workspace, `Cmd+O` Pilot Mode.
+
+Close it with `×` (or **Done** once every step is done); the choice is saved with your settings. Reopen it anytime with `Show Getting Started` from the command palette. Installs that already had workspaces before the checklist existed don't show it on their own.
+
 The intended setup is:
 
 1. Open Nirux and use the first workspace as your main repo workspace.
@@ -68,13 +77,14 @@ That leaves your main workspace on the original checkout while each isolated bra
 
 Mission handoffs add an explicit, durable mailbox between the agent that delegates a worktree task and the agent launched in that worktree. The feature is disabled by default. Enable `Settings` → `Experimental` → `Mission handoffs`; the setting applies to new terminals. After updating Nirux, run `Install Agent Skills` again so the installed `nirux-worktree` skill has the matching mailbox instructions.
 
-With Mission handoffs enabled, worktrees opened by the installed skill can send correlated questions and wait for answers, while the parent agent can receive and reply from its terminal. Questions and explicit completion results also appear in the Activity section of the expanded sidebar and in native notifications while Nirux is in the background. Click a question in Activity to reply or open its child workspace.
+With Mission handoffs enabled, worktrees opened by the installed skill can send correlated questions and wait for answers, while the parent agent can receive and reply from its terminal. Each wait lasts at most 90 seconds, under the default 2-minute limit of Claude Code's shell tool, then exits with status 3; running the identical `ask` again resumes the same question instead of sending a duplicate. Once a Mission has ended, `ask` and `completed` exit with status 4 so the child stops retrying. Questions and explicit completion results also appear in the Activity section of the expanded sidebar and in native notifications while Nirux is in the background. Click a question in Activity to reply or open its child workspace.
 
 Mission completion is always reported explicitly by the child agent. Nirux does not infer completion from a stopped turn and does not inject replies into a terminal. Worktrees opened without Mission metadata keep the existing handover behavior.
 
 Typical command palette actions:
 
 - Install Agent Skills
+- Show Getting Started
 - Open Claude Code
 - Open Codex
 - New Worktree

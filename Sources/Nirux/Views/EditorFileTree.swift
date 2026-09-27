@@ -496,7 +496,7 @@ final class EditorFileTree: NSView {
     }
 
     private nonisolated static func loadGitChanges(cwd: String) -> [GitChange] {
-        guard let output = runGit(["status", "--porcelain", "--untracked-files=all"], cwd: cwd) else {
+        guard let output = GitCommand.output(["status", "--porcelain", "--untracked-files=all"], cwd: cwd) else {
             return []
         }
 
@@ -512,8 +512,8 @@ final class EditorFileTree: NSView {
         cwd: String,
         worktreeChanges: [GitChange]
     ) -> [GitChange] {
-        guard let base = branchBaseRef(cwd: cwd),
-              let output = runGit(["diff", "--name-status", base, "--"], cwd: cwd)
+        guard let base = GitCommand.branchBaseRef(cwd: cwd),
+              let output = GitCommand.output(["diff", "--name-status", base, "--"], cwd: cwd)
         else { return [] }
 
         var changesByPath: [String: GitChange] = [:]
@@ -528,36 +528,6 @@ final class EditorFileTree: NSView {
         return changesByPath.values.sorted { lhs, rhs in
             lhs.relativePath.localizedStandardCompare(rhs.relativePath) == .orderedAscending
         }
-    }
-
-    private nonisolated static func branchBaseRef(cwd: String) -> String? {
-        for candidate in ["@{upstream}", "origin/main", "origin/master", "main", "master"] {
-            guard let output = runGit(["merge-base", "HEAD", candidate], cwd: cwd) else { continue }
-            let sha = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !sha.isEmpty { return sha }
-        }
-        return nil
-    }
-
-    private nonisolated static func runGit(_ arguments: [String], cwd: String) -> String? {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = arguments
-        process.currentDirectoryURL = URL(fileURLWithPath: cwd)
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return nil
-        }
-        guard process.terminationStatus == 0 else { return nil }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8) ?? ""
     }
 
     /// Modal name prompt used by New File / New Folder / Rename. Returns

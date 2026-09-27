@@ -244,20 +244,39 @@ extension NiruxShellView {
         with explicit mailbox instructions. The child asks and waits without PTY injection:
 
         ```bash
-        "$NIRUX_CLI_PATH" --mission ask --message "<concise blocker or question>" --timeout 900
+        "$NIRUX_CLI_PATH" --mission ask --message "<concise blocker or question>"
         "$NIRUX_CLI_PATH" --mission completed --message "<concise result>"
         ```
 
         The parent can wait for a child event, then answer a question by its `eventID`:
 
         ```bash
-        "$NIRUX_CLI_PATH" --mission receive --timeout 900
+        "$NIRUX_CLI_PATH" --mission receive
         "$NIRUX_CLI_PATH" --mission reply --event <question-event-id> --message "<concise answer>"
         ```
 
+        Messages hold at most \(MissionEventCLI.maxMessageLength) characters. `ask` and `receive`
+        wait at most \(Int(MissionEventCLI.defaultWaitTimeout)) seconds, under the default 2-minute
+        limit of the Claude Code shell tool; if your shell tool takes a timeout, allow at least 120
+        seconds. Exit statuses:
+
+        - 0: done. The output is the answer or the event, even if the shell tool also reported a
+          timeout.
+        - 3: nothing yet. Run the exact same command again to keep waiting, and do the same if the
+          shell tool stops the command before it prints anything. An identical `ask` resumes the
+          same question instead of sending it twice, and prints the answer if it arrived meanwhile.
+          For `reply`, 3 means Nirux has not confirmed the answer yet: do not send it again.
+        - 4: do not retry that command. Mission handoffs are off, the Mission has ended, the
+          terminal is not part of it, or (for `reply`) the question no longer waits for an answer,
+          for example because a human answered it from Nirux Activity.
+        - 2: invalid usage, or not a Mission terminal; the error message says which.
+        - 1: Nirux's state could not be read or written. If a sandbox blocks it, run the command
+          outside the sandbox.
+
         `receive` prints one JSON object. For a `question`, reply before calling `receive` again;
-        for `completed`, the event is acknowledged automatically. A human can also click the
-        question in Nirux Activity and use the Reply action.
+        for `completed`, the event is acknowledged automatically, so stop calling `receive` unless
+        another child Mission is still running. A human can also click the question in Nirux
+        Activity and use the Reply action.
 
         Do not report completion from a Stop/turn-complete hook. Use `completed` only when the
         delegated task is genuinely complete; use `ask` only when parent input is needed.
@@ -337,35 +356,26 @@ extension NiruxShellView {
     /// Name → content of every skill Nirux ships. Installed together: the
     /// set is small and versioned with the app, so partial installs would
     /// only create confusion about which copy is current.
-    private static let agentSkills = [
+    static let agentSkills = [
         "nirux-worktree": worktreeSkillContent,
         "nirux-show-code": showCodeSkillContent
     ]
 
-    func installAgentSkills() {
-        // Swift multiline strings already normalize indentation. Preserve the
-        // authored content verbatim so YAML front matter stays valid.
-        let roots = [
-            NSHomeDirectory() + "/.agents/skills",  // Codex, Cursor, Copilot, etc.
-            NSHomeDirectory() + "/.claude/skills"  // Claude Code
-        ]
-
+    /// Palette action and checklist button. The checklist row turning green
+    /// is its confirmation, so it skips the success alert; failures always
+    /// alert.
+    func installAgentSkills(confirmsSuccess: Bool = true) {
         do {
-            for (name, content) in Self.agentSkills {
-                for root in roots {
-                    let dir = root + "/" + name
-                    try FileManager.default.createDirectory(
-                        atPath: dir, withIntermediateDirectories: true)
-                    try (content + "\n").write(toFile: dir + "/SKILL.md", atomically: true, encoding: .utf8)
-                }
-            }
-
+            try AgentSkillsInstaller.install(Self.agentSkills, home: NSHomeDirectory())
+            refreshOnboardingChecklist()
+            guard confirmsSuccess else { return }
             let alert = NSAlert()
             alert.messageText = "Agent Skills Installed"
             let names = Self.agentSkills.keys.sorted().joined(separator: ", ")
             alert.informativeText = "Installed \(names) to ~/.agents/skills/ and ~/.claude/skills/\nAll agents will auto-detect them."
             alert.runModal()
         } catch {
+            refreshOnboardingChecklist()
             let alert = NSAlert()
             alert.messageText = "Install Failed"
             alert.informativeText = error.localizedDescription

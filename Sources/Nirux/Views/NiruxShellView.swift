@@ -62,6 +62,10 @@ final class NiruxShellView: NSView {
     var activityReadTimer: Timer?
     var activityReadGeneration: UInt = 0
 
+    /// First-launch checklist state; nil for a user set up before it existed
+    /// (see OnboardingChecklist.launchState).
+    var onboardingState: OnboardingChecklistState?
+
     // Panel references (stored properties must live in main class declaration)
     var nameInputPanel: NameInputPanel?
     var workspaceContextPanel: WorkspaceContextPanel?
@@ -115,6 +119,7 @@ final class NiruxShellView: NSView {
         sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }
         sidebar.onInactiveSectionCollapsedChange = { [weak self] _ in self?.saveState() }
         sidebar.onDiffStatsClicked = { [weak self] index in self?.openDiffInEditor(workspaceIndex: index) }
+        sidebar.onOnboardingAction = { [weak self] action in self?.handleOnboardingAction(action) }
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleSidebarActivityActivation(_:)),
@@ -153,7 +158,14 @@ final class NiruxShellView: NSView {
                 self.refreshGitAndPullRequests()
                 self.refreshMetadata(snapshot: snapshot)
                 // Save state every ~10s (every 5th tick)
-                if self.heartbeatTick % 5 == 0 { self.saveState(snapshot: snapshot) }
+                if self.heartbeatTick % 5 == 0 {
+                    self.saveState(snapshot: snapshot)
+                    // Picks up an agent CLI installed from a terminal, while
+                    // the card can be seen (opening the sidebar refreshes too).
+                    if self.onboardingState == .pending, self.isSidebarExpanded, !self.isPilotMode {
+                        self.refreshOnboardingChecklist()
+                    }
+                }
             }
         }
     }

@@ -66,11 +66,13 @@ extension SidebarView {
         let hasWorkspaces = !activeInfos.isEmpty || !inactiveInfos.isEmpty
         let activeProfile = lastProfiles.first(where: { $0.isActive })
         let activityRows = ActivityStore.shared.visibleFeedEntries(maxCount: Self.activityMaxRows)
+        let onboardingCard = preparedOnboardingCard()
 
         let contentH = expandedContentHeight(
             activeInfos: activeInfos,
             inactiveInfos: inactiveInfos,
-            activityCount: activityRows.count
+            activityCount: activityRows.count,
+            onboardingHeight: onboardingCard?.height
         )
 
         let docHeight = max(bounds.height, contentH)
@@ -97,7 +99,15 @@ extension SidebarView {
                 yOffset = buildWorkspaceGroup(inactiveInfos, padding: padding, yOffset: yOffset)
             }
         }
-        if hasWorkspaces {
+        // The checklist teaches the same chords as the hint, and more.
+        if let onboardingCard {
+            yOffset -= SidebarExpandedMetrics.onboardingCardGap
+            onboardingCard.frame.origin = NSPoint(
+                x: SidebarExpandedMetrics.workspaceInsetX,
+                y: yOffset - onboardingCard.height
+            )
+            yOffset -= onboardingCard.height
+        } else if hasWorkspaces {
             yOffset -= SidebarExpandedMetrics.shortcutHintGap
             yOffset = buildShortcutHint(padding: padding, yOffset: yOffset)
         }
@@ -126,12 +136,17 @@ extension SidebarView {
             contentScrollView.reflectScrolledClipView(clip)
             lastFollowedActiveIndex = activeIndex
         }
+        if revealsOnboardingCardOnNextBuild, onboardingCard != nil {
+            revealsOnboardingCardOnNextBuild = false
+            revealOnboardingCard()
+        }
     }
 
     /// Size the scrollable document so content is top-anchored and never
     /// hides behind the bottom space switcher.
     private func expandedContentHeight(
-        activeInfos: [WorkspaceInfo], inactiveInfos: [WorkspaceInfo], activityCount: Int
+        activeInfos: [WorkspaceInfo], inactiveInfos: [WorkspaceInfo], activityCount: Int,
+        onboardingHeight: CGFloat?
     ) -> CGFloat {
         var height = SidebarExpandedMetrics.verticalPadding
             + SidebarExpandedMetrics.spaceHeaderHeight
@@ -148,7 +163,9 @@ extension SidebarView {
                 height += SidebarExpandedMetrics.groupHeight(for: inactiveInfos)
             }
         }
-        if !activeInfos.isEmpty || !inactiveInfos.isEmpty {
+        if let onboardingHeight {
+            height += SidebarExpandedMetrics.onboardingCardGap + onboardingHeight
+        } else if !activeInfos.isEmpty || !inactiveInfos.isEmpty {
             height += SidebarExpandedMetrics.shortcutHintGap + SidebarExpandedMetrics.shortcutHintHeight
         }
         if activityCount > 0 {
@@ -381,11 +398,13 @@ extension SidebarView {
         return currentY
     }
 
+    static let shortcutHints = [
+        SidebarShortcutHint(key: NiruxShortcuts.newWorkspaceDisplay, label: "workspace"),
+        SidebarShortcutHint(key: NiruxShortcuts.newTerminalDisplay, label: "column")
+    ]
+
     private func buildShortcutHint(padding: CGFloat, yOffset: CGFloat) -> CGFloat {
-        let hint = SidebarShortcutHintView(hints: [
-            SidebarShortcutHint(key: NiruxShortcuts.newWorkspaceDisplay, label: "workspace"),
-            SidebarShortcutHint(key: NiruxShortcuts.newTerminalDisplay, label: "pane")
-        ])
+        let hint = SidebarShortcutHintView(hints: Self.shortcutHints)
         hint.frame = NSRect(
             x: padding,
             y: yOffset - SidebarExpandedMetrics.shortcutHintHeight,
@@ -395,6 +414,40 @@ extension SidebarView {
         addSubviewDoc(hint)
         expandedViews.append(hint)
         return yOffset - SidebarExpandedMetrics.shortcutHintHeight
+    }
+
+    // MARK: - Getting Started checklist
+
+    /// The checklist card laid out for the current width, added to the
+    /// document view; nil (and the card dropped) when there is no checklist.
+    private func preparedOnboardingCard() -> OnboardingChecklistView? {
+        guard let checklist = onboardingChecklist else {
+            onboardingCardView?.removeFromSuperview()
+            onboardingCardView = nil
+            return nil
+        }
+        let width = bounds.width - SidebarExpandedMetrics.workspaceInsetX * 2
+        // Mid-expansion the sidebar can still be collapsed-width.
+        guard width >= 160 else {
+            onboardingCardView?.removeFromSuperview()
+            return nil
+        }
+        let card = onboardingCardView ?? OnboardingChecklistView()
+        card.onAction = { [weak self] action in self?.onOnboardingAction?(action) }
+        card.update(checklist: checklist, width: width)
+        if card.superview !== contentDocumentView { addSubviewDoc(card) }
+        onboardingCardView = card
+        return card
+    }
+
+    /// Scrolls the checklist into view, below a long workspace list; waits
+    /// for the next build when the card isn't laid out (sidebar opening).
+    func revealOnboardingCard() {
+        guard isExpanded, let card = onboardingCardView, card.superview === contentDocumentView else {
+            revealsOnboardingCardOnNextBuild = true
+            return
+        }
+        contentDocumentView.scrollToVisible(card.frame.insetBy(dx: 0, dy: -12))
     }
 
     // MARK: - Activity feed

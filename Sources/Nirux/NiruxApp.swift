@@ -42,16 +42,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             exit(AgentHookCLI.run(kind: kind, payload: payload))
         }
         if args.count >= 2, args[1] == "--mission" {
-            guard args.count >= 3 else { exit(2) }
-            let arguments = Array(args.dropFirst(3))
-            switch args[2] {
-            case "ask": exit(MissionEventCLI.ask(arguments: arguments))
-            case "receive": exit(MissionEventCLI.receive(arguments: arguments))
-            case "reply": exit(MissionEventCLI.reply(arguments: arguments))
-            default:
-                guard let kind = MissionEvent.Kind(rawValue: args[2]) else { exit(2) }
-                exit(MissionEventCLI.run(kind: kind, arguments: arguments))
-            }
+            exit(MissionEventCLI.main(Array(args.dropFirst(2))))
         }
 
         let app = NSApplication.shared
@@ -107,7 +98,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // Agent lifecycle hooks: install into ~/.claude/settings.json and
         // ~/.codex/config.toml, then start routing events to columns. Must
         // run AFTER restoreState so queued events resolve to live columns.
-        AgentHookInstaller.installAll()
+        installAgentHooks(reportingTo: shellView)
         ActivityStore.shared.load()
         MissionStore.shared.load()
         ActivityStore.shared.onChange = { [weak shellView] in
@@ -164,6 +155,13 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         NSApp.activate(ignoringOtherApps: true)
         startTrackingFrontmostApp()
         drainLaunchURLBacklog()
+    }
+
+    /// The Getting Started checklist refreshes after the install, so it
+    /// reports the hooks as written.
+    private func installAgentHooks(reportingTo shellView: NiruxShellView) {
+        AgentHookInstaller.installAll()
+        shellView.refreshOnboardingChecklist()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
