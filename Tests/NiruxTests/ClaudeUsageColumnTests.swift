@@ -53,13 +53,27 @@ final class ClaudeUsageColumnTests: XCTestCase {
     }
 
     func testTranscriptIsReadOnlyWhileItsClaudeIsInTheForeground() {
-        let follow = ClaudeTranscriptFollow(sessionID: "s1", process: claude.instance, follower: ClaudeUsageFollower(path: "/t/s1.jsonl"))
-        XCTAssertEqual(follow.step(foregroundProcess: claude), .read)
-        let shell = ForegroundProcess(instance: ProcessInstance(pid: 50, startedAt: 5), name: "zsh", arguments: ["-zsh"])
-        XCTAssertEqual(follow.step(foregroundProcess: shell), .hide)
-        XCTAssertEqual(follow.step(foregroundProcess: nil), .hide)
-        let another = ForegroundProcess(instance: ProcessInstance(pid: 701, startedAt: 71), name: "claude", arguments: ["claude"])
-        XCTAssertEqual(follow.step(foregroundProcess: another), .stop)
+        let follow = ClaudeTranscriptFollow(
+            sessionID: "s1", process: claude.instance,
+            follower: ClaudeUsageFollower(path: "/t/s1.jsonl", owner: self)
+        )
+        let shell = ProcessInstance(pid: 50, startedAt: 5)
+        let another = ProcessInstance(pid: 701, startedAt: 71)
+        var namesAsked = 0
+        func step(_ foreground: ProcessInstance?, running: Bool, name: String?) -> ClaudeTranscriptFollow.Step {
+            follow.step(foreground: foreground, isRunning: running) {
+                namesAsked += 1
+                return name
+            }
+        }
+        XCTAssertEqual(step(claude.instance, running: true, name: "claude"), .read)
+        XCTAssertEqual(namesAsked, 0, "the common case reads no arguments")
+        // Suspended behind its shell.
+        XCTAssertEqual(step(shell, running: true, name: "zsh"), .hide)
+        XCTAssertEqual(step(nil, running: true, name: nil), .hide)
+        // Exited, or replaced by another `claude`.
+        XCTAssertEqual(step(shell, running: false, name: "zsh"), .stop)
+        XCTAssertEqual(step(another, running: true, name: "claude"), .stop)
     }
 
     func testTitleBarShowsTheUsageWhenThereIsRoom() {

@@ -16,11 +16,13 @@ struct ClaudeTokenCounts: Equatable, Sendable {
 
     /// Nil unless the object carries at least one known count. Counts are
     /// clamped: a malformed value must not overflow the session sums.
+    static let fieldKeys = [
+        "input_tokens", "output_tokens",
+        "cache_creation_input_tokens", "cache_read_input_tokens"
+    ]
+
     init?(usage: [String: Any]) {
-        let fields = [
-            "input_tokens", "output_tokens",
-            "cache_creation_input_tokens", "cache_read_input_tokens"
-        ].map { key -> Int? in
+        let fields = Self.fieldKeys.map { key -> Int? in
             guard let number = usage[key] as? NSNumber else { return nil }
             return min(max(0, number.intValue), Int(Int32.max))
         }
@@ -64,14 +66,16 @@ struct ClaudeTokenCounts: Equatable, Sendable {
 /// One Claude session's token usage, as read from its transcript.
 struct ClaudeSessionUsage: Equatable, Sendable {
     /// Context of the latest main-thread response. Nil before the first
-    /// response, and after a compaction until the next one: the transcript
-    /// doesn't say what the compacted context weighs.
+    /// response, and after a compaction until the next one: the boundary's
+    /// `postTokens` leaves out the system prompt and tools.
     var contextTokens: Int?
-    /// Largest context any response of this transcript carried.
+    /// Largest context a response of the current model carried: switching
+    /// models (`/model`) may switch windows, so it starts over.
     var peakContextTokens = 0
     /// API model ID of the latest response (`claude-opus-5-5`).
     var model: String?
-    /// Sum over the transcript's responses, each counted once.
+    /// Sum over the transcript's responses, each counted once. Subagents
+    /// log to files of their own and are not included.
     var totals = ClaudeTokenCounts()
     var responses = 0
 
@@ -82,11 +86,21 @@ struct ClaudeSessionUsage: Equatable, Sendable {
     static let standardWindow = 200_000
     static let extendedWindow = 1_000_000
 
-    /// The context window, only when the transcript proves it: a context
+    /// The context window, only when the transcript shows it: a context
     /// past the standard window means the session runs the extended one.
     /// Nil otherwise — then only token counts are shown.
     var contextWindow: Int? {
-        peakContextTokens > Self.standardWindow ? Self.extendedWindow : nil
+        guard peakContextTokens > Self.standardWindow, !Self.mayHaveCustomWindow(model) else { return nil }
+        return Self.extendedWindow
+    }
+
+    /// Models Claude Code may give another window: one between the two for
+    /// `claude-sonnet-4-6` (remote configuration), any for IDs outside its
+    /// model table (`CLAUDE_CODE_MAX_CONTEXT_TOKENS`). A context past 200k
+    /// proves nothing about them.
+    static func mayHaveCustomWindow(_ model: String?) -> Bool {
+        guard let model, model.hasPrefix("claude-") else { return true }
+        return model.hasPrefix("claude-sonnet-4-6")
     }
 
     /// Share of the context window in use, 0…1 (can exceed 1 only on a
@@ -138,6 +152,7 @@ struct ClaudeTranscriptUsageParser {
               let message = object["message"] as? [String: Any],
               let rawUsage = message["usage"] as? [String: Any],
               let counts = ClaudeTokenCounts(usage: rawUsage) else { return }
+        let context = Self.contextCounts(usage: rawUsage, response: counts).context
         let model = (message["model"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         // Error placeholders Claude Code writes itself carry this model
         // and zero counts: no request was made.
@@ -158,9 +173,28 @@ struct ClaudeTranscriptUsageParser {
                 if countedIDs.count > Self.countedIDLimit { countedIDs.removeFirst() }
             }
         }
-        usage.contextTokens = counts.context
-        usage.peakContextTokens = max(usage.peakContextTokens, counts.context)
+        if let model, let previous = usage.model, model != previous { usage.peakContextTokens = 0 }
+        usage.contextTokens = context
+        usage.peakContextTokens = max(usage.peakContextTokens, context)
         if let model { usage.model = model }
+    }
+
+    /// What Claude Code measures the context from (its statusline's
+    /// `used_percentage`): when a response ran several iterations (a
+    /// server-side compaction, an advisor, a model fallback), the last one
+    /// that isn't an advisor or compaction step — if it is a well-formed
+    /// `message` or `fallback_message` — else the response's own counts.
+    static func contextCounts(usage: [String: Any], response: ClaudeTokenCounts) -> ClaudeTokenCounts {
+        guard response.context > 0, let iterations = usage["iterations"] as? [Any] else { return response }
+        let last = iterations.last { iteration in
+            let type = (iteration as? [String: Any])?["type"] as? String
+            return type != "advisor_message" && type != "compaction"
+        }
+        guard let last = last as? [String: Any],
+              ["message", "fallback_message"].contains(last["type"] as? String),
+              ClaudeTokenCounts.fieldKeys.allSatisfy({ ((last[$0] as? NSNumber)?.doubleValue ?? -1) >= 0 }),
+              let counts = ClaudeTokenCounts(usage: last), counts.context > 0 else { return response }
+        return counts
     }
 }
 
@@ -189,17 +223,22 @@ extension ClaudeSessionUsage {
         if let contextTokens {
             let tokens = "Context: \(Self.groupedCount(contextTokens)) tokens"
             if let contextWindow, let contextFraction {
-                lines.append("\(tokens), \(Self.percent(contextFraction)) of the \(Self.groupedCount(contextWindow)) window")
+                lines.append(
+                    "\(tokens), \(Self.percent(contextFraction)) of a \(Self.groupedCount(contextWindow)) window "
+                        + "(inferred: the context went past 200k)"
+                )
             } else {
-                lines.append("\(tokens) (window not known yet: 200k or 1M, depending on the model and account)")
+                lines.append("\(tokens) (window size unknown)")
             }
-        } else {
+        } else if responses > 0 {
             lines.append("Context: compacted, updated with the next response")
+        } else {
+            lines.append("Context: no response yet")
         }
         if let model { lines.append("Model: \(model)") }
         let responseCount = responses == 1 ? "1 response" : "\(responses) responses"
         lines.append(
-            "Session (\(responseCount)): \(Self.compactCount(totals.output)) output · "
+            "Session without subagents (\(responseCount)): \(Self.compactCount(totals.output)) output · "
                 + "\(Self.compactCount(totals.input)) input · "
                 + "\(Self.compactCount(totals.cacheRead)) cache read · "
                 + "\(Self.compactCount(totals.cacheWrite)) cache write"

@@ -6,20 +6,32 @@ struct ClaudeTranscriptFollow {
     let sessionID: String
     let process: ProcessInstance
     let follower: ClaudeUsageFollower
+    /// Last heartbeat saw the session's `claude` in the foreground: a read
+    /// finishing after it left must not show the label again.
+    var isInForeground = false
 
     enum Step: Equatable {
         /// The session's `claude` is in the foreground: read and show.
         case read
-        /// A shell may only mean it is suspended (Ctrl-Z): hide, keep.
+        /// It still runs elsewhere — suspended (Ctrl-Z) behind a shell:
+        /// hide, keep.
         case hide
-        /// Another `claude` replaced it; that one's hooks will name its own
-        /// transcript.
+        /// It exited, or another `claude` replaced it (whose hooks will
+        /// name its own transcript).
         case stop
     }
 
-    func step(foregroundProcess: ForegroundProcess?) -> Step {
-        if foregroundProcess?.instance == process { return .read }
-        return foregroundProcess?.name == "claude" ? .stop : .hide
+    /// `foregroundName` is only asked for when the process still runs but
+    /// isn't in the foreground: resolving a name reads the process's
+    /// arguments.
+    func step(
+        foreground: ProcessInstance?,
+        isRunning: Bool,
+        foregroundName: () -> String?
+    ) -> Step {
+        if foreground == process { return .read }
+        guard isRunning else { return .stop }
+        return foregroundName() == "claude" ? .stop : .hide
     }
 }
 
@@ -36,22 +48,31 @@ extension ColumnState {
         claudeTranscript = ClaudeTranscriptFollow(
             sessionID: sessionID,
             process: process,
-            follower: ClaudeUsageFollower(path: path)
+            follower: ClaudeUsageFollower(path: path, owner: self)
         )
         setAgentUsage(nil)
     }
 
     /// Heartbeat, for columns on screen: read what the transcript gained.
     func refreshAgentUsage(snapshot: ProcessSnapshot) {
-        guard let follow = claudeTranscript else { return }
-        switch follow.step(foregroundProcess: pty?.foregroundProcess(snapshot: snapshot)) {
+        // An empty snapshot (failed sysctl) would read as "exited".
+        guard let follow = claudeTranscript, let pty, !snapshot.isEmpty else { return }
+        let step = follow.step(
+            foreground: pty.foregroundInstance(snapshot: snapshot),
+            isRunning: snapshot.contains(follow.process),
+            foregroundName: { pty.foregroundProcess(snapshot: snapshot)?.name }
+        )
+        switch step {
         case .read:
+            claudeTranscript?.isInForeground = true
             let follower = follow.follower
             follower.refresh { [weak self] usage in
-                guard let self, self.claudeTranscript?.follower === follower else { return }
+                guard let self, let current = self.claudeTranscript,
+                      current.follower === follower, current.isInForeground else { return }
                 self.setAgentUsage(usage)
             }
         case .hide:
+            claudeTranscript?.isInForeground = false
             setAgentUsage(nil)
         case .stop:
             follow.follower.cancel()

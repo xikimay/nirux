@@ -397,7 +397,7 @@ final class ColumnState {
         // Follow the transcript of the session now bound to the foreground
         // `claude` — never one a subagent, teammate or nested run reports.
         if admission != .rejected, event.agentID == nil,
-           let transcriptPath = event.transcriptPath,
+           let transcriptPath = event.transcriptPath.flatMap(AgentHookEvent.validTranscriptPath),
            let sessionID = event.sessionID,
            let foregroundProcess,
            claudeSessionTracker.boundSessionID(for: foregroundProcess.instance) == sessionID {

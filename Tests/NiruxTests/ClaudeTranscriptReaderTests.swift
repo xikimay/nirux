@@ -124,7 +124,7 @@ final class ClaudeTranscriptReaderTests: XCTestCase {
     @MainActor
     func testFollowerReportsOnTheMainActorAndStopsOnceCancelled() throws {
         try write(TranscriptLine.response(id: "msg_1", cacheRead: 30_000, output: 3) + "\n")
-        let follower = ClaudeUsageFollower(path: file.path)
+        let follower = ClaudeUsageFollower(path: file.path, owner: self)
         let reported = expectation(description: "usage")
         follower.refresh { usage in
             MainActor.assertIsolated()
@@ -133,10 +133,54 @@ final class ClaudeTranscriptReaderTests: XCTestCase {
         }
         wait(for: [reported], timeout: 5)
 
-        follower.cancel()
+        // A fresh follower (no throttle yet) proves `cancel`, not the
+        // minimum interval, is what silences it.
+        let cancelled = ClaudeUsageFollower(path: file.path, owner: self)
+        cancelled.cancel()
         let silent = expectation(description: "no report after cancel")
+        silent.isInverted = true
+        cancelled.refresh { _ in silent.fulfill() }
+        wait(for: [silent], timeout: 0.3)
+
+        // Cancelled while its read is in flight.
+        let midRead = ClaudeUsageFollower(path: file.path, owner: self)
+        let dropped = expectation(description: "no report for a read cancelled in flight")
+        dropped.isInverted = true
+        midRead.refresh { _ in dropped.fulfill() }
+        midRead.cancel()
+        wait(for: [dropped], timeout: 0.3)
+    }
+
+    @MainActor
+    func testFollowerStopsWhenItsOwnerIsGone() throws {
+        try write(TranscriptLine.response(id: "msg_1", cacheRead: 30_000, output: 3) + "\n")
+        var owner: NSObject? = NSObject()
+        let follower = ClaudeUsageFollower(path: file.path, owner: owner!)
+        owner = nil
+        let silent = expectation(description: "no report once the owner is gone")
         silent.isInverted = true
         follower.refresh { _ in silent.fulfill() }
         wait(for: [silent], timeout: 0.3)
+    }
+
+    @MainActor
+    func testFollowerReportsOnlyOnceCaughtUp() throws {
+        // More than one default budget: the catch-up takes several reads.
+        let line = TranscriptLine.response(
+            id: "msg_old", cacheRead: 5_000, output: 1,
+            extra: ["padding": String(repeating: "x", count: 1_000_000)]
+        )
+        let history = (0..<20).map { line.replacingOccurrences(of: "msg_old", with: "msg_\($0)") }
+        let last = TranscriptLine.response(id: "msg_last", cacheRead: 42_000, output: 1)
+        try write((history + [last]).joined(separator: "\n") + "\n")
+
+        let follower = ClaudeUsageFollower(path: file.path, owner: self)
+        let reported = expectation(description: "usage")
+        follower.refresh { usage in
+            XCTAssertEqual(usage.responses, 21, "never a mid-history snapshot")
+            XCTAssertEqual(usage.contextTokens, 42_002)
+            reported.fulfill()
+        }
+        wait(for: [reported], timeout: 10)
     }
 }

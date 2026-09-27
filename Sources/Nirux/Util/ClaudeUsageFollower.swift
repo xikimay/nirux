@@ -4,8 +4,10 @@ import Foundation
 /// appended since the last one on a background queue and reports the
 /// session's usage on the main actor. At most one read per follower is in
 /// flight and reads start at most once per `minInterval`; a refresh asked
-/// meanwhile is dropped (the next heartbeat asks again), and a read that
-/// stopped at its budget continues right away.
+/// meanwhile is dropped (the next heartbeat asks again). A read that
+/// stopped at its budget continues right away, and the usage is reported
+/// only once caught up — never mid-history while catching up on a long
+/// transcript.
 final class ClaudeUsageFollower: @unchecked Sendable {
     let path: String
     /// Serial: readers are only touched here, and one queue for every
@@ -15,14 +17,18 @@ final class ClaudeUsageFollower: @unchecked Sendable {
     private var reader: ClaudeTranscriptReader
     @MainActor private var isReading = false
     @MainActor private var isCancelled = false
+    /// The column following it: once gone, a catch-up stops mid-file.
+    @MainActor private weak var owner: AnyObject?
     @MainActor private var lastReadAt: TimeInterval = -.infinity
     /// Title-bar refreshes come up to four times a second while an agent's
     /// title spins; the usage needn't follow that closely.
     static let minInterval: TimeInterval = 1
 
-    init(path: String) {
+    @MainActor
+    init(path: String, owner: AnyObject) {
         self.path = path
         reader = ClaudeTranscriptReader(path: path)
+        self.owner = owner
     }
 
     /// The column stopped following this transcript: report nothing more.
@@ -40,7 +46,7 @@ final class ClaudeUsageFollower: @unchecked Sendable {
 
     @MainActor
     private func read(onUsage: @escaping @MainActor @Sendable (ClaudeSessionUsage) -> Void) {
-        guard !isReading, !isCancelled else { return }
+        guard !isReading, !isCancelled, owner != nil else { return }
         isReading = true
         lastReadAt = ProcessInfo.processInfo.systemUptime
         Self.queue.async { [self] in
@@ -48,9 +54,12 @@ final class ClaudeUsageFollower: @unchecked Sendable {
             let usage = reader.usage
             DispatchQueue.main.async {
                 self.isReading = false
-                guard !self.isCancelled else { return }
-                onUsage(usage)
-                if !caughtUp { self.read(onUsage: onUsage) }
+                guard !self.isCancelled, self.owner != nil else { return }
+                if caughtUp {
+                    onUsage(usage)
+                } else {
+                    self.read(onUsage: onUsage)
+                }
             }
         }
     }

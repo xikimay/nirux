@@ -13,19 +13,22 @@ enum TranscriptLine {
         model: String = "claude-opus-5-5",
         sidechain: Bool = false,
         block: Int = 0,
+        usageExtra: [String: Any] = [:],
         extra: [String: Any] = [:]
     ) -> String {
+        var usage: [String: Any] = [
+            "input_tokens": input,
+            "cache_creation_input_tokens": cacheWrite,
+            "cache_read_input_tokens": cacheRead,
+            "output_tokens": output,
+            "service_tier": "standard"
+        ]
+        usage.merge(usageExtra) { $1 }
         var message: [String: Any] = [
             "model": model,
             "role": "assistant",
             "content": [["type": "text", "text": "never kept"]],
-            "usage": [
-                "input_tokens": input,
-                "cache_creation_input_tokens": cacheWrite,
-                "cache_read_input_tokens": cacheRead,
-                "output_tokens": output,
-                "service_tier": "standard"
-            ]
+            "usage": usage
         ]
         if let id { message["id"] = id }
         var object: [String: Any] = [
@@ -181,22 +184,80 @@ final class ClaudeSessionUsageTests: XCTestCase {
         XCTAssertTrue(usage.isNearlyFull)
     }
 
+    func testContextComesFromTheLastIterationLikeClaudeCodes() {
+        func line(_ id: String, iterations: [Any]) -> String {
+            TranscriptLine.response(
+                id: id, input: 4, cacheWrite: 100, cacheRead: 300_000, output: 900,
+                usageExtra: ["iterations": iterations]
+            )
+        }
+        func iteration(_ type: String, cacheRead: Int) -> [String: Any] {
+            ["type": type, "input_tokens": 2, "output_tokens": 5, "cache_creation_input_tokens": 0, "cache_read_input_tokens": cacheRead]
+        }
+        // A server-side compaction mid-response: the continuation's context
+        // counts, not the response's sum, and the totals keep the sum.
+        var usage = parse([line("msg_1", iterations: [
+            iteration("message", cacheRead: 150_000), iteration("compaction", cacheRead: 150_000),
+            iteration("message", cacheRead: 30_000), iteration("advisor_message", cacheRead: 90_000)
+        ])])
+        XCTAssertEqual(usage.contextTokens, 30_002)
+        XCTAssertEqual(usage.peakContextTokens, 30_002)
+        XCTAssertEqual(usage.totals.cacheRead, 300_000)
+
+        usage = parse([line("msg_1", iterations: [iteration("message", cacheRead: 1_000), iteration("fallback_message", cacheRead: 7_000)])])
+        XCTAssertEqual(usage.contextTokens, 7_002)
+
+        // Anything else falls back to the response's own counts.
+        let fallbacks: [[Any]] = [
+            [], [iteration("advisor_message", cacheRead: 5)], [iteration("unknown", cacheRead: 5)], ["garbage"],
+            [["type": "message", "input_tokens": 2, "output_tokens": 5, "cache_read_input_tokens": 5]],
+            [["type": "message", "input_tokens": -2, "output_tokens": 5, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 5]],
+            [iteration("message", cacheRead: 0).merging(["input_tokens": 0]) { $1 }]
+        ]
+        for iterations in fallbacks {
+            XCTAssertEqual(parse([line("msg_1", iterations: iterations)]).contextTokens, 300_104, "\(iterations)")
+        }
+    }
+
+    func testCustomWindowModelsNeverInferTheExtendedWindow() {
+        for model in ["claude-sonnet-4-6", "claude-sonnet-4-6-20260101", "gpt-5", "us.anthropic.claude-opus-4-8-v1:0"] {
+            let usage = parse([TranscriptLine.response(id: "msg_1", cacheRead: 450_000, model: model)])
+            XCTAssertNil(usage.contextWindow, model)
+            XCTAssertEqual(usage.titleBarText, "ctx 450k", model)
+        }
+        for model in ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-4-5", "claude-sonnet-5"] {
+            XCTAssertEqual(parse([TranscriptLine.response(id: "msg_1", cacheRead: 450_000, model: model)]).contextWindow, 1_000_000, model)
+        }
+    }
+
+    func testSwitchingModelsForgetsTheProvenWindow() {
+        let usage = parse([
+            TranscriptLine.response(id: "msg_1", cacheRead: 300_000),
+            TranscriptLine.compactBoundary(),
+            TranscriptLine.response(id: "msg_2", cacheRead: 60_000, model: "claude-sonnet-4-5")
+        ])
+        XCTAssertEqual(usage.peakContextTokens, 60_002)
+        XCTAssertNil(usage.contextWindow)
+        XCTAssertEqual(usage.titleBarText, "ctx 60k")
+        XCTAssertEqual(usage.model, "claude-sonnet-4-5")
+    }
+
     func testTooltipDetailsContextModelAndSessionTotals() {
         let known = parse([
             TranscriptLine.response(id: "msg_1", input: 3, cacheWrite: 12_000, cacheRead: 200_000, output: 1_500),
             TranscriptLine.response(id: "msg_2", input: 1, cacheWrite: 400, cacheRead: 212_000, output: 48_000)
         ])
         XCTAssertEqual(known.tooltip, """
-        Context: 212,401 tokens, 21% of the 1,000,000 window
+        Context: 212,401 tokens, 21% of a 1,000,000 window (inferred: the context went past 200k)
         Model: claude-opus-5-5
-        Session (2 responses): 50k output · 4 input · 412k cache read · 12k cache write
+        Session without subagents (2 responses): 50k output · 4 input · 412k cache read · 12k cache write
         """)
 
         let unknown = parse([TranscriptLine.response(id: "msg_1", input: 5, cacheRead: 9_000, output: 1)])
         XCTAssertEqual(unknown.tooltip, """
-        Context: 9,005 tokens (window not known yet: 200k or 1M, depending on the model and account)
+        Context: 9,005 tokens (window size unknown)
         Model: claude-opus-5-5
-        Session (1 response): 1 output · 5 input · 9k cache read · 0 cache write
+        Session without subagents (1 response): 1 output · 5 input · 9k cache read · 0 cache write
         """)
     }
 
