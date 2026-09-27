@@ -556,7 +556,7 @@ extension NiruxShellView {
 
         if worktreePanel == nil {
             worktreePanel = WorktreePanel()
-            worktreePanel?.onCreated = { [weak self] branch, path, repoRoot in
+            worktreePanel?.onCreated = { [weak self] branch, path, repoRoot, checkedOutBranch in
                 guard let self else { return }
                 let col = self.activeWorkspace?.columns[safe: self.activeWorkspace?.focusedIndex ?? 0]
                 let snapshot = ProcessSnapshot()
@@ -577,7 +577,9 @@ extension NiruxShellView {
                     // into a file the user owns, never through a planted symlink.
                     guard let handoverPath = HandoverFile.makeEmptySource(agent: runningAgent.rawValue) else {
                         self.presentProblem("Couldn’t create a handover file in /tmp", "The worktree opens without one.")
-                        self.addWorkspace(title: branch, cwd: path, agent: runningAgent)
+                        self.addWorkspace(
+                            title: branch, cwd: path, agent: runningAgent, worktreeBranch: checkedOutBranch
+                        )
                         return
                     }
                     let isMission = Self.currentMissionHandoffsEnabled()
@@ -599,7 +601,7 @@ extension NiruxShellView {
                     col?.pty?.sendRaw(prompt)
                 } else {
                     // No agent — open workspace directly (worktree already created by panel)
-                    self.addWorkspace(title: branch, cwd: path, agent: .claude)
+                    self.addWorkspace(title: branch, cwd: path, agent: .claude, worktreeBranch: checkedOutBranch)
                 }
             }
         }

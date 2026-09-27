@@ -17,6 +17,9 @@ extension NiruxShellView {
         let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
         DispatchQueue.global(qos: .userInitiated).async {
             let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot)
+            // Read back from the checkout: the session is named after the
+            // branch it will actually work on (see `SessionName`).
+            let checkedOutBranch = path.flatMap(GitWorktree.currentBranch(at:))
             // Move handover file into the worktree if provided. The path comes
             // from a URL: HandoverFile only accepts the user's own regular file
             // directly in /tmp, never a symlink or hard link.
@@ -86,7 +89,8 @@ extension NiruxShellView {
                         workspaceID: childWorkspaceID,
                         initialAgentUUID: childAgentUUID,
                         missionID: missionID,
-                        deliveredHandover: deliveredHandover
+                        deliveredHandover: deliveredHandover,
+                        worktreeBranch: checkedOutBranch
                     )
                     self.saveState()
                 } else {

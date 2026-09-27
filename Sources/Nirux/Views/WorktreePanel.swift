@@ -9,7 +9,9 @@ struct GitResult {
 /// Raycast-style floating panel for creating a git worktree + workspace
 @MainActor
 final class WorktreePanel {
-    var onCreated: ((String, String, String) -> Void)?  // (branch, worktreePath, repoRoot)
+    /// (branch, worktreePath, repoRoot, branch read back from the checkout,
+    /// which names the Claude session; see `SessionName`).
+    var onCreated: ((String, String, String, String?) -> Void)?
 
     private var panel: NSPanel?
     private var field: NSTextField?
@@ -66,10 +68,11 @@ final class WorktreePanel {
 
         DispatchQueue.global(qos: .userInitiated).async {
             let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot)
+            let checkedOutBranch = path.flatMap(GitWorktree.currentBranch(at:))
             DispatchQueue.main.async { [weak self] in
                 if let path {
                     self?.panel?.orderOut(nil)
-                    self?.onCreated?(branch, path, repoRoot)
+                    self?.onCreated?(branch, path, repoRoot, checkedOutBranch)
                 } else {
                     self?.statusLabel?.stringValue = error ?? "git worktree add failed"
                     self?.statusLabel?.textColor = NSColor.systemRed.withAlphaComponent(0.9)
@@ -294,7 +297,38 @@ enum GitWorktree {
         return gitRunFull(["check-ref-format", "refs/heads/\(branch)"], cwd: repoRoot).status == 0
     }
 
+    /// The branch checked out at `path`, when `path` is itself the top of a
+    /// checkout rather than a folder inside another repository. Nil for a
+    /// detached HEAD, a folder that isn't a checkout, or a failed read.
+    /// Runs git, so call it off the main thread.
+    static func currentBranch(at path: String) -> String? {
+        let result = gitRunFull(
+            ["rev-parse", "--show-toplevel", "--symbolic-full-name", "HEAD"],
+            cwd: path,
+            timeout: branchReadTimeout
+        )
+        // `--short` would print "heads/x" when a tag is also named x.
+        let lines = result.stdout.split(separator: "\n").map(String.init)
+        let branchPrefix = "refs/heads/"
+        guard result.status == 0, lines.count == 2,
+              isSameDirectory(lines[0], path),
+              lines[1].hasPrefix(branchPrefix)
+        else { return nil }
+        let branch = String(lines[1].dropFirst(branchPrefix.count))
+        return branch.isEmpty ? nil : branch
+    }
+
     // MARK: - Helpers
+
+    /// Compares file identity, so symlinks (/tmp vs /private/tmp) and case
+    /// differences on a case-insensitive volume don't matter.
+    private static func isSameDirectory(_ first: String, _ second: String) -> Bool {
+        let keys: Set<URLResourceKey> = [.fileResourceIdentifierKey]
+        guard let firstID = try? URL(fileURLWithPath: first).resourceValues(forKeys: keys).fileResourceIdentifier,
+              let secondID = try? URL(fileURLWithPath: second).resourceValues(forKeys: keys).fileResourceIdentifier
+        else { return false }
+        return firstID.isEqual(secondID)
+    }
 
     private static func gitRun(_ args: [String], cwd: String) -> String {
         return gitRunFull(args, cwd: cwd).stdout
@@ -313,6 +347,9 @@ enum GitWorktree {
 
     /// `repoRoot(at:)` runs on the main thread, which this blocks.
     private static let mainThreadTimeout: TimeInterval = 5
+    /// A branch read is instant; past this, git is stuck and the session
+    /// simply goes unnamed.
+    private static let branchReadTimeout: TimeInterval = 5
     /// A last resort, not an expected outcome: killing `worktree add`
     /// mid-checkout leaves a half-made worktree behind, and draining both
     /// pipes already keeps large output from wedging git.
