@@ -4,6 +4,7 @@ import XCTest
 
 /// The column's side of sidebar approvals (status machine) and the
 /// Allow / Deny block on the workspace card.
+@MainActor
 final class PermissionApprovalSidebarTests: XCTestCase {
     private var machine = AgentStatusMachine()
     private let t0: TimeInterval = 1_000
@@ -240,7 +241,6 @@ final class PermissionApprovalSidebarTests: XCTestCase {
     }
 
     /// Every character of a full line fits the card: nothing is clipped.
-    @MainActor
     func testFullLineFitsTheExpandedSidebar() {
         let line = String(repeating: "W", count: SidebarExpandedMetrics.approvalCharactersPerLine)
         let width = (line as NSString).size(withAttributes: [.font: SidebarExpandedMetrics.approvalFont]).width
@@ -278,7 +278,6 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         views.compactMap { ($0 as? NSTextField)?.stringValue }
     }
 
-    @MainActor
     func testCardShowsTheExactRequestWithAllowAndDeny() throws {
         let text = "git push --force-with-lease origin feat/permission-approval"
         let result = SidebarWorkspaceCardRenderer(
@@ -321,7 +320,6 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         )
     }
 
-    @MainActor
     func testSentDecisionShowsProgressInsteadOfButtons() {
         let result = SidebarWorkspaceCardRenderer(
             workspace: workspace([column(approval("ls", sent: .deny))]), sidebarWidth: 260, padding: 20, yOffset: 800
@@ -331,7 +329,6 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         XCTAssertTrue(result.approvalButtons.isEmpty)
     }
 
-    @MainActor
     func testUndeliveredDecisionSaysToAnswerInTheTerminal() {
         var request = AgentPermissionRequest(
             toolName: "Bash", summary: "ls", key: "k", agentID: nil, sessionID: "lead", requestedAt: 0
@@ -351,7 +348,6 @@ final class PermissionApprovalSidebarTests: XCTestCase {
 
     /// A line break never hides a space: `rm -rf ./dist/assets/old-bundle *`
     /// must not read as `old-bundle*`.
-    @MainActor
     func testSpacesAtLineBreaksStayVisible() {
         let text = "rm -rf ./dist/assets/old-bundle *"
         let lines = SidebarExpandedMetrics.approvalLines(text)
@@ -370,7 +366,6 @@ final class PermissionApprovalSidebarTests: XCTestCase {
     }
 
     /// A button that just appeared or moved takes no click for a moment.
-    @MainActor
     func testButtonsArmOnlyAfterStayingPut() {
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 800))
         let key = SidebarHoverTarget.approvalButtonKey(requestID: requestID, behavior: .allow)
@@ -392,6 +387,61 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         sidebar.approvalButtonViews = [:]
         sidebar.refreshApprovalArming(now: 13)
         XCTAssertFalse(sidebar.isApprovalButtonArmed(key, now: 20), "gone")
+    }
+
+    /// Scrolling slides buttons under a still pointer; collapsing drops them.
+    func testScrollingAndCollapsingDisarmButtons() {
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 800))
+        let key = SidebarHoverTarget.approvalButtonKey(requestID: requestID, behavior: .allow)
+        let button = SidebarBadgeView(text: "Allow", textColor: .white, fillColor: .clear, font: .systemFont(ofSize: 11))
+        button.frame = NSRect(x: 20, y: 100, width: 58, height: 20)
+        sidebar.approvalButtonViews = [key: button]
+        sidebar.refreshApprovalArming(now: 0)
+        XCTAssertTrue(sidebar.isApprovalButtonArmed(key))
+
+        sidebar.approvalClipViewScrolled(Notification(name: NSView.boundsDidChangeNotification))
+        XCTAssertFalse(sidebar.isApprovalButtonArmed(key))
+
+        sidebar.refreshApprovalArming(now: 0)
+        sidebar.isExpanded = false
+        XCTAssertFalse(sidebar.isApprovalButtonArmed(key, now: 1_000_000))
+    }
+
+    func testOnlyASingleClickReleasedOnTheSameButtonDecides() {
+        let allow = SidebarHitRegion.permissionDecision(workspaceIndex: 2, columnIndex: 1, requestID: "r", behavior: .allow)
+        let deny = SidebarHitRegion.permissionDecision(workspaceIndex: 2, columnIndex: 1, requestID: "r", behavior: .deny)
+        let moved = SidebarHitRegion.permissionDecision(workspaceIndex: 0, columnIndex: 3, requestID: "r", behavior: .allow)
+        let other = SidebarHitRegion.permissionDecision(workspaceIndex: 2, columnIndex: 1, requestID: "s", behavior: .allow)
+        func decides(
+            _ released: SidebarHitRegion?, clicks: Int = 1, armedAtPress: Bool = true, armedAtRelease: Bool = true
+        ) -> Bool {
+            SidebarView.approvalClickDecision(
+                pressed: allow, released: released, clickCount: clicks,
+                armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+            ) != nil
+        }
+        XCTAssertTrue(decides(allow))
+        XCTAssertFalse(decides(deny), "released on the other button")
+        XCTAssertFalse(decides(other), "released on another request's button")
+        XCTAssertFalse(decides(.permissionBlock(workspaceIndex: 2)))
+        XCTAssertFalse(decides(nil))
+        XCTAssertFalse(decides(allow, clicks: 2), "second click of a double click")
+        XCTAssertFalse(decides(allow, armedAtPress: false))
+        XCTAssertFalse(decides(allow, armedAtRelease: false), "moved during the press")
+        let decision = SidebarView.approvalClickDecision(
+            pressed: allow, released: moved, clickCount: 1, armedAtPress: true, armedAtRelease: true
+        )
+        XCTAssertEqual(decision?.workspaceIndex, 0, "the indices where it was released")
+        XCTAssertEqual(decision?.columnIndex, 3)
+    }
+
+    /// A receiver killed without a report: once its deadline passes, #38's
+    /// rule applies again and a later tool event unblocks the column.
+    func testHeldRequestPastItsDeadlineFollowsTheTerminalAgain() {
+        holdRequest()
+        _ = machine.apply(event(.postToolUse, at: 60, tool: "Read", summary: "b", key: "k2"), isUserFocused: false)
+        XCTAssertEqual(machine.state, .working)
+        XCTAssertNil(machine.sidebarApproval(now: t0 + 61))
     }
 
     func testRequestWithoutTheToolIsNotShown() {

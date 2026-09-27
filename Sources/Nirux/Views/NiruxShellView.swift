@@ -387,7 +387,7 @@ final class NiruxShellView: NSView {
                 self.gitRefresh.isSuspended = true
                 // Nobody sees the buttons now: a background subagent's
                 // dialog must not wait on them (the heartbeat stops too).
-                _ = self.releaseApprovalsNotHeld()
+                if AgentHookCenter.shared.approvalsEnabled { self.updateSidebar() }
                 self.stopHeartbeat()
                 self.stopPilotRefresh()
                 self.forEachEditorColumn { $0.pauseFileWatch() }

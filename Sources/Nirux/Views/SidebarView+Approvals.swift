@@ -10,6 +10,14 @@ struct SidebarApprovalButtonArming: Equatable {
     let armedAt: TimeInterval
 }
 
+/// A decision clicked in the sidebar, where its button was released.
+struct SidebarApprovalClick: Equatable {
+    let workspaceIndex: Int
+    let columnIndex: Int
+    let requestID: String
+    let behavior: PermissionApproval.Behavior
+}
+
 extension SidebarView {
     /// A block appears, moves or changes to the next request on its own
     /// (the agent asks, a decision lands, a card above grows): a button
@@ -35,15 +43,52 @@ extension SidebarView {
         approvalButtonArming[key].map { now >= $0.armedAt } ?? false
     }
 
-    /// A press on Allow / Deny decides only as a single click released on
-    /// the same button, armed at both ends: never on the press, never the
-    /// second click of a double click. The loop also keeps the press from
-    /// moving the window.
+    func observeScrollingForApprovalArming() {
+        contentScrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(approvalClipViewScrolled(_:)),
+            name: NSView.boundsDidChangeNotification,
+            object: contentScrollView.contentView
+        )
+    }
+
+    /// Scrolling slides buttons under a still pointer: every button waits
+    /// its delay again.
+    @objc func approvalClipViewScrolled(_ notification: Notification) {
+        let now = ProcessInfo.processInfo.systemUptime
+        approvalButtonArming = approvalButtonArming.mapValues {
+            SidebarApprovalButtonArming(frame: $0.frame, armedAt: now + Self.approvalArmingDelay)
+        }
+    }
+
+    /// The decision a click makes, if any: a single click, released on the
+    /// button it pressed (the same request and decision, wherever a rebuild
+    /// meanwhile put it), armed at both ends.
+    static func approvalClickDecision(
+        pressed: SidebarHitRegion,
+        released: SidebarHitRegion?,
+        clickCount: Int,
+        armedAtPress: Bool,
+        armedAtRelease: Bool
+    ) -> SidebarApprovalClick? {
+        guard clickCount == 1, armedAtPress, armedAtRelease,
+              case let .permissionDecision(_, _, pressedID, pressedBehavior) = pressed,
+              case let .permissionDecision(workspaceIndex, columnIndex, releasedID, releasedBehavior)? = released,
+              releasedID == pressedID, releasedBehavior == pressedBehavior else { return nil }
+        return SidebarApprovalClick(
+            workspaceIndex: workspaceIndex, columnIndex: columnIndex, requestID: releasedID, behavior: releasedBehavior
+        )
+    }
+
+    /// A press on Allow / Deny decides only on its release (see
+    /// `approvalClickDecision`), never on the press. The loop also keeps
+    /// the press from moving the window.
     func trackApprovalClick(_ region: SidebarHitRegion, event: NSEvent) {
-        guard case let .permissionDecision(workspaceIndex, columnIndex, requestID, behavior) = region,
-              event.clickCount == 1 else { return }
+        guard case let .permissionDecision(_, _, requestID, behavior) = region else { return }
         let key = SidebarHoverTarget.approvalButtonKey(requestID: requestID, behavior: behavior)
-        guard isApprovalButtonArmed(key), let window else { return }
+        let armedAtPress = isApprovalButtonArmed(key)
+        guard event.clickCount == 1, armedAtPress, let window else { return }
         while true {
             guard let next = window.nextEvent(
                 matching: [.leftMouseUp, .leftMouseDragged],
@@ -56,11 +101,15 @@ extension SidebarView {
             }
             guard next.type == .leftMouseUp else { continue }
             let point = contentDocumentView.convert(next.locationInWindow, from: nil)
-            guard let area = hitArea(at: point),
-                  case let .permissionDecision(_, _, releasedID, releasedBehavior) = area.region,
-                  releasedID == requestID, releasedBehavior == behavior,
-                  isApprovalButtonArmed(key) else { return }
-            onPermissionDecision?(workspaceIndex, columnIndex, requestID, behavior)
+            if let decision = Self.approvalClickDecision(
+                pressed: region,
+                released: hitArea(at: point)?.region,
+                clickCount: event.clickCount,
+                armedAtPress: armedAtPress,
+                armedAtRelease: isApprovalButtonArmed(key)
+            ) {
+                onPermissionDecision?(decision.workspaceIndex, decision.columnIndex, decision.requestID, decision.behavior)
+            }
             return
         }
     }

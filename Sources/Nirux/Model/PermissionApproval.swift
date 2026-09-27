@@ -335,17 +335,28 @@ struct PermissionApprovalChannel {
 
     // MARK: App side
 
-    /// Turn the option on (marker naming `app`) or off (no marker). False
-    /// when the marker could not be written in a trusted directory.
+    /// Turn the option on: the marker names `app`. False when it could not
+    /// be written in a trusted directory.
     @discardableResult
-    func setListening(_ app: ProcessInstance?) -> Bool {
-        guard let app else {
-            try? FileManager.default.removeItem(at: markerURL)
-            return true
-        }
+    func setListening(_ app: ProcessInstance) -> Bool {
         let marker = PermissionApprovalMarker(version: PermissionApproval.protocolVersion, app: app)
         guard prepareDirectory(), let data = try? JSONEncoder().encode(marker) else { return false }
         return Self.writeAtomically(data, to: markerURL)
+    }
+
+    /// Turn the option off for `app`: the marker goes, unless it names
+    /// another Nirux still running on this state directory.
+    func stopListening(
+        for app: ProcessInstance?,
+        running: (pid_t) -> ProcessInstance? = ProcessInstance.running(pid:)
+    ) {
+        if isTrusted(),
+           let data = Self.readPrivateFile(markerURL),
+           let marker = try? JSONDecoder().decode(PermissionApprovalMarker.self, from: data),
+           marker.app != app, running(marker.app.pid) == marker.app {
+            return
+        }
+        try? FileManager.default.removeItem(at: markerURL)
     }
 
     /// Write one decision for a waiting receiver. False when it could not

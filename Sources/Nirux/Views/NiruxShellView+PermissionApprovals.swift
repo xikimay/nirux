@@ -62,6 +62,7 @@ extension NiruxShellView {
             && !(workspace.isInactive && sidebar.isInactiveSectionCollapsed)
             && !NSWorkspace.shared.isVoiceOverEnabled
         let userSeesSidebar = NSApp.isActive && window?.isVisible == true && window?.isMiniaturized == false
+            && window?.occlusionState.contains(.visible) == true
         return PermissionApprovalHold(cardShown: cardShown, userSeesSidebar: userSeesSidebar)
     }
 
@@ -75,7 +76,13 @@ extension NiruxShellView {
             for (columnIndex, column) in workspace.columns.enumerated() {
                 let hold = approvalHold(workspaceIndex: workspaceIndex, columnIndex: columnIndex, listed: listed)
                 holds[ObjectIdentifier(column)] = hold
-                releaseHeldApprovals(of: column) { !hold.holds(isSubagent: $0.agentID != nil) }
+                // A card shows one request: a subagent's held behind it
+                // would only delay its dialog.
+                let shown = column.pty?.sidebarApproval(now: Date().timeIntervalSince1970)?.approval?.requestID
+                releaseHeldApprovals(of: column) {
+                    !hold.holds(isSubagent: $0.agentID != nil)
+                        || ($0.agentID != nil && $0.approval?.requestID != shown)
+                }
             }
         }
         AgentHookCenter.shared.sweepApprovalsIfDue()
@@ -121,11 +128,17 @@ extension AgentHookCenter {
     /// earlier run are swept either way.
     func applySidebarApprovals(enabled: Bool) {
         let channel = approvalChannel()
-        let listening = channel.setListening(enabled ? ProcessInstance.running(pid: getpid()) : nil)
-        if enabled, !listening {
-            NSLog("[Approvals] state directory not private to this user — sidebar approvals stay off")
+        let me = ProcessInstance.running(pid: getpid())
+        var listening = false
+        if enabled, let me {
+            listening = channel.setListening(me)
+            if !listening {
+                NSLog("[Approvals] state directory not private to this user — sidebar approvals stay off")
+            }
+        } else {
+            channel.stopListening(for: me)
         }
-        approvalsEnabled = enabled && listening
+        approvalsEnabled = listening
         channel.sweep()
     }
 }

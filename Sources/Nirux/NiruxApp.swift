@@ -181,7 +181,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         ActivityStore.shared.flush()
         // Receivers stop waiting on an app that is gone.
         shell?.releaseAllPermissionApprovals()
-        AgentHookCenter.shared.approvalChannel().setListening(nil)
+        AgentHookCenter.shared.approvalChannel().stopListening(for: ProcessInstance.running(pid: getpid()))
         AgentHookCenter.shared.stop()
         MissionEventCenter.shared.stop()
     }

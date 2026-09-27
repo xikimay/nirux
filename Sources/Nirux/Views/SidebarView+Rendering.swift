@@ -56,7 +56,7 @@ extension SidebarView {
             return
         }
         resetRenderState()
-        guard isExpanded else { setNeedsDisplay(bounds); return }
+        guard isExpanded else { approvalButtonArming.removeAll(); setNeedsDisplay(bounds); return }
 
         rebuildBottomIndicators()
 

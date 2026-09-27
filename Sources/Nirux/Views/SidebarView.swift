@@ -134,6 +134,7 @@ final class SidebarView: NSView {
         contentScrollView.documentView = contentDocumentView
         contentScrollView.isHidden = true
         addSubview(contentScrollView)
+        observeScrollingForApprovalArming()
     }
 
     @available(*, unavailable)

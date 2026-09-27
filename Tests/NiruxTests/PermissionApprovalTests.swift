@@ -38,6 +38,8 @@ final class PermissionApprovalTests: XCTestCase {
         XCTAssertEqual(approvalText("Read", ["file_path": "/Users/me/.ssh/config"]), "~/.ssh/config")
         XCTAssertEqual(approvalText("Read", ["file_path": "/Users/meow/x"]), "/Users/meow/x")
         XCTAssertEqual(approvalText("Read", ["file_path": "/etc/hosts"]), "/etc/hosts")
+        XCTAssertNil(approvalText("Read", ["file_path": ".env"]), "relative to a directory the card doesn't show")
+        XCTAssertNil(approvalText("Read", ["file_path": "~/x"]))
     }
 
     /// Anything the screen would alter, fold or cut is not approvable.
@@ -263,8 +265,20 @@ final class PermissionApprovalTests: XCTestCase {
         // A crash left the marker and the PID now names another process.
         XCTAssertFalse(channel.isAppListening { pid in ProcessInstance(pid: pid, startedAt: me.startedAt + 1) })
         XCTAssertFalse(channel.isAppListening { _ in nil })
-        XCTAssertTrue(channel.setListening(nil))
+        channel.stopListening(for: me)
         XCTAssertFalse(channel.isAppListening())
+    }
+
+    /// Another Nirux on the same state directory keeps its marker; a stale
+    /// one (crashed app) goes.
+    func testStoppingLeavesAnotherRunningAppsMarker() throws {
+        let me = try XCTUnwrap(ProcessInstance.running(pid: getpid()))
+        let other = ProcessInstance(pid: 4_242, startedAt: 42)
+        XCTAssertTrue(channel.setListening(other))
+        channel.stopListening(for: me) { pid in pid == other.pid ? other : nil }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: channel.markerURL.path), "still running")
+        channel.stopListening(for: me) { _ in nil }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: channel.markerURL.path), "gone: stale")
     }
 
     func testSweepRemovesUnclaimedDecisionsButNotTheMarker() throws {

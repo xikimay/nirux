@@ -170,10 +170,25 @@ final class PermissionApprovalReceiverTests: XCTestCase {
         let receiver = try startReceiver()
         _ = try XCTUnwrap(queuedRequest()?.approvalRequestID)
         let started = Date()
-        channel.setListening(nil)
+        channel.stopListening(for: ProcessInstance.running(pid: getpid()))
         let (_, stdout) = try finish(receiver)
         XCTAssertEqual(stdout, "")
         XCTAssertLessThan(Date().timeIntervalSince(started), 5)
+        XCTAssertEqual(queuedEvents().last?.approvalOutcome, .expired)
+    }
+
+    /// Claude abandons a hook with SIGTERM: the receiver still reports, so
+    /// the app drops the request at once.
+    func testReceiverReportsWhenClaudeAbandonsTheHook() throws {
+        try listen()
+        let receiver = try startReceiver()
+        _ = try XCTUnwrap(queuedRequest()?.approvalRequestID)
+        let started = Date()
+        receiver.process.terminate()
+        let (status, stdout) = try finish(receiver)
+        XCTAssertEqual(status, 0)
+        XCTAssertEqual(stdout, "")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2)
         XCTAssertEqual(queuedEvents().last?.approvalOutcome, .expired)
     }
 

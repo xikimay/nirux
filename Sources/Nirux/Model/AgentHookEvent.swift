@@ -303,12 +303,21 @@ enum AgentHookCLI {
 
     /// Waits on a monotonic clock, so a wall-clock step never stretches
     /// the wait; stops early once Claude abandons the hook or the app that
-    /// would answer is gone (checked about once a second).
+    /// would answer is gone (checked about once a second). Claude abandons
+    /// a hook with SIGTERM (then SIGKILL): caught, so the report still
+    /// goes out and the app drops the request at once.
     private static func waitForDecision(
         _ wait: PermissionApprovalWait,
         on channel: PermissionApprovalChannel,
         parent: pid_t
     ) -> PermissionApproval.Outcome {
+        let terminated = SignalFlag()
+        signal(SIGTERM, SIG_IGN)
+        let termination = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+        termination.setEventHandler { terminated.raise() }
+        termination.resume()
+        defer { termination.cancel() }
+
         let start = clock_gettime_nsec_np(CLOCK_MONOTONIC)
         var checks = 0
         return wait.waitForDecision(
@@ -317,10 +326,28 @@ enum AgentHookCLI {
             sleep: { Thread.sleep(forTimeInterval: $0) },
             isAbandoned: {
                 checks += 1
-                if getppid() != parent { return true }
+                if terminated.isRaised || getppid() != parent { return true }
                 return checks % 10 == 0 && !channel.isAppListening()
             }
         )
+    }
+
+    /// Set from a signal handler's queue, read by the waiting loop.
+    private final class SignalFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var raised = false
+
+        func raise() {
+            lock.lock()
+            raised = true
+            lock.unlock()
+        }
+
+        var isRaised: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return raised
+        }
     }
 
     /// Only Nirux terminals export NIRUX_AGENT_UUID. An event without it

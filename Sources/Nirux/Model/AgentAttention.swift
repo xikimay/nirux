@@ -262,9 +262,11 @@ enum AgentToolInput {
             }
             value = input["command"] as? String
         case "Read":
-            value = (input["file_path"] as? String).map { path in
-                guard let home, !home.isEmpty, path.hasPrefix(home + "/") else { return path }
-                return "~/" + path.dropFirst(home.count + 1)
+            guard let path = input["file_path"] as? String, path.hasPrefix("/") else { return nil }
+            if let home, !home.isEmpty, path.hasPrefix(home + "/") {
+                value = "~/" + path.dropFirst(home.count + 1)
+            } else {
+                value = path
             }
         case "WebFetch":
             value = input["url"] as? String
