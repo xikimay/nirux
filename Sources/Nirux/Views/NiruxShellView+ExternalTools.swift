@@ -22,6 +22,9 @@ extension NiruxShellView {
     /// `sessionName` becomes `--name` (see `SessionName`) on a fresh launch
     /// only: it is ignored with `resume`, so a restore never overwrites a
     /// name the user set with `/rename` or from claude.ai.
+    /// `briefFile` is the space brief (see `SpaceBrief`), passed with
+    /// `--append-system-prompt-file` on every launch: a resumed conversation
+    /// keeps the prompt it recorded until it compacts, then uses this one.
     /// `handoverPrompt` is appended as a single-quoted positional argument
     /// (used by the worktree handover flow).
     ///
@@ -32,6 +35,7 @@ extension NiruxShellView {
         resume: AgentResumeTarget? = nil,
         mode: ClaudeLaunchMode,
         sessionName: String? = nil,
+        briefFile: String? = nil,
         handoverPrompt: String? = nil
     ) -> String {
         var parts = ["command", "claude"]
@@ -46,6 +50,9 @@ extension NiruxShellView {
             // One `--name=` argument, so a name starting with "-" can't be
             // read as another flag.
             parts.append(Self.shellQuotedArgument("--name=" + sessionName))
+        }
+        if let briefFile {
+            parts.append(Self.shellQuotedArgument("--append-system-prompt-file=" + briefFile))
         }
         if let prompt = handoverPrompt {
             parts.append(Self.shellQuotedArgument(prompt))
@@ -68,6 +75,8 @@ extension NiruxShellView {
     static func codexCommand(
         resume: AgentResumeTarget? = nil,
         mode: CodexLaunchMode,
+        briefFile: String? = nil,
+        shell: String = PtySession.defaultShell,
         handoverPrompt: String? = nil
     ) -> String {
         var parts = ["command", "codex"]
@@ -78,6 +87,9 @@ extension NiruxShellView {
             }
         }
         parts.append(contentsOf: mode.cliArgs)
+        if let briefFile, let override = Self.codexDeveloperInstructionsOverride(briefFile: briefFile, shell: shell) {
+            parts.append(contentsOf: ["-c", override])
+        }
         if let prompt = handoverPrompt {
             parts.append(Self.shellQuotedArgument(prompt))
         }
@@ -88,9 +100,76 @@ extension NiruxShellView {
         Persistence.load()?.settings?.codexLaunchMode ?? .default
     }
 
+    /// `developer_instructions=<TOML string read from briefFile>` as one
+    /// shell word. A shell runs the launch line, so the brief itself can't go
+    /// inline: the shell reads the one-line file. `command cat` skips a user's
+    /// `cat` alias or function. Nil for tcsh and csh, which lack `$(…)`.
+    static func codexDeveloperInstructionsOverride(briefFile: String, shell: String) -> String? {
+        let read = "command cat \(Self.shellQuotedArgument(briefFile))"
+        switch (shell as NSString).lastPathComponent {
+        case "tcsh", "csh": return nil
+        // fish before 3.4 has no `$(…)`; `(…)` works in every version.
+        case "fish": return "\"developer_instructions=\"(\(read))"
+        default: return "\"developer_instructions=$(\(read))\""
+        }
+    }
+
+    /// Writes the brief files for `workspace`'s space and returns them, or
+    /// nil when the space has no brief.
+    func spaceBriefInjection(for workspace: WorkspaceState) -> SpaceBrief.Injection? {
+        let spaceName = workspaceStore.profiles.first { $0.id == workspace.profileID }?.name
+            ?? workspace.profileID
+        return SpaceBrief.prepareInjection(spaceID: workspace.profileID, spaceName: spaceName)
+    }
+
+    /// Opens the space's brief in an editor column, creating it on first use.
+    func editSpaceBrief(profileID: String) {
+        let spaceName = workspaceStore.profiles.first { $0.id == profileID }?.name ?? profileID
+        do {
+            guard let url = try SpaceBrief.ensureBriefFile(spaceID: profileID, spaceName: spaceName) else {
+                NSSound.beep()
+                return
+            }
+            // A tab in the workspace's usual editor: rooting an editor at the
+            // brief's folder would make it the workspace's working directory.
+            openInEditorColumn(path: url.path)
+        } catch {
+            NiruxDebugLog.log("SpaceBrief: could not create the brief file: \(error)")
+            NSSound.beep()
+        }
+    }
+
+    /// The Codex brief file, unless one of the user's Codex configs already
+    /// sets `developer_instructions`, which Nirux must not override: the user
+    /// config (`$CODEX_HOME` when Nirux sees it, else ~/.codex) and project
+    /// configs (`.codex/config.toml`) from `launchDirectory` up to the home
+    /// folder.
+    static func codexBriefFile(from injection: SpaceBrief.Injection?, launchDirectory: String) -> String? {
+        guard let injection else { return nil }
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
+        let codexHome = ProcessInfo.processInfo.environment["CODEX_HOME"]
+            .map { URL(fileURLWithPath: $0) } ?? home.appendingPathComponent(".codex")
+        var configs = [codexHome.appendingPathComponent("config.toml")]
+        var folder = URL(fileURLWithPath: launchDirectory).standardizedFileURL
+        while folder.path.hasPrefix(home.path + "/") {
+            configs.append(folder.appendingPathComponent(".codex/config.toml"))
+            folder.deleteLastPathComponent()
+        }
+        for config in configs {
+            if let text = try? String(contentsOf: config, encoding: .utf8),
+               SpaceBrief.codexConfigSetsDeveloperInstructions(text) {
+                return nil
+            }
+        }
+        return injection.codexInstructionsFile
+    }
+
     func openClaudeCode() {
         guard let workspace = activeWorkspace else { return }
-        let cmd = Self.claudeCommand(mode: Self.currentClaudeLaunchMode())
+        let cmd = Self.claudeCommand(
+            mode: Self.currentClaudeLaunchMode(),
+            briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile
+        )
         workspace.addColumn()
         relayout(animated: false)
         updateSidebar()
@@ -105,7 +184,12 @@ extension NiruxShellView {
 
     func openCodex() {
         guard let workspace = activeWorkspace else { return }
-        let cmd = Self.codexCommand(mode: Self.currentCodexLaunchMode())
+        let cmd = Self.codexCommand(
+            mode: Self.currentCodexLaunchMode(),
+            briefFile: Self.codexBriefFile(
+                from: spaceBriefInjection(for: workspace), launchDirectory: workspace.focusedWorkingDirectory
+            )
+        )
         workspace.addColumn()
         relayout(animated: false)
         updateSidebar()
