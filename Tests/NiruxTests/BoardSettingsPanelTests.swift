@@ -252,10 +252,13 @@ final class BoardSettingsPanelTests: XCTestCase {
             let panel = try XCTUnwrap(form.panel as? BoardSettingsSheet)
             XCTAssertTrue(panel.defaultButtonCell === form.saveButton.cell, "Save is the default button")
             XCTAssertTrue(panel.multilineView === form.checksView)
+            // Read here: the nested function's XCTUnwrap autoclosure isn't
+            // on the main actor for CI's Swift 6.1.
+            let windowNumber = panel.windowNumber
             func key(_ characters: String, _ keyCode: UInt16, _ modifiers: NSEvent.ModifierFlags = []) throws -> NSEvent {
                 try XCTUnwrap(NSEvent.keyEvent(
                     with: .keyDown, location: .zero, modifierFlags: modifiers,
-                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: panel.windowNumber,
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber,
                     context: nil, characters: characters, charactersIgnoringModifiers: characters,
                     isARepeat: false, keyCode: keyCode
                 ))
