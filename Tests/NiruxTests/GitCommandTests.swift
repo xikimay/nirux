@@ -45,8 +45,53 @@ final class GitCommandTests: XCTestCase {
         try commit("large.txt", message: "branch tip")
         try Self.largeText("working copy").write(to: file, atomically: true, encoding: .utf8)
 
-        XCTAssertEqual(EditorColumn.gitOriginalContent(of: file.path, cwd: directory.path, mode: .head), branchTip)
-        XCTAssertEqual(EditorColumn.gitOriginalContent(of: file.path, cwd: directory.path, mode: .branch), base)
+        XCTAssertEqual(originalContent(of: file, mode: .head), .text(branchTip))
+        XCTAssertEqual(originalContent(of: file, mode: .branch), .text(base))
+    }
+
+    func testDiffOriginalOverTheLimitIsSizedButNotLoaded() throws {
+        // Deleted, so only the blob's own size can flag it as too large.
+        let file = directory.appendingPathComponent("large.txt")
+        let base = Self.largeText("base")
+        try git(["init", "-q", "-b", "main"])
+        try base.write(to: file, atomically: true, encoding: .utf8)
+        try commit("large.txt", message: "base")
+        try FileManager.default.removeItem(at: file)
+
+        XCTAssertEqual(
+            originalContent(of: file, mode: .head, maxBytes: 64 * 1024),
+            .tooLarge(byteCount: UInt64(base.utf8.count))
+        )
+        XCTAssertEqual(originalContent(of: file, mode: .head), .text(base))
+    }
+
+    func testUntrackedFileDiffsAgainstAnEmptyOriginal() throws {
+        let file = directory.appendingPathComponent("new.txt")
+        try git(["init", "-q", "-b", "main"])
+        try "tracked\n".write(to: directory.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        try commit("tracked.txt", message: "base")
+        try "new\n".write(to: file, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(originalContent(of: file, mode: .head), .text(""))
+        XCTAssertEqual(originalContent(of: file, mode: .branch), .text(""))
+    }
+
+    func testStatusLeavesTheIndexUntouched() throws {
+        // A touched but unchanged file: plain `git status` would refresh
+        // and rewrite the index, holding index.lock meanwhile.
+        let file = directory.appendingPathComponent("file.txt")
+        try git(["init", "-q"])
+        try "content\n".write(to: file, atomically: true, encoding: .utf8)
+        try commit("file.txt", message: "base")
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 1_577_836_800)],
+            ofItemAtPath: file.path
+        )
+        let index = directory.appendingPathComponent(".git/index")
+        let indexBefore = try Data(contentsOf: index)
+
+        XCTAssertEqual(GitCommand.output(["status", "--porcelain"], cwd: directory.path), "")
+        XCTAssertEqual(try Data(contentsOf: index), indexBefore)
     }
 
     func testLargeStandardErrorNeitherStallsGitNorLeaksIntoOutput() {
@@ -82,7 +127,7 @@ final class GitCommandTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(startedAt), 3)
     }
 
-    func testBranchBaseRefIsWhereTheBranchForkedFromMain() throws {
+    func testBranchBaseRefFallsBackToMainWithoutUpstream() throws {
         try git(["init", "-q", "-b", "main"])
         try "base\n".write(to: directory.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
         try commit("file.txt", message: "base")
@@ -117,32 +162,43 @@ private extension GitCommandTests {
         return text
     }
 
+    func originalContent(
+        of file: URL,
+        mode: EditorDiffMode,
+        maxBytes: UInt64 = EditorFileLimits.maxEditableBytes
+    ) -> EditorColumn.DiffOriginal? {
+        EditorColumn.gitOriginalContent(of: file.path, cwd: directory.path, mode: mode, maxBytes: maxBytes)
+    }
+
     func commit(_ path: String, message: String) throws {
         try git(["add", path])
         try git([
             "-c", "user.name=Nirux Tests",
             "-c", "user.email=nirux@example.test",
             "-c", "commit.gpgsign=false",
+            "-c", "core.hooksPath=/dev/null",
             "commit", "-qm", message
         ])
     }
 
-    /// Setup only, with small output: read to EOF before waiting on exit.
+    /// Fixture setup, with git's own error in the thrown one.
     @discardableResult
     func git(_ arguments: [String]) throws -> String {
-        let process = Process()
-        let output = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = arguments
-        process.currentDirectoryURL = directory
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw NSError(domain: "GitCommandTests.Git", code: Int(process.terminationStatus))
+        let result = try XCTUnwrap(BoundedProcess.run(
+            executableURL: URL(fileURLWithPath: "/usr/bin/git"),
+            arguments: arguments,
+            currentDirectoryURL: directory,
+            timeout: 30,
+            captureStandardError: true
+        ))
+        guard result.terminationStatus == 0 else {
+            let message = String(data: result.standardError, encoding: .utf8) ?? ""
+            throw NSError(
+                domain: "GitCommandTests.Git",
+                code: Int(result.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: "git \(arguments.joined(separator: " ")): \(message)"]
+            )
         }
-        return String(data: data, encoding: .utf8) ?? ""
+        return String(data: result.standardOutput, encoding: .utf8) ?? ""
     }
 }
