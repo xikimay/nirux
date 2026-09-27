@@ -49,6 +49,10 @@ final class WorkspaceState {
     var titleIsManual: Bool = false
     var profileID: String = WorkspaceProfile.defaultID
     var isInactive: Bool = false
+    /// Close in flight: `closeWorkspace` keeps the workspace in the store
+    /// until its exit animation ends. It no longer counts as remaining and
+    /// must not be selected or closed again.
+    var isClosing = false
     let missionID: String?
     /// Controls mission variables for terminals created after a Settings
     /// change. Already-running shells retain the environment they launched

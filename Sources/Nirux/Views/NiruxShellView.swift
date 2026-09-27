@@ -411,39 +411,6 @@ extension NiruxShellView {
         focusActiveTerminal(in: window)
     }
 
-    func closeActiveColumn() {
-        guard let workspace = activeWorkspace else { return }
-        if workspace.columns.count > 1 {
-            let closingIndex = workspace.focusedIndex
-            let closingView = workspace.columns[closingIndex].view
-
-            // Animate out, then remove
-            NSAnimationContext.runAnimationGroup({ ctx in
-                ctx.duration = 0.2
-                ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
-                closingView.animator().alphaValue = 0
-                closingView.layer?.setAffineTransform(CGAffineTransform(scaleX: 0.92, y: 0.92))
-            }, completionHandler: {
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    closingView.layer?.setAffineTransform(.identity)
-                    workspace.closeColumn(at: closingIndex)
-                    self.relayout(animated: false)
-                    // Animate remaining columns sliding into place
-                    workspace.layoutAndScroll(
-                        viewportWidth: self.viewport.frame.width,
-                        height: workspace.containerView.frame.height,
-                        animated: true, pilotMode: self.isPilotMode
-                    )
-                    self.updateSidebar()
-                    self.focusActiveTerminal(in: self.window)
-                }
-            })
-        } else if workspaces.count > 1 {
-            closeWorkspace(at: activeWSIndex)
-        }
-    }
-
     enum HDir { case left, right }
     func focusColumn(_ dir: HDir) {
         guard let workspace = activeWorkspace else { return }
