@@ -117,6 +117,7 @@ extension NiruxShellView {
             isMission: workspace.missionID != nil
         )
 
+        let brief = spaceBriefInjection(for: workspace)
         let cmd: String
         switch agent {
         case .claude:
@@ -127,11 +128,13 @@ extension NiruxShellView {
                     spaceName: workspaceStore.profiles.first { $0.id == workspace.profileID }?.name,
                     isDefaultSpace: workspace.profileID == WorkspaceProfile.defaultID
                 ),
+                briefFile: brief?.claudePromptFile,
                 handoverPrompt: handoverPrompt
             )
         case .codex:
             cmd = NiruxShellView.codexCommand(
                 mode: NiruxShellView.currentCodexLaunchMode(),
+                briefFile: NiruxShellView.codexBriefFile(from: brief, launchDirectory: workspace.cwd),
                 handoverPrompt: handoverPrompt
             )
         }

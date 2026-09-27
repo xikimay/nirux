@@ -472,7 +472,7 @@ extension WorkspaceState {
     // MARK: - Column Management
 
     private func terminalEnvironment(agentUUID: String) -> [String: String] {
-        Self.makeTerminalEnvironment(
+        var environment = Self.makeTerminalEnvironment(
             profileID: profileID,
             workspaceID: id,
             agentUUID: agentUUID,
@@ -481,6 +481,12 @@ extension WorkspaceState {
             executablePath: Bundle.main.executableURL?.path,
             launchID: NiruxLaunchAuthorization.launchID
         )
+        // Where agents edit the space brief when the user asks. Like the rest
+        // of this environment, it is fixed when the shell starts.
+        if let briefURL = SpaceBrief.briefURL(spaceID: profileID) {
+            environment["NIRUX_PROJECT_BRIEF"] = briefURL.path
+        }
+        return environment
     }
 
     // Pure builder so feature-gating of terminal metadata can be tested

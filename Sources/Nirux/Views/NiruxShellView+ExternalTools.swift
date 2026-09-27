@@ -22,6 +22,9 @@ extension NiruxShellView {
     /// `sessionName` becomes `--name` (see `SessionName`) on a fresh launch
     /// only: it is ignored with `resume`, so a restore never overwrites a
     /// name the user set with `/rename` or from claude.ai.
+    /// `briefFile` is the space brief (see `SpaceBrief`), appended to the
+    /// system prompt on every launch: a resumed conversation keeps the prompt
+    /// it recorded until it compacts, then uses this one.
     /// `handoverPrompt` is appended as a single-quoted positional argument
     /// (used by the worktree handover flow).
     ///
@@ -32,6 +35,8 @@ extension NiruxShellView {
         resume: AgentResumeTarget? = nil,
         mode: ClaudeLaunchMode,
         sessionName: String? = nil,
+        briefFile: String? = nil,
+        shell: String = PtySession.defaultShell,
         handoverPrompt: String? = nil
     ) -> String {
         var parts = ["command", "claude"]
@@ -46,6 +51,9 @@ extension NiruxShellView {
             // One `--name=` argument, so a name starting with "-" can't be
             // read as another flag.
             parts.append(Self.shellQuotedArgument("--name=" + sessionName))
+        }
+        if let briefFile {
+            parts.append(contentsOf: Self.claudeAppendSystemPromptArguments(briefFile: briefFile, shell: shell))
         }
         if let prompt = handoverPrompt {
             parts.append(Self.shellQuotedArgument(prompt))
@@ -68,6 +76,8 @@ extension NiruxShellView {
     static func codexCommand(
         resume: AgentResumeTarget? = nil,
         mode: CodexLaunchMode,
+        briefFile: String? = nil,
+        shell: String = PtySession.defaultShell,
         handoverPrompt: String? = nil
     ) -> String {
         var parts = ["command", "codex"]
@@ -78,6 +88,9 @@ extension NiruxShellView {
             }
         }
         parts.append(contentsOf: mode.cliArgs)
+        if let briefFile, let override = Self.codexDeveloperInstructionsOverride(briefFile: briefFile, shell: shell) {
+            parts.append(contentsOf: ["-c", override])
+        }
         if let prompt = handoverPrompt {
             parts.append(Self.shellQuotedArgument(prompt))
         }
@@ -90,7 +103,10 @@ extension NiruxShellView {
 
     func openClaudeCode() {
         guard let workspace = activeWorkspace else { return }
-        let cmd = Self.claudeCommand(mode: Self.currentClaudeLaunchMode())
+        let cmd = Self.claudeCommand(
+            mode: Self.currentClaudeLaunchMode(),
+            briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile
+        )
         workspace.addColumn()
         relayout(animated: false)
         updateSidebar()
@@ -105,7 +121,12 @@ extension NiruxShellView {
 
     func openCodex() {
         guard let workspace = activeWorkspace else { return }
-        let cmd = Self.codexCommand(mode: Self.currentCodexLaunchMode())
+        let cmd = Self.codexCommand(
+            mode: Self.currentCodexLaunchMode(),
+            briefFile: Self.codexBriefFile(
+                from: spaceBriefInjection(for: workspace), launchDirectory: workspace.focusedWorkingDirectory
+            )
+        )
         workspace.addColumn()
         relayout(animated: false)
         updateSidebar()

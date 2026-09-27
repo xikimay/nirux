@@ -25,6 +25,7 @@ final class SidebarView: NSView {
     var onProfileClicked: ((String) -> Void)?
     var onCreateProfile: (() -> Void)?
     var onRenameProfile: ((String) -> Void)?
+    var onEditProfileBrief: ((String) -> Void)?
     var onInactiveSectionCollapsedChange: ((Bool) -> Void)?
     var isExpanded: Bool = false {
         didSet {
@@ -495,6 +496,9 @@ final class SidebarView: NSView {
         if let active = lastProfiles.first(where: { $0.isActive }) {
             menu.addClosureItem(title: "Rename Space…") { [weak self] in
                 self?.onRenameProfile?(active.id)
+            }
+            menu.addClosureItem(title: "Edit Space Brief…") { [weak self] in
+                self?.onEditProfileBrief?(active.id)
             }
         }
         menu.addClosureItem(title: "New Space") { [weak self] in

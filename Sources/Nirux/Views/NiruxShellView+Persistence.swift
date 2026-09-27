@@ -100,8 +100,15 @@ extension NiruxShellView {
                 sessionIsUnprompted: persistedColumn.claudeSessionIsUnprompted == true,
                 claimedSessionIDs: &claimedSessionIDs.claude
             )
+            // The brief goes on restores too: a resumed conversation keeps the
+            // prompt it recorded until it compacts, then rebuilds it from the
+            // flags of this launch.
             workspace.addColumn(
-                command: NiruxShellView.claudeCommand(resume: resumeTarget, mode: mode),
+                command: NiruxShellView.claudeCommand(
+                    resume: resumeTarget,
+                    mode: mode,
+                    briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile
+                ),
                 agentUUID: persistedColumn.agentUUID ?? UUID().uuidString,
                 cwd: Self.existingDirectory(persistedColumn.cwd)
             )
@@ -116,7 +123,14 @@ extension NiruxShellView {
                 claimedSessionIDs: &claimedSessionIDs.codex
             )
             workspace.addColumn(
-                command: NiruxShellView.codexCommand(resume: resumeTarget, mode: mode),
+                command: NiruxShellView.codexCommand(
+                    resume: resumeTarget,
+                    mode: mode,
+                    briefFile: NiruxShellView.codexBriefFile(
+                        from: spaceBriefInjection(for: workspace),
+                        launchDirectory: persistedColumn.cwd ?? workspace.cwd
+                    )
+                ),
                 agentUUID: persistedColumn.agentUUID ?? UUID().uuidString,
                 cwd: Self.existingDirectory(persistedColumn.cwd)
             )
