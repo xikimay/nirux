@@ -203,15 +203,37 @@ enum PilotSidebarRenderer {
         }
         result.append(NSAttributedString(string: displayName, attributes: [.font: font, .foregroundColor: textColor]))
 
-        // Elapsed time for working agents — "· 12m" in green next to the name.
+        // Time in the current turn for working agents — "· 12m" in green
+        // next to the name.
         if column.agentStatus == .working, let elapsed = column.agentElapsedSeconds {
             result.append(NSAttributedString(string: " · \(shortDuration(elapsed))", attributes: [
                 .font: font,
                 .foregroundColor: NSColor.systemGreen.withAlphaComponent(0.65)
             ]))
         }
+        // Why a waiting agent waits — "· permission · Bash" in orange when
+        // it is blocked on the user, a muted "· done" when its turn ended.
+        if column.agentStatus == .needsAttention, let reason = column.attentionReason {
+            result.append(NSAttributedString(string: " · \(reason.shortLabel)", attributes: [
+                .font: font,
+                .foregroundColor: attentionTextColor(for: reason)
+            ]))
+        }
 
         return result
+    }
+
+    /// Row tooltip: what exactly the agent waits on ("Bash: git push").
+    static func attentionTooltip(for column: ColumnInfo) -> String? {
+        guard column.agentStatus == .needsAttention, let reason = column.attentionReason else { return nil }
+        let detail = reason.detailLine.flatMap { AgentText.clean($0, maxLength: 300) }
+        return [reason.headline, detail].compactMap { $0 }.joined(separator: " — ")
+    }
+
+    static func attentionTextColor(for reason: AgentAttentionReason) -> NSColor {
+        reason == .turnFinished
+            ? NSColor.white.withAlphaComponent(0.45)
+            : NSColor.systemOrange.withAlphaComponent(0.8)
     }
 
     /// Compact duration for sidebar rows: 42s, 12m, 1h05m. Pure —

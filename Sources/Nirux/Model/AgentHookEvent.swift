@@ -9,10 +9,12 @@ struct AgentHookEvent: Codable, Equatable {
         case claude, codex
     }
 
-    /// Normalized event names. The Claude hooks map 1:1; Codex only has a
-    /// single "agent turn complete" notification.
+    /// Normalized event names. The Claude hooks map 1:1 (PostToolUse and
+    /// PostToolUseFailure both mean "the tool call is over"); Codex only
+    /// has a single "agent turn complete" notification.
     enum Name: String, Codable {
         case sessionStart, userPromptSubmit, preToolUse, notification, stop, sessionEnd
+        case permissionRequest, postToolUse, subagentStop
         case turnComplete // codex
     }
 
@@ -34,11 +36,26 @@ struct AgentHookEvent: Codable, Equatable {
     /// queue entries omit it.
     let emitterProcess: ProcessInstance?
     let cwd: String?
-    /// Tool name (PreToolUse), notification message (Notification), or final
-    /// assistant message (Codex turnComplete, truncated).
+    /// Tool name (PreToolUse, PermissionRequest), notification message
+    /// (Notification, cleaned), or final assistant message (Codex
+    /// turnComplete, truncated).
     let detail: String?
     /// Claude SessionStart `source`: startup, resume, clear, compact, fork.
     let source: String?
+    /// Claude tool events (PreToolUse, PermissionRequest, PostToolUse*):
+    /// the tool, a short cleaned excerpt of its input (the command, file,
+    /// question…), and a key matching a PermissionRequest to the
+    /// PostToolUse of the same call. Only the excerpt and key leave the
+    /// receiver, never the input itself.
+    let toolName: String?
+    let toolSummary: String?
+    let toolKey: String?
+    /// Subagent the event came from (Claude `agent_id`); nil on the main
+    /// thread.
+    let agentID: String?
+    /// Claude Notification `notification_type` (permission_prompt,
+    /// idle_prompt…); nil from Claude versions that predate it.
+    let notificationType: String?
     /// Receiver-side timestamp (epoch seconds) — the emitter's clock and
     /// timezone are irrelevant.
     let timestamp: TimeInterval
@@ -61,25 +78,34 @@ struct AgentHookEvent: Codable, Equatable {
 
         switch kind {
         case .claude:
-            guard let hookName = payload["hook_event_name"] as? String else { return nil }
-            switch hookName {
-            case "SessionStart": name = .sessionStart
-            case "UserPromptSubmit": name = .userPromptSubmit
-            case "PreToolUse": name = .preToolUse
-            case "Notification": name = .notification
-            case "Stop": name = .stop
-            case "SessionEnd": name = .sessionEnd
-            default: return nil
-            }
+            guard let hookName = payload["hook_event_name"] as? String,
+                  let name = Self.claudeName(hookName) else { return nil }
+            self.name = name
             sessionID = payload["session_id"] as? String
-            cwd = payload["cwd"] as? String
+            let cwd = payload["cwd"] as? String
+            self.cwd = cwd
             source = name == .sessionStart ? payload["source"] as? String : nil
-            if name == .preToolUse {
-                detail = payload["tool_name"] as? String
-            } else if name == .notification {
-                detail = payload["message"] as? String
+            agentID = (payload["agent_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            let toolName = [.preToolUse, .permissionRequest, .postToolUse].contains(name)
+                ? payload["tool_name"] as? String
+                : nil
+            self.toolName = toolName
+            if let toolName, name != .preToolUse {
+                let input = payload["tool_input"] as? [String: Any] ?? [:]
+                toolSummary = AgentToolInput.summary(
+                    toolName: toolName, input: input, cwd: cwd, home: env["HOME"]
+                )
+                toolKey = AgentToolInput.key(toolName: toolName, input: input)
             } else {
-                detail = nil
+                toolSummary = nil
+                toolKey = nil
+            }
+            if name == .notification {
+                notificationType = payload["notification_type"] as? String
+                detail = (payload["message"] as? String).flatMap { AgentText.clean($0, maxLength: 300) }
+            } else {
+                notificationType = nil
+                detail = toolName
             }
         case .codex:
             // notify receives e.g. {"type":"agent-turn-complete","thread-id":…,
@@ -91,7 +117,62 @@ struct AgentHookEvent: Codable, Equatable {
             source = nil
             let message = payload["last-assistant-message"] as? String
             detail = message.map { String($0.prefix(500)) }
+            toolName = nil
+            toolSummary = nil
+            toolKey = nil
+            agentID = nil
+            notificationType = nil
         }
+    }
+
+    private static func claudeName(_ hookName: String) -> Name? {
+        switch hookName {
+        case "SessionStart": return .sessionStart
+        case "UserPromptSubmit": return .userPromptSubmit
+        case "PreToolUse": return .preToolUse
+        case "PermissionRequest": return .permissionRequest
+        case "PostToolUse", "PostToolUseFailure": return .postToolUse
+        case "Notification": return .notification
+        case "SubagentStop": return .subagentStop
+        case "Stop": return .stop
+        case "SessionEnd": return .sessionEnd
+        default: return nil
+        }
+    }
+
+    /// Direct construction (tests, synthesized events).
+    init(
+        kind: Kind,
+        name: Name,
+        agentUUID: String? = nil,
+        workspaceID: String? = nil,
+        sessionID: String? = nil,
+        emitterProcess: ProcessInstance? = nil,
+        cwd: String? = nil,
+        detail: String? = nil,
+        source: String? = nil,
+        toolName: String? = nil,
+        toolSummary: String? = nil,
+        toolKey: String? = nil,
+        agentID: String? = nil,
+        notificationType: String? = nil,
+        timestamp: TimeInterval = 0
+    ) {
+        self.kind = kind
+        self.name = name
+        self.agentUUID = agentUUID
+        self.workspaceID = workspaceID
+        self.sessionID = sessionID
+        self.emitterProcess = emitterProcess
+        self.cwd = cwd
+        self.detail = detail
+        self.source = source
+        self.toolName = toolName
+        self.toolSummary = toolSummary
+        self.toolKey = toolKey
+        self.agentID = agentID
+        self.notificationType = notificationType
+        self.timestamp = timestamp
     }
 }
 

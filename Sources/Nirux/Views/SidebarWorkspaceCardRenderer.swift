@@ -305,6 +305,7 @@ final class SidebarWorkspaceCardRenderer {
             let label = NSTextField(labelWithAttributedString: PilotSidebarRenderer.attributedColumn(column, fontSize: 11))
             label.lineBreakMode = .byTruncatingTail
             label.frame = NSRect(x: padding, y: rowY, width: sidebarWidth - padding * 2 - 18, height: rowHeight)
+            label.toolTip = PilotSidebarRenderer.attentionTooltip(for: column)
             append(label)
 
             let dot = statusDot(status: column.agentStatus)

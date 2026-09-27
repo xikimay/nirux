@@ -661,15 +661,18 @@ extension SidebarView {
     }
 
     private func activityText(for entry: ActivityEntry) -> String {
+        // Agent-provided text: one clean line (older builds stored raw
+        // notification messages).
+        let detail = entry.detail.flatMap { AgentText.clean($0, maxLength: 300) }
         let summary: String
         switch entry.category {
-        case .attention: summary = entry.detail ?? "needs input"
+        case .attention: summary = detail ?? "needs input"
         case .turnComplete: summary = "turn finished"
         case .sessionStart: summary = "session started"
         case .sessionEnd: summary = "session ended"
-        case .missionQuestion: summary = "question: \(entry.detail ?? "needs input")"
-        case .missionCompleted: summary = "completed: \(entry.detail ?? "done")"
-        case .missionResponse: summary = "replied: \(entry.detail ?? "response sent")"
+        case .missionQuestion: summary = "question: \(detail ?? "needs input")"
+        case .missionCompleted: summary = "completed: \(detail ?? "done")"
+        case .missionResponse: summary = "replied: \(detail ?? "response sent")"
         }
         return "\(entry.workspaceTitle) · \(entry.agentKind) · \(summary)"
     }

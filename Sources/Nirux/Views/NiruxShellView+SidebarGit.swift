@@ -37,6 +37,10 @@ extension NiruxShellView {
                 let editorFile = col.editorColumn?.currentPath.map {
                     ($0 as NSString).lastPathComponent
                 }
+                let agentStatus = col.pty?.agentStatus(
+                    foregroundProcess: foregroundProcess,
+                    isUserFocused: isUserFocused
+                ) ?? .idle
                 return ColumnInfo(
                     index: colIndex,
                     processName: foregroundProcess?.name,
@@ -45,15 +49,13 @@ extension NiruxShellView {
                     isWebView: col.isWebView,
                     webTitle: col.webViewColumn?.pageTitle,
                     terminalTitle: col.terminalTitle,
-                    agentStatus: col.pty?.agentStatus(
-                        foregroundProcess: foregroundProcess,
-                        isUserFocused: isUserFocused
-                    ) ?? .idle,
+                    agentStatus: agentStatus,
                     isEditor: col.isEditor,
                     editorFileName: editorFile,
                     editorIsDirty: col.editorColumn?.isDirty ?? false,
-                    agentElapsedSeconds: col.pty?.foregroundProcessStartedAt
-                        .map { Date().timeIntervalSince($0) }
+                    agentElapsedSeconds: col.pty?.agentTurnStartedAt
+                        .map { Date().timeIntervalSince($0) },
+                    attentionReason: agentStatus == .needsAttention ? col.pty?.agentAttentionReason : nil
                 )
             }
             return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
