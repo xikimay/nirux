@@ -576,6 +576,10 @@ auth, settings and plugins follow that directory.
 
 ## 7. Project view
 
+The [Project Board](project-board.md) design supersedes this section: it brings
+the view forward and adds a merge queue. The brief preview and pinned URLs below
+are left for later there.
+
 A per-project dashboard, opened as a new column type (like the editor and web
 columns) from the command palette or a shortcut. Today's Pilot panel is per
 workspace, three rows tall, and covers only the active space.
@@ -614,8 +618,8 @@ branches also change; those wait for them to merge.
 | 5 | Routing and anchors | 4 | worktree creation, git detection |
 | 6 | Per-project defaults | 2, 4 | settings, terminal env, `nirux://` request handling |
 | 7 | Session ledger and resume | 4, 5 | hook events, restore |
-| 8 | Project view column | 4, 5 | git and PR polling |
-| 9 | "Finish" (PR merged, then remove worktree), with handover files added to `info/exclude` | 8 | worktree creation |
+| 8 | Project view column. Replaced by the [Project Board](project-board.md) plan | 4, 5 | git and PR polling |
+| 9 | "Finish" (PR merged, then remove worktree), with handover files added to `info/exclude`. The cleanup shipped in #46; handover files aren't in `info/exclude` yet | 8 | worktree creation |
 
 PRs 1, 2 and 4 are the core: names, brief, and projects that persist. PRs 5 to
 9 start only if projects get used.
