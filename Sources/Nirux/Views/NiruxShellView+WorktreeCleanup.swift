@@ -265,7 +265,7 @@ extension NiruxShellView {
     }
 
     private func inspectForPanel(_ path: String, panel: WorktreeCleanupPanel, queue: OperationQueue) {
-        Self.runOffMain(on: queue) {
+        queue.addOperation {
             let inspection = WorktreeCleanup.inspect(path: path)
             DispatchQueue.main.async { @MainActor [weak self, weak panel] in
                 guard let self, let panel else { return }
@@ -282,7 +282,7 @@ extension NiruxShellView {
     /// preselected.
     private func addUnopenedWorktrees(listedFrom directory: String, to panel: WorktreeCleanupPanel, queue: OperationQueue) {
         guard panel.markFolderScanned(directory) else { return }
-        Self.runOffMain(on: queue) {
+        queue.addOperation {
             let listing = WorktreeCleanup.worktreeListing(in: directory, tools: .installed) ?? []
             // The first entry is the main checkout; a folder already gone
             // is for `git worktree prune`, not for this.
