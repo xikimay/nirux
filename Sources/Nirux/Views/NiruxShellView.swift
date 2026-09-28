@@ -107,8 +107,9 @@ final class NiruxShellView: NSView {
     lazy var projectBoardClient: any ProjectBoardGitHub = GitHubCLIBoardClient.installed
     /// Reloads the boards whose board.json was saved.
     var boardConfigSaveObserver: NSObjectProtocol?
-    /// The merge queue's `gh` client: a dry run unless Nirux runs from an
-    /// app bundle (see `MergeQueue.client`). Tests set a fake first.
+    /// The merge queue's `gh` client: a dry run unless Nirux is the notarized
+    /// release on the real state (see `MergeQueue.client`). Tests set a fake
+    /// first.
     lazy var mergeQueueClient: any MergeQueueGitHub = MergeQueue.client()
     /// Each project's merge queue, by project id (see `mergeQueue(projectID:)`).
     var mergeQueues: [String: MergeQueueController] = [:]

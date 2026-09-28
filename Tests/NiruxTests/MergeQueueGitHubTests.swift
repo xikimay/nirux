@@ -1,3 +1,4 @@
+import Security
 import XCTest
 @testable import Nirux
 
@@ -365,15 +366,24 @@ final class MergeQueueGitHubTests: XCTestCase {
 
     func testDevBuildsGetTheDryRunClient() {
         let live = GitHubCLIQueueClient { _, _ in XCTFail("no gh in tests"); return .failure(.ghMissing) }
-        // Like every dev build, the test process isn't signed for release.
-        XCTAssertFalse(MergeQueue.isSignedWithDeveloperID())
-        XCTAssertTrue(MergeQueue.client(environment: [:], live: live).isDryRun)
-        XCTAssertTrue(MergeQueue.client(environment: ["NIRUX_MERGE_QUEUE_LIVE": "true"], live: live).isDryRun)
-        XCTAssertFalse(MergeQueue.client(environment: ["NIRUX_MERGE_QUEUE_LIVE": "1"], live: live).isDryRun)
-        // The release on the real state is live; on a state of its own, not.
+        // A typo in the requirement would leave the release a dry run forever.
+        var requirement: SecRequirement?
+        XCTAssertEqual(SecRequirementCreateWithString(MergeQueue.releaseRequirement as CFString, [], &requirement), errSecSuccess)
+        // Xcode's xctest, which runs these tests, is no notarized release.
+        XCTAssertFalse(MergeQueue.isSignedForRelease())
+
+        XCTAssertTrue(MergeQueue.client(environment: [:], isSignedForRelease: false, live: live).isDryRun)
+        XCTAssertTrue(MergeQueue.client(environment: ["NIRUX_MERGE_QUEUE_LIVE": "true"], isSignedForRelease: false,
+                                        live: live).isDryRun)
+        XCTAssertFalse(MergeQueue.client(environment: ["NIRUX_MERGE_QUEUE_LIVE": "1"], isSignedForRelease: false,
+                                         live: live).isDryRun)
+        // The release on the real state is live; on a state of its own, not
+        // unless asked for.
         XCTAssertFalse(MergeQueue.client(environment: [:], isSignedForRelease: true, live: live).isDryRun)
         XCTAssertTrue(MergeQueue.client(environment: ["NIRUX_STATE_DIR": "/tmp/nirux-dev-x"], isSignedForRelease: true,
                                         live: live).isDryRun)
+        XCTAssertFalse(MergeQueue.client(environment: ["NIRUX_STATE_DIR": "/tmp/nirux-dev-x", "NIRUX_MERGE_QUEUE_LIVE": "1"],
+                                         isSignedForRelease: false, live: live).isDryRun)
         // A live Nirux doesn't pass it on to what its terminals run.
         let terminal = WorkspaceState.makeTerminalEnvironment(
             profileID: "p", workspaceID: "w", agentUUID: "u", missionID: nil, missionHandoffsEnabled: false,
@@ -382,7 +392,7 @@ final class MergeQueueGitHubTests: XCTestCase {
         let inherited = ["NIRUX_MERGE_QUEUE_LIVE": "1"].merging(terminal) { _, terminal in terminal }
         XCTAssertFalse(MergeQueue.isLive(environment: inherited, isSignedForRelease: false))
 
-        let dryRun = MergeQueue.client(environment: [:], live: live)
+        let dryRun = MergeQueue.client(environment: [:], isSignedForRelease: false, live: live)
         let mutation = MergeQueue.Mutation.merge(number: 52, head: MQ.sha("a"), method: .merge)
         XCTAssertEqual(dryRun.mutate(mutation, settings: settings), .dryRun(live.commandLine(mutation, settings: settings)))
         XCTAssertTrue(MergeQueue.Files(projectID: "p", stateDirectory: URL(fileURLWithPath: "/s"), dryRun: true)?
