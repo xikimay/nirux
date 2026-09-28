@@ -211,8 +211,7 @@ extension MergeQueue {
 
 /// An exclusive `flock` on one file per repository, in a folder that
 /// doesn't follow `NIRUX_STATE_DIR`: a live queue in any Nirux process
-/// (the installed app, an older release left beside it, a build with
-/// `NIRUX_MERGE_QUEUE_LIVE=1`) holds it.
+/// (the installed app, a bundle built by `scripts/bundle.sh`) holds it.
 /// The kernel releases it when the process dies, so a reused pid can't
 /// leave it stale. A lock is taken per open file, so two in one process
 /// exclude each other too. Sendable so the controller can release it on
