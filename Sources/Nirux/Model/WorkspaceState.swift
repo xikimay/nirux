@@ -519,7 +519,10 @@ extension WorkspaceState {
             // Hook events carry this back — see AgentHookCenter.
             "NIRUX_AGENT_UUID": agentUUID,
             // Authorizes nirux:// requests from this terminal's agents.
-            NiruxLaunchAuthorization.environmentKey: launchID
+            NiruxLaunchAuthorization.environmentKey: launchID,
+            // A live merge queue is never passed on to the builds an agent
+            // runs here: they stay dry runs unless asked for by hand.
+            "NIRUX_MERGE_QUEUE_LIVE": ""
         ]
         if missionHandoffsEnabled {
             environment["NIRUX_MISSION_HANDOFFS"] = "1"

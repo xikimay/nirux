@@ -1,8 +1,9 @@
 # Project Board
 
-Status: design, validated by the user on 2026-09-27. B4 (the config) and B1
-(the read-only board) are implemented; the merge queue (B2, B3) isn't. What B1
-decided along the way is in section 2.1.
+Status: design, validated by the user on 2026-09-27. B4 (the config), B1 (the
+read-only board) and B2 (the merge queue's engine, with no way to start it yet)
+are implemented; B3 (the queue's UI) isn't. What B1 and B2 decided along the
+way is in sections 2.1 and 3.7.
 
 On the night of 2026-09-26, one Claude session coordinated about fifteen
 parallel pull requests by hand:
@@ -319,7 +320,11 @@ For each PR, in order:
      group. So the runs are listed without `--event`. If one is unfinished, the
      queue waits for it, up to the post-merge timeout. If that run fails, the
      queue stops; otherwise it runs all of step 4's checks again. This covers
-     the first merge after Start, and merges made from outside the queue.
+     the first merge after Start, and merges made from outside the queue;
+   - step 1's local checks, again: an agent may have gone back to work in the
+     worktree while the checks ran. A busy agent is waited for (10 minutes at
+     most); tracked changes or unpushed commits stop the queue (decided with
+     the user on 2026-09-28).
 
    Then run `gh pr merge <n> --repo <owner/name> --<method>
    --match-head-commit <sha>` from a folder outside every worktree, so `gh`
@@ -449,10 +454,15 @@ The queue is a pure state machine: `(state, event) -> (state, [command])`.
   exception is `update-branch`'s 422, which step 2 classifies ("no new commits"
   goes on). A mutation refused by a rate limit stops the queue; only reads
   pause.
-- **Dev builds can't merge.** A build that doesn't run from an app bundle (a
-  `.build` binary) gets a dry-run client, unless `NIRUX_MERGE_QUEUE_LIVE=1` is
-  set. Agents build and click through Nirux inside Nirux, sometimes on the real
-  state.
+- **Dev builds can't merge.** A build gets a dry-run client unless it runs
+  from an app bundle on the real state (no `NIRUX_STATE_DIR`, which the
+  installed app never sets) that doesn't sit next to a `Package.swift` (where
+  `scripts/bundle.sh` makes it, in a checkout), or `NIRUX_MERGE_QUEUE_LIVE=1` is
+  set. Agents build and click through Nirux inside Nirux on a state of their
+  own, and LaunchServices opens a bundle with no variable at all. Nirux's
+  terminals get an empty `NIRUX_MERGE_QUEUE_LIVE`, so a live Nirux never passes
+  it on to the builds its agents run (decided with the user on 2026-09-28: the
+  design first made any app bundle live).
   - The dry-run client reads GitHub and journals the mutations it would make.
   - It writes its own `queue.dry-run.log` and `queue-state.dry-run.json`, so it
     never touches a live queue's files.
@@ -471,6 +481,98 @@ The queue is a pure state machine: `(state, event) -> (state, [command])`.
   nightly, 3 of 7"). Clicking it opens or focuses the board.
 - Quitting Nirux while a queue runs asks first. The queue stops before its next
   command.
+
+### 3.7 Decided while building B2
+
+B2 is the engine alone: nothing in the app starts a queue until B3's Start.
+Choices the design left open, taken as the most conservative option and
+documented in B2's pull request:
+
+- **Requests.** The engine waits on at most one request. A read request is a
+  batch of reads after a delay, so every poll and back-off is a request too.
+  The driver sends a request before anyone hears of the step that made it, so a
+  Stop from a listener never lands between a decision and its call. Stop drops
+  a pending read at once; a mutation already sent is awaited, and the queue
+  reads "stopping" meanwhile. A merge that answers then says to check the PR on
+  GitHub.
+- **The confirmation is B3's.** The engine has no "confirming" state: it starts
+  from a confirmed list, with the settings the sheet showed. `start` checks
+  those settings again with `BoardConfig.problems`: no required check would
+  make every head green.
+- **Checks by commit through GraphQL**, not REST: REST check runs don't name
+  their workflow, which `Workflow / job` needs, nor the run to rerun. Each read
+  costs 1 point, so a PR waiting for its checks costs about 360 points an hour
+  (PR and checks every 20 s). A missing field, or a second page of check suites
+  or runs, fails closed.
+  - Only the latest run per workflow (by id, since two workflow files may share
+    a name) and job counts.
+  - A required name needs a check run: a commit status of that name can make
+    it red or pending, never green alone.
+  - A required check that ends NEUTRAL or SKIPPED stops at once: without a new
+    run it can't turn green. A pending required check says whether it is
+    queued: at the timeout, the queue suggests a misspelled name only for a
+    check that never started.
+- **The one rerun** happens only when every failed required check belongs to
+  one workflow run, and once all that run's jobs are finished (GitHub reruns a
+  finished run only). Other failures stop. The runs it replaces (its failed
+  jobs, required or not, and the required jobs it skipped, such as one that
+  needs the failed job) read as pending until their new runs show, and the
+  checks timeout starts again at the rerun. If `gh run rerun` fails, the checks
+  are read once: new runs mean it went through.
+- **A branch update that GitHub refuses without a 422** re-reads the PR once:
+  an unchanged head stops the queue. One with no clear answer (a timeout) is
+  watched like an accepted one, for 5 minutes, since GitHub applies it later. A
+  new head must pass the update's checks (committed by `web-flow`, per REST
+  `commits/{sha}`, since GraphQL shows no user for GitHub's commits). A rerun
+  with no clear answer gets 20 s before its checks are read.
+- **After `gh pr merge`**, whatever it answered, the PR is read again. A
+  refusal stops at once; otherwise the PR is read every 5 s for a minute until
+  it is MERGED. A PR merged at another head than the confirmed one stops the
+  queue: it was merged outside it. The journal records what the queue saw at
+  each merge: the required checks with their runs, the checks still running,
+  the base tip.
+- **Post-merge runs on the base.** The queue looks at the workflow's last 50
+  runs on the base branch. Before each merge, a run that failed (failure, timed
+  out, startup failure, action required) stops the queue unless that attempt
+  had already failed at Start: a run still going at Start, or rerun since,
+  counts. One that had failed before Start is the sheet's warning (section 4),
+  not a stop, so a PR fixing the nightly can merge; a run the queue waited for
+  stops it whatever. A cancelled or skipped run doesn't stop it. While it waits
+  for an unfinished run, the queue polls the base's runs only, then runs all of
+  step 4's checks again.
+- **Whether the base moved after a merge**: `compare/{merge commit}...{base}`
+  ahead or behind. The newer run on the base names the commit that moved it.
+- **Local checks**: the branch's worktrees in the project's local repositories
+  (a remote naming the configured repository, whatever the host). Tracked
+  changes first; then a local HEAD other than the PR's head is compared on
+  GitHub. A project folder in a checkout git can't list, or refuses, fails
+  closed, before any wait for an agent. Busy
+  agents are the agent columns of the workspaces in the worktree (not in a
+  worktree nested inside it) and of other workspaces whose shell is inside it,
+  working or waiting on a dialog, as the Agent column reads them.
+- **Pauses and retries.** A primary rate limit reads `rate_limit` for the reset
+  of the exhausted pool (plus 5 s; a minute when it can't tell). A secondary one
+  waits 60 s, doubled each time, up to 16 minutes. A pause doesn't count toward
+  any timeout. Other failed reads, server errors included, retry after 5, 10,
+  20, 40 then 60 s, for 5 minutes from the first failure. `gh auth status`
+  checks the active account only; one that can't reach GitHub is retried too.
+- **A dry run stops at its first mutation** ("Dry run: … stopped before
+  running: gh pr merge …"): nothing changed on GitHub, so it can't go further.
+- **Files.** The journal's previous file is `queue.log.1`. Tokens an error
+  could echo (`ghp_…`, `gho_…`, `github_pat_…`) are masked, in the journal and
+  in the saved queue. A queue saved as running reads as interrupted at the next
+  launch, unless another Nirux holds the repository's lock: it still runs there.
+  That Nirux writes its last state before letting go, and the lock is held
+  while the file is read again and marked interrupted. The state is written
+  only when it changed. A queue interrupted, or stopped by failing reads, says
+  when a merge or branch update was sent and GitHub didn't show its effect
+  yet.
+- **For B3**, `MergeQueueController` (one per project, from
+  `NiruxShellView.mergeQueue(projectID:)`) offers `start(settings:entries:)`,
+  which returns why it refuses, `stop()`, the engine with its entries and
+  `statusText`, the saved queue and `reloadSaved()`, `isRunning`, `isDryRun`,
+  `runsElsewhere` and `onChange`. `onChange` is a single closure: B3 fans it
+  out to the board, the status bar and the quit confirmation.
 
 ## 4. Guardrails
 
