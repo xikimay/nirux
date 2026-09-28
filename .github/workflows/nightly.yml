@@ -240,16 +240,30 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          # A release goes once it is neither among the most recent
+          # KEEP_DATED_RELEASES nor published in the last KEEP_DATED_RELEASE_DAYS.
           KEEP_DATED_RELEASES: 20
+          KEEP_DATED_RELEASE_DAYS: 7
+          # gh pages through releases 100 at a time, up to this many. Past it,
+          # the releases with the oldest commits are left out, so they are
+          # only kept longer, never deleted by mistake.
+          RELEASE_LIST_LIMIT: 1000
         run: |
-          set -o pipefail
-          # Only tags this workflow creates match; `nightly` itself never does.
-          # Sort by publish time: a release's createdAt is its commit's date.
-          gh release list --limit 200 --json tagName,publishedAt \
-            | jq -r --argjson keep "$KEEP_DATED_RELEASES" '
-                [.[] | select(.tagName | test("^nightly-[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}-[0-9]{4}-[0-9a-f]{7,40}$"))]
-                | sort_by(.publishedAt) | reverse | .[$keep:] | .[].tagName' \
-            > "$RUNNER_TEMP/prune-tags.txt"
+          gh release list --limit "$RELEASE_LIST_LIMIT" --json tagName,publishedAt,isDraft \
+            > "$RUNNER_TEMP/releases.json"
+          LISTED=$(jq length "$RUNNER_TEMP/releases.json")
+          if [ "$LISTED" -ge "$RELEASE_LIST_LIMIT" ]; then
+            echo "::warning::Listed $RELEASE_LIST_LIMIT releases, the limit; older dated releases were not considered."
+          fi
+
+          # Only tags this workflow creates are selected; `nightly` never is.
+          if ! ./scripts/nightly-releases-to-prune.sh \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$KEEP_DATED_RELEASES" "$KEEP_DATED_RELEASE_DAYS" \
+            < "$RUNNER_TEMP/releases.json" > "$RUNNER_TEMP/prune-tags.txt"; then
+            echo "::warning::Could not select the dated nightly releases to prune; none deleted."
+            exit 1
+          fi
+          echo "Listed $LISTED releases; $(wc -l < "$RUNNER_TEMP/prune-tags.txt" | tr -d ' ') dated ones to delete."
 
           while read -r tag; do
             if [ "$tag" = "$RELEASE_TAG" ]; then

@@ -116,7 +116,9 @@ Every push to `main` publishes two prereleases from the same build:
 
 - `nightly-YYYY.MM.DD-HHMM-<sha>`: one immutable release per build, holding
   `Nirux.app.zip` and an `appcast.xml` whose enclosure points at that same zip.
-  The workflow keeps the 20 most recent and deletes older ones, with their tags.
+  The workflow keeps every dated release published in the last 7 days, and at
+  least the 20 most recent, and deletes older ones with their tags
+  (`scripts/nightly-releases-to-prune.sh` picks them).
 - `nightly`: the rolling release, updated in place on every build. Sparkle's
   `SUFeedURL` reads `nightly/appcast.xml`, which points at the newest dated
   release's zip.
@@ -149,10 +151,12 @@ ends its shells.
    defaults write com.xikimay.nirux SUAutomaticallyUpdate -bool false
    ```
 
-2. Pick the last good build among the dated releases and download it:
+2. Pick the last good build among the dated releases and download it. A busy
+   week keeps a few hundred of them, and `gh release list` shows only 30
+   without `--limit`:
 
    ```bash
-   gh release list --repo xikimay/nirux
+   gh release list --repo xikimay/nirux --limit 1000
    TAG=nightly-YYYY.MM.DD-HHMM-<sha>
    DIR=$(mktemp -d)
    gh release download "$TAG" --repo xikimay/nirux --pattern Nirux.app.zip --dir "$DIR"
