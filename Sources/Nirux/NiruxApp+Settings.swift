@@ -4,7 +4,9 @@ import AppKit
 
 extension NiruxApp {
     static let settingsWidth: CGFloat = 520
-    static let settingsHeight: CGFloat = 784
+    /// The General section sits on top; the others keep their layout below.
+    static let generalSectionHeight: CGFloat = 64
+    static let settingsHeight: CGFloat = 784 + generalSectionHeight
 
     @objc func showSettings(_ sender: Any?) {
         if let existing = settingsPanel {
@@ -34,29 +36,88 @@ extension NiruxApp {
         background.wantsLayer = true
         background.layer?.backgroundColor = NSColor(red: 0.11, green: 0.11, blue: 0.15, alpha: 1).cgColor
 
-        let (modePopup, noFlickerCheck) = buildClaudeSection(in: background, width: width, height: height)
+        settingsKeepAwakeCheckbox = buildGeneralSection(in: background, width: width, height: height)
+        // The sections below lay out from this top.
+        let sectionsTop = height - Self.generalSectionHeight
+        let (modePopup, noFlickerCheck) = buildClaudeSection(in: background, width: width, height: sectionsTop)
         settingsLaunchModePopup = modePopup
         settingsNoFlickerCheckbox = noFlickerCheck
-        settingsStuckAgentPopup = buildStuckAgentRow(in: background, width: width, height: height)
-        settingsCodexLaunchModePopup = buildCodexSection(in: background, width: width, height: height)
-        let experimental = buildExperimentalSection(in: background, width: width, height: height)
+        settingsStuckAgentPopup = buildStuckAgentRow(in: background, width: width, height: sectionsTop)
+        settingsCodexLaunchModePopup = buildCodexSection(in: background, width: width, height: sectionsTop)
+        let experimental = buildExperimentalSection(in: background, width: width, height: sectionsTop)
         settingsMissionHandoffsCheckbox = experimental.missionHandoffs
         settingsSidebarApprovalsCheckbox = experimental.sidebarApprovals
-        let telegramControls = buildTelegramSection(in: background, width: width, height: height)
+        let telegramControls = buildTelegramSection(in: background, width: width, height: sectionsTop)
         settingsTelegramEnabledCheckbox = telegramControls.enabled
         settingsTelegramTokenField = telegramControls.token
         settingsTelegramCompletionCheckbox = telegramControls.completion
         settingsTelegramAttentionCheckbox = telegramControls.attention
         settingsTelegramStatusLabel = telegramControls.status
         settingsTelegramPairButton = telegramControls.pair
-        buildSettingsButtons(in: background, width: width)
 
-        panel.contentView = background
+        panel.contentView = settingsContent(background, in: panel)
         panel.center()
 
         settingsPanel = panel
         panel.makeKeyAndOrderFront(nil)
         refreshTelegramSettingsState()
+    }
+
+    /// The Save/Cancel row: the buttons sit 18 pt from its bottom.
+    private static let settingsButtonRowHeight: CGFloat = 64
+
+    /// The panel's content, with the Save/Cancel row added. When the screen
+    /// can't show all of it (a 13" display with the Dock, say), the sections
+    /// scroll, opening at the top, above a Save/Cancel row that stays put.
+    private func settingsContent(_ background: NSView, in panel: NSPanel) -> NSView {
+        let size = background.frame.size
+        let chrome = NSWindow.frameRect(forContentRect: background.frame, styleMask: panel.styleMask).height - size.height
+        guard let visibleHeight = settingsVisibleHeight(), visibleHeight - chrome < size.height else {
+            buildSettingsButtons(in: background, width: size.width)
+            return background
+        }
+        let fittedHeight = max(visibleHeight - chrome, 240)
+        // A scroller that takes room (a mouse attached) widens the panel.
+        let scrollerWidth = NSScroller.preferredScrollerStyle == .legacy
+            ? NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+            : 0
+        let fittedSize = NSSize(width: size.width + scrollerWidth, height: fittedHeight)
+        panel.setContentSize(fittedSize)
+        let container = NSView(frame: NSRect(origin: .zero, size: fittedSize))
+        let buttonRowHeight = Self.settingsButtonRowHeight
+        let buttonRow = NSView(frame: NSRect(x: 0, y: 0, width: fittedSize.width, height: buttonRowHeight))
+        buildSettingsButtons(in: buttonRow, width: fittedSize.width)
+        container.addSubview(buttonRow)
+
+        let scrollHeight = fittedHeight - buttonRowHeight
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: buttonRowHeight, width: fittedSize.width, height: scrollHeight))
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.backgroundColor = NSColor(red: 0.11, green: 0.11, blue: 0.15, alpha: 1)
+        scrollView.documentView = background
+        scrollView.contentView.scroll(to: NSPoint(x: 0, y: size.height - scrollHeight))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        container.addSubview(scrollView)
+        return container
+    }
+
+    private func buildGeneralSection(in background: NSView, width: CGFloat, height: CGFloat) -> NSButton {
+        let sectionLabel = NSTextField(labelWithString: "General")
+        sectionLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        sectionLabel.textColor = NSColor.white.withAlphaComponent(0.6)
+        sectionLabel.frame = NSRect(x: 24, y: height - 30, width: width - 48, height: 16)
+        background.addSubview(sectionLabel)
+
+        let keepAwake = NSButton(checkboxWithTitle: "Keep Mac awake while agents work", target: nil, action: nil)
+        keepAwake.contentTintColor = NSColor.white.withAlphaComponent(0.85)
+        keepAwake.font = .systemFont(ofSize: 12)
+        keepAwake.frame = NSRect(x: 22, y: height - 58, width: width - 44, height: 20)
+        keepAwake.state = NiruxShellView.currentKeepMacAwakeEnabled() ? .on : .off
+        keepAwake.toolTip = "Prevents idle sleep while an agent is working, until a minute after the last one stops. "
+            + "The display still sleeps, and closing a MacBook's lid still sleeps it (except in clamshell mode)."
+        background.addSubview(keepAwake)
+
+        return keepAwake
     }
 
     private func buildClaudeSection(in background: NSView, width: CGFloat, height: CGFloat) -> (NSPopUpButton, NSButton) {
@@ -367,6 +428,8 @@ extension NiruxApp {
         let noFlicker = settingsNoFlickerCheckbox?.state == .on
         let missionHandoffsEnabled = settingsMissionHandoffsCheckbox?.state == .on
         let sidebarApprovalsEnabled = settingsSidebarApprovalsCheckbox?.state == .on
+        // Nil without the checkbox: the saved choice (on by default) stands.
+        let keepMacAwake = settingsKeepAwakeCheckbox.map { $0.state == .on }
         let telegramEnabled = settingsTelegramEnabledCheckbox?.state == .on
         let enteredToken = settingsTelegramTokenField?.stringValue
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -403,6 +466,7 @@ extension NiruxApp {
                 if let minutes = settingsStuckAgentPopup?.selectedItem?.representedObject as? Int {
                     settings.stuckAgentMinutes = minutes
                 }
+                if let keepMacAwake { settings.keepMacAwakeWhileAgentsWork = keepMacAwake }
             }
             settings.telegramRemoteAccessEnabled = telegramEnabled
             settings.telegramNotifyOnCompletion = settingsTelegramCompletionCheckbox?.state != .off
@@ -456,6 +520,8 @@ extension NiruxApp {
         }
         applySidebarApprovals(enabled: sidebarApprovalsEnabled)
         shell?.stuckAgentWaitThreshold = NiruxShellView.stuckWaitThreshold(minutes: NiruxShellView.currentStuckAgentMinutes())
+        // Without the checkbox, the saved choice stands.
+        if let keepAwake = settingsKeepAwakeCheckbox { keepAwakeController?.setEnabled(keepAwake.state == .on) }
     }
 
     /// Turning the option off hands every held request back to its
@@ -538,6 +604,7 @@ extension NiruxApp {
     /// from persisted state instead of re-showing abandoned edits.
     private func clearSettingsPanelReferences() {
         settingsPanel = nil
+        settingsKeepAwakeCheckbox = nil
         settingsLaunchModePopup = nil
         settingsNoFlickerCheckbox = nil
         settingsCodexLaunchModePopup = nil

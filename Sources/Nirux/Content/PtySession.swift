@@ -447,6 +447,16 @@ final class PtySession: @unchecked Sendable {
     /// Last computed agent state (no snapshot needed — read from persistent state)
     var cachedAgentState: AgentStatus { state.machine.state }
 
+    /// Epoch seconds of the agent's last sign of life: output that wasn't
+    /// input echo (since the foreground command started), or a hook event
+    /// (of any command). 0 = none.
+    var lastAgentActivityAt: TimeInterval { max(state.machine.lastReadAt, state.machine.lastEventAt) }
+
+    /// The last status tick saw a recognized agent in the foreground.
+    var lastSeenRunningAgent: Bool {
+        state.machine.lastForegroundName.map(AgentStatusMachine.isRecognizedAgentProcess) ?? false
+    }
+
     /// Hook kind ("claude"/"codex") once the running agent emitted a hook
     /// event — closing only trusts an "idle" status that hooks drive.
     var agentHookKind: String? { state.machine.hookKind }

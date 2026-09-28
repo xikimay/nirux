@@ -35,7 +35,7 @@ enum TerminalSearchCommand: Equatable {
 /// long scrollback, and the user is usually still typing.
 @MainActor
 final class TerminalSearchSession {
-    typealias Schedule = @MainActor (TimeInterval, @escaping @MainActor @Sendable () -> Void) -> Void
+    typealias Schedule = MainActorSchedule
 
     nonisolated static let shortNeedleLength = 3
     nonisolated static let shortNeedleDelay: TimeInterval = 0.3
@@ -66,11 +66,7 @@ final class TerminalSearchSession {
 
     init(
         send: @escaping (TerminalSearchCommand) -> Void,
-        schedule: @escaping Schedule = { delay, work in
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                MainActor.assumeIsolated { work() }
-            }
-        }
+        schedule: @escaping Schedule = mainQueueSchedule
     ) {
         self.send = send
         self.schedule = schedule

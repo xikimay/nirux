@@ -43,7 +43,7 @@ struct AgentStatusMachine {
     /// the event being applied.
     private var lastDialogClosedAt: TimeInterval = 0
     private var lastClosedDialogRequestedAt: TimeInterval = 0
-    private var lastEventAt: TimeInterval = 0
+    private(set) var lastEventAt: TimeInterval = 0
     /// Codex's last turnComplete: output before it is the finished turn's.
     private var turnEndedAt: TimeInterval = 0
     /// Start of the current turn (epoch seconds): UserPromptSubmit, else
@@ -61,7 +61,7 @@ struct AgentStatusMachine {
     /// the fallback heuristic). 0 = never. Plain TimeInterval — a single
     /// aligned 8-byte store — because noteRead runs on the PTY read queue
     /// while tick reads it on the main queue; an Optional<Date> could tear.
-    private var lastReadAt: TimeInterval = 0
+    private(set) var lastReadAt: TimeInterval = 0
     /// Epoch seconds of the last write or resize — output within the echo
     /// window after one of these is the terminal answering the user, not
     /// agent work. 0 = never.
