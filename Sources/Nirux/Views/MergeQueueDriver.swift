@@ -61,8 +61,10 @@ final class MergeQueueDriver {
 
     func send(_ event: MergeQueue.Event) {
         let output = engine.handle(event, now: clock.now())
-        onUpdate?(engine, output.notes)
+        // The request goes out before anyone hears of the step: a Stop from
+        // a listener finds a mutation already sent, never one about to be.
         if let request = output.request { run(request) }
+        onUpdate?(engine, output.notes)
     }
 
     private func run(_ request: MergeQueue.Request) {

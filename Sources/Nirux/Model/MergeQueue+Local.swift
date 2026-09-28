@@ -31,6 +31,16 @@ extension MergeQueue {
             repository.remotes.contains { $0.owner == configured.owner && $0.name == configured.name }
         }
         var inspection = LocalInspection()
+        // A folder in a checkout git couldn't list: its worktrees can't be
+        // checked, so it fails closed rather than passing unseen.
+        let listed = snapshot.repositories.flatMap { $0.worktrees.map(\.path) }
+        for folder in folders where !snapshot.missingFolders.contains(folder) {
+            let comparable = snapshot.folders[folder] ?? NiruxShellView.comparablePath(folder)
+            guard !listed.contains(where: { ProjectBoard.contains($0, comparable) }),
+                  WorktreeCleanup.git(["rev-parse", "--is-inside-work-tree"], in: folder, tools: tools).status == 0
+            else { continue }
+            inspection.worktrees.append(LocalWorktree(path: folder, problem: .unreadable("git couldn’t list its worktrees")))
+        }
         for repository in repositories {
             for worktree in repository.worktrees where !worktree.isBare && !worktree.isPrunable {
                 inspection.allWorktreePaths.append(worktree.path)

@@ -53,11 +53,12 @@ enum MQ {
     }
 
     static func checkRun(
-        id: Int, name: String = "test", workflow: String? = "Tests", runID: Int? = 900,
+        id: Int, name: String = "test", workflow: String? = "Tests", workflowID: Int? = nil, runID: Int? = 900,
         status: String = "COMPLETED", conclusion: String? = "SUCCESS"
     ) -> MergeQueue.CommitChecks.CheckRun {
         MergeQueue.CommitChecks.CheckRun(
-            id: id, name: name, workflow: workflow, app: workflow == nil ? "some-app" : "github-actions",
+            id: id, name: name, workflow: workflow, workflowID: workflowID,
+            app: workflow == nil ? "some-app" : "github-actions",
             workflowRunID: runID, status: status, conclusion: conclusion
         )
     }

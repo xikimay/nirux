@@ -37,12 +37,12 @@ final class MergeQueueGitHubTests: XCTestCase {
     static let checks = """
     {"data":{"repository":{"object":{"checkSuites":{"pageInfo":{"hasNextPage":false},"nodes":[\
     {"app":{"slug":"vercel"},"workflowRun":null,"checkRuns":{"pageInfo":{"hasNextPage":false},"nodes":[]}},\
-    {"app":{"slug":"github-actions"},"workflowRun":{"databaseId":1003173,"workflow":{"name":"CodeQL"}},\
+    {"app":{"slug":"github-actions"},"workflowRun":{"databaseId":1003173,"workflow":{"databaseId":78419332,"name":"CodeQL"}},\
     "checkRuns":{"pageInfo":{"hasNextPage":false},"nodes":[\
     {"databaseId":5671411,"name":"Analyze (swift)","status":"COMPLETED","conclusion":"SUCCESS"},\
     {"databaseId":5671712,"name":"Analyze (actions)","status":"COMPLETED","conclusion":"SUCCESS"},\
     {"databaseId":5672529,"name":"Analyze (javascript-typescript)","status":"COMPLETED","conclusion":"SUCCESS"}]}},\
-    {"app":{"slug":"github-actions"},"workflowRun":{"databaseId":1009748,"workflow":{"name":"Tests"}},\
+    {"app":{"slug":"github-actions"},"workflowRun":{"databaseId":1009748,"workflow":{"databaseId":16092770,"name":"Tests"}},\
     "checkRuns":{"pageInfo":{"hasNextPage":false},"nodes":[\
     {"databaseId":5688518,"name":"test","status":"COMPLETED","conclusion":"SUCCESS"}]}},\
     {"app":{"slug":"github-advanced-security"},"workflowRun":null,"checkRuns":{"pageInfo":{"hasNextPage":false},\
@@ -112,9 +112,12 @@ final class MergeQueueGitHubTests: XCTestCase {
         XCTAssertEqual(autoMerge.headRepository, MQ.widgets)
 
         XCTAssertNil(MergeQueue.parsePullRequest(Data(Self.missingPullRequest.utf8)))
-        // Without isInMergeQueue, a pull request reads as queued: fail closed.
-        let withoutQueueField = Self.autoMergePullRequest.replacingOccurrences(of: "\"isInMergeQueue\":false,", with: "")
-        XCTAssertEqual(MergeQueue.parsePullRequest(Data(withoutQueueField.utf8))?.isInMergeQueue, true)
+        // A field it asked for and didn't get: unreadable, never a default.
+        for field in [#""isInMergeQueue":false,"#, #""isDraft":false,"#, #""autoMergeRequest":{"enabledAt":"2026-09-28T17:20:00Z"},"#] {
+            let missing = Self.autoMergePullRequest.replacingOccurrences(of: field, with: "")
+            XCTAssertNil(MergeQueue.parsePullRequest(Data(missing.utf8)), field)
+        }
+        XCTAssertNil(MergeQueue.parseMergeQueue(Data(#"{"data":{"repository":{}}}"#.utf8)))
     }
 
     func testChecksByCommit() throws {
@@ -123,6 +126,7 @@ final class MergeQueueGitHubTests: XCTestCase {
         let test = try XCTUnwrap(checks.runs.first { $0.name == "test" })
         XCTAssertEqual(test.workflow, "Tests")
         XCTAssertEqual(test.workflowRunID, 1009748)
+        XCTAssertEqual(test.workflowID, 16092770)
         XCTAssertEqual(test.conclusion, "SUCCESS")
         let codeQL = try XCTUnwrap(checks.runs.first { $0.name == "CodeQL" })
         XCTAssertNil(codeQL.workflow)
@@ -142,6 +146,11 @@ final class MergeQueueGitHubTests: XCTestCase {
         XCTAssertTrue(message.contains("more checks than Nirux reads"))
         guard case .failure(.refused) = MergeQueue.parseChecks(Data(Self.unknownCommitChecks.utf8), sha: MQ.sha("a")) else {
             return XCTFail("an unknown commit is refused")
+        }
+        // A page it can't tell is the last one fails closed.
+        let noPageInfo = Self.checks.replacingOccurrences(of: #""pageInfo":{"hasNextPage":false},"nodes":[]"#, with: #""nodes":[]"#)
+        guard case .failure(.unreadable) = MergeQueue.parseChecks(Data(noPageInfo.utf8), sha: MQ.sha("a")) else {
+            return XCTFail("a missing pageInfo")
         }
     }
 
@@ -207,6 +216,11 @@ final class MergeQueueGitHubTests: XCTestCase {
         )) else { return XCTFail("secondary rate limit") }
         guard case .notSignedIn = GitHubCLIQueueClient.classify(output(4, stderr: "To get started with GitHub CLI, please run:  gh auth login\n"))
         else { return XCTFail("signed out") }
+        XCTAssertEqual(GitHubCLIQueueClient.classify(output(1, stderr: "HTTP 404: Not Found (https://api.github.com/repos/acme/widgets/actions/workflows/nightly.yml)\n")),
+                       .refused(status: 404, message: "HTTP 404: Not Found (https://api.github.com/repos/acme/widgets/actions/workflows/nightly.yml)"))
+        guard case .refused(nil, _) = GitHubCLIQueueClient.classify(output(
+            1, stderr: "X Pull request acme/widgets#52 is not mergeable: the merge commit cannot be cleanly created.\n"
+        )) else { return XCTFail("a merge gh refused") }
         guard case .noAnswer = GitHubCLIQueueClient.classify(output(1, stderr: "gh: Server Error (HTTP 502)\n"))
         else { return XCTFail("a server error may have gone through") }
         guard case .noAnswer = GitHubCLIQueueClient.classify(output(
@@ -292,13 +306,6 @@ final class MergeQueueGitHubTests: XCTestCase {
         XCTAssertTrue(GitHubCLIQueueClient.mergeQueueArguments(repository: "acme/widgets", branch: "rel#1").contains("branch=rel#1"))
     }
 
-    func testTheCommandLineIsShellQuotedForTheJournal() {
-        let client = GitHubCLIQueueClient { _, _ in .failure(.ghMissing) }
-        XCTAssertEqual(client.commandLine(.merge(number: 52, head: MQ.sha("a"), method: .merge), settings: settings),
-                       "gh pr merge 52 --repo github.com/acme/widgets --merge --match-head-commit \(MQ.sha("a"))")
-        XCTAssertEqual(GitHubCLIQueueClient.shellQuoted("it's"), "'it'\\''s'")
-    }
-
     // MARK: The client end to end, with a recorded gh
 
     func testTheClientReadsAndClassifiesThroughGh() throws {
@@ -356,8 +363,20 @@ final class MergeQueueGitHubTests: XCTestCase {
         XCTAssertTrue(MergeQueue.client(environment: [:], bundleURL: debug, live: live).isDryRun)
         XCTAssertTrue(MergeQueue.client(environment: ["NIRUX_MERGE_QUEUE_LIVE": "true"], bundleURL: debug, live: live).isDryRun)
         XCTAssertFalse(MergeQueue.client(environment: ["NIRUX_MERGE_QUEUE_LIVE": "1"], bundleURL: debug, live: live).isDryRun)
-        XCTAssertFalse(MergeQueue.client(environment: [:], bundleURL: URL(fileURLWithPath: "/Applications/Nirux.app"),
-                                         live: live).isDryRun)
+        let app = URL(fileURLWithPath: "/Applications/Nirux.app")
+        XCTAssertFalse(MergeQueue.client(environment: [:], bundleURL: app, live: live).isDryRun)
+        // A bundle an agent runs on a state of its own stays a dry run.
+        let bundle = URL(fileURLWithPath: "/work/nirux.feat-x/Nirux.app")
+        XCTAssertTrue(MergeQueue.client(environment: ["NIRUX_STATE_DIR": "/tmp/nirux-dev-x"], bundleURL: bundle, live: live).isDryRun)
+        XCTAssertFalse(MergeQueue.client(environment: ["NIRUX_STATE_DIR": "/tmp/nirux-dev-x", "NIRUX_MERGE_QUEUE_LIVE": "1"],
+                                         bundleURL: bundle, live: live).isDryRun)
+        // A live Nirux doesn't pass it on to what its terminals run.
+        let terminal = WorkspaceState.makeTerminalEnvironment(
+            profileID: "p", workspaceID: "w", agentUUID: "u", missionID: nil, missionHandoffsEnabled: false,
+            executablePath: nil, launchID: "l"
+        )
+        let inherited = ["NIRUX_MERGE_QUEUE_LIVE": "1"].merging(terminal) { _, terminal in terminal }
+        XCTAssertFalse(MergeQueue.isLive(environment: inherited, bundleURL: debug))
 
         let dryRun = MergeQueue.client(environment: [:], bundleURL: debug, live: live)
         let mutation = MergeQueue.Mutation.merge(number: 52, head: MQ.sha("a"), method: .merge)

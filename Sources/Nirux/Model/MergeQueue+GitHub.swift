@@ -36,11 +36,14 @@ extension MergeQueue {
         case unreadable(String)
     }
 
-    /// Whether this build may change GitHub: an app bundle, or a dev
-    /// build with `NIRUX_MERGE_QUEUE_LIVE=1`. Agents build and click
-    /// through Nirux inside Nirux, sometimes on the real state.
+    /// Whether this build may change GitHub: an app bundle run on the real
+    /// state (the installed app never sets `NIRUX_STATE_DIR`), or any build
+    /// with `NIRUX_MERGE_QUEUE_LIVE=1`. Agents build and click through
+    /// Nirux inside Nirux, bundles from `scripts/bundle.sh` included, on a
+    /// state of their own.
     static func isLive(environment: [String: String], bundleURL: URL) -> Bool {
-        bundleURL.pathExtension == "app" || environment["NIRUX_MERGE_QUEUE_LIVE"] == "1"
+        if environment["NIRUX_MERGE_QUEUE_LIVE"] == "1" { return true }
+        return bundleURL.pathExtension == "app" && (environment["NIRUX_STATE_DIR"] ?? "").isEmpty
     }
 
     /// The client this build runs its queues with: `live`, or a dry run of
@@ -259,16 +262,22 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         if let status {
             return (500..<600).contains(status) ? .noAnswer("HTTP \(status): \(message)") : .refused(status: status, message: message)
         }
-        if graphQLErrors.contains(where: { $0["type"] is String }) || standardError.hasPrefix("GraphQL:") {
+        if graphQLErrors.contains(where: { $0["type"] is String }) || standardError.hasPrefix("GraphQL:")
+            || lowered.contains("is not mergeable") || lowered.contains("could not find any workflows") {
             return .refused(status: nil, message: message)
         }
         return .noAnswer(message)
     }
 
-    /// `… (HTTP 422)` at the end of gh's error line.
+    /// `gh api`'s `… (HTTP 422)`, or the other commands' `HTTP 404: …`.
     static func httpStatus(_ text: String) -> Int? {
-        guard let range = text.range(of: #"\(HTTP (\d{3})\)"#, options: .regularExpression) else { return nil }
-        return Int(text[range].dropFirst(6).prefix(3))
+        if let range = text.range(of: #"\(HTTP \d{3}\)"#, options: .regularExpression) {
+            return Int(text[range].dropFirst(6).prefix(3))
+        }
+        if let range = text.range(of: #"(?m)^(gh: )?HTTP \d{3}:"#, options: .regularExpression) {
+            return Int(text[range].suffix(4).prefix(3))
+        }
+        return nil
     }
 
     private static func strippingPrefix(_ line: String) -> String {
@@ -288,10 +297,12 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         }
     }
 
+    /// Plain words stay as they are, so the journal reads like the command
+    /// typed by hand.
     static func shellQuoted(_ argument: String) -> String {
         let safe = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./=:@%+,")
         guard !argument.isEmpty, argument.unicodeScalars.allSatisfy(safe.contains) else {
-            return "'" + argument.replacingOccurrences(of: "'", with: "'\\''") + "'"
+            return AgentHookInstaller.shellQuoted(argument)
         }
         return argument
     }
@@ -308,7 +319,9 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         )) ?? value
     }
 
-    static let authArguments = ["auth", "status", "--hostname", host]
+    /// The active account only: another account's stale token doesn't
+    /// make the one gh uses signed out.
+    static let authArguments = ["auth", "status", "--hostname", host, "--active"]
     static let rateLimitArguments = ["api", "--hostname", host, "rate_limit"]
 
     static func rulesArguments(repository: String, branch: String) -> [String] {
@@ -408,7 +421,7 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
               pageInfo { hasNextPage }
               nodes {
                 app { slug }
-                workflowRun { databaseId workflow { name } }
+                workflowRun { databaseId workflow { databaseId name } }
                 checkRuns(first: 100, filterBy: {checkType: LATEST}) {
                   pageInfo { hasNextPage }
                   nodes { databaseId name status conclusion }

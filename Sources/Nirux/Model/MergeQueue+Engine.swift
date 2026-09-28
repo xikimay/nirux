@@ -63,6 +63,9 @@ extension MergeQueue {
         private var purpose: Purpose?
         private var nextRequestID = 1
         private var clocks = Clocks()
+        /// The newest post-merge run on the base at Start: a newer one that
+        /// fails stops the queue before its next merge.
+        private var baseRunsBaseline = 0
         private var outbox = Output()
 
         init(settings: BoardConfig.QueueSettings, entries: [ConfirmedEntry]) {
@@ -80,8 +83,11 @@ extension MergeQueue {
             case .stopped(let reason): return "Stopped: \(reason.message)"
             case .running, .paused, .stopping:
                 var text = current.map { current in
-                    "\(entries[current].stepDescription(workflow: settings.postMergeWorkflow)), "
-                        + "\(current + 1) of \(entries.count)"
+                    let step = clocks.baseRunsSince != nil
+                        ? "#\(entries[current].number) waiting for the \(MergeQueue.workflowLabel(settings.postMergeWorkflow)) "
+                            + "on \(settings.baseBranch) before merging"
+                        : entries[current].stepDescription(workflow: settings.postMergeWorkflow)
+                    return "\(step), \(current + 1) of \(entries.count)"
                 } ?? "Starting"
                 if case .paused = phase { text += " (paused by GitHub’s rate limit)" }
                 if phase == .stopping { text += " (stopping)" }
@@ -113,9 +119,12 @@ extension MergeQueue {
                 guard let request, id == request.id, case .mutate(let mutation) = request.action, let purpose else { break }
                 self.request = nil
                 if phase == .stopping {
-                    note("\(Self.describe(mutation)) answered: \(Self.describe(result))")
-                    stop(StopReason(kind: .user, message: "Stopped by the user. The call already sent answered: "
-                        + "\(Self.describe(result))."))
+                    var message = "Stopped by the user. The \(Self.describe(mutation)), already sent, answered: "
+                        + "\(Self.describe(result))."
+                    if case .merge(let number, _, _) = mutation, result == .sent || result.isUncertain {
+                        message += " Check #\(number) on GitHub: it may be merged."
+                    }
+                    stop(StopReason(kind: .user, message: message))
                 } else {
                     mutated(result, purpose: purpose, now: now)
                 }
@@ -164,6 +173,14 @@ extension MergeQueue {
             var readFailingSince: TimeInterval?
             var readFailures = 0
             var secondaryLimits = 0
+
+            /// A pause for a rate limit doesn't count toward any timeout.
+            mutating func shift(by seconds: TimeInterval) {
+                step += seconds
+                agentBusySince = agentBusySince.map { $0 + seconds }
+                unknownSince = unknownSince.map { $0 + seconds }
+                baseRunsSince = baseRunsSince.map { $0 + seconds }
+            }
 
             mutating func resetForEntry() {
                 self = Clocks(readFailingSince: readFailingSince, readFailures: readFailures, secondaryLimits: secondaryLimits)
@@ -228,7 +245,7 @@ extension MergeQueue {
             phase = .running
             note("Started: \(entries.map { "#\($0.number)" }.joined(separator: ", ")) into \(settings.baseBranch) of "
                 + "\(settings.repository)")
-            read([.auth, .rateLimit, .baseMergeQueue], for: .start)
+            read([.auth, .rateLimit, .baseMergeQueue] + (settings.postMergeWorkflow != nil ? [.baseRuns] : []), for: .start)
         }
 
         /// The next waiting pull request, or the end.
@@ -258,15 +275,18 @@ extension MergeQueue {
             case .rateLimited(let resumeAt):
                 let until = max(resumeAt, now + 1)
                 phase = .paused(until: until)
+                clocks.shift(by: until - now)
                 note("Paused by GitHub’s rate limit for \(Int((until - now).rounded(.up))) s")
                 read(reads, after: until - now, for: purpose)
             case .secondaryRateLimit:
                 let delay = min(Limits.secondaryRateLimit * pow(2, Double(clocks.secondaryLimits)), 16 * 60)
                 clocks.secondaryLimits += 1
                 phase = .paused(until: now + delay)
+                clocks.shift(by: delay)
                 note("Paused by GitHub’s secondary rate limit for \(Int(delay)) s")
                 read(reads, after: delay, for: purpose)
             case .transient(let message):
+                if case .paused = phase { phase = .running }
                 let since = clocks.readFailingSince ?? now
                 clocks.readFailingSince = since
                 guard now - since < Limits.readRetry else {
@@ -378,6 +398,10 @@ extension MergeQueue {
                     + "\(ProjectBoard.clockTime(reset, now: reset)): the queue needs \(Limits.minimumRateLimit) in each pool "
                     + "(REST \(limit.coreRemaining), GraphQL \(limit.graphQLRemaining))."))
             }
+            if settings.postMergeWorkflow != nil {
+                guard let runs = answers.runs(.baseRuns) else { return missingAnswer() }
+                baseRunsBaseline = runs.map(\.id).max() ?? 0
+            }
             guard !mergeQueue else {
                 return stop(StopReason(kind: .setup, message: "\(settings.baseBranch) requires GitHub’s merge queue: gh pr merge "
                     + "would queue pull requests there instead of merging them, without waiting for the post-merge workflow. "
@@ -448,9 +472,24 @@ extension MergeQueue {
             read([.local(branch: pullRequest.headRefName, head: pullRequest.headOid)], for: .preflightLocal(head: pullRequest.headOid))
         }
 
-        /// A busy agent may still commit and push: wait for it first, then
-        /// look at its worktree.
         private mutating func preflightLocal(_ local: LocalState, head: String, index: Int, now: TimeInterval) {
+            let number = entries[index].number
+            // Everything again after a wait: the agent may have pushed meanwhile.
+            let isHeld = holdForLocal(local, index: index, now: now) { engine in
+                engine.read([.pullRequest(number)], after: Limits.pollInterval, for: .preflight)
+            }
+            guard !isHeld else { return }
+            read([.compare(base: settings.baseBranch, head: head)], for: .behind(head: head))
+        }
+
+        /// The branch on this Mac, at preflight and before each merge: a busy
+        /// agent may still commit and push, so it is waited for (10 minutes
+        /// at most) before its worktree is looked at; tracked changes and
+        /// unpushed commits stop. Returns whether the pull request waits
+        /// (`retry` was asked for) or stopped.
+        private mutating func holdForLocal(
+            _ local: LocalState, index: Int, now: TimeInterval, retry: (inout Engine) -> Void
+        ) -> Bool {
             let number = entries[index].number
             if !local.busyAgents.isEmpty {
                 let agents = local.busyAgents.joined(separator: ", ")
@@ -458,11 +497,13 @@ extension MergeQueue {
                 let since = clocks.agentBusySince ?? now
                 clocks.agentBusySince = since
                 guard now - since < Limits.agentWait else {
-                    return stop(StopReason(kind: .agentBusy, message: "An agent of #\(number) is still busy after 10 minutes: \(agents)."))
+                    stop(StopReason(kind: .agentBusy, message: "An agent of #\(number) is still busy after 10 minutes: \(agents)."))
+                    return true
                 }
-                // Everything again: the agent may have pushed meanwhile.
-                return read([.pullRequest(number)], after: Limits.pollInterval, for: .preflight)
+                retry(&self)
+                return true
             }
+            clocks.agentBusySince = nil
             for worktree in local.worktrees {
                 guard let problem = worktree.problem else { continue }
                 let message: String
@@ -475,9 +516,10 @@ extension MergeQueue {
                 case .unreadable(let reason):
                     message = "Nirux couldn’t check \(worktree.path): \(reason)"
                 }
-                return stop(StopReason(kind: .local, message: message))
+                stop(StopReason(kind: .local, message: message))
+                return true
             }
-            read([.compare(base: settings.baseBranch, head: head)], for: .behind(head: head))
+            return false
         }
 
         // MARK: 2. Update the branch
@@ -494,6 +536,8 @@ extension MergeQueue {
             clocks.step = now
             clocks.unknownSince = nil
             clocks.unknownReads = 0
+            // A later wait for a base run starts its own clock.
+            clocks.baseRunsSince = nil
             note("\(count) commit\(count == 1 ? "" : "s") behind \(settings.baseBranch): updating the branch")
             mutate(.updateBranch(number: number, expectedHead: head), for: .update(from: head))
         }
@@ -582,9 +626,12 @@ extension MergeQueue {
             }
             guard verdict.pending.isEmpty else {
                 guard now - clocks.step < TimeInterval(settings.checksTimeoutMinutes * 60) else {
+                    let advice = verdict.pending.contains { $0.hasSuffix("(not started)") }
+                        ? "A check that never starts may be misspelled: check the names in Board Settings."
+                        : "If runners are busy, raise the checks timeout in Board Settings."
                     return stop(StopReason(kind: .checks, message: "After \(settings.checksTimeoutMinutes) minutes, required "
                         + "checks are still missing or running on \(Self.short(head)): "
-                        + "\(verdict.pending.joined(separator: ", ")). Check their names in Board Settings."))
+                        + "\(verdict.pending.joined(separator: ", ")). \(advice)"))
                 }
                 return read([.pullRequest(entries[index].number), .checks(head)], after: Limits.pollInterval,
                             for: .checks(head: head))
@@ -625,7 +672,8 @@ extension MergeQueue {
             entries[index].step = .rerunning(head)
             note("Required check \(names) failed: rerunning the failed jobs of run \(runID), once")
             mutate(.rerun(runID: runID),
-                   for: .rerun(head: head, replaced: MergeQueue.runsReplaced(byRerunOf: runID, in: checks)))
+                   for: .rerun(head: head, replaced: MergeQueue.runsReplaced(byRerunOf: runID, in: checks,
+                                                                             required: settings.requiredChecks)))
         }
 
         private mutating func rerunStarted(head: String, replaced: Set<Int>, now: TimeInterval) {
@@ -641,7 +689,8 @@ extension MergeQueue {
         private mutating func mergeChecks(head: String, index: Int, after delay: TimeInterval = 0) {
             entries[index].step = .merging(head)
             var reads: [Read] = [
-                .pullRequest(entries[index].number), .checks(head), .compare(base: settings.baseBranch, head: head)
+                .pullRequest(entries[index].number), .checks(head), .compare(base: settings.baseBranch, head: head),
+                .local(branch: entries[index].branch, head: head)
             ]
             if settings.postMergeWorkflow != nil { reads.append(.baseRuns) }
             read(reads, after: delay, for: .mergeChecks(head: head))
@@ -650,7 +699,8 @@ extension MergeQueue {
         private mutating func mergeChecksRead(_ answers: [Read: ReadResult], head: String, index: Int, now: TimeInterval) {
             let number = entries[index].number
             guard let pullRequest = answers.pullRequest(number), let checks = answers.checks(head),
-                  let comparison = answers.comparison(base: settings.baseBranch, head: head)
+                  let comparison = answers.comparison(base: settings.baseBranch, head: head),
+                  let local = answers.local(branch: entries[index].branch, head: head)
             else { return missingAnswer() }
             if let problem = problem(with: pullRequest) { return stop(problem) }
             guard pullRequest.headOid == head else { return stop(changed(index: index, head: pullRequest.headOid)) }
@@ -672,6 +722,11 @@ extension MergeQueue {
                 return stop(StopReason(kind: .checks, message: "\(verdict.otherFailures.joined(separator: ", ")) failed on "
                     + "\(Self.short(head)): any red check blocks the merge, required or not."))
             }
+            // An agent may have gone back to work since preflight.
+            let isHeld = holdForLocal(local, index: index, now: now) { engine in
+                engine.mergeChecks(head: head, index: index, after: Limits.pollInterval)
+            }
+            guard !isHeld else { return }
             guard pullRequest.mergeable == "MERGEABLE" else {
                 guard let delay = unknownDelay(now: now) else {
                     return stop(StopReason(kind: .merge, message: "GitHub still can’t say whether #\(number) can merge "
@@ -685,7 +740,8 @@ extension MergeQueue {
                 guard let runs = answers.runs(.baseRuns) else { return missingAnswer() }
                 if waitForBaseRuns(runs, head: head, index: index, now: now) { return }
             }
-            note("Merging \(Self.short(head)) into \(settings.baseBranch) at \(Self.short(comparison.baseCommit))")
+            note("Merging \(Self.short(head)) into \(settings.baseBranch) at \(Self.short(comparison.baseCommit)): "
+                + MergeQueue.checksSummary(checks, required: settings.requiredChecks) + "; mergeable, not behind")
             mutate(.merge(number: number, head: head, method: settings.mergeMethod),
                    for: .merge(head: head, baseTip: comparison.baseCommit))
         }
@@ -696,6 +752,15 @@ extension MergeQueue {
         /// whether the merge waits.
         private mutating func waitForBaseRuns(_ runs: [Run], head: String, index: Int, now: TimeInterval) -> Bool {
             let label = MergeQueue.workflowLabel(settings.postMergeWorkflow)
+            // One that started after Start and failed between two looks
+            // is caught too.
+            if let failed = runs.first(where: {
+                MergeQueue.runFailed($0) && ($0.id > baseRunsBaseline || clocks.awaitedBaseRuns.contains($0.id))
+            }) {
+                stop(StopReason(kind: .postMerge, message: "The \(label) of \(Self.short(failed.headSha)) on "
+                    + "\(settings.baseBranch) failed: the base may be broken.", url: failed.url))
+                return true
+            }
             let unfinished = runs.filter { !$0.isCompleted }
             if !unfinished.isEmpty {
                 if clocks.baseRunsSince == nil {
@@ -714,11 +779,6 @@ extension MergeQueue {
             }
             guard !clocks.awaitedBaseRuns.isEmpty else { return false }
             let awaited = runs.filter { clocks.awaitedBaseRuns.contains($0.id) }
-            if let failed = awaited.first(where: MergeQueue.runFailed) {
-                stop(StopReason(kind: .postMerge, message: "The \(label) of \(Self.short(failed.headSha)) on "
-                    + "\(settings.baseBranch) failed: the base may be broken.", url: failed.url))
-                return true
-            }
             guard awaited.count == clocks.awaitedBaseRuns.count else {
                 stop(StopReason(kind: .postMerge, message: "Nirux lost track of the \(label) run it waited for on "
                     + "\(settings.baseBranch)."))
@@ -743,6 +803,7 @@ extension MergeQueue {
                             for: .mergeConfirm(head: head, baseTip: baseTip, result: result))
             }
             if pullRequest.state == "MERGED" {
+                entries[index].mergeCommit = pullRequest.mergeCommit
                 guard pullRequest.headOid == head else {
                     return stop(StopReason(kind: .merge, message: "#\(number) was merged at \(Self.short(pullRequest.headOid)), "
                         + "not at \(Self.short(head)): outside the queue.", url: pullRequest.url))

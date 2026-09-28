@@ -37,14 +37,23 @@ extension MergeQueue {
     }
 
     /// GraphQL `repository.mergeQueue(branch:)`: whether it isn't null.
+    /// A missing field is unreadable, not "none".
     static func parseMergeQueue(_ data: Data) -> Bool? {
-        guard let repository = dig(object(data), "data", "repository") as? [String: Any] else { return nil }
-        return !(repository["mergeQueue"] == nil || repository["mergeQueue"] is NSNull)
+        guard let repository = dig(object(data), "data", "repository") as? [String: Any],
+              let mergeQueue = repository["mergeQueue"]
+        else { return nil }
+        return !(mergeQueue is NSNull)
     }
 
+    /// Every field asked for must be there: a missing one would read as
+    /// "no auto-merge" or "not a draft".
     static func parsePullRequest(_ data: Data) -> PullRequestSnapshot? {
         guard let json = dig(object(data), "data", "repository", "pullRequest") as? [String: Any],
               let number = json["number"] as? Int,
+              let isDraft = json["isDraft"] as? Bool,
+              let isInMergeQueue = json["isInMergeQueue"] as? Bool,
+              let autoMerge = json["autoMergeRequest"],
+              json["mergeCommit"] != nil,
               let state = (json["state"] as? String)?.uppercased(),
               let headRefName = json["headRefName"] as? String,
               let headOid = objectID(json["headRefOid"]),
@@ -54,21 +63,19 @@ extension MergeQueue {
         let headRepository = (dig(json, "headRepository", "owner", "login") as? String).flatMap { owner in
             (dig(json, "headRepository", "name") as? String).map { GitHubRepository(owner: owner, name: $0) }
         }
-        let autoMerge = json["autoMergeRequest"]
         let mergeCommit = json["mergeCommit"] as? [String: Any]
         let parents = (dig(mergeCommit, "parents", "nodes") as? [[String: Any]] ?? []).compactMap { objectID($0["oid"]) }
         return PullRequestSnapshot(
             number: number,
             state: state,
-            isDraft: json["isDraft"] as? Bool ?? false,
+            isDraft: isDraft,
             headRefName: headRefName,
             headOid: headOid,
             baseRefName: baseRefName,
             headRepository: headRepository,
             mergeable: (json["mergeable"] as? String)?.uppercased() ?? "UNKNOWN",
-            hasAutoMerge: !(autoMerge == nil || autoMerge is NSNull),
-            // Missing reads as queued: fail closed.
-            isInMergeQueue: json["isInMergeQueue"] as? Bool ?? true,
+            hasAutoMerge: !(autoMerge is NSNull),
+            isInMergeQueue: isInMergeQueue,
             mergeCommit: objectID(mergeCommit?["oid"]),
             mergeCommitParents: parents,
             url: url
@@ -85,18 +92,25 @@ extension MergeQueue {
         guard let commit = repository["object"] as? [String: Any] else {
             return .failure(.refused(status: nil, message: "GitHub doesn’t know commit \(sha.prefix(7))."))
         }
-        let suites = commit["checkSuites"] as? [String: Any]
+        let unreadable = Result<CommitChecks, ClientError>.failure(.unreadable("checks of \(sha.prefix(7))"))
         let tooMany = Result<CommitChecks, ClientError>.failure(
             .refused(status: nil, message: "\(sha.prefix(7)) has more checks than Nirux reads.")
         )
-        if dig(suites, "pageInfo", "hasNextPage") as? Bool == true { return tooMany }
+        // A connection or page left unread could hold a red check.
+        guard let suites = commit["checkSuites"] as? [String: Any], let suiteNodes = suites["nodes"] as? [[String: Any]],
+              let moreSuites = dig(suites, "pageInfo", "hasNextPage") as? Bool, commit["status"] != nil
+        else { return unreadable }
+        if moreSuites { return tooMany }
         var checks = CommitChecks()
-        for suite in suites?["nodes"] as? [[String: Any]] ?? [] {
-            let runs = suite["checkRuns"] as? [String: Any]
-            if dig(runs, "pageInfo", "hasNextPage") as? Bool == true { return tooMany }
+        for suite in suiteNodes {
+            guard let runs = suite["checkRuns"] as? [String: Any], let runNodes = runs["nodes"] as? [[String: Any]],
+                  let moreRuns = dig(runs, "pageInfo", "hasNextPage") as? Bool
+            else { return unreadable }
+            if moreRuns { return tooMany }
             let workflowRun = suite["workflowRun"] as? [String: Any]
             let workflow = dig(workflowRun, "workflow", "name") as? String
-            for run in runs?["nodes"] as? [[String: Any]] ?? [] {
+            let workflowID = dig(workflowRun, "workflow", "databaseId") as? Int
+            for run in runNodes {
                 guard let id = run["databaseId"] as? Int, let name = run["name"] as? String,
                       let status = run["status"] as? String
                 else { return .failure(.unreadable("a check run of \(sha.prefix(7))")) }
@@ -104,6 +118,7 @@ extension MergeQueue {
                     id: id,
                     name: name,
                     workflow: workflow,
+                    workflowID: workflowID,
                     app: dig(suite, "app", "slug") as? String,
                     workflowRunID: workflowRun?["databaseId"] as? Int,
                     status: status.uppercased(),
@@ -111,7 +126,9 @@ extension MergeQueue {
                 ))
             }
         }
-        for context in dig(commit, "status", "contexts") as? [[String: Any]] ?? [] {
+        let status = commit["status"] as? [String: Any]
+        if status != nil, status?["contexts"] as? [[String: Any]] == nil { return unreadable }
+        for context in status?["contexts"] as? [[String: Any]] ?? [] {
             guard let name = context["context"] as? String, let state = context["state"] as? String else {
                 return .failure(.unreadable("a commit status of \(sha.prefix(7))"))
             }

@@ -147,6 +147,22 @@ extension MergeQueue {
         let message: String
         /// A page that shows the problem: two heads compared, a run.
         var url: String?
+
+        /// A token that a gh error echoes never reaches the saved queue.
+        init(kind: Kind, message: String, url: String? = nil) {
+            self.kind = kind
+            self.message = MergeQueue.redacted(message)
+            self.url = url
+        }
+    }
+
+    /// GitHub tokens (`ghp_…`, `gho_…`, `github_pat_…`) masked.
+    static func redacted(_ text: String) -> String {
+        text.replacingOccurrences(
+            of: #"\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"#,
+            with: "[token]",
+            options: .regularExpression
+        )
     }
 }
 
@@ -223,6 +239,11 @@ extension MergeQueue {
         case rateLimited(String)
         /// The dry-run client didn't send it: the command it would run.
         case dryRun(String)
+
+        var isUncertain: Bool {
+            if case .uncertain = self { return true }
+            return false
+        }
     }
 
     struct Request: Equatable, Sendable {
@@ -288,6 +309,8 @@ extension MergeQueue {
             let name: String
             /// The GitHub Actions workflow that made it; nil for another app.
             let workflow: String?
+            /// That workflow's id: two workflow files may share a name.
+            let workflowID: Int?
             /// The app that made it (`github-actions`, `vercel`).
             let app: String?
             /// The workflow run to rerun; nil for another app's check.

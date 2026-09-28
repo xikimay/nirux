@@ -67,7 +67,7 @@ final class MergeQueueStoreTests: XCTestCase {
         XCTAssertEqual(decoded.time, "2026-09-21T14:13:20Z")
     }
 
-    func testTheJournalNeverHoldsAToken() {
+    func testNeitherTheJournalNorTheSavedQueueHoldsAToken() {
         let line = MergeQueue.Journal.line(
             number: 52, step: "merging",
             command: "gh pr merge 52 --repo github.com/acme/widgets --merge --match-head-commit \(MQ.sha("a"))",
@@ -78,6 +78,9 @@ final class MergeQueueStoreTests: XCTestCase {
         XCTAssertFalse(line.result.contains("github_pat_"))
         XCTAssertEqual(line.result, "HTTP 401: Bad credentials for [token] and [token]")
         XCTAssertTrue(line.command?.contains("--match-head-commit") == true)
+        // Stop reasons, saved in queue-state.json, carry gh's messages too.
+        let reason = MergeQueue.StopReason(kind: .github, message: "GitHub refused a read: bad token gho_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123")
+        XCTAssertEqual(reason.message, "GitHub refused a read: bad token [token]")
     }
 
     // MARK: Saved state
@@ -118,7 +121,7 @@ final class MergeQueueStoreTests: XCTestCase {
         XCTAssertNil(MergeQueue.SavedQueue.load(from: url))
     }
 
-    func testAnInterruptedMergeSaysItMayHaveGoneThrough() {
+    func testAnInterruptedMergeSaysWhenItsCallWasSent() {
         var world = MQ.World()
         world.pullRequests[52] = MQ.pullRequest(52, head: MQ.sha("a"))
         world.checks[MQ.sha("a")] = MQ.checks(MQ.checkRun(id: 1))
@@ -126,7 +129,16 @@ final class MergeQueueStoreTests: XCTestCase {
         queue.start()
         queue.run(world)
         let saved = MergeQueue.SavedQueue(engine: queue.engine, dryRun: false, savedAt: Date()).interrupted()
-        XCTAssertTrue(saved.stopReason?.message.contains("The merge may have gone through: check #52 on GitHub.") == true)
+        XCTAssertEqual(saved.stopReason?.message, "Interrupted while merging #52: Nirux quit. Its merge of #52 at aaaaaaa "
+            + "was sent but not answered: check #52 on GitHub.")
+
+        // Checked for the merge, but no call sent yet: nothing to check.
+        var waiting = MQ.Harness(entries: [MQ.entry(52, head: MQ.sha("a"))])
+        world.baseRuns = [MQ.run(77, head: world.mainTip, status: "in_progress", conclusion: nil)]
+        waiting.start()
+        waiting.answer(world, until: { $0.pendingDelay == 30 })
+        let interrupted = MergeQueue.SavedQueue(engine: waiting.engine, dryRun: false, savedAt: Date()).interrupted()
+        XCTAssertEqual(interrupted.stopReason?.message, "Interrupted while merging #52: Nirux quit.")
     }
 
     // MARK: Local preflight
@@ -184,6 +196,17 @@ final class MergeQueueStoreTests: XCTestCase {
         inspection = try inspect(head)
         XCTAssertEqual(inspection.worktrees.map(\.problem), [nil])
         XCTAssertEqual(client.reads.last, compare)
+
+        // A checkout git can't list fails closed.
+        let failingGit = root.appendingPathComponent("git")
+        try "#!/bin/sh\ncase \"$*\" in *\"worktree list\"*) exit 128;; esac\nexec /usr/bin/git \"$@\"\n"
+            .write(to: failingGit, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: failingGit.path)
+        var unlistable = tools
+        unlistable.gitPath = failingGit.path
+        let unlisted = try MergeQueue.inspectLocal(folders: [worktree.path], branch: "feat/52", head: head,
+                                                   settings: MQ.settings(), client: client, tools: unlistable).get()
+        XCTAssertEqual(unlisted.worktrees.map(\.problem), [.unreadable("git couldn’t list its worktrees")])
 
         // Another branch, or another repository: no worktree to check.
         XCTAssertTrue(try MergeQueue.inspectLocal(folders: [repository.path], branch: "feat/53", head: head,

@@ -12,6 +12,8 @@ final class MergeQueueController {
         case alreadyRunning
         case nothingToQueue
         case invalidEntry(String)
+        /// Settings `BoardConfig.problems` refuses: never made by `queueSettings`.
+        case invalidSettings([String])
         /// Another project's queue in this Nirux works on the repository.
         case repositoryBusy
         /// Another Nirux runs a queue on the repository.
@@ -23,6 +25,7 @@ final class MergeQueueController {
             case .alreadyRunning: return "This project’s merge queue is already running."
             case .nothingToQueue: return "Add pull requests to the queue first."
             case .invalidEntry(let problem): return problem
+            case .invalidSettings(let problems): return problems.joined(separator: "\n")
             case .repositoryBusy: return "Another project’s merge queue is running on this repository."
             case .lockedElsewhere:
                 return "Another Nirux is running a merge queue on this repository (or its lock can’t be taken)."
@@ -43,6 +46,8 @@ final class MergeQueueController {
     /// A queue saved as running whose repository another Nirux locks.
     private(set) var runsElsewhere = false
     private var activity: NSObjectProtocol?
+    /// A call just sent, journaled after the notes of the step that sent it.
+    private var sentLines: [MergeQueue.Journal.Line] = []
 
     var local: MergeQueueLocalAccess
     var clock = MergeQueueClock()
@@ -74,6 +79,15 @@ final class MergeQueueController {
         self.local = local
         self.lockFolder = lockFolder
         files = MergeQueue.Files(projectID: projectID, stateDirectory: stateDirectory, dryRun: client.isDryRun)
+        restore()
+    }
+
+    /// Reads the saved queue again, when none runs here: the board asks
+    /// whether a queue another Nirux ran is still running.
+    func reloadSaved() {
+        guard !isRunning else { return }
+        runsElsewhere = false
+        saved = nil
         restore()
     }
 
@@ -110,6 +124,8 @@ final class MergeQueueController {
         guard files != nil else { return .noProjectFolder }
         guard !entries.isEmpty else { return .nothingToQueue }
         if let problem = Self.problem(with: entries) { return .invalidEntry(problem) }
+        let settingsProblems = Self.problems(with: settings)
+        guard settingsProblems.isEmpty else { return .invalidSettings(settingsProblems) }
         guard !isRepositoryBusy(settings.gitHubRepository) else { return .repositoryBusy }
         if !isDryRun {
             guard let lock = MergeQueueLock.acquire(repository: settings.gitHubRepository, folder: lockFolder) else {
@@ -136,6 +152,25 @@ final class MergeQueueController {
         driver?.stop()
     }
 
+    /// `queueSettings` only makes valid settings; this checks them again
+    /// where they are used: no required check would make every head green.
+    static func problems(with settings: BoardConfig.QueueSettings) -> [String] {
+        let config = BoardConfig(
+            repository: settings.repository,
+            baseBranch: settings.baseBranch,
+            requiredChecks: settings.requiredChecks,
+            postMergeWorkflow: settings.postMergeWorkflow.map { .workflow($0) } ?? .noWorkflow,
+            mergeMethod: settings.mergeMethod,
+            checksTimeoutMinutes: settings.checksTimeoutMinutes,
+            postMergeTimeoutMinutes: settings.postMergeTimeoutMinutes
+        )
+        var problems = config.problems
+        if config.gitHubRepository != settings.gitHubRepository {
+            problems.append("The repository and its GitHub name don’t match.")
+        }
+        return problems
+    }
+
     static func problem(with entries: [MergeQueue.ConfirmedEntry]) -> String? {
         guard Set(entries.map(\.number)).count == entries.count else { return "A pull request is in the list twice." }
         for entry in entries {
@@ -154,7 +189,9 @@ final class MergeQueueController {
         let date = clock.date()
         let saved = MergeQueue.SavedQueue(engine: engine, dryRun: isDryRun, savedAt: date)
         self.saved = saved
-        write(lines: notes.map { MergeQueue.Journal.line($0, at: date) }, saved: saved)
+        // The step's notes, then the call it just sent.
+        write(lines: notes.map { MergeQueue.Journal.line($0, at: date) } + sentLines, saved: saved)
+        sentLines = []
         if !engine.phase.isActive { finish() }
         onChange?()
     }
@@ -175,7 +212,11 @@ final class MergeQueueController {
             result: result.map(MergeQueue.Engine.describe) ?? "sent, waiting for the answer",
             at: clock.date()
         )
-        write(lines: [line], saved: nil)
+        if result == nil {
+            sentLines.append(line)
+        } else {
+            write(lines: [line], saved: nil)
+        }
     }
 
     // MARK: Files

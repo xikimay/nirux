@@ -46,6 +46,8 @@ extension MergeQueue {
         var stopReason: StopReason?
         var entries: [Entry]
         var current: Int?
+        /// A mutating call sent and not answered yet: "merge of #52 at abc1234".
+        var inFlight: String?
 
         init(engine: Engine, dryRun: Bool, savedAt: Date) {
             repository = engine.settings.repository
@@ -55,6 +57,7 @@ extension MergeQueue {
             self.savedAt = savedAt
             entries = engine.entries
             current = engine.current
+            if case .mutate(let mutation)? = engine.request?.action { inFlight = Engine.describe(mutation) }
             switch engine.phase {
             case .idle, .running, .paused: status = .running
             case .stopping: status = .stopping
@@ -75,8 +78,8 @@ extension MergeQueue {
             let entry = current.flatMap { entries[safe: $0] }
             var message = "Interrupted while "
                 + (entry?.stepDescription(workflow: postMergeWorkflow) ?? "starting") + ": Nirux quit."
-            if case .merging? = entry?.step {
-                message += " The merge may have gone through: check #\(entry?.number ?? 0) on GitHub."
+            if let inFlight, let entry {
+                message += " Its \(inFlight) was sent but not answered: check #\(entry.number) on GitHub."
             }
             let reason = StopReason(kind: .interrupted, message: message)
             saved.status = .stopped
@@ -171,15 +174,8 @@ extension MergeQueue {
             ISO8601DateFormatter.string(from: date, timeZone: TimeZone(secondsFromGMT: 0)!, formatOptions: [.withInternetDateTime])
         }
 
-        /// GitHub tokens (`ghp_…`, `gho_…`, `github_pat_…`) that an error
-        /// message could echo are masked.
-        static func redacted(_ text: String) -> String {
-            text.replacingOccurrences(
-                of: #"\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"#,
-                with: "[token]",
-                options: .regularExpression
-            )
-        }
+        /// Tokens that an error message could echo are masked.
+        static func redacted(_ text: String) -> String { MergeQueue.redacted(text) }
 
         /// Appends, moving the journal to its previous file first when the
         /// lines would take it past `maxBytes`. The files are 0600.

@@ -65,8 +65,9 @@ final class MergeQueueFlowTests: XCTestCase {
                 // Answered on another queue, as a slow gh would.
                 let answered = DispatchSemaphore(value: 0)
                 var result: Result<GitHubCLIQueueClient.Output, MergeQueue.ClientError> = .failure(.noAnswer("unanswered"))
+                let calledOnMain = Thread.isMainThread
                 DispatchQueue(label: "scripted-gh").async {
-                    result = self.respond(arguments, onMain: Thread.isMainThread)
+                    result = self.respond(arguments, onMain: calledOnMain)
                     answered.signal()
                 }
                 answered.wait()
@@ -251,6 +252,10 @@ final class MergeQueueFlowTests: XCTestCase {
         let journal = try String(contentsOf: files.journal, encoding: .utf8)
         XCTAssertTrue(journal.contains(#""command":"gh pr merge 52 --repo github.com/acme/widgets --merge --match-head-commit \#(a)""#))
         XCTAssertTrue(journal.contains(#""result":"done""#))
+        // The step's note, then the call it sent.
+        let merging = try XCTUnwrap(journal.range(of: "Merging aaaaaaa"))
+        let sent = try XCTUnwrap(journal.range(of: "sent, waiting for the answer"))
+        XCTAssertLessThan(merging.lowerBound, sent.lowerBound)
         XCTAssertTrue(journal.contains("Finished: 2 merged"))
         XCTAssertEqual(MergeQueue.SavedQueue.load(from: files.state)?.status, .finished)
     }
@@ -263,10 +268,18 @@ final class MergeQueueFlowTests: XCTestCase {
         var ended = 0
         queue.beginActivity = { NSObject() }
         queue.endActivity = { _ in ended += 1 }
+        // Stopped as soon as it waits for the checks: on the virtual clock
+        // it would otherwise reach their timeout within milliseconds.
+        var stoppedWhileRunning = false
+        queue.onChange = { [weak queue] in
+            guard let queue, queue.isRunning, queue.engine?.entries.first?.step == .waitingForChecks(a),
+                  case .read(_, let delay)? = queue.engine?.request?.action, delay > 0 else { return }
+            stoppedWhileRunning = true
+            queue.stop()
+        }
         XCTAssertNil(queue.start(settings: MQ.settings(), entries: [MQ.entry(52, head: a)]))
-        waitUntil { queue.engine?.entries.first?.step == .waitingForChecks(a) && world.callCount > 8 }
-        XCTAssertTrue(queue.isRunning)
-        queue.stop()
+        waitUntil { !queue.isRunning }
+        XCTAssertTrue(stoppedWhileRunning)
         XCTAssertEqual(queue.engine?.phase, .stopped(MergeQueue.StopReason(kind: .user, message: "Stopped by the user.")))
         XCTAssertFalse(MergeQueueLock.isHeld(repository: MQ.widgets, folder: lockFolder))
         XCTAssertEqual(ended, 1)
@@ -275,6 +288,36 @@ final class MergeQueueFlowTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
         XCTAssertEqual(world.callCount, calls)
         XCTAssertTrue(world.mergedNumbers.isEmpty)
+    }
+
+    /// A listener that stops the queue as it hears of a merge comes after
+    /// the call went out: Stop never lands between a decision and its call.
+    @MainActor
+    func testAStopFromAListenerComesAfterTheMergeWasSent() {
+        let a = MQ.sha("a")
+        var world = MQ.World()
+        world.pullRequests[52] = MQ.pullRequest(52, head: a)
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1))
+        let driver = MergeQueueDriver(
+            engine: MergeQueue.Engine(settings: MQ.settings(), entries: [MQ.entry(52, head: a)]),
+            client: FakeQueueClient(world: world),
+            local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }),
+            clock: VirtualClock().queueClock
+        )
+        var phaseWhenSent: MergeQueue.Phase?
+        driver.onMutation = { [weak driver] _, _, result in
+            if result == nil { phaseWhenSent = driver?.engine.phase }
+        }
+        driver.onUpdate = { [weak driver] engine, _ in
+            guard engine.phase == .running, case .mutate(.merge)? = engine.request?.action else { return }
+            driver?.stop()
+        }
+        driver.start()
+        waitUntil { !driver.engine.phase.isActive }
+        XCTAssertEqual(phaseWhenSent, .running)
+        guard case .stopped(let reason) = driver.engine.phase else { return XCTFail("\(driver.engine.phase)") }
+        XCTAssertEqual(reason.kind, .user)
+        XCTAssertTrue(reason.message.contains("Check #52 on GitHub: it may be merged."), reason.message)
     }
 
     @MainActor
@@ -336,6 +379,10 @@ final class MergeQueueFlowTests: XCTestCase {
         XCTAssertEqual(second.saved?.status, .running)
         XCTAssertEqual(second.start(settings: MQ.settings(), entries: [MQ.entry(52, head: a)]), .lockedElsewhere)
         elsewhere.release()
+        // Once that Nirux let go, the board reads it as interrupted.
+        second.reloadSaved()
+        XCTAssertFalse(second.runsElsewhere)
+        XCTAssertEqual(second.saved?.stopReason?.kind, .interrupted)
     }
 
     @MainActor
@@ -349,6 +396,8 @@ final class MergeQueueFlowTests: XCTestCase {
         else { return XCTFail("a head that isn't a SHA") }
         guard case .invalidEntry = queue.start(settings: MQ.settings(), entries: [MQ.entry(52, head: MQ.sha("a"), branch: "-x")])
         else { return XCTFail("a branch git would read as an option") }
+        guard case .invalidSettings = queue.start(settings: MQ.settings(requiredChecks: []), entries: [MQ.entry(52, head: MQ.sha("a"))])
+        else { return XCTFail("no required check would make every head green") }
         XCTAssertFalse(queue.isRunning)
     }
 
