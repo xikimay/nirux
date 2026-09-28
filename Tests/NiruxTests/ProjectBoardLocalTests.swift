@@ -53,4 +53,20 @@ final class ProjectBoardLocalTests: XCTestCase {
         ))
         XCTAssertEqual(rows.map(\.name), ["main", "feature"])
     }
+
+    /// A folder inside a listed checkout but in a repository of its own (a
+    /// submodule, a clone) is listed too, whatever the folders' order.
+    func testAFolderInANestedRepositoryIsListed() throws {
+        let app = root + "/app"
+        try BoardConfigSuggestionsTests.makeRepository(at: app, remote: "https://github.com/acme/app.git")
+        let lib = app + "/vendor/lib"
+        try BoardConfigSuggestionsTests.makeRepository(at: lib, remote: "https://github.com/acme/lib.git")
+        let source = lib + "/src"
+        try FileManager.default.createDirectory(atPath: source, withIntermediateDirectories: true)
+        let plain = app + "/docs"
+        try FileManager.default.createDirectory(atPath: plain, withIntermediateDirectories: true)
+
+        let snapshot = ProjectBoard.readLocal(folders: [app, source, plain])
+        XCTAssertEqual(snapshot.repositories.map { $0.worktrees.first?.path }, [app, lib])
+    }
 }

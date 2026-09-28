@@ -118,11 +118,9 @@ extension ProjectBoard {
                 snapshot.missingFolders.insert(folder)
                 continue
             }
-            // In a worktree already listed, unless a checkout of its own
-            // starts there: its repository is known.
-            let isListed = listedPaths.contains { ProjectBoard.contains($0, comparable) }
-            guard !isListed || FileManager.default.fileExists(atPath: folder + "/.git"),
-                  !listedPaths.contains(comparable),
+            // In a worktree already listed, and no other checkout (a
+            // submodule, a clone) starts in between: its repository is known.
+            guard !isInListedCheckout(comparable, listed: listedPaths),
                   let listing = WorktreeCleanup.worktreeListing(in: folder, tools: tools),
                   let first = listing.first,
                   listed.insert(NiruxShellView.comparablePath(first.path)).inserted
@@ -143,6 +141,18 @@ extension ProjectBoard {
             ))
         }
         return snapshot
+    }
+
+    /// Whether `path` (comparable) is a listed worktree, or inside one with
+    /// no `.git` between them.
+    private static func isInListedCheckout(_ path: String, listed: Set<String>) -> Bool {
+        guard let root = listed.filter({ contains($0, path) }).max(by: { $0.count < $1.count }) else { return false }
+        var current = path
+        while current != root, current.count > root.count {
+            if FileManager.default.fileExists(atPath: current + "/.git") { return false }
+            current = (current as NSString).deletingLastPathComponent
+        }
+        return true
     }
 
     /// The GitHub repositories of `git remote -v`, each once.

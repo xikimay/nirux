@@ -223,7 +223,8 @@ final class ProjectBoardFlowTests: XCTestCase {
             // board.json is being read, when every read is due.
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
             board.reload()
-            shell.updateSidebar()
+            // As a status refresh would, on screen (this window never is).
+            board.tick(onScreen: true)
             try waitUntil("the new workflow's run is read") {
                 client.calls.contains { $0.what == "run acme/widgets nightly.yml main" }
             }
