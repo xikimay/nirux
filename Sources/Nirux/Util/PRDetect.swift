@@ -39,10 +39,14 @@ enum PRDetect {
         }
     }
 
+    /// Where the GitHub CLI is looked for; nil when it isn't there. The
+    /// Project Board finds it the same way.
+    static func installedGHPath() -> String? {
+        ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"].first { FileManager.default.fileExists(atPath: $0) }
+    }
+
     private static func fetch(branch: String, cwd: String) -> FetchResult {
-        let ghPath = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
-            .first { FileManager.default.fileExists(atPath: $0) }
-        guard let ghPath,
+        guard let ghPath = installedGHPath(),
               let context = GitDetect.context(at: cwd),
               context.branch == branch
         else { return .failure }

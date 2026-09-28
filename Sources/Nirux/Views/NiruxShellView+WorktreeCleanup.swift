@@ -118,8 +118,8 @@ extension NiruxShellView {
         let resolvedRoot = comparablePath(root)
         return { candidate in
             guard let candidate else { return false }
-            let resolved = comparablePath(candidate)
-            return resolved == resolvedRoot || resolved.hasPrefix(resolvedRoot + "/")
+            // The Project Board places workspaces by the same rule.
+            return ProjectBoard.contains(resolvedRoot, comparablePath(candidate))
         }
     }
 
@@ -131,6 +131,12 @@ extension NiruxShellView {
         guard let workspace = workspaces[safe: workspaceIndex], !workspace.isClosing,
               let path = Self.worktreeCleanupPath(forCwd: workspace.cwd)
         else { return }
+        requestWorktreeCleanup(path: path)
+    }
+
+    /// The same for a worktree named by its folder, which may have no
+    /// workspace: the Project Board's "Clean Up…".
+    func requestWorktreeCleanup(path: String) {
         let key = Self.comparablePath(path)
         guard worktreeCleanupsInFlight.insert(key).inserted else { return }
         DispatchQueue.global(qos: .userInitiated).async {
@@ -201,6 +207,7 @@ extension NiruxShellView {
     private func finishWorktreeCleanup(
         _ execution: WorktreeCleanup.Execution, of candidate: WorktreeCleanupCandidate, plan: WorktreeCleanup.Plan
     ) -> CleanupOutcome {
+        defer { expireProjectBoardWorktrees() }
         switch execution {
         case .cleaned(let forced, let trashFolder):
             let kept = closeWorkspacesAfterCleanup(of: candidate)

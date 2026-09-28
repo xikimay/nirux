@@ -164,6 +164,18 @@ extension NiruxShellView {
                     editor.switchTo(path: active)
                 }
             }
+        case .projectBoard:
+            let projectID = persistedColumn.boardProjectID ?? workspace.profileID
+            // One board per project: a second one (a hand-edited state)
+            // comes back as a terminal, as in an older build.
+            if projectBoardLocation(projectID: projectID) != nil
+                || workspace.columns.contains(where: { $0.projectBoard?.projectID == projectID }) {
+                workspace.addColumn(agentUUID: persistedColumn.agentUUID ?? UUID().uuidString)
+            } else {
+                let board = makeProjectBoard(projectID: projectID, offersSettings: false)
+                workspace.addProjectBoardColumn(board)
+                board.reload()
+            }
         case .terminal:
             workspace.addColumn(agentUUID: persistedColumn.agentUUID ?? UUID().uuidString)
         }
@@ -260,6 +272,13 @@ extension NiruxShellView {
         in workspace: WorkspaceState,
         snapshot: ProcessSnapshot
     ) -> PersistedColumn {
+        if let board = col.projectBoard {
+            // The workspace's folder: an older build opens a terminal there.
+            return PersistedColumn(
+                widthPreset: Double(col.widthFraction), cwd: workspace.cwd, columnType: .projectBoard,
+                webViewURL: nil, claudeLaunchMode: nil, codexLaunchMode: nil, boardProjectID: board.projectID
+            )
+        }
         let foregroundProcess = col.pty?.foregroundProcess(snapshot: snapshot)
         if var restored = col.restoredColumn {
             // Nothing to inspect yet (a save while queued hooks replay at

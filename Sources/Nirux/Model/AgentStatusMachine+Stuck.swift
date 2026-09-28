@@ -16,18 +16,25 @@ extension AgentStatusMachine {
         // of one suspended behind a shell, nor of an earlier claude (events
         // queued while Nirux was closed replay at launch).
         guard let foreground, foreground.name == "claude" else { return nil }
-        let startedAt = foreground.instance.startedAt
-        if let turnFailure, turnFailure.failedAt >= startedAt { return .stoppedOnError(turnFailure) }
-        // A keystroke since a dialog opened went to it: it was answered
-        // (the tool may then run long, silently) or denied with Esc, which
-        // fires no hook. Claude's reminder clears the keystroke once a
-        // dialog sits unanswered.
-        if let waitThreshold, let dialog = openDialogs.first(where: {
-            $0.requestedAt >= startedAt && $0.requestedAt >= lastKeystrokeAt
-        }), now - dialog.requestedAt >= waitThreshold {
+        if let turnFailure, turnFailure.failedAt >= foreground.instance.startedAt { return .stoppedOnError(turnFailure) }
+        if let waitThreshold, let dialog = visibleDialog(foreground: foreground),
+           now - dialog.requestedAt >= waitThreshold {
             return .waiting(dialog.reason, since: dialog.requestedAt)
         }
         return nil
+    }
+
+    /// The dialog the foreground `claude` is showing, if any: open, raised
+    /// by this very `claude` (not one before it: events queued while Nirux
+    /// was closed replay at launch), and not reached by a keystroke since.
+    /// A keystroke went to it: it was answered (the tool may then run long,
+    /// silently) or denied with Esc, which fires no hook. Claude's reminder
+    /// clears the keystroke once a dialog sits unanswered.
+    func visibleDialog(foreground: ForegroundProcess?) -> AgentPermissionRequest? {
+        guard let foreground, foreground.name == "claude" else { return nil }
+        return openDialogs.first {
+            $0.requestedAt >= foreground.instance.startedAt && $0.requestedAt >= lastKeystrokeAt
+        }
     }
 
     /// Whether Resume may type `continue`: a failed turn with nothing

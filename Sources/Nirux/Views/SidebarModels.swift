@@ -11,6 +11,7 @@ struct ColumnInfo: Hashable {
     let agentStatus: AgentStatus
     let isEditor: Bool
     let editorFileName: String?
+    var isProjectBoard = false
     /// Active editor tab has unsaved changes — rendered as a dirty dot
     /// next to the file name.
     var editorIsDirty: Bool = false
@@ -44,6 +45,7 @@ struct ColumnInfo: Hashable {
             && lhs.agentStatus == rhs.agentStatus
             && lhs.isEditor == rhs.isEditor
             && lhs.editorFileName == rhs.editorFileName
+            && lhs.isProjectBoard == rhs.isProjectBoard
             && lhs.editorIsDirty == rhs.editorIsDirty
             && lhs.elapsedDisplay == rhs.elapsedDisplay
             && lhs.attentionReason == rhs.attentionReason
@@ -62,6 +64,7 @@ struct ColumnInfo: Hashable {
         hasher.combine(agentStatus)
         hasher.combine(isEditor)
         hasher.combine(editorFileName)
+        hasher.combine(isProjectBoard)
         hasher.combine(editorIsDirty)
         hasher.combine(elapsedDisplay)
         hasher.combine(attentionReason)

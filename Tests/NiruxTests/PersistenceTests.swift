@@ -344,6 +344,40 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(ColumnKind.webView.rawValue, "webView")
         XCTAssertEqual(ColumnKind.claudeCode.rawValue, "claudeCode")
         XCTAssertEqual(ColumnKind.codex.rawValue, "codex")
+        XCTAssertEqual(ColumnKind.projectBoard.rawValue, "projectBoard")
+    }
+
+    /// A Project Board column keeps its project; a build from before the
+    /// board decodes it as it decoded any kind it didn't know: a terminal in
+    /// the workspace's folder. (Updating again doesn't bring the board back.)
+    func testAProjectBoardColumnRoundTripsAndAnOlderBuildOpensATerminal() throws {
+        /// `PersistedColumn`'s decoding before the board existed.
+        struct OlderColumn: Decodable {
+            enum Kind: String, Decodable { case terminal, webView, claudeCode, codex, editor }
+            enum CodingKeys: String, CodingKey { case cwd, columnType }
+            let cwd: String
+            let columnType: Kind?
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                cwd = try container.decode(String.self, forKey: .cwd)
+                columnType = try? container.decodeIfPresent(Kind.self, forKey: .columnType)
+            }
+        }
+        let column = PersistedColumn(
+            widthPreset: 0.5, cwd: "/p/widgets", columnType: .projectBoard, webViewURL: nil,
+            claudeLaunchMode: nil, codexLaunchMode: nil, boardProjectID: "space-1"
+        )
+        let data = try JSONEncoder().encode(column)
+
+        let decoded = try JSONDecoder().decode(PersistedColumn.self, from: data)
+        XCTAssertEqual(decoded.resolvedType, .projectBoard)
+        XCTAssertEqual(decoded.boardProjectID, "space-1")
+        XCTAssertEqual(decoded.cwd, "/p/widgets")
+
+        let older = try JSONDecoder().decode(OlderColumn.self, from: data)
+        XCTAssertNil(older.columnType, "a terminal, in an older build")
+        XCTAssertEqual(older.cwd, "/p/widgets")
     }
 
     /// State files written by older builds (or hand-edited) might contain

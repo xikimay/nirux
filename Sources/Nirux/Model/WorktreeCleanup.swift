@@ -413,28 +413,52 @@ enum WorktreeCleanup {
         }
     }
 
-    struct ListedWorktree: Equatable {
-        let path: String
-        let isLocked: Bool
+    struct ListedWorktree: Equatable, Sendable {
+        var path: String
+        var isLocked = false
+        /// The checked-out commit. Nil for a bare repository, or a branch
+        /// without commits.
+        var head: String?
+        /// Without `refs/heads/`. Nil on a detached HEAD or in a bare
+        /// repository.
+        var branch: String?
+        /// The bare repository itself, listed first: it has no files.
+        var isBare = false
+        /// Its folder is gone: `git worktree prune` would drop the entry.
+        var isPrunable = false
     }
 
-    /// `git worktree list --porcelain -z`, run in `directory`.
+    /// `git worktree list --porcelain -z`, run in `directory`. The first
+    /// entry is the main working tree, or the bare repository.
     static func worktreeListing(in directory: String, tools: Tools) -> [ListedWorktree]? {
         let result = git(["worktree", "list", "--porcelain", "-z"], in: directory, tools: tools)
         guard result.status == 0 else { return nil }
+        return parseWorktreeListing(result.stdout)
+    }
+
+    static func parseWorktreeListing(_ output: String) -> [ListedWorktree] {
         var listed: [ListedWorktree] = []
-        var path: String?
-        var isLocked = false
+        var current: ListedWorktree?
         // Attributes end with NUL; an empty field ends an entry.
-        for field in result.stdout.split(separator: "\0", omittingEmptySubsequences: false) {
+        for field in output.split(separator: "\0", omittingEmptySubsequences: false) {
             if field.hasPrefix("worktree ") {
-                path = String(field.dropFirst("worktree ".count))
-                isLocked = false
+                current = ListedWorktree(path: String(field.dropFirst("worktree ".count)))
+            } else if field.hasPrefix("HEAD ") {
+                // An unborn branch reads as all zeros.
+                let head = field.dropFirst("HEAD ".count)
+                current?.head = head.allSatisfy { $0 == "0" } ? nil : String(head)
+            } else if field.hasPrefix("branch ") {
+                let ref = field.dropFirst("branch ".count)
+                current?.branch = ref.hasPrefix("refs/heads/") ? String(ref.dropFirst("refs/heads/".count)) : String(ref)
+            } else if field == "bare" {
+                current?.isBare = true
             } else if field == "locked" || field.hasPrefix("locked ") {
-                isLocked = true
-            } else if field.isEmpty, let current = path {
-                listed.append(ListedWorktree(path: current, isLocked: isLocked))
-                path = nil
+                current?.isLocked = true
+            } else if field == "prunable" || field.hasPrefix("prunable ") {
+                current?.isPrunable = true
+            } else if field.isEmpty, let entry = current {
+                listed.append(entry)
+                current = nil
             }
         }
         return listed

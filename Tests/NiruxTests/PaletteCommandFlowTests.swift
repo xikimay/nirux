@@ -25,6 +25,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
                 "New Workspace", "Rename Workspace", "Show/Hide Sidebar", "Show/Hide Inactive Workspaces", "Pilot Mode"
             ],
             "testWorktreeCommands": ["Open Worktree", "New Worktree", "Clean Up Merged Worktrees…"],
+            "testProjectBoardCommand": ["Open Project Board"],
             "testSetupCommands": ["Show Getting Started", "Install Agent Skills", "Open Settings"]
         ],
         exemptions: [:]
@@ -238,6 +239,32 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             }
             panel.dismiss()
             XCTAssertNil(shell.worktreeCleanupPanel)
+        }
+    }
+
+    // MARK: - Project Board
+
+    func testProjectBoardCommand() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let client = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")
+            shell.projectBoardClient = client
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+
+            // No repository yet: the board asks for one, and runs no gh.
+            harness.runPaletteCommand("Open Project Board")
+            let board = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.projectBoard)
+            XCTAssertEqual(board.projectID, workspace.profileID)
+            harness.waitUntil("Board Settings to open") { shell.boardSettingsPanel?.panel != nil }
+            shell.boardSettingsPanel?.dismiss()
+
+            // From another column: the same board comes to the front.
+            shell.addColumn()
+            XCTAssertNil(workspace.columns[safe: workspace.focusedIndex]?.projectBoard)
+            harness.runPaletteCommand("Open Project Board")
+            XCTAssertIdentical(workspace.columns[safe: workspace.focusedIndex]?.projectBoard, board)
+            XCTAssertEqual(workspace.columns.filter(\.isProjectBoard).count, 1)
+            XCTAssertEqual(client.calls, [])
         }
     }
 

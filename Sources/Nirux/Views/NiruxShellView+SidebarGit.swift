@@ -41,6 +41,7 @@ extension NiruxShellView {
                     agentStatus: agentStatus,
                     isEditor: col.isEditor,
                     editorFileName: editorFile,
+                    isProjectBoard: col.isProjectBoard,
                     editorIsDirty: col.editorColumn?.isDirty ?? false,
                     agentElapsedSeconds: col.pty?.agentTurnStartedAt
                         .map { Date().timeIntervalSince($0) },
@@ -77,6 +78,7 @@ extension NiruxShellView {
         updateSidebarAttention(infos: infos)
         if invalidatedSessionBinding { saveState(snapshot: snapshot) }
         scheduleActivityReadMark()
+        refreshProjectBoards(snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
     }
 
     /// Every column's foreground process, shown or not, and what follows
