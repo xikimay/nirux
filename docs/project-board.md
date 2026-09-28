@@ -1,8 +1,9 @@
 # Project Board
 
-Status: design, validated by the user on 2026-09-27. B4 (the config) and B1
-(the read-only board) are implemented; the merge queue (B2, B3) isn't. What B1
-decided along the way is in section 2.1.
+Status: design, validated by the user on 2026-09-27. B4 (the config), B1 (the
+read-only board) and B2 (the merge queue's engine, with no way to start it yet)
+are implemented; B3 (the queue's UI) isn't. What B1 and B2 decided along the
+way is in sections 2.1 and 3.7.
 
 On the night of 2026-09-26, one Claude session coordinated about fifteen
 parallel pull requests by hand:
@@ -471,6 +472,69 @@ The queue is a pure state machine: `(state, event) -> (state, [command])`.
   nightly, 3 of 7"). Clicking it opens or focuses the board.
 - Quitting Nirux while a queue runs asks first. The queue stops before its next
   command.
+
+### 3.7 Decided while building B2
+
+B2 is the engine alone: nothing in the app starts a queue until B3's Start.
+Choices the design left open, taken as the most conservative option and
+documented in B2's pull request:
+
+- **Requests.** The engine waits on at most one request. A read request is a
+  batch of reads after a delay, so every poll and back-off is a request too.
+  Stop drops a pending read at once; a mutation already sent is awaited, and the
+  queue reads "stopping" meanwhile.
+- **The confirmation is B3's.** The engine has no "confirming" state: it starts
+  from a confirmed list, with the settings the sheet showed.
+- **Checks by commit through GraphQL**, not REST: REST check runs don't name
+  their workflow, which `Workflow / job` needs, nor the run to rerun. Each read
+  costs 1 point, so a PR waiting for its checks costs about 360 points an hour
+  (PR and checks every 20 s). A second page of check suites or runs fails
+  closed.
+- **A required check that ends NEUTRAL or SKIPPED stops at once**: without a
+  new run it can't turn green, so waiting for the timeout gains nothing.
+- **The one rerun** happens only when every failed required check belongs to
+  one workflow run, and once all that run's jobs are finished (GitHub reruns a
+  finished run only). Other failures stop. The failed runs it replaces, required
+  or not, read as pending until their new runs show, and the checks timeout
+  starts again at the rerun. If `gh run rerun` fails, the checks are read once:
+  new runs mean it went through.
+- **A branch update that fails without a 422** re-reads the PR once. An
+  unchanged head stops the queue; a new head must pass the update's checks
+  (committed by `web-flow`, per REST `commits/{sha}`, since GraphQL shows no
+  user for GitHub's commits).
+- **After `gh pr merge`**, whatever it answered, the PR is read again. A
+  refusal stops at once; otherwise the PR is read every 5 s for a minute until
+  it is MERGED. A PR merged at another head than the confirmed one stops the
+  queue: it was merged outside it.
+- **An unfinished post-merge run on the base** that ends in failure, timed out,
+  startup failure or action required stops the queue. Cancelled or skipped
+  doesn't: nothing says the base is broken. The queue looks at the workflow's
+  last 50 runs on the base branch.
+- **Whether the base moved after a merge**: `compare/{merge commit}...{base}`
+  ahead or behind. The newer run on the base names the commit that moved it.
+- **Local preflight**: the branch's worktrees in the project's local
+  repositories (a remote naming the configured repository, whatever the host).
+  Tracked changes first; then a local HEAD other than the PR's head is compared
+  on GitHub. Busy agents are the agent columns of the workspaces in the worktree
+  (not in a worktree nested inside it) and of other workspaces whose shell is
+  inside it, working or waiting on a dialog, as the Agent column reads them.
+- **Pauses and retries.** A primary rate limit reads `rate_limit` for the reset
+  of the exhausted pool (plus 5 s; a minute when it can't tell). A secondary one
+  waits 60 s, doubled each time, up to 16 minutes. Other failed reads, server
+  errors included, retry after 5, 10, 20, 40 then 60 s, for 5 minutes from the
+  first failure.
+- **A dry run stops at its first mutation** ("Dry run: … stopped before
+  running: gh pr merge …"): nothing changed on GitHub, so it can't go further.
+  Only `NIRUX_MERGE_QUEUE_LIVE=1` makes a dev build live.
+- **Files.** The journal's previous file is `queue.log.1`; tokens an error
+  could echo (`ghp_…`, `gho_…`, `github_pat_…`) are masked. A queue saved as
+  running reads as interrupted at the next launch, unless another Nirux holds
+  the repository's lock: it still runs there.
+- **For B3**, `MergeQueueController` (one per project, from
+  `NiruxShellView.mergeQueue(projectID:)`) offers `start(settings:entries:)`,
+  which returns why it refuses, `stop()`, the engine with its entries and
+  `statusText`, the saved queue, `isRunning`, `isDryRun`, `runsElsewhere` and
+  `onChange`.
 
 ## 4. Guardrails
 
