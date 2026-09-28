@@ -9,7 +9,6 @@ import XCTest
 /// (#48). git runs for real, in temporary repositories. Clicks are
 /// hit-tested by hand, since a window that is never shown (CI) drops
 /// events sent with `sendEvent`.
-@MainActor
 final class ProjectBoardFlowTests: XCTestCase {
     private var root: String!
 
@@ -74,12 +73,14 @@ final class ProjectBoardFlowTests: XCTestCase {
     ]
     """
 
+    @MainActor
     private func makeClient() -> FakeGitHub {
         FakeGitHub(openPullRequests: Self.pullRequests, runs: ProjectBoardGitHubTests.postMergeRuns)
     }
 
     // MARK: - Flows
 
+    @MainActor
     func testTheBoardOpensReadsOffTheMainThreadAndRunsItsButtons() throws {
         let client = makeClient()
         try withShell(client: client) { shell, space in
@@ -162,7 +163,8 @@ final class ProjectBoardFlowTests: XCTestCase {
             guard case .blocked(let problems) = candidate.availability else {
                 return XCTFail("\(candidate.availability)")
             }
-            XCTAssertTrue(problems.contains { $0.contains("isn’t pushed to a GitHub remote") || $0.contains("isn't pushed to a GitHub remote") },
+            // Stopped before gh either way: not pushed to GitHub, or no gh.
+            XCTAssertTrue(problems.contains { $0.contains("pushed to a GitHub remote") || $0.contains("(gh) isn") },
                           "\(problems)")
             XCTAssertTrue(shell.worktreeCleanupsInFlight.isEmpty)
         }
@@ -170,6 +172,7 @@ final class ProjectBoardFlowTests: XCTestCase {
 
     /// No repository yet: the board asks for one and calls no gh. Saving
     /// Board Settings reloads it.
+    @MainActor
     func testABoardWithoutRepositoryOpensBoardSettingsThenReadsOnceSaved() throws {
         let client = makeClient()
         try withShell(client: client) { shell, space in
@@ -198,8 +201,40 @@ final class ProjectBoardFlowTests: XCTestCase {
         }
     }
 
+    /// A saved board.json reloads the board, and nothing is read with the
+    /// config it replaces, even when a status refresh comes in between.
+    @MainActor
+    func testASavedConfigIsReadBeforeAnythingElse() throws {
+        let client = makeClient()
+        try withShell(client: client) { shell, space in
+            try writeConfig(for: space, workflow: "ci.yml")
+            shell.addWorkspace(title: "widgets", cwd: root, profileID: space.id)
+            try runPaletteAction("Open Project Board", in: shell)
+            try waitUntil("the first post-merge run is read") {
+                client.calls.contains { $0.what == "run acme/widgets ci.yml main" }
+            }
+            try waitUntil("every first read is back") {
+                shell.projectBoardLocation(projectID: space.id)?.board.schedule.inFlight.isEmpty == true
+            }
+            let before = client.calls.count
+
+            try writeConfig(for: space, workflow: "nightly.yml")
+            // The save's reload is on its way; a status refresh lands while
+            // board.json is being read, when every read is due.
+            let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
+            board.reload()
+            shell.updateSidebar()
+            try waitUntil("the new workflow's run is read") {
+                client.calls.contains { $0.what == "run acme/widgets nightly.yml main" }
+            }
+            XCTAssertFalse(client.calls[before...].contains { $0.what.contains("ci.yml") },
+                           "\(client.calls[before...].map(\.what))")
+        }
+    }
+
     /// Switching project from the header: one that has a board brings it to
     /// the front; another one is shown in place. A deleted project says so.
+    @MainActor
     func testTheProjectMenuSwitchesOrFocusesAndADeletedProjectSaysSo() throws {
         let client = makeClient()
         try withShell(client: client) { shell, space in
@@ -237,12 +272,15 @@ final class ProjectBoardFlowTests: XCTestCase {
 
     // MARK: - Persistence
 
+    @MainActor
     func testTheBoardIsSavedAndRestoredOncePerProject() throws {
         let client = makeClient()
         var state: PersistedState?
         var spaceID = ""
         try withShell(client: client) { shell, space in
             spaceID = space.id
+            // Configured: no Board Settings request outlives the test.
+            try writeConfig(for: space, workflow: "nightly.yml")
             shell.addWorkspace(title: "widgets", cwd: root, profileID: space.id)
             try runPaletteAction("Open Project Board", in: shell)
             state = shell.persistedState()
@@ -267,6 +305,7 @@ final class ProjectBoardFlowTests: XCTestCase {
 
     // MARK: - Helpers
 
+    @MainActor
     private func withShell(
         client: FakeGitHub,
         restoring state: PersistedState? = nil,
@@ -322,23 +361,28 @@ final class ProjectBoardFlowTests: XCTestCase {
     /// `addWorkspace` slides a picture of the previous workspace away over
     /// the new one; the animation that removes it doesn't run in a window
     /// that isn't shown, and the picture would take the clicks.
+    @MainActor
     private func dropWorkspaceSnapshots(_ shell: NiruxShellView) {
         shell.viewport.subviews.filter { $0 is NSImageView }.forEach { $0.removeFromSuperview() }
     }
 
+    @MainActor
     private func select(_ title: String, in shell: NiruxShellView) throws {
         shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0.title == title }))
     }
 
+    @MainActor
     private func runPaletteAction(_ title: String, in shell: NiruxShellView) throws {
         let actions = shell.columnPaletteActions() + shell.agentPaletteActions() + shell.workspacePaletteActions()
         try XCTUnwrap(actions.first { $0.title == title }, "no “\(title)” in the palette").action()
     }
 
+    @MainActor
     private func row(_ name: String, in board: ProjectBoardController) throws -> ProjectBoardView.RowViews {
         try XCTUnwrap(board.view.rowViews.first { $0.row.name == name }, "no row “\(name)”")
     }
 
+    @MainActor
     private func waitUntil(_ what: String, timeout: TimeInterval = 30, _ condition: () -> Bool) throws {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition(), Date() < deadline {
@@ -350,6 +394,7 @@ final class ProjectBoardFlowTests: XCTestCase {
     /// The button must be what the window hit-tests under the pointer, as
     /// AppKit finds it for a real click; then `performClick`, since a
     /// button's own tracking never ends in a window that isn't shown.
+    @MainActor
     private func click(_ button: NSButton) throws {
         let window = try XCTUnwrap(button.window)
         let contentView = try XCTUnwrap(window.contentView)

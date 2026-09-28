@@ -64,6 +64,14 @@ extension NiruxShellView {
             guard let self, let board else { return false }
             return self.isProjectBoardOnScreen(board)
         }
+        board.isShown = { [weak self, weak board] in
+            guard let self, let board else { return false }
+            return self.isProjectBoardShown(board)
+        }
+        board.projectExists = { [weak self, weak board] in
+            guard let self, let board else { return false }
+            return self.profiles.contains { $0.id == board.projectID }
+        }
         board.onRead = { [weak self, weak board] in
             guard let self, let board else { return }
             self.renderProjectBoard(board)
@@ -105,14 +113,14 @@ extension NiruxShellView {
         saveState()
     }
 
-    /// The project's workspaces, active and inactive, in sidebar order.
+    /// The project's workspaces in sidebar order: active ones, then inactive.
     func projectWorkspaces(of projectID: String) -> [WorkspaceState] {
-        workspaces.filter { $0.profileID == projectID && !$0.isClosing }
+        workspaceStore.visibleWorkspaceIndices(in: projectID).map { workspaces[$0] }.filter { !$0.isClosing }
     }
 
-    /// A board is on screen while its workspace is: the selected one, or
-    /// any of the space's in Pilot Mode, in a window that isn't minimized.
-    func isProjectBoardOnScreen(_ board: ProjectBoardController) -> Bool {
+    /// A board is shown while its workspace is: the selected one, or any of
+    /// the space's in Pilot Mode, in a window that isn't minimized.
+    func isProjectBoardShown(_ board: ProjectBoardController) -> Bool {
         guard let window, !window.isMiniaturized,
               let location = projectBoardLocations.first(where: { $0.board === board }),
               location.workspace.profileID == activeProfileID
@@ -123,21 +131,36 @@ extension NiruxShellView {
         return location.workspace === activeWorkspace
     }
 
+    /// Shown, with Nirux in front and its window not covered: the board's
+    /// periodic reads run only then. In the background they pause, as the
+    /// sidebar's pull request reads do (hook events still refresh the
+    /// sidebar there).
+    func isProjectBoardOnScreen(_ board: ProjectBoardController) -> Bool {
+        guard NSApp.isActive, window?.occlusionState.contains(.visible) == true else { return false }
+        return isProjectBoardShown(board)
+    }
+
     // MARK: Drawing
 
-    /// At each status refresh: the boards on screen read what is due and
-    /// show their agents as they are now.
-    func refreshProjectBoards(snapshot: ProcessSnapshot, now: TimeInterval) {
-        for location in projectBoardLocations where isProjectBoardOnScreen(location.board) {
+    /// At each status refresh: the boards shown draw their agents as they
+    /// are now, and read what is due if they are on screen.
+    /// `foregroundProcesses` is the sidebar's, by column.
+    func refreshProjectBoards(
+        snapshot: ProcessSnapshot,
+        now: TimeInterval,
+        foregroundProcesses: [ObjectIdentifier: ForegroundProcess]? = nil
+    ) {
+        for location in projectBoardLocations where isProjectBoardShown(location.board) {
             location.board.tick()
-            renderProjectBoard(location.board, snapshot: snapshot, now: now)
+            renderProjectBoard(location.board, snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
         }
     }
 
     func renderProjectBoard(
         _ board: ProjectBoardController,
         snapshot: ProcessSnapshot? = nil,
-        now: TimeInterval = Date().timeIntervalSince1970
+        now: TimeInterval = Date().timeIntervalSince1970,
+        foregroundProcesses: [ObjectIdentifier: ForegroundProcess]? = nil
     ) {
         let snapshot = snapshot ?? ProcessSnapshot()
         let members = projectWorkspaces(of: board.projectID)
@@ -146,23 +169,30 @@ extension NiruxShellView {
                 id: workspace.id,
                 title: workspace.title,
                 folder: board.comparableFolder(workspace.cwd),
+                // Checked off the main thread when the worktrees are listed.
+                folderIsGone: board.local?.missingFolders.contains(workspace.cwd) ?? false,
                 isInactive: workspace.isInactive,
-                agent: .mostUrgent(workspace.openColumns.map {
-                    projectBoardAgent(of: $0, in: workspace, snapshot: snapshot, now: now)
+                agent: .mostUrgent(workspace.openColumns.map { column in
+                    let foreground = foregroundProcesses.map { $0[ObjectIdentifier(column)] }
+                        ?? column.pty?.foregroundProcess(snapshot: snapshot)
+                    return projectBoardAgent(of: column, in: workspace, foreground: foreground, snapshot: snapshot, now: now)
                 })
             )
         }
-        if let local = board.local {
-            // A workspace opened in a folder not listed yet, or a worktree
-            // removed since: list them again.
-            let unlisted = members.contains { local.folders[$0.cwd] == nil }
-            let removed = local.repositories.contains { repository in
-                repository.worktrees.contains { !$0.isBare && !$0.isPrunable && !FileManager.default.fileExists(atPath: $0.path) }
-            }
-            if unlisted || removed { board.expireWorktrees() }
+        // A workspace opened in a folder not listed yet: list them again.
+        if let local = board.local, members.contains(where: { local.folders[$0.cwd] == nil }) {
+            board.expireWorktrees()
         }
         let projects = profiles.map { ProjectBoardView.Project(id: $0.id, name: $0.name) }
         board.view.show(board.content(workspaces: inputs, projects: projects))
+    }
+
+    /// A worktree was cleaned up: the boards list their worktrees again.
+    func expireProjectBoardWorktrees() {
+        for location in projectBoardLocations {
+            location.board.expireWorktrees()
+            location.board.tick(onScreen: isProjectBoardShown(location.board))
+        }
     }
 
     /// What the Agent column says of one column (see `ProjectBoard.agentState`),
@@ -170,11 +200,11 @@ extension NiruxShellView {
     func projectBoardAgent(
         of column: ColumnState,
         in workspace: WorkspaceState,
+        foreground: ForegroundProcess?,
         snapshot: ProcessSnapshot,
         now: TimeInterval
     ) -> ProjectBoard.Agent {
         guard let pty = column.pty else { return ProjectBoard.Agent() }
-        let foreground = pty.foregroundProcess(snapshot: snapshot)
         let stuck = sidebarStuckState(of: column, foregroundProcess: foreground, snapshot: snapshot, now: now)
         let agentInFront = foreground.map { AgentStatusMachine.isRecognizedAgentProcess($0.name) } ?? false
         let state = ProjectBoard.agentState(
@@ -182,7 +212,10 @@ extension NiruxShellView {
             hasAgent: agentInFront || pty.agentProcessName(snapshot: snapshot) != nil,
             agentInFront: agentInFront,
             status: pty.cachedAgentState,
-            openDialog: pty.agentOpenDialogs.first?.reason,
+            // Dialogs of an earlier `claude` in this column aren't on screen.
+            openDialog: pty.agentOpenDialogs.first { dialog in
+                foreground.map { dialog.requestedAt >= $0.instance.startedAt } ?? false
+            }?.reason,
             workingFor: pty.agentTurnStartedAt.map { PilotSidebarRenderer.shortDuration(now - $0.timeIntervalSince1970) }
         )
         var failedAt: TimeInterval?

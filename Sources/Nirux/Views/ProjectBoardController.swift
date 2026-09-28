@@ -3,10 +3,10 @@ import AppKit
 /// One Project Board column: its project, what it read (docs/project-board.md,
 /// section 6) and its view. Reads run off the main thread, on the schedule
 /// of `ProjectBoard.RefreshSchedule`, and only while the board is on
-/// screen, except the config. The cache lives here, for the board's
-/// repository, and goes with the board. The shell supplies the project's
-/// workspaces and their agents at each render: they change by the second
-/// and cost no call.
+/// screen; opening it, Refresh and a saved board.json read at once if it
+/// is shown. The cache lives here, for the board's repository, and goes
+/// with the board. The shell supplies the project's workspaces and their
+/// agents at each render: they change by the second and cost no call.
 @MainActor
 final class ProjectBoardController {
     private(set) var projectID: String
@@ -23,16 +23,32 @@ final class ProjectBoardController {
     private(set) var errors: [ProjectBoard.Source: ProjectBoard.FetchError] = [:]
     private(set) var pullRequestsReadAt: Date?
     private(set) var schedule = ProjectBoard.RefreshSchedule()
-    /// Bumped by `reload`: answers to earlier reads are dropped.
+    /// Bumped when what the reads depend on changes (the project, the
+    /// repository, the base branch, the workflow): answers to earlier
+    /// reads are dropped.
     private var generation = 0
+    /// Bumped by each read of board.json: only the latest one applies.
+    private var configRead = 0
+    /// board.json is being read again: nothing else is read meanwhile, or
+    /// it would be read with the config being replaced.
+    private var isReadingConfig = false
+    /// Reads landed since the last render: they are drawn once, together.
+    private var isRenderScheduled = false
     /// A board opened from the palette on a project without a repository
     /// opens Board Settings, once.
     private var offersSettings: Bool
 
     /// The project's workspace folders, where the worktrees are listed.
     var workspaceFolders: () -> [String] = { [] }
-    /// Whether the board is on screen now.
+    /// Whether the board is on screen now: shown, in the active app, in a
+    /// window that isn't covered. Periodic reads need it.
     var isOnScreen: () -> Bool = { false }
+    /// Whether its workspace is shown in the window. Opening the board,
+    /// Refresh and a saved board.json read at once when it is.
+    var isShown: () -> Bool = { false }
+    /// Whether the board's project still exists: a deleted one's board
+    /// reads nothing.
+    var projectExists: () -> Bool = { true }
     /// Something was read: the shell renders the board again.
     var onRead: (() -> Void)?
     /// A board without a repository asks for Board Settings.
@@ -64,6 +80,8 @@ final class ProjectBoardController {
     func switchProject(to projectID: String) {
         guard projectID != self.projectID else { return }
         self.projectID = projectID
+        generation += 1
+        schedule.reset()
         loaded = nil
         local = nil
         clearGitHubData()
@@ -71,36 +89,50 @@ final class ProjectBoardController {
     }
 
     /// Refresh, a new project, board.json saved: read the config, then
-    /// everything, now if the board is on screen.
+    /// everything, at once if the board is shown. A read already running
+    /// for the same config isn't started again: its answer is on its way.
     func reload() {
-        generation += 1
-        schedule.reset()
+        configRead += 1
+        let current = configRead
+        schedule.makeEverythingDue()
         errors = [:]
-        let current = generation
         guard let store = BoardConfigStore(spaceID: projectID) else {
+            isReadingConfig = false
             loaded = BoardConfigStore.Loaded(config: nil, status: .unreadable)
             onRead?()
             return
         }
+        isReadingConfig = true
         Self.readOffMain({ store.load() }, then: { [weak self] loaded in
-            guard let self, self.generation == current else { return }
+            guard let self, self.configRead == current else { return }
+            self.isReadingConfig = false
             self.apply(loaded)
         })
     }
 
     private func apply(_ newConfig: BoardConfigStore.Loaded) {
         let previous = loaded?.config
+        let wasRead = loaded != nil
         loaded = newConfig
         let config = newConfig.config
-        if previous?.gitHubRepository != config?.gitHubRepository { clearGitHubData() }
-        if previous?.baseBranch != config?.baseBranch || previous?.postMergeWorkflow != config?.postMergeWorkflow {
-            postMergeRun = nil
+        let repositoryChanged = previous?.gitHubRepository != config?.gitHubRepository
+        let runChanged = previous?.baseBranch != config?.baseBranch
+            || previous?.postMergeWorkflow != config?.postMergeWorkflow
+        if wasRead, repositoryChanged || runChanged {
+            // Reads still running answer for the config just replaced.
+            generation += 1
+            schedule.reset()
         }
-        let asksForSettings = offersSettings && repository == nil && newConfig.status != .unreadable
+        if repositoryChanged { clearGitHubData() }
+        if runChanged { postMergeRun = nil }
+        // Only a file that is missing, or saved without a repository: an
+        // unreadable or read-only one says why instead.
+        let asksForSettings = offersSettings && repository == nil
+            && (newConfig.status == .missing || newConfig.status == .loaded)
         offersSettings = false
         onRead?()
         if asksForSettings { onNeedsSettings?() }
-        tick()
+        tick(onScreen: isShown())
     }
 
     private func clearGitHubData() {
@@ -111,11 +143,12 @@ final class ProjectBoardController {
         errors = [:]
     }
 
-    /// Reads what is due. Called on every status refresh (the heartbeat).
-    func tick(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
-        guard loaded != nil else { return }
+    /// Reads what is due. Called on every status refresh (the heartbeat),
+    /// which reads only while the board is on screen.
+    func tick(now: TimeInterval = ProcessInfo.processInfo.systemUptime, onScreen: Bool? = nil) {
+        guard loaded != nil, !isReadingConfig, projectExists() else { return }
         let due = schedule.due(
-            now: now, onScreen: isOnScreen(), hasPendingChecks: hasPendingChecks, available: availableSources
+            now: now, onScreen: onScreen ?? isOnScreen(), hasPendingChecks: hasPendingChecks, available: availableSources
         )
         for source in due { read(source, now: now) }
     }
@@ -159,6 +192,12 @@ final class ProjectBoardController {
                     board.errors[source] = result.failureValue
                     guard case .success(let pullRequests) = result else { return }
                     if list == .open {
+                        // A pull request no longer open was likely merged:
+                        // its branch reads "merged" now, not in 10 minutes.
+                        let numbers = Set(pullRequests.map(\.number))
+                        if board.openPullRequests?.contains(where: { !numbers.contains($0.number) }) == true {
+                            board.schedule.expire(.mergedPullRequests)
+                        }
                         board.openPullRequests = pullRequests
                         board.pullRequestsReadAt = Date()
                     } else {
@@ -188,7 +227,18 @@ final class ProjectBoardController {
         guard generation == self.generation else { return }
         schedule.finish(source)
         store(self)
-        onRead?()
+        scheduleRender()
+    }
+
+    /// Answers landing together (the first reads, a Refresh) are drawn once.
+    private func scheduleRender() {
+        guard !isRenderScheduled else { return }
+        isRenderScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isRenderScheduled = false
+            self.onRead?()
+        }
     }
 
     /// Runs `work` off the main thread, then `completion` on it. Both are
@@ -252,6 +302,8 @@ final class ProjectBoardController {
             body = .message("This project was deleted. Pick another one in the menu above.")
         } else if let loaded, loaded.status == .unreadable {
             body = .message("board.json can’t be read: open Board Settings… to replace it.")
+        } else if let loaded, case .readOnly(let reason) = loaded.status, repository == nil {
+            body = .message(reason.message)
         } else if loaded == nil {
             body = .message("Reading board.json…")
         } else if repository == nil {

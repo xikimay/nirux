@@ -135,4 +135,36 @@ final class ProjectBoardAgentTests: XCTestCase {
         XCTAssertEqual(unopened.map { $0.action }, [.open(path: "/p/w.fix", title: "fix"), .cleanUp(path: "/p/w.fix")])
         XCTAssertEqual(ProjectBoardView.actions(for: row(agent: ProjectBoard.Agent(), workspaces: [], path: nil)).count, 0)
     }
+
+    // MARK: - Drawing
+
+    /// A working agent's time ticks by the second: its label changes where
+    /// it is. A state that changes the buttons builds the row again.
+    @MainActor
+    func testAgentLabelsUpdateInPlaceUnlessTheButtonsChange() throws {
+        let view = ProjectBoardView(frame: NSRect(x: 0, y: 0, width: 800, height: 400))
+        let column = UUID()
+        func content(_ state: ProjectBoard.AgentState, failedAt: TimeInterval? = nil) -> ProjectBoardView.Content {
+            ProjectBoardView.Content(
+                header: ProjectBoardView.Header(projectName: "p", projectID: "p"),
+                body: .rows([row(agent: ProjectBoard.Agent(
+                    state: state, workspaceID: "ws", columnID: column, failedAt: failedAt
+                ))])
+            )
+        }
+        view.show(content(.working(duration: "5s")))
+        let first = try XCTUnwrap(view.rowViews.first)
+        XCTAssertEqual(first.agent.stringValue, "working 5s")
+
+        view.show(content(.working(duration: "6s")))
+        let second = try XCTUnwrap(view.rowViews.first)
+        XCTAssertTrue(second.agent === first.agent, "the same label")
+        XCTAssertEqual(second.agent.stringValue, "working 6s")
+        XCTAssertEqual(second.row.agent.state, .working(duration: "6s"))
+
+        view.show(content(.stoppedOnError(kind: nil, resume: .offered), failedAt: 9))
+        let third = try XCTUnwrap(view.rowViews.first)
+        XCTAssertFalse(third.agent === first.agent, "Resume appeared: the row is built again")
+        XCTAssertEqual(third.actions.map(\.title), ["Resume", "Focus", "Clean Up…"])
+    }
 }

@@ -169,18 +169,33 @@ documented in B1's pull request:
   worktrees", ready for Clean Up.
 - **A bare repository** has no main working tree: its first entry gets no
   row, and its linked worktrees sort like any other.
+- **A fork's pull request** gets no row: it matches no branch, and the queue
+  refuses it anyway.
+- **A workspace whose folder is gone** (its worktree was removed under it)
+  gets a row of its own in group 4, "folder is gone", with Clean Up, which
+  closes it. It doesn't join the checkout around it.
+- **Rows show workspaces in sidebar order**, active ones first. A row reads
+  "inactive" only when all its workspaces are.
+- **Checks, for display:** the latest run of each check counts, a rerun not
+  started yet included; a skipped or neutral job doesn't hide a success.
 - **Urgency across a row's agent columns:** stopped on error, exited mid-turn,
   waiting past the stuck threshold, waiting, working, idle. Failures come
-  first: nothing but the user moves them.
+  first: nothing but the user moves them. A dialog of an earlier `claude` in
+  the column (before the one in front started) doesn't read as waiting.
 - **Buttons, most urgent first:** Resume, Focus, Open, Clean Up. A column too
   narrow for all of them leaves out the last ones; clicking the name still
   focuses. Focus goes to the most urgent agent column of the row.
 - **Open** opens a workspace with a shell in the worktree, in the board's
   project, as "Open Worktree" does. It launches no agent.
-- **On screen** means its workspace is shown (selected, or in Pilot Mode's
-  rows) in a window that isn't minimized. The board reads on the status
-  refresh, which pauses while Nirux is in the background, as the sidebar's
-  pull request reads do.
+- **On screen** means its workspace is shown (selected, or any workspace of
+  the space in Pilot Mode), with Nirux in front and its window neither
+  minimized nor covered. Periodic reads run only then, on the status
+  refresh; in the background they pause, as the sidebar's pull request reads
+  do. Opening the board, Refresh and a saved board.json read at once when
+  its workspace is shown. Refresh doesn't start a read already running.
+- The board reads nothing while board.json is being read again, nor for a
+  deleted project. A pull request that leaves the open list makes the merged
+  list due at once. A finished clean-up lists the worktrees again.
 - **Without a repository**, or with an unreadable `board.json`, the board says
   so instead of listing rows, and calls no `gh`. Board Settings opens by
   itself only when the board is opened from the palette, not when it is

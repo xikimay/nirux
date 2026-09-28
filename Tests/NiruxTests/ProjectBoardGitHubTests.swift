@@ -134,6 +134,19 @@ final class ProjectBoardGitHubTests: XCTestCase {
             required: ["test"]
         )
         XCTAssertEqual(green.text, "test ✓ · others ✓")
+        XCTAssertEqual(green.worst, .success, "a skipped job doesn't grey out a green board")
+
+        // A rerun waiting for a runner has gh's zero time: it is the latest.
+        let rerun = ProjectBoard.checkSummary([
+            ProjectBoard.Check(name: "test", workflowName: "Tests", result: .failure, startedAt: "2026-09-27T22:55:02Z"),
+            ProjectBoard.Check(name: "test", workflowName: "Tests", result: .pending, startedAt: "0001-01-01T00:00:00Z")
+        ], required: ["test"])
+        XCTAssertEqual(rerun.required, [.init(name: "test", result: .pending)])
+        let twoJobs = ProjectBoard.checkSummary([
+            ProjectBoard.Check(name: "test", workflowName: "Tests", result: .success, startedAt: nil),
+            ProjectBoard.Check(name: "test", workflowName: "Lint", result: .skipped, startedAt: nil)
+        ], required: ["test"])
+        XCTAssertEqual(twoJobs.text, "test ✓")
     }
 
     func testThePullRequestColumnSaysStateDraftConflictAndAnotherBase() throws {
@@ -198,7 +211,7 @@ final class ProjectBoardGitHubTests: XCTestCase {
     }
 
     func testWithoutGhNothingRuns() {
-        let client = GitHubCLIBoardClient(ghPath: nil)
+        let client = GitHubCLIBoardClient(findGH: { nil })
         XCTAssertEqual(client.pullRequests(repository: "acme/widgets", state: .open), .failure(.ghMissing))
         XCTAssertEqual(client.postMergeRuns(repository: "acme/widgets", workflow: "n.yml", branch: "main"), .failure(.ghMissing))
     }

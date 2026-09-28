@@ -13,11 +13,13 @@ enum ProjectBoard {}
 // MARK: - What GitHub says
 
 extension ProjectBoard {
-    /// A check run's or a commit status's outcome, least to most urgent.
+    /// A check run's or a commit status's outcome, in the order the board
+    /// shows the worst of several: a skipped or neutral check doesn't hide
+    /// a success. (The merge queue has its own rules: neither is green.)
     enum CheckResult: Int, Comparable, Sendable {
-        case success
         case skipped
         case neutral
+        case success
         case pending
         case failure
 
@@ -99,6 +101,9 @@ extension ProjectBoard {
         let title: String
         /// Its launch folder, comparable like the worktrees' paths.
         let folder: String
+        /// The folder no longer exists (its worktree was removed): the
+        /// workspace gets a row of its own, not the enclosing worktree's.
+        var folderIsGone = false
         let isInactive: Bool
         /// Its most urgent agent column.
         let agent: Agent
@@ -145,9 +150,11 @@ extension ProjectBoard {
         /// Its open pull request, else one merged recently from its branch.
         let pullRequest: PullRequest?
         /// The most urgent agent column among `workspaces`.
-        let agent: Agent
-        /// A workspace's folder outside any repository.
+        var agent: Agent
+        /// A workspace's folder outside any repository, or gone.
         let folder: String?
+        /// `folder` no longer exists: only its workspaces are left to close.
+        var folderIsGone = false
 
         /// The first workspace's title, else the branch, else the folder.
         var name: String {
@@ -158,8 +165,11 @@ extension ProjectBoard {
             return (path as NSString).lastPathComponent
         }
 
-        /// A worktree only Nirux's clean-up may delete: a linked one.
-        var canCleanUp: Bool { worktreePath != nil && group != .main && group != .otherRepository }
+        /// A linked worktree of the project, which the clean-up may delete,
+        /// or a folder already gone, whose workspaces it closes.
+        var canCleanUp: Bool {
+            folderIsGone || (worktreePath != nil && group != .main && group != .otherRepository)
+        }
     }
 
     /// Everything the rows come from.
@@ -265,6 +275,10 @@ extension ProjectBoard {
         var members: [Int: [Member]] = [:]
         var outside: [Member] = []
         for (order, workspace) in workspaces.enumerated() {
+            guard !workspace.folderIsGone else {
+                outside.append((order, workspace))
+                continue
+            }
             let holding = places.indices
                 .filter { contains(places[$0].path, workspace.folder) }
                 .max { places[$0].path.count < places[$1].path.count }
@@ -300,7 +314,8 @@ extension ProjectBoard {
             return (first.order, Row(
                 group: .otherRepository, worktreePath: nil, branch: nil, detachedHead: nil,
                 workspaces: inside.map(\.workspace.reference), pullRequest: nil,
-                agent: Agent.mostUrgent(inside.map(\.workspace.agent)), folder: folder
+                agent: Agent.mostUrgent(inside.map(\.workspace.agent)), folder: folder,
+                folderIsGone: inside.allSatisfy(\.workspace.folderIsGone)
             ))
         }
     }

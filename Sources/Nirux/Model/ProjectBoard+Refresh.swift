@@ -59,11 +59,17 @@ extension ProjectBoard {
             lastStarted[source] = nil
         }
 
-        /// Refresh, a new project or config: everything is due at once, and
-        /// reads still running answer for what the board no longer shows.
+        /// A new project or config: everything is due at once, and reads
+        /// still running answer for what the board no longer shows.
         mutating func reset() {
             lastStarted = [:]
             inFlight = []
+        }
+
+        /// Refresh: everything is due at once, but a read still running is
+        /// not started again.
+        mutating func makeEverythingDue() {
+            lastStarted = [:]
         }
     }
 }
@@ -75,6 +81,9 @@ extension ProjectBoard {
         var repositories: [LocalRepository] = []
         /// Each folder read, as the rows compare paths (symlinks resolved).
         var folders: [String: String] = [:]
+        /// The folders read that aren't there: their workspace's worktree
+        /// was removed under it.
+        var missingFolders: Set<String> = []
     }
 
     /// The repositories the project's folders are in, each listed once
@@ -82,10 +91,17 @@ extension ProjectBoard {
     static func readLocal(folders: [String], tools: WorktreeCleanup.Tools = .installed) -> LocalSnapshot {
         var snapshot = LocalSnapshot()
         var listed: Set<String> = []
+        var listedPaths: Set<String> = []
         for folder in folders where snapshot.folders[folder] == nil {
-            snapshot.folders[folder] = NiruxShellView.comparablePath(folder)
+            let comparable = NiruxShellView.comparablePath(folder)
+            snapshot.folders[folder] = comparable
             var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory), isDirectory.boolValue,
+            guard FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory), isDirectory.boolValue else {
+                snapshot.missingFolders.insert(folder)
+                continue
+            }
+            // The top of a worktree already listed: its repository is known.
+            guard !listedPaths.contains(comparable),
                   let listing = WorktreeCleanup.worktreeListing(in: folder, tools: tools),
                   let first = listing.first,
                   listed.insert(NiruxShellView.comparablePath(first.path)).inserted
@@ -93,9 +109,13 @@ extension ProjectBoard {
             let worktrees = listing.map { entry -> WorktreeCleanup.ListedWorktree in
                 var resolved = entry
                 resolved.path = NiruxShellView.comparablePath(entry.path)
+                // A folder deleted by hand that git doesn't flag yet: the
+                // board would otherwise list again and again to see it go.
+                if !entry.isBare, !FileManager.default.fileExists(atPath: entry.path) { resolved.isPrunable = true }
                 return resolved
             }
             let remotes = WorktreeCleanup.git(["remote", "-v"], in: folder, tools: tools)
+            listedPaths.formUnion(worktrees.map(\.path))
             snapshot.repositories.append(LocalRepository(
                 worktrees: worktrees,
                 remotes: remotes.status == 0 ? parseRemotes(remotes.stdout) : []

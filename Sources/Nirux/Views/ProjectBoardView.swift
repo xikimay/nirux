@@ -55,7 +55,7 @@ final class ProjectBoardView: NSView {
 
     /// One row as drawn, for the shell's tests to click through.
     struct RowViews {
-        let row: ProjectBoard.Row
+        fileprivate(set) var row: ProjectBoard.Row
         /// The name, a button when the row has a workspace to focus.
         let name: NSView
         let subtitle: NSTextField
@@ -165,16 +165,49 @@ final class ProjectBoardView: NSView {
 
     // MARK: - Content
 
-    /// Draws `content`; the rows are built again only when it changed.
+    /// Draws `content`. The rows are built again only when more than their
+    /// agents' labels changed: a working agent's time ticks by the second.
     func show(_ content: Content) {
         guard content != self.content else { return }
-        let rowsChanged = content.body != self.content?.body
-            || content.requiredChecks != self.content?.requiredChecks
-            || content.baseBranch != self.content?.baseBranch
+        let previous = self.content
         self.content = content
         applyHeader(content.header)
-        if rowsChanged { buildBody() }
+        if content.body != previous?.body || content.requiredChecks != previous?.requiredChecks
+            || content.baseBranch != previous?.baseBranch {
+            if !updateAgentsInPlace(from: previous) { buildBody() }
+        }
         layoutContent()
+    }
+
+    /// When the rows differ only in their agents' states, and those don't
+    /// change any button, updates the Agent labels where they are.
+    private func updateAgentsInPlace(from previous: Content?) -> Bool {
+        guard let previous, let content,
+              previous.requiredChecks == content.requiredChecks, previous.baseBranch == content.baseBranch,
+              case .rows(let old) = previous.body, case .rows(let new) = content.body,
+              old.count == new.count
+        else { return false }
+        for (before, after) in zip(old, new) {
+            var lhs = before
+            var rhs = after
+            lhs.agent.state = .none
+            rhs.agent.state = .none
+            guard lhs == rhs, Self.actionSignature(before) == Self.actionSignature(after) else { return false }
+        }
+        for index in rowViews.indices {
+            guard let position = old.firstIndex(of: rowViews[index].row) else { return false }
+            let row = new[position]
+            rowViews[index].row = row
+            rowViews[index].agent.stringValue = row.agent.state.label
+            rowViews[index].agent.textColor = Self.color(for: row.agent.state)
+            rowViews[index].agent.toolTip = row.agent.state.detail
+        }
+        return true
+    }
+
+    private static func actionSignature(_ row: ProjectBoard.Row) -> [String] {
+        actions(for: row).map { "\($0.title)|\(String(describing: $0.action))|\($0.tooltip ?? "")" }
+            + [String(describing: focusAction(for: row))]
     }
 
     private func applyHeader(_ header: Header, force: Bool = false) {
@@ -228,7 +261,7 @@ final class ProjectBoardView: NSView {
         }
         for row in others { rowViews.append(makeRow(row)) }
         if rows.contains(where: { $0.group == .otherRepository }) {
-            let title = NSTextField(labelWithString: "Other repositories")
+            let title = NSTextField(labelWithString: "Other workspaces")
             title.font = .systemFont(ofSize: 11, weight: .semibold)
             title.textColor = Self.secondaryText
             documentView.addSubview(title)
@@ -313,8 +346,10 @@ final class ProjectBoardView: NSView {
         if row.group == .main { parts.append("main checkout") }
         if let branch = row.branch, row.name != branch { parts.append(branch) }
         if let path = row.worktreePath ?? row.folder { parts.append(path.abbreviatedPath(maxComponents: 2)) }
-        if row.worktreePath == nil, row.folder == nil { parts.append("no local worktree") }
-        if row.workspaces.contains(where: \.isInactive) { parts.append("inactive") }
+        if row.folderIsGone { parts.append("folder is gone") }
+        // A detached worktree may hold the branch mid-rebase: not "no local worktree".
+        if row.worktreePath == nil, row.folder == nil { parts.append("not checked out") }
+        if !row.workspaces.isEmpty, row.workspaces.allSatisfy(\.isInactive) { parts.append("inactive") }
         return parts.joined(separator: " · ")
     }
 
@@ -349,7 +384,7 @@ final class ProjectBoardView: NSView {
         if row.workspaces.isEmpty, let path = row.worktreePath {
             actions.append(("Open", .open(path: path, title: row.branch ?? (path as NSString).lastPathComponent), nil))
         }
-        if row.canCleanUp, let path = row.worktreePath {
+        if row.canCleanUp, let path = row.worktreePath ?? row.folder {
             actions.append(("Clean Up…", .cleanUp(path: path), "Check the worktree, then confirm what goes"))
         }
         return actions

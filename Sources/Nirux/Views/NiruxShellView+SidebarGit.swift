@@ -78,7 +78,7 @@ extension NiruxShellView {
         updateSidebarAttention(infos: infos)
         if invalidatedSessionBinding { saveState(snapshot: snapshot) }
         scheduleActivityReadMark()
-        refreshProjectBoards(snapshot: snapshot, now: now)
+        refreshProjectBoards(snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
     }
 
     /// Every column's foreground process, shown or not, and what follows

@@ -40,14 +40,21 @@ extension ProjectBoard {
     }
 }
 
-/// The real client: the GitHub CLI where `PRDetect` finds it, run through
+/// The real client: the GitHub CLI where `PRDetect` finds it (looked up at
+/// each call, so a gh installed since launch is found), run through
 /// `BoundedProcess` from a folder outside every checkout.
 struct GitHubCLIBoardClient: ProjectBoardGitHub {
-    /// Nil when gh isn't installed.
-    let ghPath: String?
+    /// Where gh is; nil when it isn't installed.
+    var findGH: @Sendable () -> String? = { PRDetect.installedGHPath() }
     var timeout: TimeInterval = 30
 
-    static var installed: GitHubCLIBoardClient { GitHubCLIBoardClient(ghPath: PRDetect.installedGHPath()) }
+    static var installed: GitHubCLIBoardClient { GitHubCLIBoardClient() }
+
+    /// Plain JSON whatever the terminal Nirux was started from asked for.
+    static let environment = [
+        "GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1",
+        "NO_COLOR": "1", "CLICOLOR_FORCE": "0", "GH_FORCE_TTY": ""
+    ]
 
     static let openFields = [
         "number", "state", "headRefName", "headRefOid", "headRepositoryOwner", "headRepository",
@@ -85,12 +92,12 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
     }
 
     private func run(_ arguments: [String]) -> Result<Data, ProjectBoard.FetchError> {
-        guard let ghPath else { return .failure(.ghMissing) }
+        guard let ghPath = findGH() else { return .failure(.ghMissing) }
         guard let result = BoundedProcess.run(
             executableURL: URL(fileURLWithPath: ghPath),
             arguments: arguments,
             currentDirectoryURL: FileManager.default.temporaryDirectory,
-            environment: ["GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1"],
+            environment: Self.environment,
             timeout: timeout,
             captureStandardError: true
         ) else {
@@ -252,7 +259,7 @@ extension ProjectBoard {
                 order.append(key)
                 continue
             }
-            if (check.startedAt ?? "") >= (known.startedAt ?? "") { latest[key] = check }
+            if startOrder(check) >= startOrder(known) { latest[key] = check }
         }
         let current = order.compactMap { latest[$0] }
         return CheckSummary(
@@ -261,6 +268,13 @@ extension ProjectBoard {
             },
             others: current.filter { check in !required.contains { check.matches($0) } }.map(\.result)
         )
+    }
+
+    /// A run not started yet (a rerun waiting for a runner) has no start,
+    /// or gh's zero time: it is the latest.
+    private static func startOrder(_ check: Check) -> String {
+        guard let startedAt = check.startedAt, !startedAt.isEmpty, !startedAt.hasPrefix("0001-") else { return "~" }
+        return startedAt
     }
 
     /// "#52 open", "#52 draft", "#52 conflict", "#52 draft · conflict",

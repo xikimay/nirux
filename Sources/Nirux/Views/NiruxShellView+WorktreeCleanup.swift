@@ -211,6 +211,7 @@ extension NiruxShellView {
     private func finishWorktreeCleanup(
         _ execution: WorktreeCleanup.Execution, of candidate: WorktreeCleanupCandidate, plan: WorktreeCleanup.Plan
     ) -> CleanupOutcome {
+        defer { expireProjectBoardWorktrees() }
         switch execution {
         case .cleaned(let forced, let trashFolder):
             let kept = closeWorkspacesAfterCleanup(of: candidate)
