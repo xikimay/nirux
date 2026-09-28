@@ -249,16 +249,21 @@ jobs:
           # only kept longer, never deleted by mistake.
           RELEASE_LIST_LIMIT: 1000
         run: |
-          gh release list --limit "$RELEASE_LIST_LIMIT" --json tagName,publishedAt \
+          gh release list --limit "$RELEASE_LIST_LIMIT" --json tagName,publishedAt,isDraft \
             > "$RUNNER_TEMP/releases.json"
-          if [ "$(jq length "$RUNNER_TEMP/releases.json")" -ge "$RELEASE_LIST_LIMIT" ]; then
+          LISTED=$(jq length "$RUNNER_TEMP/releases.json")
+          if [ "$LISTED" -ge "$RELEASE_LIST_LIMIT" ]; then
             echo "::warning::Listed $RELEASE_LIST_LIMIT releases, the limit; older dated releases were not considered."
           fi
 
           # Only tags this workflow creates are selected; `nightly` never is.
-          ./scripts/nightly-releases-to-prune.sh \
+          if ! ./scripts/nightly-releases-to-prune.sh \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$KEEP_DATED_RELEASES" "$KEEP_DATED_RELEASE_DAYS" \
-            < "$RUNNER_TEMP/releases.json" > "$RUNNER_TEMP/prune-tags.txt"
+            < "$RUNNER_TEMP/releases.json" > "$RUNNER_TEMP/prune-tags.txt"; then
+            echo "::warning::Could not select the dated nightly releases to prune; none deleted."
+            exit 1
+          fi
+          echo "Listed $LISTED releases; $(wc -l < "$RUNNER_TEMP/prune-tags.txt" | tr -d ' ') dated ones to delete."
 
           while read -r tag; do
             if [ "$tag" = "$RELEASE_TAG" ]; then

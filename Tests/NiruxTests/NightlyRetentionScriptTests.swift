@@ -68,6 +68,11 @@ final class NightlyRetentionScriptTests: XCTestCase {
                        ["nightly-2026.09.10-0200-bbbbbbb", "nightly-2026.09.09-0100-ccccccc"])
     }
 
+    func testADuplicatedEntryDoesNotPushAnotherReleaseOut() throws {
+        let releases = (0..<25).map { dated(8 * day + Double($0) * day, index: $0) }
+        XCTAssertEqual(try prune(releases + [releases[3]]), tags(releases[20...]))
+    }
+
     func testPrintsNothingForAnEmptyListing() throws {
         XCTAssertEqual(try prune([]), [])
     }
@@ -80,6 +85,7 @@ final class NightlyRetentionScriptTests: XCTestCase {
             release("nightly", published: old),
             release("v1.0.0", published: old),
             release("nightly-2026.01.01", published: old),
+            release("nightly-2026-01-01-0000-0ee6cb4", published: old),
             release("nightly-2026.01.01-0000-abc", published: old),
             release("nightly-2026.01.01-0000-0ee6cb4-rc1", published: old),
             release("nightly-2026.01.01-0000-0EE6CB4", published: old),
@@ -89,25 +95,43 @@ final class NightlyRetentionScriptTests: XCTestCase {
         XCTAssertEqual(try prune(foreign + [dated], keep: 0, days: 0), [dated["tagName"] as? String])
     }
 
-    func testAReleaseWithoutPublishTimeCountsAsTheOldest() throws {
-        // Drafts have no publish time: gh prints null or Go's zero time.
+    func testTheRollingReleaseDoesNotTakeOneOfTheTwenty() throws {
+        // Even published last, `nightly` must not count as one of the 20.
+        let rolling = release("nightly", published: "2026-09-28T11:59:00Z")
+        let old = (0..<21).map { dated(8 * day + Double($0) * day, index: $0) }
+        XCTAssertEqual(try prune([rolling] + old), tags(old[20...]))
+    }
+
+    func testADraftCountsAsTheOldest() throws {
+        // A publish that failed while uploading leaves a draft, which has no
+        // publish time: gh prints Go's zero time.
         let newest = dated(hour, index: 1)
-        let null = release("nightly-2026.09.28-1100-0000002", published: nil)
-        let zero = release("nightly-2026.09.28-1100-0000003", published: "0001-01-01T00:00:00Z")
-        XCTAssertEqual(try prune([null, zero, newest], keep: 1),
-                       ["nightly-2026.09.28-1100-0000003", "nightly-2026.09.28-1100-0000002"])
-        XCTAssertEqual(try prune([null, zero, newest], keep: 3), [])
+        let zero = release("nightly-2026.09.28-1100-0000002", published: "0001-01-01T00:00:00Z", draft: true)
+        let null = release("nightly-2026.09.28-1100-0000003", published: nil, draft: true)
+        let stamped = release("nightly-2026.09.28-1100-0000004", published: now, draft: true)
+        let all = [zero, null, stamped, newest]
+        XCTAssertEqual(try prune(all, keep: 1), tags([stamped, null, zero]))
+        XCTAssertEqual(try prune(all, keep: 4), [])
     }
 
     // MARK: - Failing closed
 
     func testAnUnexpectedPublishTimeDeletesNothing() throws {
+        // Older than `fine`, so a check made after sorting would already have
+        // printed `fine`.
         let fine = dated(30 * day, index: 1)
-        for published: Any in ["2026-09-01T00:00:00.5Z", "2026-09-01T00:00:00+00:00", "2026-09-01", 1_790_000_000] {
-            var odd = release("nightly-2026.09.01-0000-0000002", published: nil)
-            odd["publishedAt"] = published
-            XCTAssertThrowsError(try prune([fine, odd], keep: 0), "publishedAt \(published)")
+        let published: [Any] = ["2026-08-01T00:00:00.5Z", "2026-08-01T00:00:00+00:00", "2026-08-01",
+                                1_780_000_000, NSNull(), "0001-01-01T00:00:00Z"]
+        for value in published {
+            var odd = release("nightly-2026.08.01-0000-0000002", published: nil)
+            odd["publishedAt"] = value
+            XCTAssertThrowsError(try prune([fine, odd], keep: 0), "publishedAt \(value)")
         }
+    }
+
+    func testASecondDocumentAfterTheListingDeletesNothing() throws {
+        let json = try JSONSerialization.data(withJSONObject: [dated(30 * day, index: 1)])
+        XCTAssertThrowsError(try run([now, "0", "0"], input: String(decoding: json, as: UTF8.self) + " {"))
     }
 
     func testRejectsBadArguments() throws {
@@ -132,17 +156,21 @@ final class NightlyRetentionScriptTests: XCTestCase {
     }
 
     private func run(_ arguments: [String], input: String) throws -> String {
+        // A file, not a pipe: writing to a pipe the script never reads (it
+        // exits early on bad arguments) would kill the test run with SIGPIPE.
+        let inputFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nirux-nightly-releases-\(UUID().uuidString).json")
+        try Data(input.utf8).write(to: inputFile)
+        defer { try? FileManager.default.removeItem(at: inputFile) }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: Self.script)
         process.arguments = arguments
-        let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
-        process.standardInput = stdin
+        let stdout = Pipe(), stderr = Pipe()
+        process.standardInput = try FileHandle(forReadingFrom: inputFile)
         process.standardOutput = stdout
         process.standardError = stderr
         try process.run()
-        // Fixtures stay far below the pipe buffer, so writing first can't block.
-        stdin.fileHandleForWriting.write(Data(input.utf8))
-        try stdin.fileHandleForWriting.close()
         let output = String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         let errors = String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         process.waitUntilExit()
@@ -154,8 +182,10 @@ final class NightlyRetentionScriptTests: XCTestCase {
         return output
     }
 
-    private func release(_ tag: String, published: String?, created: String? = nil) -> [String: Any] {
-        var release: [String: Any] = ["tagName": tag, "publishedAt": published ?? NSNull()]
+    /// A release as `gh release list --json tagName,publishedAt,isDraft`
+    /// prints it, plus createdAt when given.
+    private func release(_ tag: String, published: String?, created: String? = nil, draft: Bool = false) -> [String: Any] {
+        var release: [String: Any] = ["tagName": tag, "publishedAt": published ?? NSNull(), "isDraft": draft]
         if let created { release["createdAt"] = created }
         return release
     }

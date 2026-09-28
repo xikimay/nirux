@@ -151,10 +151,12 @@ ends its shells.
    defaults write com.xikimay.nirux SUAutomaticallyUpdate -bool false
    ```
 
-2. Pick the last good build among the dated releases and download it:
+2. Pick the last good build among the dated releases and download it. A busy
+   week keeps a few hundred of them, and `gh release list` shows only 30
+   without `--limit`:
 
    ```bash
-   gh release list --repo xikimay/nirux
+   gh release list --repo xikimay/nirux --limit 1000
    TAG=nightly-YYYY.MM.DD-HHMM-<sha>
    DIR=$(mktemp -d)
    gh release download "$TAG" --repo xikimay/nirux --pattern Nirux.app.zip --dir "$DIR"
