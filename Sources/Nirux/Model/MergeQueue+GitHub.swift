@@ -37,28 +37,34 @@ extension MergeQueue {
         case unreadable(String)
     }
 
-    /// Whether this build may change GitHub: Nirux signed with a Developer
-    /// ID (the nightly) and run on the real state, or any build with
+    /// Whether this build may change GitHub: the release (see
+    /// `releaseRequirement`) run on the real state, or any build with
     /// `NIRUX_MERGE_QUEUE_LIVE=1`. Agents build and click through Nirux
-    /// inside Nirux: their builds are signed ad hoc, wherever they are
-    /// copied and however they are opened (LaunchServices passes no
-    /// variable), and they run on a state of their own (`NIRUX_STATE_DIR`,
-    /// which the installed app never sets).
+    /// inside Nirux: their builds aren't notarized, wherever they are copied
+    /// and however they are opened (LaunchServices passes no variable), and
+    /// they run on a state of their own (`NIRUX_STATE_DIR`, which the
+    /// installed app never sets).
     static func isLive(environment: [String: String], isSignedForRelease: Bool) -> Bool {
         if environment["NIRUX_MERGE_QUEUE_LIVE"] == "1" { return true }
         return isSignedForRelease && (environment["NIRUX_STATE_DIR"] ?? "").isEmpty
     }
 
-    /// Whether this process is signed with a Developer ID Application
-    /// certificate, and its signature holds. The nightly's is; `swift build`
-    /// and `scripts/bundle.sh` sign ad hoc unless given an identity.
-    static func isSignedWithDeveloperID() -> Bool {
-        let developerID = "anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
-            + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+    /// The nightly's signature: a Developer ID Application certificate, and
+    /// Apple's notarization, stapled to the app so it is checked offline. A
+    /// build signed on a Mac that holds the Developer ID isn't notarized.
+    /// `nightly.yml` checks the app it publishes against this same text.
+    static let releaseRequirement = "anchor apple generic"
+        + " and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
+        + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+        + " and notarized"
+
+    /// Whether this process's signature holds and meets `releaseRequirement`.
+    static func isSignedForRelease() -> Bool {
         var code: SecCode?
         var requirement: SecRequirement?
         guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
-              SecRequirementCreateWithString(developerID as CFString, [], &requirement) == errSecSuccess, let requirement
+              SecRequirementCreateWithString(releaseRequirement as CFString, [], &requirement) == errSecSuccess,
+              let requirement
         else { return false }
         return SecCodeCheckValidity(code, [], requirement) == errSecSuccess
     }
@@ -67,12 +73,13 @@ extension MergeQueue {
     /// it that reads GitHub and journals the mutations it would make.
     static func client(
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        isSignedForRelease: @autoclosure () -> Bool = isSignedWithDeveloperID(),
+        isSignedForRelease: @autoclosure () -> Bool = isSignedForRelease(),
         live: @autoclosure () -> any MergeQueueGitHub = GitHubCLIQueueClient.installed
     ) -> any MergeQueueGitHub {
         let client = live()
-        return isLive(environment: environment, isSignedForRelease: isSignedForRelease())
-            ? client : DryRunQueueClient(wrapped: client)
+        let isLive = isLive(environment: environment, isSignedForRelease: isSignedForRelease())
+        NSLog("[MergeQueue] %@", isLive ? "live: queues change GitHub" : "dry run: not the notarized release on the real state")
+        return isLive ? client : DryRunQueueClient(wrapped: client)
     }
 }
 

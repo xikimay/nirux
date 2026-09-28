@@ -125,6 +125,10 @@ jobs:
           xcrun stapler staple Nirux.app
           xcrun stapler validate Nirux.app
           spctl --assess --type execute --verbose=4 Nirux.app
+          # The merge queue is live only in an app that meets this, the same
+          # text as MergeQueue.releaseRequirement: fail rather than ship a
+          # release whose queue would stay a dry run.
+          codesign --verify -R='anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and notarized' Nirux.app
 
           rm -f Nirux.app.zip
           ditto -c -k --keepParent Nirux.app Nirux.app.zip
