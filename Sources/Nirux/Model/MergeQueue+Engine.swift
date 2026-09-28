@@ -63,9 +63,13 @@ extension MergeQueue {
         private var purpose: Purpose?
         private var nextRequestID = 1
         private var clocks = Clocks()
-        /// The newest post-merge run on the base at Start: a newer one that
-        /// fails stops the queue before its next merge.
-        private var baseRunsBaseline = 0
+        /// The post-merge runs on the base that had failed at Start: the
+        /// sheet warns of them. Any other that fails since, a run still going
+        /// at Start or rerun since included, stops the queue before its next
+        /// merge.
+        private var baseRunsFailedAtStart: Set<Int> = []
+        /// The pending read polls a post-merge run on the base (status text).
+        private var waitsOnBaseRun = false
         private var outbox = Output()
 
         init(settings: BoardConfig.QueueSettings, entries: [ConfirmedEntry]) {
@@ -75,6 +79,16 @@ extension MergeQueue {
 
         var currentEntry: Entry? { current.map { entries[$0] } }
 
+        /// A mutation sent whose effect GitHub hasn't shown yet: in flight,
+        /// or a merge whose pull request doesn't read MERGED yet.
+        var unconfirmedMutation: Mutation? {
+            if case .mutate(let mutation)? = request?.action { return mutation }
+            if case .mergeConfirm(let head, _, _)? = purpose, let entry = currentEntry {
+                return .merge(number: entry.number, head: head, method: settings.mergeMethod)
+            }
+            return nil
+        }
+
         /// "#52 waiting for the nightly, 3 of 7".
         var statusText: String {
             switch phase {
@@ -83,7 +97,7 @@ extension MergeQueue {
             case .stopped(let reason): return "Stopped: \(reason.message)"
             case .running, .paused, .stopping:
                 var text = current.map { current in
-                    let step = clocks.baseRunsSince != nil
+                    let step = waitsOnBaseRun
                         ? "#\(entries[current].number) waiting for the \(MergeQueue.workflowLabel(settings.postMergeWorkflow)) "
                             + "on \(settings.baseBranch) before merging"
                         : entries[current].stepDescription(workflow: settings.postMergeWorkflow)
@@ -177,6 +191,7 @@ extension MergeQueue {
             /// A pause for a rate limit doesn't count toward any timeout.
             mutating func shift(by seconds: TimeInterval) {
                 step += seconds
+                readFailingSince = readFailingSince.map { $0 + seconds }
                 agentBusySince = agentBusySince.map { $0 + seconds }
                 unknownSince = unknownSince.map { $0 + seconds }
                 baseRunsSince = baseRunsSince.map { $0 + seconds }
@@ -200,6 +215,7 @@ extension MergeQueue {
         private mutating func issue(_ action: Request.Action, _ purpose: Purpose) {
             let request = Request(id: nextRequestID, action: action)
             nextRequestID += 1
+            waitsOnBaseRun = false
             self.request = request
             self.purpose = purpose
             outbox.request = request
@@ -400,7 +416,7 @@ extension MergeQueue {
             }
             if settings.postMergeWorkflow != nil {
                 guard let runs = answers.runs(.baseRuns) else { return missingAnswer() }
-                baseRunsBaseline = runs.map(\.id).max() ?? 0
+                baseRunsFailedAtStart = Set(runs.filter(MergeQueue.runFailed).map(\.id))
             }
             guard !mergeQueue else {
                 return stop(StopReason(kind: .setup, message: "\(settings.baseBranch) requires GitHub’s merge queue: gh pr merge "
@@ -491,6 +507,11 @@ extension MergeQueue {
             _ local: LocalState, index: Int, now: TimeInterval, retry: (inout Engine) -> Void
         ) -> Bool {
             let number = entries[index].number
+            if let worktree = local.worktrees.first(where: { if case .unreadable = $0.problem { return true }; return false }),
+               case .unreadable(let reason)? = worktree.problem {
+                stop(StopReason(kind: .local, message: "Nirux couldn’t check \(worktree.path): \(reason)"))
+                return true
+            }
             if !local.busyAgents.isEmpty {
                 let agents = local.busyAgents.joined(separator: ", ")
                 if clocks.agentBusySince == nil { note("Waiting up to 10 minutes for \(agents)") }
@@ -752,10 +773,9 @@ extension MergeQueue {
         /// whether the merge waits.
         private mutating func waitForBaseRuns(_ runs: [Run], head: String, index: Int, now: TimeInterval) -> Bool {
             let label = MergeQueue.workflowLabel(settings.postMergeWorkflow)
-            // One that started after Start and failed between two looks
-            // is caught too.
+            // One that failed between two looks is caught too.
             if let failed = runs.first(where: {
-                MergeQueue.runFailed($0) && ($0.id > baseRunsBaseline || clocks.awaitedBaseRuns.contains($0.id))
+                MergeQueue.runFailed($0) && (!baseRunsFailedAtStart.contains($0.id) || clocks.awaitedBaseRuns.contains($0.id))
             }) {
                 stop(StopReason(kind: .postMerge, message: "The \(label) of \(Self.short(failed.headSha)) on "
                     + "\(settings.baseBranch) failed: the base may be broken.", url: failed.url))
@@ -775,6 +795,7 @@ extension MergeQueue {
                     return true
                 }
                 mergeChecks(head: head, index: index, after: Limits.runPollInterval)
+                waitsOnBaseRun = true
                 return true
             }
             guard !clocks.awaitedBaseRuns.isEmpty else { return false }

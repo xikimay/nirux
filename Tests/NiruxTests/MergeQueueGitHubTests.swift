@@ -221,6 +221,8 @@ final class MergeQueueGitHubTests: XCTestCase {
         guard case .refused(nil, _) = GitHubCLIQueueClient.classify(output(
             1, stderr: "X Pull request acme/widgets#52 is not mergeable: the merge commit cannot be cleanly created.\n"
         )) else { return XCTFail("a merge gh refused") }
+        guard case .refused = GitHubCLIQueueClient.classify(output(1, stderr: "could not find any workflows named nightly.yml\n"))
+        else { return XCTFail("a workflow gone for good") }
         guard case .noAnswer = GitHubCLIQueueClient.classify(output(1, stderr: "gh: Server Error (HTTP 502)\n"))
         else { return XCTFail("a server error may have gone through") }
         guard case .noAnswer = GitHubCLIQueueClient.classify(output(

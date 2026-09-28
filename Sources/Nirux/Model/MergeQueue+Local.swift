@@ -36,9 +36,15 @@ extension MergeQueue {
         let listed = snapshot.repositories.flatMap { $0.worktrees.map(\.path) }
         for folder in folders where !snapshot.missingFolders.contains(folder) {
             let comparable = snapshot.folders[folder] ?? NiruxShellView.comparablePath(folder)
-            guard !listed.contains(where: { ProjectBoard.contains($0, comparable) }),
-                  WorktreeCleanup.git(["rev-parse", "--is-inside-work-tree"], in: folder, tools: tools).status == 0
-            else { continue }
+            guard !listed.contains(where: { ProjectBoard.contains($0, comparable) }) else { continue }
+            // A bare repository's folder answers `false`; a checkout git
+            // refuses (dubious ownership, say) fails otherwise than "not a
+            // git repository".
+            let probe = WorktreeCleanup.git(["rev-parse", "--is-inside-work-tree"], in: folder, tools: tools)
+            let isUnlistedCheckout = probe.status == 0
+                ? probe.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
+                : !probe.stderr.contains("not a git repository")
+            guard isUnlistedCheckout else { continue }
             inspection.worktrees.append(LocalWorktree(path: folder, problem: .unreadable("git couldn’t list its worktrees")))
         }
         for repository in repositories {

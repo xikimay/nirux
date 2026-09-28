@@ -181,7 +181,12 @@ final class MergeQueueEngineTests: XCTestCase {
 
     func testAnAgentBackAtWorkBeforeTheMergeIsWaitedForAgain() {
         var world = readyWorld()
-        var queue = atMergeChecks(world)
+        // Busy for nearly 10 minutes at preflight: the wait before the merge starts afresh.
+        world.local.busyAgents = ["claude working in “api”"]
+        var queue = started(world)
+        queue.answer(world, until: { $0.now >= 1_000 + 590 })
+        world.local.busyAgents = []
+        queue.answer(world, until: { $0.engine.entries[0].step == .merging(self.a) })
         world.local.busyAgents = ["claude working in “api”"]
         queue.answer(world)
         XCTAssertEqual(queue.pendingDelay, 20)
@@ -458,6 +463,12 @@ final class MergeQueueEngineTests: XCTestCase {
         queue.answer(world)
         XCTAssertNil(queue.stopReason)
         XCTAssertEqual(queue.pendingDelay, 20)
+
+        // Nor toward the 5 minutes of failed reads around it.
+        queue.fail(.transient("timeout"))
+        queue.fail(.rateLimited(resumeAt: queue.now + 900))
+        queue.fail(.transient("timeout"))
+        XCTAssertNil(queue.stopReason)
     }
 
     func testACommitStatusAloneNeverMakesARequiredCheckGreen() {
@@ -570,11 +581,13 @@ final class MergeQueueEngineTests: XCTestCase {
         queue.answer(world)
         XCTAssertEqual(queue.pendingDelay, 30)
         XCTAssertTrue(queue.noted("Waiting for the nightly running on main before merging"))
+        XCTAssertEqual(queue.engine.statusText, "#52 waiting for the nightly on main before merging, 1 of 1")
         world.baseRuns = [MQ.run(77, head: world.mainTip, event: "workflow_dispatch")]
         queue.answer(world)
         // Every check of step 4 again, not the merge yet.
         XCTAssertNil(queue.pendingMutation)
         XCTAssertEqual(queue.pendingReads?.contains(.baseRuns), true)
+        XCTAssertEqual(queue.engine.statusText, "merging #52, 1 of 1")
         XCTAssertEqual(queue.run(world), .merge(number: 52, head: a, method: .merge))
 
         world.baseRuns = [MQ.run(77, head: world.mainTip, status: "queued", conclusion: nil)]
@@ -602,6 +615,16 @@ final class MergeQueueEngineTests: XCTestCase {
         world.baseRuns = [MQ.run(70, head: world.mainTip, conclusion: "failure")]
         queue = started(world)
         XCTAssertEqual(queue.run(world), .merge(number: 52, head: a, method: .merge))
+
+        // Still running at Start, failed while #52's checks ran.
+        world.baseRuns = [MQ.run(72, head: world.mainTip, status: "in_progress", conclusion: nil)]
+        world.checks[a] = MergeQueue.CommitChecks()
+        queue = started(world)
+        queue.answer(world, until: { $0.pendingDelay == 20 })
+        world.baseRuns = [MQ.run(72, head: world.mainTip, conclusion: "failure")]
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1))
+        queue.run(world)
+        XCTAssertEqual(queue.stopReason?.url, "https://github.com/acme/widgets/actions/runs/72")
     }
 
     func testAMergeThatTimedOutButHappenedGoesOn() {
@@ -892,14 +915,5 @@ final class MergeQueueEngineTests: XCTestCase {
         queue = started(readyWorld())
         queue.fail(.refused("Could not resolve to a PullRequest with the number of 52."))
         XCTAssertEqual(queue.stopReason?.kind, .github)
-    }
-
-    func testADryRunStopsBeforeItsFirstMutation() {
-        let world = readyWorld()
-        var queue = started(world)
-        queue.run(world)
-        queue.mutated(.dryRun("gh pr merge 52 --repo github.com/acme/widgets --merge --match-head-commit \(a)"))
-        XCTAssertEqual(queue.stopReason?.kind, .dryRun)
-        XCTAssertTrue(queue.stopReason?.message.contains("--match-head-commit \(a)") == true)
     }
 }

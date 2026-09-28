@@ -46,7 +46,8 @@ extension MergeQueue {
         var stopReason: StopReason?
         var entries: [Entry]
         var current: Int?
-        /// A mutating call sent and not answered yet: "merge of #52 at abc1234".
+        /// A mutating call sent whose effect GitHub hasn't shown yet: "merge
+        /// of #52 at abc1234".
         var inFlight: String?
 
         init(engine: Engine, dryRun: Bool, savedAt: Date) {
@@ -57,7 +58,7 @@ extension MergeQueue {
             self.savedAt = savedAt
             entries = engine.entries
             current = engine.current
-            if case .mutate(let mutation)? = engine.request?.action { inFlight = Engine.describe(mutation) }
+            inFlight = engine.unconfirmedMutation.map(Engine.describe)
             switch engine.phase {
             case .idle, .running, .paused: status = .running
             case .stopping: status = .stopping

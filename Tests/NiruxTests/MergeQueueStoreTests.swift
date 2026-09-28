@@ -131,6 +131,10 @@ final class MergeQueueStoreTests: XCTestCase {
         let saved = MergeQueue.SavedQueue(engine: queue.engine, dryRun: false, savedAt: Date()).interrupted()
         XCTAssertEqual(saved.stopReason?.message, "Interrupted while merging #52: Nirux quit. Its merge of #52 at aaaaaaa "
             + "was sent but not answered: check #52 on GitHub.")
+        // gh answered, but GitHub doesn't show the pull request merged yet.
+        queue.mutated(.uncertain("timeout"))
+        let confirming = MergeQueue.SavedQueue(engine: queue.engine, dryRun: false, savedAt: Date()).interrupted()
+        XCTAssertTrue(confirming.stopReason?.message.contains("check #52 on GitHub") == true)
 
         // Checked for the merge, but no call sent yet: nothing to check.
         var waiting = MQ.Harness(entries: [MQ.entry(52, head: MQ.sha("a"))])
@@ -207,6 +211,17 @@ final class MergeQueueStoreTests: XCTestCase {
         let unlisted = try MergeQueue.inspectLocal(folders: [worktree.path], branch: "feat/52", head: head,
                                                    settings: MQ.settings(), client: client, tools: unlistable).get()
         XCTAssertEqual(unlisted.worktrees.map(\.problem), [.unreadable("git couldn’t list its worktrees")])
+
+        // A folder holding a bare repository and its worktrees is no
+        // checkout of its own.
+        let layout = root.appendingPathComponent("gadgets")
+        try FileManager.default.createDirectory(at: layout, withIntermediateDirectories: true)
+        try git(["clone", "-q", "--bare", repository.path, layout.appendingPathComponent(".bare").path], at: root)
+        try "gitdir: ./.bare\n".write(to: layout.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
+        try git(["worktree", "add", "-q", layout.appendingPathComponent("main").path, "main"], at: layout)
+        let bare = try MergeQueue.inspectLocal(folders: [layout.path], branch: "feat/52", head: head,
+                                               settings: MQ.settings(), client: client, tools: tools).get()
+        XCTAssertTrue(bare.worktrees.isEmpty, "\(bare.worktrees)")
 
         // Another branch, or another repository: no worktree to check.
         XCTAssertTrue(try MergeQueue.inspectLocal(folders: [repository.path], branch: "feat/53", head: head,

@@ -530,16 +530,18 @@ documented in B2's pull request:
   the base tip.
 - **Post-merge runs on the base.** The queue looks at the workflow's last 50
   runs on the base branch. Before each merge, a run that failed (failure, timed
-  out, startup failure, action required) stops the queue if it started after
-  Start or was one the queue waited for; one that failed before Start is the
-  sheet's warning (section 4), not a stop, so a PR fixing the nightly can
-  merge. A cancelled or skipped run doesn't stop it.
+  out, startup failure, action required) stops the queue unless it had already
+  failed at Start: a run still going at Start, or rerun since, counts. One that
+  had failed before Start is the sheet's warning (section 4), not a stop, so a
+  PR fixing the nightly can merge; a run the queue waited for stops it
+  whatever. A cancelled or skipped run doesn't stop it.
 - **Whether the base moved after a merge**: `compare/{merge commit}...{base}`
   ahead or behind. The newer run on the base names the commit that moved it.
 - **Local checks**: the branch's worktrees in the project's local repositories
   (a remote naming the configured repository, whatever the host). Tracked
   changes first; then a local HEAD other than the PR's head is compared on
-  GitHub. A project folder in a checkout git can't list fails closed. Busy
+  GitHub. A project folder in a checkout git can't list, or refuses, fails
+  closed, before any wait for an agent. Busy
   agents are the agent columns of the workspaces in the worktree (not in a
   worktree nested inside it) and of other workspaces whose shell is inside it,
   working or waiting on a dialog, as the Agent column reads them.
@@ -555,7 +557,8 @@ documented in B2's pull request:
   could echo (`ghp_…`, `gho_…`, `github_pat_…`) are masked, in the journal and
   in the saved queue. A queue saved as running reads as interrupted at the next
   launch, unless another Nirux holds the repository's lock: it still runs there.
-  An interrupted queue says when a mutation was sent and never answered.
+  The final state is written before the lock is released. An interrupted queue
+  says when a mutation was sent and GitHub didn't show its effect yet.
 - **For B3**, `MergeQueueController` (one per project, from
   `NiruxShellView.mergeQueue(projectID:)`) offers `start(settings:entries:)`,
   which returns why it refuses, `stop()`, the engine with its entries and

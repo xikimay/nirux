@@ -197,6 +197,9 @@ final class MergeQueueController {
     }
 
     private func finish() {
+        // The final state is on disk before another Nirux can take the
+        // lock and read it as a queue that quit mid-run.
+        Self.waitForFiles()
         lock?.release()
         lock = nil
         if let activity { endActivity(activity) }
