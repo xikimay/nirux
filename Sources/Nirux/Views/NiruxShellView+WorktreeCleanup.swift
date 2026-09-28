@@ -145,10 +145,6 @@ extension NiruxShellView {
                 guard let self else { return }
                 var candidate = self.worktreeCleanupCandidate(path: path)
                 candidate.inspection = inspection
-                if let presenter = self.worktreeCleanupPresenter {
-                    self.worktreeCleanupsInFlight.remove(key)
-                    return presenter(candidate)
-                }
                 self.presentWorktreeCleanup(candidate) { [weak self] in
                     self?.worktreeCleanupsInFlight.remove(key)
                 }

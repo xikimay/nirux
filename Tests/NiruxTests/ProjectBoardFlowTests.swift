@@ -152,20 +152,17 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(board.view.otherWorktreesToggle?.title, "▾ Other worktrees (1)")
             let scratchRow = try row("scratch", in: board)
             XCTAssertEqual(scratchRow.actions.map(\.title), ["Open", "Clean Up…"])
-            var checked: WorktreeCleanupCandidate?
-            shell.worktreeCleanupPresenter = { checked = $0 }
-            try click(try XCTUnwrap(scratchRow.actions.last))
-            try waitUntil("the worktree is checked") { checked != nil }
-            let candidate = try XCTUnwrap(checked)
-            XCTAssertEqual(NiruxShellView.comparablePath(candidate.path), NiruxShellView.comparablePath(scratch))
-            XCTAssertEqual(candidate.workspaces, [])
-            XCTAssertEqual(candidate.report?.worktree.branch, "scratch")
-            guard case .blocked(let problems) = candidate.availability else {
-                return XCTFail("\(candidate.availability)")
+            var alerts: [NSAlert] = []
+            shell.sideEffects.runModal = { alert in
+                alerts.append(alert)
+                return .alertFirstButtonReturn
             }
+            try click(try XCTUnwrap(scratchRow.actions.last))
+            try waitUntil("the worktree is checked") { !alerts.isEmpty }
+            XCTAssertEqual(alerts.map(\.messageText), ["Can’t clean up widgets.scratch · scratch"], "the #46 notice, for that folder")
             // Stopped before gh either way: not pushed to GitHub, or no gh.
-            XCTAssertTrue(problems.contains { $0.contains("pushed to a GitHub remote") || $0.contains("(gh) isn") },
-                          "\(problems)")
+            let problems = alerts.first?.informativeText ?? ""
+            XCTAssertTrue(problems.contains("pushed to a GitHub remote") || problems.contains("(gh) isn"), problems)
             XCTAssertTrue(shell.worktreeCleanupsInFlight.isEmpty)
         }
     }

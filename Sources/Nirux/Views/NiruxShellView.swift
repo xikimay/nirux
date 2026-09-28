@@ -104,10 +104,6 @@ final class NiruxShellView: NSView {
     lazy var projectBoardClient: any ProjectBoardGitHub = GitHubCLIBoardClient.installed
     /// Reloads the boards whose board.json was saved.
     var boardConfigSaveObserver: NSObjectProtocol?
-    /// Takes the worktree a "Clean Up Worktree…" checked, instead of the
-    /// alerts that follow: tests read it there, since an alert would wait
-    /// for a click.
-    var worktreeCleanupPresenter: ((WorktreeCleanupCandidate) -> Void)?
 
     /// Debounce timer used to nudge TUI agents (claude, codex, vim…) to
     /// redraw after the window stops resizing. Without this, agents that
