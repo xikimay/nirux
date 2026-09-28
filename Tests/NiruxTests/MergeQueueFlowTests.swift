@@ -324,8 +324,7 @@ final class MergeQueueFlowTests: XCTestCase {
     func testADryRunReadsGitHubButNeverChangesItNorTakesTheLock() throws {
         let a = MQ.sha("a")
         let world = GitHubWorld(pullRequests: [52: a])
-        let dryRun = MergeQueue.client(environment: [:], bundleURL: URL(fileURLWithPath: "/work/.build/debug"),
-                                       live: GitHubCLIQueueClient(run: world.run))
+        let dryRun = MergeQueue.client(environment: [:], live: GitHubCLIQueueClient(run: world.run))
         let queue = controller(dryRun, clock: VirtualClock())
         queue.beginActivity = { NSObject() }
         queue.endActivity = { _ in }

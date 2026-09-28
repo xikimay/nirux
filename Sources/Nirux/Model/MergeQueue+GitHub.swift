@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 // MARK: - Client
 
@@ -36,28 +37,42 @@ extension MergeQueue {
         case unreadable(String)
     }
 
-    /// Whether this build may change GitHub: an installed app bundle run on
-    /// the real state, or any build with `NIRUX_MERGE_QUEUE_LIVE=1`. Agents
-    /// build and click through Nirux inside Nirux on a state of their own
-    /// (`NIRUX_STATE_DIR`, which the installed app never sets). A bundle
-    /// next to a `Package.swift` is `scripts/bundle.sh`'s, in a checkout:
-    /// opened through LaunchServices, it inherits no variable at all.
-    static func isLive(environment: [String: String], bundleURL: URL) -> Bool {
+    /// Whether this build may change GitHub: Nirux signed with a Developer
+    /// ID (the nightly) and run on the real state, or any build with
+    /// `NIRUX_MERGE_QUEUE_LIVE=1`. Agents build and click through Nirux
+    /// inside Nirux: their builds are signed ad hoc, wherever they are
+    /// copied and however they are opened (LaunchServices passes no
+    /// variable), and they run on a state of their own (`NIRUX_STATE_DIR`,
+    /// which the installed app never sets).
+    static func isLive(environment: [String: String], isSignedForRelease: Bool) -> Bool {
         if environment["NIRUX_MERGE_QUEUE_LIVE"] == "1" { return true }
-        let checkoutManifest = bundleURL.deletingLastPathComponent().appendingPathComponent("Package.swift").path
-        return bundleURL.pathExtension == "app" && (environment["NIRUX_STATE_DIR"] ?? "").isEmpty
-            && !FileManager.default.fileExists(atPath: checkoutManifest)
+        return isSignedForRelease && (environment["NIRUX_STATE_DIR"] ?? "").isEmpty
+    }
+
+    /// Whether this process is signed with a Developer ID Application
+    /// certificate, and its signature holds. The nightly's is; `swift build`
+    /// and `scripts/bundle.sh` sign ad hoc unless given an identity.
+    static func isSignedWithDeveloperID() -> Bool {
+        let developerID = "anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
+            + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
+        var code: SecCode?
+        var requirement: SecRequirement?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
+              SecRequirementCreateWithString(developerID as CFString, [], &requirement) == errSecSuccess, let requirement
+        else { return false }
+        return SecCodeCheckValidity(code, [], requirement) == errSecSuccess
     }
 
     /// The client this build runs its queues with: `live`, or a dry run of
     /// it that reads GitHub and journals the mutations it would make.
     static func client(
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        bundleURL: URL = Bundle.main.bundleURL,
+        isSignedForRelease: @autoclosure () -> Bool = isSignedWithDeveloperID(),
         live: @autoclosure () -> any MergeQueueGitHub = GitHubCLIQueueClient.installed
     ) -> any MergeQueueGitHub {
         let client = live()
-        return isLive(environment: environment, bundleURL: bundleURL) ? client : DryRunQueueClient(wrapped: client)
+        return isLive(environment: environment, isSignedForRelease: isSignedForRelease())
+            ? client : DryRunQueueClient(wrapped: client)
     }
 }
 
