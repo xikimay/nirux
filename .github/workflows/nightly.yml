@@ -125,6 +125,10 @@ jobs:
           xcrun stapler staple Nirux.app
           xcrun stapler validate Nirux.app
           spctl --assess --type execute --verbose=4 Nirux.app
+          # The merge queue is live only in the notarized release: the app
+          # checks itself here as it will at launch, so a release whose
+          # queue would stay a dry run fails rather than ships.
+          ./Nirux.app/Contents/MacOS/Nirux --check-release-signature
 
           rm -f Nirux.app.zip
           ditto -c -k --keepParent Nirux.app Nirux.app.zip
