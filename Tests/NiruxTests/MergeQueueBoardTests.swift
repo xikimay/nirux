@@ -238,7 +238,10 @@ final class MergeQueueBoardTests: XCTestCase {
         queue.addToSelection(8, repository: widgets)
         XCTAssertEqual(queue.selection(for: widgets), [9, 7, 8], "after the user's order, additions go at the end")
 
-        [9, 7, 8].forEach(queue.removeFromSelection)
+        queue.removeFromSelection(9)
+        queue.addToSelection(5, repository: widgets)
+        XCTAssertEqual(queue.selection(for: widgets), [7, 8, 5], "a removal keeps the user's order")
+        [7, 8, 5].forEach(queue.removeFromSelection)
         queue.addToSelection(5, repository: widgets)
         queue.addToSelection(2, repository: widgets)
         XCTAssertEqual(queue.selection(for: widgets), [2, 5], "an emptied list starts over by number")
@@ -354,12 +357,12 @@ final class MergeQueueBoardTests: XCTestCase {
             ))
         }
 
-        var reading: MergeQueue.ConfirmationReading?
-        queue.readConfirmation(settings: MQ.settings(), numbers: [2, 1]) { reading = $0 }
+        let reading = ReadingBox()
+        queue.readConfirmation(settings: MQ.settings(), numbers: [2, 1]) { reading.value = $0 }
         let deadline = Date().addingTimeInterval(10)
-        while reading == nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        while reading.value == nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
 
-        let read = try XCTUnwrap(reading)
+        let read = try XCTUnwrap(reading.value)
         XCTAssertTrue(read.isDryRun)
         XCTAssertEqual(read.candidates.map(\.number), [2, 1], "in the list's order")
         XCTAssertEqual(busyAsked, [["/tmp/feat/1"]])
@@ -422,6 +425,12 @@ final class MergeQueueBoardTests: XCTestCase {
         )
         XCTAssertEqual(fetch.reading.setupError, "GitHub’s answers were incomplete. Start again to retry.")
         XCTAssertFalse(MergeQueue.confirmation(fetch.reading).canStart, "no rate limit read is no rate limit checked")
+    }
+
+    /// What a completion on the main actor hands back.
+    @MainActor
+    private final class ReadingBox {
+        var value: MergeQueue.ConfirmationReading?
     }
 
     // MARK: - The details read

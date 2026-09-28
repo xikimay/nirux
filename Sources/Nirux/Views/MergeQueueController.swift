@@ -121,7 +121,7 @@ final class MergeQueueController {
         guard let saved, !saved.isRunning, BoardConfig.isValidRepository(saved.repository) else { return }
         let parts = saved.repository.split(separator: "/")
         setSelection(saved.entries.filter { $0.step != .done }.map(\.number),
-                     repository: GitHubRepository(owner: String(parts[0]), name: String(parts[1])))
+                     repository: GitHubRepository(owner: String(parts[0]), name: String(parts[1])), isNewOrder: true)
     }
 
     // MARK: The next Start's list
@@ -137,7 +137,7 @@ final class MergeQueueController {
     /// list of another repository is dropped first.
     func addToSelection(_ number: Int, repository: GitHubRepository) {
         guard !isRunning, !runsElsewhere else { return }
-        if repository != selectionRepository { setSelection([], repository: repository) }
+        if repository != selectionRepository { setSelection([], repository: repository, isNewOrder: true) }
         guard !selection.contains(number) else { return }
         selection.append(number)
         if !isSelectionReordered { selection.sort() }
@@ -150,13 +150,17 @@ final class MergeQueueController {
         onChange?()
     }
 
-    /// The list a sheet confirmed, in its order: the pull requests it left
-    /// out leave the list too.
-    private func setSelection(_ numbers: [Int], repository: GitHubRepository?) {
+    /// A new list (`isNewOrder`: its order is the user's if it isn't by
+    /// number), or the list with pull requests removed: the user's order
+    /// stays theirs until the list is empty, which starts over by number.
+    private func setSelection(_ numbers: [Int], repository: GitHubRepository?, isNewOrder: Bool = false) {
         selection = numbers
         selectionRepository = repository
-        // An empty list starts over by number.
-        isSelectionReordered = numbers != numbers.sorted()
+        if isNewOrder {
+            isSelectionReordered = numbers != numbers.sorted()
+        } else if numbers.isEmpty {
+            isSelectionReordered = false
+        }
     }
 
     /// A queue saved as running when Nirux quit never resumes: it reads as
@@ -230,7 +234,8 @@ final class MergeQueueController {
             self?.journal(mutation, command: command, result: result)
         }
         self.driver = driver
-        setSelection(entries.map(\.number), repository: settings.gitHubRepository)
+        // The list a sheet confirmed, in its order: what it left out leaves it.
+        setSelection(entries.map(\.number), repository: settings.gitHubRepository, isNewOrder: true)
         activity = beginActivity()
         driver.start()
         return nil

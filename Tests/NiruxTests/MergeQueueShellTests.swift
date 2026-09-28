@@ -168,6 +168,7 @@ final class MergeQueueShellTests: XCTestCase {
         let notice = try XCTUnwrap(shell.statusBar.queueNotice)
         XCTAssertTrue(notice.text.hasSuffix("(+1 other queue)"), notice.text)
         XCTAssertEqual(shell.statusBar.queueStopButton?.title, "Stop All")
+        XCTAssertEqual(shell.statusBar.queueStopButton?.isEnabled, true)
         try XCTUnwrap(shell.statusBar.queueStopButton).performClick(nil)
         XCTAssertFalse(first.isRunning)
         XCTAssertFalse(second.isRunning, "Stop reaches the queue the bar doesn’t name")

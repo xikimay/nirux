@@ -262,7 +262,8 @@ extension NiruxShellView {
         var notice = StatusBarView.QueueNotice(
             text: text,
             isRunning: shown.isRunning,
-            isStopping: engine.phase == .stopping,
+            // Stop All stays in reach while any queue isn't stopping yet.
+            isStopping: stopsAll ? running.allSatisfy { $0.engine?.phase == .stopping } : engine.phase == .stopping,
             isDryRun: shown.isDryRun,
             isFailure: isFailure,
             stopsAll: stopsAll
@@ -377,7 +378,8 @@ extension NiruxShellView {
         }
         details.append("")
         details.append(isDryRun
-            ? "Quitting stops it before its next command. A dry run sends nothing to GitHub: nothing is left half done."
+            ? "Quitting stops \(running.count == 1 ? "it" : "them") before the next command. A dry run sends nothing to "
+                + "GitHub: nothing is left half done."
             : "Quitting stops the queue before its next command. A merge or a branch update already sent to GitHub "
                 + "finishes first, which may take up to 2 minutes. Nothing resumes by itself at the next launch: the "
                 + "board shows where it stopped.")
