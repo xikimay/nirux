@@ -504,7 +504,7 @@ final class SidebarView: NSView {
 
     /// Space options only — switching spaces lives in the bottom dot
     /// switcher (and ⌘←/→), so the header menu doesn't duplicate it.
-    private func spaceOptionsMenu() -> NSMenu {
+    func spaceOptionsMenu() -> NSMenu {
         let menu = NSMenu()
         if let active = lastProfiles.first(where: { $0.isActive }) {
             addSpaceManagementItems(to: menu, for: active)
@@ -531,7 +531,7 @@ final class SidebarView: NSView {
     /// Full per-workspace action menu, shared by right-click and the "⋯"
     /// button. `columnIndex` non-nil when invoked from a column row — adds
     /// the column-level actions on top.
-    private func workspaceActionMenu(workspaceIndex: Int, columnIndex: Int?) -> NSMenu {
+    func workspaceActionMenu(workspaceIndex: Int, columnIndex: Int?) -> NSMenu {
         let workspace = lastInfos.first { $0.index == workspaceIndex }
 
         let menu = NSMenu()

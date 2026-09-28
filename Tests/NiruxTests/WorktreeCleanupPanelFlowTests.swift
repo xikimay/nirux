@@ -23,35 +23,16 @@ final class WorktreeCleanupPanelFlowTests: XCTestCase {
         super.tearDown()
     }
 
-    @discardableResult
-    private func git(_ arguments: [String], at directory: String) throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false"] + arguments
-        process.currentDirectoryURL = URL(fileURLWithPath: directory)
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = output
-        try process.run()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        let text = String(decoding: data, as: UTF8.self)
-        guard process.terminationStatus == 0 else {
-            throw NSError(domain: "git", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: text])
-        }
-        return text
-    }
-
     @MainActor
     func testBulkPanelInspectsOpenAndUnopenedWorktreesWithoutTrapping() throws {
         let repo = root + "/repo"
         try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
-        try git(["init", "-q", "-b", "main"], at: repo)
-        try git(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "init"], at: repo)
+        try UIFlowHarness.git(["init", "-q", "-b", "main"], at: repo)
+        try UIFlowHarness.git(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "init"], at: repo)
         let opened = root + "/repo.feat-opened"
         let unopened = root + "/repo.feat-unopened"
-        try git(["worktree", "add", "-q", "-b", "feat/opened", opened], at: repo)
-        try git(["worktree", "add", "-q", "-b", "feat/unopened", unopened], at: repo)
+        try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/opened", opened], at: repo)
+        try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/unopened", unopened], at: repo)
 
         let stateDirectory = root + "/state"
         try FileManager.default.createDirectory(atPath: stateDirectory, withIntermediateDirectories: true)

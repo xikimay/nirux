@@ -36,7 +36,7 @@ extension NiruxShellView {
         }()
 
         let wsTitle = title ?? "ws \(workspaces.count + 1)"
-        let wsCwd = cwd ?? NSHomeDirectory()
+        let wsCwd = cwd ?? sideEffects.homeDirectory()
         let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
         let workspace = WorkspaceState(
             id: workspaceID,
@@ -139,9 +139,7 @@ extension NiruxShellView {
             )
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            col.pty?.sendRaw("\(cmd)\n")
-        }
+        sideEffects.launchAgent(col, cmd)
     }
 
     func focusWorkspace(_ dir: VDir) {
@@ -234,7 +232,7 @@ extension NiruxShellView {
         if !workspaceStore.visibleWorkspaceIndices.isEmpty {
             refreshAfterWorkspaceSelection(animated: false)
         } else {
-            addWorkspace(title: activeProfile.name, cwd: NSHomeDirectory())
+            addWorkspace(title: activeProfile.name, cwd: sideEffects.homeDirectory())
         }
         saveState()
 
@@ -271,7 +269,7 @@ extension NiruxShellView {
     func createProfileFromActiveContext() {
         let sourceWorkspace = activeWorkspace
         let baseName = sourceWorkspace.flatMap { profileName(for: $0) } ?? "profile"
-        let cwd = sourceWorkspace?.focusedWorkingDirectory ?? NSHomeDirectory()
+        let cwd = sourceWorkspace?.focusedWorkingDirectory ?? sideEffects.homeDirectory()
         // Spaces persist: reuse an empty one of that name rather than pile up
         // "name 2", "name 3"…
         if let empty = profiles.first(where: { $0.name == baseName && workspaceStore.visibleWorkspaceIndices(in: $0.id).isEmpty }),

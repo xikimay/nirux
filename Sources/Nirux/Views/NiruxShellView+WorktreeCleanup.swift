@@ -380,7 +380,7 @@ extension NiruxShellView {
         let closing = affected.filter { workspace in !kept.contains { $0 === workspace } }
         guard !closing.isEmpty else { return kept.map(\.title) }
         if workspaceStore.remainingWorkspaceCount <= closing.count {
-            addWorkspace(cwd: NSHomeDirectory())
+            addWorkspace(cwd: sideEffects.homeDirectory())
         }
         // The selected one last: its successor is then picked among the
         // workspaces left, in one hop.
@@ -414,6 +414,6 @@ extension NiruxShellView {
         alert.messageText = message
         alert.informativeText = lines.joined(separator: "\n")
         alert.addButton(withTitle: "OK")
-        alert.runModal()
+        runModal(alert)
     }
 }
