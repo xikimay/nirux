@@ -634,6 +634,9 @@ struct PersistedColumn: Codable {
     var claudeSessionIsUnprompted: Bool?
     /// Stable hook-routing identity (NIRUX_AGENT_UUID) for terminal columns.
     var agentUUID: String?
+    /// The project (space id) a Project Board column shows. An older build
+    /// ignores it and restores the column as a terminal in `cwd`.
+    var boardProjectID: String?
 
     /// Non-optional accessor — missing or unknown `columnType` means terminal.
     var resolvedType: ColumnKind { columnType ?? .terminal }
@@ -648,7 +651,8 @@ struct PersistedColumn: Codable {
         codexSessionID: String? = nil,
         claudeSessionID: String? = nil,
         claudeSessionIsUnprompted: Bool? = nil,
-        agentUUID: String? = nil
+        agentUUID: String? = nil,
+        boardProjectID: String? = nil
     ) {
         self.widthPreset = widthPreset
         self.cwd = cwd
@@ -662,6 +666,7 @@ struct PersistedColumn: Codable {
         self.claudeSessionID = claudeSessionID
         self.claudeSessionIsUnprompted = claudeSessionIsUnprompted
         self.agentUUID = agentUUID
+        self.boardProjectID = boardProjectID
     }
 
     enum CodingKeys: String, CodingKey {
@@ -674,6 +679,7 @@ struct PersistedColumn: Codable {
         case claudeSessionID
         case claudeSessionIsUnprompted
         case agentUUID
+        case boardProjectID
         case claudeBypassPermissions // legacy
     }
 
@@ -713,6 +719,7 @@ struct PersistedColumn: Codable {
         claudeSessionID = try? container.decodeIfPresent(String.self, forKey: .claudeSessionID)
         claudeSessionIsUnprompted = try? container.decodeIfPresent(Bool.self, forKey: .claudeSessionIsUnprompted)
         agentUUID = try? container.decodeIfPresent(String.self, forKey: .agentUUID)
+        boardProjectID = try? container.decodeIfPresent(String.self, forKey: .boardProjectID)
     }
 
     /// Custom encoder is required because `CodingKeys` carries the legacy
@@ -732,11 +739,13 @@ struct PersistedColumn: Codable {
         try container.encodeIfPresent(claudeSessionID, forKey: .claudeSessionID)
         try container.encodeIfPresent(claudeSessionIsUnprompted, forKey: .claudeSessionIsUnprompted)
         try container.encodeIfPresent(agentUUID, forKey: .agentUUID)
+        try container.encodeIfPresent(boardProjectID, forKey: .boardProjectID)
     }
 }
 
+/// An older build decodes a kind it doesn't know as a terminal.
 enum ColumnKind: String, Codable {
-    case terminal, webView, claudeCode, codex, editor
+    case terminal, webView, claudeCode, codex, editor, projectBoard
 }
 
 // MARK: - URL History

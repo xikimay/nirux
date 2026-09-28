@@ -13,6 +13,8 @@ final class ColumnState {
     var terminalView: TerminalView?
     var webViewColumn: WebViewColumn?
     var editorColumn: EditorColumn?
+    /// The Project Board this column shows.
+    private(set) var projectBoard: ProjectBoardController?
     /// Column width as a fraction of the columns viewport (0.15…2.0).
     /// Freeform (drag the resize handles); the ColumnWidth presets are just
     /// named stops the width cycler snaps to.
@@ -212,6 +214,8 @@ final class ColumnState {
     /// True if this column is an Editor (Monaco-backed)
     var isEditor: Bool { editorColumn != nil }
 
+    var isProjectBoard: Bool { projectBoard != nil }
+
     /// Escape a file path for safe pasting into a shell.
     private static func shellEscape(_ path: String) -> String {
         if path.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "/" || $0 == "." || $0 == "-" || $0 == "_" }) {
@@ -337,6 +341,18 @@ final class ColumnState {
         editor.autoresizingMask = [.width, .height]
         view.addSubview(editor)
         editorColumn = editor
+    }
+
+    /// Project Board column: a project's branches, agents and pull requests.
+    init(projectBoard: ProjectBoardController) {
+        agentUUID = nil
+        view = NSView()
+        view.wantsLayer = true
+
+        let board = projectBoard.view
+        board.autoresizingMask = [.width, .height]
+        view.addSubview(board)
+        self.projectBoard = projectBoard
     }
 
     /// Snap to the next preset (same cycle order as before: from any

@@ -622,6 +622,11 @@ extension WorkspaceState {
         }
     }
 
+    /// Insert a Project Board column next to the focused one.
+    func addProjectBoardColumn(_ board: ProjectBoardController) {
+        insertColumn(ColumnState(projectBoard: board))
+    }
+
     func closeColumn(at index: Int) {
         guard columns.count > 1 else { return }
         let previouslyFocusedColumn = columns[safe: focusedIndex]

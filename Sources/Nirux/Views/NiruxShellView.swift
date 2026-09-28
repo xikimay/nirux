@@ -103,6 +103,10 @@ final class NiruxShellView: NSView {
     /// A "Board Settings…" reading board.json and the checkouts, so a
     /// second click doesn't open a second form.
     var isReadingBoardSettings = false
+    /// The Project Board's `gh` reads. Tests set a fake before a board opens.
+    lazy var projectBoardClient: any ProjectBoardGitHub = GitHubCLIBoardClient.installed
+    /// Reloads the boards whose board.json was saved.
+    var boardConfigSaveObserver: NSObjectProtocol?
 
     /// Debounce timer used to nudge TUI agents (claude, codex, vim…) to
     /// redraw after the window stops resizing. Without this, agents that
@@ -748,6 +752,8 @@ extension NiruxShellView {
               let window else { return }
         if let webView = col.webViewColumn {
             window.makeFirstResponder(webView.webView)
+        } else if let board = col.projectBoard {
+            window.makeFirstResponder(board.view)
         } else if col.isFindBarOpen {
             // An open find bar keeps the keyboard: text typed for it must
             // not reach the agent. A click on the terminal takes it back.
