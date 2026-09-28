@@ -125,6 +125,7 @@ final class NiruxShellView: NSView {
         addSubview(edgeGlowTop)
         addSubview(edgeGlowBottom)
         addSubview(statusBar)
+        statusBar.onContentChange = { [weak self] in self?.relayout(animated: false) }
 
         let workspace = WorkspaceState(
             title: "ws 1",
