@@ -110,11 +110,8 @@ extension NiruxShellView {
         workspace.addColumn()
         relayout(animated: false)
         updateSidebar()
-        // Send claude command to the new terminal after shell starts
         if let col = workspace.columns[safe: workspace.focusedIndex] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                col.pty?.sendRaw("\(cmd)\n")
-            }
+            sideEffects.launchAgent(col, cmd)
         }
         focusActiveTerminal(in: window)
     }
@@ -131,9 +128,7 @@ extension NiruxShellView {
         relayout(animated: false)
         updateSidebar()
         if let col = workspace.columns[safe: workspace.focusedIndex] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                col.pty?.sendRaw("\(cmd)\n")
-            }
+            sideEffects.launchAgent(col, cmd)
         }
         focusActiveTerminal(in: window)
     }
@@ -396,33 +391,33 @@ extension NiruxShellView {
     /// alert.
     func installAgentSkills(confirmsSuccess: Bool = true) {
         do {
-            try AgentSkillsInstaller.install(Self.agentSkills, home: NSHomeDirectory())
+            try AgentSkillsInstaller.install(Self.agentSkills, home: sideEffects.homeDirectory())
             refreshOnboardingChecklist()
             guard confirmsSuccess else { return }
             let alert = NSAlert()
             alert.messageText = "Agent Skills Installed"
             let names = Self.agentSkills.keys.sorted().joined(separator: ", ")
             alert.informativeText = "Installed \(names) to ~/.agents/skills/ and ~/.claude/skills/\nAll agents will auto-detect them."
-            alert.runModal()
+            runModal(alert)
         } catch {
             refreshOnboardingChecklist()
             let alert = NSAlert()
             alert.messageText = "Install Failed"
             alert.informativeText = error.localizedDescription
             alert.alertStyle = .warning
-            alert.runModal()
+            runModal(alert)
         }
     }
 
     // MARK: - Cookie Import
 
     func importCookieSubtitle() -> String {
-        let browsers = CookieImporter.availableBrowsers.map(\.rawValue)
+        let browsers = sideEffects.cookieBrowsers().map(\.rawValue)
         return browsers.isEmpty ? "No Chromium browsers detected" : "From \(browsers.joined(separator: ", "))"
     }
 
     func importBrowserCookies() {
-        let browsers = CookieImporter.availableBrowsers
+        let browsers = sideEffects.cookieBrowsers()
         guard !browsers.isEmpty else { return }
 
         guard browsers.count > 1 else {
@@ -438,27 +433,29 @@ extension NiruxShellView {
             alert.addButton(withTitle: browser.rawValue)
         }
         alert.addButton(withTitle: "Cancel")
-        let response = alert.runModal()
+        let response = runModal(alert)
         let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
         guard browsers.indices.contains(index) else { return }
         runCookieImport(from: browsers[index])
     }
 
     private func runCookieImport(from browser: CookieImporter.Browser) {
+        let importCookies = sideEffects.importCookies
+        let runModal = sideEffects.runModal
         Task {
             do {
-                let result = try await CookieImporter.importCookies(from: browser, into: WebViewColumn.sharedDataStore)
+                let result = try await importCookies(browser)
                 let alert = NSAlert()
                 alert.messageText = "Cookies Imported"
                 let failNote = result.failed > 0 ? " \(result.failed) failed." : ""
                 alert.informativeText = "Imported \(result.imported) cookies from \(result.browser.rawValue).\(failNote)"
-                alert.runModal()
+                _ = runModal(alert)
             } catch {
                 let alert = NSAlert()
                 alert.messageText = "Import Failed"
                 alert.informativeText = error.localizedDescription
                 alert.alertStyle = .warning
-                alert.runModal()
+                _ = runModal(alert)
             }
         }
     }

@@ -114,7 +114,7 @@ extension NiruxShellView {
         if let window {
             alert.beginSheetModal(for: window)
         } else {
-            alert.runModal()
+            runModal(alert)
         }
     }
 

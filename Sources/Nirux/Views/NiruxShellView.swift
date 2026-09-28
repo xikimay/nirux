@@ -80,6 +80,10 @@ final class NiruxShellView: NSView {
     /// workspace, the column's index, the column.
     var onStuckAgentAlert: ((AgentAttentionReason, WorkspaceState, Int, ColumnState) -> Void)?
 
+    /// Agent launches, the home folder, cookies and modal alerts; tests
+    /// replace them (see ShellSideEffects).
+    var sideEffects = ShellSideEffects()
+
     // Panel references (stored properties must live in main class declaration)
     var nameInputPanel: NameInputPanel?
     var workspaceContextPanel: WorkspaceContextPanel?

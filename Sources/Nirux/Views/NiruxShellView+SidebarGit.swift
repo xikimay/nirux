@@ -250,7 +250,7 @@ extension NiruxShellView {
         alert.addButton(withTitle: "Open Child")
         alert.addButton(withTitle: "Cancel")
 
-        let result = alert.runModal()
+        let result = runModal(alert)
         if result == .alertSecondButtonReturn {
             focusActivityEntry(entry)
             return
