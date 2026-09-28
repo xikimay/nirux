@@ -369,8 +369,13 @@ final class MergeQueueGitHubTests: XCTestCase {
         // A typo in the requirement would leave the release a dry run forever.
         var requirement: SecRequirement?
         XCTAssertEqual(SecRequirementCreateWithString(MergeQueue.releaseRequirement as CFString, [], &requirement), errSecSuccess)
-        // Xcode's xctest, which runs these tests, is no notarized release.
-        guard case .notRelease = MergeQueue.releaseSignature() else { return XCTFail("xctest read as the release") }
+        // Refused by the requirement, not by the check itself: an API
+        // misuse (errSecCSInvalidFlags) read as "not the release" once, and
+        // kept the nightly from shipping. /bin/ls is Apple's own, and
+        // xctest, which runs these tests, is signed ad hoc or not at all.
+        XCTAssertEqual(MergeQueue.releaseSignature(atPath: "/bin/ls"), .notRelease(errSecCSReqFailed))
+        guard case .notRelease(let status) = MergeQueue.releaseSignature() else { return XCTFail("xctest read as the release") }
+        XCTAssertTrue([errSecCSReqFailed, errSecCSUnsigned].contains(status), MergeQueue.ReleaseSignature.notRelease(status).detail)
 
         let installed = URL(fileURLWithPath: "/Applications/Nirux.app")
         let release = { MergeQueue.ReleaseSignature.release }
@@ -406,7 +411,7 @@ final class MergeQueueGitHubTests: XCTestCase {
         let inherited = ["NIRUX_MERGE_QUEUE_LIVE": "1"].merging(terminal) { _, terminal in terminal }
         XCTAssertFalse(isLive(inherited, signed: adHoc))
         XCTAssertEqual(MergeQueue.liveDecision(environment: [:], bundleURL: installed, signature: adHoc).reason,
-                       "not the notarized release (OSStatus \(errSecCSReqFailed))")
+                       "not the notarized release (OSStatus -67050: code failed to satisfy specified code requirement(s))")
 
         let dryRun = MergeQueue.client(environment: [:], bundleURL: installed, signature: .notRelease(errSecCSReqFailed),
                                        live: live)

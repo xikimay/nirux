@@ -42,6 +42,13 @@ extension MergeQueue {
         case release
         /// The Security framework's status for the step that failed.
         case notRelease(OSStatus)
+
+        /// "OSStatus -67050: code failed to satisfy specified code requirement(s)".
+        var detail: String {
+            guard case .notRelease(let status) = self else { return "the notarized release" }
+            let message = (SecCopyErrorMessageString(status, nil) as String?) ?? "unknown error"
+            return "OSStatus \(status): \(message)"
+        }
     }
 
     /// Whether this build may change GitHub, and why, for the log: the
@@ -60,10 +67,10 @@ extension MergeQueue {
         guard (environment["NIRUX_STATE_DIR"] ?? "").isEmpty else { return (false, "NIRUX_STATE_DIR is set") }
         let checkoutManifest = bundleURL.deletingLastPathComponent().appendingPathComponent("Package.swift").path
         guard !FileManager.default.fileExists(atPath: checkoutManifest) else { return (false, "a build inside a checkout") }
-        switch signature() {
-        case .release: return (true, "the notarized release on the real state")
-        case .notRelease(let status): return (false, "not the notarized release (OSStatus \(status))")
-        }
+        let result = signature()
+        return result == .release
+            ? (true, "the notarized release on the real state")
+            : (false, "not the notarized release (\(result.detail))")
     }
 
     /// The nightly's signature: a Developer ID Application certificate, and
@@ -75,18 +82,49 @@ extension MergeQueue {
         + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
         + " and notarized"
 
-    /// Checks this process's signature against `releaseRequirement`. The
-    /// bundle's resources aren't hashed again: they don't make it the
-    /// release, and hashing them takes a tenth of a second.
+    /// Checks this process's app, as it is on disk, against
+    /// `releaseRequirement`. On disk: `SecCodeCheckValidity` on the running
+    /// code refuses the flags of a static check (errSecCSInvalidFlags), and
+    /// what makes a build the release is its signed files. The nightly runs
+    /// this through `Nirux --check-release-signature`.
     static func releaseSignature() -> ReleaseSignature {
         var code: SecCode?
         var status = SecCodeCopySelf([], &code)
         guard status == errSecSuccess, let code else { return .notRelease(status) }
+        var staticCode: SecStaticCode?
+        status = SecCodeCopyStaticCode(code, [], &staticCode)
+        guard status == errSecSuccess, let staticCode else { return .notRelease(status) }
+        return releaseSignature(of: staticCode)
+    }
+
+    /// The same check on the app (or binary) at `path`: a downloaded
+    /// nightly, say.
+    static func releaseSignature(atPath path: String) -> ReleaseSignature {
+        var staticCode: SecStaticCode?
+        let status = SecStaticCodeCreateWithPath(URL(fileURLWithPath: path) as CFURL, [], &staticCode)
+        guard status == errSecSuccess, let staticCode else { return .notRelease(status) }
+        return releaseSignature(of: staticCode)
+    }
+
+    /// Default flags: the signature, its resources and the requirement.
+    private static func releaseSignature(of staticCode: SecStaticCode) -> ReleaseSignature {
         var requirement: SecRequirement?
-        status = SecRequirementCreateWithString(releaseRequirement as CFString, [], &requirement)
+        var status = SecRequirementCreateWithString(releaseRequirement as CFString, [], &requirement)
         guard status == errSecSuccess, let requirement else { return .notRelease(status) }
-        status = SecCodeCheckValidity(code, SecCSFlags(rawValue: UInt32(kSecCSDoNotValidateResources)), requirement)
+        status = SecStaticCodeCheckValidity(staticCode, [], requirement)
         return status == errSecSuccess ? .release : .notRelease(status)
+    }
+
+    /// Where this process's app is, for the nightly's log.
+    static func ownCodePath() -> String? {
+        var code: SecCode?
+        var staticCode: SecStaticCode?
+        var url: CFURL?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
+              SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
+              SecCodeCopyPath(staticCode, [], &url) == errSecSuccess, let url
+        else { return nil }
+        return (url as URL).path
     }
 
     /// The signature as it was at launch: the check compares the running

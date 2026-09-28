@@ -52,10 +52,11 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             exit(MissionEventCLI.main(Array(args.dropFirst(2))))
         }
         // The nightly checks the app it publishes the way the merge queue
-        // checks itself (MergeQueue.releaseSignature).
-        if args.count == 2, args[1] == "--check-release-signature" {
-            let signature = MergeQueue.releaseSignature()
-            print(signature == .release ? "release" : "not the notarized release: \(signature)")
+        // checks itself; with a path, another app (a downloaded nightly).
+        if args.count >= 2, args[1] == "--check-release-signature", args.count <= 3 {
+            let path = args.count == 3 ? args[2] : MergeQueue.ownCodePath() ?? "(this process)"
+            let signature = args.count == 3 ? MergeQueue.releaseSignature(atPath: args[2]) : MergeQueue.releaseSignature()
+            print("app: \(path)\nrequirement: \(MergeQueue.releaseRequirement)\nresult: \(signature.detail)")
             exit(signature == .release ? 0 : 1)
         }
 
