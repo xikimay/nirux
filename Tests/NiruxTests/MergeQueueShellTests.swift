@@ -4,13 +4,12 @@ import XCTest
 
 /// What a running queue does beyond the board: the status bar, keep-awake,
 /// and a quit that asks first and waits for a call already sent.
-@MainActor
 final class MergeQueueShellTests: XCTestCase {
     private var root: URL!
     private var previousStateDirectory: String?
 
-    override func setUp() async throws {
-        try await super.setUp()
+    override func setUpWithError() throws {
+        try super.setUpWithError()
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("nirux-merge-queue-shell-\(UUID().uuidString)")
             .resolvingSymlinksInPath()
@@ -19,7 +18,7 @@ final class MergeQueueShellTests: XCTestCase {
         setenv("NIRUX_STATE_DIR", root.appendingPathComponent("state").path, 1)
     }
 
-    override func tearDown() async throws {
+    override func tearDown() {
         MergeQueueController.waitForFiles()
         if let previousStateDirectory {
             setenv("NIRUX_STATE_DIR", previousStateDirectory, 1)
@@ -27,9 +26,10 @@ final class MergeQueueShellTests: XCTestCase {
             unsetenv("NIRUX_STATE_DIR")
         }
         if let root { try? FileManager.default.removeItem(at: root) }
-        try await super.tearDown()
+        super.tearDown()
     }
 
+    @MainActor
     private func makeShell(_ client: any MergeQueueGitHub) -> NiruxShellView {
         _ = NSApplication.shared
         let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
@@ -40,6 +40,7 @@ final class MergeQueueShellTests: XCTestCase {
     }
 
     /// A pull request ready to merge: the engine reaches its merge without a wait.
+    @MainActor
     private func readyWorld() -> MQ.World {
         var world = MQ.World()
         world.pullRequests[52] = MQ.pullRequest(52, head: MQ.sha("a"))
@@ -48,12 +49,14 @@ final class MergeQueueShellTests: XCTestCase {
     }
 
     /// A pull request whose checks still run: the queue waits 20 s between looks.
+    @MainActor
     private func waitingWorld() -> MQ.World {
         var world = readyWorld()
         world.checks[MQ.sha("a")] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
         return world
     }
 
+    @MainActor
     private func start(_ shell: NiruxShellView, projectID: String = "project") -> MergeQueueController {
         let queue = shell.mergeQueue(projectID: projectID)
         queue.beginActivity = { NSObject() }
@@ -62,6 +65,7 @@ final class MergeQueueShellTests: XCTestCase {
         return queue
     }
 
+    @MainActor
     private func waitUntil(_ what: String, timeout: TimeInterval = 10, _ condition: () -> Bool) {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition(), Date() < deadline {
@@ -72,6 +76,7 @@ final class MergeQueueShellTests: XCTestCase {
 
     // MARK: - Status bar
 
+    @MainActor
     func testTheStatusBarFollowsTheQueueAndItsStopStopsIt() throws {
         let shell = makeShell(FakeQueueClient(world: readyWorld(), isDryRun: true))
         XCTAssertNil(shell.statusBar.queueNotice)
@@ -97,6 +102,7 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertFalse(shell.statusBar.hasContent)
     }
 
+    @MainActor
     func testTheQueueComesFirstAndACrashNoticeFollowsIt() throws {
         let bar = StatusBarView(frame: NSRect(x: 0, y: 0, width: 1200, height: StatusBarView.height))
         bar.showUpdate(version: "nightly-2026.09.29")
@@ -119,6 +125,7 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertEqual(clicks, ["board", "stop"])
     }
 
+    @MainActor
     func testOnANarrowBarTheQueueShrinksSoACrashNoticeKeepsItsButtons() throws {
         _ = NSApplication.shared
         let report = try XCTUnwrap(CrashReportParser.report(from: CrashReportFixtures.report()))
@@ -143,6 +150,7 @@ final class MergeQueueShellTests: XCTestCase {
         }
     }
 
+    @MainActor
     func testWithSeveralQueuesTheStatusBarStopsThemAll() throws {
         let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
         let first = start(shell, projectID: "first")
@@ -167,6 +175,7 @@ final class MergeQueueShellTests: XCTestCase {
 
     // MARK: - Spaces
 
+    @MainActor
     func testASpaceWhoseQueueRunsIsNotDeleted() {
         let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
         var alerts: [String] = []
@@ -186,6 +195,7 @@ final class MergeQueueShellTests: XCTestCase {
 
     // MARK: - Keep-awake
 
+    @MainActor
     func testARunningQueueKeepsTheMacAwakeUnderTheSameSetting() {
         let harness = KeepAwakeHarness()
         harness.controller.update(mergeQueueRunning: true)
@@ -210,6 +220,7 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertTrue(disabled.controller.isActive)
     }
 
+    @MainActor
     func testTheShellTellsKeepAwakeWhileAQueueRuns() {
         let shell = makeShell(FakeQueueClient(world: readyWorld(), isDryRun: true))
         let harness = KeepAwakeHarness()
@@ -236,6 +247,7 @@ final class MergeQueueShellTests: XCTestCase {
         var answer: (@MainActor (Bool) -> Void)?
     }
 
+    @MainActor
     private func recordQuitQuestions(_ shell: NiruxShellView) -> QuitQuestion {
         let question = QuitQuestion()
         shell.sideEffects.confirmQuitWithMergeQueue = { message, details, _, answer in
@@ -245,6 +257,7 @@ final class MergeQueueShellTests: XCTestCase {
         return question
     }
 
+    @MainActor
     func testQuittingWithoutAQueueDoesNotAsk() {
         let shell = makeShell(FakeQueueClient(isDryRun: true))
         let question = recordQuitQuestions(shell)
@@ -252,6 +265,7 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertTrue(question.asked.isEmpty)
     }
 
+    @MainActor
     func testQuittingAsksFirstAndKeepRunningCancels() throws {
         let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
         let question = recordQuitQuestions(shell)
@@ -270,6 +284,7 @@ final class MergeQueueShellTests: XCTestCase {
         queue.stop()
     }
 
+    @MainActor
     func testQuittingStopsTheQueueAndWaitsForAMergeAlreadySent() throws {
         let client = HeldMutationClient(world: readyWorld())
         let shell = makeShell(client)
@@ -292,6 +307,7 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertTrue(reason.message.contains("Check #52 on GitHub: it may be merged."), reason.message)
     }
 
+    @MainActor
     func testNoQueueStartsOnceAQuitIsAsked() throws {
         let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
         _ = recordQuitQuestions(shell)
@@ -326,6 +342,7 @@ final class MergeQueueShellTests: XCTestCase {
         running.stop()
     }
 
+    @MainActor
     func testTheWindowsCloseButtonAsksOnceThenTheQuitStopsTheQueue() throws {
         let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
         let question = recordQuitQuestions(shell)
