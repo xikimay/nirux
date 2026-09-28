@@ -603,13 +603,6 @@ extension NiruxShellView {
         }
     }
 
-    // MARK: - Status Bar
-
-    func showUpdateAvailable(version: String) {
-        statusBar.showUpdate(version: version)
-        relayout(animated: false)
-    }
-
     // MARK: - Terminal Redraw
 
     private static let shells: Set<String> = ["zsh", "bash", "fish", "sh", "-zsh", "-bash"]

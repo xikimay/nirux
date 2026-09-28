@@ -37,7 +37,7 @@ extension NiruxApp {
 
     func showUpdateAvailable(version: String) {
         guard let shell else { return }
-        shell.showUpdateAvailable(version: version)
+        shell.statusBar.showUpdate(version: version)
         shell.statusBar.onInstall = { [weak self] in
             self?.updaterController?.checkForUpdates(nil)
         }
