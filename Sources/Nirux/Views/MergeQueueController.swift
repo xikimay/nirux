@@ -95,18 +95,29 @@ final class MergeQueueController {
     /// interrupted, unless another Nirux still runs it.
     private func restore() {
         guard let files, let saved = MergeQueue.SavedQueue.load(from: files.state) else { return }
-        guard saved.isRunning else {
+        guard saved.isRunning, !saved.dryRun, BoardConfig.isValidRepository(saved.repository) else { return settle(saved) }
+        let parts = saved.repository.split(separator: "/")
+        let repository = GitHubRepository(owner: String(parts[0]), name: String(parts[1]))
+        // A queue of this Nirux holds the repository: the saved one runs nowhere.
+        if isRepositoryBusy(repository) { return settle(saved) }
+        // Held while the file is read again and rewritten: a Nirux that
+        // ended that queue meanwhile wrote its last state before letting go.
+        guard let lock = MergeQueueLock.acquire(repository: repository, folder: lockFolder) else {
+            runsElsewhere = true
             self.saved = saved
             return
         }
-        if !saved.dryRun, BoardConfig.isValidRepository(saved.repository) {
-            let parts = saved.repository.split(separator: "/")
-            let repository = GitHubRepository(owner: String(parts[0]), name: String(parts[1]))
-            if MergeQueueLock.isHeld(repository: repository, folder: lockFolder) {
-                runsElsewhere = true
-                self.saved = saved
-                return
-            }
+        settle(MergeQueue.SavedQueue.load(from: files.state) ?? saved)
+        Self.waitForFiles()
+        lock.release()
+    }
+
+    /// A saved queue as the board shows it: one saved as running reads,
+    /// and is saved, as interrupted.
+    private func settle(_ saved: MergeQueue.SavedQueue) {
+        guard saved.isRunning else {
+            self.saved = saved
+            return
         }
         let interrupted = saved.interrupted()
         self.saved = interrupted
@@ -128,6 +139,9 @@ final class MergeQueueController {
         guard settingsProblems.isEmpty else { return .invalidSettings(settingsProblems) }
         guard !isRepositoryBusy(settings.gitHubRepository) else { return .repositoryBusy }
         if !isDryRun {
+            // A queue that just ended here lets go of its lock after its
+            // last write.
+            Self.waitForFiles()
             guard let lock = MergeQueueLock.acquire(repository: settings.gitHubRepository, folder: lockFolder) else {
                 return .lockedElsewhere
             }
@@ -188,20 +202,22 @@ final class MergeQueueController {
     private func update(_ engine: MergeQueue.Engine, notes: [MergeQueue.Note]) {
         let date = clock.date()
         let saved = MergeQueue.SavedQueue(engine: engine, dryRun: isDryRun, savedAt: date)
+        // A poll that changed nothing leaves the file as it is.
+        let changed = !saved.isSame(as: self.saved)
         self.saved = saved
         // The step's notes, then the call it just sent.
-        write(lines: notes.map { MergeQueue.Journal.line($0, at: date) } + sentLines, saved: saved)
+        write(lines: notes.map { MergeQueue.Journal.line($0, at: date) } + sentLines, saved: changed ? saved : nil)
         sentLines = []
         if !engine.phase.isActive { finish() }
         onChange?()
     }
 
     private func finish() {
-        // The final state is on disk before another Nirux can take the
-        // lock and read it as a queue that quit mid-run.
-        Self.waitForFiles()
-        lock?.release()
-        lock = nil
+        // Let go after the last write, on the file queue: another Nirux
+        // taking the lock then reads the queue as it ended.
+        let lock = self.lock
+        self.lock = nil
+        Self.writeOffMain { lock?.release() }
         if let activity { endActivity(activity) }
         activity = nil
     }
@@ -228,7 +244,7 @@ final class MergeQueueController {
     nonisolated private static let fileQueue = DispatchQueue(label: "MergeQueue.files", qos: .utility)
 
     private func write(lines: [MergeQueue.Journal.Line], saved: MergeQueue.SavedQueue?) {
-        guard let files else { return }
+        guard let files, !lines.isEmpty || saved != nil else { return }
         let journal = MergeQueue.Journal(url: files.journal)
         let stateURL = files.state
         Self.writeOffMain {

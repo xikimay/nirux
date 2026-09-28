@@ -63,13 +63,11 @@ extension MergeQueue {
         private var purpose: Purpose?
         private var nextRequestID = 1
         private var clocks = Clocks()
-        /// The post-merge runs on the base that had failed at Start: the
-        /// sheet warns of them. Any other that fails since, a run still going
-        /// at Start or rerun since included, stops the queue before its next
-        /// merge.
-        private var baseRunsFailedAtStart: Set<Int> = []
-        /// The pending read polls a post-merge run on the base (status text).
-        private var waitsOnBaseRun = false
+        /// The post-merge runs on the base that had failed at Start, by run
+        /// and attempt: the sheet warns of them. Any other that fails since,
+        /// a run still going at Start or rerun since included, stops the
+        /// queue before its next merge.
+        private var baseRunsFailedAtStart: Set<String> = []
         private var outbox = Output()
 
         init(settings: BoardConfig.QueueSettings, entries: [ConfirmedEntry]) {
@@ -80,13 +78,24 @@ extension MergeQueue {
         var currentEntry: Entry? { current.map { entries[$0] } }
 
         /// A mutation sent whose effect GitHub hasn't shown yet: in flight,
-        /// or a merge whose pull request doesn't read MERGED yet.
+        /// a branch update whose new head hasn't shown, or a merge whose
+        /// pull request doesn't read MERGED yet.
         var unconfirmedMutation: Mutation? {
             if case .mutate(let mutation)? = request?.action { return mutation }
-            if case .mergeConfirm(let head, _, _)? = purpose, let entry = currentEntry {
+            guard let entry = currentEntry else { return nil }
+            switch purpose {
+            case .updatePoll(let from)?, .updateFailed(let from, _)?:
+                return .updateBranch(number: entry.number, expectedHead: from)
+            case .mergeConfirm(let head, _, _)?:
                 return .merge(number: entry.number, head: head, method: settings.mergeMethod)
+            default:
+                return nil
             }
-            return nil
+        }
+
+        private var isWaitingOnBaseRun: Bool {
+            if case .baseRunWait? = purpose { return true }
+            return false
         }
 
         /// "#52 waiting for the nightly, 3 of 7".
@@ -97,7 +106,7 @@ extension MergeQueue {
             case .stopped(let reason): return "Stopped: \(reason.message)"
             case .running, .paused, .stopping:
                 var text = current.map { current in
-                    let step = waitsOnBaseRun
+                    let step = isWaitingOnBaseRun
                         ? "#\(entries[current].number) waiting for the \(MergeQueue.workflowLabel(settings.postMergeWorkflow)) "
                             + "on \(settings.baseBranch) before merging"
                         : entries[current].stepDescription(workflow: settings.postMergeWorkflow)
@@ -165,6 +174,8 @@ extension MergeQueue {
             case rerun(head: String, replaced: Set<Int>)
             case rerunCheck(head: String, replaced: Set<Int>, message: String)
             case mergeChecks(head: String)
+            /// Only the base's runs, until those step 4 waits for end.
+            case baseRunWait(head: String)
             case merge(head: String, baseTip: String)
             case mergeConfirm(head: String, baseTip: String, result: MutationResult)
             case postMerge(commit: String)
@@ -215,7 +226,6 @@ extension MergeQueue {
         private mutating func issue(_ action: Request.Action, _ purpose: Purpose) {
             let request = Request(id: nextRequestID, action: action)
             nextRequestID += 1
-            waitsOnBaseRun = false
             self.request = request
             self.purpose = purpose
             outbox.request = request
@@ -226,8 +236,15 @@ extension MergeQueue {
             outbox.notes.append(Note(number: entry?.number, step: entry.map { Self.stepName($0.step) } ?? "queue", message: message))
         }
 
-        /// Stops the queue, and the pull request it was working on.
+        /// Stops the queue, and the pull request it was working on. When
+        /// reads stop it while GitHub hasn't shown the effect of a call
+        /// sent, the reason says so.
         private mutating func stop(_ reason: StopReason) {
+            var reason = reason
+            if reason.kind == .github || reason.kind == .setup, let mutation = unconfirmedMutation, let entry = currentEntry {
+                reason = StopReason(kind: reason.kind, message: reason.message + " The \(Self.describe(mutation)) was sent "
+                    + "and GitHub didn’t show its effect yet: check #\(entry.number) on GitHub.", url: reason.url)
+            }
             note("Stopped: \(reason.message)")
             request = nil
             purpose = nil
@@ -318,12 +335,14 @@ extension MergeQueue {
         // MARK: Answers
 
         private mutating func observed(_ answers: [Read: ReadResult], purpose: Purpose, now: TimeInterval) {
-            if case .start = purpose { return startChecked(answers) }
+            guard case .start = purpose else { return observedForEntry(answers, purpose: purpose, now: now) }
+            startChecked(answers)
+        }
+
+        private mutating func observedForEntry(_ answers: [Read: ReadResult], purpose: Purpose, now: TimeInterval) {
             guard let index = current else { return missingAnswer() }
             let number = entries[index].number
             switch purpose {
-            case .start:
-                break
             case .preflight:
                 guard let pullRequest = answers.pullRequest(number) else { return missingAnswer() }
                 preflight(pullRequest, index: index)
@@ -379,6 +398,9 @@ extension MergeQueue {
                 rerunStarted(head: head, replaced: replaced, now: now)
             case .mergeChecks(let head):
                 mergeChecksRead(answers, head: head, index: index, now: now)
+            case .baseRunWait(let head):
+                guard let runs = answers.runs(.baseRuns) else { return missingAnswer() }
+                if !waitForBaseRuns(runs, head: head, index: index, now: now) { mergeChecks(head: head, index: index) }
             case .mergeConfirm(let head, let baseTip, let result):
                 guard let pullRequest = answers.pullRequest(number) else { return missingAnswer() }
                 mergeConfirmRead(pullRequest, head: head, baseTip: baseTip, result: result, index: index, now: now)
@@ -390,7 +412,7 @@ extension MergeQueue {
                       let comparison = answers.comparison(base: commit, head: settings.baseBranch)
                 else { return missingAnswer() }
                 postMergeFailed(run, commit: commit, baseRuns: runs, comparison: comparison, index: index)
-            case .update, .rerun, .merge:
+            case .start, .update, .rerun, .merge:
                 missingAnswer()
             }
         }
@@ -416,7 +438,7 @@ extension MergeQueue {
             }
             if settings.postMergeWorkflow != nil {
                 guard let runs = answers.runs(.baseRuns) else { return missingAnswer() }
-                baseRunsFailedAtStart = Set(runs.filter(MergeQueue.runFailed).map(\.id))
+                baseRunsFailedAtStart = Set(runs.filter(MergeQueue.runFailed).map(\.attemptKey))
             }
             guard !mergeQueue else {
                 return stop(StopReason(kind: .setup, message: "\(settings.baseBranch) requires GitHub’s merge queue: gh pr merge "
@@ -525,19 +547,14 @@ extension MergeQueue {
                 return true
             }
             clocks.agentBusySince = nil
-            for worktree in local.worktrees {
-                guard let problem = worktree.problem else { continue }
-                let message: String
-                switch problem {
-                case .trackedChanges:
-                    message = "\(worktree.path) has changes to tracked files: commit and push them, or discard them, "
-                        + "then start again."
-                case .unpushed:
-                    message = "\(worktree.path) has commits that aren’t on GitHub: push them, then start again."
-                case .unreadable(let reason):
-                    message = "Nirux couldn’t check \(worktree.path): \(reason)"
-                }
-                stop(StopReason(kind: .local, message: message))
+            if let worktree = local.worktrees.first(where: { $0.problem == .trackedChanges }) {
+                stop(StopReason(kind: .local, message: "\(worktree.path) has changes to tracked files: commit and push them, "
+                    + "or discard them, then start again."))
+                return true
+            }
+            if let worktree = local.worktrees.first(where: { $0.problem == .unpushed }) {
+                stop(StopReason(kind: .local, message: "\(worktree.path) has commits that aren’t on GitHub: push them, "
+                    + "then start again."))
                 return true
             }
             return false
@@ -775,7 +792,8 @@ extension MergeQueue {
             let label = MergeQueue.workflowLabel(settings.postMergeWorkflow)
             // One that failed between two looks is caught too.
             if let failed = runs.first(where: {
-                MergeQueue.runFailed($0) && (!baseRunsFailedAtStart.contains($0.id) || clocks.awaitedBaseRuns.contains($0.id))
+                MergeQueue.runFailed($0)
+                    && (!baseRunsFailedAtStart.contains($0.attemptKey) || clocks.awaitedBaseRuns.contains($0.id))
             }) {
                 stop(StopReason(kind: .postMerge, message: "The \(label) of \(Self.short(failed.headSha)) on "
                     + "\(settings.baseBranch) failed: the base may be broken.", url: failed.url))
@@ -794,8 +812,7 @@ extension MergeQueue {
                         + "\(settings.postMergeTimeoutMinutes) minutes.", url: unfinished.first?.url))
                     return true
                 }
-                mergeChecks(head: head, index: index, after: Limits.runPollInterval)
-                waitsOnBaseRun = true
+                read([.baseRuns], after: Limits.runPollInterval, for: .baseRunWait(head: head))
                 return true
             }
             guard !clocks.awaitedBaseRuns.isEmpty else { return false }
@@ -836,7 +853,6 @@ extension MergeQueue {
                     }
                     return again(&self)
                 }
-                entries[index].mergeCommit = mergeCommit
                 guard let parent = pullRequest.mergeCommitParents.first, parent == baseTip else {
                     return stop(StopReason(kind: .merge, message: "#\(number) merged onto an untested base: its merge commit "
                         + "\(Self.short(mergeCommit)) sits on \(Self.short(pullRequest.mergeCommitParents.first ?? "?")), "
@@ -967,8 +983,12 @@ extension MergeQueue {
                     read([.pullRequest(number)], for: .update422(from: from, message: message))
                 case .rateLimited(let message):
                     stop(StopReason(kind: .update, message: "GitHub refused the branch update of #\(number): \(message)"))
-                case .refused(_, let message), .uncertain(let message):
+                case .refused(_, let message):
                     read([.pullRequest(number)], for: .updateFailed(from: from, message: message))
+                case .uncertain(let message):
+                    // Asynchronous on GitHub's side: polled as if accepted.
+                    note("The branch update got no clear answer (\(message)): watching for its new head")
+                    read([.pullRequest(number)], after: Limits.updatePollInterval, for: .updatePoll(from: from))
                 case .dryRun:
                     break
                 }
@@ -978,8 +998,12 @@ extension MergeQueue {
                     rerunStarted(head: head, replaced: replaced, now: now)
                 case .rateLimited(let message):
                     stop(StopReason(kind: .checks, message: "GitHub refused to rerun the checks of #\(number): \(message)"))
-                case .refused(_, let message), .uncertain(let message):
+                case .refused(_, let message):
                     read([.checks(head)], for: .rerunCheck(head: head, replaced: replaced, message: message))
+                case .uncertain(let message):
+                    // Its new runs take a moment to show.
+                    read([.checks(head)], after: Limits.pollInterval,
+                         for: .rerunCheck(head: head, replaced: replaced, message: message))
                 case .dryRun:
                     break
                 }
@@ -994,7 +1018,7 @@ extension MergeQueue {
 
         // MARK: Words
 
-        static func short(_ sha: String) -> String { String(sha.prefix(7)) }
+        static func short(_ sha: String) -> String { WorktreeCleanup.short(sha) }
 
         static func stepName(_ step: Step) -> String {
             switch step {

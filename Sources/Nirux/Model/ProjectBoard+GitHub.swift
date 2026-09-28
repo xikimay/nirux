@@ -91,16 +91,23 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
         run(Self.runArguments(repository: repository, workflow: workflow, branch: branch))
     }
 
-    private func run(_ arguments: [String]) -> Result<Data, ProjectBoard.FetchError> {
-        guard let ghPath = findGH() else { return .failure(.ghMissing) }
-        guard let result = BoundedProcess.run(
+    /// gh at `ghPath`, from a folder outside every checkout, with the
+    /// neutral environment. Nil when it didn't start or timed out. The
+    /// merge queue runs gh through it too.
+    static func runGH(_ ghPath: String, arguments: [String], timeout: TimeInterval) -> BoundedProcessResult? {
+        BoundedProcess.run(
             executableURL: URL(fileURLWithPath: ghPath),
             arguments: arguments,
             currentDirectoryURL: FileManager.default.temporaryDirectory,
-            environment: Self.environment,
+            environment: environment,
             timeout: timeout,
             captureStandardError: true
-        ) else {
+        )
+    }
+
+    private func run(_ arguments: [String]) -> Result<Data, ProjectBoard.FetchError> {
+        guard let ghPath = findGH() else { return .failure(.ghMissing) }
+        guard let result = Self.runGH(ghPath, arguments: arguments, timeout: timeout) else {
             return .failure(.failed("it couldn’t start, or took longer than \(Int(timeout)) s"))
         }
         guard result.terminationStatus == 0 else {

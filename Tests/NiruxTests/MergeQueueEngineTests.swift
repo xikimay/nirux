@@ -581,6 +581,9 @@ final class MergeQueueEngineTests: XCTestCase {
         queue.answer(world)
         XCTAssertEqual(queue.pendingDelay, 30)
         XCTAssertTrue(queue.noted("Waiting for the nightly running on main before merging"))
+        // Only the base's runs are polled meanwhile, and a retry keeps saying so.
+        XCTAssertEqual(queue.pendingReads, [.baseRuns])
+        queue.fail(.transient("timeout"))
         XCTAssertEqual(queue.engine.statusText, "#52 waiting for the nightly on main before merging, 1 of 1")
         world.baseRuns = [MQ.run(77, head: world.mainTip, event: "workflow_dispatch")]
         queue.answer(world)
@@ -625,6 +628,18 @@ final class MergeQueueEngineTests: XCTestCase {
         world.checks[a] = MQ.checks(MQ.checkRun(id: 1))
         queue.run(world)
         XCTAssertEqual(queue.stopReason?.url, "https://github.com/acme/widgets/actions/runs/72")
+
+        // Failed before Start, rerun since, and failed again.
+        world.baseRuns = [MQ.run(70, head: world.mainTip, conclusion: "failure")]
+        world.checks[a] = MergeQueue.CommitChecks()
+        queue = started(world)
+        queue.answer(world, until: { $0.pendingDelay == 20 })
+        var rerun = MQ.run(70, head: world.mainTip, conclusion: "failure")
+        rerun.attempt = 2
+        world.baseRuns = [rerun]
+        world.checks[a] = MQ.checks(MQ.checkRun(id: 1))
+        queue.run(world)
+        XCTAssertEqual(queue.stopReason?.url, "https://github.com/acme/widgets/actions/runs/70")
     }
 
     func testAMergeThatTimedOutButHappenedGoesOn() {
@@ -654,6 +669,15 @@ final class MergeQueueEngineTests: XCTestCase {
         queue.mutated(.refused(status: nil, message: "Head branch was modified. Review and try the merge again."))
         queue.run(world)
         XCTAssertTrue(queue.stopReason?.message.contains("Head branch was modified") == true)
+
+        // Reads that fail while GitHub doesn't show the merge yet: the stop says it was sent.
+        queue = started(world)
+        queue.run(world)
+        queue.mutated(.uncertain("timeout"))
+        queue.fail(.refused("Bad credentials (HTTP 401)"))
+        XCTAssertEqual(queue.stopReason?.kind, .github)
+        XCTAssertTrue(queue.stopReason?.message.hasSuffix("The merge of #52 at aaaaaaa was sent and GitHub didn’t show "
+            + "its effect yet: check #52 on GitHub.") == true)
     }
 
     func testAutoMergeOrGitHubsQueueInsteadOfAMergeStops() {

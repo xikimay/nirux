@@ -40,7 +40,9 @@ extension MergeQueue {
             // A bare repository's folder answers `false`; a checkout git
             // refuses (dubious ownership, say) fails otherwise than "not a
             // git repository".
-            let probe = WorktreeCleanup.git(["rev-parse", "--is-inside-work-tree"], in: folder, tools: tools)
+            var probeTools = tools
+            probeTools.environment["LC_ALL"] = "C"
+            let probe = WorktreeCleanup.git(["rev-parse", "--is-inside-work-tree"], in: folder, tools: probeTools)
             let isUnlistedCheckout = probe.status == 0
                 ? probe.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "true"
                 : !probe.stderr.contains("not a git repository")

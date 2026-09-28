@@ -264,3 +264,14 @@ final class FakeQueueClient: MergeQueueGitHub, @unchecked Sendable {
         "gh \(mutation)"
     }
 }
+
+extension MergeQueueLock {
+    /// Whether a queue holds the repository's lock, once the controllers'
+    /// pending writes (after which they let go) are done.
+    static func isHeld(repository: GitHubRepository, folder: URL) -> Bool {
+        MergeQueueController.waitForFiles()
+        guard let lock = acquire(repository: repository, folder: folder) else { return true }
+        lock.release()
+        return false
+    }
+}

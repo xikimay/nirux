@@ -326,6 +326,10 @@ final class MergeQueueGitHubTests: XCTestCase {
         guard case .failure(.notSignedIn) = client.read(.auth, settings: settings) else { return XCTFail("signed out") }
         guard case .runs(let runs) = try client.read(.baseRuns, settings: settings).get() else { return XCTFail() }
         XCTAssertEqual(runs.count, 3)
+        // gh auth status that can't reach GitHub is retried, not "signed out".
+        gh.answer(prefix: ["auth", "status"], status: 1,
+                  stderr: "X Timeout trying to log in to github.com account acme (keyring)\n")
+        guard case .failure(.noAnswer) = client.read(.auth, settings: settings) else { return XCTFail("no answer") }
         XCTAssertTrue(gh.forbidden.isEmpty, "\(gh.forbidden)")
     }
 
@@ -367,6 +371,15 @@ final class MergeQueueGitHubTests: XCTestCase {
         XCTAssertFalse(MergeQueue.client(environment: ["NIRUX_MERGE_QUEUE_LIVE": "1"], bundleURL: debug, live: live).isDryRun)
         let app = URL(fileURLWithPath: "/Applications/Nirux.app")
         XCTAssertFalse(MergeQueue.client(environment: [:], bundleURL: app, live: live).isDryRun)
+        // scripts/bundle.sh's bundle, in a checkout, stays a dry run even
+        // when LaunchServices opens it with no variable at all.
+        let checkout = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-bundle-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: checkout) }
+        FileManager.default.createFile(atPath: checkout.appendingPathComponent("Package.swift").path, contents: Data())
+        XCTAssertFalse(MergeQueue.isLive(environment: [:], bundleURL: checkout.appendingPathComponent("Nirux.app")))
+        XCTAssertTrue(MergeQueue.isLive(environment: ["NIRUX_MERGE_QUEUE_LIVE": "1"],
+                                        bundleURL: checkout.appendingPathComponent("Nirux.app")))
         // A bundle an agent runs on a state of its own stays a dry run.
         let bundle = URL(fileURLWithPath: "/work/nirux.feat-x/Nirux.app")
         XCTAssertTrue(MergeQueue.client(environment: ["NIRUX_STATE_DIR": "/tmp/nirux-dev-x"], bundleURL: bundle, live: live).isDryRun)

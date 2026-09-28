@@ -164,7 +164,8 @@ extension MergeQueue {
             else { return nil }
             let conclusion = (run["conclusion"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             runs.append(Run(id: id, status: status, conclusion: conclusion, headSha: headSha, event: event,
-                            title: run["displayTitle"] as? String, url: run["url"] as? String))
+                            attempt: run["attempt"] as? Int ?? 1, title: run["displayTitle"] as? String,
+                            url: run["url"] as? String))
         }
         return runs
     }

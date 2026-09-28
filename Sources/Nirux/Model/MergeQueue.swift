@@ -360,11 +360,15 @@ extension MergeQueue {
         let headSha: String
         /// `push`, `workflow_dispatch`…
         let event: String
+        /// 1, then 2… for each rerun of the same run.
+        var attempt = 1
         /// The commit's first line, for a push.
         let title: String?
         let url: String?
 
         var isCompleted: Bool { status == "completed" }
+        /// A rerun is the same run, but not the same result.
+        var attemptKey: String { "\(id)#\(attempt)" }
     }
 
     struct RateLimit: Equatable, Sendable {

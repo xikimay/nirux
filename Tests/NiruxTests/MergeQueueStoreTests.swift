@@ -136,6 +136,16 @@ final class MergeQueueStoreTests: XCTestCase {
         let confirming = MergeQueue.SavedQueue(engine: queue.engine, dryRun: false, savedAt: Date()).interrupted()
         XCTAssertTrue(confirming.stopReason?.message.contains("check #52 on GitHub") == true)
 
+        // A branch update GitHub hasn't applied yet may still land.
+        world.behind[MQ.sha("a")] = 1
+        var updating = MQ.Harness(entries: [MQ.entry(52, head: MQ.sha("a"))])
+        updating.start()
+        updating.run(world)
+        updating.mutated(.sent)
+        let pendingUpdate = MergeQueue.SavedQueue(engine: updating.engine, dryRun: false, savedAt: Date()).interrupted()
+        XCTAssertTrue(pendingUpdate.stopReason?.message.contains("Its update-branch #52 from aaaaaaa was sent") == true)
+        world.behind = [:]
+
         // Checked for the merge, but no call sent yet: nothing to check.
         var waiting = MQ.Harness(entries: [MQ.entry(52, head: MQ.sha("a"))])
         world.baseRuns = [MQ.run(77, head: world.mainTip, status: "in_progress", conclusion: nil)]

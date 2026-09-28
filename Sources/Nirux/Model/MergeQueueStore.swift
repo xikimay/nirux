@@ -71,6 +71,14 @@ extension MergeQueue {
 
         var isRunning: Bool { status == .running || status == .stopping }
 
+        /// The same queue, whenever it was saved: nothing to write again.
+        func isSame(as other: SavedQueue?) -> Bool {
+            guard let other else { return false }
+            var copy = self
+            copy.savedAt = other.savedAt
+            return copy == other
+        }
+
         /// "Interrupted while waiting for the nightly of #52": what a queue
         /// saved as running says after a restart.
         func interrupted() -> SavedQueue {
@@ -92,7 +100,7 @@ extension MergeQueue {
         }
 
         static func load(from url: URL) -> SavedQueue? {
-            guard let data = readRegularFile(url, maxBytes: maxFileBytes),
+            guard let data = BoardConfigStore.read(url, maxBytes: maxFileBytes).contents,
                   let saved = try? decoder.decode(SavedQueue.self, from: data),
                   saved.schemaVersion <= schemaVersion
             else { return nil }
@@ -125,18 +133,6 @@ extension MergeQueue {
         }()
     }
 
-    /// A regular file's bytes, without following a link; nil for anything
-    /// else or anything larger than `maxBytes`.
-    static func readRegularFile(_ url: URL, maxBytes: Int) -> Data? {
-        let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
-        guard descriptor >= 0 else { return nil }
-        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
-        var info = stat()
-        guard fstat(descriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_size <= maxBytes,
-              let data = try? handle.read(upToCount: maxBytes + 1), data.count <= maxBytes
-        else { return nil }
-        return data
-    }
 }
 
 // MARK: - Journal (section 4)
@@ -218,8 +214,9 @@ extension MergeQueue {
 /// (the installed app, a bundle built by `scripts/bundle.sh`) holds it.
 /// The kernel releases it when the process dies, so a reused pid can't
 /// leave it stale. A lock is taken per open file, so two in one process
-/// exclude each other too.
-final class MergeQueueLock {
+/// exclude each other too. Sendable so the controller can release it on
+/// its file queue, after the last write; nothing else touches it then.
+final class MergeQueueLock: @unchecked Sendable {
     let url: URL
     private var descriptor: Int32
 
@@ -254,15 +251,6 @@ final class MergeQueueLock {
         let pid = "\(ProcessInfo.processInfo.processIdentifier)\n"
         _ = pid.withCString { write(descriptor, $0, strlen($0)) }
         return MergeQueueLock(url: url, descriptor: descriptor)
-    }
-
-    /// Whether a queue holds the repository's lock now.
-    static func isHeld(repository: GitHubRepository, folder: URL) -> Bool {
-        guard let lock = acquire(repository: repository, folder: folder) else {
-            return FileManager.default.fileExists(atPath: folder.appendingPathComponent(fileName(for: repository)).path)
-        }
-        lock.release()
-        return false
     }
 
     func release() {

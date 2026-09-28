@@ -36,14 +36,17 @@ extension MergeQueue {
         case unreadable(String)
     }
 
-    /// Whether this build may change GitHub: an app bundle run on the real
-    /// state (the installed app never sets `NIRUX_STATE_DIR`), or any build
-    /// with `NIRUX_MERGE_QUEUE_LIVE=1`. Agents build and click through
-    /// Nirux inside Nirux, bundles from `scripts/bundle.sh` included, on a
-    /// state of their own.
+    /// Whether this build may change GitHub: an installed app bundle run on
+    /// the real state, or any build with `NIRUX_MERGE_QUEUE_LIVE=1`. Agents
+    /// build and click through Nirux inside Nirux on a state of their own
+    /// (`NIRUX_STATE_DIR`, which the installed app never sets). A bundle
+    /// next to a `Package.swift` is `scripts/bundle.sh`'s, in a checkout:
+    /// opened through LaunchServices, it inherits no variable at all.
     static func isLive(environment: [String: String], bundleURL: URL) -> Bool {
         if environment["NIRUX_MERGE_QUEUE_LIVE"] == "1" { return true }
+        let checkoutManifest = bundleURL.deletingLastPathComponent().appendingPathComponent("Package.swift").path
         return bundleURL.pathExtension == "app" && (environment["NIRUX_STATE_DIR"] ?? "").isEmpty
+            && !FileManager.default.fileExists(atPath: checkoutManifest)
     }
 
     /// The client this build runs its queues with: `live`, or a dry run of
@@ -101,14 +104,7 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         GitHubCLIQueueClient { arguments, timeout in
             // Looked up at each call, like the board's: a gh installed since launch is found.
             guard let ghPath = PRDetect.installedGHPath() else { return .failure(.ghMissing) }
-            guard let result = BoundedProcess.run(
-                executableURL: URL(fileURLWithPath: ghPath),
-                arguments: arguments,
-                currentDirectoryURL: FileManager.default.temporaryDirectory,
-                environment: GitHubCLIBoardClient.environment,
-                timeout: timeout,
-                captureStandardError: true
-            ) else {
+            guard let result = GitHubCLIBoardClient.runGH(ghPath, arguments: arguments, timeout: timeout) else {
                 return .failure(.noAnswer("gh couldn’t start, or took longer than \(Int(timeout)) s"))
             }
             return .success(Output(status: result.terminationStatus, standardOutput: result.standardOutput,
@@ -123,10 +119,13 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         switch read {
         case .auth:
             return call(Self.authArguments).map { _ -> MergeQueue.ReadResult in .signedIn }.flatMapError { error in
-                // Any failure of `gh auth status` but a missing gh means signed out.
-                if case .ghMissing = error { return .failure(error) }
-                if case .notSignedIn = error { return .failure(error) }
-                return .failure(.notSignedIn(Self.message(of: error)))
+                switch error {
+                // No answer or a rate limit: retried or paused like any read.
+                case .ghMissing, .notSignedIn, .rateLimited, .secondaryRateLimit, .noAnswer:
+                    return .failure(error)
+                case .refused, .unreadable:
+                    return .failure(.notSignedIn(Self.message(of: error)))
+                }
             }
         case .rateLimit:
             return parse(call(Self.rateLimitArguments), MergeQueue.parseRateLimit).map { .rateLimit($0) }
@@ -195,7 +194,7 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         case .secondaryRateLimit(let message): return .rateLimited(message)
         case .refused(let status, let message): return .refused(status: status, message: message)
         case .noAnswer(let message): return .uncertain(message)
-        case .unreadable: return .sent
+        case .unreadable(let output): return .uncertain("gh answered with something Nirux can’t read: \(output)")
         }
     }
 
@@ -367,7 +366,7 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
          "--jq", "{sha, committer: .committer.login, parents: [.parents[].sha]}"]
     }
 
-    static let runFields = "databaseId,status,conclusion,headSha,event,displayTitle,url"
+    static let runFields = "databaseId,attempt,status,conclusion,headSha,event,displayTitle,url"
 
     /// The runs on the base whatever their event (a manual dispatch shares
     /// the nightly's concurrency group), or the push runs of a merge commit.
