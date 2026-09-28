@@ -696,14 +696,14 @@ In delivery order:
 | 1 | B4: config | #45 | `board.json` model and storage, Board Settings form |
 | 2 | B1: read-only board | B4 | Column type, rows, batched PR fetch, last post-merge run, Focus, Open, Clean Up by path, Resume (once stuck-agent detection lands) |
 | 3 | B2: queue engine | B4, B1's data types | State machine, `GitHubClient` (real and dry-run), driver, `MergeQueueController`, journal. No UI |
-| 4 | Nightly retention (CI) | none | Keep the dated nightlies of the last 7 days, and at least 20 |
+| 4 | Nightly retention (CI) | none | Keep the dated nightlies of the last 7 days, and at least 20. Shipped |
 | 5 | B3: queue UI | B2, retention | Add to Queue, confirmation sheet, Start and Stop, status bar item, quit confirmation, journal view, Ask Agent to Resolve, keep-awake input |
 
 - **Config first:** B1 needs the repository, the required checks and the
   post-merge workflow, and the queue must never run with a guessed workflow.
-- **Retention before B3:** `nightly.yml` keeps the last 20 dated releases. On
-  2026-09-27 it published 34, so a busy day left about 12 hours to roll back,
-  and a queue publishes several nightlies in a row.
+- **Retention before B3:** `nightly.yml` kept only the last 20 dated releases.
+  On 2026-09-27 it published 34, so a busy day left about 12 hours to roll
+  back, and a queue publishes several nightlies in a row. It now keeps a week.
 - B2 can start in parallel with B1 if it defines its own PR type.
 - B3's keep-awake input waits for `feat/keep-awake`; without it, B3 ships
   without the assertion.
