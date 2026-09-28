@@ -2,8 +2,9 @@ import AppKit
 
 /// The Project Board column's content (docs/project-board.md, sections 1
 /// and 2): a header with the project, its repository, the last post-merge
-/// run and the board's buttons, then one row per branch. It only draws:
-/// `ProjectBoardController` fills it, the shell runs its buttons.
+/// run, the merge queue and the board's buttons, then one row per branch.
+/// It only draws: `ProjectBoardController` fills it, the shell runs its
+/// buttons and the queue.
 @MainActor
 final class ProjectBoardView: NSView {
     struct Project: Equatable {
@@ -38,6 +39,42 @@ final class ProjectBoardView: NSView {
         var requiredChecks: [String] = []
         /// The configured base branch: another one is named in the PR column.
         var baseBranch: String?
+        /// The project's merge queue; nil while the board can't show one
+        /// (no repository, a deleted project).
+        var queue: ProjectBoard.QueueState?
+    }
+
+    /// A button of the queue line or of a Queue cell.
+    struct QueueButton: Equatable {
+        let title: String
+        var isEnabled = true
+        var tooltip: String?
+    }
+
+    enum QueueTone: Equatable {
+        case normal, active, success, failure
+    }
+
+    /// The header's queue line: what the queue does, Start and Stop.
+    struct QueueHeader: Equatable {
+        var text: String
+        var tone: QueueTone = .normal
+        var isDryRun: Bool
+        var start: QueueButton?
+        var stop: QueueButton?
+    }
+
+    /// A row's Queue column: its place or step, or why it can't join, and
+    /// the button that adds or removes it.
+    struct QueueCell: Equatable {
+        var text: String
+        var tone: QueueTone = .normal
+        /// A second line: what the last queue did with it.
+        var detail: String?
+        var detailTone: QueueTone = .normal
+        var tooltip: String?
+        var button: QueueButton?
+        var action: Action?
     }
 
     enum Action: Equatable {
@@ -46,6 +83,8 @@ final class ProjectBoardView: NSView {
         case cleanUp(path: String)
         case resumeFailed(workspaceID: String, columnID: UUID, failedAt: TimeInterval)
         case resumeExited(workspaceID: String, columnID: UUID)
+        case addToQueue(number: Int)
+        case removeFromQueue(number: Int)
     }
 
     /// A button of a row, with what it does.
@@ -62,10 +101,15 @@ final class ProjectBoardView: NSView {
         let agent: NSTextField
         let pullRequest: NSTextField
         let checks: NSTextField
+        let queue: NSTextField
+        let queueDetail: NSTextField
+        let queueButton: ActionButton?
         let actions: [ActionButton]
     }
 
     var onRefresh: (() -> Void)?
+    var onStartQueue: (() -> Void)?
+    var onStopQueue: (() -> Void)?
     var onSelectProject: ((String) -> Void)?
     var onBoardSettings: (() -> Void)?
     var onAction: ((Action) -> Void)?
@@ -83,8 +127,13 @@ final class ProjectBoardView: NSView {
     let statusLabel = NSTextField(labelWithString: "")
     let refreshButton = NSButton(title: "Refresh", target: nil, action: nil)
     let settingsButton = NSButton(title: "Board Settings…", target: nil, action: nil)
+    /// "DRY RUN" while this build can't change GitHub.
+    let dryRunBadge = NSTextField(labelWithString: "DRY RUN")
+    let queueLabel = NSTextField(labelWithString: "")
+    let startQueueButton = NSButton(title: "Start…", target: nil, action: nil)
+    let stopQueueButton = NSButton(title: "Stop", target: nil, action: nil)
     let messageLabel = NSTextField(wrappingLabelWithString: "")
-    private let columnTitles = ["Name", "Agent", "PR", "Checks", "Actions"].map { NSTextField(labelWithString: $0) }
+    private let columnTitles = ["Name", "Agent", "PR", "Checks", "Queue", "Actions"].map { NSTextField(labelWithString: $0) }
     private let separator = NSView()
     private let scrollView = NSScrollView()
     private let documentView = FlippedView()
@@ -97,18 +146,22 @@ final class ProjectBoardView: NSView {
     }
     private var appliedMenu: MenuState?
 
-    private static let headerHeight: CGFloat = 86
+    private static let headerHeight: CGFloat = 114
     private static let rowHeight: CGFloat = 42
     private static let groupHeight: CGFloat = 28
     private static let padding: CGFloat = 12
-    /// Name, Agent, PR, Checks, Actions.
-    private static let columnFractions: [CGFloat] = [0.25, 0.19, 0.13, 0.16, 0.27]
+    /// Name, Agent, PR, Checks, Queue, Actions.
+    private static let columnFractions: [CGFloat] = [0.21, 0.15, 0.11, 0.14, 0.17, 0.22]
 
     private static let primaryText = NSColor.white.withAlphaComponent(0.85)
     private static let secondaryText = NSColor.white.withAlphaComponent(0.45)
     private static let waitingColor = NSColor.systemOrange
     private static let failureColor = NSColor(red: 0.97, green: 0.46, blue: 0.56, alpha: 1)
     private static let workingColor = NSColor(red: 0.62, green: 0.81, blue: 0.42, alpha: 1)
+    private static let dryRunColor = NSColor.systemOrange
+
+    static let dryRunTooltip = "This build can’t change GitHub: its queue reads GitHub, then stops before its first "
+        + "branch update, rerun or merge. Only the installed Nirux runs a real queue."
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -130,7 +183,10 @@ final class ProjectBoardView: NSView {
         }
         repositoryLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         statusLabel.alignment = .right
-        for (button, action) in [(refreshButton, #selector(refreshClicked)), (settingsButton, #selector(settingsClicked))] {
+        for (button, action) in [
+            (refreshButton, #selector(refreshClicked)), (settingsButton, #selector(settingsClicked)),
+            (startQueueButton, #selector(startQueueClicked)), (stopQueueButton, #selector(stopQueueClicked))
+        ] {
             button.bezelStyle = .rounded
             button.controlSize = .small
             button.font = .systemFont(ofSize: 11)
@@ -141,6 +197,19 @@ final class ProjectBoardView: NSView {
             title.font = .systemFont(ofSize: 10, weight: .semibold)
             title.textColor = Self.secondaryText
         }
+        queueLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        queueLabel.textColor = Self.secondaryText
+        queueLabel.lineBreakMode = .byTruncatingTail
+        dryRunBadge.font = .systemFont(ofSize: 9.5, weight: .bold)
+        dryRunBadge.textColor = .black
+        dryRunBadge.alignment = .center
+        dryRunBadge.drawsBackground = true
+        dryRunBadge.backgroundColor = Self.dryRunColor
+        dryRunBadge.toolTip = Self.dryRunTooltip
+        dryRunBadge.isHidden = true
+        stopQueueButton.isHidden = true
+        startQueueButton.isHidden = true
+        queueLabel.isHidden = true
         separator.wantsLayer = true
         separator.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
         messageLabel.font = .systemFont(ofSize: 12)
@@ -152,8 +221,10 @@ final class ProjectBoardView: NSView {
         scrollView.autohidesScrollers = true
         scrollView.documentView = documentView
 
-        for view in [projectPopup, repositoryLabel, refreshButton, settingsButton, runLabel, statusLabel, separator, scrollView]
-            as [NSView] {
+        for view in [
+            projectPopup, repositoryLabel, refreshButton, settingsButton, runLabel, statusLabel, dryRunBadge, queueLabel,
+            startQueueButton, stopQueueButton, separator, scrollView
+        ] as [NSView] {
             addSubview(view)
         }
         columnTitles.forEach(addSubview)
@@ -172,8 +243,9 @@ final class ProjectBoardView: NSView {
         let previous = self.content
         self.content = content
         applyHeader(content.header)
+        applyQueueHeader(content.queue.map(Self.queueHeader))
         if content.body != previous?.body || content.requiredChecks != previous?.requiredChecks
-            || content.baseBranch != previous?.baseBranch {
+            || content.baseBranch != previous?.baseBranch || content.queue != previous?.queue {
             if !updateAgentsInPlace(from: previous) { buildBody() }
         }
         layoutContent()
@@ -184,6 +256,7 @@ final class ProjectBoardView: NSView {
     private func updateAgentsInPlace(from previous: Content?) -> Bool {
         guard let previous, let content,
               previous.requiredChecks == content.requiredChecks, previous.baseBranch == content.baseBranch,
+              previous.queue == content.queue,
               case .rows(let old) = previous.body, case .rows(let new) = content.body,
               old.count == new.count
         else { return false }
@@ -192,7 +265,9 @@ final class ProjectBoardView: NSView {
             var rhs = after
             lhs.agent.state = .none
             rhs.agent.state = .none
-            guard lhs == rhs, Self.actionSignature(before) == Self.actionSignature(after) else { return false }
+            guard lhs == rhs, Self.actionSignature(before) == Self.actionSignature(after),
+                  queueCell(for: before) == queueCell(for: after)
+            else { return false }
         }
         for index in rowViews.indices {
             guard let position = old.firstIndex(of: rowViews[index].row) else { return false }
@@ -312,6 +387,28 @@ final class ProjectBoardView: NSView {
                     .joined(separator: "\n")
             }
         }
+        let queue = label("", color: Self.secondaryText, size: 11)
+        let queueDetail = label("", color: Self.secondaryText, size: 10)
+        var queueButton: ActionButton?
+        if let cell = queueCell(for: row) {
+            queue.stringValue = cell.text
+            queue.textColor = Self.color(for: cell.tone)
+            queue.toolTip = cell.tooltip ?? cell.text
+            queueDetail.stringValue = cell.detail ?? ""
+            queueDetail.textColor = Self.color(for: cell.detailTone)
+            queueDetail.toolTip = cell.tooltip
+            if let button = cell.button {
+                let control = ActionButton(title: button.title, target: self, action: #selector(actionClicked(_:)))
+                control.bezelStyle = .rounded
+                control.controlSize = .small
+                control.font = .systemFont(ofSize: 10, weight: .medium)
+                control.boardAction = cell.action
+                control.isEnabled = button.isEnabled && cell.action != nil
+                control.toolTip = button.tooltip
+                control.setAccessibilityLabel(button.tooltip ?? button.title)
+                queueButton = control
+            }
+        }
         let actions = Self.actions(for: row).map { item -> ActionButton in
             let button = ActionButton(title: item.title, target: self, action: #selector(actionClicked(_:)))
             button.bezelStyle = .rounded
@@ -323,10 +420,13 @@ final class ProjectBoardView: NSView {
             return button
         }
         let container = FlippedView()
-        for view in [name, subtitle, agent, pullRequest, checks] + actions { container.addSubview(view) }
+        for view in [name, subtitle, agent, pullRequest, checks, queue, queueDetail] + (queueButton.map { [$0] } ?? []) + actions {
+            container.addSubview(view)
+        }
         documentView.addSubview(container)
         return RowViews(
-            row: row, name: name, subtitle: subtitle, agent: agent, pullRequest: pullRequest, checks: checks, actions: actions
+            row: row, name: name, subtitle: subtitle, agent: agent, pullRequest: pullRequest, checks: checks, queue: queue,
+            queueDetail: queueDetail, queueButton: queueButton, actions: actions
         )
     }
 
@@ -399,6 +499,169 @@ final class ProjectBoardView: NSView {
         }
     }
 
+    // MARK: - The merge queue
+
+    /// The row's Queue cell, with the board's queue and base branch.
+    private func queueCell(for row: ProjectBoard.Row) -> QueueCell? {
+        guard let queue = content?.queue else { return nil }
+        return Self.queueCell(for: row, queue: queue, baseBranch: content?.baseBranch)
+    }
+
+    /// While a queue runs (here or in another Nirux): the pull request's
+    /// place and step. Otherwise: queued, with Remove; Add to Queue; or
+    /// why it can't join. A stop of the last queue shows after it.
+    nonisolated static func queueCell(
+        for row: ProjectBoard.Row, queue: ProjectBoard.QueueState, baseBranch: String?
+    ) -> QueueCell? {
+        guard row.group != .otherRepository, let pullRequest = row.pullRequest, pullRequest.isFromConfiguredRepository
+        else { return nil }
+        let number = pullRequest.number
+        let entryIndex = queue.entries.firstIndex { $0.number == number }
+        let entry = entryIndex.map { queue.entries[$0] }
+        if queue.isLocked, let entry, let entryIndex {
+            let step = ProjectBoard.queueStepLabel(entry.step, workflow: queue.workflow)
+            var cell = QueueCell(text: step)
+            switch entry.step {
+            case .done: cell.tone = .success
+            case .stopped(let reason):
+                cell.tone = reason.isProblem ? .failure : .normal
+                cell.tooltip = reason.message
+            case .waiting: cell.text = "\(entryIndex + 1) of \(queue.entries.count) · \(step)"
+            default:
+                cell.text = "\(entryIndex + 1) of \(queue.entries.count) · \(step)"
+                cell.tone = .active
+            }
+            return cell
+        }
+        // The sheet shows the list as it was when it opened.
+        let isFrozen = queue.isLocked || queue.isConfirming
+        let locked = queue.run == .elsewhere
+            ? "Another Nirux runs this project’s queue: wait until it ends."
+            : queue.isLocked ? "The queue is running: change the list once it stops."
+            : "The confirmation sheet is open: change the list once it closes."
+        // What the last queue did with it, under its place in the next one.
+        var last: String?
+        var lastReason: String?
+        var lastIsFailure = false
+        if !queue.isLocked, let entry {
+            switch entry.step {
+            case .done: return QueueCell(text: "merged ✓", tone: .success)
+            case .stopped(let reason):
+                last = ProjectBoard.queueStopLabel(reason, workflow: queue.workflow)
+                lastReason = reason.message
+                lastIsFailure = reason.isProblem
+            default: break
+            }
+        }
+        if let position = queue.selection.firstIndex(of: number) {
+            var cell = QueueCell(text: "queued · \(position + 1)", detail: last.map { "last: \($0)" },
+                                 detailTone: lastIsFailure ? .failure : .normal)
+            cell.tooltip = lastReason.map { "Last queue: \($0)" }
+            // ✕: the column is narrow, and its place must stay readable.
+            cell.button = QueueButton(title: "✕", isEnabled: !isFrozen,
+                                      tooltip: isFrozen ? locked : "Remove #\(number) from the queue")
+            cell.action = .removeFromQueue(number: number)
+            return cell
+        }
+        guard pullRequest.isOpen else { return nil }
+        if let refusal = ProjectBoard.queueRefusal(row, baseBranch: baseBranch) {
+            return QueueCell(text: refusal, detail: last.map { "last: \($0)" }, detailTone: lastIsFailure ? .failure : .normal,
+                             tooltip: lastReason.map { "Can’t join the queue: \(refusal). Last queue: \($0)" }
+                                ?? "Can’t join the queue: \(refusal)")
+        }
+        var cell = QueueCell(text: "", detail: last.map { "last: \($0)" }, detailTone: lastIsFailure ? .failure : .normal,
+                             tooltip: lastReason.map { "Last queue: \($0)" })
+        cell.button = QueueButton(title: "Add to Queue", isEnabled: !isFrozen,
+                                  tooltip: isFrozen ? locked : "Propose #\(number) at the next Start")
+        cell.action = .addToQueue(number: number)
+        return cell
+    }
+
+    /// The header's queue line.
+    nonisolated static func queueHeader(_ queue: ProjectBoard.QueueState) -> QueueHeader {
+        var header = QueueHeader(text: "", isDryRun: queue.isDryRun)
+        let count = queue.selection.count
+        let queued = "\(count) pull request\(count == 1 ? "" : "s") queued"
+        switch queue.run {
+        case .running(let isStopping):
+            header.text = "Queue: " + (queue.status ?? "running")
+            header.tone = .active
+            header.stop = QueueButton(title: isStopping ? "Stopping…" : "Stop", isEnabled: !isStopping,
+                                      tooltip: "Stop before the next command; a call already sent to GitHub finishes")
+            return header
+        case .elsewhere:
+            header.text = "Queue: running in another Nirux, read-only here" + (queue.status.map { " · \($0)" } ?? "")
+            header.tone = .active
+            header.start = QueueButton(title: startTitle(queue), isEnabled: false,
+                                       tooltip: "Another Nirux runs this project’s queue: Start once it ends there.")
+            return header
+        case .ended:
+            header.text = "Queue: " + (queue.status ?? "ended") + (count > 0 ? " · \(queued)" : "")
+            header.tone = queue.statusIsFailure ? .failure : .normal
+        case .none:
+            header.text = count > 0 ? "Queue: \(queued)" : "Queue: add pull requests with Add to Queue, then Start"
+        }
+        var start = QueueButton(title: startTitle(queue))
+        if !queue.startProblems.isEmpty {
+            start.isEnabled = false
+            start.tooltip = queue.startProblems.joined(separator: "\n")
+        } else if count == 0 {
+            start.isEnabled = false
+            start.tooltip = "Add pull requests to the queue first."
+        } else if queue.isConfirming {
+            start.isEnabled = false
+            start.tooltip = "The confirmation sheet is open."
+        } else {
+            start.tooltip = "Read the queued pull requests on GitHub, then confirm what the queue will do"
+        }
+        header.start = start
+        return header
+    }
+
+    private nonisolated static func startTitle(_ queue: ProjectBoard.QueueState) -> String {
+        queue.isDryRun ? "Start Dry Run…" : "Start…"
+    }
+
+    private func applyQueueHeader(_ header: QueueHeader?) {
+        queueLabel.isHidden = header == nil
+        dryRunBadge.isHidden = header?.isDryRun != true
+        queueLabel.stringValue = header?.text ?? ""
+        queueLabel.toolTip = header?.text
+        queueLabel.textColor = Self.color(for: header?.tone ?? .normal)
+        for (button, state) in [(startQueueButton, header?.start), (stopQueueButton, header?.stop)] {
+            button.isHidden = state == nil
+            button.title = state?.title ?? button.title
+            button.isEnabled = state?.isEnabled ?? false
+            button.toolTip = state?.tooltip
+        }
+    }
+
+    /// DRY RUN, the queue's status, then Start or Stop at the right.
+    private func layoutQueueLine(width: CGFloat) {
+        let pad = Self.padding
+        var right = width - pad
+        for button in [stopQueueButton, startQueueButton] where !button.isHidden {
+            let buttonWidth = ceil(button.intrinsicContentSize.width) + 8
+            button.frame = NSRect(x: right - buttonWidth, y: 60, width: buttonWidth, height: 24)
+            right = button.frame.minX - 6
+        }
+        var x = pad
+        if !dryRunBadge.isHidden {
+            dryRunBadge.frame = NSRect(x: x, y: 64, width: 58, height: 15)
+            x = dryRunBadge.frame.maxX + 8
+        }
+        queueLabel.frame = NSRect(x: x, y: 64, width: max(0, right - x - 8), height: 16)
+    }
+
+    private static func color(for tone: QueueTone) -> NSColor {
+        switch tone {
+        case .normal: return secondaryText
+        case .active: return primaryText
+        case .success: return workingColor
+        case .failure: return failureColor
+        }
+    }
+
     private static func color(for result: ProjectBoard.CheckResult?) -> NSColor {
         switch result {
         case .failure?: return failureColor
@@ -431,10 +694,11 @@ final class ProjectBoardView: NSView {
         let halfWidth = max(0, (width - 2 * pad) / 2)
         runLabel.frame = NSRect(x: pad, y: 38, width: halfWidth, height: 16)
         statusLabel.frame = NSRect(x: pad + halfWidth, y: 38, width: halfWidth, height: 16)
+        layoutQueueLine(width: width)
 
         let columns = columnFrames(width: width)
         for (title, frame) in zip(columnTitles, columns) {
-            title.frame = NSRect(x: frame.minX, y: 64, width: frame.width, height: 14)
+            title.frame = NSRect(x: frame.minX, y: 92, width: frame.width, height: 14)
         }
         separator.frame = NSRect(x: 0, y: Self.headerHeight - 1, width: width, height: 1)
         scrollView.frame = NSRect(x: 0, y: Self.headerHeight, width: width, height: max(0, bounds.height - Self.headerHeight))
@@ -495,7 +759,23 @@ final class ProjectBoardView: NSView {
         views.agent.frame = NSRect(x: columns[1].minX, y: 13, width: columns[1].width, height: 16)
         views.pullRequest.frame = NSRect(x: columns[2].minX, y: 13, width: columns[2].width, height: 16)
         views.checks.frame = NSRect(x: columns[3].minX, y: 13, width: columns[3].width, height: 16)
-        var x = columns[4].minX
+        // The place (or the button alone) on the first line, the last
+        // queue's word under it, like the name and its subtitle.
+        let hasDetail = !views.queueDetail.stringValue.isEmpty
+        var queueTextWidth = columns[4].width
+        if let button = views.queueButton {
+            let buttonWidth = min(ceil(button.intrinsicContentSize.width), columns[4].width)
+            let isAlone = views.queue.stringValue.isEmpty
+            button.frame = NSRect(
+                x: isAlone ? columns[4].minX : columns[4].minX + columns[4].width - buttonWidth,
+                y: isAlone && hasDetail ? 2 : 11, width: buttonWidth, height: 20
+            )
+            queueTextWidth = isAlone ? 0 : max(0, columns[4].width - buttonWidth - 4)
+        }
+        views.queue.frame = NSRect(x: columns[4].minX, y: hasDetail ? 4 : 13, width: queueTextWidth, height: hasDetail ? 18 : 16)
+        let detailWidth = views.queue.stringValue.isEmpty ? columns[4].width : queueTextWidth
+        views.queueDetail.frame = NSRect(x: columns[4].minX, y: 22, width: hasDetail ? detailWidth : 0, height: 14)
+        var x = columns[5].minX
         let limit = width - Self.padding
         for button in views.actions {
             let buttonWidth = ceil(button.intrinsicContentSize.width)
@@ -508,6 +788,10 @@ final class ProjectBoardView: NSView {
     // MARK: - Buttons
 
     @objc private func refreshClicked() { onRefresh?() }
+
+    @objc private func startQueueClicked() { onStartQueue?() }
+
+    @objc private func stopQueueClicked() { onStopQueue?() }
 
     @objc private func settingsClicked() { onBoardSettings?() }
 

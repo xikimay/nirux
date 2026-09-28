@@ -79,6 +79,7 @@ enum MQ {
     /// repository would: no checks, nothing behind, no runs.
     struct World {
         var pullRequests: [Int: MergeQueue.PullRequestSnapshot] = [:]
+        var details: [Int: MergeQueue.PullRequestDetails] = [:]
         var checks: [String: MergeQueue.CommitChecks] = [:]
         var mainTip = MQ.sha("0")
         /// Commits of `main` each head lacks.
@@ -101,6 +102,10 @@ enum MQ {
             case .rateLimit: return .rateLimit(rateLimit)
             case .baseMergeQueue: return .baseMergeQueue(baseMergeQueue)
             case .pullRequest(let number): return pullRequests[number].map { .pullRequest($0) }
+            case .pullRequestDetails(let number):
+                return .pullRequestDetails(details[number] ?? MergeQueue.PullRequestDetails(
+                    title: "Change \(number)", files: ["Sources/\(number).swift"], hasMoreFiles: false
+                ))
             case .checks(let sha): return .checks(checks[sha] ?? MergeQueue.CommitChecks())
             case .compare(let base, let head):
                 if let answer = compares[read] { return .comparison(answer) }

@@ -1,15 +1,31 @@
 import AppKit
 
 /// Global status bar at the bottom of the window.
-/// Shows app-level info (updates, crashes, pilot shortcuts) — not workspace-specific.
+/// Shows app-level info (a merge queue, updates, crashes, pilot shortcuts) —
+/// not workspace-specific.
 ///
-/// One notice at a time: a crash of the previous session outranks an
-/// available update, which shows once the crash notice is dismissed.
+/// A merge queue comes first, with its Stop: it must stay in reach while
+/// it runs. Then one notice at a time: a crash of the previous session
+/// outranks an available update, which shows once the crash notice is
+/// dismissed.
 final class StatusBarView: NSView {
     static let height: CGFloat = 28
 
     enum CrashAction {
         case copySummary, openReport
+    }
+
+    /// A merge queue (docs/project-board.md, section 3.6): running, with
+    /// Stop; or ended, until dismissed.
+    struct QueueNotice: Equatable {
+        /// "Queue: #52 waiting for the nightly, 3 of 7".
+        let text: String
+        var tooltip: String?
+        var isRunning: Bool
+        var isStopping = false
+        var isDryRun: Bool
+        /// Stopped by a problem, not by the user.
+        var isFailure = false
     }
 
     private static let crashColor = NSColor(red: 0.95, green: 0.47, blue: 0.43, alpha: 0.9)
@@ -24,6 +40,11 @@ final class StatusBarView: NSView {
     private var copySummaryButton: NSButton?
     private var openReportButton: NSButton?
     private var dismissButton: NSButton?
+    /// The queue's text, a button: a click shows its board.
+    private(set) var queueButton: NSButton?
+    private(set) var queueStopButton: NSButton?
+    private(set) var queueDismissButton: NSButton?
+    private(set) var queueNotice: QueueNotice?
     private var trackingArea: NSTrackingArea?
     private var updateVersion: String?
     private(set) var crashNotice: CrashNotice?
@@ -37,9 +58,14 @@ final class StatusBarView: NSView {
     private var showsPointingHand = false
     var onInstall: (() -> Void)?
     var onCrashAction: ((CrashAction) -> Void)?
+    var onQueueClick: (() -> Void)?
+    var onQueueStop: (() -> Void)?
+    var onQueueDismiss: (() -> Void)?
     /// A notice appeared or went away: the shell shows or hides the bar.
     var onContentChange: (() -> Void)?
-    var hasContent: Bool { crashNotice != nil || updateVersion != nil }
+    var hasContent: Bool { hasNotice || queueNotice != nil }
+    /// A crash or an update: the notice after the queue.
+    private var hasNotice: Bool { crashNotice != nil || updateVersion != nil }
     private var isShowingUpdate: Bool { crashNotice == nil && updateVersion != nil }
 
     override init(frame: NSRect) {
@@ -74,6 +100,28 @@ final class StatusBarView: NSView {
         copySummaryButton = copy
         openReportButton = actionButton("Open report", action: #selector(openReportClicked))
         openReportButton?.toolTip = "Open the full crash report in Console"
+
+        // Merge queue: its text (a click shows the board), Stop, or ✕ once ended.
+        let queue = NSButton(title: "", target: self, action: #selector(queueClicked))
+        queue.bezelStyle = .inline
+        queue.isBordered = false
+        queue.alignment = .left
+        (queue.cell as? NSButtonCell)?.lineBreakMode = .byTruncatingTail
+        queue.isHidden = true
+        addSubview(queue)
+        queueButton = queue
+        queueStopButton = actionButton("Stop", action: #selector(queueStopClicked))
+        queueStopButton?.contentTintColor = Self.crashColor
+        queueStopButton?.toolTip = "Stop the queue before its next command; a call already sent to GitHub finishes"
+        let queueDismiss = NSButton(title: "✕", target: self, action: #selector(queueDismissClicked))
+        queueDismiss.bezelStyle = .inline
+        queueDismiss.isBordered = false
+        queueDismiss.font = .systemFont(ofSize: 11)
+        queueDismiss.contentTintColor = NSColor.white.withAlphaComponent(0.25)
+        queueDismiss.isHidden = true
+        queueDismiss.setAccessibilityLabel("Dismiss the queue notice")
+        addSubview(queueDismiss)
+        queueDismissButton = queueDismiss
 
         // Dismiss button
         let x = NSButton(title: "✕", target: self, action: #selector(dismissClicked))
@@ -139,6 +187,25 @@ final class StatusBarView: NSView {
         let hintsText = hintsLabel?.stringValue.isEmpty == false ? hintsLabel?.attributedStringValue.size().width ?? 0 : 0
         let noticeMaxX = hintsMaxX - (hintsText > 0 ? ceil(hintsText) + 4 + pad : 0)
 
+        let versionMinX = bounds.width - verW - pad
+        // The queue first: at most half the bar when a notice follows it.
+        var start = pad
+        if let queueButton, !queueButton.isHidden {
+            let trailing = [queueStopButton, queueDismissButton].compactMap { $0 }.filter { !$0.isHidden }
+            trailing.forEach { $0.sizeToFit() }
+            let trailingW = trailing.reduce(CGFloat(0)) { $0 + $1.frame.width + 6 }
+            let limit = (hasNotice ? bounds.width / 2 : versionMinX - 8) - pad - trailingW
+            let textW = min(ceil(queueButton.attributedTitle.size().width) + 6, max(60, limit))
+            queueButton.frame = NSRect(x: pad, y: (height - 18) / 2, width: textW, height: 18)
+            var queueX = queueButton.frame.maxX
+            for button in trailing {
+                queueX += 6
+                button.frame = NSRect(x: queueX, y: (height - 18) / 2, width: button.frame.width, height: 18)
+                queueX += button.frame.width
+            }
+            start = queueX + 18
+        }
+
         let buttons = [installButton, copySummaryButton, openReportButton].compactMap { $0 }.filter { !$0.isHidden }
         buttons.forEach { $0.sizeToFit() }
         copySummaryButton?.frame.size.width = copySummaryWidth
@@ -147,22 +214,21 @@ final class StatusBarView: NSView {
         let labelSize = label?.attributedStringValue.size() ?? .zero
         // At least the left half, as before the hints moved aside; never so
         // wide that ✕ goes under the version label, which would take its clicks.
-        let versionMinX = bounds.width - verW - pad
         let labelMaxW = min(
-            max(80, bounds.width / 2 - pad, noticeMaxX - pad - buttonsW - dismissW),
-            max(40, versionMinX - 4 - pad - buttonsW - dismissW)
+            max(80, bounds.width / 2 - start, noticeMaxX - start - buttonsW - dismissW),
+            max(40, versionMinX - 4 - start - buttonsW - dismissW)
         )
-        let labelW = min(ceil(labelSize.width) + 4, labelMaxW)
-        label?.frame = NSRect(x: pad, y: (height - 14) / 2, width: labelW, height: 14)
+        let labelW = hasNotice ? min(ceil(labelSize.width) + 4, labelMaxW) : 0
+        label?.frame = NSRect(x: start, y: (height - 14) / 2, width: labelW, height: 14)
 
-        var x = pad + labelW
+        var x = start + labelW
         for button in buttons {
             x += 8
             button.frame = NSRect(x: x, y: (height - 18) / 2, width: button.frame.width, height: 18)
             x += button.frame.width
         }
         dismissButton?.frame = NSRect(x: x + 4, y: (height - 18) / 2, width: 18, height: 18)
-        let noticeEndX = hasContent ? x + 4 + dismissW : 0
+        let noticeEndX = hasNotice ? x + 4 + dismissW : (queueNotice != nil ? start : 0)
 
         versionLabel?.frame = NSRect(x: versionMinX, y: (height - 14) / 2, width: verW, height: 14)
         // Starts after the notice: a label on top of a button takes its clicks.
@@ -236,6 +302,35 @@ final class StatusBarView: NSView {
         render()
     }
 
+    /// The merge queue to show, or none.
+    func showQueue(_ notice: QueueNotice?) {
+        guard notice != queueNotice else { return }
+        queueNotice = notice
+        render()
+    }
+
+    /// What the queue's text looks like.
+    private func renderQueue() {
+        guard let queueNotice else {
+            queueButton?.isHidden = true
+            queueStopButton?.isHidden = true
+            queueDismissButton?.isHidden = true
+            return
+        }
+        let color: NSColor = queueNotice.isFailure ? Self.crashColor
+            : queueNotice.isDryRun ? NSColor.systemOrange
+            : queueNotice.isRunning ? NSColor.white.withAlphaComponent(0.75) : NSColor.white.withAlphaComponent(0.45)
+        queueButton?.attributedTitle = NSAttributedString(string: "● " + queueNotice.text, attributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .medium), .foregroundColor: color
+        ])
+        queueButton?.toolTip = queueNotice.tooltip ?? queueNotice.text
+        queueButton?.isHidden = false
+        queueStopButton?.isHidden = !queueNotice.isRunning
+        queueStopButton?.title = queueNotice.isStopping ? "Stopping…" : "Stop"
+        queueStopButton?.isEnabled = !queueNotice.isStopping
+        queueDismissButton?.isHidden = queueNotice.isRunning
+    }
+
     /// What the label says for a crash notice.
     static func crashText(for notice: CrashNotice) -> String {
         let times = notice.reportCount > 1 ? " \(notice.reportCount)×" : ""
@@ -247,10 +342,11 @@ final class StatusBarView: NSView {
             NSCursor.arrow.set()
             showsPointingHand = false
         }
+        renderQueue()
         installButton?.isHidden = true
         copySummaryButton?.isHidden = true
         openReportButton?.isHidden = true
-        dismissButton?.isHidden = !hasContent
+        dismissButton?.isHidden = !hasNotice
         label?.toolTip = nil
         if let crashNotice {
             label?.stringValue = Self.crashText(for: crashNotice)
@@ -289,6 +385,18 @@ final class StatusBarView: NSView {
 
     @objc private func openReportClicked() {
         onCrashAction?(.openReport)
+    }
+
+    @objc private func queueClicked() {
+        onQueueClick?()
+    }
+
+    @objc private func queueStopClicked() {
+        onQueueStop?()
+    }
+
+    @objc private func queueDismissClicked() {
+        onQueueDismiss?()
     }
 
     /// Dismisses the notice on screen; an update hidden behind a crash

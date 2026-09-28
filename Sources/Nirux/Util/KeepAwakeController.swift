@@ -28,11 +28,12 @@ struct IOKitSleepAssertions: SleepAssertionAPI {
     }
 }
 
-/// Keeps the Mac from idle-sleeping while at least one agent works: one
-/// global assertion, taken when the first agent starts a turn and released
-/// a grace period after the last one stops, so back-to-back turns don't
-/// toggle it. An agent waiting on the user makes no progress and doesn't
-/// count. The system also drops the assertion if Nirux crashes.
+/// Keeps the Mac from idle-sleeping while at least one agent works, or a
+/// merge queue runs: one global assertion, taken when the first agent
+/// starts a turn (or a queue starts) and released a grace period after the
+/// last one stops, so back-to-back turns don't toggle it. An agent waiting
+/// on the user makes no progress and doesn't count. The system also drops
+/// the assertion if Nirux crashes.
 @MainActor
 final class KeepAwakeController {
     static let assertionName = "Nirux: agents working"
@@ -53,6 +54,9 @@ final class KeepAwakeController {
     private let schedule: Schedule
     private(set) var isEnabled: Bool
     private(set) var workingAgentCount = 0
+    /// A merge queue runs (docs/project-board.md, section 3.4): it polls
+    /// GitHub for an hour or more with no agent at work.
+    private(set) var isMergeQueueRunning = false
     private var assertionID: IOPMAssertionID?
     /// Bumped by every release and every called-off release: a scheduled
     /// release from before does nothing.
@@ -69,9 +73,12 @@ final class KeepAwakeController {
     /// grace period ends; answers with `update(workingAgentCount:)`.
     var onRefresh: (() -> Void)?
 
-    /// The assertion is held — agents are working, or finished less than
-    /// `gracePeriod` ago.
+    /// The assertion is held — agents are working or a queue runs, or they
+    /// stopped less than `gracePeriod` ago.
     var isActive: Bool { assertionID != nil }
+
+    /// What wants the Mac awake now.
+    private var isNeeded: Bool { workingAgentCount > 0 || isMergeQueueRunning }
 
     init(
         enabled: Bool,
@@ -92,16 +99,29 @@ final class KeepAwakeController {
     /// Agents mid-turn right now, every workspace and space included.
     func update(workingAgentCount count: Int) {
         guard !isShutDown else { return }
-        let wasActive = isActive
-        let previousCount = workingAgentCount
+        let previous = (isActive, workingAgentCount, isMergeQueueRunning)
         workingAgentCount = max(0, count)
-        if workingAgentCount > 0 {
+        apply(since: previous)
+    }
+
+    /// Whether a merge queue runs, in any project.
+    func update(mergeQueueRunning running: Bool) {
+        guard !isShutDown else { return }
+        let previous = (isActive, workingAgentCount, isMergeQueueRunning)
+        isMergeQueueRunning = running
+        apply(since: previous)
+    }
+
+    private func apply(since previous: (isActive: Bool, count: Int, queue: Bool)) {
+        if isNeeded {
             cancelPendingRelease()
             if isEnabled { acquire() }
         } else if isActive, !releaseIsPending {
             scheduleRelease()
         }
-        if isActive != wasActive || workingAgentCount != previousCount { onChange?() }
+        if isActive != previous.isActive || workingAgentCount != previous.count || isMergeQueueRunning != previous.queue {
+            onChange?()
+        }
     }
 
     /// Off releases at once; on protects agents already working.
@@ -111,7 +131,7 @@ final class KeepAwakeController {
         let wasActive = isActive
         if enabled {
             startPolling()
-            if workingAgentCount > 0 { acquire() }
+            if isNeeded { acquire() }
         } else {
             pollGeneration &+= 1
             release()

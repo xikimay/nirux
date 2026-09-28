@@ -4,8 +4,8 @@ import Foundation
 /// project, owned by the shell, so closing the board doesn't stop it. It
 /// runs the queue through a `MergeQueueDriver`, holds the repository's
 /// lock while a live queue runs, keeps App Nap from throttling its polls,
-/// journals every step and saves the queue after each one. Nothing starts
-/// a queue yet: the board's Start (B3) will.
+/// journals every step and saves the queue after each one. The board's
+/// Start opens the confirmation sheet, which starts it.
 @MainActor
 final class MergeQueueController {
     enum StartRefusal: Error, Equatable {
@@ -48,6 +48,15 @@ final class MergeQueueController {
     private var activity: NSObjectProtocol?
     /// A call just sent, journaled after the notes of the step that sent it.
     private var sentLines: [MergeQueue.Journal.Line] = []
+    /// The pull requests the next Start proposes, in order: those added
+    /// with "Add to Queue", or left over from the last queue. In memory:
+    /// a relaunch proposes the saved queue's.
+    private(set) var selection: [Int] = []
+    /// The user's order from a confirmation sheet: additions go at the
+    /// end, not by number.
+    private var isSelectionReordered = false
+    /// When the saved queue was last read again for `runsElsewhere`.
+    private var savedReadAt: TimeInterval?
 
     var local: MergeQueueLocalAccess
     var clock = MergeQueueClock()
@@ -80,6 +89,7 @@ final class MergeQueueController {
         self.lockFolder = lockFolder
         files = MergeQueue.Files(projectID: projectID, stateDirectory: stateDirectory, dryRun: client.isDryRun)
         restore()
+        selection = leftOver(saved)
     }
 
     /// Reads the saved queue again, when none runs here: the board asks
@@ -89,6 +99,47 @@ final class MergeQueueController {
         runsElsewhere = false
         saved = nil
         restore()
+        if selection.isEmpty, !runsElsewhere { selection = leftOver(saved) }
+    }
+
+    /// While another Nirux runs the queue, the board asks now and then
+    /// (`interval` seconds of `clock`) whether it ended.
+    func reloadSavedIfStale(interval: TimeInterval = 30) {
+        guard runsElsewhere else { return }
+        let now = clock.now()
+        if let savedReadAt, now - savedReadAt < interval { return }
+        savedReadAt = now
+        reloadSaved()
+        if !runsElsewhere { onChange?() }
+    }
+
+    /// The pull requests a stopped queue didn't merge, in its order.
+    private func leftOver(_ saved: MergeQueue.SavedQueue?) -> [Int] {
+        guard let saved, !saved.isRunning else { return [] }
+        return saved.entries.filter { $0.step != .done }.map(\.number)
+    }
+
+    // MARK: The next Start's list
+
+    /// "Add to Queue": by number, oldest first, until the user reorders.
+    func addToSelection(_ number: Int) {
+        guard !isRunning, !selection.contains(number) else { return }
+        selection.append(number)
+        if !isSelectionReordered { selection.sort() }
+        onChange?()
+    }
+
+    func removeFromSelection(_ number: Int) {
+        guard !isRunning, selection.contains(number) else { return }
+        selection.removeAll { $0 == number }
+        onChange?()
+    }
+
+    /// The list a sheet confirmed, in its order: the pull requests it left
+    /// out leave the list too.
+    private func confirmSelection(_ numbers: [Int]) {
+        selection = numbers
+        isSelectionReordered = numbers != numbers.sorted()
     }
 
     /// A queue saved as running when Nirux quit never resumes: it reads as
@@ -156,6 +207,7 @@ final class MergeQueueController {
             self?.journal(mutation, command: command, result: result)
         }
         self.driver = driver
+        confirmSelection(entries.map(\.number))
         activity = beginActivity()
         driver.start()
         return nil
@@ -185,7 +237,7 @@ final class MergeQueueController {
         return problems
     }
 
-    static func problem(with entries: [MergeQueue.ConfirmedEntry]) -> String? {
+    nonisolated static func problem(with entries: [MergeQueue.ConfirmedEntry]) -> String? {
         guard Set(entries.map(\.number)).count == entries.count else { return "A pull request is in the list twice." }
         for entry in entries {
             guard entry.number > 0 else { return "#\(entry.number) isn’t a pull request number." }
@@ -205,6 +257,8 @@ final class MergeQueueController {
         // A poll that changed nothing leaves the file as it is.
         let changed = !saved.isSame(as: self.saved)
         self.saved = saved
+        let merged = Set(engine.entries.filter { $0.step == .done }.map(\.number))
+        selection.removeAll { merged.contains($0) }
         // The step's notes, then the call it just sent.
         write(lines: notes.map { MergeQueue.Journal.line($0, at: date) } + sentLines, saved: changed ? saved : nil)
         sentLines = []
@@ -228,7 +282,8 @@ final class MergeQueueController {
             number: entry?.number,
             step: entry.map { MergeQueue.Engine.stepName($0.step) } ?? "queue",
             command: command,
-            result: result.map(MergeQueue.Engine.describe) ?? "sent, waiting for the answer",
+            result: result.map(MergeQueue.Engine.describe)
+                ?? (isDryRun ? "handed to the dry run, which doesn’t send it" : "sent, waiting for the answer"),
             at: clock.date()
         )
         if result == nil {

@@ -32,6 +32,27 @@ struct ShellSideEffects {
 
     /// Shows an app-modal alert and waits for its answer.
     var runModal: @MainActor (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }
+
+    /// Asks whether to stop the running merge queues and quit: a sheet on
+    /// the window when it is on screen, else an alert. `answer` gets true
+    /// to quit. Never waits in the caller: AppKit waits for the answer.
+    var confirmQuitWithMergeQueue: @MainActor (
+        _ message: String, _ details: String, _ window: NSWindow?, _ answer: @escaping @MainActor (Bool) -> Void
+    ) -> Void = { message, details, window, answer in
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = message
+        alert.informativeText = details
+        alert.addButton(withTitle: "Keep Running")
+        alert.addButton(withTitle: "Stop Queue and Quit").hasDestructiveAction = true
+        guard let window, window.isVisible, !window.isMiniaturized, window.attachedSheet == nil else {
+            answer(alert.runModal() == .alertSecondButtonReturn)
+            return
+        }
+        alert.beginSheetModal(for: window) { response in
+            answer(response == .alertSecondButtonReturn)
+        }
+    }
 }
 
 extension NiruxShellView {

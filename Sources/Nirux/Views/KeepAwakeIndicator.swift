@@ -29,18 +29,20 @@ final class KeepAwakeIndicator: NSTitlebarAccessoryViewController {
         view = container
     }
 
-    func update(isActive: Bool, workingAgentCount: Int) {
+    func update(isActive: Bool, workingAgentCount: Int, isMergeQueueRunning: Bool = false) {
         isHidden = !isActive
-        let text = Self.toolTip(workingAgentCount: workingAgentCount)
+        let text = Self.toolTip(workingAgentCount: workingAgentCount, isMergeQueueRunning: isMergeQueueRunning)
         view.toolTip = text
         imageView.setAccessibilityLabel(text)
     }
 
-    static func toolTip(workingAgentCount count: Int) -> String {
-        switch count {
-        case 0: "Keeping your Mac awake: no agent is working now, sleep is allowed again in about a minute."
-        case 1: "Keeping your Mac awake while 1 agent works."
-        default: "Keeping your Mac awake while \(count) agents work."
+    static func toolTip(workingAgentCount count: Int, isMergeQueueRunning: Bool = false) -> String {
+        let agents = count == 1 ? "1 agent works" : "\(count) agents work"
+        switch (count, isMergeQueueRunning) {
+        case (0, false): return "Keeping your Mac awake: no agent is working now, sleep is allowed again in about a minute."
+        case (0, true): return "Keeping your Mac awake while a merge queue runs."
+        case (_, false): return "Keeping your Mac awake while \(agents)."
+        case (_, true): return "Keeping your Mac awake while a merge queue runs and \(agents)."
         }
     }
 }

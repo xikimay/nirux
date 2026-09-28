@@ -624,8 +624,16 @@ extension NiruxApp {
     }
 }
 
-// Closing via the title bar discards edits, like Cancel.
+// Closing via the title bar discards edits, like Cancel. The main window's
+// close button quits Nirux: a running merge queue asks first.
 extension NiruxApp: NSWindowDelegate {
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard sender === mainWindow, let shell else { return true }
+        return shell.confirmCloseWithMergeQueues {
+            NSApp.terminate(nil)
+        }
+    }
+
     func windowWillClose(_ notification: Notification) {
         guard let panel = notification.object as? NSPanel, panel === settingsPanel else { return }
         clearSettingsPanelReferences()
