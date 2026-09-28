@@ -212,48 +212,124 @@ final class MergeQueueBoardTests: XCTestCase {
     @MainActor
     func testTheListKeepsNumberOrderUntilTheUserReordersIt() {
         let queue = controller()
+        let widgets = MQ.widgets
         var changes = 0
         queue.onChange = { changes += 1 }
 
-        queue.addToSelection(12)
-        queue.addToSelection(7)
-        queue.addToSelection(7)
-        XCTAssertEqual(queue.selection, [7, 12], "oldest first by default")
+        queue.addToSelection(12, repository: widgets)
+        queue.addToSelection(7, repository: widgets)
+        queue.addToSelection(7, repository: widgets)
+        XCTAssertEqual(queue.selection(for: widgets), [7, 12], "oldest first by default")
         queue.removeFromSelection(12)
-        XCTAssertEqual(queue.selection, [7])
+        XCTAssertEqual(queue.selection(for: widgets), [7])
         XCTAssertEqual(changes, 3)
 
-        queue.addToSelection(3)
+        queue.addToSelection(3, repository: widgets)
         XCTAssertNil(queue.start(settings: MQ.settings(), entries: [MQ.entry(7, head: MQ.sha("a"))]))
-        XCTAssertEqual(queue.selection, [7], "the confirmed list: what the sheet left out leaves it")
-        queue.addToSelection(9)
-        XCTAssertEqual(queue.selection, [7], "nothing joins a running queue")
+        XCTAssertEqual(queue.selection(for: widgets), [7], "the confirmed list: what the sheet left out leaves it")
+        queue.addToSelection(9, repository: widgets)
+        XCTAssertEqual(queue.selection(for: widgets), [7], "nothing joins a running queue")
         queue.stop()
 
         XCTAssertNil(queue.start(settings: MQ.settings(), entries: [
             MQ.entry(9, head: MQ.sha("b")), MQ.entry(7, head: MQ.sha("a"))
         ]))
         queue.stop()
-        queue.addToSelection(8)
-        XCTAssertEqual(queue.selection, [9, 7, 8], "after the user's order, additions go at the end")
+        queue.addToSelection(8, repository: widgets)
+        XCTAssertEqual(queue.selection(for: widgets), [9, 7, 8], "after the user's order, additions go at the end")
+
+        [9, 7, 8].forEach(queue.removeFromSelection)
+        queue.addToSelection(5, repository: widgets)
+        queue.addToSelection(2, repository: widgets)
+        XCTAssertEqual(queue.selection(for: widgets), [2, 5], "an emptied list starts over by number")
     }
 
     @MainActor
-    func testARelaunchProposesWhatTheLastQueueDidNotMerge() throws {
-        let first = controller()
+    func testTheListBelongsToItsRepository() {
+        let queue = controller()
+        queue.addToSelection(7, repository: MQ.widgets)
+        XCTAssertEqual(queue.selection(for: GitHubRepository(owner: "ACME", name: "Widgets")), [7], "GitHub ignores case")
+        let gadgets = GitHubRepository(owner: "acme", name: "gadgets")
+        XCTAssertEqual(queue.selection(for: gadgets), [], "#7 of widgets isn’t #7 of gadgets")
+        XCTAssertEqual(queue.selection(for: nil), [])
+        queue.addToSelection(3, repository: gadgets)
+        XCTAssertEqual(queue.selection(for: gadgets), [3])
+        XCTAssertEqual(queue.selection(for: MQ.widgets), [], "adding for another repository drops the old list")
+    }
+
+    @MainActor
+    private func saveStoppedQueue(for controller: MergeQueueController, order: [Int]) throws {
         let conflict = MergeQueue.StopReason(kind: .conflict, message: "#4 conflicts with main.")
-        var engine = MergeQueue.Engine(settings: MQ.settings(), entries: [
-            MQ.entry(1, head: MQ.sha("a")), MQ.entry(4, head: MQ.sha("b")), MQ.entry(5, head: MQ.sha("c"))
-        ])
+        var engine = MergeQueue.Engine(settings: MQ.settings(), entries: order.map { MQ.entry($0, head: MQ.sha("a")) })
         _ = engine.handle(.start, now: 0)
         var saved = MergeQueue.SavedQueue(engine: engine, dryRun: true, savedAt: Date())
         saved.status = .stopped
         saved.stopReason = conflict
         saved.entries[0].step = .done
         saved.entries[1].step = .stopped(conflict)
-        saved.save(to: try XCTUnwrap(first.files?.state))
+        saved.save(to: try XCTUnwrap(controller.files?.state))
+    }
 
-        XCTAssertEqual(controller().selection, [4, 5])
+    @MainActor
+    func testARelaunchProposesWhatTheLastQueueDidNotMergeInItsOrder() throws {
+        try saveStoppedQueue(for: controller(), order: [1, 9, 5])
+
+        let relaunched = controller()
+        XCTAssertEqual(relaunched.selection(for: MQ.widgets), [9, 5], "for the saved queue’s repository")
+        relaunched.addToSelection(8, repository: MQ.widgets)
+        XCTAssertEqual(relaunched.selection(for: MQ.widgets), [9, 5, 8], "the user's order survives the relaunch")
+        XCTAssertEqual(relaunched.selection(for: GitHubRepository(owner: "acme", name: "gadgets")), [])
+    }
+
+    @MainActor
+    func testTheListDoesNotChangeWhileAnotherNiruxRunsTheQueue() throws {
+        let lockFolder = root.appendingPathComponent("locks")
+        let live = MergeQueueController(
+            projectID: "project", client: FakeQueueClient(),
+            local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }),
+            stateDirectory: root.appendingPathComponent("state"), lockFolder: lockFolder
+        )
+        var engine = MergeQueue.Engine(settings: MQ.settings(), entries: [MQ.entry(4, head: MQ.sha("a"))])
+        _ = engine.handle(.start, now: 0)
+        MergeQueue.SavedQueue(engine: engine, dryRun: false, savedAt: Date()).save(to: try XCTUnwrap(live.files?.state))
+        // Another Nirux holds the repository's lock: its queue runs.
+        let lock = try XCTUnwrap(MergeQueueLock.acquire(repository: MQ.widgets, folder: lockFolder))
+        defer { lock.release() }
+
+        live.reloadSaved()
+        XCTAssertTrue(live.runsElsewhere)
+        live.addToSelection(7, repository: MQ.widgets)
+        XCTAssertEqual(live.selection(for: MQ.widgets), [])
+    }
+
+    @MainActor
+    func testTheLocalChecksKeepTheFoldersTheProjectHadAtStart() throws {
+        var folders = ["/tmp/app", "/tmp/app.feat-4"]
+        final class Inspected: @unchecked Sendable {
+            private let lock = NSLock()
+            private var recorded: [[String]] = []
+            func append(_ folders: [String]) { lock.withLock { recorded.append(folders) } }
+            var first: [String]? { lock.withLock { recorded.first } }
+        }
+        let inspected = Inspected()
+        let queue = controller(FakeQueueClient(world: {
+            var world = MQ.World()
+            world.pullRequests[4] = MQ.pullRequest(4, head: MQ.sha("a"))
+            world.checks[MQ.sha("a")] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
+            return world
+        }(), isDryRun: true))
+        queue.local.folders = { folders }
+        queue.local.inspect = { folders, _, _, _, _ in
+            inspected.append(folders)
+            return .success(MergeQueue.LocalInspection())
+        }
+        XCTAssertNil(queue.start(settings: MQ.settings(), entries: [MQ.entry(4, head: MQ.sha("a"))]))
+        // The space deleted, or its last workspace closed, mid-queue.
+        folders = ["/tmp/other"]
+        let deadline = Date().addingTimeInterval(10)
+        while inspected.first == nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        queue.stop()
+        XCTAssertEqual(inspected.first, ["/tmp/app", "/tmp/app.feat-4", "/tmp/other"])
     }
 
     // MARK: - What the sheet reads
@@ -328,6 +404,24 @@ final class MergeQueueBoardTests: XCTestCase {
             "gh isn’t signed in to github.com (You are not logged into any GitHub hosts.): run gh auth login in a terminal, "
                 + "then Start again."
         ])
+    }
+
+    func testTheSheetRefusesWhenASetupReadAnswersSomethingElse() {
+        final class Confused: MergeQueueGitHub, @unchecked Sendable {
+            var isDryRun: Bool { true }
+            func read(_ read: MergeQueue.Read, settings: BoardConfig.QueueSettings)
+                -> Result<MergeQueue.ReadResult, MergeQueue.ClientError> { .success(.signedIn) }
+            func mutate(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> MergeQueue.MutationResult {
+                .refused(status: nil, message: "")
+            }
+            func commandLine(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> String { "" }
+        }
+        let fetch = MergeQueueController.fetchConfirmation(
+            settings: MQ.settings(), numbers: [1], isDryRun: true, client: Confused(), folders: [],
+            inspect: { _, _, _, _, _ in .success(MergeQueue.LocalInspection()) }
+        )
+        XCTAssertEqual(fetch.reading.setupError, "GitHub’s answers were incomplete. Start again to retry.")
+        XCTAssertFalse(MergeQueue.confirmation(fetch.reading).canStart, "no rate limit read is no rate limit checked")
     }
 
     // MARK: - The details read

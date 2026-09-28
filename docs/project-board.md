@@ -608,13 +608,18 @@ pull request.
 - **The list.** "Add to Queue" sits in the Queue column, not in Actions, whose
   last buttons hide on a narrow board. It adds to the next Start's list, by
   number, oldest first, until the user reorders one in a sheet; later additions
-  go at its end. The list belongs to the project's `MergeQueueController`, in
-  memory: closing the board keeps it, and a relaunch proposes what the saved
-  queue didn't merge. A row the queue would stop on at once (a draft, another
-  base, a conflict, a busy agent) says why instead; the sheet checks the rest.
-  The list doesn't change while a queue runs, here or in another Nirux, nor
-  while the sheet is open. A Start makes it the confirmed list: what the sheet
-  left out leaves it, and each pull request leaves it once merged.
+  go at its end, and an emptied list starts over by number. The list belongs
+  to the project's `MergeQueueController`, in memory: closing the board keeps
+  it, and a relaunch proposes what the saved queue didn't merge, in its order.
+  It is the list of one repository: once board.json names another, it is
+  empty, and the board no longer marks rows with the last queue's steps. A row
+  the queue would stop on at once (a draft, another base, a conflict, a busy
+  agent) says why instead; the sheet checks the rest. The list doesn't change
+  while a queue runs, here or in another Nirux, nor while the sheet is open or
+  Nirux is quitting. A Start makes it the confirmed list: what the sheet left
+  out leaves it, and each pull request leaves it once merged. A pull request
+  the sheet reads merged or closed leaves it at once: it may have no row left
+  to remove it from.
 - **What the sheet reads**, off the main thread, four pull requests at a time:
   `gh auth status`, `rate_limit`, whether the base needs GitHub's merge queue,
   the post-merge runs on the base; then each pull request's snapshot, its title
@@ -626,23 +631,31 @@ pull request.
 - **Order** (with the user): ↑ and ↓ on each pull request, no drag and drop.
 - **Start** in the sheet doesn't answer Return. It reads board.json again and
   refuses settings changed since the sheet read GitHub. Every Start opens a new
-  sheet; one sheet at a time.
+  sheet; one sheet at a time. A quit that was asked refuses it, and closes the
+  sheet once confirmed.
+- **The local checks keep the project's folders at Start**, plus those opened
+  since: a workspace closed or moved mid-queue doesn't turn them off. A space
+  whose queue runs can't be deleted: stop it first. The board keeps its queue
+  line, and Stop, while a queue runs, even when board.json can't be read.
 - **Warnings and refusals.** Besides section 4's: a post-merge run going on the
   base (the first merge waits for it), a red check that isn't required (the
   queue never merges with one), a required check that ended skipped or neutral,
   more than 100 changed files. "The last post-merge run" is the last completed
   one. Nothing that can join refuses Start too.
 - **Nightlies**: one per merge. A dry run says how many a real queue would
-  publish, and that it publishes none.
+  publish, and that it publishes none. Another post-merge workflow is said to
+  run once per merge, not to publish.
 - **Status bar** (with the user): the queue comes first, with Stop, then the
   crash or update notice. Once the queue ends, "Queue stopped: …" or "Queue
   finished: …" stays until its ✕, so a stop overnight is seen. A click shows
   the board, opening one in the project's first workspace if there is none.
   With several queues, the first in sidebar order shows, with "+1 other
-  queue". Only the queues of this launch show there; an interrupted one shows
-  on its board. A dry run reaching its first mutation isn't shown as a failure.
-- **Quitting** (with the user): a sheet on the window, or an alert when the
-  window isn't on screen, with Keep Running first. "Stop Queue and Quit" stops
+  queue", and its Stop becomes Stop All. Only the queues of this launch show
+  there; an interrupted one shows on its board. A dry run reaching its first
+  mutation isn't shown as a failure.
+- **Quitting** (with the user): Nirux comes to the front and asks, in a sheet
+  on the window, or an alert when the window isn't on screen, with Keep
+  Running first; a dry run is said to be one. "Stop Queue and Quit" stops
   every queue and waits for a call already sent to answer, 2.5 minutes at most,
   so the journal records it. The main window's close button quits Nirux, so it
   asks the same question. The queue's files are written before Nirux exits.

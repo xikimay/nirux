@@ -39,6 +39,9 @@ struct ShellSideEffects {
     var confirmQuitWithMergeQueue: @MainActor (
         _ message: String, _ details: String, _ window: NSWindow?, _ answer: @escaping @MainActor (Bool) -> Void
     ) -> Void = { message, details, window, answer in
+        // Quit from the Dock while Nirux is hidden: the question must show.
+        NSApp.unhide(nil)
+        NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = message

@@ -105,11 +105,19 @@ extension MergeQueue {
             if let workflow {
                 lines.append("• Wait for \(workflow) on \(base) (up to \(settings.postMergeTimeoutMinutes) minutes), "
                     + "then go on to the next one.")
-                let nightlies = "\(count) \(count == 1 ? label : MergeQueue.plural(label))"
-                lines.append(isDryRun
-                    ? "A real queue would publish \(nightlies), one after each merge. This dry run publishes none."
-                    : "This queue publishes \(nightlies): \(workflow) runs after each of its \(count) "
-                        + "merge\(count == 1 ? "" : "s").")
+                let merges = "\(count) merge\(count == 1 ? "" : "s")"
+                // A nightly publishes: say how many; another workflow, how often it runs.
+                if label.lowercased().contains("nightly") {
+                    let nightlies = "\(count) \(count == 1 ? label : MergeQueue.plural(label))"
+                    lines.append(isDryRun
+                        ? "A real queue would publish \(nightlies), one after each merge. This dry run publishes none."
+                        : "This queue publishes \(nightlies): \(workflow) runs after each of its \(merges).")
+                } else {
+                    lines.append(isDryRun
+                        ? "A real queue would run \(workflow) \(count) time\(count == 1 ? "" : "s"), after each merge. This "
+                            + "dry run merges nothing, so it runs none."
+                        : "This queue runs \(workflow) \(count) time\(count == 1 ? "" : "s"): after each of its \(merges).")
+                }
             } else {
                 lines.append("• Go on to the next one right away: no post-merge workflow.")
                 lines.append(isDryRun
@@ -147,7 +155,7 @@ extension MergeQueue {
                 let remaining = min(limit.coreRemaining, limit.graphQLRemaining)
                 if remaining < Limits.minimumRateLimit {
                     let reset = limit.coreRemaining < limit.graphQLRemaining ? limit.coreReset : limit.graphQLReset
-                    refusals.append("Only \(remaining) GitHub requests are left until "
+                    refusals.append("Only \(remaining) GitHub request\(remaining == 1 ? " is" : "s are") left until "
                         + "\(ProjectBoard.clockTime(reset, now: reset)) (REST \(limit.coreRemaining), GraphQL "
                         + "\(limit.graphQLRemaining)): the queue needs \(Limits.minimumRateLimit) in each.")
                 }

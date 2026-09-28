@@ -60,10 +60,15 @@ extension MergeQueueController {
         if settings.postMergeWorkflow != nil { setup.append(.baseRuns) }
         for read in setup {
             switch client.read(read, settings: settings) {
-            case .success(.rateLimit(let limit)): fetch.reading.rateLimit = limit
-            case .success(.baseMergeQueue(let required)): fetch.reading.baseMergeQueue = required
-            case .success(.runs(let runs)): fetch.reading.baseRuns = runs
-            case .success: break
+            case .success(.signedIn) where read == .auth: break
+            case .success(.rateLimit(let limit)) where read == .rateLimit: fetch.reading.rateLimit = limit
+            case .success(.baseMergeQueue(let required)) where read == .baseMergeQueue:
+                fetch.reading.baseMergeQueue = required
+            case .success(.runs(let runs)) where read == .baseRuns: fetch.reading.baseRuns = runs
+            case .success:
+                // An answer Nirux didn't ask for: nothing is judged on it.
+                fetch.reading.setupError = "GitHub’s answers were incomplete. Start again to retry."
+                return fetch
             case .failure(let error):
                 fetch.reading.setupError = setupMessage(error)
                 return fetch
@@ -97,10 +102,10 @@ extension MergeQueueController {
         case .success: candidate.error = "unexpected answer"
         case .failure(let error): candidate.error = GitHubCLIQueueClient.message(of: error)
         }
-        if case .success(.pullRequestDetails(let details)) = client.read(.pullRequestDetails(number), settings: settings) {
-            candidate.details = details
-        } else {
-            candidate.detailsError = "not read"
+        switch client.read(.pullRequestDetails(number), settings: settings) {
+        case .success(.pullRequestDetails(let details)): candidate.details = details
+        case .success: candidate.detailsError = "unexpected answer"
+        case .failure(let error): candidate.detailsError = GitHubCLIQueueClient.message(of: error)
         }
         // A pull request left out anyway needs nothing more.
         guard let pullRequest = candidate.pullRequest, MergeQueue.exclusionReason(pullRequest, settings: settings) == nil,

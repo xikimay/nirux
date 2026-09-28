@@ -68,9 +68,11 @@ extension NiruxShellView {
         }
     }
 
-    /// After every step of a queue, and every change to its list.
+    /// After every step of a queue, and every change to its list. A board
+    /// out of sight draws when it shows again.
     func mergeQueueDidChange(projectID: String) {
-        for location in projectBoardLocations where location.board.projectID == projectID {
+        for location in projectBoardLocations where location.board.projectID == projectID
+            && isProjectBoardShown(location.board) {
             renderProjectBoard(location.board)
         }
         updateMergeQueueStatusBar()
@@ -81,53 +83,88 @@ extension NiruxShellView {
     // MARK: The board
 
     /// What the board shows of its project's queue; nil while it can't
-    /// show one (no repository, a deleted project, board.json unread).
+    /// show one (no repository, a deleted project, board.json unread),
+    /// unless a queue runs: its Stop stays in reach whatever board.json says.
     func projectBoardQueueState(_ board: ProjectBoardController) -> ProjectBoard.QueueState? {
-        guard board.repository != nil, let loaded = board.loaded, profiles.contains(where: { $0.id == board.projectID })
+        let existing = mergeQueues[board.projectID]
+        let isActive = existing?.isRunning == true || existing?.runsElsewhere == true
+        guard isActive || (board.repository != nil && board.loaded != nil && profiles.contains { $0.id == board.projectID })
         else { return nil }
-        let controller = mergeQueue(projectID: board.projectID)
+        let controller = existing ?? mergeQueue(projectID: board.projectID)
         controller.reloadSavedIfStale()
+        let repository = board.repository?.gitHub
         var state = ProjectBoard.QueueState(isDryRun: controller.isDryRun)
-        state.selection = controller.selection
-        state.startProblems = loaded.queueStartProblems
+        state.selection = controller.selection(for: repository)
+        state.startProblems = board.loaded?.queueStartProblems ?? ["board.json isn’t read yet."]
         state.isConfirming = mergeQueueConfirmation != nil
+        var queueRepository: String?
         if let engine = controller.engine, controller.isRunning {
             state.run = .running(isStopping: engine.phase == .stopping)
             state.status = engine.statusText
             state.entries = engine.entries
             state.workflow = engine.settings.postMergeWorkflow
+            queueRepository = engine.settings.repository
         } else if controller.runsElsewhere, let saved = controller.saved {
             state.run = .elsewhere
             state.status = saved.statusText
             state.entries = saved.entries
             state.workflow = saved.postMergeWorkflow
+            queueRepository = saved.repository
         } else if let engine = controller.engine {
             state.run = .ended
             state.status = engine.statusText
             if case .stopped(let reason) = engine.phase { state.statusIsFailure = reason.isProblem }
             state.entries = engine.entries
             state.workflow = engine.settings.postMergeWorkflow
+            queueRepository = engine.settings.repository
         } else if let saved = controller.saved {
             state.run = .ended
             state.status = saved.statusText
             state.statusIsFailure = saved.status == .stopped && saved.stopReason?.isProblem != false
             state.entries = saved.entries
             state.workflow = saved.postMergeWorkflow
+            queueRepository = saved.repository
+        }
+        // Its numbers name other pull requests in another repository.
+        if let queueRepository, Self.gitHubRepository(queueRepository) != repository {
+            state.entries = []
+            state.status = state.status.map { "\(queueRepository): \($0)" }
         }
         return state
     }
 
+    private static func gitHubRepository(_ name: String) -> GitHubRepository? {
+        guard BoardConfig.isValidRepository(name) else { return nil }
+        let parts = name.split(separator: "/")
+        return GitHubRepository(owner: String(parts[0]), name: String(parts[1]))
+    }
+
     func addToMergeQueue(_ number: Int, board: ProjectBoardController) {
-        mergeQueue(projectID: board.projectID).addToSelection(number)
+        guard mergeQueueConfirmation == nil, mergeQueueQuit == nil, let repository = board.repository?.gitHub else {
+            return NSSound.beep()
+        }
+        mergeQueue(projectID: board.projectID).addToSelection(number, repository: repository)
     }
 
     func removeFromMergeQueue(_ number: Int, board: ProjectBoardController) {
+        guard mergeQueueConfirmation == nil, mergeQueueQuit == nil else { return NSSound.beep() }
         mergeQueue(projectID: board.projectID).removeFromSelection(number)
     }
 
     /// Stop, from the board or the status bar: before the next command.
     func stopMergeQueue(projectID: String) {
         mergeQueues[projectID]?.stop()
+    }
+
+    /// Deleting a space whose queue runs would take its folders, and its
+    /// board's Stop, away: stop the queue first.
+    func refuseToDeleteSpaceWithRunningQueue(profileID: String) -> Bool {
+        guard mergeQueues[profileID]?.isRunning == true else { return false }
+        let alert = NSAlert()
+        alert.messageText = "This space’s merge queue is running"
+        alert.informativeText = "Stop it from the board or the status bar, then delete the space."
+        runModal(alert)
+        return true
     }
 
     // MARK: Start: the confirmation sheet
@@ -140,12 +177,12 @@ extension NiruxShellView {
             return NSSound.beep()
         }
         let controller = mergeQueue(projectID: board.projectID)
-        guard let settings = board.loaded?.queueSettings, !controller.isRunning, !controller.runsElsewhere,
-              !controller.selection.isEmpty
+        guard mergeQueueQuit == nil, let settings = board.loaded?.queueSettings, !controller.isRunning,
+              !controller.runsElsewhere
         else { return NSSound.beep() }
-        let panel = MergeQueueConfirmationPanel(
-            projectID: board.projectID, isDryRun: controller.isDryRun, numbers: controller.selection
-        )
+        let numbers = controller.selection(for: settings.gitHubRepository)
+        guard !numbers.isEmpty else { return NSSound.beep() }
+        let panel = MergeQueueConfirmationPanel(projectID: board.projectID, isDryRun: controller.isDryRun, numbers: numbers)
         panel.onStart = { [weak self, weak panel] confirmation in
             guard let self, let panel else { return }
             self.confirmMergeQueueStart(confirmation, panel: panel)
@@ -158,8 +195,13 @@ extension NiruxShellView {
         mergeQueueConfirmation = panel
         panel.show(attachedTo: window, repository: settings.repository, baseBranch: settings.baseBranch)
         renderMergeQueueBoards()
-        controller.readConfirmation(settings: settings, numbers: controller.selection) { [weak panel] reading in
+        controller.readConfirmation(settings: settings, numbers: numbers) { [weak panel, weak controller] reading in
             guard let panel, panel.isShown else { return }
+            // Merged or closed: they can never join, and may have no row
+            // left to remove them from.
+            for candidate in reading.candidates where candidate.pullRequest.map({ !$0.isOpen }) == true {
+                controller?.removeFromSelection(candidate.number)
+            }
             panel.update(MergeQueue.confirmation(reading))
         }
     }
@@ -168,6 +210,7 @@ extension NiruxShellView {
     /// must still hold, and its list in its order.
     func confirmMergeQueueStart(_ confirmation: MergeQueue.Confirmation, panel: MergeQueueConfirmationPanel) {
         guard confirmation.canStart else { return }
+        guard mergeQueueQuit == nil else { return panel.showError("Nirux is quitting.") }
         guard profiles.contains(where: { $0.id == panel.projectID }) else {
             return panel.showError("This project was deleted.")
         }
@@ -213,18 +256,28 @@ extension NiruxShellView {
             text = "\(prefix) finished: \(engine.entries.filter { $0.step == .done }.count) merged"
         }
         if running.count > 1 { text += " (+\(running.count - 1) other queue\(running.count == 2 ? "" : "s"))" }
+        // Stop reaches every running queue, not only the one shown.
+        let stopsAll = running.count > 1
         let project = profiles.first { $0.id == projectID }?.name ?? "Deleted project"
         var notice = StatusBarView.QueueNotice(
             text: text,
             isRunning: shown.isRunning,
             isStopping: engine.phase == .stopping,
             isDryRun: shown.isDryRun,
-            isFailure: isFailure
+            isFailure: isFailure,
+            stopsAll: stopsAll
         )
         notice.tooltip = "\(project) · \(engine.settings.repository) into \(engine.settings.baseBranch)\n\(text)\n"
             + "Click to show the project’s board." + (shown.isDryRun ? "\n" + ProjectBoardView.dryRunTooltip : "")
         statusBar.onQueueClick = { [weak self] in self?.showProjectBoard(projectID: projectID) }
-        statusBar.onQueueStop = { [weak self] in self?.stopMergeQueue(projectID: projectID) }
+        statusBar.onQueueStop = { [weak self] in
+            guard let self else { return }
+            if stopsAll {
+                self.runningMergeQueues.forEach { $0.stop() }
+            } else {
+                self.stopMergeQueue(projectID: projectID)
+            }
+        }
         statusBar.onQueueDismiss = { [weak self] in
             guard let self else { return }
             self.dismissedMergeQueueNotices.insert(projectID)
@@ -315,16 +368,19 @@ extension NiruxShellView {
             return answerMergeQueueQuit(quit, true)
         }
         let isDryRun = running.allSatisfy(\.isDryRun)
-        let message = (running.count == 1 ? "A \(isDryRun ? "dry-run " : "")merge queue is running"
-            : "\(running.count) merge queues are running") + (closesWindow ? ": closing the window quits Nirux" : "")
+        let kind = isDryRun ? "dry-run merge queue" : "merge queue"
+        let message = (running.count == 1 ? "A \(kind) is running" : "\(running.count) \(kind)s are running")
+            + (closesWindow ? ": closing the window quits Nirux" : "")
         var details = running.compactMap { controller -> String? in
             guard let engine = controller.engine else { return nil }
             return "\(engine.settings.repository): \(engine.statusText)"
         }
         details.append("")
-        details.append("Quitting stops the queue before its next command. A merge or a branch update already sent to "
-            + "GitHub finishes first, which may take up to 2 minutes. Nothing resumes by itself at the next launch: "
-            + "the board shows where it stopped.")
+        details.append(isDryRun
+            ? "Quitting stops it before its next command. A dry run sends nothing to GitHub: nothing is left half done."
+            : "Quitting stops the queue before its next command. A merge or a branch update already sent to GitHub "
+                + "finishes first, which may take up to 2 minutes. Nothing resumes by itself at the next launch: the "
+                + "board shows where it stopped.")
         sideEffects.confirmQuitWithMergeQueue(message, details.joined(separator: "\n"), window) { [weak self] confirmed in
             guard let self, self.mergeQueueQuit === quit else { return }
             guard confirmed else {
@@ -332,6 +388,8 @@ extension NiruxShellView {
                 return self.answerMergeQueueQuit(quit, false)
             }
             quit.isConfirmed = true
+            // No new queue starts from here on.
+            self.mergeQueueConfirmation?.dismiss()
             // The window's close button: the quit that follows stops the queues.
             if closesWindow { return self.answerMergeQueueQuit(quit, true) }
             self.mergeQueueQuit = nil
@@ -352,12 +410,14 @@ extension NiruxShellView {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.mergeQueueQuitTimeout) { [weak self] in
             guard let self, self.mergeQueueQuit === quit else { return }
             NiruxDebugLog.log("MergeQueue: quitting while a call already sent hasn’t answered")
+            self.runningMergeQueues.forEach { $0.stop() }
             self.answerMergeQueueQuit(quit, true)
         }
         return .terminateLater
     }
 
-    /// A queue changed: a confirmed quit goes on once none runs.
+    /// A queue changed: a confirmed quit goes on once none runs. (No queue
+    /// starts once the quit is asked: Start refuses.)
     func settleMergeQueueQuit() {
         guard let quit = mergeQueueQuit, quit.isConfirmed, !quit.isAnswered, runningMergeQueues.isEmpty else { return }
         answerMergeQueueQuit(quit, true)

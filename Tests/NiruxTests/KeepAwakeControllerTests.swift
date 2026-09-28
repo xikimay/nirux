@@ -83,7 +83,7 @@ final class KeepAwakeControllerTests: XCTestCase {
         controller.update(workingAgentCount: 2)
 
         XCTAssertTrue(controller.isActive)
-        XCTAssertEqual(assertions.createdNames, ["Nirux: agents working"], "one global assertion")
+        XCTAssertEqual(assertions.createdNames, [KeepAwakeController.assertionName], "one global assertion")
         XCTAssertEqual(assertions.held.count, 1)
         XCTAssertEqual(controller.workingAgentCount, 2)
     }

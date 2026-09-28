@@ -97,6 +97,10 @@ final class MergeQueueConfirmationPanel: NSObject {
         confirmation.move(index, by: offset)
         self.confirmation = confirmation
         render()
+        // The list was drawn again: the keyboard stays on the item moved.
+        guard let buttons = moveButtons[safe: index + offset] else { return }
+        let next = offset < 0 ? (buttons.up.isEnabled ? buttons.up : buttons.down) : (buttons.down.isEnabled ? buttons.down : buttons.up)
+        panel?.makeFirstResponder(next)
     }
 
     @objc private func cancelAction() {

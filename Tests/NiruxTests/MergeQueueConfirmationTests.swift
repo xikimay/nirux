@@ -251,5 +251,16 @@ final class MergeQueueConfirmationTests: XCTestCase {
         XCTAssertTrue(noWorkflow.plan.contains("• Go on to the next one right away: no post-merge workflow."))
         XCTAssertTrue(noWorkflow.plan.contains("This queue makes 1 merge into main, one right after the other."))
         XCTAssertTrue(noWorkflow.plan[3].hasPrefix("• Squash and merge it"))
+
+        let deploy = MergeQueue.confirmation(reading(
+            [candidate(1, head: a), candidate(2, head: b)], settings: MQ.settings(postMergeWorkflow: "deploy.yml")
+        ))
+        XCTAssertTrue(deploy.plan.contains("This queue runs deploy.yml 2 times: after each of its 2 merges."),
+                      "only a nightly is said to publish")
+    }
+
+    func testOneRequestLeftReadsInTheSingular() {
+        let limited = MergeQueue.confirmation(reading([candidate(1, head: a)], remaining: 1))
+        XCTAssertTrue(limited.refusals[0].hasPrefix("Only 1 GitHub request is left until"), limited.refusals[0])
     }
 }

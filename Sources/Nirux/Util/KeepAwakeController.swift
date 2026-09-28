@@ -36,7 +36,7 @@ struct IOKitSleepAssertions: SleepAssertionAPI {
 /// the assertion if Nirux crashes.
 @MainActor
 final class KeepAwakeController {
-    static let assertionName = "Nirux: agents working"
+    static let assertionName = "Nirux: agents working or a merge queue running"
     static let gracePeriod: TimeInterval = 60
     /// While enabled, how often to ask for a fresh count (`onRefresh`). With
     /// Nirux in the background the heartbeat stops, and nothing else sees
@@ -67,7 +67,8 @@ final class KeepAwakeController {
     private var isShutDown = false
     private var loggedCreateFailure = false
 
-    /// The indicator's state changed: `isActive` or `workingAgentCount`.
+    /// The indicator's state changed: `isActive`, `workingAgentCount` or
+    /// `isMergeQueueRunning`.
     var onChange: (() -> Void)?
     /// Asked every `pollInterval` while enabled, and once more before the
     /// grace period ends; answers with `update(workingAgentCount:)`.

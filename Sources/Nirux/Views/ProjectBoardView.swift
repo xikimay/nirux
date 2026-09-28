@@ -150,8 +150,9 @@ final class ProjectBoardView: NSView {
     private static let rowHeight: CGFloat = 42
     private static let groupHeight: CGFloat = 28
     private static let padding: CGFloat = 12
-    /// Name, Agent, PR, Checks, Queue, Actions.
-    private static let columnFractions: [CGFloat] = [0.21, 0.15, 0.11, 0.14, 0.17, 0.22]
+    /// Name, Agent, PR, Checks, Queue, Actions. Actions keeps its width:
+    /// its last buttons hide when they don't fit.
+    private static let columnFractions: [CGFloat] = [0.20, 0.14, 0.11, 0.13, 0.15, 0.27]
 
     private static let primaryText = NSColor.white.withAlphaComponent(0.85)
     private static let secondaryText = NSColor.white.withAlphaComponent(0.45)

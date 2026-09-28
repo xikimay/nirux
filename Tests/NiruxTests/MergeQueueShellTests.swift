@@ -119,6 +119,71 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertEqual(clicks, ["board", "stop"])
     }
 
+    func testOnANarrowBarTheQueueShrinksSoACrashNoticeKeepsItsButtons() throws {
+        _ = NSApplication.shared
+        let report = try XCTUnwrap(CrashReportParser.report(from: CrashReportFixtures.report()))
+        let crash = CrashNotice(report: report, reportURL: URL(fileURLWithPath: "/tmp/Nirux-2026-09-29.ips"),
+                                date: Date(timeIntervalSince1970: 1_790_500_488), reportCount: 1)
+        let bar = StatusBarView(frame: NSRect(x: 0, y: 0, width: 600, height: StatusBarView.height))
+        bar.showCrash(crash)
+        bar.showQueue(StatusBarView.QueueNotice(text: "Queue: #52 waiting for the checks of #52, 3 of 7", isRunning: true,
+                                                isDryRun: false))
+        for width in stride(from: CGFloat(600), through: 900, by: 50) {
+            bar.setFrameSize(NSSize(width: width, height: StatusBarView.height))
+            bar.layoutSubtreeIfNeeded()
+            let visible = bar.subviews.compactMap { $0 as? NSButton }.filter { !$0.isHidden }
+            let crashDismiss = try XCTUnwrap(visible.last { $0.title == "✕" })
+            XCTAssertLessThanOrEqual(crashDismiss.frame.maxX, bar.bounds.width - 120 - 16, "✕ clear of the version at \(width)")
+            for button in visible {
+                XCTAssertTrue(bar.hitTest(NSPoint(x: button.frame.midX, y: button.frame.midY)) === button,
+                              "\(button.title) takes its clicks at \(width)")
+            }
+            let label = try XCTUnwrap(bar.subviews.compactMap { $0 as? NSTextField }.first { $0.stringValue.hasPrefix("● Nirux crashed") })
+            XCTAssertGreaterThanOrEqual(label.frame.width, 79, "the crash stays readable at \(width)")
+        }
+    }
+
+    func testWithSeveralQueuesTheStatusBarStopsThemAll() throws {
+        let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
+        let first = start(shell, projectID: "first")
+        let second = shell.mergeQueue(projectID: "second")
+        second.beginActivity = { NSObject() }
+        second.endActivity = { _ in }
+        var gadgets = MQ.settings()
+        gadgets = BoardConfig.QueueSettings(
+            repository: "acme/gadgets", gitHubRepository: GitHubRepository(owner: "acme", name: "gadgets"),
+            baseBranch: gadgets.baseBranch, requiredChecks: gadgets.requiredChecks, postMergeWorkflow: gadgets.postMergeWorkflow,
+            mergeMethod: gadgets.mergeMethod, checksTimeoutMinutes: 30, postMergeTimeoutMinutes: 30
+        )
+        XCTAssertNil(second.start(settings: gadgets, entries: [MQ.entry(52, head: MQ.sha("a"))]))
+
+        let notice = try XCTUnwrap(shell.statusBar.queueNotice)
+        XCTAssertTrue(notice.text.hasSuffix("(+1 other queue)"), notice.text)
+        XCTAssertEqual(shell.statusBar.queueStopButton?.title, "Stop All")
+        try XCTUnwrap(shell.statusBar.queueStopButton).performClick(nil)
+        XCTAssertFalse(first.isRunning)
+        XCTAssertFalse(second.isRunning, "Stop reaches the queue the bar doesn’t name")
+    }
+
+    // MARK: - Spaces
+
+    func testASpaceWhoseQueueRunsIsNotDeleted() {
+        let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
+        var alerts: [String] = []
+        shell.sideEffects.runModal = { alert in
+            alerts.append(alert.messageText)
+            return .alertSecondButtonReturn
+        }
+        let space = shell.workspaceStore.createProfile(named: "Widgets")
+        let queue = start(shell, projectID: space.id)
+
+        shell.confirmDeleteSpace(profileID: space.id)
+        XCTAssertEqual(alerts, ["This space’s merge queue is running"])
+        shell.deleteSpace(profileID: space.id)
+        XCTAssertTrue(shell.profiles.contains { $0.id == space.id }, "its folders would leave the queue's local checks")
+        queue.stop()
+    }
+
     // MARK: - Keep-awake
 
     func testARunningQueueKeepsTheMacAwakeUnderTheSameSetting() {
@@ -225,6 +290,40 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertEqual(replies, [true])
         guard case .stopped(let reason)? = queue.engine?.phase else { return XCTFail("not stopped") }
         XCTAssertTrue(reason.message.contains("Check #52 on GitHub: it may be merged."), reason.message)
+    }
+
+    func testNoQueueStartsOnceAQuitIsAsked() throws {
+        let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
+        _ = recordQuitQuestions(shell)
+        let running = start(shell, projectID: "first")
+        XCTAssertEqual(shell.mergeQueueTerminateReply { _ in }, .terminateLater)
+
+        // Another project, fully configured: without the guard, its queue would start.
+        let space = shell.workspaceStore.createProfile(named: "Gadgets")
+        let gadgets = BoardConfig(repository: "acme/gadgets", baseBranch: "main", requiredChecks: ["test"],
+                                  postMergeWorkflow: .workflow("nightly.yml"))
+        _ = try XCTUnwrap(BoardConfigStore(spaceID: space.id)).save(gadgets)
+        let settings = try XCTUnwrap(BoardConfigStore(spaceID: space.id)?.load().queueSettings)
+        var reading = MergeQueue.ConfirmationReading(settings: settings, isDryRun: true)
+        reading.rateLimit = MergeQueue.RateLimit(coreRemaining: 5000, coreReset: Date(), graphQLRemaining: 5000, graphQLReset: Date())
+        reading.baseMergeQueue = false
+        reading.baseRuns = []
+        var candidate = MergeQueue.ConfirmationReading.Candidate(number: 7)
+        candidate.pullRequest = MQ.pullRequest(7, head: MQ.sha("b"), repository: settings.gitHubRepository)
+        candidate.checks = MQ.checks(MQ.checkRun(id: 1))
+        candidate.comparison = .some(MergeQueue.Comparison(status: "ahead", aheadBy: 1, behindBy: 0, baseCommit: MQ.sha("0")))
+        candidate.local = MergeQueue.LocalState()
+        reading.candidates = [candidate]
+        let confirmation = MergeQueue.confirmation(reading)
+        XCTAssertTrue(confirmation.canStart)
+        let panel = MergeQueueConfirmationPanel(projectID: space.id, isDryRun: true, numbers: [7])
+        panel.show(attachedTo: nil, repository: "acme/gadgets", baseBranch: "main")
+        defer { panel.dismiss() }
+
+        shell.confirmMergeQueueStart(confirmation, panel: panel)
+        XCTAssertEqual(panel.statusLabel?.stringValue, "Nirux is quitting.")
+        XCTAssertNil(shell.mergeQueues[space.id]?.engine, "nothing started")
+        running.stop()
     }
 
     func testTheWindowsCloseButtonAsksOnceThenTheQuitStopsTheQueue() throws {

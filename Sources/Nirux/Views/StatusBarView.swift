@@ -26,6 +26,8 @@ final class StatusBarView: NSView {
         var isDryRun: Bool
         /// Stopped by a problem, not by the user.
         var isFailure = false
+        /// Several queues run: Stop stops them all.
+        var stopsAll = false
     }
 
     private static let crashColor = NSColor(red: 0.95, green: 0.47, blue: 0.43, alpha: 0.9)
@@ -143,7 +145,9 @@ final class StatusBarView: NSView {
         if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
             ver.stringValue = version
         }
-        addSubview(ver)
+        // Below every button (the border stays first): where they meet on a
+        // narrow bar, the buttons take the clicks.
+        addSubview(ver, positioned: .above, relativeTo: border)
         versionLabel = ver
 
         // Right hints label (pilot shortcuts)
@@ -188,14 +192,24 @@ final class StatusBarView: NSView {
         let noticeMaxX = hintsMaxX - (hintsText > 0 ? ceil(hintsText) + 4 + pad : 0)
 
         let versionMinX = bounds.width - verW - pad
-        // The queue first: at most half the bar when a notice follows it.
+        let noticeButtons = [installButton, copySummaryButton, openReportButton].compactMap { $0 }.filter { !$0.isHidden }
+        noticeButtons.forEach { $0.sizeToFit() }
+        copySummaryButton?.frame.size.width = copySummaryWidth
+        let noticeButtonsW = noticeButtons.reduce(CGFloat(0)) { $0 + $1.frame.width + 8 }
+        // The queue first: at most half the bar when a notice follows it,
+        // and never so wide that the notice's buttons and ✕ reach the
+        // version label; its text shrinks first.
         var start = pad
         if let queueButton, !queueButton.isHidden {
             let trailing = [queueStopButton, queueDismissButton].compactMap { $0 }.filter { !$0.isHidden }
             trailing.forEach { $0.sizeToFit() }
             let trailingW = trailing.reduce(CGFloat(0)) { $0 + $1.frame.width + 6 }
-            let limit = (hasNotice ? bounds.width / 2 : versionMinX - 8) - pad - trailingW
-            let textW = min(ceil(queueButton.attributedTitle.size().width) + 6, max(60, limit))
+            var limit = (hasNotice ? bounds.width / 2 : versionMinX - 8) - pad - trailingW
+            if hasNotice {
+                let noticeMinW: CGFloat = 80 + noticeButtonsW + 26
+                limit = min(limit, versionMinX - 4 - noticeMinW - 18 - pad - trailingW)
+            }
+            let textW = min(ceil(queueButton.attributedTitle.size().width) + 6, max(40, limit))
             queueButton.frame = NSRect(x: pad, y: (height - 18) / 2, width: textW, height: 18)
             var queueX = queueButton.frame.maxX
             for button in trailing {
@@ -206,10 +220,8 @@ final class StatusBarView: NSView {
             start = queueX + 18
         }
 
-        let buttons = [installButton, copySummaryButton, openReportButton].compactMap { $0 }.filter { !$0.isHidden }
-        buttons.forEach { $0.sizeToFit() }
-        copySummaryButton?.frame.size.width = copySummaryWidth
-        let buttonsW = buttons.reduce(CGFloat(0)) { $0 + $1.frame.width + 8 }
+        let buttons = noticeButtons
+        let buttonsW = noticeButtonsW
         let dismissW: CGFloat = dismissButton?.isHidden == false ? 22 : 0
         let labelSize = label?.attributedStringValue.size() ?? .zero
         // At least the left half, as before the hints moved aside; never so
@@ -326,7 +338,10 @@ final class StatusBarView: NSView {
         queueButton?.toolTip = queueNotice.tooltip ?? queueNotice.text
         queueButton?.isHidden = false
         queueStopButton?.isHidden = !queueNotice.isRunning
-        queueStopButton?.title = queueNotice.isStopping ? "Stopping…" : "Stop"
+        queueStopButton?.title = queueNotice.isStopping ? "Stopping…" : queueNotice.stopsAll ? "Stop All" : "Stop"
+        queueStopButton?.toolTip = queueNotice.stopsAll
+            ? "Stop every running queue before its next command; a call already sent to GitHub finishes"
+            : "Stop the queue before its next command; a call already sent to GitHub finishes"
         queueStopButton?.isEnabled = !queueNotice.isStopping
         queueDismissButton?.isHidden = queueNotice.isRunning
     }
