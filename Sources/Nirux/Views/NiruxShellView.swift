@@ -63,6 +63,9 @@ final class NiruxShellView: NSView {
     var activityReadTimer: Timer?
     var activityReadGeneration: UInt = 0
 
+    /// Owned by NiruxApp; nil in tests, which never touch power settings.
+    weak var keepAwake: KeepAwakeController?
+
     /// First-launch checklist state; nil for a user set up before it existed
     /// (see OnboardingChecklist.launchState).
     var onboardingState: OnboardingChecklistState?

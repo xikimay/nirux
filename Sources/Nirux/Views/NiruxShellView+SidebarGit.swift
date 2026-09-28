@@ -59,6 +59,7 @@ extension NiruxShellView {
                           blocker: workspace.blocker, phase: workspace.effectivePhase,
                           lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt)
         }
+        tickHiddenSpaceAgents(visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses)
         let profileInfos = workspaceStore.navigableProfiles.map { profile in
             let profileWorkspaces = workspaces.filter { $0.profileID == profile.id }
             let hasAttention = profileWorkspaces.contains { workspace in
@@ -109,6 +110,25 @@ extension NiruxShellView {
         return (foregroundProcesses, invalidatedSessionBinding)
     }
 
+    /// The other spaces' columns tick too, unfocused: the space dots, the
+    /// Dock badge and keep-awake read their status, which would otherwise
+    /// stay frozen from when the space was last on screen — an agent
+    /// without hooks "working" long after it went quiet.
+    private func tickHiddenSpaceAgents(
+        visibleIndices: [Int],
+        foregroundProcesses: [ObjectIdentifier: ForegroundProcess]
+    ) {
+        let visible = Set(visibleIndices)
+        for (index, workspace) in workspaces.enumerated() where !visible.contains(index) {
+            for column in workspace.columns {
+                _ = column.pty?.agentStatus(
+                    foregroundProcess: foregroundProcesses[ObjectIdentifier(column)],
+                    isUserFocused: false
+                )
+            }
+        }
+    }
+
     private func updateSidebarAttention(infos: [WorkspaceInfo]) {
         // Dock badge: workspaces currently waiting for attention.
         let attentionCount = workspaces.filter { workspace in
@@ -116,6 +136,8 @@ extension NiruxShellView {
                 || workspace.columns.contains { $0.pty?.cachedAgentState == .needsAttention }
         }.count
         NiruxNotifier.shared.updateDockBadge(attentionCount: attentionCount)
+        // Same source, the other way: agents still working.
+        updateKeepAwake()
 
         // Update per-workspace pilot panels
         if isPilotMode {

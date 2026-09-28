@@ -9,6 +9,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var updaterController: SPUStandardUpdaterController?
     var updateDot: NSView?
     var settingsPanel: NSPanel?
+    weak var settingsKeepAwakeCheckbox: NSButton?
     weak var settingsLaunchModePopup: NSPopUpButton?
     weak var settingsNoFlickerCheckbox: NSButton?
     weak var settingsCodexLaunchModePopup: NSPopUpButton?
@@ -22,9 +23,13 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     weak var settingsTelegramStatusLabel: NSTextField?
     weak var settingsTelegramPairButton: NSButton?
     var telegramRemoteAccessController: TelegramRemoteAccessController?
+    var keepAwakeController: KeepAwakeController?
+    var keepAwakeIndicator: KeepAwakeIndicator?
     /// Keychain access used by the Settings panel; tests stub it.
     var telegramTokenLoader: () throws -> String? = { try TelegramTokenStore.load() }
     var telegramTokenSaver: (String) throws -> Void = { try TelegramTokenStore.save($0) }
+    /// Screen height the Settings panel may take; tests stub it.
+    var settingsVisibleHeight: @MainActor () -> CGFloat? = { NSScreen.main?.visibleFrame.height }
     var isManualUpdateCheck = false
     var updaterReady = false
     var urlConfirmations = URLConfirmationQueue()
@@ -62,10 +67,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         setupClickToFocus()
         setupMenus()
 
-        let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
-        let rect = NSRect(x: screen.origin.x + 50, y: screen.origin.y + 50,
-                          width: screen.width - 100, height: screen.height - 100)
-
+        let rect = Self.initialMainWindowFrame()
         let window = NSWindow(
             contentRect: rect,
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -83,6 +85,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         shellView.autoresizingMask = [.width, .height]
         window.contentView = shellView
         shell = shellView
+        setUpKeepAwake(window: window, shell: shellView)
         setupStatusBarNotices()
 
         // Native notifications: click focuses the originating workspace/column.
@@ -173,6 +176,13 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         checkForCrashReports()
     }
 
+    /// The main screen's visible area, inset by 50 pt.
+    private static func initialMainWindowFrame() -> NSRect {
+        let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
+        return NSRect(x: screen.origin.x + 50, y: screen.origin.y + 50,
+                      width: screen.width - 100, height: screen.height - 100)
+    }
+
     /// The Getting Started checklist refreshes after the install, so it
     /// reports the hooks as written.
     private func installAgentHooks(reportingTo shellView: NiruxShellView) {
@@ -189,6 +199,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // sent) so the saved Claude restore targets are current.
         AgentHookCenter.shared.drain()
         shell?.saveState(snapshot: ProcessSnapshot())
+        keepAwakeController?.shutdown()
         telegramRemoteAccessController?.shutdown()
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
         ActivityStore.shared.flush()
