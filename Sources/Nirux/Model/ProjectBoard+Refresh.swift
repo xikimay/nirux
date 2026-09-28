@@ -19,10 +19,13 @@ extension ProjectBoard {
     /// 60 s, or 30 s while a check of an open pull request runs; merged
     /// pull requests every 10 minutes; the post-merge run every 5. A source
     /// being read isn't read again meanwhile. Times are seconds of a
-    /// monotonic clock, injected (the board passes `systemUptime`).
+    /// monotonic clock, injected (the board passes `ProjectBoard.clock()`).
     struct RefreshSchedule: Equatable {
         private(set) var lastStarted: [Source: TimeInterval] = [:]
         private(set) var inFlight: Set<Source> = []
+        /// Expired while being read: the answer may predate the change, so
+        /// the source is due again as soon as it lands.
+        private(set) var expiredWhileReading: Set<Source> = []
 
         static func interval(of source: Source, hasPendingChecks: Bool) -> TimeInterval {
             switch source {
@@ -51,12 +54,17 @@ extension ProjectBoard {
 
         mutating func finish(_ source: Source) {
             inFlight.remove(source)
+            if expiredWhileReading.remove(source) != nil { lastStarted[source] = nil }
         }
 
-        /// `source` is due at the next tick, unless a read of it is running.
+        /// `source` is due at the next tick, or as soon as the read of it
+        /// that is running lands.
         mutating func expire(_ source: Source) {
-            guard !inFlight.contains(source) else { return }
-            lastStarted[source] = nil
+            if inFlight.contains(source) {
+                expiredWhileReading.insert(source)
+            } else {
+                lastStarted[source] = nil
+            }
         }
 
         /// A new project or config: everything is due at once, and reads
@@ -64,6 +72,7 @@ extension ProjectBoard {
         mutating func reset() {
             lastStarted = [:]
             inFlight = []
+            expiredWhileReading = []
         }
 
         /// Refresh: everything is due at once, but a read still running is
@@ -71,6 +80,15 @@ extension ProjectBoard {
         mutating func makeEverythingDue() {
             lastStarted = [:]
         }
+    }
+}
+
+extension ProjectBoard {
+    /// Seconds of a monotonic clock that keeps counting while the Mac
+    /// sleeps (unlike `systemUptime`): after a night asleep, everything is
+    /// due.
+    static func clock() -> TimeInterval {
+        TimeInterval(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000_000
     }
 }
 
@@ -100,8 +118,11 @@ extension ProjectBoard {
                 snapshot.missingFolders.insert(folder)
                 continue
             }
-            // The top of a worktree already listed: its repository is known.
-            guard !listedPaths.contains(comparable),
+            // In a worktree already listed, unless a checkout of its own
+            // starts there: its repository is known.
+            let isListed = listedPaths.contains { ProjectBoard.contains($0, comparable) }
+            guard !isListed || FileManager.default.fileExists(atPath: folder + "/.git"),
+                  !listedPaths.contains(comparable),
                   let listing = WorktreeCleanup.worktreeListing(in: folder, tools: tools),
                   let first = listing.first,
                   listed.insert(NiruxShellView.comparablePath(first.path)).inserted

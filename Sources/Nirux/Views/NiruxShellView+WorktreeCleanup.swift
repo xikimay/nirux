@@ -118,8 +118,8 @@ extension NiruxShellView {
         let resolvedRoot = comparablePath(root)
         return { candidate in
             guard let candidate else { return false }
-            let resolved = comparablePath(candidate)
-            return resolved == resolvedRoot || resolved.hasPrefix(resolvedRoot + "/")
+            // The Project Board places workspaces by the same rule.
+            return ProjectBoard.contains(resolvedRoot, comparablePath(candidate))
         }
     }
 

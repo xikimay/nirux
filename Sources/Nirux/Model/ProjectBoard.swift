@@ -193,8 +193,9 @@ extension ProjectBoard {
     /// A workspace belongs to the worktree that holds its launch folder,
     /// the longest match (worktrees may sit inside the main checkout). A
     /// worktree belongs to the open pull request of its branch, else to a
-    /// merged one; only pull requests from the configured repository match,
-    /// and none without one. Bare and prunable entries get no row.
+    /// merged one whose head it is still at; only pull requests from the
+    /// configured repository match, and none without one. Bare and
+    /// prunable entries get no row.
     static func rows(_ sources: Sources) -> [Row] {
         let places = self.places(in: sources.local)
         let (members, outside) = assign(sources.workspaces, to: places)
@@ -211,14 +212,22 @@ extension ProjectBoard {
             let repository = sources.local[place.repository]
             let worktree = repository.worktrees[place.entry]
             let inside = members[index] ?? []
-            let isProjects = sources.repository.map { repository.remotes.contains($0) } ?? false
+            // By owner and name: an SSH host alias (`git@github-work:…`)
+            // points at github.com all the same.
+            let isProjects = sources.repository.map { configured in
+                repository.remotes.contains { $0.owner == configured.owner && $0.name == configured.name }
+            } ?? false
             guard isProjects else {
                 if let first = inside.first {
                     foreign.append((first.order, row(.otherRepository, worktree: worktree, inside: inside, pullRequest: nil)))
                 }
                 continue
             }
-            let pullRequest = worktree.branch.flatMap { open[$0] ?? merged[$0] }
+            // A merged pull request only if the worktree is still at its
+            // head: a branch name reused since has new work.
+            let pullRequest = worktree.branch.flatMap { branch in
+                open[branch] ?? merged[branch].flatMap { $0.headOid == worktree.head?.lowercased() ? $0 : nil }
+            }
             if let branch = worktree.branch { branchesWithWorktree.insert(branch) }
             let group: RowGroup
             if place.entry == 0 {

@@ -121,10 +121,11 @@ extension NiruxShellView {
     /// A board is shown while its workspace is: the selected one, or any of
     /// the space's in Pilot Mode, in a window that isn't minimized.
     func isProjectBoardShown(_ board: ProjectBoardController) -> Bool {
-        guard let window, !window.isMiniaturized,
-              let location = projectBoardLocations.first(where: { $0.board === board }),
-              location.workspace.profileID == activeProfileID
-        else { return false }
+        projectBoardLocations.first { $0.board === board }.map(isProjectBoardShown) ?? false
+    }
+
+    private func isProjectBoardShown(_ location: ProjectBoardLocation) -> Bool {
+        guard let window, !window.isMiniaturized, location.workspace.profileID == activeProfileID else { return false }
         if isPilotMode {
             return visibleWorkspaceIndices.contains { workspaces[$0] === location.workspace }
         }
@@ -136,8 +137,11 @@ extension NiruxShellView {
     /// sidebar's pull request reads do (hook events still refresh the
     /// sidebar there).
     func isProjectBoardOnScreen(_ board: ProjectBoardController) -> Bool {
-        guard NSApp.isActive, window?.occlusionState.contains(.visible) == true else { return false }
-        return isProjectBoardShown(board)
+        isInFront && isProjectBoardShown(board)
+    }
+
+    private var isInFront: Bool {
+        NSApp.isActive && window?.occlusionState.contains(.visible) == true
     }
 
     // MARK: Drawing
@@ -150,8 +154,9 @@ extension NiruxShellView {
         now: TimeInterval,
         foregroundProcesses: [ObjectIdentifier: ForegroundProcess]? = nil
     ) {
-        for location in projectBoardLocations where isProjectBoardShown(location.board) {
-            location.board.tick()
+        let inFront = isInFront
+        for location in projectBoardLocations where isProjectBoardShown(location) {
+            location.board.tick(onScreen: inFront)
             renderProjectBoard(location.board, snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
         }
     }
@@ -212,10 +217,7 @@ extension NiruxShellView {
             hasAgent: agentInFront || pty.agentProcessName(snapshot: snapshot) != nil,
             agentInFront: agentInFront,
             status: pty.cachedAgentState,
-            // Dialogs of an earlier `claude` in this column aren't on screen.
-            openDialog: pty.agentOpenDialogs.first { dialog in
-                foreground.map { dialog.requestedAt >= $0.instance.startedAt } ?? false
-            }?.reason,
+            openDialog: pty.agentVisibleDialog(foreground: foreground)?.reason,
             workingFor: pty.agentTurnStartedAt.map { PilotSidebarRenderer.shortDuration(now - $0.timeIntervalSince1970) }
         )
         var failedAt: TimeInterval?
@@ -244,13 +246,14 @@ extension NiruxShellView {
             // The flow and confirmation of "Clean Up Worktree…", by folder.
             requestWorktreeCleanup(path: path)
         case .resumeFailed(let workspaceID, let columnID, let failedAt):
-            guard let workspaceIndex = workspaces.firstIndex(where: { $0.id == workspaceID }),
-                  let columnIndex = workspaces[workspaceIndex].columns.firstIndex(where: { $0.id == columnID })
+            // Not into a workspace or a column on its way out.
+            guard let workspaceIndex = workspaces.firstIndex(where: { $0.id == workspaceID && !$0.isClosing }),
+                  let columnIndex = workspaces[workspaceIndex].columns.firstIndex(where: { $0.id == columnID && !$0.isClosing })
             else { return NSSound.beep() }
             resumeFailedAgent(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt)
         case .resumeExited(let workspaceID, let columnID):
-            guard let workspace = workspaces.first(where: { $0.id == workspaceID }),
-                  let column = workspace.columns.first(where: { $0.id == columnID })
+            guard let workspace = workspaces.first(where: { $0.id == workspaceID && !$0.isClosing }),
+                  let column = workspace.columns.first(where: { $0.id == columnID && !$0.isClosing })
             else { return NSSound.beep() }
             resumeExitedAgent(in: workspace, column: column)
         }

@@ -315,13 +315,18 @@ extension ProjectBoard {
     }
 
     /// "20:27" today, "26 Sep 20:27" another day.
+    /// Built from calendar fields rather than a DateFormatter: it runs at
+    /// each render.
     static func clockTime(_ date: Date, now: Date, timeZone: TimeZone = .current) -> String {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = timeZone
-        formatter.dateFormat = calendar.isDate(date, inSameDayAs: now) ? "HH:mm" : "d MMM HH:mm"
-        return formatter.string(from: date)
+        let parts = calendar.dateComponents([.day, .month, .hour, .minute], from: date)
+        let time = String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0)
+        guard !calendar.isDate(date, inSameDayAs: now), let day = parts.day, let month = parts.month,
+              let name = monthNames[safe: month - 1]
+        else { return time }
+        return "\(day) \(name) \(time)"
     }
+
+    private static let monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 }

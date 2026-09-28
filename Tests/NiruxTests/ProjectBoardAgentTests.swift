@@ -6,6 +6,10 @@ import XCTest
 final class ProjectBoardAgentTests: XCTestCase {
     private var machine = AgentStatusMachine()
     private let t0: TimeInterval = 1_000
+    /// The `claude` in front, started before the events.
+    private let claude = ForegroundProcess(
+        instance: ProcessInstance(pid: 4242, startedAt: 900), name: "claude", arguments: ["claude"]
+    )
 
     private func apply(_ name: AgentHookEvent.Name, at offset: TimeInterval, focused: Bool, tool: String? = nil) {
         _ = machine.apply(AgentHookEvent(
@@ -20,7 +24,7 @@ final class ProjectBoardAgentTests: XCTestCase {
     private func boardState(agentInFront: Bool = true, hasAgent: Bool = true) -> ProjectBoard.AgentState {
         ProjectBoard.agentState(
             stuck: nil, hasAgent: hasAgent, agentInFront: agentInFront,
-            status: machine.state, openDialog: machine.openDialogs.first?.reason
+            status: machine.state, openDialog: machine.visibleDialog(foreground: agentInFront ? claude : nil)?.reason
         )
     }
 
@@ -38,6 +42,21 @@ final class ProjectBoardAgentTests: XCTestCase {
                        "the status alone reads idle while the user looks at the dialog")
         XCTAssertEqual(boardState(), .waiting(.permission(tool: "Bash", summary: nil)))
         XCTAssertEqual(boardState().label, "waiting (permission · Bash)")
+    }
+
+    func testADialogDeniedWithEscapeNoLongerReadsAsWaiting() {
+        askPermission(focused: true)
+        machine.noteKeystroke(now: date(4))
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: true, now: date(10)), .idle)
+        XCTAssertEqual(machine.openDialogs.count, 1, "Esc fires no hook")
+        XCTAssertEqual(boardState(), .idle, "as the stuck-agent check reads it")
+    }
+
+    func testADialogOfAnEarlierClaudeDoesNotReadAsWaiting() {
+        askPermission(focused: true)
+        let later = ForegroundProcess(instance: ProcessInstance(pid: 4343, startedAt: t0 + 30), name: "claude", arguments: ["claude"])
+        XCTAssertNil(machine.visibleDialog(foreground: later))
+        XCTAssertNotNil(machine.visibleDialog(foreground: claude))
     }
 
     func testADialogApprovedWhileItsToolRunsReadsAsWorking() {

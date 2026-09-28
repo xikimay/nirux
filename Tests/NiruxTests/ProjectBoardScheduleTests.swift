@@ -73,5 +73,15 @@ final class ProjectBoardScheduleTests: XCTestCase {
         schedule.start(.worktrees, now: 1_001)
         schedule.expire(.worktrees)
         XCTAssertEqual(due(schedule, at: 1_002), [], "not while it is being read")
+        schedule.finish(.worktrees)
+        XCTAssertEqual(due(schedule, at: 1_003), [.worktrees], "that read may predate the change: again")
+        schedule.start(.worktrees, now: 1_003)
+        schedule.finish(.worktrees)
+        XCTAssertEqual(due(schedule, at: 1_004), [])
+    }
+
+    func testTheClockKeepsCountingWhileTheMacSleeps() {
+        // CLOCK_MONOTONIC counts sleep; systemUptime doesn't.
+        XCTAssertGreaterThanOrEqual(ProjectBoard.clock(), ProcessInfo.processInfo.systemUptime - 1)
     }
 }

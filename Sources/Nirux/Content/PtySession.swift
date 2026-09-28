@@ -315,9 +315,11 @@ final class PtySession: @unchecked Sendable {
     /// even while the column is focused and reads as idle.
     var pendingAgentDialog: AgentPermissionRequest? { state.machine.pendingDialogs.first }
 
-    /// The dialogs no later tool event superseded: what the column's own
-    /// status believes is on screen (see `AgentStatusMachine.openDialogs`).
-    var agentOpenDialogs: [AgentPermissionRequest] { state.machine.openDialogs }
+    /// The dialog the foreground `claude` is showing, if any (see
+    /// `AgentStatusMachine.visibleDialog`).
+    func agentVisibleDialog(foreground: ForegroundProcess?) -> AgentPermissionRequest? {
+        state.machine.visibleDialog(foreground: foreground)
+    }
 
     /// The request the sidebar can answer, or whose answer is on its way.
     func sidebarApproval(now: TimeInterval) -> AgentPermissionRequest? {

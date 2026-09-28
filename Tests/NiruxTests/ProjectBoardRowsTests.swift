@@ -200,17 +200,21 @@ final class ProjectBoardRowsTests: XCTestCase {
     }
 
     func testTheNewestOpenPullRequestOfABranchWinsOverAMergedOne() {
+        let mergedHead = String(repeating: "a", count: 40)
         let repository = ProjectBoard.LocalRepository(worktrees: [
             worktree("/p/widgets", branch: "main"),
             worktree("/p/widgets.fix", branch: "fix"),
-            worktree("/p/widgets.done", branch: "done")
+            worktree("/p/widgets.done", branch: "done", head: mergedHead),
+            worktree("/p/widgets.reused", branch: "reused", head: String(repeating: "b", count: 40))
         ], remotes: [widgets])
         let result = rows(
             local: [repository],
             open: [pullRequest(40, "fix"), pullRequest(44, "fix")],
-            merged: [pullRequest(20, "fix", state: "MERGED"), pullRequest(21, "done", state: "MERGED")]
+            merged: [pullRequest(20, "fix", state: "MERGED"), pullRequest(21, "done", state: "MERGED"),
+                     pullRequest(22, "reused", state: "MERGED")]
         )
-        XCTAssertEqual(summary(result), ["main main", "active fix #44", "otherWorktree done #21"])
+        XCTAssertEqual(summary(result), ["main main", "active fix #44", "otherWorktree done #21", "otherWorktree reused"],
+                       "a branch name reused since its merge has new work")
         XCTAssertEqual(result[2].pullRequest?.state, "MERGED", "merged, ready to clean up")
     }
 
@@ -250,6 +254,14 @@ final class ProjectBoardRowsTests: XCTestCase {
             openPullRequests: [pullRequest(1, "main")]
         ))
         XCTAssertEqual(summary(result), ["otherRepository ws [ws]"])
+    }
+
+    func testARemoteThroughAnSSHHostAliasIsTheProjects() {
+        let repository = ProjectBoard.LocalRepository(worktrees: [
+            worktree("/p/widgets", branch: "main"),
+            worktree("/p/widgets.fix", branch: "fix")
+        ], remotes: ProjectBoard.parseRemotes("origin\tgit@github-work:acme/widgets.git (fetch)\n"))
+        XCTAssertEqual(summary(rows(local: [repository], open: [pullRequest(5, "fix")])), ["main main", "active fix #5"])
     }
 
     func testRemotesSpelledDifferentlyStillNameTheRepository() {

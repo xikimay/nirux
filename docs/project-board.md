@@ -165,8 +165,12 @@ documented in B1's pull request:
   but no open pull request, by name. Groups 3 and 4 follow, by name and by
   sidebar order.
 - **A merged pull request** marks its branch's worktree ("#52 merged") when
-  no open one does. Such a worktree without a workspace goes to "Other
-  worktrees", ready for Clean Up.
+  no open one does and the worktree is still at its head: a branch name
+  reused since has new work. Such a worktree without a workspace goes to
+  "Other worktrees", ready for Clean Up.
+- **The project's local repositories** are those with a remote naming the
+  configured `owner/name`, whatever the host: an SSH host alias
+  (`git@github-work:…`) counts.
 - **A bare repository** has no main working tree: its first entry gets no
   row, and its linked worktrees sort like any other.
 - **A fork's pull request** gets no row: it matches no branch, and the queue
@@ -180,8 +184,10 @@ documented in B1's pull request:
   started yet included; a skipped or neutral job doesn't hide a success.
 - **Urgency across a row's agent columns:** stopped on error, exited mid-turn,
   waiting past the stuck threshold, waiting, working, idle. Failures come
-  first: nothing but the user moves them. A dialog of an earlier `claude` in
-  the column (before the one in front started) doesn't read as waiting.
+  first: nothing but the user moves them. "Waiting" follows the stuck-agent
+  check's rule (`AgentStatusMachine.visibleDialog`): a dialog of an earlier
+  `claude`, or one a keystroke reached since (an answer, or Esc, which fires
+  no hook), doesn't read as waiting.
 - **Buttons, most urgent first:** Resume, Focus, Open, Clean Up. A column too
   narrow for all of them leaves out the last ones; clicking the name still
   focuses. Focus goes to the most urgent agent column of the row.
@@ -194,7 +200,8 @@ documented in B1's pull request:
   do. Opening the board, Refresh and a saved board.json read at once when
   its workspace is shown. Refresh doesn't start a read already running.
 - The board reads nothing while board.json is being read again, nor for a
-  deleted project. A pull request that leaves the open list makes the merged
+  deleted project or one without a repository. Its clock keeps counting
+  while the Mac sleeps, so everything is due after a wake. A pull request that leaves the open list makes the merged
   list due at once. A finished clean-up lists the worktrees again.
 - **Without a repository**, or with an unreadable `board.json`, the board says
   so instead of listing rows, and calls no `gh`. Board Settings opens by

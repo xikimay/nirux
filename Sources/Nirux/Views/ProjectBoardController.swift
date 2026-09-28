@@ -68,9 +68,12 @@ final class ProjectBoardController {
         return (name, gitHub)
     }
 
+    /// A check of an open pull request runs: the latest run of each, as
+    /// the Checks column counts them.
     var hasPendingChecks: Bool {
         (openPullRequests ?? []).contains { pullRequest in
-            pullRequest.isFromConfiguredRepository && pullRequest.checks.contains { $0.result == .pending }
+            pullRequest.isFromConfiguredRepository
+                && ProjectBoard.checkSummary(pullRequest.checks, required: []).hasPending
         }
     }
 
@@ -145,7 +148,7 @@ final class ProjectBoardController {
 
     /// Reads what is due. Called on every status refresh (the heartbeat),
     /// which reads only while the board is on screen.
-    func tick(now: TimeInterval = ProcessInfo.processInfo.systemUptime, onScreen: Bool? = nil) {
+    func tick(now: TimeInterval = ProjectBoard.clock(), onScreen: Bool? = nil) {
         guard loaded != nil, !isReadingConfig, projectExists() else { return }
         let due = schedule.due(
             now: now, onScreen: onScreen ?? isOnScreen(), hasPendingChecks: hasPendingChecks, available: availableSources
@@ -159,10 +162,10 @@ final class ProjectBoardController {
         schedule.expire(.worktrees)
     }
 
+    /// Nothing without a repository: the board only says to set one.
     private var availableSources: Set<ProjectBoard.Source> {
-        var sources: Set<ProjectBoard.Source> = [.worktrees]
-        guard repository != nil else { return sources }
-        sources.formUnion([.openPullRequests, .mergedPullRequests])
+        guard repository != nil else { return [] }
+        var sources: Set<ProjectBoard.Source> = [.worktrees, .openPullRequests, .mergedPullRequests]
         if let config = loaded?.config, config.baseBranch != nil, case .workflow = config.postMergeWorkflow {
             sources.insert(.postMergeRun)
         }
