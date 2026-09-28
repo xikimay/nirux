@@ -454,15 +454,15 @@ The queue is a pure state machine: `(state, event) -> (state, [command])`.
   exception is `update-branch`'s 422, which step 2 classifies ("no new commits"
   goes on). A mutation refused by a rate limit stops the queue; only reads
   pause.
-- **Dev builds can't merge.** A build gets a dry-run client unless it runs
-  from an app bundle on the real state (no `NIRUX_STATE_DIR`, which the
-  installed app never sets) that doesn't sit next to a `Package.swift` (where
-  `scripts/bundle.sh` makes it, in a checkout), or `NIRUX_MERGE_QUEUE_LIVE=1` is
-  set. Agents build and click through Nirux inside Nirux on a state of their
-  own, and LaunchServices opens a bundle with no variable at all. Nirux's
-  terminals get an empty `NIRUX_MERGE_QUEUE_LIVE`, so a live Nirux never passes
-  it on to the builds its agents run (decided with the user on 2026-09-28: the
-  design first made any app bundle live).
+- **Dev builds can't merge.** A build gets a dry-run client unless it is
+  signed with a Developer ID, as the nightly is, and runs on the real state (no
+  `NIRUX_STATE_DIR`, which the installed app never sets), or
+  `NIRUX_MERGE_QUEUE_LIVE=1` is set. `swift build` and `scripts/bundle.sh` sign
+  ad hoc, so an agent's build stays a dry run wherever it is copied and however
+  it is opened: LaunchServices passes no variable at all. Nirux's terminals get
+  an empty `NIRUX_MERGE_QUEUE_LIVE`, so a live Nirux never passes it on to the
+  builds its agents run (decided with the user on 2026-09-28 and 2026-09-29:
+  the design first made any app bundle live).
   - The dry-run client reads GitHub and journals the mutations it would make.
   - It writes its own `queue.dry-run.log` and `queue-state.dry-run.json`, so it
     never touches a live queue's files.

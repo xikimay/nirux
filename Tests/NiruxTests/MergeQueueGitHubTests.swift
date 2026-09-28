@@ -365,35 +365,24 @@ final class MergeQueueGitHubTests: XCTestCase {
 
     func testDevBuildsGetTheDryRunClient() {
         let live = GitHubCLIQueueClient { _, _ in XCTFail("no gh in tests"); return .failure(.ghMissing) }
-        let debug = URL(fileURLWithPath: "/work/nirux/.build/arm64-apple-macosx/debug")
-        XCTAssertTrue(MergeQueue.client(environment: [:], bundleURL: debug, live: live).isDryRun)
-        XCTAssertTrue(MergeQueue.client(environment: ["NIRUX_MERGE_QUEUE_LIVE": "true"], bundleURL: debug, live: live).isDryRun)
-        XCTAssertFalse(MergeQueue.client(environment: ["NIRUX_MERGE_QUEUE_LIVE": "1"], bundleURL: debug, live: live).isDryRun)
-        let app = URL(fileURLWithPath: "/Applications/Nirux.app")
-        XCTAssertFalse(MergeQueue.client(environment: [:], bundleURL: app, live: live).isDryRun)
-        // scripts/bundle.sh's bundle, in a checkout, stays a dry run even
-        // when LaunchServices opens it with no variable at all.
-        let checkout = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-bundle-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: checkout) }
-        FileManager.default.createFile(atPath: checkout.appendingPathComponent("Package.swift").path, contents: Data())
-        XCTAssertFalse(MergeQueue.isLive(environment: [:], bundleURL: checkout.appendingPathComponent("Nirux.app")))
-        XCTAssertTrue(MergeQueue.isLive(environment: ["NIRUX_MERGE_QUEUE_LIVE": "1"],
-                                        bundleURL: checkout.appendingPathComponent("Nirux.app")))
-        // A bundle an agent runs on a state of its own stays a dry run.
-        let bundle = URL(fileURLWithPath: "/work/nirux.feat-x/Nirux.app")
-        XCTAssertTrue(MergeQueue.client(environment: ["NIRUX_STATE_DIR": "/tmp/nirux-dev-x"], bundleURL: bundle, live: live).isDryRun)
-        XCTAssertFalse(MergeQueue.client(environment: ["NIRUX_STATE_DIR": "/tmp/nirux-dev-x", "NIRUX_MERGE_QUEUE_LIVE": "1"],
-                                         bundleURL: bundle, live: live).isDryRun)
+        // Like every dev build, the test process isn't signed for release.
+        XCTAssertFalse(MergeQueue.isSignedWithDeveloperID())
+        XCTAssertTrue(MergeQueue.client(environment: [:], live: live).isDryRun)
+        XCTAssertTrue(MergeQueue.client(environment: ["NIRUX_MERGE_QUEUE_LIVE": "true"], live: live).isDryRun)
+        XCTAssertFalse(MergeQueue.client(environment: ["NIRUX_MERGE_QUEUE_LIVE": "1"], live: live).isDryRun)
+        // The release on the real state is live; on a state of its own, not.
+        XCTAssertFalse(MergeQueue.client(environment: [:], isSignedForRelease: true, live: live).isDryRun)
+        XCTAssertTrue(MergeQueue.client(environment: ["NIRUX_STATE_DIR": "/tmp/nirux-dev-x"], isSignedForRelease: true,
+                                        live: live).isDryRun)
         // A live Nirux doesn't pass it on to what its terminals run.
         let terminal = WorkspaceState.makeTerminalEnvironment(
             profileID: "p", workspaceID: "w", agentUUID: "u", missionID: nil, missionHandoffsEnabled: false,
             executablePath: nil, launchID: "l"
         )
         let inherited = ["NIRUX_MERGE_QUEUE_LIVE": "1"].merging(terminal) { _, terminal in terminal }
-        XCTAssertFalse(MergeQueue.isLive(environment: inherited, bundleURL: debug))
+        XCTAssertFalse(MergeQueue.isLive(environment: inherited, isSignedForRelease: false))
 
-        let dryRun = MergeQueue.client(environment: [:], bundleURL: debug, live: live)
+        let dryRun = MergeQueue.client(environment: [:], live: live)
         let mutation = MergeQueue.Mutation.merge(number: 52, head: MQ.sha("a"), method: .merge)
         XCTAssertEqual(dryRun.mutate(mutation, settings: settings), .dryRun(live.commandLine(mutation, settings: settings)))
         XCTAssertTrue(MergeQueue.Files(projectID: "p", stateDirectory: URL(fileURLWithPath: "/s"), dryRun: true)?
