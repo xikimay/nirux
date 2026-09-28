@@ -37,49 +37,79 @@ extension MergeQueue {
         case unreadable(String)
     }
 
-    /// Whether this build may change GitHub: the release (see
-    /// `releaseRequirement`) run on the real state, or any build with
+    /// What this process's signature says (see `releaseRequirement`).
+    enum ReleaseSignature: Equatable, Sendable {
+        case release
+        /// The Security framework's status for the step that failed.
+        case notRelease(OSStatus)
+    }
+
+    /// Whether this build may change GitHub, and why, for the log: the
+    /// notarized release run on the real state, or any build with
     /// `NIRUX_MERGE_QUEUE_LIVE=1`. Agents build and click through Nirux
-    /// inside Nirux: their builds aren't notarized, wherever they are copied
-    /// and however they are opened (LaunchServices passes no variable), and
-    /// they run on a state of their own (`NIRUX_STATE_DIR`, which the
-    /// installed app never sets).
-    static func isLive(environment: [String: String], isSignedForRelease: Bool) -> Bool {
-        if environment["NIRUX_MERGE_QUEUE_LIVE"] == "1" { return true }
-        return isSignedForRelease && (environment["NIRUX_STATE_DIR"] ?? "").isEmpty
+    /// inside Nirux on a state of their own (`NIRUX_STATE_DIR`, which the
+    /// installed app never sets), and LaunchServices opens a bundle with no
+    /// variable at all: their builds aren't notarized, and a bundle next to
+    /// a `Package.swift` (`scripts/bundle.sh`'s, in a checkout) is refused
+    /// even if someone notarized it by hand. The signature is only asked
+    /// for when the rest doesn't decide.
+    static func liveDecision(
+        environment: [String: String], bundleURL: URL, signature: () -> ReleaseSignature
+    ) -> (isLive: Bool, reason: String) {
+        if environment["NIRUX_MERGE_QUEUE_LIVE"] == "1" { return (true, "NIRUX_MERGE_QUEUE_LIVE=1") }
+        guard (environment["NIRUX_STATE_DIR"] ?? "").isEmpty else { return (false, "NIRUX_STATE_DIR is set") }
+        let checkoutManifest = bundleURL.deletingLastPathComponent().appendingPathComponent("Package.swift").path
+        guard !FileManager.default.fileExists(atPath: checkoutManifest) else { return (false, "a build inside a checkout") }
+        switch signature() {
+        case .release: return (true, "the notarized release on the real state")
+        case .notRelease(let status): return (false, "not the notarized release (OSStatus \(status))")
+        }
     }
 
     /// The nightly's signature: a Developer ID Application certificate, and
-    /// Apple's notarization, stapled to the app so it is checked offline. A
-    /// build signed on a Mac that holds the Developer ID isn't notarized.
-    /// `nightly.yml` checks the app it publishes against this same text.
+    /// Apple's notarization, stapled to the app so it is checked offline.
+    /// The nightly runs `Nirux --check-release-signature` on the app it
+    /// publishes, so a release whose queue would stay a dry run fails there.
     static let releaseRequirement = "anchor apple generic"
         + " and certificate 1[field.1.2.840.113635.100.6.2.6] exists"
         + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
         + " and notarized"
 
-    /// Whether this process's signature holds and meets `releaseRequirement`.
-    static func isSignedForRelease() -> Bool {
+    /// Checks this process's signature against `releaseRequirement`. The
+    /// bundle's resources aren't hashed again: they don't make it the
+    /// release, and hashing them takes a tenth of a second.
+    static func releaseSignature() -> ReleaseSignature {
         var code: SecCode?
+        var status = SecCodeCopySelf([], &code)
+        guard status == errSecSuccess, let code else { return .notRelease(status) }
         var requirement: SecRequirement?
-        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
-              SecRequirementCreateWithString(releaseRequirement as CFString, [], &requirement) == errSecSuccess,
-              let requirement
-        else { return false }
-        return SecCodeCheckValidity(code, [], requirement) == errSecSuccess
+        status = SecRequirementCreateWithString(releaseRequirement as CFString, [], &requirement)
+        guard status == errSecSuccess, let requirement else { return .notRelease(status) }
+        status = SecCodeCheckValidity(code, SecCSFlags(rawValue: UInt32(kSecCSDoNotValidateResources)), requirement)
+        return status == errSecSuccess ? .release : .notRelease(status)
+    }
+
+    /// The signature as it was at launch: the check compares the running
+    /// code with the bundle on disk, which an install may replace later.
+    static let signatureAtLaunch = releaseSignature()
+
+    /// Checks the signature off the main thread, as Nirux launches.
+    static func checkSignatureAtLaunch() {
+        DispatchQueue.global(qos: .utility).async { _ = signatureAtLaunch }
     }
 
     /// The client this build runs its queues with: `live`, or a dry run of
     /// it that reads GitHub and journals the mutations it would make.
     static func client(
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        isSignedForRelease: @autoclosure () -> Bool = isSignedForRelease(),
+        bundleURL: URL = Bundle.main.bundleURL,
+        signature: @autoclosure () -> ReleaseSignature = signatureAtLaunch,
         live: @autoclosure () -> any MergeQueueGitHub = GitHubCLIQueueClient.installed
     ) -> any MergeQueueGitHub {
         let client = live()
-        let isLive = isLive(environment: environment, isSignedForRelease: isSignedForRelease())
-        NSLog("[MergeQueue] %@", isLive ? "live: queues change GitHub" : "dry run: not the notarized release on the real state")
-        return isLive ? client : DryRunQueueClient(wrapped: client)
+        let decision = liveDecision(environment: environment, bundleURL: bundleURL, signature: signature)
+        NSLog("[MergeQueue] %@: %@", decision.isLive ? "live" : "dry run", decision.reason)
+        return decision.isLive ? client : DryRunQueueClient(wrapped: client)
     }
 }
 

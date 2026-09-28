@@ -51,6 +51,13 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         if args.count >= 2, args[1] == "--mission" {
             exit(MissionEventCLI.main(Array(args.dropFirst(2))))
         }
+        // The nightly checks the app it publishes the way the merge queue
+        // checks itself (MergeQueue.releaseSignature).
+        if args.count == 2, args[1] == "--check-release-signature" {
+            let signature = MergeQueue.releaseSignature()
+            print(signature == .release ? "release" : "not the notarized release: \(signature)")
+            exit(signature == .release ? 0 : 1)
+        }
 
         let app = NSApplication.shared
         let delegate = NiruxApp()
@@ -59,6 +66,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        MergeQueue.checkSignatureAtLaunch()
         if ProcessInfo.processInfo.environment["NIRUX_TERM_DEBUG"] != nil {
             TerminalDebugLog.enable([.metrics, .lifecycle])
         }
