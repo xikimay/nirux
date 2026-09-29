@@ -1,0 +1,97 @@
+name: Release check (temporary)
+
+# TEMPORARY, never merged: proves on a real notarized build, before merging
+# fix/queue-release-signature, that the app recognizes itself as the release
+# (the nightly's new step). It signs and notarizes, and publishes nothing.
+on:
+  push:
+    branches: [fix/queue-release-signature]
+
+concurrency:
+  group: release-check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Import Developer ID certificate
+        env:
+          APPLE_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          APPLE_DEVELOPER_ID_APPLICATION: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/developer-id-application.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/nirux-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "NIRUX_SIGNING_KEYCHAIN=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+          printf '%s' "$APPLE_DEVELOPER_ID_CERTIFICATE_BASE64" | base64 -D > "$CERTIFICATE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -P "$APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD" \
+            -A \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH" \
+            -T /usr/bin/codesign
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+          if ! security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -F "$APPLE_DEVELOPER_ID_APPLICATION"; then
+            echo "::error::Developer ID signing identity not found: $APPLE_DEVELOPER_ID_APPLICATION"
+            exit 1
+          fi
+
+      - name: Build release
+        run: swift build -c release
+
+      - name: Bundle .app
+        env:
+          NIRUX_CODESIGN_IDENTITY: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+        run: ./scripts/bundle.sh "nightly-check" "$(date +%Y%m%d%H%M)"
+
+      - name: Notarize and staple app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcrun notarytool submit Nirux.app.zip \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --wait
+
+          xcrun stapler staple Nirux.app
+          xcrun stapler validate Nirux.app
+          spctl --assess --type execute --verbose=4 Nirux.app
+
+          rm -f Nirux.app.zip
+          ditto -c -k --keepParent Nirux.app Nirux.app.zip
+
+      - name: Check the app runs its merge queue live
+        timeout-minutes: 5
+        run: ./scripts/check-release-signature.sh Nirux.app
+
+      - name: The same check on the app's files, and on the unsigned build
+        timeout-minutes: 5
+        run: |
+          ./Nirux.app/Contents/MacOS/Nirux --check-release-signature "$PWD/Nirux.app"
+          # The ad hoc build under .build is refused by the requirement (1),
+          # not by a misused check (2).
+          set +e
+          .build/release/Nirux --check-release-signature
+          status=$?
+          set -e
+          test "$status" -eq 1
