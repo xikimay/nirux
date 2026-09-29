@@ -37,29 +37,41 @@ extension MergeQueue {
         case unreadable(String)
     }
 
-    /// What this process's signature says (see `releaseRequirement`).
+    /// What a signature check found (see `releaseRequirement`).
     enum ReleaseSignature: Equatable, Sendable {
         case release
         /// The Security framework's status for the step that failed.
         case notRelease(OSStatus)
 
+        /// Statuses that mean the check itself was misused (flags, a bad
+        /// requirement, a bad argument), not that the code isn't the release:
+        /// such an error once kept the nightly from shipping.
+        static let misuse: Set<OSStatus> = [
+            errSecCSInvalidFlags, errSecCSReqInvalid, errSecCSReqUnsupported, errSecCSInvalidObjectRef, errSecParam
+        ]
+
+        var isMisuse: Bool {
+            if case .notRelease(let status) = self { return Self.misuse.contains(status) }
+            return false
+        }
+
         /// "OSStatus -67050: code failed to satisfy specified code requirement(s)".
         var detail: String {
             guard case .notRelease(let status) = self else { return "the notarized release" }
             let message = (SecCopyErrorMessageString(status, nil) as String?) ?? "unknown error"
-            return "OSStatus \(status): \(message)"
+            return "OSStatus \(status): \(message)" + (isMisuse ? " (the check was misused)" : "")
         }
     }
 
-    /// Whether this build may change GitHub, and why, for the log: the
-    /// notarized release run on the real state, or any build with
-    /// `NIRUX_MERGE_QUEUE_LIVE=1`. Agents build and click through Nirux
-    /// inside Nirux on a state of their own (`NIRUX_STATE_DIR`, which the
-    /// installed app never sets), and LaunchServices opens a bundle with no
-    /// variable at all: their builds aren't notarized, and a bundle next to
-    /// a `Package.swift` (`scripts/bundle.sh`'s, in a checkout) is refused
-    /// even if someone notarized it by hand. The signature is only asked
-    /// for when the rest doesn't decide.
+    /// Whether this build may change GitHub, and why, for the log and a dry
+    /// run's stop: the notarized release run on the real state, or any
+    /// build with `NIRUX_MERGE_QUEUE_LIVE=1`. Agents build and click through
+    /// Nirux inside Nirux on a state of their own (`NIRUX_STATE_DIR`, which
+    /// the installed app never sets), and LaunchServices opens a bundle with
+    /// no variable at all: their builds aren't notarized, and a bundle next
+    /// to a `Package.swift` (`scripts/bundle.sh`'s, in a checkout) is
+    /// refused even if someone notarized it by hand. The signature is only
+    /// asked for when the rest doesn't decide.
     static func liveDecision(
         environment: [String: String], bundleURL: URL, signature: () -> ReleaseSignature
     ) -> (isLive: Bool, reason: String) {
@@ -82,62 +94,71 @@ extension MergeQueue {
         + " and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"
         + " and notarized"
 
-    /// Checks this process's app, as it is on disk, against
-    /// `releaseRequirement`. On disk: `SecCodeCheckValidity` on the running
-    /// code refuses the flags of a static check (errSecCSInvalidFlags), and
-    /// what makes a build the release is its signed files. The nightly runs
-    /// this through `Nirux --check-release-signature`.
-    static func releaseSignature() -> ReleaseSignature {
+    /// `releaseRequirement` compiled, or the status that refused it.
+    private static func requirement() -> (requirement: SecRequirement?, status: OSStatus) {
+        var requirement: SecRequirement?
+        let status = SecRequirementCreateWithString(releaseRequirement as CFString, [], &requirement)
+        return (status == errSecSuccess ? requirement : nil, status)
+    }
+
+    /// This running process against `releaseRequirement`, with its path.
+    /// Default flags check what establishes its identity against the code
+    /// the kernel runs. (A static check's flags, such as
+    /// kSecCSDoNotValidateResources, are refused here: errSecCSInvalidFlags.)
+    static func ownReleaseSignature() -> (signature: ReleaseSignature, path: String?) {
         var code: SecCode?
         var status = SecCodeCopySelf([], &code)
-        guard status == errSecSuccess, let code else { return .notRelease(status) }
+        guard status == errSecSuccess, let code else { return (.notRelease(status), nil) }
+        // Where it runs from, for the nightly's log only.
         var staticCode: SecStaticCode?
-        status = SecCodeCopyStaticCode(code, [], &staticCode)
-        guard status == errSecSuccess, let staticCode else { return .notRelease(status) }
-        return releaseSignature(of: staticCode)
+        var url: CFURL?
+        let path = SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess
+            && staticCode.map { SecCodeCopyPath($0, [], &url) == errSecSuccess } == true ? (url as URL?)?.path : nil
+        let (requirement, requirementStatus) = requirement()
+        guard let requirement else { return (.notRelease(requirementStatus), path) }
+        status = SecCodeCheckValidity(code, [], requirement)
+        return (status == errSecSuccess ? .release : .notRelease(status), path)
     }
 
-    /// The same check on the app (or binary) at `path`: a downloaded
-    /// nightly, say.
+    /// The app (or binary) at `path` against `releaseRequirement`: its
+    /// signature, sealed resources and requirement, as on disk. For a
+    /// downloaded nightly, say.
     static func releaseSignature(atPath path: String) -> ReleaseSignature {
         var staticCode: SecStaticCode?
-        let status = SecStaticCodeCreateWithPath(URL(fileURLWithPath: path) as CFURL, [], &staticCode)
+        var status = SecStaticCodeCreateWithPath(URL(fileURLWithPath: path).standardizedFileURL as CFURL, [], &staticCode)
         guard status == errSecSuccess, let staticCode else { return .notRelease(status) }
-        return releaseSignature(of: staticCode)
-    }
-
-    /// Default flags: the signature, its resources and the requirement.
-    private static func releaseSignature(of staticCode: SecStaticCode) -> ReleaseSignature {
-        var requirement: SecRequirement?
-        var status = SecRequirementCreateWithString(releaseRequirement as CFString, [], &requirement)
-        guard status == errSecSuccess, let requirement else { return .notRelease(status) }
+        let (requirement, requirementStatus) = requirement()
+        guard let requirement else { return .notRelease(requirementStatus) }
         status = SecStaticCodeCheckValidity(staticCode, [], requirement)
         return status == errSecSuccess ? .release : .notRelease(status)
     }
 
-    /// Where this process's app is, for the nightly's log.
-    static func ownCodePath() -> String? {
-        var code: SecCode?
-        var staticCode: SecStaticCode?
-        var url: CFURL?
-        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
-              SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
-              SecCodeCopyPath(staticCode, [], &url) == errSecSuccess, let url
-        else { return nil }
-        return (url as URL).path
-    }
-
-    /// The signature as it was at launch: the check compares the running
-    /// code with the bundle on disk, which an install may replace later.
-    static let signatureAtLaunch = releaseSignature()
+    /// Checked once, as Nirux launches (`checkSignatureAtLaunch`): an
+    /// install may replace the bundle on disk later, and the check reads it.
+    static let signatureAtLaunch = ownReleaseSignature().signature
 
     /// Checks the signature off the main thread, as Nirux launches.
     static func checkSignatureAtLaunch() {
         DispatchQueue.global(qos: .utility).async { _ = signatureAtLaunch }
     }
 
+    /// `Nirux --check-release-signature [path]`: this app, or the one at
+    /// `path`, printed with the requirement and the Security status. Exits
+    /// 0 for the release, 1 for anything else, 2 for a misused check or
+    /// wrong arguments.
+    static func checkReleaseSignatureCommand(_ arguments: [String]) -> Int32 {
+        guard arguments.count <= 1 else {
+            print("usage: Nirux --check-release-signature [path-to-app]")
+            return 2
+        }
+        let (signature, path) = arguments.first.map { (releaseSignature(atPath: $0), Optional($0)) } ?? ownReleaseSignature()
+        print("app: \(path ?? "(this process)")\nrequirement: \(releaseRequirement)\nresult: \(signature.detail)")
+        return signature == .release ? 0 : signature.isMisuse ? 2 : 1
+    }
+
     /// The client this build runs its queues with: `live`, or a dry run of
-    /// it that reads GitHub and journals the mutations it would make.
+    /// it that reads GitHub and journals the mutations it would make, and
+    /// says why.
     static func client(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         bundleURL: URL = Bundle.main.bundleURL,
@@ -147,13 +168,15 @@ extension MergeQueue {
         let client = live()
         let decision = liveDecision(environment: environment, bundleURL: bundleURL, signature: signature)
         NSLog("[MergeQueue] %@: %@", decision.isLive ? "live" : "dry run", decision.reason)
-        return decision.isLive ? client : DryRunQueueClient(wrapped: client)
+        return decision.isLive ? client : DryRunQueueClient(wrapped: client, reason: decision.reason)
     }
 }
 
 /// Reads through `wrapped`; mutations are never sent, only described.
 struct DryRunQueueClient: MergeQueueGitHub {
     let wrapped: any MergeQueueGitHub
+    /// Why this build is a dry run, for the queue's stop.
+    var reason = "a dry run"
 
     var isDryRun: Bool { true }
 
@@ -162,7 +185,7 @@ struct DryRunQueueClient: MergeQueueGitHub {
     }
 
     func mutate(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> MergeQueue.MutationResult {
-        .dryRun(wrapped.commandLine(mutation, settings: settings))
+        .dryRun("\(wrapped.commandLine(mutation, settings: settings)) (dry run: \(reason))")
     }
 
     func commandLine(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> String {

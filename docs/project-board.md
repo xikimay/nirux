@@ -464,14 +464,16 @@ The queue is a pure state machine: `(state, event) -> (state, [command])`.
     notarized otherwise, even signed on a Mac that holds the Developer ID, so
     they stay dry runs wherever they are copied and however they are opened:
     LaunchServices passes no variable at all.
-  - The signature of Nirux's app on disk is checked once, off the main thread,
-    as Nirux launches: an install may replace the bundle later. The log says
-    why a build is a dry run.
-  - The nightly runs `Nirux --check-release-signature` on the app it
-    publishes, the same check, and logs the app, the requirement and the
-    Security status before it fails: a release whose queue would stay a dry
-    run doesn't ship. `Nirux --check-release-signature <path>` checks another
-    app, such as a downloaded nightly.
+  - Nirux checks its running code once, off the main thread, as it launches:
+    an install may replace the bundle later. The log, and a dry run's stop,
+    say why a build is a dry run.
+  - The nightly runs `scripts/check-release-signature.sh` on the app it
+    publishes: the app checks itself as it does at launch, and a release
+    whose queue would stay a dry run doesn't ship. On failure it prints the
+    app, the requirement, the Security status (telling a misused check from
+    a build that isn't the release) and each clause of the requirement.
+    `Nirux --check-release-signature <path>` checks another app's files, such
+    as a downloaded nightly.
   - Nirux's terminals get an empty `NIRUX_MERGE_QUEUE_LIVE`, so a live Nirux
     never passes it on to the builds its agents run. Don't set it with
     `launchctl setenv`: every app LaunchServices opens would get it, agents'

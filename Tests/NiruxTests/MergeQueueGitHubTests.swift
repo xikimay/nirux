@@ -366,16 +366,18 @@ final class MergeQueueGitHubTests: XCTestCase {
 
     func testDevBuildsGetTheDryRunClient() {
         let live = GitHubCLIQueueClient { _, _ in XCTFail("no gh in tests"); return .failure(.ghMissing) }
-        // A typo in the requirement would leave the release a dry run forever.
-        var requirement: SecRequirement?
-        XCTAssertEqual(SecRequirementCreateWithString(MergeQueue.releaseRequirement as CFString, [], &requirement), errSecSuccess)
-        // Refused by the requirement, not by the check itself: an API
-        // misuse (errSecCSInvalidFlags) read as "not the release" once, and
-        // kept the nightly from shipping. /bin/ls is Apple's own, and
-        // xctest, which runs these tests, is signed ad hoc or not at all.
-        XCTAssertEqual(MergeQueue.releaseSignature(atPath: "/bin/ls"), .notRelease(errSecCSReqFailed))
-        guard case .notRelease(let status) = MergeQueue.releaseSignature() else { return XCTFail("xctest read as the release") }
-        XCTAssertTrue([errSecCSReqFailed, errSecCSUnsigned].contains(status), MergeQueue.ReleaseSignature.notRelease(status).detail)
+        // Refused by the requirement, not by the check itself: an API misuse
+        // (errSecCSInvalidFlags) read as "not the release" once, and kept
+        // the nightly from shipping; a requirement typo would too
+        // (errSecCSReqInvalid). Calculator is an Apple bundle, not a
+        // Developer ID one; xctest, which runs these tests, is signed ad hoc.
+        XCTAssertEqual(MergeQueue.releaseSignature(atPath: "/System/Applications/Calculator.app"), .notRelease(errSecCSReqFailed))
+        XCTAssertEqual(MergeQueue.ownReleaseSignature().signature, .notRelease(errSecCSReqFailed))
+        XCTAssertTrue(MergeQueue.ReleaseSignature.notRelease(errSecCSInvalidFlags).isMisuse)
+        XCTAssertFalse(MergeQueue.ReleaseSignature.notRelease(errSecCSReqFailed).isMisuse)
+        // The command the nightly runs: 1 for another app, 2 for wrong arguments.
+        XCTAssertEqual(MergeQueue.checkReleaseSignatureCommand(["/System/Applications/Calculator.app"]), 1)
+        XCTAssertEqual(MergeQueue.checkReleaseSignatureCommand(["/tmp/a", "/tmp/b"]), 2)
 
         let installed = URL(fileURLWithPath: "/Applications/Nirux.app")
         let release = { MergeQueue.ReleaseSignature.release }
@@ -410,14 +412,16 @@ final class MergeQueueGitHubTests: XCTestCase {
         )
         let inherited = ["NIRUX_MERGE_QUEUE_LIVE": "1"].merging(terminal) { _, terminal in terminal }
         XCTAssertFalse(isLive(inherited, signed: adHoc))
-        XCTAssertEqual(MergeQueue.liveDecision(environment: [:], bundleURL: installed, signature: adHoc).reason,
-                       "not the notarized release (OSStatus -67050: code failed to satisfy specified code requirement(s))")
+        XCTAssertTrue(MergeQueue.liveDecision(environment: [:], bundleURL: installed, signature: adHoc).reason
+            .hasPrefix("not the notarized release (OSStatus -67050: "))
 
         let dryRun = MergeQueue.client(environment: [:], bundleURL: installed, signature: .notRelease(errSecCSReqFailed),
                                        live: live)
         XCTAssertTrue(dryRun.isDryRun)
         let mutation = MergeQueue.Mutation.merge(number: 52, head: MQ.sha("a"), method: .merge)
-        XCTAssertEqual(dryRun.mutate(mutation, settings: settings), .dryRun(live.commandLine(mutation, settings: settings)))
+        XCTAssertEqual(dryRun.mutate(mutation, settings: settings),
+                       .dryRun("\(live.commandLine(mutation, settings: settings)) (dry run: not the notarized release "
+                           + "(\(MergeQueue.ReleaseSignature.notRelease(errSecCSReqFailed).detail)))"))
         XCTAssertTrue(MergeQueue.Files(projectID: "p", stateDirectory: URL(fileURLWithPath: "/s"), dryRun: true)?
             .journal.lastPathComponent == "queue.dry-run.log")
     }
