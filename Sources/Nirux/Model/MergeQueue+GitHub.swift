@@ -185,7 +185,7 @@ struct DryRunQueueClient: MergeQueueGitHub {
     }
 
     func mutate(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> MergeQueue.MutationResult {
-        .dryRun("\(wrapped.commandLine(mutation, settings: settings)) (dry run: \(reason))")
+        .dryRun("\(wrapped.commandLine(mutation, settings: settings)) (this build: \(reason))")
     }
 
     func commandLine(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> String {

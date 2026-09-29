@@ -8,11 +8,18 @@ set -uo pipefail
 APP="${1:?Usage: check-release-signature.sh <path-to-Nirux.app>}"
 BINARY="$APP/Contents/MacOS/Nirux"
 
-if "$BINARY" --check-release-signature; then
+"$BINARY" --check-release-signature
+status=$?
+if [[ $status -eq 0 ]]; then
     exit 0
 fi
 
-echo "::error::$APP doesn't recognize itself as the notarized release: its merge queue would stay a dry run."
+case $status in
+    1) why="it doesn't recognize itself as the notarized release" ;;
+    2) why="the check was misused (a flag or an argument), not answered" ;;
+    *) why="the app didn't run the check (exit $status)" ;;
+esac
+echo "::error::$APP failed the release check: $why. Its merge queue would stay a dry run."
 echo "--- The same check on the app's files:"
 "$BINARY" --check-release-signature "$APP" || true
 echo "--- Its signature:"

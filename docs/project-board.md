@@ -468,8 +468,9 @@ The queue is a pure state machine: `(state, event) -> (state, [command])`.
     an install may replace the bundle later. The log, and a dry run's stop,
     say why a build is a dry run.
   - The nightly runs `scripts/check-release-signature.sh` on the app it
-    publishes: the app checks itself as it does at launch, and a release
-    whose queue would stay a dry run doesn't ship. On failure it prints the
+    publishes: the app checks its own signature as it does at launch (the
+    environment and the checkout rule aside), and a release whose queue would
+    stay a dry run doesn't ship. On failure it prints the
     app, the requirement, the Security status (telling a misused check from
     a build that isn't the release) and each clause of the requirement.
     `Nirux --check-release-signature <path>` checks another app's files, such
