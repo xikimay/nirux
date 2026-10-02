@@ -2,7 +2,10 @@ import AppKit
 
 /// Cup near the trailing end of the main window's title bar (the Claude
 /// usage limits take the very end) while Nirux keeps the Mac awake (see
-/// `KeepAwakeController`); the tooltip says why.
+/// `KeepAwakeController`); the tooltip says why. The rest of the time it
+/// takes no room: the controller's `isHidden` only works for top and
+/// bottom accessories (a hidden trailing one keeps its frame and stays
+/// drawn), so the view hides and shrinks to nothing itself.
 final class KeepAwakeIndicator: NSTitlebarAccessoryViewController {
     static let symbolName = "cup.and.saucer.fill"
     private static let size = NSSize(width: 30, height: 22)
@@ -12,7 +15,6 @@ final class KeepAwakeIndicator: NSTitlebarAccessoryViewController {
     init() {
         super.init(nibName: nil, bundle: nil)
         layoutAttribute = .trailing
-        isHidden = true
     }
 
     @available(*, unavailable)
@@ -20,6 +22,7 @@ final class KeepAwakeIndicator: NSTitlebarAccessoryViewController {
 
     override func loadView() {
         let container = NSView(frame: NSRect(origin: .zero, size: Self.size))
+        container.isHidden = true
         imageView.image = NSImage(systemSymbolName: Self.symbolName, accessibilityDescription: nil)
         imageView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .regular)
         imageView.contentTintColor = NSColor.white.withAlphaComponent(0.45)
@@ -27,11 +30,13 @@ final class KeepAwakeIndicator: NSTitlebarAccessoryViewController {
         imageView.frame = container.bounds
         imageView.autoresizingMask = [.width, .height]
         container.addSubview(imageView)
+        container.frame.size.width = 0
         view = container
     }
 
     func update(isActive: Bool, workingAgentCount: Int, isMergeQueueRunning: Bool = false) {
-        isHidden = !isActive
+        view.isHidden = !isActive
+        view.frame.size.width = isActive ? Self.size.width : 0
         let text = Self.toolTip(workingAgentCount: workingAgentCount, isMergeQueueRunning: isMergeQueueRunning)
         view.toolTip = text
         imageView.setAccessibilityLabel(text)
