@@ -231,7 +231,7 @@ extension WorkspaceState {
             ciLabel.frame = NSRect(x: padding + indent, y: cursorY - 12, width: panelWidth - padding * 2 - indent, height: 12)
             panel.addSubview(ciLabel)
             pilotPanelViews.append(ciLabel)
-            let ciUrl = (ciStatus == "FAILURE" ? pullRequest.failedCheckUrl : nil) ?? pullRequest.url
+            let ciUrl = (ciStatus == "FAILURE" ? pullRequest.failedCheckUrl : nil) ?? "\(pullRequest.url)/checks"
             pilotClickableAreas.append(PilotClickableArea(frame: ciLabel.frame, url: ciUrl, label: ciLabel))
             cursorY -= 14
         }
@@ -287,8 +287,8 @@ extension WorkspaceState {
         for area in pilotClickableAreas where area.frame.contains(panelPoint) {
             if area.url == "action:diff" {
                 onDiffStatsClicked?()
-            } else if let url = URL(string: area.url) {
-                NSWorkspace.shared.open(url)
+            } else {
+                onTerminalOpenURL?(self, area.url)
             }
             return true
         }

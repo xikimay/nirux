@@ -37,6 +37,8 @@ final class SidebarView: NSView {
     /// Resume clicked: (workspaceIndex, columnIndex, the failure it was for).
     var onAgentResume: ((Int, Int, TimeInterval) -> Void)?
     var onDiffStatsClicked: ((Int) -> Void)?
+    /// A card's PR link clicked: (workspaceIndex, url).
+    var onWorkspaceURLClicked: ((Int, String) -> Void)?
     var onWorkspaceAction: ((WorkspaceSidebarAction, Int) -> Void)?
     /// Whether the workspace's menu offers "Clean Up Worktree…" (it's open
     /// in a linked worktree, or its folder is gone). Asked on each menu.
@@ -482,6 +484,8 @@ final class SidebarView: NSView {
                 toggleInactiveSection()
             } else if let workspaceIndex = Self.diffActionWorkspaceIndex(url) {
                 onDiffStatsClicked?(workspaceIndex)
+            } else if let (workspaceIndex, url) = Self.workspaceURLAction(url) {
+                onWorkspaceURLClicked?(workspaceIndex, url)
             } else if let url = URL(string: url) {
                 NSWorkspace.shared.open(url)
             }
@@ -657,12 +661,25 @@ final class SidebarView: NSView {
         "action:diff:\(workspaceIndex)"
     }
 
+    /// Opens `url` in a browser column of the card's workspace.
+    static func workspaceURLAction(workspaceIndex: Int, url: String) -> String {
+        "action:open:\(workspaceIndex):\(url)"
+    }
+
     static let inactiveSectionActionURL = "action:inactive-section-toggle"
 
     private static func diffActionWorkspaceIndex(_ value: String) -> Int? {
         let prefix = "action:diff:"
         guard value.hasPrefix(prefix) else { return nil }
         return Int(value.dropFirst(prefix.count))
+    }
+
+    private static func workspaceURLAction(_ value: String) -> (Int, String)? {
+        let prefix = "action:open:"
+        guard value.hasPrefix(prefix) else { return nil }
+        let rest = value.dropFirst(prefix.count)
+        guard let colon = rest.firstIndex(of: ":"), let workspaceIndex = Int(rest[..<colon]) else { return nil }
+        return (workspaceIndex, String(rest[rest.index(after: colon)...]))
     }
 }
 
