@@ -82,8 +82,10 @@ final class RealStateGuardTests: XCTestCase {
         try FileManager.default.createSymbolicLink(atPath: linkedInstall, withDestinationPath: installedBundle)
         XCTAssertNil(refused(installedExecutable, installed: linkedInstall))
         let otherCase = root.appendingPathComponent("applications/NIRUX.APP").path
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: otherCase), "case-sensitive volume")
-        XCTAssertNil(refused(installedExecutable, installed: otherCase))
+        // A case-sensitive volume has no such folder.
+        if FileManager.default.fileExists(atPath: otherCase) {
+            XCTAssertNil(refused(installedExecutable, installed: otherCase))
+        }
     }
 
     func testATranslocatedAppIsJudgedByWhereItWasOpenedFrom() throws {

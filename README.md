@@ -34,7 +34,7 @@ Download `Nirux.app.zip` from the nightly release:
 https://github.com/xikimay/nirux/releases/tag/nightly
 ```
 
-Unzip it and move `Nirux.app` to `/Applications` (or to `~/Applications` if your account can't write `/Applications`). Nirux opens your workspaces only from there: a copy started anywhere else explains why and quits, so it can't overwrite them.
+Unzip it and move `Nirux.app` to `/Applications` (or to `~/Applications` if `/Applications` has no Nirux and your account can't write there). Nirux opens your workspaces only from there: a copy started anywhere else explains why and quits, so it can't overwrite them.
 
 Current public builds should be signed and notarized. If you are opening an older pre-notarized build and macOS Gatekeeper says Apple cannot verify it, open it once with:
 
@@ -301,7 +301,7 @@ Run from SwiftPM, on a state of its own:
 NIRUX_STATE_DIR=/tmp/nirux-dev swift run Nirux
 ```
 
-Only the installed app opens your workspaces: `/Applications/Nirux.app`, or `~/Applications/Nirux.app` when `/Applications` has none. Any other copy (`swift run`, `.build/debug/Nirux`, a `bundle.sh` bundle, a downloaded copy run from elsewhere) quits unless `NIRUX_STATE_DIR` is set. Started from a terminal, it says why on stderr; started by Finder or a `nirux://` link, it shows an alert. The check compares files rather than paths, so a symlink or another spelling of the same folder still counts, and it recognizes the installed app when Gatekeeper runs it from a translocated copy. Copies built before this check aren't covered: delete old `Nirux.app` bundles, since LaunchServices may still hand them `nirux://` links.
+Only the installed app opens your workspaces: `/Applications/Nirux.app`, or `~/Applications/Nirux.app` when `/Applications` has none. Any other copy (`swift run`, `.build/debug/Nirux`, a `bundle.sh` bundle, a downloaded copy run from elsewhere) quits unless `NIRUX_STATE_DIR` is set (non-empty). It always says why on stderr, and shows an alert too when LaunchServices started it (Finder, the Dock, `open`, a `nirux://` link). The check compares files rather than paths, so a symlink or another spelling of the same folder still counts, and it recognizes the installed app when Gatekeeper runs it from a translocated copy. Copies built before this check aren't covered: delete old `Nirux.app` bundles, since LaunchServices may still hand them `nirux://` links.
 
 `NIRUX_ALLOW_REAL_STATE=1` (exactly `1`) lets another copy use the real state anyway. It then restores and saves the installed app's workspaces and relaunches their agent sessions, even while the installed app runs. For a bundle, also set `NIRUX_SKIP_HOOK_INSTALL=1`, or it points the agent hooks at itself. Nirux doesn't pass the variable on to its terminals.
 

@@ -19,10 +19,10 @@ enum Persistence {
     static let stagingPrefix = "state.tmp-"
 
     private static var stateURL: URL {
-        // Development escape hatch: a debug launch restores AND re-saves the
-        // same state file, duplicating live agent sessions. Point
-        // NIRUX_STATE_DIR elsewhere to smoke-test safely. (HOME is not
-        // respected by Application Support resolution — this is.)
+        // Development builds need NIRUX_STATE_DIR: on the real state they
+        // would restore AND re-save the installed app's file, duplicating
+        // live agent sessions, so RealStateGuard stops them without it.
+        // (HOME is not respected by Application Support resolution — this is.)
         if let override = stateDirectoryOverride(in: ProcessInfo.processInfo.environment) {
             let dir = URL(fileURLWithPath: override, isDirectory: true)
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

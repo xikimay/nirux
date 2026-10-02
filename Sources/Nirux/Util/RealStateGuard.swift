@@ -117,7 +117,7 @@ enum RealStateGuard {
     /// account's own temporary folder). The hooks stay put too: an app
     /// bundle would point them at itself.
     static func isolatedLaunchCommand(executablePath: String) -> String {
-        #"NIRUX_STATE_DIR="$TMPDIR/nirux-dev" NIRUX_SKIP_HOOK_INSTALL=1 "#
+        #"NIRUX_STATE_DIR="${TMPDIR:-/tmp}/nirux-dev" NIRUX_SKIP_HOOK_INSTALL=1 "#
             + AgentHookInstaller.shellQuoted(executablePath)
     }
 
@@ -137,8 +137,9 @@ enum RealStateGuard {
             """.utf8))
         // A terminal, a script or an agent's tool started it: stderr says it
         // all, and an alert would steal the focus and wait for a click. Apps
-        // that LaunchServices starts are children of launchd.
-        guard getppid() == 1 else { exit(EXIT_FAILURE) }
+        // that LaunchServices starts are children of launchd in its session;
+        // one detached from a shell (`&`, nohup) keeps the shell's session.
+        guard getppid() == 1, getsid(0) == 1 else { exit(EXIT_FAILURE) }
         let app = NSApplication.shared
         let delegate = RefusedLaunchDelegate(copy: copy, installed: installedBundlePath, command: command)
         app.delegate = delegate
@@ -172,7 +173,7 @@ final class RefusedLaunchDelegate: NSObject, NSApplicationDelegate {
     /// app: never acted on, only mentioned. It arrives before
     /// applicationDidFinishLaunching.
     func application(_ application: NSApplication, open urls: [URL]) {
-        openedByLink = true
+        if urls.contains(where: { $0.scheme == "nirux" }) { openedByLink = true }
     }
 
     func respond(to response: NSApplication.ModalResponse, pasteboard: NSPasteboard = .general) {
@@ -194,7 +195,7 @@ final class RefusedLaunchDelegate: NSObject, NSApplicationDelegate {
                 + "can't overwrite them or relaunch their agent sessions. To use Nirux, open \($0)."
         } ?? "Nirux opens your workspaces only once installed in /Applications (or in the Applications "
             + "folder of your home folder), so an older or development copy can't overwrite them or "
-            + "relaunch their agent sessions. To use Nirux, move it there."
+            + "relaunch their agent sessions. To use Nirux, install it as /Applications/Nirux.app."
         alert.informativeText = "It runs from \(copy).\n\n" + link + use
             + "\n\nTo try this copy on a state of its own, run in Terminal:"
         let field = NSTextField(wrappingLabelWithString: command)
