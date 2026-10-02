@@ -91,6 +91,7 @@ Typical command palette actions:
 - Show Getting Started
 - Open Claude Code
 - Open Codex
+- New Task…
 - New Worktree
 - Open Worktree
 - Clean Up Merged Worktrees
@@ -268,6 +269,23 @@ The command palette action `Install Agent Skills` writes the bundled skills to:
 ```
 
 `nirux-worktree` lets supported agents open isolated Nirux workspaces when the user asks to start work on a feature, bug, or separate branch. `nirux-show-code` teaches agents to open code in the editor column via `nirux://open-editor` when the user asks to see code.
+
+### Starting a task from Nirux
+
+`New Task…` in the command palette starts an agent on a task without going through another agent session. Describe the task, then pick a template, the agent (Claude Code or Codex) and the project (the current one by default). The first line of the description names the new workspace and suggests the branch: `fix/…` when the template is about a bug or the description starts with a word such as "Fix", "Bug" or "Crash", `feat/…` otherwise. Edit the branch freely. Return adds a line to the description; ⌘Return starts the task from anywhere in the form.
+
+`Start Task` then:
+
+- fetches the branch the task starts from: the project's base branch on `origin` (Board Settings…), else origin's default branch, else its `main` or `master`. The fetch takes at most 10 seconds and never asks for credentials. If it fails, the form says why, and `Start Task` again starts from that branch as last fetched. A repository whose `origin` has none of these starts from its checkout's HEAD; the form shows which, in orange;
+- creates a worktree next to the project's main checkout, on a new branch, without an upstream. A branch that already exists, whatever its case, locally or on a remote, one a worktree has checked out, and one starting with a remote's name (`origin/…`) are refused, and the form stays open with the error. If git fails once the worktree exists (a failing `post-checkout` hook), Nirux opens it and shows git's error; if it fails having made only the branch, Nirux deletes the branch, so the name can be tried again;
+- adds `.claude-handover.md` and `.codex-handover.md` to the repository's `.git/info/exclude` if they aren't there, then writes the handover, private to you, with the description and the template's text, in the folder the agent starts in;
+- opens a workspace named after the task in that project and launches the agent, told to read the handover. The project's brief and the Claude session name apply as for any worktree workspace.
+
+`Close` hides the form while this runs, so a long checkout doesn't hold the window: the workspace opens when it's ready, and the form comes back if it fails.
+
+The project's repository is the one its workspaces are in: the active workspace's folder, then the folder its terminal is in, when it belongs to the project, then each of the project's other workspaces. When the project's workspace sits in a folder of the repository rather than at its top, the task's workspace opens in the same folder of the new worktree.
+
+Templates are kept per project in `<state dir>/projects/<project id>/task-templates.md`, one `## Name` section per template. `Edit Task Templates…` in the project's menu opens that file in the editor, creating it on first use with three templates: Bugfix, Feature (full review cycle) and Investigation (no code). Until it exists, the form offers those three.
 
 ### Cleaning up merged worktrees
 

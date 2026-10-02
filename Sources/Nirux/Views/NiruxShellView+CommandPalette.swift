@@ -90,6 +90,13 @@ extension NiruxShellView {
             ) { [weak self] in
                 self?.showNewWorkspacePanel()
             },
+            PaletteAction(
+                icon: "🚀", title: "New Task…",
+                subtitle: "Describe a task: Nirux makes its worktree and hands it to an agent",
+                shortcut: nil
+            ) { [weak self] in
+                self?.showNewTaskPanel()
+            },
             PaletteAction(icon: "🌳", title: "New Worktree", subtitle: "Create a git worktree + workspace", shortcut: nil) { [weak self] in
                 self?.showWorktreePanel()
             },

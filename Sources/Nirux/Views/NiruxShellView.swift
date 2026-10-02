@@ -106,6 +106,7 @@ final class NiruxShellView: NSView {
     /// A "Board Settings…" reading board.json and the checkouts, so a
     /// second click doesn't open a second form.
     var isReadingBoardSettings = false
+    var newTaskPanel: NewTaskPanel?
     /// The Project Board's `gh` reads. Tests set a fake before a board opens.
     lazy var projectBoardClient: any ProjectBoardGitHub = GitHubCLIBoardClient.installed
     /// Reloads the boards whose board.json was saved.
@@ -172,6 +173,7 @@ final class NiruxShellView: NSView {
         sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }
         sidebar.onEditProfileBrief = { [weak self] profileID in self?.editSpaceBrief(profileID: profileID) }
         sidebar.onEditBoardSettings = { [weak self] profileID in self?.showBoardSettings(profileID: profileID) }
+        sidebar.onEditTaskTemplates = { [weak self] profileID in self?.editTaskTemplates(profileID: profileID) }
         sidebar.onRecolorProfile = { [weak self] profileID, hex in self?.recolorSpace(profileID: profileID, colorHex: hex) }
         sidebar.onDeleteProfile = { [weak self] profileID in self?.confirmDeleteSpace(profileID: profileID) }
         sidebar.onMoveWorkspaceToProfile = { [weak self] workspaceID, profileID in

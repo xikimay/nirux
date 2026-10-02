@@ -172,7 +172,8 @@ stored and managed:
   a workspace in it. ⌘⌥←/→ skips empty spaces, so cycling doesn't open
   workspaces.
 - **Space menu**, on the header or on right-clicking any space's dot:
-  "Rename Space…", "Edit Space Brief…", "Space Color" and "Delete Space…".
+  "Rename Space…", "Edit Space Brief…", "Board Settings…", "Edit Task
+  Templates…", "Space Color" and "Delete Space…".
   Right-clicking lets you manage an empty space without opening a workspace in
   it. A deleted space's workspaces move to the default space, and its brief
   stays on disk. A new space takes a color no other space uses.
@@ -478,6 +479,10 @@ but:
 - Codex requires the user to trust each hook;
 - Codex caps hook output at roughly 2,500 tokens.
 
+**Task templates.** The project's folder also holds `task-templates.md`, the
+templates New Task… offers (see the README). A template is how to work on one
+task, so it goes into that task's handover, never into the brief.
+
 **Optional claude.ai doc (deferred).** A project could also store the link to a
 claude.ai doc, and the injected brief would tell Claude to read it through the
 Claude Docs connector. Nirux couldn't display it and Codex couldn't read it.
@@ -687,7 +692,7 @@ branches also change; those wait for them to merge.
 | 6 | Per-project defaults | 2, 4 | settings, terminal env, `nirux://` request handling |
 | 7 | Session ledger and resume. The ledger and the resume plan shipped; the list and Resume wait for the Project Board | 4, 5 | hook events, restore |
 | 8 | Project view column. Replaced by the [Project Board](project-board.md) plan | 4, 5 | git and PR polling |
-| 9 | "Finish" (PR merged, then remove worktree), with handover files added to `info/exclude`. The cleanup shipped in #46; handover files aren't in `info/exclude` yet | 8 | worktree creation |
+| 9 | "Finish" (PR merged, then remove worktree), with handover files added to `info/exclude`. The cleanup shipped in #46; New Task… adds the handover files to `info/exclude`, other worktree flows don't yet | 8 | worktree creation |
 
 PRs 1, 2 and 4 are the core: names, brief, and projects that persist. PRs 5 to
 9 start only if projects get used.

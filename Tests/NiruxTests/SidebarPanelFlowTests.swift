@@ -21,8 +21,8 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 "Rename Workspace", "New Workspace", "Move Up", "Move Down", "Move to Inactive", "Move to Active"
             ],
             "testSpaceMenuItems": [
-                "New Space", "Rename Space…", "Space Color", "Edit Space Brief…", "Board Settings…", "Move to Space",
-                "Delete Space…"
+                "New Space", "Rename Space…", "Space Color", "Edit Space Brief…", "Edit Task Templates…", "Board Settings…",
+                "Move to Space", "Delete Space…"
             ]
         ],
         exemptions: [:]
@@ -166,6 +166,15 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertTrue(brief.hasPrefix(harness.stateDirectory + "/"), brief)
             let editor = try XCTUnwrap(spaceWorkspace.columns.compactMap(\.editorColumn).first)
             harness.waitUntil("the brief in the editor") { editor.activePath == brief }
+
+            // Written with the default templates on first use, then opened
+            // in the same editor.
+            harness.perform(["Edit Task Templates…"], in: shell.sidebar.spaceOptionsMenu())
+            let templates = try XCTUnwrap(TaskTemplates.fileURL(spaceID: space.id)).path
+            XCTAssertTrue(templates.hasPrefix(harness.stateDirectory + "/"), templates)
+            harness.waitUntil("the templates in the editor") { editor.activePath == templates }
+            XCTAssertEqual(TaskTemplates.load(spaceID: space.id), TaskTemplates.defaults)
+            XCTAssertEqual(spaceWorkspace.columns.compactMap(\.editorColumn).count, 1)
 
             // board.json and the checkouts are read off the main thread,
             // then the form opens as a sheet; Cancel writes nothing.

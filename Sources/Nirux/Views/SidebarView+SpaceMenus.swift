@@ -3,9 +3,10 @@ import AppKit
 // MARK: - Space management menus (see ProjectStore)
 
 extension SidebarView {
-    /// A space's items: rename, brief, board settings, color, delete. Used by
-    /// the active space's header menu and by right-clicking any space's dot,
-    /// so an empty space can be managed without opening a workspace in it.
+    /// A space's items: rename, brief, board settings, task templates, color,
+    /// delete. Used by the active space's header menu and by right-clicking
+    /// any space's dot, so an empty space can be managed without opening a
+    /// workspace in it.
     func addSpaceManagementItems(to menu: NSMenu, for profile: ProfileInfo) {
         menu.addClosureItem(title: "Rename Space…") { [weak self] in
             self?.onRenameProfile?(profile.id)
@@ -15,6 +16,9 @@ extension SidebarView {
         }
         menu.addClosureItem(title: "Board Settings…") { [weak self] in
             self?.onEditBoardSettings?(profile.id)
+        }
+        menu.addClosureItem(title: "Edit Task Templates…") { [weak self] in
+            self?.onEditTaskTemplates?(profile.id)
         }
         let colorItem = NSMenuItem(title: "Space Color", action: nil, keyEquivalent: "")
         let colors = NSMenu()
