@@ -30,7 +30,7 @@ final class StatusBarView: NSView {
         var stopsAll = false
     }
 
-    private static let crashColor = NSColor(red: 0.95, green: 0.47, blue: 0.43, alpha: 0.9)
+    private static let crashColor = Theme.Color.error.withAlphaComponent(0.9)
     private static let copyTitle = "Copy summary"
     private static let copiedTitle = "Copied ✓"
     private static let copiedFlashDuration: TimeInterval = 1.5
@@ -72,7 +72,7 @@ final class StatusBarView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(red: 0.09, green: 0.09, blue: 0.11, alpha: 1).cgColor
+        layer?.backgroundColor = Theme.Color.canvas.cgColor
 
         // Top border
         let border = NSView()
@@ -158,7 +158,7 @@ final class StatusBarView: NSView {
         button.bezelStyle = .inline
         button.isBordered = false
         button.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
-        button.contentTintColor = .niruxAccent
+        button.contentTintColor = Theme.Color.accent
         button.isHidden = true
         addSubview(button)
         return button
@@ -242,11 +242,11 @@ final class StatusBarView: NSView {
         if updateHitFrame.contains(loc) {
             NSCursor.pointingHand.set()
             showsPointingHand = true
-            label?.textColor = NSColor(red: 0.57, green: 0.74, blue: 1.0, alpha: 1.0)
+            label?.textColor = Theme.Color.accent
         } else {
             NSCursor.arrow.set()
             showsPointingHand = false
-            label?.textColor = NSColor.niruxAccent.withAlphaComponent(0.8)
+            label?.textColor = Theme.Color.accent.withAlphaComponent(0.8)
         }
     }
 
@@ -254,7 +254,7 @@ final class StatusBarView: NSView {
         guard isShowingUpdate else { return }
         NSCursor.arrow.set()
         showsPointingHand = false
-        label?.textColor = NSColor.niruxAccent.withAlphaComponent(0.8)
+        label?.textColor = Theme.Color.accent.withAlphaComponent(0.8)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -341,7 +341,7 @@ final class StatusBarView: NSView {
             openReportButton?.isHidden = false
         } else if let updateVersion {
             label?.stringValue = "● Update available · \(updateVersion)"
-            label?.textColor = NSColor.niruxAccent.withAlphaComponent(0.8)
+            label?.textColor = Theme.Color.accent.withAlphaComponent(0.8)
             installButton?.isHidden = false
         } else {
             label?.stringValue = ""

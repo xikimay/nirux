@@ -9,7 +9,7 @@ final class ColumnIndicatorView: NSView {
 
     private static let dotSize: CGFloat = 6
     private static let dotGap: CGFloat = 8
-    private static let accentColor: NSColor = .niruxAccent
+    private static let accentColor: NSColor = Theme.Color.accent
     private static let dimColor = NSColor.white.withAlphaComponent(0.25)
     private static let notifColor = NSColor.systemOrange
 
@@ -46,7 +46,7 @@ final class ColumnIndicatorView: NSView {
         // Background pill
         let pillPad: CGFloat = 10
         let pillRect = CGRect(x: x - pillPad, y: 1, width: totalW + pillPad * 2, height: bounds.height - 2)
-        ctx.setFillColor(NSColor(red: 0.1, green: 0.1, blue: 0.13, alpha: 0.85).cgColor)
+        ctx.setFillColor(Theme.Color.base.withAlphaComponent(0.85).cgColor)
         let path = CGMutablePath()
         path.addRoundedRect(in: pillRect, cornerWidth: (bounds.height - 2) / 2, cornerHeight: (bounds.height - 2) / 2)
         ctx.addPath(path)

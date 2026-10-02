@@ -84,7 +84,7 @@ final class SidebarDotIndicatorView: NSView {
         super.draw(dirtyRect)
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
 
-        ctx.setFillColor(NSColor(red: 0.09, green: 0.09, blue: 0.115, alpha: 0.96).cgColor)
+        ctx.setFillColor(Theme.Color.canvas.withAlphaComponent(0.96).cgColor)
         ctx.fill(bounds)
         ctx.setFillColor(NSColor.white.withAlphaComponent(0.07).cgColor)
         ctx.fill(CGRect(x: 14, y: bounds.height - 1, width: bounds.width - 28, height: 1))
@@ -92,7 +92,7 @@ final class SidebarDotIndicatorView: NSView {
         for (idx, rect) in dotRects().enumerated() {
             let item = items[idx]
             let isHovered = idx == hoveredIndex
-            let color = NSColor.niruxColor(hex: item.colorHex) ?? .niruxAccent
+            let color = NSColor.niruxColor(hex: item.colorHex) ?? Theme.Color.accent
             if item.label != nil {
                 drawActionBackground(in: rect, context: ctx, hovered: isHovered)
             } else {

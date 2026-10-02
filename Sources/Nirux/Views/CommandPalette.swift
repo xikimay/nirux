@@ -153,14 +153,14 @@ final class CommandPalette: NSObject {
         palettePanel.backgroundColor = .clear
         palettePanel.isOpaque = false
         palettePanel.hasShadow = true
-        palettePanel.appearance = NSAppearance(named: .darkAqua)
+        palettePanel.appearance = Theme.appearance
         palettePanel.becomesKeyOnlyIfNeeded = false
         palettePanel.acceptsMouseMovedEvents = true
 
         let background = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 340))
         background.wantsLayer = true
         background.layer?.cornerRadius = 12
-        background.layer?.backgroundColor = NSColor(red: 0.11, green: 0.11, blue: 0.15, alpha: 0.98).cgColor
+        background.layer?.backgroundColor = Theme.Color.base.withAlphaComponent(0.98).cgColor
         background.layer?.borderWidth = 1
         background.layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
         background.layer?.masksToBounds = true
@@ -454,7 +454,7 @@ final class CommandPalette: NSObject {
         }
 
         // Highlight
-        let accent = NSColor.niruxAccent.withAlphaComponent(0.15)
+        let accent = Theme.Color.accent.withAlphaComponent(0.15)
         let selectedItem = listLayout.itemIndex(ofRow: selectedIndex)
         for (index, view) in rowViews.enumerated() {
             view.layer?.backgroundColor = (index == selectedItem) ? accent.cgColor : NSColor.clear.cgColor

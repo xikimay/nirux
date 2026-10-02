@@ -681,7 +681,7 @@ extension WorkspaceState {
     private static let resizeHandleWidth: CGFloat = 9
     private static let focusBorderWidth: CGFloat = 2
     private static let focusCornerRadius: CGFloat = 6
-    private static let focusColor = NSColor.niruxAccent.withAlphaComponent(0.7)
+    private static let focusColor = Theme.Color.accent.withAlphaComponent(0.7)
 
     func layoutAndScroll(
         viewportWidth: CGFloat, height: CGFloat, animated: Bool,

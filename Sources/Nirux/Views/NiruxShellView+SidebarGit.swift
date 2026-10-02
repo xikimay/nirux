@@ -195,7 +195,7 @@ extension NiruxShellView {
                     colLayer?.removeAnimation(forKey: "attentionPulse")
                     // Restore focus border if this is the focused column
                     let isFocus = (wsIndex == activeWSIndex && colIndex == workspace.focusedIndex)
-                    let accent = NSColor.niruxAccent.withAlphaComponent(0.7).cgColor
+                    let accent = Theme.Color.accent.withAlphaComponent(0.7).cgColor
                     colLayer?.cornerRadius = isFocus ? 6 : 0
                     colLayer?.borderWidth = isFocus ? 2 : 0
                     colLayer?.borderColor = isFocus ? accent : nil
@@ -222,7 +222,7 @@ extension NiruxShellView {
                 guard colLayer?.animation(forKey: "attentionPulse") != nil else { continue }
                 colLayer?.removeAnimation(forKey: "attentionPulse")
                 let isFocus = (wsIndex == activeWSIndex && colIndex == workspace.focusedIndex)
-                let accent = NSColor.niruxAccent.withAlphaComponent(0.7).cgColor
+                let accent = Theme.Color.accent.withAlphaComponent(0.7).cgColor
                 colLayer?.cornerRadius = isFocus ? 6 : 0
                 colLayer?.borderWidth = isFocus ? 2 : 0
                 colLayer?.borderColor = isFocus ? accent : nil
@@ -373,7 +373,7 @@ extension NiruxShellView {
         overlay.wantsLayer = true
         overlay.layer?.cornerRadius = 6
         overlay.layer?.borderWidth = 3
-        overlay.layer?.borderColor = NSColor.niruxAccent.cgColor
+        overlay.layer?.borderColor = Theme.Color.accent.cgColor
         overlay.layer?.opacity = 0
         col.view.addSubview(overlay)
 

@@ -29,7 +29,7 @@ final class EditorFileTree: NSView {
         self.workspaceCwd = workspaceCwd
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(red: 0.10, green: 0.11, blue: 0.14, alpha: 1).cgColor
+        layer?.backgroundColor = Theme.Color.base.cgColor
 
         configureHeaders()
         configureOutline(changesOutline)
@@ -803,7 +803,7 @@ private final class FileTreeCellView: NSTableCellView {
         iconImageView.imageScaling = .scaleProportionallyUpOrDown
         iconImageView.isHidden = true
         nameLabel.font = .systemFont(ofSize: 12)
-        nameLabel.textColor = NSColor(red: 0.85, green: 0.88, blue: 0.95, alpha: 1)
+        nameLabel.textColor = Theme.Color.textPrimary
         nameLabel.lineBreakMode = .byTruncatingMiddle
         addSubview(iconLabel)
         addSubview(iconImageView)
@@ -868,7 +868,7 @@ private final class FileTreeCellView: NSTableCellView {
             iconLabel.isHidden = false
             iconLabel.font = .systemFont(ofSize: 11)
             iconLabel.stringValue = node.isDirectory ? "▸" : "·"
-            iconLabel.textColor = NSColor(red: 0.55, green: 0.70, blue: 1.0, alpha: 0.95)
+            iconLabel.textColor = Theme.Color.accent
         } else if let icon = Self.icon(for: node) {
             iconLabel.isHidden = true
             iconImageView.isHidden = false
@@ -883,7 +883,7 @@ private final class FileTreeCellView: NSTableCellView {
         nameLabel.stringValue = node.name
         nameLabel.textColor = node.isVirtual
             ? NSColor.white.withAlphaComponent(0.95)
-            : NSColor(red: 0.85, green: 0.88, blue: 0.95, alpha: 1)
+            : Theme.Color.textPrimary
         nameLabel.font = .systemFont(ofSize: 12, weight: node.isVirtual ? .semibold : .regular)
     }
 }
@@ -892,7 +892,7 @@ private final class FileTreeCellView: NSTableCellView {
 private final class FileTreeRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {
         if selectionHighlightStyle != .none {
-            NSColor.niruxAccent.withAlphaComponent(0.18).setFill()
+            Theme.Color.accent.withAlphaComponent(0.18).setFill()
             bounds.fill()
         }
     }

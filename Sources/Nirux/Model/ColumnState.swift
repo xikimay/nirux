@@ -112,11 +112,11 @@ final class ColumnState {
     private func setupTitleBar() {
         let bar = WindowDragView()
         bar.wantsLayer = true
-        bar.layer?.backgroundColor = NSColor(red: 0.12, green: 0.12, blue: 0.16, alpha: 1).cgColor
+        bar.layer?.backgroundColor = Theme.Color.surface.cgColor
 
         let label = NSTextField(labelWithString: "")
         label.font = .systemFont(ofSize: 12, weight: .medium)
-        label.textColor = NSColor(red: 0.55, green: 0.70, blue: 1.0, alpha: 0.95)
+        label.textColor = Theme.Color.accent
         label.lineBreakMode = .byTruncatingTail
         label.isBezeled = false
         label.drawsBackground = false

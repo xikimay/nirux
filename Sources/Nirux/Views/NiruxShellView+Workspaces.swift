@@ -455,7 +455,7 @@ extension NiruxShellView {
         }
 
         // Focus border only — attention borders are managed by updateSidebar()
-        let accent = NSColor.niruxAccent.withAlphaComponent(0.7).cgColor
+        let accent = Theme.Color.accent.withAlphaComponent(0.7).cgColor
         for (wsIndex, workspace) in workspaces.enumerated() {
             for (colIndex, col) in workspace.columns.enumerated() {
                 let isFocus = (wsIndex == activeWSIndex && colIndex == workspace.focusedIndex)

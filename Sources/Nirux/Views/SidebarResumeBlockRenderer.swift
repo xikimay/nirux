@@ -83,7 +83,7 @@ struct SidebarResumeBlockRenderer {
     }
 
     private func resumeButton() -> SidebarBadgeView {
-        let color = NSColor.niruxAccent
+        let color = Theme.Color.accent
         let label = "Resume: type “continue” into claude"
         let button = SidebarBadgeView(
             text: "Resume",

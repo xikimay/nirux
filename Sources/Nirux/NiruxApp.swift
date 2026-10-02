@@ -107,10 +107,10 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = false
-        window.backgroundColor = NSColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1.0)
+        window.backgroundColor = Theme.Color.canvas
         window.minSize = NSSize(width: 600, height: 400)
         window.title = "Nirux"
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = Theme.appearance
         // Its close button quits Nirux: a running merge queue asks first.
         window.delegate = self
 

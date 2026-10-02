@@ -35,7 +35,7 @@ final class TerminalFindBar: NSView, NSTextFieldDelegate {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(red: 0.12, green: 0.12, blue: 0.16, alpha: 0.98).cgColor
+        layer?.backgroundColor = Theme.Color.surface.withAlphaComponent(0.98).cgColor
         layer?.cornerRadius = 7
         layer?.borderWidth = 1
         layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor

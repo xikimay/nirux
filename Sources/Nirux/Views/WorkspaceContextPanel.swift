@@ -202,7 +202,7 @@ final class WorkspaceContextPanel {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
-        panel.appearance = NSAppearance(named: .darkAqua)
+        panel.appearance = Theme.appearance
         return panel
     }
 
@@ -210,7 +210,7 @@ final class WorkspaceContextPanel {
         let container = NSView(frame: NSRect(origin: .zero, size: Self.size))
         container.wantsLayer = true
         container.layer?.cornerRadius = 12
-        container.layer?.backgroundColor = NSColor(red: 0.105, green: 0.105, blue: 0.14, alpha: 0.99).cgColor
+        container.layer?.backgroundColor = Theme.Color.base.withAlphaComponent(0.99).cgColor
         container.layer?.borderWidth = 1
         container.layer?.borderColor = NSColor.white.withAlphaComponent(0.09).cgColor
         container.layer?.masksToBounds = true

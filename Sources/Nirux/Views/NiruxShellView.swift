@@ -139,7 +139,7 @@ final class NiruxShellView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1).cgColor
+        layer?.backgroundColor = Theme.Color.canvas.cgColor
         divider.boxType = .separator
         viewport.wantsLayer = true
         viewport.layer?.masksToBounds = true

@@ -54,7 +54,7 @@ final class EditorConflictBanner: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(red: 0.35, green: 0.22, blue: 0.08, alpha: 0.98).cgColor
+        layer?.backgroundColor = Theme.Color.tint(Theme.Color.waiting, 0.3).cgColor
         layer?.cornerRadius = 7
         layer?.borderWidth = 1
         layer?.borderColor = NSColor.systemOrange.withAlphaComponent(0.5).cgColor
@@ -118,7 +118,7 @@ final class EditorLoadFailureOverlay: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(red: 0.10, green: 0.11, blue: 0.15, alpha: 1).cgColor
+        layer?.backgroundColor = Theme.Color.base.cgColor
 
         messageLabel.font = .systemFont(ofSize: 12, weight: .medium)
         messageLabel.textColor = NSColor.white.withAlphaComponent(0.55)
@@ -192,7 +192,7 @@ final class ShellExitedOverlay: NSView {
     init(content: Content = .shellExited) {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(red: 0.08, green: 0.08, blue: 0.10, alpha: 0.92).cgColor
+        layer?.backgroundColor = Theme.Color.canvas.withAlphaComponent(0.92).cgColor
 
         label.font = .systemFont(ofSize: 13, weight: .semibold)
         label.textColor = NSColor.white.withAlphaComponent(0.85)

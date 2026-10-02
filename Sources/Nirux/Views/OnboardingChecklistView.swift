@@ -397,7 +397,7 @@ final class OnboardingChecklistButton: NSView {
         var textColor = NSColor.white
         switch style {
         case .primary:
-            NSColor.niruxAccent.withAlphaComponent(isPressed ? 0.65 : (isHovered ? 1.0 : 0.85)).setFill()
+            Theme.Color.accent.withAlphaComponent(isPressed ? 0.65 : (isHovered ? 1.0 : 0.85)).setFill()
             NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
         case .command:
             NSColor.white.withAlphaComponent(isHovered ? 0.11 : 0.06).setFill()
@@ -406,7 +406,7 @@ final class OnboardingChecklistButton: NSView {
             NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).stroke()
             textColor = NSColor.white.withAlphaComponent(0.80)
         case .link:
-            textColor = NSColor.niruxAccent.withAlphaComponent(isPressed ? 0.7 : 1.0)
+            textColor = Theme.Color.accent.withAlphaComponent(isPressed ? 0.7 : 1.0)
         case .close:
             if isHovered {
                 NSColor.white.withAlphaComponent(0.10).setFill()

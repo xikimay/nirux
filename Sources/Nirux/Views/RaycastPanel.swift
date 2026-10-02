@@ -55,15 +55,15 @@ enum RaycastPanel {
         panel.titleVisibility = .hidden
         panel.isMovable = false
         panel.level = .floating
-        panel.backgroundColor = NSColor(red: 0.12, green: 0.12, blue: 0.16, alpha: 1)
+        panel.backgroundColor = Theme.Color.surface
         panel.isOpaque = false
         panel.hasShadow = true
-        panel.appearance = NSAppearance(named: .darkAqua)
+        panel.appearance = Theme.appearance
 
         let container = NSView(frame: NSRect(x: 0, y: 0, width: config.width, height: config.height))
         container.wantsLayer = true
         container.layer?.cornerRadius = 10
-        container.layer?.backgroundColor = NSColor(red: 0.14, green: 0.14, blue: 0.18, alpha: 1).cgColor
+        container.layer?.backgroundColor = Theme.Color.raised.cgColor
         container.layer?.borderWidth = 1
         container.layer?.borderColor = NSColor.white.withAlphaComponent(0.1).cgColor
 

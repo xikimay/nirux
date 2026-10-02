@@ -23,9 +23,9 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     private var downloadDestinations: [ObjectIdentifier: URL] = [:]
 
     private static let barHeight: CGFloat = 32
-    private static let barBg = NSColor(red: 0.13, green: 0.13, blue: 0.17, alpha: 1)
-    private static let fieldBg = NSColor(red: 0.18, green: 0.18, blue: 0.22, alpha: 1)
-    private static let accent: NSColor = .niruxAccent
+    private static let barBg = Theme.Color.surface
+    private static let fieldBg = Theme.Color.raised
+    private static let accent: NSColor = Theme.Color.accent
 
     /// Shared data store — all WebViews share the same cookies
     static let sharedDataStore = WKWebsiteDataStore.default()
@@ -48,7 +48,7 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
 
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(red: 0.12, green: 0.12, blue: 0.15, alpha: 1).cgColor
+        layer?.backgroundColor = Theme.Color.surface.cgColor
 
         setupNavBar()
         setupProgressBar()
@@ -119,7 +119,7 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     private func setupWebView() {
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.underPageBackgroundColor = NSColor(red: 0.12, green: 0.12, blue: 0.15, alpha: 1)
+        webView.underPageBackgroundColor = Theme.Color.surface
         webView.allowsBackForwardNavigationGestures = true
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"

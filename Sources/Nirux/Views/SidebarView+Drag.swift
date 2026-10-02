@@ -213,7 +213,7 @@ extension SidebarView {
         // Card-shaped veil dimming the original row.
         let dim = SidebarBackgroundView(frame: drag.rowFrame)
         dim.wantsLayer = true
-        dim.layer?.backgroundColor = NSColor(red: 0.11, green: 0.11, blue: 0.14, alpha: 0.6).cgColor
+        dim.layer?.backgroundColor = Theme.Color.base.withAlphaComponent(0.6).cgColor
         dim.layer?.cornerRadius = 8
         contentDocumentView.addSubview(dim)
         dragDimView = dim
@@ -223,7 +223,7 @@ extension SidebarView {
         // properties, which cacheDisplay does not reliably composite.
         let ghost = SidebarBackgroundView(frame: drag.rowFrame)
         ghost.wantsLayer = true
-        ghost.layer?.backgroundColor = NSColor(red: 0.16, green: 0.16, blue: 0.20, alpha: 0.95).cgColor
+        ghost.layer?.backgroundColor = Theme.Color.raised.withAlphaComponent(0.95).cgColor
         ghost.layer?.cornerRadius = 8
         ghost.layer?.borderWidth = 1
         ghost.layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor

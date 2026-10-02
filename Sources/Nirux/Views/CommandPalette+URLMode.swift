@@ -72,8 +72,8 @@ extension CommandPalette {
             let badge = NSTextField(labelWithString: isSecure ? "HTTPS" : "HTTP")
             badge.font = .monospacedSystemFont(ofSize: 9, weight: .bold)
             badge.textColor = isSecure
-                ? NSColor(red: 0.4, green: 0.8, blue: 0.5, alpha: 1)
-                : NSColor(red: 0.9, green: 0.55, blue: 0.3, alpha: 1)
+                ? Theme.Color.success
+                : Theme.Color.textSecondary
             badge.frame = NSRect(x: 12, y: 9, width: 38, height: 18)
             row.addSubview(badge)
 
@@ -105,7 +105,7 @@ extension CommandPalette {
     }
 
     func highlightURLSelected() {
-        let accent = NSColor.niruxAccent.withAlphaComponent(0.15)
+        let accent = Theme.Color.accent.withAlphaComponent(0.15)
         for (index, row) in rowViews.enumerated() {
             row.layer?.backgroundColor = (index == urlSelectedIndex) ? accent.cgColor : NSColor.clear.cgColor
         }

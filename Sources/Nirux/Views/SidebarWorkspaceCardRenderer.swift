@@ -300,7 +300,7 @@ final class SidebarWorkspaceCardRenderer {
                 let selected = SidebarBackgroundView(frame: rowBackingFrame)
                 selected.wantsLayer = true
                 selected.layer?.cornerRadius = 6
-                selected.layer?.backgroundColor = NSColor.niruxAccent.withAlphaComponent(0.10).cgColor
+                selected.layer?.backgroundColor = Theme.Color.accent.withAlphaComponent(0.10).cgColor
                 append(selected)
             }
 
