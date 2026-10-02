@@ -94,7 +94,7 @@ extension NiruxShellView {
         // Made once per project: it reads the saved queue.
         let controller = existing ?? mergeQueue(projectID: board.projectID)
         let repository = board.repository?.gitHub
-        var state = ProjectBoard.QueueState(isDryRun: controller.isDryRun)
+        var state = ProjectBoard.QueueState(isDryRun: controller.isDryRun, dryRunReason: controller.dryRunReason)
         state.selection = controller.selection(for: repository)
         state.startProblems = board.loaded?.queueStartProblems ?? ["board.json isn’t read yet."]
         state.isConfirming = mergeQueueConfirmation != nil
@@ -184,7 +184,9 @@ extension NiruxShellView {
         else { return NSSound.beep() }
         let numbers = controller.selection(for: settings.gitHubRepository)
         guard !numbers.isEmpty else { return NSSound.beep() }
-        let panel = MergeQueueConfirmationPanel(projectID: board.projectID, isDryRun: controller.isDryRun, numbers: numbers)
+        let panel = MergeQueueConfirmationPanel(
+            projectID: board.projectID, isDryRun: controller.isDryRun, numbers: numbers, dryRunReason: controller.dryRunReason
+        )
         panel.onStart = { [weak self, weak panel] confirmation in
             guard let self, let panel else { return }
             self.confirmMergeQueueStart(confirmation, panel: panel)
@@ -278,7 +280,8 @@ extension NiruxShellView {
             stopsAll: stopsAll
         )
         notice.tooltip = "\(project) · \(engine.settings.repository) into \(engine.settings.baseBranch)\n\(text)\n"
-            + "Click to show the project’s board." + (shown.isDryRun ? "\n" + ProjectBoardView.dryRunTooltip : "")
+            + "Click to show the project’s board."
+            + (shown.isDryRun ? "\n" + ProjectBoardView.dryRunTooltip(reason: shown.dryRunReason) : "")
         statusBar.onQueueClick = { [weak self] in self?.showProjectBoard(projectID: projectID) }
         statusBar.onQueueStop = { [weak self] in
             guard let self else { return }
@@ -313,7 +316,8 @@ extension NiruxShellView {
     // MARK: Quitting
 
     /// A quit while a queue runs: the question, then the wait for the
-    /// queues to stop.
+    /// queues to stop. Main thread only.
+    @MainActor
     final class MergeQueueQuit {
         let reply: @MainActor (Bool) -> Void
         /// The user chose to stop the queues and quit.
@@ -347,7 +351,8 @@ extension NiruxShellView {
         // main-queue block would never see a block of it (`requestQuit`).
         // The queues' own main-queue answers keep coming meanwhile.
         RunLoop.main.perform(inModes: [.default, .modalPanel]) { [weak self] in
-            self?.askToQuitWithMergeQueues(quit)
+            // On the main thread, which Swift 6.1 doesn't infer for this block.
+            MainActor.assumeIsolated { self?.askToQuitWithMergeQueues(quit) }
         }
         return .terminateLater
     }

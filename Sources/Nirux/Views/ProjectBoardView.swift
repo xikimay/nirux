@@ -60,6 +60,8 @@ final class ProjectBoardView: NSView {
         var text: String
         var tone: QueueTone = .normal
         var isDryRun: Bool
+        /// Why this build is a dry run, for the badge's tooltip.
+        var dryRunReason: String?
         var start: QueueButton?
         var stop: QueueButton?
     }
@@ -161,8 +163,13 @@ final class ProjectBoardView: NSView {
     private static let workingColor = NSColor(red: 0.62, green: 0.81, blue: 0.42, alpha: 1)
     private static let dryRunColor = NSColor.systemOrange
 
-    static let dryRunTooltip = "This build can’t change GitHub: its queue reads GitHub, then stops before its first "
-        + "branch update, rerun or merge. Only the installed Nirux runs a real queue."
+    nonisolated static let dryRunTooltip = "This build can’t change GitHub: its queue reads GitHub, then stops before its first "
+        + "branch update, rerun or merge. Only the notarized release, on the real state, runs a real queue."
+
+    /// The tooltip, with why this build is a dry run when it is known.
+    nonisolated static func dryRunTooltip(reason: String?) -> String {
+        dryRunTooltip + (reason.map { "\nThis build: \($0)." } ?? "")
+    }
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -584,7 +591,7 @@ final class ProjectBoardView: NSView {
 
     /// The header's queue line.
     nonisolated static func queueHeader(_ queue: ProjectBoard.QueueState) -> QueueHeader {
-        var header = QueueHeader(text: "", isDryRun: queue.isDryRun)
+        var header = QueueHeader(text: "", isDryRun: queue.isDryRun, dryRunReason: queue.dryRunReason)
         let count = queue.selection.count
         let queued = "\(count) pull request\(count == 1 ? "" : "s") queued"
         switch queue.run {
@@ -630,6 +637,7 @@ final class ProjectBoardView: NSView {
     private func applyQueueHeader(_ header: QueueHeader?) {
         queueLabel.isHidden = header == nil
         dryRunBadge.isHidden = header?.isDryRun != true
+        dryRunBadge.toolTip = Self.dryRunTooltip(reason: header?.dryRunReason)
         queueLabel.stringValue = header?.text ?? ""
         queueLabel.toolTip = header?.text
         queueLabel.textColor = Self.color(for: header?.tone ?? .normal)

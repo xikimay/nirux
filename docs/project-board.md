@@ -666,7 +666,9 @@ pull request.
   work or a merge queue runs"; the indicator's tooltip says why.
 - **A dry run shows everywhere**: a DRY RUN badge on the board's queue line,
   "Start Dry Run…", the sheet's orange title and banner, "Queue (dry run)" in
-  the status bar, and a journal line that says the mutation wasn't sent.
+  the status bar, the quit question, and a journal line that says the mutation
+  wasn't sent. The badge, the banner and the status bar say why this build is
+  one ("This build: not the notarized release (…)", "NIRUX_STATE_DIR is set").
 
 ## 4. Guardrails
 

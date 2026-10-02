@@ -74,6 +74,9 @@ final class MergeQueueController {
     var onChange: (() -> Void)?
 
     var isDryRun: Bool { client.isDryRun }
+    /// Why this build's queue is a dry run ("not the notarized release
+    /// (…)"), when its client says.
+    var dryRunReason: String? { (client as? DryRunQueueClient)?.reason }
     var engine: MergeQueue.Engine? { driver?.engine }
     var isRunning: Bool { engine?.phase.isActive == true }
     var repository: GitHubRepository? { engine?.settings.gitHubRepository }

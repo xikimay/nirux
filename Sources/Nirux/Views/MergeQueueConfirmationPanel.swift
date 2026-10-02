@@ -36,11 +36,16 @@ final class MergeQueueConfirmationPanel: NSObject {
     private static let secondaryText = NSColor.white.withAlphaComponent(0.5)
 
     static let dryRunExplanation = "Dry run: this build reads GitHub, then stops before its first change (a branch "
-        + "update, a rerun or a merge). Nothing changes on GitHub. Only the installed Nirux runs a real queue."
+        + "update, a rerun or a merge). Nothing changes on GitHub. Only the notarized release, on the real state, runs "
+        + "a real queue."
 
-    init(projectID: String, isDryRun: Bool, numbers: [Int]) {
+    /// Why this build is a dry run, under the banner, when it is known.
+    let dryRunReason: String?
+
+    init(projectID: String, isDryRun: Bool, numbers: [Int], dryRunReason: String? = nil) {
         self.projectID = projectID
         self.isDryRun = isDryRun
+        self.dryRunReason = dryRunReason
         readingText = "Reading " + numbers.map { "#\($0)" }.joined(separator: ", ") + " on GitHub…"
     }
 
@@ -141,7 +146,11 @@ final class MergeQueueConfirmationPanel: NSObject {
         }
 
         if isDryRun {
-            add(Self.dryRunExplanation, color: Self.dryRunColor, font: .systemFont(ofSize: 12, weight: .semibold), gap: 8)
+            add(Self.dryRunExplanation, color: Self.dryRunColor, font: .systemFont(ofSize: 12, weight: .semibold),
+                gap: dryRunReason == nil ? 8 : 2)
+            if let dryRunReason {
+                add("This build: \(dryRunReason).", color: Self.dryRunColor, font: .systemFont(ofSize: 11), gap: 8)
+            }
         }
         guard let confirmation else {
             add(readingText, color: Self.secondaryText)

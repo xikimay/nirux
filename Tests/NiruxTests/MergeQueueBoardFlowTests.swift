@@ -55,6 +55,8 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             try waitUntil("#12 is queued") { (try? self.row("login", in: board).queue.stringValue) == "queued · 1" }
             XCTAssertEqual(try row("feat/api", in: board).queue.stringValue, "queued · 2")
             XCTAssertFalse(board.view.dryRunBadge.isHidden, "a dev build's queue is a dry run, and says so")
+            XCTAssertTrue(board.view.dryRunBadge.toolTip?.hasSuffix("\nThis build: NIRUX_STATE_DIR is set.") == true,
+                          "and why: \(board.view.dryRunBadge.toolTip ?? "")")
             XCTAssertEqual(board.view.startQueueButton.title, "Start Dry Run…")
 
             try click(board.view.startQueueButton)
@@ -65,7 +67,9 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             XCTAssertEqual(confirmation.refusals, [])
             XCTAssertEqual(confirmation.entries.map(\.number), [12, 14])
             XCTAssertEqual(confirmation.entries.map(\.head), [Self.a, Self.b], "the heads GitHub has now")
-            XCTAssertEqual(sheet.lines.first, MergeQueueConfirmationPanel.dryRunExplanation)
+            XCTAssertEqual(Array(sheet.lines.prefix(2)), [
+                MergeQueueConfirmationPanel.dryRunExplanation, "This build: NIRUX_STATE_DIR is set."
+            ])
             XCTAssertTrue(sheet.lines.contains("1. #12  Change 12"), "\(sheet.lines)")
             XCTAssertTrue(sheet.lines.contains("A real queue would publish 2 nightlies, one after each merge. This dry run publishes none."))
             XCTAssertEqual(sheet.startButton?.title, "Start Dry Run")
@@ -150,7 +154,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         shell.projectBoardClient = ProjectBoardFlowTests.FakeGitHub(
             openPullRequests: Self.boardPullRequests, runs: ProjectBoardGitHubTests.postMergeRuns
         )
-        shell.mergeQueueClient = DryRunQueueClient(wrapped: GitHubCLIQueueClient(run: world.run))
+        shell.mergeQueueClient = DryRunQueueClient(wrapped: GitHubCLIQueueClient(run: world.run), reason: "NIRUX_STATE_DIR is set")
         shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1600, height: 900),

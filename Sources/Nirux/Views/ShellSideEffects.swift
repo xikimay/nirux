@@ -39,8 +39,10 @@ struct ShellSideEffects {
     /// queue never runs another block until that one ends, so the answer it
     /// waits for would never come.
     var requestQuit: @MainActor () -> Void = {
+        // The main run loop runs it on the main thread; Swift 6.1 types the
+        // block as nonisolated.
         RunLoop.main.perform(inModes: [.default, .modalPanel]) {
-            NSApp.terminate(nil)
+            MainActor.assumeIsolated { NSApp.terminate(nil) }
         }
     }
 

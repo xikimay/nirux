@@ -307,7 +307,7 @@ final class MergeQueueBoardTests: XCTestCase {
 
     @MainActor
     func testTheLocalChecksKeepTheFoldersTheProjectHadAtStart() throws {
-        var folders = ["/tmp/app", "/tmp/app.feat-4"]
+        let folders = FolderList(["/tmp/app", "/tmp/app.feat-4"])
         final class Inspected: @unchecked Sendable {
             private let lock = NSLock()
             private var recorded: [[String]] = []
@@ -321,14 +321,14 @@ final class MergeQueueBoardTests: XCTestCase {
             world.checks[MQ.sha("a")] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
             return world
         }(), isDryRun: true))
-        queue.local.folders = { folders }
+        queue.local.folders = { folders.value }
         queue.local.inspect = { folders, _, _, _, _ in
             inspected.append(folders)
             return .success(MergeQueue.LocalInspection())
         }
         XCTAssertNil(queue.start(settings: MQ.settings(), entries: [MQ.entry(4, head: MQ.sha("a"))]))
         // The space deleted, or its last workspace closed, mid-queue.
-        folders = ["/tmp/other"]
+        folders.value = ["/tmp/other"]
         let deadline = Date().addingTimeInterval(10)
         while inspected.first == nil, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
         queue.stop()
@@ -425,6 +425,13 @@ final class MergeQueueBoardTests: XCTestCase {
         )
         XCTAssertEqual(fetch.reading.setupError, "GitHub’s answers were incomplete. Start again to retry.")
         XCTAssertFalse(MergeQueue.confirmation(fetch.reading).canStart, "no rate limit read is no rate limit checked")
+    }
+
+    /// The project's folders as a test changes them.
+    @MainActor
+    private final class FolderList {
+        var value: [String]
+        init(_ value: [String]) { self.value = value }
     }
 
     /// What a completion on the main actor hands back.

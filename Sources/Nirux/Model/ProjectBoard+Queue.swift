@@ -20,6 +20,8 @@ extension ProjectBoard {
         var run: Run = .none
         /// This build can't change GitHub: every queue is a dry run.
         var isDryRun: Bool
+        /// Why, when the client says: "not the notarized release (…)".
+        var dryRunReason: String?
         /// "#52 waiting for the nightly, 3 of 7", "Stopped: …".
         var status: String?
         /// Stopped by a problem, not by the user.
