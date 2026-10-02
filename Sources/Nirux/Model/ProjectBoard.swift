@@ -29,7 +29,7 @@ extension ProjectBoard {
     /// One entry of a pull request's `statusCheckRollup`: a check run, or a
     /// commit status (`context`). For display only: the rollup carries no
     /// commit, so the merge queue reads checks by commit instead.
-    struct Check: Equatable, Sendable {
+    struct Check: Hashable, Sendable {
         /// The job's name, or a commit status's context.
         let name: String
         /// The check run's workflow. Nil (or empty) for a commit status, or
@@ -38,6 +38,9 @@ extension ProjectBoard {
         let result: CheckResult
         /// ISO 8601. Of two runs of one check, the later one counts.
         let startedAt: String?
+        /// The check run's `detailsUrl`, or the commit status's `targetUrl`.
+        /// Set by whoever posted the check: untrusted.
+        let url: String?
 
         /// `Workflow / job`, as board.json may name it.
         var qualifiedName: String? {

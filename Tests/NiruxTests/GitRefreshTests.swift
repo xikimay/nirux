@@ -438,7 +438,7 @@ final class GitRefreshTests: XCTestCase {
             state: state,
             isDraft: false,
             ciStatus: ciStatus,
-            failedCheckUrl: nil,
+            checks: [],
             reviewDecision: nil,
             mergeable: nil,
             url: "https://example.test/pull/1",

@@ -594,6 +594,8 @@ extension NiruxShellView {
                         for: queriedContext,
                         observation: observation
                     )
+                    // Even unchanged: the first read after launch records
+                    // what is already red.
                     self?.reportNewRedChecks(in: workspace)
                     guard applied else { return }
                     self?.scheduleMetadataRefresh()

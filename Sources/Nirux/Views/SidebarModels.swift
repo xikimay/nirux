@@ -180,20 +180,17 @@ struct PRInfo: Hashable, Sendable {
     let state: String
     let isDraft: Bool
     let ciStatus: String?
-    let failedCheckUrl: String?
+    /// The latest run of each check (docs/ci-failure-actions.md).
+    let checks: [ProjectBoard.Check]
     let reviewDecision: String?
     let mergeable: String?
     let url: String
     let additions: Int?
     let deletions: Int?
     let changedFiles: Int?
-    /// The latest run of each check that is red (docs/ci-failure-actions.md).
-    var redChecks: [RedCheck] = []
 
-    struct RedCheck: Hashable, Sendable {
-        let name: String
-        /// The check run's `detailsUrl`, or the commit status's `targetUrl`.
-        let url: String?
+    var failedCheckUrl: String? {
+        checks.lazy.filter { $0.result == .failure }.compactMap(\.url).first
     }
 }
 

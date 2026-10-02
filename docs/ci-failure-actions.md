@@ -15,31 +15,36 @@ are typed by hand.
   section 3.2: only the latest run per check name and workflow counts;
   FAILURE, CANCELLED, TIMED_OUT, ACTION_REQUIRED, STARTUP_FAILURE, STALE, or a
   commit status in ERROR or FAILURE. NEUTRAL and SKIPPED aren't red. The
-  sidebar's `✗ CI` follows the same rule (today it only sees FAILURE, and a
-  rerun's old failure keeps it red).
+  sidebar's `✗ CI` now follows the same rule (it used to see only FAILURE, and
+  a rerun's old failure kept it red).
 - **Any red check counts**, required or not: section 3.2 says a red check
   blocks the merge either way, and a workspace isn't tied to a board config.
+- **Open pull requests only**, and a failed job waits for the rest of its
+  Actions run: until the run ends, it can be neither rerun nor read.
 - **Notify once per failure.** A notification names the PR and its red checks.
-  "Once" is keyed on the red check runs' URLs: a rerun that fails again is a
-  new run, so it notifies again. Like agent attention: the card's attention
-  glow and the Dock badge, plus a native notification while Nirux is in the
-  background. The first poll after launch only records what is red: no burst of
-  notifications at launch.
+  "Once" is keyed on each red check's workflow, name, start and URL: a rerun
+  that fails again, or a status posted again, notifies again. Like agent
+  attention: the card's attention glow and the Dock badge (not for the
+  workspace on screen), plus a native notification while Nirux is in the
+  background. The first read after launch, or on another branch, only records
+  what is red: a pull request that was already red isn't news.
 - **Two actions**, in the card's right-click menu while the PR is red, and as
-  buttons on the notification:
-  - **Why Failed:** types into the workspace's agent (the first column whose
-    agent accepts prompts, through the remote prompt path: sanitized, bracketed
-    paste, refused while a dialog is open) "CI failed on PR #52. Run `gh run
-    view 123 --repo github.com/owner/name --log-failed`, then tell me why it
-    failed." Built only from
-    the run id and repository parsed out of a GitHub Actions URL
-    (`https://github.com/<owner>/<repo>/actions/runs/<id>`), never from check
-    names or other text GitHub returns. Without an agent, or for a check that
-    isn't an Actions run (external CI), the item opens the check's URL.
-  - **Rerun Failed:** an outward action, so an alert confirms first, naming
-    the PR and the runs. Then `gh run rerun <id> --repo github.com/owner/name
-    --failed` for each red Actions run (the merge queue's own arguments), and
-    the pull request poll goes hot (30 s), as after a push.
+  buttons on the notification. Both act only on Actions runs of the pull
+  request's own repository: anyone who can post a check on it chooses the
+  check's URL.
+  - **Ask Agent Why CI Failed:** types into the workspace's agent (the focused
+    column's, else the first column whose agent accepts prompts, through the
+    remote prompt path: sanitized, bracketed paste, refused while a dialog is
+    open) "CI failed on PR #52. Run `gh run view 123 --repo
+    github.com/owner/name --log-failed`, then tell me why it failed." Built
+    only from the run id and repository parsed out of a GitHub Actions URL
+    (`https://<host>/<owner>/<repo>/actions/runs/<id>`), never from check names
+    or other text GitHub returns. Without an agent, or without such a run, it
+    opens the check's URL if it is https, else the pull request.
+  - **Rerun Failed CI Jobs…:** an outward action, so an alert confirms first,
+    naming the PR, the runs and their repository. Then `gh run rerun <id>
+    --repo <host>/owner/name --failed` for each red run, and the pull request
+    poll goes hot (30 s), as after a push.
 
 ## Decided
 
@@ -47,12 +52,14 @@ are typed by hand.
 2. The first pull request read after launch stays silent.
 3. Both the card menu and the notification's buttons offer the actions.
 4. While the agent shows a dialog, Why Failed types nothing (it would answer
-   the dialog): it focuses the column instead.
+   the dialog): it focuses the column and beeps instead.
 
 ## Files
 
-`PRDetect` (red rule, `PRInfo.redChecks`), `WorkspaceState.takeNewRedChecks`
-(notify-once), `CIFailure` (run URL parsing, prompt, rerun arguments),
+`PRDetect` and `ProjectBoard.latest` (red rule, `PRInfo.checks`),
+`WorkspaceState.takeNewRedChecks` (notify-once), `CIFailure` (red checks to
+act on, run URL parsing, prompt, rerun),
 `NiruxNotifier` (category with two buttons), the card menu in
-`SidebarMenuSupport`, `NiruxShellView+CIFailure` for the two actions.
+`SidebarMenuSupport`, `NiruxShellView+CIFailure` for the two actions, and
+`ShellSideEffects.rerunFailedJobs`, which tests replace.
 Tests: `CIFailureTests`, and `SidebarPanelFlowTests.testCIFailureMenuItems`.

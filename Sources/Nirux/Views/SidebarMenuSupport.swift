@@ -41,12 +41,12 @@ extension SidebarView {
     /// The two CI failure actions, while the workspace's pull request is red
     /// (docs/ci-failure-actions.md). A rerun needs a GitHub Actions run.
     func addCIFailureItems(to menu: NSMenu, pullRequest: PRInfo?, workspaceIndex: Int) {
-        guard let pullRequest, !pullRequest.redChecks.isEmpty else { return }
+        guard let pullRequest, !CIFailure.redChecks(pullRequest).isEmpty else { return }
         menu.addClosureItem(title: "Ask Agent Why CI Failed") { [weak self] in
             self?.onWorkspaceAction?(.askWhyCIFailed, workspaceIndex)
         }
         menu.addClosureItem(title: "Rerun Failed CI Jobs…") { [weak self] in
             self?.onWorkspaceAction?(.rerunFailedCI, workspaceIndex)
-        }.isEnabled = !CIFailure.runs(pullRequest.redChecks).isEmpty
+        }.isEnabled = !CIFailure.runs(pullRequest).isEmpty
     }
 }

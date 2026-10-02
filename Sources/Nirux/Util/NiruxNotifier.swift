@@ -6,7 +6,8 @@ import UserNotifications
 /// user is looking at Nirux; this covers the case where they aren't.
 ///
 /// Clicking a notification routes back through `onActivate` so the shell
-/// can focus the exact workspace and column that asked for attention.
+/// can focus the exact workspace and column that asked for attention; a CI
+/// failure's buttons route through `onCIFailureAction`.
 @MainActor
 final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NiruxNotifier()
@@ -37,9 +38,9 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         center.setNotificationCategories([UNNotificationCategory(
             identifier: Self.ciFailureCategory,
             actions: [
-                UNNotificationAction(identifier: CIFailureAction.whyFailed.rawValue, title: "Ask Agent Why",
+                UNNotificationAction(identifier: CIFailureAction.whyFailed.rawValue, title: "Ask Agent Why CI Failed",
                                      options: [.foreground]),
-                UNNotificationAction(identifier: CIFailureAction.rerunFailed.rawValue, title: "Rerun Failed Jobs…",
+                UNNotificationAction(identifier: CIFailureAction.rerunFailed.rawValue, title: "Rerun Failed CI Jobs…",
                                      options: [.foreground])
             ],
             intentIdentifiers: []
@@ -130,8 +131,7 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         let content = UNMutableNotificationContent()
         content.title = "CI failed"
         content.subtitle = workspaceTitle
-        let names = checkNames.compactMap { AgentText.clean($0, maxLength: 60) }.joined(separator: ", ")
-        content.body = AgentText.clean("#\(pullRequest): \(names)", maxLength: 200) ?? "#\(pullRequest)"
+        content.body = AgentText.clean("#\(pullRequest): " + checkNames.joined(separator: ", "), maxLength: 200) ?? ""
         content.sound = .default
         content.categoryIdentifier = Self.ciFailureCategory
         content.userInfo = ["workspaceID": workspaceID]

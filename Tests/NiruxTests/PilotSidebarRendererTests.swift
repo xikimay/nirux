@@ -270,7 +270,7 @@ final class PilotSidebarRendererTests: XCTestCase {
     private func makePR(state: String, isDraft: Bool) -> PRInfo {
         PRInfo(
             number: 1, state: state, isDraft: isDraft, ciStatus: nil,
-            failedCheckUrl: nil, reviewDecision: nil, mergeable: nil,
+            checks: [], reviewDecision: nil, mergeable: nil,
             url: "https://example.test/pr/1", additions: nil, deletions: nil, changedFiles: nil
         )
     }

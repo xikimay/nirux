@@ -148,7 +148,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
     ])
 
     /// Without an agent in the workspace, Why opens the failed check; a
-    /// rerun asks first, and nothing reaches GitHub when cancelled.
+    /// rerun asks first, and only a confirmed one reaches GitHub.
     func testCIFailureMenuItems() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -162,7 +162,12 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
 
             harness.alertResponses = [.alertSecondButtonReturn]
             harness.perform(["Rerun Failed CI Jobs…"], in: shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil))
-            XCTAssertEqual(harness.alerts.last, "Rerun the failed jobs of #52?")
+            XCTAssertEqual(harness.alerts, ["Rerun the failed jobs of #52?"])
+
+            // Confirmed: the double refuses, and the refusal shows.
+            harness.perform(["Rerun Failed CI Jobs…"], in: shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil))
+            harness.waitUntil("the rerun's answer") { harness.alerts.count == 3 }
+            XCTAssertEqual(harness.alerts.last, "Nirux couldn’t rerun the failed jobs")
         }
     }
 

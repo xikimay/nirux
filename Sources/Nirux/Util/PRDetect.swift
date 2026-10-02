@@ -173,28 +173,16 @@ enum PRDetect {
         let allChecksPending = !rollup.isEmpty && conclusions.allSatisfy({ $0.isEmpty })
         // Red as the Project Board defines it (docs/project-board.md,
         // section 3.2): only the latest run of each check counts.
-        let redChecks = ProjectBoard.latest(
-            rollup.compactMap { json in
-                ProjectBoard.check(from: json).map { (check: $0, url: (json["detailsUrl"] ?? json["targetUrl"]) as? String) }
-            },
-            check: \.check
-        )
-        .filter { $0.check.result == .failure }
-        .map { PRInfo.RedCheck(name: $0.check.name, url: $0.url) }
+        let checks = ProjectBoard.latest(rollup.compactMap(ProjectBoard.check(from:)))
         let ciStatus: String?
-        let failedCheckUrl: String?
-        if !redChecks.isEmpty {
+        if checks.contains(where: { $0.result == .failure }) {
             ciStatus = "FAILURE"
-            failedCheckUrl = redChecks.lazy.compactMap(\.url).first
         } else if conclusions.contains("PENDING") || allChecksPending || hasRunningCheck {
             ciStatus = "PENDING"
-            failedCheckUrl = nil
         } else if !conclusions.isEmpty {
             ciStatus = "SUCCESS"
-            failedCheckUrl = nil
         } else {
             ciStatus = nil
-            failedCheckUrl = nil
         }
 
         return PRInfo(
@@ -202,14 +190,13 @@ enum PRDetect {
             state: candidate["state"] as? String ?? "",
             isDraft: candidate["isDraft"] as? Bool ?? false,
             ciStatus: ciStatus,
-            failedCheckUrl: failedCheckUrl,
+            checks: checks,
             reviewDecision: candidate["reviewDecision"] as? String,
             mergeable: candidate["mergeable"] as? String,
             url: candidate["url"] as? String ?? "",
             additions: candidate["additions"] as? Int,
             deletions: candidate["deletions"] as? Int,
-            changedFiles: candidate["changedFiles"] as? Int,
-            redChecks: redChecks
+            changedFiles: candidate["changedFiles"] as? Int
         )
     }
 
