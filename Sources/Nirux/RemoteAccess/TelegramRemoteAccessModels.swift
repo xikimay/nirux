@@ -75,7 +75,7 @@ enum RemoteDialogText {
         guard case .stillWaiting(let dialog, let waited) = reason else { return (attentionLabel(reason), nil) }
         var lines: [String] = []
         if case .permission(let tool?, _) = dialog, tool != "ExitPlanMode" { lines.append("Tool: \(tool)") }
-        lines.append("Waiting for \(PilotSidebarRenderer.shortDuration(waited))")
+        lines.append("Waiting for \(SidebarRenderer.shortDuration(waited))")
         return (attentionLabel(dialog), lines.joined(separator: "\n"))
     }
 

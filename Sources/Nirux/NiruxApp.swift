@@ -56,6 +56,13 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         if args.count >= 2, args[1] == "--check-release-signature" {
             exit(MergeQueue.checkReleaseSignatureCommand(Array(args.dropFirst(2))))
         }
+        // Only the installed app opens the real state; any other copy needs
+        // a state of its own (see RealStateGuard). Command-line modes stay
+        // above this: they run from any copy and any parent (agent hooks,
+        // NIRUX_CLI_PATH, the nightly's checks), which this would stop.
+        if let refused = RealStateGuard.refusedExecutable() {
+            RealStateGuard.refuseLaunch(executablePath: refused)
+        }
 
         let app = NSApplication.shared
         let delegate = NiruxApp()
@@ -225,6 +232,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         telegramRemoteAccessController?.shutdown()
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
         ActivityStore.shared.flush()
+        // Every agent goes with its terminal; a restore resumes the session.
+        shell?.sessionLedger.closeAllSessions(at: Date().timeIntervalSince1970)
         // Receivers stop waiting on an app that is gone.
         shell?.releaseAllPermissionApprovals()
         AgentHookCenter.shared.approvalChannel().stopListening(for: ProcessInstance.running(pid: getpid()))

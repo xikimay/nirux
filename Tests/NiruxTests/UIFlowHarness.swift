@@ -152,7 +152,6 @@ final class UIFlowHarness {
         shell.filePickerPanel?.dismiss()
         shell.worktreeCleanupPanel?.dismiss()
         shell.boardSettingsPanel?.dismiss()
-        if shell.isPilotMode { shell.togglePilotMode() }
         for other in NSApp.windows where other !== window && !windowsBefore.contains(ObjectIdentifier(other)) {
             if let sheet = other.attachedSheet { other.endSheet(sheet) }
             other.orderOut(nil)

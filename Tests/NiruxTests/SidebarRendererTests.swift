@@ -3,55 +3,55 @@ import AppKit
 @testable import Nirux
 
 @MainActor
-final class PilotSidebarRendererTests: XCTestCase {
+final class SidebarRendererTests: XCTestCase {
 
     // MARK: - formatDiffStats
 
     func testFormatDiffStatsTypicalGitOutput() {
         let raw = "2 files changed, 42 insertions(+), 8 deletions(-)"
-        XCTAssertEqual(PilotSidebarRenderer.formatDiffStats(raw), "2 files, +42 -8")
+        XCTAssertEqual(SidebarRenderer.formatDiffStats(raw), "2 files, +42 -8")
     }
 
     func testFormatDiffStatsInsertionsOnly() {
         let raw = "1 file changed, 10 insertions(+)"
-        XCTAssertEqual(PilotSidebarRenderer.formatDiffStats(raw), "1 files, +10")
+        XCTAssertEqual(SidebarRenderer.formatDiffStats(raw), "1 files, +10")
     }
 
     func testFormatDiffStatsDeletionsOnly() {
         let raw = "3 files changed, 5 deletions(-)"
-        XCTAssertEqual(PilotSidebarRenderer.formatDiffStats(raw), "3 files, -5")
+        XCTAssertEqual(SidebarRenderer.formatDiffStats(raw), "3 files, -5")
     }
 
     func testFormatDiffStatsEmptyReturnsRaw() {
-        XCTAssertEqual(PilotSidebarRenderer.formatDiffStats(""), "")
+        XCTAssertEqual(SidebarRenderer.formatDiffStats(""), "")
     }
 
     func testFormatDiffStatsGarbageReturnsRaw() {
-        XCTAssertEqual(PilotSidebarRenderer.formatDiffStats("nothing to parse"), "nothing to parse")
+        XCTAssertEqual(SidebarRenderer.formatDiffStats("nothing to parse"), "nothing to parse")
     }
 
     // MARK: - shortDuration
 
     func testShortDurationSeconds() {
-        XCTAssertEqual(PilotSidebarRenderer.shortDuration(0), "0s")
-        XCTAssertEqual(PilotSidebarRenderer.shortDuration(42), "42s")
-        XCTAssertEqual(PilotSidebarRenderer.shortDuration(59.9), "59s")
+        XCTAssertEqual(SidebarRenderer.shortDuration(0), "0s")
+        XCTAssertEqual(SidebarRenderer.shortDuration(42), "42s")
+        XCTAssertEqual(SidebarRenderer.shortDuration(59.9), "59s")
     }
 
     func testShortDurationMinutes() {
-        XCTAssertEqual(PilotSidebarRenderer.shortDuration(60), "1m")
-        XCTAssertEqual(PilotSidebarRenderer.shortDuration(732), "12m")
-        XCTAssertEqual(PilotSidebarRenderer.shortDuration(3599), "59m")
+        XCTAssertEqual(SidebarRenderer.shortDuration(60), "1m")
+        XCTAssertEqual(SidebarRenderer.shortDuration(732), "12m")
+        XCTAssertEqual(SidebarRenderer.shortDuration(3599), "59m")
     }
 
     func testShortDurationHours() {
-        XCTAssertEqual(PilotSidebarRenderer.shortDuration(3600), "1h00m")
-        XCTAssertEqual(PilotSidebarRenderer.shortDuration(3920), "1h05m")
-        XCTAssertEqual(PilotSidebarRenderer.shortDuration(7384), "2h03m")
+        XCTAssertEqual(SidebarRenderer.shortDuration(3600), "1h00m")
+        XCTAssertEqual(SidebarRenderer.shortDuration(3920), "1h05m")
+        XCTAssertEqual(SidebarRenderer.shortDuration(7384), "2h03m")
     }
 
     func testShortDurationNegativeClampsToZero() {
-        XCTAssertEqual(PilotSidebarRenderer.shortDuration(-5), "0s")
+        XCTAssertEqual(SidebarRenderer.shortDuration(-5), "0s")
     }
 
     // MARK: - Attention reason
@@ -66,40 +66,24 @@ final class PilotSidebarRendererTests: XCTestCase {
 
     func testRowSaysWhyTheAgentWaits() {
         let waiting = column(.needsAttention, reason: .permission(tool: "Bash", summary: "git push\u{1B}[2J"))
-        XCTAssertTrue(PilotSidebarRenderer.attributedColumn(waiting).string.hasSuffix("claude · permission · Bash"))
+        XCTAssertTrue(SidebarRenderer.attributedColumn(waiting).string.hasSuffix("claude · permission · Bash"))
         XCTAssertEqual(
-            PilotSidebarRenderer.attentionTooltip(for: waiting), "needs permission — Bash: git push[2J"
+            SidebarRenderer.attentionTooltip(for: waiting), "needs permission — Bash: git push[2J"
         )
         let done = column(.needsAttention, reason: .turnFinished)
-        XCTAssertTrue(PilotSidebarRenderer.attributedColumn(done).string.hasSuffix("claude · done"))
-        XCTAssertEqual(PilotSidebarRenderer.attentionTooltip(for: done), "finished its turn")
-        XCTAssertNil(PilotSidebarRenderer.attentionTooltip(for: column(.idle, reason: nil)))
+        XCTAssertTrue(SidebarRenderer.attributedColumn(done).string.hasSuffix("claude · done"))
+        XCTAssertEqual(SidebarRenderer.attentionTooltip(for: done), "finished its turn")
+        XCTAssertNil(SidebarRenderer.attentionTooltip(for: column(.idle, reason: nil)))
     }
 
     /// The dot stays orange for any attention (like the glows and
     /// borders); the label tells a blocked agent from a finished turn.
     func testBlockedAndFinishedLabelsDiffer() {
-        let blocked = PilotSidebarRenderer.attentionTextColor(for: .permission(tool: "Bash", summary: nil))
-        let question = PilotSidebarRenderer.attentionTextColor(for: .question(nil))
-        let done = PilotSidebarRenderer.attentionTextColor(for: .turnFinished)
+        let blocked = SidebarRenderer.attentionTextColor(for: .permission(tool: "Bash", summary: nil))
+        let question = SidebarRenderer.attentionTextColor(for: .question(nil))
+        let done = SidebarRenderer.attentionTextColor(for: .turnFinished)
         XCTAssertEqual(blocked, question)
         XCTAssertNotEqual(blocked, done)
-    }
-
-    func testPilotFingerprintSeesTheReason() {
-        let workspace = WorkspaceState(cwd: "/tmp")
-        func info(_ reason: AgentAttentionReason) -> WorkspaceInfo {
-            WorkspaceInfo(
-                id: "w", index: 0, title: "w", profileID: "p", isInactive: false, columnCount: 1,
-                focusedColumn: 0, gitBranch: nil, hasNotification: false, isActive: false,
-                columns: [column(.needsAttention, reason: reason)], prInfo: nil, diffStats: nil,
-                purpose: nil, nextStep: nil, blocker: nil, phase: .active, lastSummary: nil, lastActivityAt: nil
-            )
-        }
-        XCTAssertNotEqual(
-            workspace.pilotFingerprint(info(.turnFinished)),
-            workspace.pilotFingerprint(info(.permission(tool: "Bash", summary: nil)))
-        )
     }
 
     func testReasonChangeRerendersTheRow() {
@@ -139,62 +123,57 @@ final class PilotSidebarRendererTests: XCTestCase {
 
     func testPrStateDisplayDraft() {
         let pullRequest = makePR(state: "OPEN", isDraft: true)
-        let (text, _) = PilotSidebarRenderer.prStateDisplay(pullRequest)
+        let (text, _) = SidebarRenderer.prStateDisplay(pullRequest)
         XCTAssertEqual(text, "draft")
     }
 
     func testPrStateDisplayOpen() {
         let pullRequest = makePR(state: "OPEN", isDraft: false)
-        let (text, _) = PilotSidebarRenderer.prStateDisplay(pullRequest)
+        let (text, _) = SidebarRenderer.prStateDisplay(pullRequest)
         XCTAssertEqual(text, "open")
     }
 
     func testPrStateDisplayMerged() {
         let pullRequest = makePR(state: "MERGED", isDraft: false)
-        let (text, _) = PilotSidebarRenderer.prStateDisplay(pullRequest)
+        let (text, _) = SidebarRenderer.prStateDisplay(pullRequest)
         XCTAssertEqual(text, "merged")
     }
 
     func testPrStateDisplayClosed() {
         let pullRequest = makePR(state: "CLOSED", isDraft: false)
-        let (text, _) = PilotSidebarRenderer.prStateDisplay(pullRequest)
+        let (text, _) = SidebarRenderer.prStateDisplay(pullRequest)
         XCTAssertEqual(text, "closed")
     }
 
     // MARK: - ciStatusDisplay
 
-    func testCIStatusDisplayShortStyleUsesCompactLabels() {
-        let (_, _, text) = PilotSidebarRenderer.ciStatusDisplay("SUCCESS", style: .short)
+    func testCIStatusDisplaySuccessSaysPassed() {
+        let (_, _, text) = SidebarRenderer.ciStatusDisplay("SUCCESS")
         XCTAssertEqual(text, "passed")
     }
 
-    func testCIStatusDisplayLongStyleUsesVerboseLabels() {
-        let (_, _, text) = PilotSidebarRenderer.ciStatusDisplay("SUCCESS", style: .long)
-        XCTAssertEqual(text, "checks passed")
-    }
-
     func testCIStatusDisplayFailureColorsRed() {
-        let (dot, color, _) = PilotSidebarRenderer.ciStatusDisplay("FAILURE", style: .short)
+        let (dot, color, _) = SidebarRenderer.ciStatusDisplay("FAILURE")
         XCTAssertEqual(dot, "✗")
         XCTAssertEqual(color, .systemRed)
     }
 
     func testCIStatusDisplayUnknownStateLowercased() {
-        let (_, _, text) = PilotSidebarRenderer.ciStatusDisplay("WEIRD_THING", style: .short)
+        let (_, _, text) = SidebarRenderer.ciStatusDisplay("WEIRD_THING")
         XCTAssertEqual(text, "weird_thing")
     }
 
     // MARK: - reviewDecisionDisplay
 
     func testReviewDecisionDisplayConflictTakesPrecedence() {
-        let result = PilotSidebarRenderer.reviewDecisionDisplay(
+        let result = SidebarRenderer.reviewDecisionDisplay(
             reviewDecision: "APPROVED", mergeable: "CONFLICTING"
         )
         XCTAssertEqual(result?.text, "conflict")
     }
 
     func testReviewDecisionDisplayApproved() {
-        let result = PilotSidebarRenderer.reviewDecisionDisplay(
+        let result = SidebarRenderer.reviewDecisionDisplay(
             reviewDecision: "APPROVED", mergeable: "MERGEABLE"
         )
         XCTAssertEqual(result?.text, "approved")
@@ -202,67 +181,41 @@ final class PilotSidebarRendererTests: XCTestCase {
     }
 
     func testReviewDecisionDisplayReturnsNilForNoDecision() {
-        XCTAssertNil(PilotSidebarRenderer.reviewDecisionDisplay(reviewDecision: nil, mergeable: nil))
-        XCTAssertNil(PilotSidebarRenderer.reviewDecisionDisplay(reviewDecision: "", mergeable: nil))
+        XCTAssertNil(SidebarRenderer.reviewDecisionDisplay(reviewDecision: nil, mergeable: nil))
+        XCTAssertNil(SidebarRenderer.reviewDecisionDisplay(reviewDecision: "", mergeable: nil))
     }
 
     // MARK: - attributedColumn
 
     func testAttributedColumnFocusedShowsArrow() {
         let column = makeColumn(isFocused: true, processName: "zsh")
-        let attr = PilotSidebarRenderer.attributedColumn(column)
+        let attr = SidebarRenderer.attributedColumn(column)
         XCTAssertTrue(attr.string.contains("▸"))
         XCTAssertTrue(attr.string.contains("zsh"))
     }
 
     func testAttributedColumnUnfocusedOmitsArrow() {
         let column = makeColumn(isFocused: false, processName: "zsh")
-        let attr = PilotSidebarRenderer.attributedColumn(column)
+        let attr = SidebarRenderer.attributedColumn(column)
         XCTAssertFalse(attr.string.contains("▸"))
     }
 
     func testAttributedColumnWebViewUsesTitle() {
         let column = makeColumn(isFocused: false, processName: nil, isWebView: true, webTitle: "GitHub")
-        let attr = PilotSidebarRenderer.attributedColumn(column)
+        let attr = SidebarRenderer.attributedColumn(column)
         XCTAssertTrue(attr.string.contains("GitHub"))
     }
 
     func testAttributedColumnWebViewWithoutTitleFallsBackToWeb() {
         let column = makeColumn(isFocused: false, processName: nil, isWebView: true, webTitle: nil)
-        let attr = PilotSidebarRenderer.attributedColumn(column)
+        let attr = SidebarRenderer.attributedColumn(column)
         XCTAssertTrue(attr.string.contains("web"))
     }
 
     func testAttributedColumnShellFallback() {
         let column = makeColumn(isFocused: false, processName: nil)
-        let attr = PilotSidebarRenderer.attributedColumn(column)
+        let attr = SidebarRenderer.attributedColumn(column)
         XCTAssertTrue(attr.string.contains("shell"))
-    }
-
-    // MARK: - makeAgentDot
-
-    func testMakeAgentDotReturnsNilForIdle() {
-        let dot = PilotSidebarRenderer.makeAgentDot(
-            status: .idle, x: 0, yOffset: 100, rowHeight: 14, size: 8
-        )
-        XCTAssertNil(dot)
-    }
-
-    func testMakeAgentDotReturnsViewForWorking() {
-        let dot = PilotSidebarRenderer.makeAgentDot(
-            status: .working, x: 20, yOffset: 100, rowHeight: 14, size: 8
-        )
-        XCTAssertNotNil(dot)
-        XCTAssertEqual(dot?.frame.width, 8)
-        XCTAssertEqual(dot?.frame.height, 8)
-        XCTAssertNotNil(dot?.layer?.animation(forKey: "pulse"))
-    }
-
-    func testMakeAgentDotReturnsViewForNeedsAttention() {
-        let dot = PilotSidebarRenderer.makeAgentDot(
-            status: .needsAttention, x: 20, yOffset: 100, rowHeight: 14, size: 8
-        )
-        XCTAssertNotNil(dot)
     }
 
     // MARK: - Test helpers

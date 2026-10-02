@@ -18,7 +18,6 @@ Nirux is alpha software.
 - Worktree flow: create or open Git worktrees as new workspaces, optionally handing context from the current agent session into the new workspace.
 - Built-in editor: open files, keep tabs, search the workspace, browse the file tree with Finder icons, view Git changes, and toggle file diffs. Find/replace, word wrap, font zoom, per-tab scroll restore, and disk-conflict protection included.
 - Browser context: open URLs in app, keep URL history, import cookies from Chrome, Brave, Arc, or Edge into the shared WebKit data store, download files to ~/Downloads, and inspect pages with the Web Inspector.
-- Pilot mode: switch to a compact overview of active workspaces with branch, column, diff, PR, CI, and review state where available.
 - Session restore: workspace layout, editor tabs, browser URLs, sidebar state, detected Claude/Codex launch modes, and verified Claude session / Codex thread IDs are saved under Application Support, with rotating backups for corruption recovery. Each agent column resumes its own conversation by exact ID (`claude --resume <id>`, `codex resume <id>`) in the directory it ran in; a Claude session that was never prompted restarts fresh, and legacy, missing, malformed, or duplicate IDs open the agent's interactive resume picker instead of guessing the last session. A `claude -p` launched by a column's agent, or a `codex exec` launched by a Claude, Gemini CLI or OpenCode column, keeps its own session and doesn't drive that column's status, notifications, or restore.
 
 ## Requirements
@@ -35,7 +34,7 @@ Download `Nirux.app.zip` from the nightly release:
 https://github.com/xikimay/nirux/releases/tag/nightly
 ```
 
-Unzip it and move `Nirux.app` to `/Applications`.
+Unzip it and move `Nirux.app` to `/Applications` (or to `~/Applications` if `/Applications` has no Nirux and your account can't write there). Nirux opens your workspaces only from there: a copy started anywhere else explains why and quits, so it can't overwrite them.
 
 Current public builds should be signed and notarized. If you are opening an older pre-notarized build and macOS Gatekeeper says Apple cannot verify it, open it once with:
 
@@ -60,7 +59,7 @@ On first launch, Nirux opens the sidebar on a **Getting Started** checklist, sho
 - whether `claude` or `codex` is installed where a Nirux terminal finds it, with copyable install commands (Claude Code's native installer, Homebrew for Codex) and a **Check again** link otherwise. Nirux reads the terminal `PATH` and the usual per-user install locations (`~/.local/bin`, the npm prefix from `~/.npmrc`, nvm, fnm, Volta, asdf, mise, Nix profiles) without running your shell's startup files, so a CLI installed elsewhere shows as missing: close the card if you already have one;
 - whether the bundled Agent Skills are installed and match this version, with an **Install**/**Update** button;
 - whether the [agent status hooks](#agent-status-hooks) are present in `~/.claude/settings.json` and `~/.codex/config.toml`;
-- the main shortcuts: `Cmd+P` palette, `Cmd+T` column, `Cmd+N` workspace, `Cmd+O` Pilot Mode.
+- the main shortcuts: `Cmd+P` palette, `Cmd+T` column, `Cmd+N` workspace.
 
 Close it with `×` (or **Done** once every step is done); the choice is saved with your settings. Reopen it anytime with `Show Getting Started` from the command palette. Installs that already had workspaces before the checklist existed don't show it on their own.
 
@@ -100,7 +99,6 @@ Typical command palette actions:
 - Open Browser
 - Import Browser Cookies
 - New Workspace
-- Pilot Mode
 - Show/Hide Sidebar
 - Rename Workspace
 - Resize Column (Cycle Width)
@@ -123,7 +121,6 @@ Useful shortcuts:
 | `Cmd+N` | New workspace |
 | `Cmd+Up` / `Cmd+Down` | Switch workspace |
 | `Alt+Cmd+Left` / `Alt+Cmd+Right` | Switch to the previous or next space (the workspace group named in the sidebar header) |
-| `Cmd+O` | Toggle Pilot Mode |
 | `Ctrl+Cmd+S` | Toggle sidebar |
 | `Ctrl+Cmd+F` | Enter or exit full screen |
 | `Cmd+M` | Minimize the window |
@@ -296,17 +293,15 @@ Run tests:
 swift test
 ```
 
-Run from SwiftPM:
-
-```bash
-swift run Nirux
-```
-
-A development build otherwise restores and saves the installed app's workspaces. Isolate smoke runs:
+Run from SwiftPM, on a state of its own:
 
 ```bash
 NIRUX_STATE_DIR=/tmp/nirux-dev swift run Nirux
 ```
+
+Only the installed app opens your workspaces: `/Applications/Nirux.app`, or `~/Applications/Nirux.app` when `/Applications` has none. Any other copy (`swift run`, `.build/debug/Nirux`, a `bundle.sh` bundle, a downloaded copy run from elsewhere) quits unless `NIRUX_STATE_DIR` is set (non-empty). It always says why on stderr, and shows an alert too when LaunchServices started it (Finder, the Dock, `open`, a `nirux://` link). The check compares files rather than paths, so a symlink or another spelling of the same folder still counts, and it recognizes the installed app when Gatekeeper runs it from a translocated copy. Copies built before this check aren't covered: delete old `Nirux.app` bundles, since LaunchServices may still hand them `nirux://` links.
+
+`NIRUX_ALLOW_REAL_STATE=1` (exactly `1`) lets another copy use the real state anyway. It then restores and saves the installed app's workspaces and relaunches their agent sessions, even while the installed app runs. For a bundle, also set `NIRUX_SKIP_HOOK_INSTALL=1`, or it points the agent hooks at itself. Nirux doesn't pass the variable on to its terminals.
 
 `NIRUX_STATE_DIR` moves workspaces, settings, Activity and Mission history, URL history, and agent hook events out of `~/Library/Application Support/nirux/` (`HOME` is ignored). The Keychain (Telegram token) and the `nirux://` scheme stay shared with the installed app.
 

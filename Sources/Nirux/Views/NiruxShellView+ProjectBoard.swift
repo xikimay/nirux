@@ -126,17 +126,14 @@ extension NiruxShellView {
         workspaceStore.visibleWorkspaceIndices(in: projectID).map { workspaces[$0] }.filter { !$0.isClosing }
     }
 
-    /// A board is shown while its workspace is: the selected one, or any of
-    /// the space's in Pilot Mode, in a window that isn't minimized.
+    /// A board is shown while its workspace is the selected one, in a
+    /// window that isn't minimized.
     func isProjectBoardShown(_ board: ProjectBoardController) -> Bool {
         projectBoardLocations.first { $0.board === board }.map(isProjectBoardShown) ?? false
     }
 
     private func isProjectBoardShown(_ location: ProjectBoardLocation) -> Bool {
         guard let window, !window.isMiniaturized, location.workspace.profileID == activeProfileID else { return false }
-        if isPilotMode {
-            return visibleWorkspaceIndices.contains { workspaces[$0] === location.workspace }
-        }
         return location.workspace === activeWorkspace
     }
 
@@ -229,7 +226,7 @@ extension NiruxShellView {
             agentInFront: agentInFront,
             status: pty.cachedAgentState,
             openDialog: pty.agentVisibleDialog(foreground: foreground)?.reason,
-            workingFor: pty.agentTurnStartedAt.map { PilotSidebarRenderer.shortDuration(now - $0.timeIntervalSince1970) }
+            workingFor: pty.agentTurnStartedAt.map { SidebarRenderer.shortDuration(now - $0.timeIntervalSince1970) }
         )
         var failedAt: TimeInterval?
         if case .stoppedOnError(_, _, let at, _)? = stuck { failedAt = at }
