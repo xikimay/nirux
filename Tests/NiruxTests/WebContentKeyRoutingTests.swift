@@ -98,6 +98,8 @@ final class WebContentKeyRoutingTests: XCTestCase {
     func testFindChordNeighboursStillReachTheMenu() {
         for editor in [true, false] {
             XCTAssertFalse(passes(editor: editor, "F", [.command, .shift]), "Search Workspace")
+            // Shadows Monaco's Replace chord; its find widget keeps the toggle.
+            XCTAssertFalse(passes(editor: editor, "ƒ", [.command, .option], ignoringModifiers: "f"), "Search Everywhere")
             XCTAssertFalse(passes(editor: editor, "f", [.command, .control]), "Enter Full Screen")
         }
     }
