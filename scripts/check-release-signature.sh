@@ -9,13 +9,17 @@ set -uo pipefail
 APP="${1:?Usage: check-release-signature.sh <path-to-Nirux.app>}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-# A bundle next to a Package.swift is never live: check a copy elsewhere.
-ditto "$APP" "$WORK/Nirux.app"
 COPY="$WORK/Nirux.app"
 BINARY="$COPY/Contents/MacOS/Nirux"
+# A bundle next to a Package.swift is never live: check a copy elsewhere.
+if ! ditto "$APP" "$COPY"; then
+    echo "::error::Couldn't copy $APP to check it outside the checkout."
+    exit 1
+fi
 
-# A check that hangs must leave time for the diagnostics.
-limited() { perl -e 'alarm shift; exec @ARGV' "$@"; }
+# A check that hangs must leave time for the diagnostics (the step allows
+# 5 minutes); a program that can't run fails rather than passes.
+limited() { perl -e 'alarm shift; exec @ARGV; exit 127' "$@"; }
 
 limited 120 env -u NIRUX_STATE_DIR -u NIRUX_MERGE_QUEUE_LIVE "$BINARY" --check-release-signature
 status=$?
@@ -30,11 +34,12 @@ case $status in
 esac
 echo "::error::$APP failed the release check: $why."
 echo "--- The same check on the app's files:"
-limited 120 "$BINARY" --check-release-signature "$COPY" || true
+files_check="$(limited 90 "$BINARY" --check-release-signature "$COPY" 2>&1)"
+printf '%s\n' "$files_check"
 echo "--- Its signature:"
 codesign -dvvv "$COPY" 2>&1 | grep -E 'Authority|TeamIdentifier|Notarization|flags' || true
 echo "--- The requirement, clause by clause:"
-requirement="$(limited 120 "$BINARY" --check-release-signature "$COPY" 2>/dev/null | sed -n 's/^requirement: //p')"
+requirement="$(sed -n 's/^requirement: //p' <<< "$files_check")"
 if [[ -z "$requirement" ]]; then
     echo "(the app didn't print its requirement)"
 else

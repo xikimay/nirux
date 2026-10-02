@@ -378,8 +378,8 @@ final class MergeQueueGitHubTests: XCTestCase {
         XCTAssertEqual(MergeQueue.checkReleaseSignatureCommand(["/System/Applications/Calculator.app"]), 1)
         XCTAssertEqual(MergeQueue.checkReleaseSignatureCommand([], environment: [:],
                                                                bundleURL: URL(fileURLWithPath: "/Applications/Nirux.app")), 1)
-        XCTAssertEqual(MergeQueue.checkReleaseSignatureCommand(["/tmp/a", "/tmp/b"]), 2)
-        XCTAssertEqual(MergeQueue.checkReleaseSignatureCommand(["--help"]), 2)
+        let calculator = "/System/Applications/Calculator.app"
+        XCTAssertEqual(MergeQueue.checkReleaseSignatureCommand([calculator, calculator]), 2)
         XCTAssertEqual(MergeQueue.checkReleaseSignatureCommand(["/tmp/no-such-app-\(UUID().uuidString).app"]), 2)
 
         let installed = URL(fileURLWithPath: "/Applications/Nirux.app")

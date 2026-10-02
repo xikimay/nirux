@@ -166,7 +166,8 @@ extension MergeQueue {
 
     /// Checks the signature off the main thread as Nirux launches, when the
     /// decision needs it: an install may replace the bundle later. A queue
-    /// opened before it ends checks it itself (about a tenth of a second).
+    /// opened before it ends checks it itself, on the thread that asks (the
+    /// main thread, from the board), in about a tenth of a second.
     static func checkSignatureAtLaunch(
         environment: [String: String] = ProcessInfo.processInfo.environment, bundleURL: URL = Bundle.main.bundleURL
     ) {
@@ -186,7 +187,7 @@ extension MergeQueue {
         bundleURL: URL = Bundle.main.bundleURL
     ) -> Int32 {
         let usage = "usage: Nirux --check-release-signature [path-to-app]"
-        guard arguments.count <= 1, arguments.first?.hasPrefix("-") != true else {
+        guard arguments.count <= 1 else {
             print(usage)
             return 2
         }

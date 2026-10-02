@@ -466,8 +466,8 @@ The queue is a pure state machine: `(state, event) -> (state, [command])`.
     they stay dry runs wherever they are copied and however they are opened:
     LaunchServices passes no variable at all. A bare executable is never live.
   - Nirux checks its running code only when the rest doesn't decide, off the
-    main thread as it launches (a queue opened before that ends waits about a
-    tenth of a second). A definitive answer is kept; a passing failure (a busy
+    main thread as it launches (a queue opened before that ends checks it
+    itself, in about a tenth of a second). A definitive answer is kept; a passing failure (a busy
     system service, a bundle replaced mid-check) is checked again for the next
     queue. The log, and a dry run's stop, say why a build is a dry run.
   - The nightly runs `scripts/check-release-signature.sh` on the app it
