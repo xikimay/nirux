@@ -342,8 +342,11 @@ extension NiruxShellView {
         let quit = MergeQueueQuit(reply: reply)
         mergeQueueQuit = quit
         // After this returns: an answer that comes at once must not reach
-        // AppKit before `.terminateLater` does.
-        DispatchQueue.main.async { [weak self] in
+        // AppKit before `.terminateLater` does. Through the run loop, which
+        // AppKit's wait runs, not the main queue: a quit asked from a
+        // main-queue block would never see a block of it (`requestQuit`).
+        // The queues' own main-queue answers keep coming meanwhile.
+        RunLoop.main.perform(inModes: [.default, .modalPanel]) { [weak self] in
             self?.askToQuitWithMergeQueues(quit)
         }
         return .terminateLater
@@ -354,8 +357,8 @@ extension NiruxShellView {
     /// `mergeQueueTerminateReply`.
     func mainWindowShouldClose() -> Bool {
         guard !runningMergeQueues.isEmpty else { return true }
-        let requestQuit = sideEffects.requestQuit
-        DispatchQueue.main.async { requestQuit() }
+        // From the next turn of the run loop, after the close returns.
+        sideEffects.requestQuit()
         return false
     }
 
@@ -383,7 +386,8 @@ extension NiruxShellView {
                 + "branch update already sent to GitHub finishes first: Nirux waits for its answer, "
                 + "\(Int(Self.mergeQueueQuitTimeout)) seconds at most. Nothing resumes by itself at the "
                 + "next launch: the board shows where \(one ? "it" : "each") stopped.")
-        sideEffects.confirmQuitWithMergeQueue(message, details.joined(separator: "\n"), window) { [weak self] confirmed in
+        let confirm = one ? "Stop Queue and Quit" : "Stop Queues and Quit"
+        sideEffects.confirmQuitWithMergeQueue(message, details.joined(separator: "\n"), confirm, window) { [weak self] confirmed in
             guard let self, self.mergeQueueQuit === quit else { return }
             guard confirmed else {
                 self.mergeQueueQuit = nil

@@ -33,15 +33,25 @@ struct ShellSideEffects {
     /// Shows an app-modal alert and waits for its answer.
     var runModal: @MainActor (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }
 
-    /// Quits Nirux, through `applicationShouldTerminate`.
-    var requestQuit: @MainActor () -> Void = { NSApp.terminate(nil) }
+    /// Quits Nirux, through `applicationShouldTerminate`, from the next
+    /// turn of the run loop. Never from a main-queue block: a quit that waits
+    /// (`.terminateLater`) runs AppKit's modal loop inside it, and the main
+    /// queue never runs another block until that one ends, so the answer it
+    /// waits for would never come.
+    var requestQuit: @MainActor () -> Void = {
+        RunLoop.main.perform(inModes: [.default, .modalPanel]) {
+            NSApp.terminate(nil)
+        }
+    }
 
-    /// Asks whether to stop the running merge queues and quit: a sheet on
-    /// the window when it is on screen, else an alert. `answer` gets true
-    /// to quit. Never waits in the caller: AppKit waits for the answer.
+    /// Asks whether to stop the running merge queues and quit, `confirm`
+    /// on the destructive button: a sheet on the window when it is on
+    /// screen, else an alert. `answer` gets true to quit. Never waits in
+    /// the caller: AppKit waits for the answer.
     var confirmQuitWithMergeQueue: @MainActor (
-        _ message: String, _ details: String, _ window: NSWindow?, _ answer: @escaping @MainActor (Bool) -> Void
-    ) -> Void = { message, details, window, answer in
+        _ message: String, _ details: String, _ confirm: String, _ window: NSWindow?,
+        _ answer: @escaping @MainActor (Bool) -> Void
+    ) -> Void = { message, details, confirm, window, answer in
         // Quit from the Dock while Nirux is hidden: the question must show.
         NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -50,7 +60,7 @@ struct ShellSideEffects {
         alert.messageText = message
         alert.informativeText = details
         alert.addButton(withTitle: "Keep Running")
-        alert.addButton(withTitle: "Stop Queue and Quit").hasDestructiveAction = true
+        alert.addButton(withTitle: confirm).hasDestructiveAction = true
         guard let window, window.isVisible, !window.isMiniaturized, window.attachedSheet == nil else {
             answer(alert.runModal() == .alertSecondButtonReturn)
             return

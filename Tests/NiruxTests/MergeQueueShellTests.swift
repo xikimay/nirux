@@ -265,6 +265,7 @@ final class MergeQueueShellTests: XCTestCase {
     // MARK: - Quitting
 
     /// The quit question, answered by the test.
+    @MainActor
     private final class QuitQuestion {
         var asked: [String] = []
         var answer: (@MainActor (Bool) -> Void)?
@@ -273,7 +274,7 @@ final class MergeQueueShellTests: XCTestCase {
     @MainActor
     private func recordQuitQuestions(_ shell: NiruxShellView) -> QuitQuestion {
         let question = QuitQuestion()
-        shell.sideEffects.confirmQuitWithMergeQueue = { message, details, _, answer in
+        shell.sideEffects.confirmQuitWithMergeQueue = { message, details, _, _, answer in
             question.asked.append(message + "\n" + details)
             question.answer = answer
         }
@@ -365,6 +366,37 @@ final class MergeQueueShellTests: XCTestCase {
         running.stop()
     }
 
+    /// The close button's quit comes from a main-queue block if anything
+    /// defers it there: AppKit then waits inside that block, where the main
+    /// queue runs nothing else. The question must still come.
+    @MainActor
+    func testTheQuestionComesWhenTheQuitWaitsInsideAMainQueueBlock() {
+        let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
+        let question = recordQuitQuestions(shell)
+        let queue = start(shell)
+        let asked = Flag()
+        let done = expectation(description: "the block ends")
+        DispatchQueue.main.async { @MainActor in
+            XCTAssertEqual(shell.mergeQueueTerminateReply { _ in }, .terminateLater)
+            // AppKit's wait for the answer: a modal-panel run loop, inside this block.
+            let deadline = Date().addingTimeInterval(5)
+            while question.asked.isEmpty, Date() < deadline {
+                RunLoop.main.run(mode: .modalPanel, before: Date().addingTimeInterval(0.02))
+            }
+            asked.value = !question.asked.isEmpty
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 10)
+        XCTAssertTrue(asked.value)
+        question.answer?(false)
+        queue.stop()
+    }
+
+    @MainActor
+    private final class Flag {
+        var value = false
+    }
+
     @MainActor
     func testTheWindowsCloseButtonQuitsThroughTheOneQuestion() throws {
         let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
@@ -375,8 +407,7 @@ final class MergeQueueShellTests: XCTestCase {
         let queue = start(shell)
 
         XCTAssertFalse(shell.mainWindowShouldClose(), "the window stays while a queue runs")
-        XCTAssertEqual(quits, 0, "asked after the close button returns")
-        waitUntil("the quit is requested") { quits == 1 }
+        XCTAssertEqual(quits, 1, "and Nirux quits, which asks")
         XCTAssertTrue(question.asked.isEmpty, "the quit asks, not the close button")
         var replies: [Bool] = []
         XCTAssertEqual(shell.mergeQueueTerminateReply { replies.append($0) }, .terminateLater)
