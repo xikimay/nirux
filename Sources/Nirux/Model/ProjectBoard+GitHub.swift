@@ -257,24 +257,31 @@ extension ProjectBoard {
     /// it reran. Several matching a required name (jobs of several
     /// workflows) show the worst of them.
     static func checkSummary(_ checks: [Check], required: [String]) -> CheckSummary {
-        var latest: [String: Check] = [:]
-        var order: [String] = []
-        for check in checks {
-            let key = "\(check.workflowName ?? "")\u{0}\(check.name)"
-            guard let known = latest[key] else {
-                latest[key] = check
-                order.append(key)
-                continue
-            }
-            if startOrder(check) >= startOrder(known) { latest[key] = check }
-        }
-        let current = order.compactMap { latest[$0] }
+        let current = latest(checks) { $0 }
         return CheckSummary(
             required: required.map { name in
                 RequiredCheck(name: name, result: current.filter { $0.matches(name) }.map(\.result).max())
             },
             others: current.filter { check in !required.contains { check.matches($0) } }.map(\.result)
         )
+    }
+
+    /// The latest run of each check (by workflow and name), in first-seen
+    /// order. The sidebar's pull request reads it with each check's URL.
+    static func latest<Item>(_ items: [Item], check: (Item) -> Check) -> [Item] {
+        var latest: [String: Item] = [:]
+        var order: [String] = []
+        for item in items {
+            let candidate = check(item)
+            let key = "\(candidate.workflowName ?? "")\u{0}\(candidate.name)"
+            guard let known = latest[key] else {
+                latest[key] = item
+                order.append(key)
+                continue
+            }
+            if startOrder(candidate) >= startOrder(check(known)) { latest[key] = item }
+        }
+        return order.compactMap { latest[$0] }
     }
 
     /// A run not started yet (a rerun waiting for a runner) has no start,

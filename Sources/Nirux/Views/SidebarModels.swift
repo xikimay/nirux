@@ -187,6 +187,14 @@ struct PRInfo: Hashable, Sendable {
     let additions: Int?
     let deletions: Int?
     let changedFiles: Int?
+    /// The latest run of each check that is red (docs/ci-failure-actions.md).
+    var redChecks: [RedCheck] = []
+
+    struct RedCheck: Hashable, Sendable {
+        let name: String
+        /// The check run's `detailsUrl`, or the commit status's `targetUrl`.
+        let url: String?
+    }
 }
 
 struct WorkspaceInfo: Hashable {
@@ -274,6 +282,7 @@ enum WorkspaceSidebarAction {
     case close, rename, editContext, newWorkspace
     case closeColumn(columnIndex: Int)
     case cleanUpWorktree
+    case askWhyCIFailed, rerunFailedCI
 }
 
 /// Hover highlight target in the expanded sidebar. Links have their own

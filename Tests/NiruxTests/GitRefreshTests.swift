@@ -125,7 +125,8 @@ final class GitRefreshTests: XCTestCase {
         let passed: [String: Any] = ["status": "COMPLETED", "conclusion": "SUCCESS"]
         XCTAssertEqual(ciStatus([passed, ["status": "IN_PROGRESS", "conclusion": ""]]), "PENDING")
         XCTAssertEqual(ciStatus([passed, ["status": "COMPLETED", "conclusion": "NEUTRAL"]]), "SUCCESS")
-        XCTAssertEqual(ciStatus([["status": "COMPLETED", "conclusion": "FAILURE"], ["status": "QUEUED", "conclusion": ""]]), "FAILURE")
+        XCTAssertEqual(ciStatus([["name": "test", "status": "COMPLETED", "conclusion": "FAILURE"],
+                                  ["name": "lint", "status": "QUEUED", "conclusion": ""]]), "FAILURE")
         XCTAssertEqual(ciStatus([passed, ["state": "PENDING"]]), "PENDING")
         XCTAssertEqual(ciStatus([passed, ["state": "SUCCESS"]]), "SUCCESS")
         XCTAssertNil(ciStatus([]))

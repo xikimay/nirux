@@ -79,6 +79,9 @@ final class WorkspaceState {
     }
     var hasNotification: Bool = false
     var prInfo: PRInfo?
+    /// The red checks already reported, by URL (else name). Nil until the
+    /// first call, which only records: red at launch isn't news.
+    private var reportedRedChecks: Set<String>?
     var diffStats: String?
 
     // Workspace context. Purpose/next step/blocker are always human-owned.
@@ -264,6 +267,16 @@ extension WorkspaceState {
         else { return false }
         prInfo = info
         return true
+    }
+
+    /// The red checks of `prInfo` not reported yet, each once
+    /// (docs/ci-failure-actions.md). A rerun is a new run, with a new URL.
+    func takeNewRedChecks() -> [PRInfo.RedCheck] {
+        let red = prInfo?.redChecks ?? []
+        let keys = red.map { $0.url ?? $0.name }
+        defer { reportedRedChecks = (reportedRedChecks ?? []).union(keys) }
+        guard let reported = reportedRedChecks else { return [] }
+        return red.filter { !reported.contains($0.url ?? $0.name) }
     }
 
     func beginPullRequestObservation(for context: GitContext) -> PullRequestObservation? {

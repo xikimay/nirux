@@ -589,11 +589,13 @@ extension NiruxShellView {
                         workspace.finishPullRequestObservation(observation)
                         return
                     }
-                    guard workspace.applyPullRequestInfo(
+                    let applied = workspace.applyPullRequestInfo(
                         info,
                         for: queriedContext,
                         observation: observation
-                    ) else { return }
+                    )
+                    self?.reportNewRedChecks(in: workspace)
+                    guard applied else { return }
                     self?.scheduleMetadataRefresh()
                 }
             }

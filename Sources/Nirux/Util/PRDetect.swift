@@ -171,13 +171,21 @@ enum PRDetect {
             return (check["conclusion"] as? String)?.isEmpty ?? false
         }
         let allChecksPending = !rollup.isEmpty && conclusions.allSatisfy({ $0.isEmpty })
+        // Red as the Project Board defines it (docs/project-board.md,
+        // section 3.2): only the latest run of each check counts.
+        let redChecks = ProjectBoard.latest(
+            rollup.compactMap { json in
+                ProjectBoard.check(from: json).map { (check: $0, url: (json["detailsUrl"] ?? json["targetUrl"]) as? String) }
+            },
+            check: \.check
+        )
+        .filter { $0.check.result == .failure }
+        .map { PRInfo.RedCheck(name: $0.check.name, url: $0.url) }
         let ciStatus: String?
         let failedCheckUrl: String?
-        if conclusions.contains("FAILURE") {
+        if !redChecks.isEmpty {
             ciStatus = "FAILURE"
-            failedCheckUrl = rollup
-                .first { ($0["conclusion"] as? String) == "FAILURE" }
-                .flatMap { $0["detailsUrl"] as? String }
+            failedCheckUrl = redChecks.lazy.compactMap(\.url).first
         } else if conclusions.contains("PENDING") || allChecksPending || hasRunningCheck {
             ciStatus = "PENDING"
             failedCheckUrl = nil
@@ -200,7 +208,8 @@ enum PRDetect {
             url: candidate["url"] as? String ?? "",
             additions: candidate["additions"] as? Int,
             deletions: candidate["deletions"] as? Int,
-            changedFiles: candidate["changedFiles"] as? Int
+            changedFiles: candidate["changedFiles"] as? Int,
+            redChecks: redChecks
         )
     }
 

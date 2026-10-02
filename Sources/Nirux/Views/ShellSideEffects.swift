@@ -30,6 +30,9 @@ struct ShellSideEffects {
         try await CookieImporter.importCookies(from: browser, into: WebViewColumn.sharedDataStore)
     }
 
+    /// Opens a link in the default browser.
+    var openURL: @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) }
+
     /// Shows an app-modal alert and waits for its answer.
     var runModal: @MainActor (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }
 

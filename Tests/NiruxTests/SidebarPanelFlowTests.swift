@@ -20,6 +20,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 "Focus Column", "Close Column", "Close Workspace", "Clean Up Worktree…", "View/Edit Context…",
                 "Rename Workspace", "New Workspace", "Move Up", "Move Down", "Move to Inactive", "Move to Active"
             ],
+            "testCIFailureMenuItems": ["Ask Agent Why CI Failed", "Rerun Failed CI Jobs…"],
             "testSpaceMenuItems": [
                 "New Space", "Rename Space…", "Space Color", "Edit Space Brief…", "Board Settings…", "Move to Space",
                 "Delete Space…"
@@ -46,6 +47,8 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             let worktreeIndex = try XCTUnwrap(shell.activeWorkspace.flatMap { active in
                 shell.workspaces.firstIndex { $0 === active }
             })
+            shell.workspaces[worktreeIndex].prInfo = Self.redPullRequest
+            shell.updateSidebar()
             let menus = [
                 shell.sidebar.workspaceActionMenu(workspaceIndex: worktreeIndex, columnIndex: 1),
                 shell.sidebar.workspaceActionMenu(workspaceIndex: inactiveIndex, columnIndex: nil),
@@ -132,6 +135,34 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 !shell.workspaces.contains { $0 === goneWorkspace }
             }
             XCTAssertEqual(harness.alerts.last, "The folder of “gone” is gone")
+        }
+    }
+
+    /// A pull request whose `test` job failed in a GitHub Actions run.
+    static let redPullRequest = PRDetect.pullRequestInfo(from: [
+        "number": 52, "state": "OPEN", "url": "https://github.com/acme/widgets/pull/52",
+        "statusCheckRollup": [[
+            "name": "test", "workflowName": "Tests", "status": "COMPLETED", "conclusion": "FAILURE",
+            "startedAt": "2026-10-02T10:00:00Z", "detailsUrl": "https://github.com/acme/widgets/actions/runs/7/job/11"
+        ]]
+    ])
+
+    /// Without an agent in the workspace, Why opens the failed check; a
+    /// rerun asks first, and nothing reaches GitHub when cancelled.
+    func testCIFailureMenuItems() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace })
+            workspace.prInfo = Self.redPullRequest
+            shell.updateSidebar()
+
+            harness.perform(["Ask Agent Why CI Failed"], in: shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil))
+            XCTAssertEqual(harness.openedURLs, [URL(string: "https://github.com/acme/widgets/actions/runs/7/job/11")])
+
+            harness.alertResponses = [.alertSecondButtonReturn]
+            harness.perform(["Rerun Failed CI Jobs…"], in: shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil))
+            XCTAssertEqual(harness.alerts.last, "Rerun the failed jobs of #52?")
         }
     }
 

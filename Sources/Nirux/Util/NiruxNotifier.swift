@@ -13,6 +13,15 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// (workspaceID, columnIndex?) — set by the app delegate at launch.
     var onActivate: ((String, Int?) -> Void)?
+    /// (workspaceID, action): a button of a CI failure notification.
+    var onCIFailureAction: ((String, CIFailureAction) -> Void)?
+
+    /// The buttons of a CI failure notification (docs/ci-failure-actions.md).
+    enum CIFailureAction: String {
+        case whyFailed, rerunFailed
+    }
+
+    private static let ciFailureCategory = "ciFailure"
 
     /// UNUserNotificationCenter requires a signed bundle with an identifier;
     /// `swift run` debug binaries have neither and would raise.
@@ -24,6 +33,17 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         guard isAvailable else { return }
         let center = UNUserNotificationCenter.current()
         center.delegate = self
+        // Foreground: both actions act in the app, and a rerun asks first.
+        center.setNotificationCategories([UNNotificationCategory(
+            identifier: Self.ciFailureCategory,
+            actions: [
+                UNNotificationAction(identifier: CIFailureAction.whyFailed.rawValue, title: "Ask Agent Why",
+                                     options: [.foreground]),
+                UNNotificationAction(identifier: CIFailureAction.rerunFailed.rawValue, title: "Rerun Failed Jobs…",
+                                     options: [.foreground])
+            ],
+            intentIdentifiers: []
+        )])
         // @Sendable keeps the closure nonisolated: UNUserNotificationCenter
         // invokes it on a background queue, and a MainActor-inferred closure
         // would trap the runtime isolation check there.
@@ -103,6 +123,21 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         post(content)
     }
 
+    /// "CI failed" / workspace / "#52: test, lint". Check names come from
+    /// GitHub: cleaned and bounded like an agent's text.
+    func postCIFailure(workspaceID: String, workspaceTitle: String, pullRequest: Int, checkNames: [String]) {
+        guard !NSApp.isActive else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "CI failed"
+        content.subtitle = workspaceTitle
+        let names = checkNames.compactMap { AgentText.clean($0, maxLength: 60) }.joined(separator: ", ")
+        content.body = AgentText.clean("#\(pullRequest): \(names)", maxLength: 200) ?? "#\(pullRequest)"
+        content.sound = .default
+        content.categoryIdentifier = Self.ciFailureCategory
+        content.userInfo = ["workspaceID": workspaceID]
+        post(content)
+    }
+
     /// Post a "download finished" notification; clicking reveals the file
     /// in Finder. Suppressed while the app is active.
     func postDownloadFinished(filename: String, fileURL: URL) {
@@ -148,6 +183,7 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         let workspaceID = info["workspaceID"] as? String
         let columnIndex = info["columnIndex"] as? Int
         let filePath = info["filePath"] as? String
+        let ciFailureAction = CIFailureAction(rawValue: response.actionIdentifier)
         // Answer synchronously — sending the closure into the MainActor task
         // below would risk a data race.
         completionHandler()
@@ -159,7 +195,9 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
                 return
             }
             NSApp.activate(ignoringOtherApps: true)
-            if let workspaceID {
+            if let workspaceID, let ciFailureAction {
+                self.onCIFailureAction?(workspaceID, ciFailureAction)
+            } else if let workspaceID {
                 self.onActivate?(workspaceID, columnIndex)
             }
         }
