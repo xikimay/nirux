@@ -63,14 +63,17 @@ that does the work.
 - Entry points:
   - the palette: **Review Branch** (current workspace);
   - the sidebar's workspace menu: **Review Branch**;
-  - the editor's "Full Branch Diff (N)" tab: an "Open in Branch Review" link
-    in its header;
+  - the editor's "Full Branch Diff (N)" tab: a native banner above the web
+    view, like the editor's conflict banner (`EditorConflictBanner`), with an
+    "Open in Branch Review" button;
   - later, a "Review" button on the Project Board's rows.
 
   The palette command and the menu item are listed in the UI flow harness
-  (#59, `UIFlowCoverage`), which fails otherwise. The editor link is outside
-  what the harness enumerates, so it gets its own flow test.
-- **The page is HTML in a `WKWebView`**, like the editor: the summary, the
+  (#59, `UIFlowCoverage`), which fails otherwise. The editor's banner is
+  outside what the harness enumerates, so it gets its own flow test; it is
+  native so that a test can click it.
+- **The page is HTML in a `WKWebView`**, like the editor, with its own page
+  (`review.html`, not the editor's `index.html`): the summary, the
   groups, the comments and the diffs are one scrolling document. Swift
   computes the data (git, `gh`, rules, `claude -p`) and sends it over the
   bridge; the page renders it and sends back clicks and comments.
@@ -95,13 +98,18 @@ The page shows text that neither Nirux nor the user wrote: diffs, file paths,
 PR bodies (a fork's included), commit messages, handovers, Claude's output.
 The page has a bridge to Swift, so:
 
-- `index.html` carries a Content Security Policy that allows only the bundled
-  scripts and styles, and no remote image, font or frame.
+- `review.html` carries a Content Security Policy: scripts from the bundle
+  only (`script-src 'self'`), no remote image, font, frame or connection.
+  Styles allow `'unsafe-inline'`: `@pierre/diffs` creates `<style>` elements
+  and its syntax highlighting writes inline styles.
 - The web view loads only its bundled `file://` page. Every other navigation is
   cancelled (`decidePolicyFor`); a link opens in the browser instead.
 - The bridge accepts messages only from the main frame of that page.
-- Every untrusted string is set with `textContent`. Markdown in a PR body is
-  rendered without raw HTML. No payload string reaches `innerHTML`.
+- The page's own code sets every untrusted string with `textContent` and
+  never uses `innerHTML`. Markdown in a PR body is rendered without raw HTML.
+  `@pierre/diffs` writes the diff through `innerHTML`
+  (`renderPartialHTML`) after escaping it; a test covers that escaping on a
+  crafted line and path (section 9.1).
 - Bridge messages carry ids, never text to type: Swift builds the message to
   send to the agent from its own stored comments, and the sheet that confirms
   it is native.
@@ -158,7 +166,9 @@ Top to bottom:
    - binaries.
 
 **Uncommitted changes** are part of what the agent did, but not of the PR yet:
-they form their own group at the top, marked "not committed". The files
+they form their own group at the top, marked "not committed". A file changed
+both in commits and in the working tree is listed there once, with its whole
+patch from the merge base to the working tree. The files
 Nirux's worktree cleanup already treats as disposable
 (`WorktreeCleanup.disposablePaths`: the handovers,
 `.claude/settings.local.json`) are left out.
@@ -179,7 +189,10 @@ The page is useful before anyone clicks Explain. Nirux groups by path:
 | CI | `.github/workflows/`, `.github/actions/` |
 | Docs | `*.md`, `docs/` |
 
-Inside a group, added files come first, then by lines changed. Once explained,
+The rules apply top to bottom, and the first that matches wins: the table
+lists "Code" first for reading, but it is the fallback, tried last
+(`Tests/README.md` is a test file). Inside a group, added files come first,
+then by lines changed. Once explained,
 Claude's intent groups replace the path groups. Nirux checks them: a path that
 isn't in the diff is dropped, a file that appears in no group goes to "Other
 changes", a file in two groups stays in the first.
@@ -260,7 +273,7 @@ of the branch.** About 80 s and $0.59 at API prices for a branch of this size.
 
 ```sh
 claude -p --model claude-opus-5-5 --effort medium \
-  --output-format json --json-schema <schema> \
+  --output-format stream-json --verbose --json-schema <schema> \
   --tools Read,Grep,Glob --restricted --permission-prompts none \
   --strict-mcp-config --disable-slash-commands \
   --no-session-persistence --settings '{"disableAllHooks":true}' \
@@ -273,40 +286,56 @@ claude -p --model claude-opus-5-5 --effort medium \
   `--permission-prompts none`, anything that would ask is denied. Checked on
   2026-10-02 with a canary: with `--allowedTools Read,Grep,Glob` instead, the
   model read an absolute path outside the folder and a symlink pointing out of
-  it; with these flags both were denied. Explain requires a Claude Code
-  version that has `--restricted` (2.1.288 or later, `ClaudeCodeVersion`).
+  it; with these flags both were denied. Explain requires that the binary it
+  will run lists `--restricted` and `--permission-prompts` in its `--help`
+  (2.1.285 does). Not `ClaudeCodeVersion.detect`: it returns the oldest of
+  the installed versions, and nothing for a shim.
 - **`--bare` would be leaner, but it refuses OAuth**, so it doesn't work on a
   subscription.
 - **The model id is a full name**, not the `opus` alias, which will move to the
   next model. It is a setting, with this default.
 - **The copy.** The working directory is a fresh temporary folder outside the
-  state directory, deleted after the run; leftovers are swept at launch. It
-  holds the branch as the user sees it: a temporary index
-  (`GIT_INDEX_FILE`) gets `read-tree HEAD` and `add -u`, then `write-tree` and
-  `git archive`. Untracked files are left out (see "Input" below). Then
-  Nirux deletes every symlink and every path that looks like a secret
-  (`.env*`, `*.pem`, `*.p12`, `*.key`, `*.mobileprovision`, `*credentials*`,
-  `id_rsa*`, `id_ed25519*`, `.netrc`). Not a `git worktree add`: it would show
-  in `git worktree list` and on the Project Board.
-- **The environment is an allowlist:** `HOME`, `USER`, `LOGNAME`, `PATH`,
-  `LANG`, `TMPDIR`. Nothing else from Nirux's environment reaches the child:
+  state directory, deleted after the run; leftovers are swept at launch. Nirux
+  copies into it, from the working tree, every path `git ls-files -z` lists:
+  committed and staged files with their uncommitted edits, without untracked
+  files (see "Input" below). It skips symlinks, submodules and files missing
+  from disk, so nothing is written to the repository's index or object store.
+  Then it deletes:
+  - paths that look like a secret (`.env*`, `*.pem`, `*.p12`, `*.key`,
+    `*.mobileprovision`, `*credentials*`, `id_rsa*`, `id_ed25519*`,
+    `.netrc`);
+  - text files containing a key marker (`-----BEGIN`, `sk-ant-`, `ghp_`,
+    `github_pat_`, `AKIA`), the same markers the input withholds;
+  - `CLAUDE.md`, `CLAUDE.local.md` and `.claude/`: instructions the branch
+    carries must not reach the reviewer as project instructions.
+
+  Not a `git worktree add`: it would show in `git worktree list` and on the
+  Project Board.
+- **The environment is an allowlist:** `HOME`, `USER`, `LOGNAME`, `LANG`,
+  `TMPDIR`, and a `PATH` that starts with the folder of the `claude` binary
+  `AgentCLILocator` found, then `PtySession.effectivePath`: an npm install is
+  a `node` script, and Nirux's own `PATH` is launchd's. Nothing else from
+  Nirux's environment reaches the child:
   not `NIRUX_AGENT_UUID` (Nirux's hooks run only when it is set), not
   `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_BASE_URL` (which
   would bill the API instead of the plan), not the `CLAUDE_CODE_*` variables a
   dev build launched from a Claude session inherits. `disableAllHooks` covers
   hooks from settings Nirux didn't pass.
 - **The account.** Before the first run, and when it changes, Nirux reads
-  `claude auth status --json`. The first-use notice of a project names the
-  account and its method ("claude.ai, Max"); `api_key` asks again. Logged
-  out, or no `claude` found (`AgentCLILocator`), and Explain is disabled with
-  the reason.
+  `claude auth status --json`, with the same environment as the run, so it
+  reports the account the run will use. The first-use notice of a project
+  names the account and its method ("claude.ai, Max"); `api_key` asks again.
+  Logged out, or no `claude` found (`AgentCLILocator`), and Explain is
+  disabled with the reason.
 - **No session is saved** (`--no-session-persistence`): the review doesn't show
   in `claude --resume`. The session history (#68) already ignores `claude -p`.
 - **One run at a time, in the whole app.** A second Explain waits in line. The
   run has a 6-minute timeout and a Cancel button. `BoundedProcess` can't do
   this today: R3 extends it with stdin, a cancel handle, a replaced (not
   merged) environment, and keeping the output it read when it stops, and runs
-  it off the main thread.
+  it off the main thread. With `stream-json`, a cancelled or timed-out run
+  still leaves the usage its events reported; R3 checks that the structured
+  output arrives in the final `result` event.
 - **Input:** the PR body, the handover, the commits, and the diff from the
   merge base with numbered hunks. Left out: folded noise, binaries, secret
   paths, and the disposable paths of section 2. Hunks containing a key marker
@@ -324,11 +353,13 @@ claude -p --model claude-opus-5-5 --effort medium \
 - **Limits:** the model never marks a file reviewed, never hides a file and
   never removes a risk signal. Its notes are labeled "Claude", with the model
   and the head commit it read. Each "check this" note can be turned into a
-  comment, or marked wrong; the marks are kept with the run, so the page can
-  say how often notes were wrong.
-- **Cache:** per file, keyed by the hash of the file's patch (section 6.3). When
-  the branch moves, Explain again only sends the files whose patch changed,
-  with the previous overview as context; the others keep their notes.
+  comment (once R4 has landed), or marked wrong; the marks are kept with the
+  run, so the page can say how often notes were wrong.
+- **Cache:** per file, keyed by the file's patch hash (section 6.3). Notes are
+  stored by path and by the hunk's position in the file, not by the run's
+  hunk ids (`f12h1`), which only live for one run. When the branch moves,
+  Explain again only sends the files whose patch changed, with the previous
+  overview as context; the others keep their notes.
 - **Usage:** each run's tokens and reported cost are kept with it, and the
   column's header shows today's total. A run that ends on a usage limit says
   so, rather than "failed".
@@ -353,11 +384,17 @@ notes are shown apart and never change these signals.
 | Dependencies | `Package.swift`, `Package.resolved` | A build-rewritten `Package.resolved` must not be committed |
 
 **Tests against code.** The header shows lines added in tests against lines
-added in code, and lists the symbols the branch declares or changes that no
-test mentions. On #57: 578 test lines for 458 code lines, and nothing
-mentions `setUpKeepAwake` (`NiruxApp+KeepAwake.swift`),
-`initialMainWindowFrame` (`NiruxApp.swift`) or `mainQueueSchedule`
-(`MainActorSchedule.swift`). A mention isn't coverage, so the line says
+added in code, and lists the symbols the branch declares that no test
+mentions. A symbol is an identifier declared on an added line (`func`, `var`,
+`let`, `class`, `struct`, `enum`, `case`, `protocol`, `typealias`) outside any
+function body, found by tracking braces in the file at the head, and not
+`private` or `fileprivate`: private members are tested through the API that
+uses them, and local variables would only add noise. A test mentions a symbol
+when the identifier appears as a whole word in a file under `Tests/`. On #57,
+578 test lines for 458 code lines, and a script applying this rule found 11
+of 42 symbols that no test mentions, among them `setUpKeepAwake` (the launch
+wiring), `IOKitSleepAssertions` (the real IOKit calls; the tests inject a
+fake) and `mainQueueSchedule`. A mention isn't coverage, so the line says
 "mentions", never "tested".
 
 The rules start built in, for Swift and macOS. Per-project rules
@@ -408,16 +445,21 @@ say why and change nothing for it. Then say what you did for each number.
 - **"Idle at its prompt" is a new predicate.** `PtySession.agentResumeRefusal`
   doesn't fit: it refuses any agent without a failed turn, and any agent but
   `claude`. The new one keeps its at-prompt checks without the failed turn:
-  the agent is the column's foreground process, no dialog is pending, no hook
-  says it is working and no turn has started. It fails closed: an agent
-  without hooks (Gemini CLI, OpenCode, a Claude without Nirux's hooks) or a
-  Codex without its notify hook can't be read as idle, so the button is
-  disabled and says why. It is checked when the sheet opens and again on
-  Send: a Telegram prompt or a merge-queue prompt may start a turn meanwhile.
+  the foreground process is `claude` driven by Nirux's hooks (`hookKind ==
+  "claude"`, not a headless `claude -p`), no dialog is pending, no hook says
+  it is working and no turn has started. This is the rule worktree closing
+  already uses to trust "idle" (`WorkspaceClosePolicy`). Every other agent is
+  refused, with the reason: Codex's notify hook reports turn ends only, so an
+  open approval prompt would read as idle; Gemini CLI and OpenCode report
+  nothing. It is checked when the sheet opens and again on Send: a Telegram
+  prompt or a merge-queue prompt may start a turn meanwhile.
 - **The message is sanitized as a whole**, paths and quoted lines included,
-  with the scalar allowlist of `RemotePromptSanitizer` (keep `\n` and `\t`,
-  drop the other C0 controls, DEL and C1; no length cap). A file named with an
-  ESC[201~ can't end the paste and inject a Return. In the sheet, bidi and
+  by the scalar filter of `RemotePromptSanitizer`, factored out: keep `\n` and
+  `\t`, drop the other C0 controls, DEL and C1. Not its `sanitize` as is, which
+  caps at 8,000 characters, nor its `terminalInput`, which appends a Return:
+  the message is wrapped in `ESC[200~` and `ESC[201~` with nothing after, as
+  `sendSelectionToAgent` does. A file named with an ESC[201~ can't end the
+  paste and inject a Return. In the sheet, bidi and
   zero-width characters are shown escaped, so what the user reads is what is
   sent.
 - **A queued PR:** if the PR is in the merge queue, the sheet warns that the
@@ -437,11 +479,13 @@ Rejected:
 
 ### 6.3 Reviewed
 
-- One checkbox per file, keyed by the hash of the file's patch against the
-  merge base, working tree included, without the hunk headers' line numbers.
-  A change to the file's patch clears it: "changed since you reviewed". A merge
-  from the base that doesn't touch the branch's own changes keeps it, and an
-  uncommitted edit clears it.
+- One checkbox per file, keyed by the file's **patch hash**: a hash of its
+  path (both paths for a rename), its status, and the bodies of its hunks from
+  the merge base to the working tree. The `diff --git`, `index`, mode and
+  similarity lines and the `@@` ranges are left out: they change when the base
+  changes the file elsewhere. A change to the file's patch clears it:
+  "changed since you reviewed". A merge from the base that doesn't touch the
+  branch's own changes keeps it, and an uncommitted edit clears it.
 - The header counts reviewed files. Reviewed files can be collapsed.
 - **A new head never re-renders the page under the user.** A banner offers
   Reload; drafts survive it.
@@ -452,31 +496,45 @@ Rejected:
 ## 7. Data and refresh
 
 - **Git.** Every call runs with `GitDetect.readOnlyEnvironment`
-  (`GIT_OPTIONAL_LOCKS=0`), so the page never takes `index.lock` while an agent
-  commits, and with `--no-color --no-ext-diff --no-textconv --src-prefix=a/
-  --dst-prefix=b/ -M -z`, so the user's git config can't change what Nirux
-  parses. Output is decoded per file, lossily: one Latin-1 file must not empty
-  the page (`GitCommand.output` returns an empty string for non-UTF-8 output).
+  (`GIT_OPTIONAL_LOCKS=0`). That is not enough on its own: a `git diff`
+  without a tree-ish still refreshes the index (`GitCommand.swift`), so Nirux
+  only runs `git diff <merge base>` and `git status --porcelain=v2 -z`. Patches
+  use `-c core.quotePath=false -c diff.suppressBlankEmpty=false --no-color
+  --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ -M -U3
+  --inter-hunk-context=0 --diff-algorithm=myers`, so the user's git config
+  can't change the patch or its hash. Paths come from `--name-status -z`; the
+  patch parser still reads C-quoted paths. Output is decoded per file,
+  lossily: one Latin-1 file must not empty the page (`GitCommand.output`
+  returns an empty string for non-UTF-8 output).
 - **Base.** With a PR, the merge base of HEAD and the PR's base branch, fetched
-  on Refresh (`git fetch origin <baseRefName>`). Without one, the merge base
+  on Refresh: `git fetch --no-auto-maintenance --no-write-fetch-head origin
+  <baseRefName>`, with `GIT_TERMINAL_PROMPT=0` and a timeout. Nirux has never
+  fetched before; this updates one remote-tracking ref and is the page's only
+  write to the repository. Without one, the merge base
   with the remote's default branch (`origin/HEAD`), else `main` or `master`.
   Not `GitCommand.branchBaseRef`, which tries `@{upstream}` first: after `git
   push -u` with no PR yet, that is the branch's own remote, and the page would
   show only unpushed commits. The diff runs from the merge base to the working
-  tree, untracked files included.
-- **Which PR.** The open PR of the branch whose head shares history with HEAD
-  (`gh pr view --json number,title,body,state,baseRefName,headRefOid`). A
-  merged or closed PR, or an unrelated one under a reused branch name, is
-  ignored. `gh` missing or logged out: the page works without the PR, and says
-  so.
+  tree. Untracked files (`git ls-files --others --exclude-standard -z`) are
+  read from disk and shown as added files.
+- **Which PR.** Found as the sidebar finds it (`PRDetect`: `gh pr list
+  --head <branch>` on the upstream repository), then kept only if it is open
+  and at least one of its commits (`gh pr view --json commits`) is in HEAD's
+  history and not in the base's. A merged or closed PR, or one under a reused
+  branch name, is ignored. The PR's head may not be local (the merge queue
+  updates branches on GitHub): the header then says the PR has commits the
+  worktree doesn't. `gh` missing or logged out: the page works without the
+  PR, and says so.
 - **Local against PR:** when the local head isn't the PR's head (unpushed
   commits, or a branch updated on GitHub by the merge queue), the header says
   so.
 - **Refresh.** The column watches its own worktree with a
   `GitRepositoryWatcher` (the workspace's watcher follows the focused
   column's folder and is suspended in the background). A `.metadata` event
-  compares `rev-parse HEAD` and the branch: a new head shows the Reload banner.
-  A `.worktree` event refreshes the "not committed" group, debounced. Off
+  compares `rev-parse HEAD` and the branch: a new head shows the Reload banner;
+  an unchanged head refreshes the "not committed" group, since a batch of
+  events reports only `.metadata`. A `.worktree` event refreshes that group
+  too, debounced. Off
   screen, the column only marks itself stale. Refresh re-reads everything. No
   polling of `gh` in the background.
 - **Rebase or switch.** During a rebase or a merge, the page pauses and says
@@ -494,12 +552,16 @@ Rejected:
   is case-insensitive: `Fix/A` and `fix/a` must not share a file).
   `NIRUX_STATE_DIR` moves it.
 - It holds the comments, drafts, reviewed marks, what was sent, the
-  explanation cache, each Explain run's usage, and the merge base the review
-  started from. If that merge base is no longer an ancestor of HEAD, the branch
-  name was reused: the old file is archived and the review starts fresh.
-- Writes read, merge and write under an exclusive `flock`, as the merge queue's
-  lock does (`MergeQueueStore.swift`): the installed app and a dev build can
-  share the state directory.
+  explanation cache, each Explain run's usage, the PR number and the last
+  head reviewed. A reused branch name must not inherit old comments: the file
+  is kept only if its PR number matches the branch's PR, or, without a PR, if
+  its last head is still in the branch's reflog (`git reflog
+  refs/heads/<branch>`; `git branch -D` deletes it, a rebase keeps it).
+  Otherwise it is archived and the review starts fresh.
+- Writes take a blocking exclusive `flock` on a sibling `<file>.lock`, held
+  across read, merge and write: the installed app and a dev build can share the
+  state directory, and a lock on the data file itself would be lost when the
+  file is replaced atomically.
 - A `version` field. A file from a newer version opens read-only, so an older
   build never drops keys it doesn't know.
 - Clean Up of the worktree deletes the file.
@@ -510,25 +572,27 @@ One pull request each. Explain comes third, before comments: understanding a
 branch is the point, and acting on it is worth building only if the page gets
 used.
 
-1. **R1, review data, no UI.** The snapshot builder (git with the flags of
-   section 7, and `gh` through an injectable runner: CI has no `gh` login),
-   base and PR selection, noise classification, path groups, risk rules,
-   tests against code, and the versioned storage file with its lock. Pure and
-   unit-tested.
-2. **R2, the column, read-only.** `ColumnKind.branchReview`, the page and its
-   safety rules (section 1.1), the summary, the risk chips, the groups and the
-   diffs. "Review Branch" in the palette and the sidebar menu, listed in the
-   UI flow harness, and the editor's "Open in Branch Review" link with its own
-   flow test. The `@pierre/diffs` wrapper source, its `package.json` and lock,
-   and a build script that records the hashes of the sources and the bundle; a
-   test fails when the bundle no longer matches them, since CI doesn't build
-   JavaScript. The editor's diff tab must render as before.
+1. **R1, review data, no UI.** The snapshot builder (git as in section 7, and
+   `gh` through an injectable runner: CI has no `gh` login), base and PR
+   selection, noise classification, path groups, risk rules, tests against
+   code, the patch hash, and the versioned storage file with its lock, which
+   Clean Up of the worktree deletes. Pure and unit-tested.
+2. **R2, the column, read-only.** `ColumnKind.branchReview`, `review.html` and
+   its safety rules (section 1.1), the summary, the risk chips, the groups and
+   the diffs. The column's watcher, Refresh, the stale state, the Reload
+   banner and the pause during a rebase or a switch. "Review Branch" in the
+   palette and the sidebar menu, listed in the UI flow harness, and the
+   editor's native banner with its own flow test. The `@pierre/diffs` wrapper
+   source, its `package.json` and lock, and a build script that records the
+   hashes of the sources and the bundle; a test fails when the bundle no longer
+   matches them, since CI doesn't build JavaScript. The editor's diff tab must
+   render as before.
 3. **R3, Explain.** `BoundedProcess`'s extensions, the run of section 4.3, the
    copy, the account check, the settings (model, effort), the first-use
    notice, the cache, the checks on the output, the claims, the usage line.
    Run on five merged PRs before its defaults are frozen.
 4. **R4, comments and reviewed marks.** Drafts, re-anchoring, outdated
-   comments, the Reload banner.
+   comments, and turning a "check this" note into a comment.
 5. **R5, sending to the agent.** The "idle at its prompt" predicate, the
    sanitizer, the message, the target rules, the sheet; shared with "Ask Agent
    to Resolve" if it has landed.
@@ -545,11 +609,14 @@ button.
   tested through a fake that completes on a background queue, so a main-actor
   closure called from the wrong thread traps in CI (Swift 6.1, as the nightly)
   rather than in the nightly (#48).
-- Tests that touch main-actor types are `@MainActor`. AppKit clicks use
-  `hitTest` and `mouseDown`; windows set `isReleasedWhenClosed = false`.
+- Tests that touch main-actor types are `@MainActor`. AppKit clicks go through
+  `hitTest`, then `mouseDown` for a custom view or `performClick` for an
+  `NSButton`; windows set `isReleasedWhenClosed = false`.
 - The page is tested on the JSON Swift sends, and on its pure functions under
   JavaScriptCore (`JSContext`), with crafted strings: a PR body with HTML and
-  links, a path with ESC and bidi characters. No test navigates a
-  `WKWebView`; none does today.
+  links, a path with ESC and bidi characters. `@pierre/diffs`'s escaping is
+  tested on the same strings through `renderPartialHTML`'s output; if that
+  needs a DOM, R2 adds the first test that loads a `WKWebView` and proves it
+  stable on CI before relying on it.
 - Explain is tested against a fake `claude`; the real CLI runs only by hand,
   on a dev build with `NIRUX_STATE_DIR`.
