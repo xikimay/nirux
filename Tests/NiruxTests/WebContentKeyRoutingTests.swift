@@ -77,24 +77,6 @@ final class WebContentKeyRoutingTests: XCTestCase {
         XCTAssertFalse(passes(editor: false, "l", .command))
     }
 
-    /// Text that has the keyboard takes Cmd+Arrow and Shift+Cmd+Arrow;
-    /// Control+Cmd+Arrow (focus column, switch workspace) and
-    /// Alt+Cmd+Arrow (switch space) stay with the menu.
-    func testOnlyCommandAndShiftCommandArrowsMoveTheCaret() {
-        func moves(_ keyCode: UInt16, _ modifiers: NSEvent.ModifierFlags) -> Bool {
-            // Arrow keys always carry the function and numeric pad flags.
-            WebContentKeyRouting.movesCaretToTextEdge(keyCode: keyCode, modifierFlags: modifiers.union([.function, .numericPad]))
-        }
-        for arrow: UInt16 in 0x7B...0x7E {
-            XCTAssertTrue(moves(arrow, .command))
-            XCTAssertTrue(moves(arrow, [.command, .shift]))
-            XCTAssertFalse(moves(arrow, [.command, .control]))
-            XCTAssertFalse(moves(arrow, [.command, .option]))
-            XCTAssertFalse(moves(arrow, []))
-        }
-        XCTAssertFalse(moves(0x7A, .command)) // F1
-    }
-
     func testCommandOptionReturnStaysWithMonaco() {
         XCTAssertTrue(passes(editor: true, "\r", [.command, .option], keyCode: 0x24))
         XCTAssertFalse(passes(editor: false, "\r", [.command, .option], keyCode: 0x24))

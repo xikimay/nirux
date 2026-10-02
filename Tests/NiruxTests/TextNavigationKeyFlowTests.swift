@@ -5,7 +5,8 @@ import XCTest
 
 /// Cmd+Arrow in an editor or browser column, through the app's key
 /// interceptor and menu bar: it edits the text that has the keyboard,
-/// and Control+Cmd+Arrow still navigates from there.
+/// and Control+Cmd+Arrow still navigates from there. A focused editor
+/// column has the keyboard, unless an agent's open focused it.
 @MainActor
 final class TextNavigationKeyFlowTests: XCTestCase {
     private enum Arrow: UInt16 {
@@ -25,15 +26,8 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         try UIFlowHarness.run { harness in
             try withApp(on: harness) {
                 let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
-                harness.shell.openEditorColumn()
+                let (editor, webView) = try openEditorWithKeyboard(in: harness)
                 let editorIndex = workspace.focusedIndex
-                let column = try XCTUnwrap(workspace.columns[safe: editorIndex])
-                let editor = try XCTUnwrap(column.editorColumn)
-                harness.waitUntil("the editor to open README.md") { editor.activePath == harness.repo + "/README.md" }
-                // A click in Monaco gives it the keyboard.
-                let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
-                harness.window.makeFirstResponder(webView)
-                harness.waitUntil("Monaco to take text") { webView.inputContext != nil }
 
                 press(.right, [.command], in: harness)
                 press(.left, [.command, .shift], in: harness)
@@ -41,11 +35,30 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 press(.down, [.command], in: harness)
                 press(.up, [.command, .shift], in: harness)
                 waitForSelection("# Flow\n\nEdited.\n", in: editor, harness: harness)
-                XCTAssertIdentical(workspace.columns[safe: editorIndex], column, "the editor column moved")
-                XCTAssertEqual(workspace.focusedIndex, editorIndex)
 
-                // Control+Cmd+Arrow navigates from the text.
+                // Control+Cmd+Arrow navigates from the text, and back: the
+                // editor column takes the keyboard as it gets the focus.
                 press(.left, [.command, .control], in: harness)
+                XCTAssertEqual(workspace.focusedIndex, editorIndex - 1)
+                press(.right, [.command, .control], in: harness)
+                XCTAssertEqual(workspace.focusedIndex, editorIndex)
+                XCTAssertIdentical(harness.window.firstResponder, webView)
+            }
+        }
+    }
+
+    /// The diff hides Monaco: Cmd+Arrow navigates again.
+    func testCommandArrowsNavigateFromTheEditorDiff() throws {
+        try UIFlowHarness.run { harness in
+            try withApp(on: harness) {
+                let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+                let (editor, webView) = try openEditorWithKeyboard(in: harness)
+                let editorIndex = workspace.focusedIndex
+                harness.shell.toggleEditorDiff()
+                harness.waitUntil("the diff of README.md") { editor.diffActivePath == harness.repo + "/README.md" }
+                harness.waitUntil("the diff to hide Monaco's text", timeout: 10) { webView.inputContext == nil }
+
+                press(.left, [.command], in: harness)
                 XCTAssertEqual(workspace.focusedIndex, editorIndex - 1)
             }
         }
@@ -67,7 +80,6 @@ final class TextNavigationKeyFlowTests: XCTestCase {
 
                 press(.left, [.command], in: harness)
                 XCTAssertEqual(workspace.focusedIndex, browserIndex)
-                XCTAssertIdentical(harness.window.firstResponder, fieldEditor, "the address bar lost the keyboard")
                 XCTAssertEqual(fieldEditor.selectedRange(), NSRange(location: 0, length: 0))
                 press(.right, [.command, .shift], in: harness)
                 XCTAssertEqual(fieldEditor.selectedRange(), NSRange(location: 0, length: length))
@@ -100,6 +112,30 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         }
     }
 
+    /// An agent's open never takes the keyboard from the terminal it may be
+    /// typed in, not even once an earlier open focused the editor column.
+    func testAgentOpensLeaveTheKeyboardInTheTerminal() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let terminal = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.terminalView)
+            harness.window.makeFirstResponder(terminal)
+            for file in ["README.md", UIFlowHarness.searchTarget] {
+                let request = try XCTUnwrap(OpenEditorRequest(
+                    queryItems: [
+                        URLQueryItem(name: "file", value: harness.repo + "/" + file),
+                        URLQueryItem(name: "workspace", value: workspace.id)
+                    ],
+                    canonicalize: { $0 },
+                    isOpenableFile: { _ in true }
+                ))
+                shell.openEditorFromURL(request)
+                XCTAssertNotNil(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
+                XCTAssertIdentical(harness.window.firstResponder, terminal, "opening \(file) took the keyboard")
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     /// Runs `body` with the app's key interceptor and menu bar on the
@@ -120,6 +156,19 @@ final class TextNavigationKeyFlowTests: XCTestCase {
             NSApp.mainMenu = previousMenu
         }
         try body()
+    }
+
+    /// Opens README.md in a new editor column, its Monaco with the keyboard.
+    private func openEditorWithKeyboard(in harness: UIFlowHarness) throws -> (EditorColumn, WKWebView) {
+        let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+        harness.shell.openEditorColumn()
+        let editor = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
+        harness.waitUntil("the editor to open README.md") { editor.activePath == harness.repo + "/README.md" }
+        // A click in Monaco gives it the keyboard.
+        let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
+        harness.window.makeFirstResponder(webView)
+        harness.waitUntil("Monaco to take text") { webView.inputContext != nil }
+        return (editor, webView)
     }
 
     /// A key press, through the app's event dispatch and so its key

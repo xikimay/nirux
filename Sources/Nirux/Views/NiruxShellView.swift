@@ -724,6 +724,8 @@ extension NiruxShellView {
               let window else { return }
         if let webView = col.webViewColumn {
             window.makeFirstResponder(webView.webView)
+        } else if let editor = col.editorColumn {
+            editor.takeKeyboard()
         } else if let board = col.projectBoard {
             window.makeFirstResponder(board.view)
         } else if col.isFindBarOpen {
