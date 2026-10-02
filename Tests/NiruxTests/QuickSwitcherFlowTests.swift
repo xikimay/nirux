@@ -181,12 +181,19 @@ final class QuickSwitcherFlowTests: XCTestCase {
             shell.switchToWorkspace(try index(of: repo, in: shell))
 
             var landed: [String] = []
-            for _ in 0..<4 {
+            @MainActor func press() throws {
                 shell.jumpToNextWaitingAgent()
                 let workspace = try XCTUnwrap(shell.activeWorkspace)
                 landed.append("\(workspace.title)#\(workspace.focusedIndex)")
             }
-            XCTAssertEqual(landed, ["acme#0", "second#0", "parked#0", "acme#0"])
+            try press()
+            try press()
+            // Away and back by hand: the next press starts over at the
+            // longest wait.
+            shell.switchToWorkspace(try index(of: repo, in: shell))
+            shell.switchToWorkspace(try index(of: second, in: shell))
+            for _ in 0..<4 { try press() }
+            XCTAssertEqual(landed, ["acme#0", "second#0", "acme#0", "second#0", "parked#0", "acme#0"])
             XCTAssertEqual(shell.activeProfileID, clients.id)
             XCTAssertTrue(parked.isInactive)
             XCTAssertTrue(shell.sidebar.isInactiveSectionCollapsed, "landing on an inactive workspace kept the section folded")

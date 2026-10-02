@@ -10,11 +10,18 @@ final class QuickSwitchState {
     var agentWait: @MainActor (ColumnState, ProcessSnapshot, TimeInterval) -> AgentWait? = { column, snapshot, now in
         column.pty?.agentBlockedWait(now: now, foreground: column.pty?.foregroundProcess(snapshot: snapshot))
     }
-    /// The column the last ⌘J landed on: a press from there goes on to the
-    /// next agent.
-    var lastJump: UUID?
+    /// The column the last ⌘J landed on, until the focus moves: a press
+    /// from there goes on to the next agent.
+    private(set) var lastJump: UUID?
     /// "No agent is waiting on you" (see `showTransientHint`).
     var hint: TransientHintView?
+
+    /// The user moved the focus (or ⌘J did, which then notes where it
+    /// landed): back on that column by hand, a press starts over at the
+    /// longest wait.
+    func focusMoved() { lastJump = nil }
+
+    func noteJump(to column: UUID?) { lastJump = column }
 }
 
 // MARK: - Quick switcher (⌘P workspaces) and Next Waiting Agent (⌘J)
@@ -101,12 +108,13 @@ extension NiruxShellView {
         guard let next = WaitingAgentQueue.next(from: current, lastJump: quickSwitch.lastJump, in: queue),
               let workspace = workspaces.first(where: { $0.id == next.workspaceID }),
               let columnIndex = workspace.columns.firstIndex(where: { $0.id == next.columnID }) else {
-            quickSwitch.lastJump = nil
+            quickSwitch.noteJump(to: nil)
             showTransientHint(Self.noWaitingAgentHint)
             return
         }
-        quickSwitch.lastJump = next.columnID
         focusWorkspace(id: workspace.id, column: columnIndex)
+        // After: going there moved the focus.
+        quickSwitch.noteJump(to: next.columnID)
     }
 
     /// A line at the top of the columns that fades by itself.

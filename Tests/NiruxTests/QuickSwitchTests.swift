@@ -10,7 +10,9 @@ final class QuickSwitchTests: XCTestCase {
     private let commands = [
         Candidate(title: "New Terminal", keys: ["Open a new terminal column"]),
         Candidate(title: "New Workspace", keys: ["Create a new workspace"]),
-        Candidate(title: "Open Browser", keys: ["Open a URL in a new WebView column"])
+        Candidate(title: "Open Browser", keys: ["Open a URL in a new WebView column"]),
+        Candidate(title: "Toggle Web Inspector", keys: ["Inspect the focused browser column"]),
+        Candidate(title: "Open Codex", keys: ["Launch OpenAI Codex in a new terminal"])
     ]
 
     private func workspace(
@@ -32,6 +34,11 @@ final class QuickSwitchTests: XCTestCase {
         PaletteRanking.rank(query: query, sections: [commands, workspaces.map(\.candidate)])
     }
 
+    /// The workspace rows `query` lists, in order.
+    private func workspaceRows(_ query: String, _ workspaces: [QuickSwitchWorkspace]) -> [Int]? {
+        rank(query, workspaces).first { $0.section == 1 }?.rows
+    }
+
     // MARK: - Sections
 
     /// ⌘P opened without typing lists what it always did first.
@@ -39,7 +46,7 @@ final class QuickSwitchTests: XCTestCase {
         let workspaces = [workspace("old-spike", isInactive: true), workspace("api"), workspace("web")]
 
         XCTAssertEqual(rank("", workspaces), [
-            Section(section: 0, rows: [0, 1, 2]),
+            Section(section: 0, rows: [0, 1, 2, 3, 4]),
             Section(section: 1, rows: [1, 2, 0])
         ])
     }
@@ -49,31 +56,44 @@ final class QuickSwitchTests: XCTestCase {
         XCTAssertEqual(rank("billing", [workspace("api"), workspace("billing-fix")]), [Section(section: 1, rows: [1])])
 
         // Open Browser's subtitle ("WebView") matches too, loosely.
-        XCTAssertEqual(rank("web", [workspace("api"), workspace("web")]), [
-            Section(section: 1, rows: [1]),
-            Section(section: 0, rows: [2])
-        ])
+        XCTAssertEqual(rank("webv", [workspace("webview-crash")]).map(\.section), [1, 0])
     }
 
     /// A command's name, or its initials, keeps the commands on top even
-    /// when a workspace's name matches better.
+    /// when a workspace's name matches better…
     func testTypingACommandNameKeepsTheCommandsFirst() {
         let workspaces = [workspace("browser-tabs"), workspace("ntfy-alerts")]
 
         XCTAssertEqual(rank("browser", workspaces).map(\.section), [0, 1])
-        XCTAssertEqual(rank("nt", workspaces).first, Section(section: 0, rows: [0]), "New Terminal's initials")
-        XCTAssertEqual(rank("new t", workspaces).first, Section(section: 0, rows: [0]))
+        XCTAssertEqual(rank("nt", workspaces).first?.section, 0)
+        XCTAssertEqual(rank("nt", workspaces).first?.rows.first, 0, "New Terminal's initials")
+        XCTAssertEqual(rank("new t", workspaces).first?.rows.first, 0)
+    }
+
+    /// …unless a workspace bears that very name.
+    func testWorkspaceNamedExactlyLikeTheQueryLeads() {
+        XCTAssertEqual(rank("web", [workspace("api"), workspace("web")]).map(\.section), [1, 0])
+        XCTAssertEqual(rank("codex", [workspace("Codex")]).first, Section(section: 1, rows: [0]))
     }
 
     /// A section is judged by the row it shows first, where Return goes:
     /// not by an inactive row listed below it.
     func testSectionIsJudgedByItsFirstRow() {
         let workspaces = [workspace("terminal-fix", isInactive: true), workspace("repo", branch: "feat/terraform")]
+        let ranked = rank("erm", workspaces)
 
-        XCTAssertEqual(rank("erm", workspaces), [
-            Section(section: 0, rows: [0, 2]),
-            Section(section: 1, rows: [1, 0])
-        ])
+        XCTAssertEqual(ranked.map(\.section), [0, 1])
+        XCTAssertEqual(workspaceRows("erm", workspaces), [1, 0])
+    }
+
+    func testQueryNamesATitleByAWordStartOrConsecutiveInitials() {
+        XCTAssertEqual(PaletteRanking.naming(query: "New Terminal", title: "new terminal"), .exact)
+        XCTAssertEqual(PaletteRanking.naming(query: "new t", title: "New Terminal"), .wordStart)
+        XCTAssertEqual(PaletteRanking.naming(query: "quick", title: "feat/quick-switcher"), .wordStart)
+        XCTAssertEqual(PaletteRanking.naming(query: "nt", title: "New Terminal"), .initials)
+        XCTAssertEqual(PaletteRanking.naming(query: "cw", title: "Resize Column (Cycle Width)"), .initials)
+        XCTAssertEqual(PaletteRanking.naming(query: "ss", title: "Show/Hide Sidebar"), .none, "a word skipped")
+        XCTAssertEqual(PaletteRanking.naming(query: "erm", title: "New Terminal"), .none)
     }
 
     // MARK: - Workspaces
@@ -85,24 +105,27 @@ final class QuickSwitchTests: XCTestCase {
             "login", branch: "feat/oauth", space: "Clients", folder: "/Users/me/Projects/acme-portal", showsSpace: true
         )
 
-        XCTAssertEqual(rank("oauth", [found]).last?.rows, [0])
-        XCTAssertEqual(rank("clients", [found]).last?.rows, [0])
-        XCTAssertEqual(rank("portal", [found]).last?.rows, [0])
-        XCTAssertNil(rank("projects", [found]).first { $0.section == 1 })
+        XCTAssertEqual(workspaceRows("oauth", [found]), [0])
+        XCTAssertEqual(workspaceRows("clients", [found]), [0])
+        XCTAssertEqual(workspaceRows("portal", [found]), [0])
+        XCTAssertNil(workspaceRows("projects", [found]))
     }
 
     /// With a single space, its name ("main") would match every workspace.
     func testTheOnlySpaceIsNotSearched() {
         let workspaces = [workspace("api"), workspace("web", branch: "main")]
 
-        XCTAssertEqual(rank("main", workspaces).first { $0.section == 1 }?.rows, [1], "its branch only")
+        XCTAssertEqual(workspaceRows("main", workspaces), [1], "its branch only")
     }
 
     /// Inactive workspaces list below the active ones that match as well;
-    /// a name typed outranks a looser match, inactive or not.
+    /// the title typed, or a word of it, outranks a looser match — not
+    /// initials, which are a guess.
     func testInactiveWorkspacesListBelowActiveOnesThatMatchAsWell() {
-        XCTAssertEqual(rank("api", [workspace("api-old", isInactive: true), workspace("api-new")]).last?.rows, [1, 0])
-        XCTAssertEqual(rank("api", [workspace("api", isInactive: true), workspace("rapid-ui")]).last?.rows, [0, 1])
+        XCTAssertEqual(workspaceRows("api", [workspace("api-old", isInactive: true), workspace("api-new")]), [1, 0])
+        XCTAssertEqual(workspaceRows("api", [workspace("api", isInactive: true), workspace("api-v2")]), [0, 1])
+        XCTAssertEqual(workspaceRows("api", [workspace("api-old", isInactive: true), workspace("rapid-ui")]), [0, 1])
+        XCTAssertEqual(workspaceRows("api", [workspace("feat/add-payment-integration", isInactive: true), workspace("rapid-ui")]), [1, 0])
     }
 
     func testSubtitleSaysWhatTheTitleDoesNot() {

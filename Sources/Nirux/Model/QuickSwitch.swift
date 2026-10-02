@@ -18,7 +18,8 @@ struct QuickSwitchWorkspace: Equatable {
     let agent: QuickSwitchAgentState?
 
     /// What ⌘P searches: the title, then the branch, the space and the
-    /// folder's name. Inactive workspaces list after the active ones.
+    /// folder's name. Inactive workspaces list below the active ones that
+    /// match as well.
     var candidate: PaletteRanking.Candidate {
         PaletteRanking.Candidate(
             title: title,

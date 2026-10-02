@@ -9,7 +9,7 @@ struct PaletteAction {
     let shortcut: NiruxShortcuts?
     /// What the search matches and how the row ranks; nil: its title, then
     /// its subtitle. A workspace's title, branch, space and folder, inactive
-    /// ones last.
+    /// ones below the active ones that match as well.
     var ranking: PaletteRanking.Candidate?
     /// Shown on the right instead of a shortcut: a workspace's agent state.
     var badge: PaletteBadge?
@@ -527,6 +527,8 @@ final class CommandPalette: NSObject {
         guard mode == .actions else { return }
 
         let all = [PaletteSection(title: Self.commandsSectionTitle, rows: actions)] + sections
+        // "billing " still finds billing-fix; "new t" keeps its space.
+        let query = query.trimmingCharacters(in: .whitespaces)
         let ranked = PaletteRanking.rank(query: query, sections: all.map { $0.rows.map(\.rankingCandidate) })
         var items: [PaletteListLayout.Item] = []
         var rows: [PaletteAction] = []
