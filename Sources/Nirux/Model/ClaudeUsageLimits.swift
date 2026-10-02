@@ -10,7 +10,7 @@ import Foundation
 /// no non-interactive form, and nothing under ~/.claude stores them. So when
 /// the user turns the indicator on, Nirux becomes Claude Code's status line
 /// (see `AgentHookInstaller.installClaudeStatusLine`), and each run of
-/// `Nirux --hook claude --statusline` folds its report into one file the
+/// `Nirux --hook claude --statusline` records its report in one file the
 /// app reads (see `ClaudeUsageLimitsFile`).
 struct ClaudeUsageLimits: Codable, Equatable, Sendable {
     struct Window: Codable, Equatable, Sendable {
@@ -23,6 +23,18 @@ struct ClaudeUsageLimits: Codable, Equatable, Sendable {
 
         /// What the title bar shows, so that the color and the number agree.
         var displayedPercent: Int { Int(usedPercentage.rounded()) }
+
+        /// The reading if it still applies at `now` and is one Claude Code
+        /// could send, its percentage capped: nil once it reset, or for
+        /// values a hand edit or a corrupt file left (the display converts
+        /// them to integers).
+        func current(at now: TimeInterval) -> Window? {
+            guard usedPercentage.isFinite, resetsAt.isFinite, reportedAt.isFinite,
+                  resetsAt > now, resetsAt < now + ClaudeUsageLimits.maximumResetDistance else { return nil }
+            var window = self
+            window.usedPercentage = min(max(0, usedPercentage), ClaudeUsageLimits.maximumPercentage)
+            return window
+        }
     }
 
     var fiveHour: Window?
@@ -30,11 +42,6 @@ struct ClaudeUsageLimits: Codable, Equatable, Sendable {
 
     /// From 80% of either window, the indicator turns orange.
     static let nearLimitPercent = 80
-
-    /// Two readings of one window name the same reset; a later window resets
-    /// at least its length (5 hours) after the earlier one did. The margin
-    /// absorbs a reset time that moves by a few seconds between responses.
-    static let sameWindowTolerance: TimeInterval = 3600
 
     /// The latest reset Claude Code itself accepts: a year out.
     static let maximumResetDistance: TimeInterval = 366 * 24 * 3600
@@ -61,42 +68,27 @@ struct ClaudeUsageLimits: Codable, Equatable, Sendable {
     private static func window(_ value: Any?, now: TimeInterval) -> Window? {
         guard let object = value as? [String: Any],
               let used = (object["used_percentage"] as? NSNumber)?.doubleValue,
-              let resetsAt = (object["resets_at"] as? NSNumber)?.doubleValue,
-              used.isFinite, resetsAt.isFinite,
-              resetsAt > now, resetsAt < now + maximumResetDistance else { return nil }
-        return Window(usedPercentage: min(max(0, used), maximumPercentage), resetsAt: resetsAt, reportedAt: now)
+              let resetsAt = (object["resets_at"] as? NSNumber)?.doubleValue else { return nil }
+        return Window(usedPercentage: used, resetsAt: resetsAt, reportedAt: now).current(at: now)
     }
 
-    /// Without the windows that have reset by `now`; nil when none is left.
+    /// The windows that still apply at `now`; nil when none is left.
     func current(at now: TimeInterval) -> ClaudeUsageLimits? {
-        let kept = ClaudeUsageLimits(
-            fiveHour: fiveHour.flatMap { $0.resetsAt > now ? $0 : nil },
-            sevenDay: sevenDay.flatMap { $0.resetsAt > now ? $0 : nil }
-        )
+        let kept = ClaudeUsageLimits(fiveHour: fiveHour?.current(at: now), sevenDay: sevenDay?.current(at: now))
         return kept.fiveHour == nil && kept.sevenDay == nil ? nil : kept
     }
 
-    /// These readings updated with a session's `report`.
-    func merging(_ report: ClaudeUsageLimits) -> ClaudeUsageLimits {
-        ClaudeUsageLimits(
-            fiveHour: Self.newer(fiveHour, report.fiveHour),
-            sevenDay: Self.newer(sevenDay, report.sevenDay)
-        )
+    /// The windows of a newer `report` replace these; a window it lacks stays.
+    func updated(with report: ClaudeUsageLimits) -> ClaudeUsageLimits {
+        ClaudeUsageLimits(fiveHour: report.fiveHour ?? fiveHour, sevenDay: report.sevenDay ?? sevenDay)
     }
 
-    /// Which of two readings of a window is the more recent. Each session
-    /// knows only what its own last response said, and an idle one reports
-    /// old numbers again (its status line runs again when its permission
-    /// mode changes or its prompt cache expires). Within a window usage only
-    /// grows, so the higher reading is the more recent one, and a reading
-    /// of a later window replaces those of an earlier one. A tie keeps the
-    /// existing reading: the report may be an idle session's.
-    static func newer(_ existing: Window?, _ report: Window?) -> Window? {
-        guard let existing else { return report }
-        guard let report else { return existing }
-        if report.resetsAt > existing.resetsAt + sameWindowTolerance { return report }
-        if report.resetsAt < existing.resetsAt - sameWindowTolerance { return existing }
-        return report.usedPercentage > existing.usedPercentage ? report : existing
+    /// The readings, without when they were reported: two runs of one
+    /// session's status line with the same fingerprint carry the same news.
+    var fingerprint: String {
+        [fiveHour, sevenDay]
+            .map { $0.map { "\($0.usedPercentage)@\($0.resetsAt)" } ?? "-" }
+            .joined(separator: " ")
     }
 
     /// Whether a window reached `nearLimitPercent`.

@@ -49,7 +49,8 @@ enum AgentHookInstaller {
 
     /// `claudeVersion` is read only when the hooks are installed.
     /// `claudeStatusLine`: whether the usage limits indicator is on (see
-    /// `installClaudeStatusLine`); nil leaves the status line as it is.
+    /// `installClaudeStatusLine`); nil leaves the status line as it is, and
+    /// so does a copy on a state of its own (see `managesClaudeStatusLine`).
     static func installAll(
         executablePath: String = defaultExecutablePath,
         home: URL = URL(fileURLWithPath: NSHomeDirectory()),
@@ -63,7 +64,7 @@ enum AgentHookInstaller {
             return
         }
         installClaudeHooks(executablePath: executablePath, home: home, claudeVersion: claudeVersion())
-        if let claudeStatusLine {
+        if let claudeStatusLine, Persistence.stateDirectoryOverride(in: environment) == nil {
             installClaudeStatusLine(enabled: claudeStatusLine, executablePath: executablePath, home: home)
         }
         installCodexNotify(executablePath: executablePath, home: home)
@@ -372,9 +373,7 @@ enum AgentHookInstaller {
     /// Every event Nirux listens to has a Nirux entry, whichever app path it
     /// runs (the next launch of the app bundle refreshes the path).
     static func hasClaudeHooks(home: URL) -> Bool {
-        guard let url = resolvingSymlinks(home.appendingPathComponent(".claude/settings.json")),
-              let data = try? Data(contentsOf: url),
-              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+        guard case .parsed(let root, _) = readClaudeSettings(home: home),
               let hooks = root["hooks"] as? [String: Any] else { return false }
         return claudeHookEvents.allSatisfy { event in
             let groups = hooks[event] as? [[String: Any]] ?? []

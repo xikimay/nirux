@@ -29,7 +29,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var usageLimitsIndicator: ClaudeUsageIndicator?
     var usageLimitsMonitor: ClaudeUsageLimitsMonitor?
     /// What Settings reports about Claude Code's status line, and how it
-    /// installs Nirux's; tests stub both so they never touch ~/.claude.
+    /// installs Nirux's; Settings tests stub both, so Save never writes to
+    /// ~/.claude.
     var claudeStatusLineStateReader: () -> AgentHookInstaller.ClaudeStatusLineState = {
         AgentHookInstaller.claudeStatusLineState()
     }
@@ -219,7 +220,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     /// The Getting Started checklist refreshes after the install, so it
     /// reports the hooks as written.
     private func installAgentHooks(reportingTo shellView: NiruxShellView) {
-        AgentHookInstaller.installAll(claudeStatusLine: Self.currentShowClaudeUsageLimits())
+        AgentHookInstaller.installAll(claudeStatusLine: Self.savedClaudeStatusLineOption())
         shellView.refreshOnboardingChecklist()
     }
 

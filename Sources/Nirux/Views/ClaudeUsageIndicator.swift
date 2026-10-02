@@ -3,7 +3,9 @@ import AppKit
 /// "5h 42% · 7d 18%" at the trailing end of the main window's title bar:
 /// the Claude plan usage limits (see `ClaudeUsageLimits`), orange from 80%
 /// of either window like a nearly full context. The tooltip gives each
-/// window's reset. Hidden while the option is off or nothing is known.
+/// window's reset. While the option is off or nothing is known it takes
+/// no room: the controller's `isHidden` only works for top and bottom
+/// accessories, so the view hides and shrinks to nothing itself.
 /// It sits at the very end, left of nothing: the cup, which comes and goes
 /// with every turn, appears to its left without moving it.
 final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
@@ -16,14 +18,14 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
     init() {
         super.init(nibName: nil, bundle: nil)
         layoutAttribute = .trailing
-        isHidden = true
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
     override func loadView() {
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: Self.padding * 2, height: Self.height))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 0, height: Self.height))
+        container.isHidden = true
         label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         label.textColor = Self.normalColor
         label.lineBreakMode = .byClipping
@@ -33,7 +35,11 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
 
     func update(limits: ClaudeUsageLimits?, now: TimeInterval) {
         guard let limits else {
-            isHidden = true
+            view.isHidden = true
+            view.frame.size.width = 0
+            view.toolTip = nil
+            label.toolTip = nil
+            label.stringValue = ""
             return
         }
         label.stringValue = limits.titleText
@@ -46,8 +52,11 @@ final class ClaudeUsageIndicator: NSTitlebarAccessoryViewController {
         // The title bar sets the height; only the width follows the text.
         view.frame.size.width = label.frame.width + Self.padding * 2
         centerLabel()
-        isHidden = false
+        view.isHidden = false
     }
+
+    /// Showing the limits, as opposed to taking no room.
+    var isShowing: Bool { !view.isHidden && view.frame.width > 0 }
 
     override func viewDidLayout() {
         super.viewDidLayout()

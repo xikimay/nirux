@@ -318,7 +318,7 @@ final class SettingsPanelTests: XCTestCase {
     }
 
     /// Opt-in: on, Save installs the status line and shows the indicator;
-    /// off, it takes the status line back.
+    /// off, it takes the status line back and forgets the readings.
     @MainActor
     func testUsageLimitsStayOffUntilSavedOn() throws {
         try withIsolatedState {
@@ -326,7 +326,9 @@ final class SettingsPanelTests: XCTestCase {
             defer { close(app) }
             var installs: [Bool] = []
             app.claudeStatusLineInstaller = { installs.append($0) }
-            let monitor = ClaudeUsageLimitsMonitor(url: Persistence.stateDirectory.appendingPathComponent("limits.json"))
+            let monitor = ClaudeUsageLimitsMonitor(
+                url: Persistence.stateDirectory.appendingPathComponent("limits.json"), isReporting: { true }
+            )
             app.usageLimitsMonitor = monitor
             XCTAssertEqual(app.settingsUsageLimitsCheckbox?.state, .off)
 
@@ -341,11 +343,13 @@ final class SettingsPanelTests: XCTestCase {
             disabling.claudeStatusLineInstaller = { installs.append($0) }
             disabling.usageLimitsMonitor = monitor
             XCTAssertEqual(disabling.settingsUsageLimitsCheckbox?.state, .on)
+            try Data("{}".utf8).write(to: ClaudeUsageLimitsFile.url)
             disabling.settingsUsageLimitsCheckbox?.state = .off
             disabling.settingsSave(NSButton())
             XCTAssertEqual(Persistence.load()?.settings?.showClaudeUsageLimits, false)
             XCTAssertEqual(installs, [true, false])
             XCTAssertFalse(monitor.isEnabled)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: ClaudeUsageLimitsFile.url.path), "off forgets the readings")
         }
     }
 

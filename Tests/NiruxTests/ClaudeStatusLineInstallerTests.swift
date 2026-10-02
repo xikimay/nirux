@@ -58,16 +58,34 @@ final class ClaudeStatusLineInstallerTests: XCTestCase {
         XCTAssertNotNil(settings()["hooks"])
     }
 
+    /// Theirs too when it calls Nirux among other things, or carries keys
+    /// Nirux doesn't write: only Nirux's exact entry is Nirux's.
     func testTheUsersOwnStatusLineIsNeverTouched() throws {
-        let own = #"{"statusLine": {"type": "command", "command": "~/.claude/statusline.sh", "padding": 0}}"#
-        try writeSettings(own)
-        XCTAssertEqual(AgentHookInstaller.installClaudeStatusLine(enabled: true, home: home), .foreign)
-        XCTAssertEqual(AgentHookInstaller.installClaudeStatusLine(enabled: false, home: home), .foreign)
-        XCTAssertEqual(settingsText(), own)
+        let nirux = AgentHookInstaller.claudeStatusLineCommand(executablePath: "/Apps/Nirux")
+        let chained = #"input=$(cat); echo "$input" | '/Apps/Nirux' --hook claude --statusline; echo "$input" | ~/.claude/sl.sh"#
+        let owns: [[String: Any]] = [
+            ["type": "command", "command": "~/.claude/statusline.sh", "padding": 0],
+            ["type": "command", "command": chained],
+            ["type": "command", "command": nirux, "padding": 1],
+            ["type": "command", "command": nirux + "; ~/.claude/statusline.sh"]
+        ]
+        for own in owns {
+            let text = String(decoding: try JSONSerialization.data(withJSONObject: ["statusLine": own]), as: UTF8.self)
+            try writeSettings(text)
+            XCTAssertEqual(AgentHookInstaller.installClaudeStatusLine(enabled: true, home: home), .foreign, "\(own)")
+            XCTAssertEqual(AgentHookInstaller.installClaudeStatusLine(enabled: false, home: home), .foreign, "\(own)")
+            XCTAssertEqual(settingsText(), text)
+        }
     }
 
+    /// The old path holds a space and quotes, as an app moved anywhere may.
     func testRefreshesAMovedAppOnceAndLeavesItBe() throws {
-        try writeSettings(#"{"statusLine": {"type": "command", "command": "'/Old/Nirux' --hook claude --statusline"}}"#)
+        let old = AgentHookInstaller.claudeStatusLineCommand(executablePath: "/Users/me/My 'Apps'/Nirux.app/Contents/MacOS/Nirux")
+        let text = String(decoding: try JSONSerialization.data(
+            withJSONObject: ["statusLine": ["type": "command", "command": old]]
+        ), as: UTF8.self)
+        try writeSettings(text)
+        XCTAssertEqual(AgentHookInstaller.claudeStatusLineState(home: home), .nirux)
         XCTAssertEqual(AgentHookInstaller.installClaudeStatusLine(enabled: true, executablePath: "/Apps/Nirux", home: home), .nirux)
         XCTAssertEqual(statusLineCommand(), AgentHookInstaller.claudeStatusLineCommand(executablePath: "/Apps/Nirux"))
 
@@ -110,6 +128,18 @@ final class ClaudeStatusLineInstallerTests: XCTestCase {
         )
         XCTAssertEqual(AgentHookInstaller.claudeStatusLineState(home: home), .none)
         XCTAssertFalse(hookCommands().isEmpty, "the hooks stay")
+
+        // A copy on a state of its own has its own option: it leaves the
+        // installed app's status line alone.
+        AgentHookInstaller.installClaudeStatusLine(enabled: true, executablePath: "/Apps/Nirux", home: home)
+        let scratch = ["NIRUX_STATE_DIR": home.appendingPathComponent("state").path]
+        AgentHookInstaller.installAll(
+            executablePath: "/Other/Nirux", home: home, environment: scratch, bundleURL: appBundle,
+            claudeVersion: nil, claudeStatusLine: false
+        )
+        XCTAssertEqual(statusLineCommand(), AgentHookInstaller.claudeStatusLineCommand(executablePath: "/Apps/Nirux"))
+        XCTAssertNil(AgentHookInstaller.applyClaudeStatusLine(enabled: false, environment: scratch, bundleURL: appBundle))
+        XCTAssertEqual(AgentHookInstaller.claudeStatusLineState(home: home), .nirux)
     }
 
     private func hookCommands() -> [String] {
@@ -127,11 +157,12 @@ final class ClaudeStatusLineInstallerTests: XCTestCase {
     /// limits only in Nirux terminals, and prints nothing either way, so the
     /// status line stays blank.
     func testCommandRecordsTheLimitsOnlyInNiruxTerminals() throws {
-        let url = Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("Nirux")
-        let nirux = try XCTUnwrap(
-            FileManager.default.isExecutableFile(atPath: url.path) ? url.path : nil, "Nirux executable not found at \(url.path)"
-        )
+        let nirux = try niruxExecutable()
         let command = AgentHookInstaller.claudeStatusLineCommand(executablePath: nirux)
+        // Spelled as a Claude hook: a build without the indicator (a
+        // rollback at the same path) drops a hook payload naming no event
+        // and exits, instead of launching its UI on every response.
+        XCTAssertTrue(command.contains(AgentHookInstaller.shellQuoted(nirux) + " --hook claude --statusline;"))
         let stateDir = home.appendingPathComponent("state")
         let limitsFile = stateDir.appendingPathComponent("claude-usage-limits.json")
         let resetsAt = Int(Date().timeIntervalSince1970) + 3600
@@ -148,25 +179,6 @@ final class ClaudeStatusLineInstallerTests: XCTestCase {
         let recorded = try XCTUnwrap(ClaudeUsageLimitsFile.load(from: limitsFile))
         XCTAssertEqual(recorded.fiveHour?.usedPercentage, 25)
         XCTAssertEqual(recorded.fiveHour?.resetsAt, TimeInterval(resetsAt))
-    }
-
-    /// A build without the indicator (a rollback to an older nightly at the
-    /// same path) reads the command as a Claude hook whose payload names no
-    /// event: it must exit at once, quietly, never launch its UI.
-    func testABuildWithoutTheIndicatorTakesTheCommandForAnEmptyHook() throws {
-        let url = Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("Nirux")
-        let nirux = try XCTUnwrap(
-            FileManager.default.isExecutableFile(atPath: url.path) ? url.path : nil, "Nirux executable not found at \(url.path)"
-        )
-        let stateDir = home.appendingPathComponent("state")
-        let payload = #"{"session_id":"s1","rate_limits":{"five_hour":{"used_percentage":25,"resets_at":4102444800}}}"#
-        // What such a build runs: the hook route, `--statusline` unread.
-        let hook = AgentHookInstaller.shellQuoted(nirux) + " --hook claude"
-        let result = try run(hook, env: ["NIRUX_STATE_DIR": stateDir.path, "NIRUX_AGENT_UUID": "column-1"], stdin: payload)
-        XCTAssertEqual(result.status, 0)
-        XCTAssertEqual(result.stdout, "")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: stateDir.appendingPathComponent("hook-events.jsonl").path))
-        XCTAssertTrue(AgentHookInstaller.claudeStatusLineCommand(executablePath: nirux).contains(hook + " --statusline"))
     }
 
     /// Runs `command` through `sh -c` with `env` as the whole environment.

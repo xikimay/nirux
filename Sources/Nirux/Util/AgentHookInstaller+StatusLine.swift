@@ -25,17 +25,17 @@ extension AgentHookInstaller {
         case unreadable
     }
 
-    /// Identifies Nirux's status line command, whichever app path it runs.
-    private static let statusLineCommandPattern = #"/Nirux["']? --hook claude --statusline"#
-
     /// Guarded like `claudeHookCommand`: outside Nirux terminals, or with
     /// the binary gone, it drains the payload and prints nothing. The flags
     /// read as a hook to a build without the indicator (see `NiruxApp.main`).
     static func claudeStatusLineCommand(executablePath: String) -> String {
         let path = shellQuoted(executablePath)
-        return #"if [ -n "$NIRUX_AGENT_UUID" ] && [ -x \#(path) ]; then \#(path) --hook claude --statusline; "#
+        return statusLineCommandPrefix + path.dropFirst() + #" ]; then \#(path) --hook claude --statusline; "#
             + "else /bin/cat >/dev/null; fi"
     }
+
+    /// Up to the path's opening quote.
+    private static let statusLineCommandPrefix = #"if [ -n "$NIRUX_AGENT_UUID" ] && [ -x '"#
 
     static func claudeStatusLineState(home: URL = URL(fileURLWithPath: NSHomeDirectory())) -> ClaudeStatusLineState {
         switch readClaudeSettings(home: home) {
@@ -56,8 +56,8 @@ extension AgentHookInstaller {
         let url: URL
         var root: [String: Any]
         switch readClaudeSettings(home: home) {
-        case .unreadable:
-            NSLog("[AgentHooks] ~/.claude/settings.json unreadable or unparsable — leaving the status line alone")
+        case .unreadable(let reason):
+            NSLog("[AgentHooks] ~/.claude/settings.json: %@ — leaving the status line alone", reason)
             return .unreadable
         case .missing(let path):
             guard enabled else { return .none }
@@ -86,22 +86,58 @@ extension AgentHookInstaller {
         }
     }
 
-    /// At Save in Settings: the same as at launch, for a build that installs
-    /// the hooks. Nil when it doesn't (a dev build).
+    /// Whether this Nirux keeps the status line in step with its option: a
+    /// build that installs the hooks, on the real state. A copy run on a
+    /// state of its own (NIRUX_STATE_DIR) has its own option, off at first,
+    /// and must not take back the installed app's status line.
+    static func managesClaudeStatusLine(environment: [String: String], bundleURL: URL) -> Bool {
+        shouldInstall(environment: environment, bundleURL: bundleURL)
+            && Persistence.stateDirectoryOverride(in: environment) == nil
+    }
+
+    /// At Save in Settings: the same as at launch. Nil when this Nirux
+    /// leaves the status line alone (see `managesClaudeStatusLine`).
     @discardableResult
     static func applyClaudeStatusLine(
         enabled: Bool,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         bundleURL: URL = Bundle.main.bundleURL
     ) -> ClaudeStatusLineState? {
-        guard shouldInstall(environment: environment, bundleURL: bundleURL) else { return nil }
+        guard managesClaudeStatusLine(environment: environment, bundleURL: bundleURL) else { return nil }
         return installClaudeStatusLine(enabled: enabled)
     }
 
+    /// Nirux's only when it is exactly what Nirux writes, for some Nirux
+    /// binary: a status line of the user's own that calls Nirux among other
+    /// things (chaining it with their script, say) is theirs.
     private static func statusLineState(of value: Any?) -> ClaudeStatusLineState {
         guard let value, !(value is NSNull) else { return .none }
-        guard let command = (value as? [String: Any])?["command"] as? String,
-              command.range(of: statusLineCommandPattern, options: .regularExpression) != nil else { return .foreign }
+        guard let entry = value as? [String: Any], Set(entry.keys) == ["type", "command"],
+              entry["type"] as? String == "command",
+              let command = entry["command"] as? String,
+              let path = quotedPath(after: statusLineCommandPrefix, in: command),
+              path.hasSuffix("/Nirux"),
+              command == claudeStatusLineCommand(executablePath: path) else { return .foreign }
         return .nirux
+    }
+
+    /// The path `shellQuoted` wrote right after `prefix` (whose last
+    /// character is the opening quote), unquoted.
+    private static func quotedPath(after prefix: String, in command: String) -> String? {
+        guard command.hasPrefix(prefix) else { return nil }
+        var rest = command.dropFirst(prefix.count)
+        var path = ""
+        while let character = rest.first {
+            rest = rest.dropFirst()
+            guard character == "'" else {
+                path.append(character)
+                continue
+            }
+            // `'\''` stands for a quote inside the path; any other quote ends it.
+            guard rest.hasPrefix(#"\''"#) else { return path }
+            path.append("'")
+            rest = rest.dropFirst(3)
+        }
+        return nil
     }
 }

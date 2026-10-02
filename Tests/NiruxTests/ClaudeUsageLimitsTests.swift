@@ -74,37 +74,25 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         XCTAssertEqual(partial?.sevenDay?.usedPercentage, ClaudeUsageLimits.maximumPercentage, "a wild value is capped")
     }
 
-    // MARK: - Merging reports
-
-    /// An idle session reports the numbers of its last response again: they
-    /// must not replace newer, higher ones.
-    func testMergeKeepsTheHigherReadingOfAWindow() {
-        let resets = now + 2 * hour
-        let current = ClaudeUsageLimits(fiveHour: window(40, resetsAt: resets, reportedAt: now - 60))
-
-        let idle = current.merging(ClaudeUsageLimits(fiveHour: window(30, resetsAt: resets)))
-        XCTAssertEqual(idle.fiveHour?.usedPercentage, 40)
-        let same = current.merging(ClaudeUsageLimits(fiveHour: window(40, resetsAt: resets + 30)))
-        XCTAssertEqual(same.fiveHour?.reportedAt, now - 60, "a tie may be an idle session: keep the earlier report")
-        let busier = current.merging(ClaudeUsageLimits(fiveHour: window(45, resetsAt: resets + 30)))
-        XCTAssertEqual(busier.fiveHour, window(45, resetsAt: resets + 30))
-    }
-
-    func testMergeMovesToALaterWindowAndIgnoresAnEarlierOne() {
-        let current = ClaudeUsageLimits(fiveHour: window(90, resetsAt: now + hour), sevenDay: window(50, resetsAt: now + 50 * hour))
-        let later = current.merging(ClaudeUsageLimits(fiveHour: window(5, resetsAt: now + 6 * hour)))
-        XCTAssertEqual(later.fiveHour?.usedPercentage, 5, "a new 5-hour window began")
-        XCTAssertEqual(later.sevenDay?.usedPercentage, 50, "a report without a window keeps the known one")
-
-        let stale = later.merging(ClaudeUsageLimits(fiveHour: window(95, resetsAt: now + hour)))
-        XCTAssertEqual(stale.fiveHour?.usedPercentage, 5, "a reading of the window before is old news")
-    }
-
     func testCurrentDropsTheWindowsThatReset() {
         let limits = ClaudeUsageLimits(fiveHour: window(90, resetsAt: now + hour), sevenDay: window(50, resetsAt: now + 50 * hour))
         XCTAssertEqual(limits.current(at: now + hour - 1), limits)
         XCTAssertEqual(limits.current(at: now + hour), ClaudeUsageLimits(sevenDay: limits.sevenDay))
         XCTAssertNil(limits.current(at: now + 50 * hour))
+    }
+
+    /// The file is only ever written by the receiver, but a hand edit or a
+    /// corrupt one must not crash the title bar (it converts to integers).
+    func testCurrentRejectsWhatClaudeCodeCouldNotHaveSent() throws {
+        try Data(#"""
+        {"limits": {"fiveHour": {"usedPercentage": 1e300, "resetsAt": \#(now + hour), "reportedAt": \#(now)},
+                    "sevenDay": {"usedPercentage": 18, "resetsAt": 4102444800, "reportedAt": \#(now)}},
+         "sessions": {}}
+        """#.utf8).write(to: fileURL)
+        let current = try XCTUnwrap(ClaudeUsageLimitsFile.load(from: fileURL)?.current(at: now))
+        XCTAssertEqual(current.fiveHour?.usedPercentage, ClaudeUsageLimits.maximumPercentage)
+        XCTAssertEqual(current.titleText, "5h 999%")
+        XCTAssertNil(current.sevenDay, "a reset decades out never expires: dropped")
     }
 
     // MARK: - Display
@@ -146,18 +134,42 @@ final class ClaudeUsageLimitsTests: XCTestCase {
 
     // MARK: - The shared file
 
-    func testRecordFoldsTheReportsOfSeveralSessions() throws {
-        let env = ["NIRUX_AGENT_UUID": "column-1"]
-        let first = try JSONSerialization.data(withJSONObject: payload(fiveHour: reading(30, resetsIn: hour)))
-        let second = try JSONSerialization.data(
-            withJSONObject: payload(fiveHour: reading(25, resetsIn: hour), sevenDay: reading(10, resetsIn: 90 * hour))
-        )
-        XCTAssertTrue(ClaudeStatusLineCLI.record(payload: first, env: env, now: now, url: fileURL))
-        XCTAssertTrue(ClaudeStatusLineCLI.record(payload: second, env: env, now: now + 5, url: fileURL))
+    private func report(_ session: String, api: Double, fiveHour: Double, sevenDay: Double? = nil) throws -> Data {
+        var object = payload(fiveHour: reading(fiveHour, resetsIn: hour), sevenDay: sevenDay.map { reading($0, resetsIn: 90 * hour) })
+        object["session_id"] = session
+        object["cost"] = ["total_api_duration_ms": api, "total_cost_usd": 0.08]
+        return try JSONSerialization.data(withJSONObject: object)
+    }
 
-        let stored = try XCTUnwrap(ClaudeUsageLimitsFile.load(from: fileURL))
-        XCTAssertEqual(stored.fiveHour, window(30, resetsAt: now + hour), "the idle session's 25% loses")
-        XCTAssertEqual(stored.sevenDay, window(10, resetsAt: now + 90 * hour, reportedAt: now + 5))
+    /// The latest news wins, whichever session brings it; a session whose
+    /// status line runs again while it is idle repeats old numbers, which
+    /// must not come back over newer ones.
+    func testRecordKeepsTheLatestNewsAndIgnoresAnIdleRepeat() throws {
+        let env = ["NIRUX_AGENT_UUID": "column-1"]
+        XCTAssertTrue(ClaudeStatusLineCLI.record(
+            payload: try report("a", api: 2700, fiveHour: 30, sevenDay: 18), env: env, now: now, url: fileURL
+        ))
+        // Another session, maybe on another account, answers later.
+        XCTAssertTrue(ClaudeStatusLineCLI.record(
+            payload: try report("b", api: 900, fiveHour: 12), env: env, now: now + 60, url: fileURL
+        ))
+        var stored = try XCTUnwrap(ClaudeUsageLimitsFile.load(from: fileURL))
+        XCTAssertEqual(stored.fiveHour, window(12, resetsAt: now + hour, reportedAt: now + 60))
+        XCTAssertEqual(stored.sevenDay, window(18, resetsAt: now + 90 * hour), "a window the report lacks stays")
+
+        // Session a's prompt cache expires: its status line runs again.
+        XCTAssertTrue(ClaudeStatusLineCLI.record(
+            payload: try report("a", api: 2700, fiveHour: 30, sevenDay: 18), env: env, now: now + 300, url: fileURL
+        ))
+        stored = try XCTUnwrap(ClaudeUsageLimitsFile.load(from: fileURL))
+        XCTAssertEqual(stored.fiveHour?.usedPercentage, 12, "an idle repeat is old news")
+
+        // Its next response is news again, even with the same numbers.
+        XCTAssertTrue(ClaudeStatusLineCLI.record(
+            payload: try report("a", api: 4100, fiveHour: 30, sevenDay: 18), env: env, now: now + 400, url: fileURL
+        ))
+        stored = try XCTUnwrap(ClaudeUsageLimitsFile.load(from: fileURL))
+        XCTAssertEqual(stored.fiveHour, window(30, resetsAt: now + hour, reportedAt: now + 400))
     }
 
     func testRecordTakesNothingFromOutsideNiruxOrWithoutLimits() throws {
@@ -178,7 +190,8 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         defer { close(lock) }
 
         let start = Date()
-        XCTAssertFalse(ClaudeUsageLimitsFile.record(ClaudeUsageLimits(fiveHour: window(30, resetsAt: now + hour)), now: now, at: fileURL))
+        let report = ClaudeStatusLineReport(limits: ClaudeUsageLimits(fiveHour: window(30, resetsAt: now + hour)))
+        XCTAssertFalse(ClaudeUsageLimitsFile.record(report, now: now, at: fileURL))
         XCTAssertLessThan(Date().timeIntervalSince(start), ClaudeUsageLimitsFile.lockWait + 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
     }
@@ -187,12 +200,17 @@ final class ClaudeUsageLimitsTests: XCTestCase {
 
     @MainActor
     func testMonitorShowsWhatStillAppliesAndPicksUpNewReports() throws {
-        let monitor = ClaudeUsageLimitsMonitor(url: fileURL)
+        var reporting = true
+        let monitor = ClaudeUsageLimitsMonitor(url: fileURL, isReporting: { reporting })
         var shown: [ClaudeUsageLimits?] = []
-        monitor.onUpdate = { shown.append($0) }
+        monitor.onUpdate = { limits, _ in shown.append(limits) }
         let clock = Date(timeIntervalSince1970: now)
+        func record(_ percent: Double) {
+            let limits = ClaudeUsageLimits(fiveHour: window(percent, resetsAt: now + hour))
+            ClaudeUsageLimitsFile.record(ClaudeStatusLineReport(limits: limits), now: now, at: fileURL)
+        }
 
-        ClaudeUsageLimitsFile.record(ClaudeUsageLimits(fiveHour: window(30, resetsAt: now + hour)), now: now, at: fileURL)
+        record(30)
         monitor.refresh(now: clock)
         XCTAssertTrue(shown.isEmpty, "off: nothing is read")
 
@@ -201,9 +219,14 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         monitor.refresh(now: clock)
         XCTAssertEqual(shown.last??.fiveHour?.usedPercentage, 30)
 
-        ClaudeUsageLimitsFile.record(ClaudeUsageLimits(fiveHour: window(35, resetsAt: now + hour)), now: now, at: fileURL)
+        record(35)
         monitor.refresh(now: clock)
         XCTAssertEqual(shown.last??.fiveHour?.usedPercentage, 35, "a rewrite is read again")
+
+        reporting = false
+        monitor.refresh(now: clock)
+        XCTAssertEqual(shown.last, .some(nil), "a status line of the user's own: no more reports, nothing shown")
+        reporting = true
 
         monitor.refresh(now: clock.addingTimeInterval(hour))
         XCTAssertEqual(shown.last, .some(nil), "the window reset")
@@ -216,7 +239,7 @@ final class ClaudeUsageLimitsTests: XCTestCase {
     func testIndicatorHidesWithoutLimitsAndTurnsNearTheLimit() {
         let indicator = ClaudeUsageIndicator()
         indicator.update(limits: ClaudeUsageLimits(fiveHour: window(42, resetsAt: now + hour)), now: now)
-        XCTAssertFalse(indicator.isHidden)
+        XCTAssertTrue(indicator.isShowing)
         XCTAssertEqual(indicator.label.stringValue, "5h 42%")
         XCTAssertNotEqual(indicator.label.textColor, .niruxNearLimit)
         XCTAssertGreaterThanOrEqual(indicator.view.frame.width, indicator.label.frame.maxX)
@@ -224,7 +247,11 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         indicator.update(limits: ClaudeUsageLimits(fiveHour: window(85, resetsAt: now + hour)), now: now)
         XCTAssertEqual(indicator.label.textColor, .niruxNearLimit)
 
+        // The controller's isHidden does nothing for a trailing accessory:
+        // the view itself must take no room and show nothing.
         indicator.update(limits: nil, now: now)
-        XCTAssertTrue(indicator.isHidden)
+        XCTAssertFalse(indicator.isShowing)
+        XCTAssertTrue(indicator.view.isHidden)
+        XCTAssertEqual(indicator.view.frame.width, 0)
     }
 }

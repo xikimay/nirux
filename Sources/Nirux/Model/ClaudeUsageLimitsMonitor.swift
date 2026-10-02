@@ -8,11 +8,16 @@ final class ClaudeUsageLimitsMonitor {
     static let interval: TimeInterval = 10
 
     /// The readings that still apply, or nil (off, nothing reported, all
-    /// reset).
-    var onUpdate: ((ClaudeUsageLimits?) -> Void)?
+    /// reset, or no status line of Nirux's to report them), and the time
+    /// they were judged at.
+    var onUpdate: ((ClaudeUsageLimits?, TimeInterval) -> Void)?
     private(set) var isEnabled = false
 
     private let url: URL
+    /// Whether Claude Code's status line is Nirux's. Once the user sets one
+    /// of their own (Claude Code's `/statusline`, say), no report comes:
+    /// the last ones would stay on screen for up to a week.
+    private let isReporting: () -> Bool
     private var loaded: ClaudeUsageLimits?
     /// What identified the file last loaded: each write replaces it (a new
     /// inode), so this changes even within one timestamp tick.
@@ -24,8 +29,12 @@ final class ClaudeUsageLimitsMonitor {
         let inode: Int?
     }
 
-    init(url: URL = ClaudeUsageLimitsFile.url) {
+    init(
+        url: URL = ClaudeUsageLimitsFile.url,
+        isReporting: @escaping () -> Bool = { AgentHookInstaller.claudeStatusLineState() == .nirux }
+    ) {
         self.url = url
+        self.isReporting = isReporting
     }
 
     func setEnabled(_ enabled: Bool) {
@@ -33,7 +42,7 @@ final class ClaudeUsageLimitsMonitor {
         guard enabled else {
             timer?.invalidate()
             timer = nil
-            onUpdate?(nil)
+            onUpdate?(nil, Date().timeIntervalSince1970)
             return
         }
         refresh()
@@ -56,6 +65,7 @@ final class ClaudeUsageLimitsMonitor {
             loaded = version == nil ? nil : ClaudeUsageLimitsFile.load(from: url)
             loadedVersion = version
         }
-        onUpdate?(loaded?.current(at: now.timeIntervalSince1970))
+        let time = now.timeIntervalSince1970
+        onUpdate?(isReporting() ? loaded?.current(at: time) : nil, time)
     }
 }

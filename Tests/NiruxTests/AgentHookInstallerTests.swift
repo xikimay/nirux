@@ -582,14 +582,6 @@ final class AgentHookInstallerTests: XCTestCase {
     // MARK: - Receiver (end to end)
 
     /// `swift test` builds the app executable next to the test bundle.
-    private func niruxExecutable() throws -> String {
-        let url = Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("Nirux")
-        return try XCTUnwrap(
-            FileManager.default.isExecutableFile(atPath: url.path) ? url.path : nil,
-            "Nirux executable not found at \(url.path)"
-        )
-    }
-
     func testReceiverQueuesOnlyEventsFromNiruxTerminals() throws {
         let nirux = try niruxExecutable()
         let stateDir = home.appendingPathComponent("state")

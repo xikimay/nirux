@@ -1,7 +1,8 @@
 import AppKit
 
-/// Cup at the trailing end of the main window's title bar while Nirux keeps
-/// the Mac awake (see `KeepAwakeController`); the tooltip says why.
+/// Cup near the trailing end of the main window's title bar (the Claude
+/// usage limits take the very end) while Nirux keeps the Mac awake (see
+/// `KeepAwakeController`); the tooltip says why.
 final class KeepAwakeIndicator: NSTitlebarAccessoryViewController {
     static let symbolName = "cup.and.saucer.fill"
     private static let size = NSSize(width: 30, height: 22)
