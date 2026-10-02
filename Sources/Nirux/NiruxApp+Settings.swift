@@ -108,13 +108,16 @@ extension NiruxApp {
         sectionLabel.frame = NSRect(x: 24, y: height - 30, width: width - 48, height: 16)
         background.addSubview(sectionLabel)
 
-        let keepAwake = NSButton(checkboxWithTitle: "Keep Mac awake while agents work", target: nil, action: nil)
+        let keepAwake = NSButton(
+            checkboxWithTitle: "Keep Mac awake while agents work or a merge queue runs", target: nil, action: nil
+        )
         keepAwake.contentTintColor = NSColor.white.withAlphaComponent(0.85)
         keepAwake.font = .systemFont(ofSize: 12)
         keepAwake.frame = NSRect(x: 22, y: height - 58, width: width - 44, height: 20)
         keepAwake.state = NiruxShellView.currentKeepMacAwakeEnabled() ? .on : .off
-        keepAwake.toolTip = "Prevents idle sleep while an agent is working, until a minute after the last one stops. "
-            + "The display still sleeps, and closing a MacBook's lid still sleeps it (except in clamshell mode)."
+        keepAwake.toolTip = "Prevents idle sleep while an agent is working or a merge queue runs, until a minute after "
+            + "the last one stops: a queue asleep stops polling GitHub. The display still sleeps, and closing a "
+            + "MacBook's lid still sleeps it (except in clamshell mode)."
         background.addSubview(keepAwake)
 
         return keepAwake
@@ -624,8 +627,14 @@ extension NiruxApp {
     }
 }
 
-// Closing via the title bar discards edits, like Cancel.
+// Closing via the title bar discards edits, like Cancel. The main window's
+// close button quits Nirux: a running merge queue asks first.
 extension NiruxApp: NSWindowDelegate {
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard sender === mainWindow, let shell else { return true }
+        return shell.mainWindowShouldClose()
+    }
+
     func windowWillClose(_ notification: Notification) {
         guard let panel = notification.object as? NSPanel, panel === settingsPanel else { return }
         clearSettingsPanelReferences()

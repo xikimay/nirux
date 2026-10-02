@@ -119,9 +119,7 @@ struct BoardConfig: Equatable, Sendable {
     /// The repository to compare with others (lowercased, on github.com).
     /// Nil unless `repository` is valid.
     var gitHubRepository: GitHubRepository? {
-        guard let repository, Self.isValidRepository(repository) else { return nil }
-        let parts = repository.split(separator: "/")
-        return GitHubRepository(owner: String(parts[0]), name: String(parts[1]))
+        repository.flatMap(GitHubRepository.init(ownerAndName:))
     }
 
     /// `owner/name` with GitHub's characters: an owner of 1 to 39 letters,
@@ -227,5 +225,15 @@ extension BoardConfig: Codable {
         try container.encode(mergeMethod.rawValue, forKey: .mergeMethod)
         try container.encode(checksTimeoutMinutes, forKey: .checksTimeoutMinutes)
         try container.encode(postMergeTimeoutMinutes, forKey: .postMergeTimeoutMinutes)
+    }
+}
+
+extension GitHubRepository {
+    /// `owner/name` as board.json and a saved queue spell it, on
+    /// github.com; nil for anything `BoardConfig.isValidRepository` refuses.
+    init?(ownerAndName value: String) {
+        guard BoardConfig.isValidRepository(value) else { return nil }
+        let parts = value.split(separator: "/")
+        self.init(owner: String(parts[0]), name: String(parts[1]))
     }
 }

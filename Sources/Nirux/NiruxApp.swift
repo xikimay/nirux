@@ -93,6 +93,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         window.minSize = NSSize(width: 600, height: 400)
         window.title = "Nirux"
         window.appearance = NSAppearance(named: .darkAqua)
+        // Its close button quits Nirux: a running merge queue asks first.
+        window.delegate = self
 
         let shellView = NiruxShellView(frame: rect)
         shellView.autoresizingMask = [.width, .height]
@@ -207,11 +209,22 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         true
     }
 
+    /// A running merge queue asks first; the queue stops before its next
+    /// command, and a call already sent is waited for.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let shell else { return .terminateNow }
+        return shell.mergeQueueTerminateReply { quit in
+            NSApp.reply(toApplicationShouldTerminate: quit)
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // Apply hooks still inside the drain debounce (a first prompt just
         // sent) so the saved Claude restore targets are current.
         AgentHookCenter.shared.drain()
         shell?.saveState(snapshot: ProcessSnapshot())
+        // A queue's last step is written before the process ends.
+        MergeQueueController.waitForFiles()
         keepAwakeController?.shutdown()
         telegramRemoteAccessController?.shutdown()
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)

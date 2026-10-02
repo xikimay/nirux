@@ -11,7 +11,10 @@ extension NiruxApp {
         let controller = KeepAwakeController(enabled: NiruxShellView.currentKeepMacAwakeEnabled())
         controller.onChange = { [weak controller, weak indicator] in
             guard let controller else { return }
-            indicator?.update(isActive: controller.isActive, workingAgentCount: controller.workingAgentCount)
+            indicator?.update(
+                isActive: controller.isActive, workingAgentCount: controller.workingAgentCount,
+                isMergeQueueRunning: controller.isMergeQueueRunning
+            )
         }
         controller.onRefresh = { [weak shell] in
             shell?.refreshAgentStatusInBackground()

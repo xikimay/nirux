@@ -22,8 +22,9 @@ final class CrashNoticeStatusBarTests: XCTestCase {
         return bar
     }
 
+    /// A shown button: the queue's ✕ hides while no queue ended.
     private func button(_ title: String, in bar: StatusBarView) -> NSButton? {
-        bar.subviews.compactMap { $0 as? NSButton }.first { $0.title == title }
+        bar.subviews.compactMap { $0 as? NSButton }.first { $0.title == title && !$0.isHidden }
     }
 
     private func visibleButtonTitles(in bar: StatusBarView) -> [String] {

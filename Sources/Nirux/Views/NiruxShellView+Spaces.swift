@@ -15,6 +15,7 @@ extension NiruxShellView {
         guard profileID != WorkspaceProfile.defaultID,
               let space = profiles.first(where: { $0.id == profileID })
         else { return }
+        guard !refuseToDeleteSpaceWithRunningQueue(profileID: profileID) else { return }
         guard projectStore.availability == .writable else {
             // Deleting needs projects.json: the mirror alone can't record it,
             // so the space would come back at the next launch.
@@ -47,6 +48,8 @@ extension NiruxShellView {
     }
 
     func deleteSpace(profileID: String) {
+        // Asked while the confirmation was up: a queue started meanwhile.
+        guard mergeQueues[profileID]?.isRunning != true else { return NSSound.beep() }
         guard workspaceStore.deleteProfile(id: profileID) else { return }
         projectStore.markDeleted(profileID)
         // Opened while the confirmation was up: its space is gone.

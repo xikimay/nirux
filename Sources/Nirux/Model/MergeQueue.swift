@@ -179,6 +179,9 @@ extension MergeQueue {
         /// Whether the base branch requires GitHub's merge queue.
         case baseMergeQueue
         case pullRequest(Int)
+        /// Its title and the files it changes: the confirmation sheet's
+        /// only; the engine never asks.
+        case pullRequestDetails(Int)
         /// The check runs and commit statuses of a commit.
         case checks(String)
         /// REST `compare/{base}...{head}`: each a branch or a commit.
@@ -198,6 +201,7 @@ extension MergeQueue {
         case rateLimit(RateLimit)
         case baseMergeQueue(Bool)
         case pullRequest(PullRequestSnapshot)
+        case pullRequestDetails(PullRequestDetails)
         case checks(CommitChecks)
         /// Nil: GitHub doesn't know one of the commits (404).
         case comparison(Comparison?)
@@ -302,6 +306,21 @@ extension MergeQueue {
         let url: String
 
         var isOpen: Bool { state == "OPEN" }
+    }
+
+    /// What the confirmation sheet shows of a pull request beyond its
+    /// snapshot (section 4).
+    struct PullRequestDetails: Equatable, Sendable {
+        let title: String
+        /// The paths it changes, at most `maxFiles`.
+        let files: [String]
+        /// It changes more files than `files` holds.
+        let hasMoreFiles: Bool
+
+        static let maxFiles = 100
+
+        /// Its checks ran its own version of the workflows.
+        var changesWorkflows: Bool { files.contains { $0.hasPrefix(".github/workflows/") } }
     }
 
     struct CommitChecks: Equatable, Sendable {

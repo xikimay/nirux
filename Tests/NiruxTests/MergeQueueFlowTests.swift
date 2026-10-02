@@ -120,6 +120,10 @@ final class MergeQueueFlowTests: XCTestCase {
                 if joined.contains("rate_limit") { return ok(MergeQueueGitHubTests.rateLimit) }
                 if joined.contains("/rules/branches/") { return ok("[]") }
                 if joined.contains("mergeQueue(branch") { return ok(#"{"data":{"repository":{"mergeQueue":null}}}"#) }
+                if joined.contains("files(first:"), let number = value(after: "-F", prefix: "number=").flatMap(Int.init) {
+                    return ok(#"{"data":{"repository":{"pullRequest":{"title":"Change \#(number)","#
+                        + #""files":{"pageInfo":{"hasNextPage":false},"nodes":[{"path":"README.md"}]}}}}}"#)
+                }
                 if joined.contains("pullRequest(number"), let number = value(after: "-F", prefix: "number=").flatMap(Int.init),
                    let pullRequest = pullRequests[number] {
                     return ok(Self.pullRequestJSON(number, pullRequest))

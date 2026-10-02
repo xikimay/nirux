@@ -304,6 +304,9 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         case .pullRequest(let number):
             return parse(call(Self.pullRequestArguments(repository: repository, number: number)),
                          MergeQueue.parsePullRequest).map { .pullRequest($0) }
+        case .pullRequestDetails(let number):
+            return parse(call(Self.pullRequestDetailsArguments(repository: repository, number: number)),
+                         MergeQueue.parsePullRequestDetails).map { .pullRequestDetails($0) }
         case .checks(let sha):
             return call(Self.checksArguments(repository: repository, sha: sha)).flatMap { output in
                 MergeQueue.parseChecks(output.standardOutput, sha: sha).map { .checks($0) }
@@ -512,6 +515,10 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
         graphQL(pullRequestQuery, strings: ownerAndName(repository), integers: [("number", number)])
     }
 
+    static func pullRequestDetailsArguments(repository: String, number: Int) -> [String] {
+        graphQL(pullRequestDetailsQuery, strings: ownerAndName(repository), integers: [("number", number)])
+    }
+
     static func checksArguments(repository: String, sha: String) -> [String] {
         graphQL(checksQuery, strings: ownerAndName(repository) + [("oid", sha)])
     }
@@ -568,6 +575,19 @@ struct GitHubCLIQueueClient: MergeQueueGitHub {
           mergeable isInMergeQueue
           autoMergeRequest { enabledAt }
           mergeCommit { oid parents(first: 2) { nodes { oid } } }
+        }
+      }
+    }
+    """
+
+    /// A rename out of `.github/workflows/` shows under its new path only:
+    /// GraphQL gives no previous path.
+    static let pullRequestDetailsQuery = """
+    query($owner: String!, $name: String!, $number: Int!) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+          title
+          files(first: \(MergeQueue.PullRequestDetails.maxFiles)) { pageInfo { hasNextPage } nodes { path } }
         }
       }
     }
