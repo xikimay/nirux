@@ -2,7 +2,7 @@ import Foundation
 
 /// A small, explicit parent/child handoff created with a Nirux worktree.
 /// The event list is a durable mailbox for correlated questions, responses,
-/// and the child's explicit completion result.
+/// the child's explicit completion result, and the parent's instructions.
 struct Mission: Codable, Equatable {
     enum Status: String, Codable {
         case active
@@ -29,6 +29,9 @@ struct MissionEvent: Codable, Equatable {
         case question
         case completed
         case response
+        /// Parent → child (`tell`): typed into the child's prompt once it
+        /// is free, which sets `childConsumedAt`.
+        case instruction
         /// Internal inbox acknowledgement: from the parent for a question or
         /// completion, from the child for a response. It updates the target
         /// event and is not retained as a user-visible Mission event.
@@ -52,7 +55,8 @@ struct MissionEvent: Codable, Equatable {
     var parentConsumedAt: TimeInterval?
     /// Set on a response once the child's `ask` has printed it. Asking the
     /// same question again replays the answer for a short window (a rerun
-    /// after a cut-off command), then starts a new exchange.
+    /// after a cut-off command), then starts a new exchange. Set on an
+    /// instruction once Nirux typed it into the child's prompt.
     var childConsumedAt: TimeInterval?
 
     init(
@@ -197,8 +201,9 @@ final class MissionStore {
     }
 
     /// Validate routing identities against the recorded Mission. Child
-    /// reports must match the child; responses and acknowledgements must
-    /// match the parent and reference a real pending child event.
+    /// reports must match the child; responses, instructions and
+    /// acknowledgements must match the parent, and a response or an
+    /// acknowledgement must reference a real pending child event.
     func accept(_ incoming: MissionEvent, enabled: Bool) -> AcceptedEvent? {
         guard case let .accepted(event) = process(incoming, enabled: enabled) else { return nil }
         return event
@@ -234,6 +239,8 @@ final class MissionStore {
         }
 
         var updated = missions
+        let fromParent = incoming.parentWorkspaceID == missions[index].parentWorkspaceID
+            && incoming.parentAgentUUID == missions[index].parentAgentUUID
 
         switch incoming.kind {
         case .question, .completed:
@@ -245,8 +252,7 @@ final class MissionStore {
 
         case .response:
             guard missions[index].status == .active,
-                  incoming.parentWorkspaceID == missions[index].parentWorkspaceID,
-                  incoming.parentAgentUUID == missions[index].parentAgentUUID,
+                  fromParent,
                   let questionID = incoming.inReplyTo,
                   let questionIndex = missions[index].events.firstIndex(where: {
                       $0.id == questionID && $0.kind == .question
@@ -256,6 +262,11 @@ final class MissionStore {
                   })
             else { return .rejected }
             updated[index].events[questionIndex].parentConsumedAt = incoming.timestamp
+
+        case .instruction:
+            // Any status: a follow-up after `completed` reopens the Mission
+            // once it is typed (see `markInstructionTyped`).
+            guard fromParent, incoming.inReplyTo == nil else { return .rejected }
 
         case .acknowledged:
             return processAcknowledgement(incoming, missionIndex: index)
@@ -357,6 +368,36 @@ final class MissionStore {
                 event.deliveredAt == nil ? AcceptedEvent(mission: mission, event: event) : nil
             }
         }.sorted { $0.event.timestamp < $1.event.timestamp }
+    }
+
+    /// Instructions not typed into their child's prompt yet, oldest first.
+    func pendingInstructions() -> [AcceptedEvent] {
+        missions.flatMap { mission in
+            mission.events.compactMap { event in
+                event.kind == .instruction && event.childConsumedAt == nil
+                    ? AcceptedEvent(mission: mission, event: event)
+                    : nil
+            }
+        }.sorted { $0.event.timestamp < $1.event.timestamp }
+    }
+
+    /// The instruction is in the child's prompt: the child has work again,
+    /// so its Mission is active, even after `completed`.
+    @discardableResult
+    func markInstructionTyped(
+        eventID: String, at timestamp: TimeInterval = Date().timeIntervalSince1970
+    ) -> Bool {
+        for missionIndex in missions.indices {
+            guard let eventIndex = missions[missionIndex].events.firstIndex(where: {
+                $0.id == eventID && $0.kind == .instruction && $0.childConsumedAt == nil
+            }) else { continue }
+            var updated = missions
+            updated[missionIndex].events[eventIndex].childConsumedAt = timestamp
+            updated[missionIndex].status = .active
+            updated[missionIndex].updatedAt = timestamp
+            return commit(updated)
+        }
+        return false
     }
 
     @discardableResult

@@ -64,4 +64,18 @@ extension AgentStatusMachine {
         guard lastDraftInputAt <= promptWentIn else { return .userTyped }
         return nil
     }
+
+    /// Whether text typed now lands in an empty prompt of `foreground`, the
+    /// column's interactive `claude`: its hooks reached this column since it
+    /// started, its turn is over, no dialog is listed, and nothing was typed
+    /// since its last prompt went in (a draft, or text typed by Nirux that
+    /// Claude has not submitted yet).
+    func isPromptFree(foreground: ForegroundProcess?) -> Bool {
+        guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground),
+              hookKind == AgentHookEvent.Kind.claude.rawValue,
+              lastEventAt >= foreground.instance.startedAt
+        else { return false }
+        return pendingDialogs.isEmpty && !hookWorking && turnStartedAt == nil
+            && lastDraftInputAt <= (lastPromptAt ?? 0)
+    }
 }

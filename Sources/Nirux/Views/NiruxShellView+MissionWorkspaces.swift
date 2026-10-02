@@ -150,6 +150,26 @@ extension NiruxShellView {
         }
     }
 
+    /// Types each pending `tell` into its child's prompt if that prompt is
+    /// free; the others wait for the child's next turn end. Runs when a
+    /// `tell` arrives and when a Mission child's turn ends.
+    func typeMissionInstructions() {
+        let pending = MissionStore.shared.pendingInstructions()
+        guard !pending.isEmpty, Self.currentMissionHandoffsEnabled() else { return }
+        // A dialog may still wait out the hook queue's drain debounce:
+        // apply it before deciding.
+        AgentHookCenter.shared.drain()
+        let snapshot = ProcessSnapshot()
+        for instruction in pending {
+            let mission = instruction.mission
+            guard let pty = workspaces.first(where: { $0.id == mission.childWorkspaceID })?
+                .columns.first(where: { $0.agentUUID == mission.childAgentUUID })?.pty,
+                pty.typeMissionInstruction(instruction.event.message, snapshot: snapshot)
+            else { continue }
+            MissionStore.shared.markInstructionTyped(eventID: instruction.event.id)
+        }
+    }
+
     static func currentMissionHandoffsEnabled() -> Bool {
         Persistence.load()?.settings?.missionHandoffsEnabled == true
     }

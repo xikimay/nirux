@@ -560,7 +560,7 @@ extension SidebarView {
         let canReply = entry.category == .missionQuestion
             && entry.missionEventID.map { MissionStore.shared.response(to: $0) == nil } == true
         let targetGone = !canReply && isActivityTargetGone(entry)
-        let isRead = entry.category == .missionResponse
+        let isRead = [.missionResponse, .missionInstruction].contains(entry.category)
             || entry.timestamp <= ActivityStore.shared.lastReadTimestamp
         return ActivityRowStyle(
             canReply: canReply,
@@ -683,7 +683,7 @@ extension SidebarView {
         case .sessionEnd: return .white.withAlphaComponent(0.35)
         case .missionQuestion: return .systemOrange
         case .missionCompleted: return .systemGreen
-        case .missionResponse: return .systemBlue
+        case .missionResponse, .missionInstruction: return .systemBlue
         }
     }
 
@@ -700,6 +700,7 @@ extension SidebarView {
         case .missionQuestion: summary = "question: \(detail ?? "needs input")"
         case .missionCompleted: summary = "completed: \(detail ?? "done")"
         case .missionResponse: summary = "replied: \(detail ?? "response sent")"
+        case .missionInstruction: summary = "told: \(detail ?? "message sent")"
         }
         return "\(entry.workspaceTitle) · \(entry.agentKind) · \(summary)"
     }

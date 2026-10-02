@@ -48,7 +48,7 @@ enum MissionEventCLI {
             Persistence.load().map { $0.settings?.missionHandoffsEnabled == true }
         }
     ) -> Int32 {
-        let commands = "ask|completed|receive|reply [options]"
+        let commands = "ask|completed|receive|reply|tell [options]"
         guard let command = arguments.first else { return usage(commands) }
         // Terminals keep their Mission environment after the setting is
         // turned off, while Nirux drops their events: say so, don't wait.
@@ -61,6 +61,7 @@ enum MissionEventCLI {
         case "ask": return ask(arguments: options)
         case "receive": return receive(arguments: options)
         case "reply": return reply(arguments: options)
+        case "tell": return tell(arguments: options)
         case MissionEvent.Kind.question.rawValue: return run(kind: .question, arguments: options)
         case MissionEvent.Kind.completed.rawValue: return run(kind: .completed, arguments: options)
         default: return usage(commands)
@@ -553,5 +554,81 @@ enum MissionEventCLI {
     private static func writeStandardError(_ line: String) {
         guard let data = (line + "\n").data(using: .utf8) else { return }
         FileHandle.standardError.write(data)
+    }
+}
+
+extension MissionEventCLI {
+    /// Parent-agent instruction for the child on `--branch`: Nirux types it
+    /// into the child's prompt once it is free (see
+    /// `AgentStatusMachine.isPromptFree`). Waits for that like `ask` waits
+    /// for an answer, and running the same command again resumes the wait
+    /// instead of sending the text twice.
+    static func tell(
+        arguments: [String],
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        now: () -> TimeInterval = { Date().timeIntervalSince1970 },
+        eventsURL: URL = MissionEventCenter.defaultEventsURL,
+        missionsURL: URL = MissionStore.defaultFileURL,
+        pollInterval: TimeInterval = 0.2
+    ) -> Int32 {
+        guard let context = parentContext(environment) else { return notAMissionTerminal(child: false) }
+        guard let options = parseOptions(arguments, allowed: ["--branch", "--message", "--timeout"]),
+              let branch = options["--branch"],
+              let message = validMessage(options["--message"]),
+              let timeout = validTimeout(options["--timeout"])
+        else {
+            return usage("tell --branch <child-branch> --message <1-\(maxMessageLength) characters>")
+        }
+        var ledger = MissionLedgerReader(url: missionsURL)
+        guard loadLedger(&ledger) else { return unreadableLedger(missionsURL) }
+        // A branch reopened in a new worktree has a newer Mission.
+        guard let mission = ledger.missions.filter({
+            $0.parentWorkspaceID == context.workspaceID
+                && $0.parentAgentUUID == context.agentUUID
+                && $0.branch == branch
+        }).max(by: { $0.createdAt < $1.createdAt }) else {
+            writeStandardError("No Mission on branch \(branch) was started from this terminal.")
+            return 4
+        }
+        guard mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue else {
+            writeStandardError("Nirux types messages only into a Claude Code child; this one runs \(mission.childAgentKind).")
+            return 4
+        }
+        let sentAt = now()
+        let existing = mission.events.last(where: {
+            $0.kind == .instruction && $0.message == message
+                && $0.childConsumedAt.map { sentAt - $0 < answerReplayWindow } ?? true
+        })
+        let instructionID = existing?.id ?? UUID().uuidString
+        if existing == nil {
+            let instruction = MissionEvent(
+                id: instructionID,
+                missionID: mission.id,
+                childWorkspaceID: mission.childWorkspaceID,
+                childAgentUUID: mission.childAgentUUID,
+                parentWorkspaceID: context.workspaceID,
+                parentAgentUUID: context.agentUUID,
+                kind: .instruction,
+                message: message,
+                timestamp: sentAt
+            )
+            guard append(instruction, to: eventsURL) else { return 1 }
+        }
+
+        let typed = waitForLedger(&ledger, timeout: timeout, pollInterval: pollInterval) { missions in
+            missions.lazy.flatMap(\.events).contains(where: {
+                $0.id == instructionID && $0.childConsumedAt != nil
+            }) ? true : nil
+        }
+        guard typed == nil else {
+            writeStandardOutput("Nirux typed the message into the child's prompt.")
+            return 0
+        }
+        writeStandardError(
+            "Not typed yet: the child is working, a dialog is open, or someone is typing at its prompt. "
+                + "Nirux types it once the child's turn ends. Run the exact same command again to keep "
+                + "waiting; it does not send the message twice."
+        )
+        return 3
     }
 }

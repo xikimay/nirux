@@ -400,6 +400,17 @@ final class PtySession: @unchecked Sendable {
         return nil
     }
 
+    /// Type a Mission instruction and Enter, only into a free prompt (see
+    /// `AgentStatusMachine.isPromptFree`). Returns whether it was typed.
+    func typeMissionInstruction(_ message: String, snapshot: ProcessSnapshot) -> Bool {
+        guard !hasExited,
+              state.machine.isPromptFree(foreground: foregroundProcess(snapshot: snapshot)),
+              let input = RemotePromptSanitizer.terminalInput(for: message)
+        else { return false }
+        sendRaw(input)
+        return true
+    }
+
     /// The user's login shell ($SHELL) when it's a mainstream
     /// POSIX-compatible one, else zsh. Restricted to an allowlist because
     /// command-backed columns launch it with zsh-style `-i -l -c` flags

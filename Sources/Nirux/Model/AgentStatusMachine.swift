@@ -101,7 +101,7 @@ struct AgentStatusMachine {
     /// earlier prompt arrived late (Claude doesn't wait for it) and ends
     /// nothing; one about a prompt never seen (a turn Claude started by
     /// itself) counts.
-    private var lastPromptAt: TimeInterval?
+    private(set) var lastPromptAt: TimeInterval?
     private var turnPromptID: String?
     private var recentPromptIDs: [String] = []
 
