@@ -226,6 +226,28 @@ final class MissionTellTests: XCTestCase {
         ), 3, "the child can ask again")
     }
 
+    func testReceiveKeepsWaitingWhileATellMayReopenTheMission() throws {
+        let fixture = try makeFixture()
+        func receive() -> Int32 {
+            MissionEventCLI.receive(
+                arguments: ["--timeout", "0"],
+                environment: parentEnvironment(),
+                eventsURL: fixture.eventsURL,
+                missionsURL: fixture.missionsURL,
+                pollInterval: 0.01
+            )
+        }
+        complete(fixture)
+        XCTAssertEqual(receive(), 0, "prints the completion")
+        fixture.center.drain()
+        XCTAssertEqual(receive(), 4, "nothing left to wait for")
+
+        let now = Date().timeIntervalSince1970
+        XCTAssertEqual(tell("/premortem", in: fixture, at: now), 3)
+        fixture.center.drain()
+        XCTAssertEqual(receive(), 3, "the child gets more work once the message is typed")
+    }
+
     func testOnlyEventsWithTheRecordedParentIdentityAreTold() throws {
         let fixture = try makeFixture()
         func instruction(parentAgentUUID: String?) -> MissionEvent {

@@ -300,7 +300,14 @@ enum MissionEventCLI {
             let missions = ledger.missions.filter {
                 $0.parentWorkspaceID == context.workspaceID && $0.parentAgentUUID == context.agentUUID
             }
-            if !missions.isEmpty, !missions.contains(where: { $0.status == .active }) {
+            // A `tell` Nirux may still type reopens its Mission.
+            let receivedAt = now()
+            if !missions.isEmpty, !missions.contains(where: { mission in
+                mission.status == .active || mission.events.contains {
+                    $0.kind == .instruction && $0.childConsumedAt == nil
+                        && receivedAt - $0.timestamp < instructionLifetime
+                }
+            }) {
                 writeStandardError("No active Mission for this terminal; stop waiting.")
                 return 4
             }
