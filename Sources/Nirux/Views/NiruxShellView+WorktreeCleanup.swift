@@ -44,8 +44,13 @@ extension NiruxShellView {
     }
 
     func offersWorktreeCleanup(workspaceIndex: Int) -> Bool {
-        guard let workspace = workspaces[safe: workspaceIndex], !workspace.isClosing else { return false }
-        return Self.worktreeCleanupPath(forCwd: workspace.cwd) != nil
+        worktreeCleanupPath(workspaceIndex: workspaceIndex) != nil
+    }
+
+    /// What "Clean Up Worktree…" would clean up for this workspace.
+    private func worktreeCleanupPath(workspaceIndex: Int) -> String? {
+        guard let workspace = workspaces[safe: workspaceIndex], !workspace.isClosing else { return nil }
+        return Self.worktreeCleanupPath(forCwd: workspace.cwd)
     }
 
     /// The card's "merged · Clean up": the ⋯ menu's offer, once the card
@@ -55,10 +60,10 @@ extension NiruxShellView {
     /// still on disk. Asked on every sidebar refresh, so the files are
     /// read only for a merged one.
     func mergedCleanupOffer(workspaceIndex: Int) -> MergedCleanupOffer? {
-        guard let workspace = workspaces[safe: workspaceIndex], !workspace.isClosing,
+        guard let workspace = workspaces[safe: workspaceIndex],
               let pullRequest = workspace.prInfo, pullRequest.state == "MERGED", !pullRequest.isDraft,
               let repositoryRoot = workspace.gitContext?.identity.repositoryRoot,
-              let path = Self.worktreeCleanupPath(forCwd: workspace.cwd),
+              let path = worktreeCleanupPath(workspaceIndex: workspaceIndex),
               FileManager.default.fileExists(atPath: path)
         else { return nil }
         let key = Self.comparablePath(path)
@@ -146,9 +151,7 @@ extension NiruxShellView {
     /// The ⋯ menu's "Clean Up Worktree…": check, then say why not or
     /// confirm exactly what goes. Nothing is deleted without that click.
     func requestWorktreeCleanup(workspaceIndex: Int) {
-        guard let workspace = workspaces[safe: workspaceIndex], !workspace.isClosing,
-              let path = Self.worktreeCleanupPath(forCwd: workspace.cwd)
-        else { return }
+        guard let path = worktreeCleanupPath(workspaceIndex: workspaceIndex) else { return }
         requestWorktreeCleanup(path: path)
     }
 

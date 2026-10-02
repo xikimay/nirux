@@ -426,7 +426,7 @@ final class SidebarWorkspaceCardRenderer {
         case .available:
             link = textLabel("Clean up", font: font, color: color)
             link.toolTip = "Clean Up Worktree…: checks, then asks before deleting this worktree’s folder and "
-                + "local branch and closing its workspace. The remote branch is kept."
+                + "local branch and closing the workspaces open in it. The remote branch is kept."
         case .inProgress:
             link = textLabel("Cleaning up…", font: font, color: color.withAlphaComponent(0.6))
         }

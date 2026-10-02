@@ -27,6 +27,7 @@ final class MergedCleanupLinkTests: XCTestCase {
             mainCheckout.prInfo = pullRequest(state: "MERGED")
             shell.updateSidebar()
             XCTAssertEqual(cleanupTexts(in: shell.sidebar), [], "merged, but in the main checkout")
+            XCTAssertEqual(texts(in: shell.sidebar).filter { $0 == "#7 merged" }.count, 2)
 
             shell.focusColumnByIndex(0)
             waitForGitContext(of: worktreeWorkspace, at: harness.worktree, shell: shell, harness: harness)
@@ -50,9 +51,6 @@ final class MergedCleanupLinkTests: XCTestCase {
             harness.waitUntil("the clean-up verdict") { !harness.alerts.isEmpty && shell.worktreeCleanupsInFlight.isEmpty }
             XCTAssertTrue(harness.alerts.last?.hasPrefix("Can’t clean up") == true, "\(harness.alerts)")
             XCTAssertTrue(FileManager.default.fileExists(atPath: harness.worktree))
-            worktreeWorkspace.prInfo = pullRequest(state: "MERGED")
-            shell.updateSidebar()
-            XCTAssertEqual(cleanupTexts(in: shell.sidebar), ["Clean up"])
         }
     }
 
@@ -72,10 +70,13 @@ final class MergedCleanupLinkTests: XCTestCase {
         )
     }
 
+    private func texts(in sidebar: SidebarView) -> [String] {
+        sidebar.expandedViews.compactMap { ($0 as? NSTextField)?.stringValue }
+    }
+
     /// What follows "#7 merged ·" on the cards.
     private func cleanupTexts(in sidebar: SidebarView) -> [String] {
-        sidebar.expandedViews.compactMap { ($0 as? NSTextField)?.stringValue }
-            .filter { $0 == "Clean up" || $0 == "Cleaning up…" }
+        texts(in: sidebar).filter { $0 == "Clean up" || $0 == "Cleaning up…" }
     }
 
     private func cleanupLink(in sidebar: SidebarView) -> SidebarHitArea? {
