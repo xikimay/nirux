@@ -28,7 +28,12 @@ new Nirux code path.
     deploy) would still run, some without approval. `--ignore-user-config` drops
     the servers, `--disable apps` the connectors: Codex reads, it can't act.
   - Ignoring the user config also drops its model and effort. The model is
-    Codex's default; effort is pinned to `high`, as a check deserves.
+    Codex's default; effort is pinned to `high`, as a check deserves. Login
+    still comes from `CODEX_HOME`, but a custom provider set in the config
+    (Azure, a local model) is dropped too: the run fails and Claude shows the
+    log.
+  - A repository's own `.codex/config.toml` doesn't load either: without the
+    user config, no folder is trusted (checked with a probe MCP server).
   - `--ephemeral` keeps the run out of `codex resume`, so the user's own
     `codex resume --last` never lands on it. `--skip-git-repo-check` lets it run
     in a folder that isn't a repository.
