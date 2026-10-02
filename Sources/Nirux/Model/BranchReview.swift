@@ -25,7 +25,10 @@ enum BranchReview {
         }
 
         let kind: Kind
+        /// Decoded lossily.
         let text: String
+        /// The line's bytes, kept only when `text` isn't them (not UTF-8).
+        var bytes: Data?
     }
 
     struct Hunk: Equatable, Sendable {
@@ -39,17 +42,22 @@ enum BranchReview {
         var lines: [Line]
     }
 
-    /// Why a file's hunks aren't in the snapshot.
+    /// Why a file's hunks aren't in the snapshot. Its hash and line
+    /// counts stay, except for `.notRead`.
     enum Omission: Equatable, Sendable {
         /// Its patch is over `Options.maxFileDiffBytes`: the page shows a
         /// placeholder, as the editor's stacked diff does.
-        case tooLarge(bytes: Int)
-        /// The whole diff is over `Options.maxInlineDiffBytes`: the page
-        /// lists the files and loads one with `filePatch` when it opens.
+        case tooLarge
+        /// The other files' patches add up to more than
+        /// `Options.maxInlineDiffBytes`: the page lists the files and loads
+        /// one with `filePatch` when its row opens.
         case onDemand
-        /// The whole diff is over `Options.maxDiffBytes`, or git couldn't
-        /// produce it in time: only its paths and counts were read, so it
-        /// has no hash either until `filePatch` loads it.
+        /// Not read: the diff is over `Options.maxDiffBytes` (the files
+        /// with the most changed lines are left out first), git didn't
+        /// produce it in time, or it is an untracked file past the read
+        /// limits. Only its path and line counts are known, and it has no
+        /// hash until `filePatch` loads it: a Reviewed mark must not be
+        /// cleared for lack of one.
         case notRead
     }
 
@@ -72,6 +80,8 @@ enum BranchReview {
         var newObjectID: String?
         var additions = 0
         var deletions = 0
+        /// The size of its patch (an untracked file's size); 0 when not read.
+        var patchBytes = 0
         /// Not tracked by git: read from disk, shown as added.
         var isUntracked = false
         /// Part of what isn't committed yet (untracked, or `git status`
@@ -102,6 +112,16 @@ enum BranchReview {
         let mergeBase: String
     }
 
+    enum HeadComparison: Equatable, Sendable {
+        /// `ahead`: commits only HEAD has (unpushed); `behind`: commits only
+        /// the other side has.
+        case counted(ahead: Int, behind: Int)
+        /// The other commit isn't in the local repository: it has commits
+        /// the worktree doesn't (the merge queue updated the branch on
+        /// GitHub, say).
+        case notLocal
+    }
+
     struct PullRequest: Equatable, Sendable {
         let number: Int
         let title: String
@@ -129,21 +149,32 @@ enum BranchReview {
     struct Snapshot: Equatable, Sendable {
         /// The worktree's top level.
         let root: String
-        /// "sha1" or "sha256": how an untracked binary file's id is computed.
-        let objectFormat: String
         let branch: String
         let head: String
         let base: Base
         let pullRequest: PullRequestLookup
         /// Why fetching the base branch failed, when it was asked for.
         let fetchProblem: String?
+        /// HEAD against its upstream; nil without one.
+        let upstream: HeadComparison?
+        /// HEAD against the pull request's head on GitHub; nil without a
+        /// pull request.
+        let pullRequestHead: HeadComparison?
+        /// Something isn't committed: a change `git status` lists, or an
+        /// untracked file other than the disposable ones.
+        let hasUncommittedChanges: Bool
         /// From the merge base to HEAD, newest first.
         let commits: [Commit]
-        /// Sorted by path.
+        /// Sorted by path, one entry per path.
         let files: [FileChange]
-        /// The size of the whole patch, untracked files included. Nil when
-        /// it is over `Options.maxDiffBytes` and wasn't read.
-        let diffBytes: Int?
+
+        /// Whether the base is the pull request's base branch. False when
+        /// it couldn't be used (never fetched, say): the merge base is then
+        /// with the default branch.
+        var usesPullRequestBase: Bool {
+            guard let pullRequest = pullRequest.pullRequest else { return false }
+            return base.ref == "refs/remotes/origin/\(pullRequest.baseRefName)"
+        }
     }
 
     enum Operation: String, Equatable, Sendable {

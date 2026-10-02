@@ -52,26 +52,8 @@ extension BranchReview {
     /// commits.
     static func selectBase(root: String, branch: String, options: Options) -> BaseSelection {
         var fetchProblem: String?
-        var fetched: Set<String> = []
-        let lookup: PullRequestLookup
-        switch openPullRequests(branch: branch, root: root, options: options) {
-        case .failure(let failure):
-            lookup = .unavailable(failure.message)
-        case .success(let candidates):
-            var found: PullRequest?
-            for candidate in candidates {
-                let baseName = candidate.pullRequest.baseRefName
-                if options.fetchBase, fetched.insert(baseName).inserted,
-                   let problem = fetch(baseBranch: baseName, root: root, options: options) {
-                    fetchProblem = problem
-                }
-                if isOwnPullRequest(candidate, branch: branch, root: root, options: options) {
-                    found = candidate.pullRequest
-                    break
-                }
-            }
-            lookup = found.map { .found($0) } ?? .notFound
-        }
+        let lookup = options.knownPullRequest
+            ?? lookUpPullRequest(branch: branch, root: root, options: options, fetchProblem: &fetchProblem)
 
         var refs: [String] = []
         if let pullRequest = lookup.pullRequest {
@@ -128,27 +110,51 @@ extension BranchReview {
 
     // MARK: Pull request
 
-    struct Candidate: Equatable, Sendable {
-        let pullRequest: PullRequest
-        let commitOids: Set<String>
-    }
-
     struct LookupFailure: Error, Equatable {
         let message: String
     }
 
+    /// The newest open pull request that is the branch's own. With
+    /// `fetchBase`, each candidate's base branch is fetched first: whether
+    /// it is the branch's own depends on it.
+    static func lookUpPullRequest(
+        branch: String, root: String, options: Options, fetchProblem: inout String?
+    ) -> PullRequestLookup {
+        let candidates: [PullRequest]
+        switch openPullRequests(branch: branch, root: root, options: options) {
+        case .failure(let failure): return .unavailable(failure.message)
+        case .success(let found): candidates = found
+        }
+        var fetched: Set<String> = []
+        for candidate in candidates {
+            if options.fetchBase, fetched.insert(candidate.baseRefName).inserted,
+               let problem = fetch(baseBranch: candidate.baseRefName, root: root, options: options) {
+                fetchProblem = problem
+            }
+            switch isOwnPullRequest(candidate, branch: branch, root: root, options: options) {
+            case .success(true): return .found(candidate)
+            case .success(false): continue
+            case .failure(let failure): return .unavailable(failure.message)
+            }
+        }
+        return .notFound
+    }
+
     /// Open pull requests whose head is this branch of the repository it is
-    /// pushed to, as `PRDetect` matches them; newest first.
+    /// pushed to, as `PRDetect` matches them; newest first. Without their
+    /// commits: gh asks for each commit's authors, and 100 pull requests ×
+    /// 100 commits × 100 authors is over GitHub's GraphQL limit of 500,000
+    /// nodes, which fails the whole query.
     static func openPullRequests(
         branch: String, root: String, options: Options
-    ) -> Result<[Candidate], LookupFailure> {
+    ) -> Result<[PullRequest], LookupFailure> {
         guard let gitHub = options.gitHub else {
             return .failure(LookupFailure(message: "The GitHub CLI (gh) isn't installed."))
         }
         guard let repository = headRepository(branch: branch, root: root, options: options) else {
             return .failure(LookupFailure(message: "\(branch) isn't pushed to GitHub."))
         }
-        let fields = "number,title,body,url,baseRefName,headRefOid,isDraft,headRepository,headRepositoryOwner,commits"
+        let fields = "number,title,body,url,baseRefName,headRefOid,isDraft,headRepository,headRepositoryOwner"
         guard let output = gitHub.run(
             ["pr", "list", "--head", branch, "--state", "open", "--json", fields, "--limit", "100"], root
         ) else {
@@ -162,53 +168,81 @@ extension BranchReview {
             return .failure(LookupFailure(message: "gh printed pull requests Nirux can't read."))
         }
         return .success(
-            json.compactMap { candidate(from: $0, headRepository: repository) }
-                .sorted { $0.pullRequest.number > $1.pullRequest.number }
+            json.compactMap { pullRequest(from: $0, headRepository: repository) }
+                .sorted { $0.number > $1.number }
         )
     }
 
-    static func candidate(from json: [String: Any], headRepository: GitHubRepository) -> Candidate? {
+    static func pullRequest(from json: [String: Any], headRepository: GitHubRepository) -> PullRequest? {
         guard let number = json["number"] as? Int,
               let url = json["url"] as? String,
               let baseRefName = json["baseRefName"] as? String,
               let headRefOid = (json["headRefOid"] as? String)?.lowercased(),
+              [40, 64].contains(headRefOid.count), headRefOid.allSatisfy(\.isHexDigit),
               let owner = (json["headRepositoryOwner"] as? [String: Any])?["login"] as? String,
               let name = (json["headRepository"] as? [String: Any])?["name"] as? String,
               GitHubRepository(repositoryURL: url, owner: owner, name: name) == headRepository
         else { return nil }
-        let commits = (json["commits"] as? [[String: Any]] ?? []).compactMap { ($0["oid"] as? String)?.lowercased() }
-        return Candidate(
-            pullRequest: PullRequest(
-                number: number,
-                title: json["title"] as? String ?? "",
-                body: json["body"] as? String ?? "",
-                url: url,
-                baseRefName: baseRefName,
-                headRefOid: headRefOid,
-                isDraft: json["isDraft"] as? Bool ?? false
-            ),
-            commitOids: Set(commits)
+        return PullRequest(
+            number: number,
+            title: json["title"] as? String ?? "",
+            body: json["body"] as? String ?? "",
+            url: url,
+            baseRefName: baseRefName,
+            headRefOid: headRefOid,
+            isDraft: json["isDraft"] as? Bool ?? false
         )
     }
 
-    /// A pull request under a reused branch name isn't this branch's: one
-    /// of its commits must be in HEAD's history and not in its base's, or
-    /// its head in the branch's reflog (after a local rebase not pushed
-    /// yet, none of its commits is in HEAD's history).
-    static func isOwnPullRequest(_ candidate: Candidate, branch: String, root: String, options: Options) -> Bool {
-        let baseRef = remoteRef(candidate.pullRequest.baseRefName)
-        let hasBase = isPlainBranchName(candidate.pullRequest.baseRefName)
+    /// A pull request under a reused branch name isn't this branch's: its
+    /// head must be in the branch's reflog (after a local rebase not pushed
+    /// yet, none of its commits is in HEAD's history), or one of its commits
+    /// in HEAD's history and not in its base's. The reflog is read first:
+    /// it settles the usual case without asking gh for the commits.
+    static func isOwnPullRequest(
+        _ pullRequest: PullRequest, branch: String, root: String, options: Options
+    ) -> Result<Bool, LookupFailure> {
+        if let reflog = git(["log", "-g", "--format=%H", "refs/heads/\(branch)", "--"], in: root, options: options),
+           reflog.status == 0,
+           reflog.text.split(separator: "\n").contains(where: { $0 == pullRequest.headRefOid }) {
+            return .success(true)
+        }
+        guard let gitHub = options.gitHub,
+              let output = gitHub.run(["pr", "view", pullRequest.url, "--json", "commits"], root)
+        else { return .failure(LookupFailure(message: "gh didn't answer.")) }
+        guard output.status == 0,
+              let json = (try? JSONSerialization.jsonObject(with: output.standardOutput)) as? [String: Any],
+              let commits = json["commits"] as? [[String: Any]]
+        else {
+            let reason = firstLine(output.standardError).map { ": \($0)" } ?? "."
+            return .failure(LookupFailure(message: "gh couldn't read the commits of #\(pullRequest.number)\(reason)"))
+        }
+        let oids = Set(commits.compactMap { ($0["oid"] as? String)?.lowercased() })
+        let baseRef = remoteRef(pullRequest.baseRefName)
+        let hasBase = isPlainBranchName(pullRequest.baseRefName)
             && git(["rev-parse", "-q", "--verify", "\(baseRef)^{commit}"], in: root, options: options)?.status == 0
         let range = hasBase ? ["HEAD", "^\(baseRef)"] : ["HEAD"]
-        if let own = git(["rev-list", "--max-count=10000"] + range + ["--"], in: root, options: options),
-           own.status == 0,
-           !candidate.commitOids.isDisjoint(with: own.text.split(separator: "\n").map(String.init)) {
-            return true
-        }
-        guard let reflog = git(["log", "-g", "--format=%H", "refs/heads/\(branch)", "--"], in: root, options: options),
-              reflog.status == 0
-        else { return false }
-        return reflog.text.split(separator: "\n").contains { $0 == candidate.pullRequest.headRefOid }
+        guard let own = git(["rev-list", "--max-count=10000"] + range + ["--"], in: root, options: options),
+              own.status == 0
+        else { return .success(false) }
+        return .success(!oids.isDisjoint(with: own.text.split(separator: "\n").map(String.init)))
+    }
+
+    /// HEAD against `other`: `git rev-list --left-right --count`.
+    static func compare(head: String, with other: String, root: String, options: Options) -> HeadComparison? {
+        guard let counted = git(["rev-list", "--left-right", "--count", "\(head)...\(other)", "--"], in: root, options: options),
+              counted.status == 0
+        else { return nil }
+        let numbers = counted.text.split(whereSeparator: \.isWhitespace).compactMap { Int($0) }
+        guard numbers.count == 2 else { return nil }
+        return .counted(ahead: numbers[0], behind: numbers[1])
+    }
+
+    /// HEAD against the pull request's head, which may not be local.
+    static func comparePullRequestHead(_ pullRequest: PullRequest, head: String, root: String, options: Options) -> HeadComparison? {
+        guard git(["cat-file", "-e", "\(pullRequest.headRefOid)^{commit}"], in: root, options: options)?.status == 0
+        else { return .notLocal }
+        return compare(head: head, with: pullRequest.headRefOid, root: root, options: options)
     }
 
     /// The repository the branch is pushed to; `origin` for a branch pushed

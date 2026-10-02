@@ -27,7 +27,12 @@ extension BranchReview {
         var oldObjectID: String?
         var newObjectID: String?
         var isBinary = false
+        /// Empty when parsed without its lines.
         var hunks: [Hunk] = []
+        var additions = 0
+        var deletions = 0
+        /// SHA-256 of its changed lines' bytes (see `ChangedLineHasher`).
+        var changedLines = Data()
         /// Its size in the patch, header included.
         var byteCount = 0
 
@@ -37,52 +42,55 @@ extension BranchReview {
     }
 
     enum Patch {
-        /// Splits a patch into its `diff --git` sections and parses each.
-        /// Each section is decoded on its own, lossily: one file that isn't
-        /// UTF-8 gets replacement characters instead of emptying the page.
-        /// Nil when a section can't be parsed.
-        static func sections(of data: Data) -> [PatchSection]? {
+        /// The byte ranges of a patch's `diff --git` sections.
+        static func sectionRanges(of data: Data) -> [Range<Data.Index>] {
             let marker = Data("\ndiff --git ".utf8)
-            var starts: [Int] = []
+            var starts: [Data.Index] = []
             if data.starts(with: marker.dropFirst()) { starts.append(data.startIndex) }
             var searchStart = data.startIndex
             while let found = data.range(of: marker, in: searchStart..<data.endIndex) {
                 starts.append(found.lowerBound + 1)
                 searchStart = found.lowerBound + 1
             }
-            // Anything before the first section is noise git never prints.
+            return starts.indices.map { index in
+                starts[index]..<(index + 1 < starts.count ? starts[index + 1] : data.endIndex)
+            }
+        }
+
+        /// Parses every section; `keepsLines` says, from its size, which
+        /// ones keep their hunks (the others only count and hash them, so a
+        /// huge file never becomes a million Strings). Nil when a section
+        /// can't be parsed.
+        static func sections(of data: Data, keepsLines: (Int) -> Bool = { _ in true }) -> [PatchSection]? {
             var sections: [PatchSection] = []
-            for (index, start) in starts.enumerated() {
-                let end = index + 1 < starts.count ? starts[index + 1] : data.endIndex
-                let bytes = data[start..<end]
-                guard var section = section(bytes) else { return nil }
-                section.byteCount = bytes.count
+            for range in sectionRanges(of: data) {
+                guard let section = section(data[range], keepsLines: keepsLines(range.count)) else { return nil }
                 sections.append(section)
             }
             return sections
         }
 
-        /// The lines of `bytes`, each decoded lossily. Split on the bytes:
-        /// Swift reads "\r\n" as one Character, which a split on "\n"
-        /// would leave whole.
-        static func lines(_ bytes: Data) -> [Substring] {
-            bytes.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false)
-                .map { Substring(String(decoding: $0, as: UTF8.self)) }
-        }
-
-        /// Parses one section, from its `diff --git` line on.
-        static func section(_ bytes: Data) -> PatchSection? {
-            var lines = lines(bytes)
-            if lines.last?.isEmpty == true { lines.removeLast() }
-            guard let first = lines.first, first.hasPrefix("diff --git ") else { return nil }
-            var section = PatchSection()
+        /// Parses one section, from its `diff --git` line on. Lines are cut
+        /// on the newline byte and told apart by their first byte: Swift
+        /// makes one Character of "\r\n", and of "+" and a combining accent
+        /// after it. Text is decoded lossily, one line at a time, so one
+        /// file that isn't UTF-8 doesn't empty the page; the hash reads the
+        /// bytes.
+        static func section(_ bytes: Data, keepsLines: Bool = true) -> PatchSection? {
+            var reader = LineReader(bytes)
+            guard let first = reader.next(), first.starts(with: Data("diff --git ".utf8)) else { return nil }
+            var section = PatchSection(byteCount: bytes.count)
             var oldName: String??
             var newName: String??
             var renamedFrom: String?
             var renamedTo: String?
-            var index = 1
-            while index < lines.count, !lines[index].hasPrefix("@@ ") {
-                let line = lines[index]
+            var pendingHunk: Data?
+            while let raw = reader.next() {
+                if raw.starts(with: Data("@@ ".utf8)) {
+                    pendingHunk = raw
+                    break
+                }
+                let line = Substring(decoded(raw))
                 if let value = line.dropPrefix("old mode ") {
                     section.oldMode = String(value)
                 } else if let value = line.dropPrefix("new mode ") {
@@ -110,71 +118,79 @@ extension BranchReview {
                 } else if line.hasPrefix("Binary files ") {
                     section.isBinary = true
                 }
-                index += 1
             }
             // The most reliable source first: rename lines and the ---/+++
             // lines are quoted when needed; the `diff --git` line is
             // ambiguous when a path holds " b/".
-            let gitLine = gitLinePaths(first.dropFirst("diff --git ".count))
+            let gitLine = gitLinePaths(Substring(decoded(first.dropFirst("diff --git ".count))))
             let oldFromHeaders: String? = oldName ?? gitLine?.old
             let newFromHeaders: String? = newName ?? gitLine?.new
             section.oldPath = renamedFrom ?? oldFromHeaders
             section.newPath = renamedTo ?? newFromHeaders
             guard section.key != nil else { return nil }
 
-            while index < lines.count {
-                guard let hunk = hunk(from: lines, at: &index) else { return nil }
-                section.hunks.append(hunk)
+            var hasher = ChangedLineHasher()
+            while let header = pendingHunk {
+                guard let read = hunk(header, from: &reader, into: &section, hasher: &hasher, keepsLines: keepsLines)
+                else { return nil }
+                if keepsLines { section.hunks.append(read.hunk) }
+                pendingHunk = read.next
             }
+            section.changedLines = hasher.finalize()
             return section
         }
 
-        /// Reads one hunk starting at its `@@` line; leaves `index` after it.
-        private static func hunk(from lines: [Substring], at index: inout Int) -> Hunk? {
-            guard let header = hunkHeader(lines[index]) else { return nil }
+        /// Reads one hunk after its `@@` line. Returns it, and the next
+        /// hunk's `@@` line if one follows.
+        private static func hunk(
+            _ headerLine: Data,
+            from reader: inout LineReader,
+            into section: inout PatchSection,
+            hasher: inout ChangedLineHasher,
+            keepsLines: Bool
+        ) -> (hunk: Hunk, next: Data?)? {
+            guard let header = hunkHeader(Substring(decoded(headerLine))) else { return nil }
             var oldRemaining = header.oldCount
             var newRemaining = header.newCount
             var body: [Line] = []
-            index += 1
             // The counts say where the hunk ends: an added line may well
-            // read "+++ b/x" or "@@ -1 +1 @@". The marker is the first
-            // scalar, not the first Character: a line starting with a
-            // combining accent makes one Character of "+" and the accent.
-            while index < lines.count {
-                let line = lines[index]
-                let marker = line.unicodeScalars.first
-                if marker == "\\" {
-                    body.append(Line(kind: .noNewlineMarker, text: ""))
-                } else if oldRemaining > 0 || newRemaining > 0 {
-                    let text = String(Substring(line.unicodeScalars.dropFirst()))
-                    switch marker {
-                    case "+":
+            // read "+++ b/x" or "@@ -1 +1 @@".
+            while let raw = reader.next() {
+                let kind: Line.Kind
+                if raw.first == UInt8(ascii: "\\") {
+                    kind = .noNewlineMarker
+                } else if oldRemaining == 0, newRemaining == 0 {
+                    guard raw.starts(with: Data("@@ ".utf8)) else { return nil }
+                    return (Hunk(header: header, lines: body), raw)
+                } else {
+                    switch raw.first {
+                    case UInt8(ascii: "+"):
                         guard newRemaining > 0 else { return nil }
                         newRemaining -= 1
-                        body.append(Line(kind: .added, text: text))
-                    case "-":
+                        section.additions += 1
+                        kind = .added
+                    case UInt8(ascii: "-"):
                         guard oldRemaining > 0 else { return nil }
                         oldRemaining -= 1
-                        body.append(Line(kind: .removed, text: text))
-                    case " ", nil:
+                        section.deletions += 1
+                        kind = .removed
+                    case UInt8(ascii: " "), nil:
                         guard oldRemaining > 0, newRemaining > 0 else { return nil }
                         oldRemaining -= 1
                         newRemaining -= 1
-                        body.append(Line(kind: .context, text: text))
+                        kind = .context
                     default:
                         return nil
                     }
-                } else {
-                    break
                 }
-                index += 1
+                let content = raw.dropFirst()
+                hasher.add(kind, content)
+                if keepsLines {
+                    body.append(kind == .noNewlineMarker ? Line(kind: kind, text: "") : Line(kind: kind, bytes: content))
+                }
             }
             guard oldRemaining == 0, newRemaining == 0 else { return nil }
-            return Hunk(
-                oldStart: header.oldStart, oldCount: header.oldCount,
-                newStart: header.newStart, newCount: header.newCount,
-                section: header.section, lines: body
-            )
+            return (Hunk(header: header, lines: body), nil)
         }
 
         /// "@@ -12,3 +12,4 @@ func name()": a count left out is 1.
@@ -199,6 +215,10 @@ extension BranchReview {
             return (start, count)
         }
 
+        static func decoded(_ bytes: Data) -> String {
+            String(decoding: bytes, as: UTF8.self)
+        }
+
         /// A ---/+++ path: nil for /dev/null. git ends the name with a tab
         /// when it holds a space, for patch(1).
         private static func headerPath(_ value: Substring, prefix: String) -> String?? {
@@ -215,8 +235,8 @@ extension BranchReview {
         /// only for those.
         private static func gitLinePaths(_ rest: Substring) -> (old: String, new: String)? {
             if rest.hasPrefix("\"") {
-                guard let (quotedOld, remainder) = quotedPrefix(rest), remainder.hasPrefix(" ") else { return nil }
-                guard let old = Substring(unquotedBytes(quotedOld)).dropPrefix("a/"),
+                guard let (quotedOld, remainder) = quotedPrefix(rest), remainder.hasPrefix(" "),
+                      let old = Substring(unquotedBytes(quotedOld)).dropPrefix("a/"),
                       let new = Substring(unquoted(remainder.dropFirst())).dropPrefix("b/")
                 else { return nil }
                 return (String(old), String(new))
@@ -293,12 +313,12 @@ extension BranchReview {
             if fields.last?.isEmpty == true { fields.removeLast() }
             var entries: [NameStatusEntry] = []
             while let statusField = fields.popFirst() {
-                let status = String(decoding: statusField, as: UTF8.self)
+                let status = decoded(statusField)
                 guard let letter = status.first else { return nil }
                 let score = Int(status.dropFirst())
                 let pathCount = letter == "R" || letter == "C" ? 2 : 1
                 guard fields.count >= pathCount else { return nil }
-                let paths = (0..<pathCount).map { _ in String(decoding: fields.removeFirst(), as: UTF8.self) }
+                let paths = (0..<pathCount).map { _ in decoded(fields.removeFirst()) }
                 entries.append(NameStatusEntry(
                     letter: letter, score: score,
                     path: paths[pathCount - 1], oldPath: pathCount == 2 ? paths[0] : nil
@@ -307,12 +327,13 @@ extension BranchReview {
             return entries
         }
 
-        /// One file per name-status entry that has a section. An entry
-        /// without one is dropped: under `diff.autoRefreshIndex=false`, a
-        /// file whose timestamp changed but not its content is listed, and
+        /// One file per name-status entry that has a section, hashed. An
+        /// entry without one is dropped: under `diff.autoRefreshIndex=false`,
+        /// a file whose timestamp changed but not its content is listed, and
         /// the patch leaves it out. A type change has two sections, the old
-        /// file deleted and the new one added. Nil when a section matches
-        /// no entry: the worktree changed between the two reads.
+        /// file deleted and the new one added. Nil when a section matches no
+        /// entry, or not the way its status says: the worktree changed
+        /// between the two reads.
         static func files(entries: [NameStatusEntry], sections: [PatchSection]) -> [FileChange]? {
             var sectionsByKey: [String: [PatchSection]] = [:]
             for section in sections {
@@ -323,14 +344,15 @@ extension BranchReview {
             var matched = 0
             for entry in entries {
                 guard let found = sectionsByKey.removeValue(forKey: entry.path) else { continue }
+                guard let file = file(entry: entry, sections: found) else { return nil }
                 matched += found.count
-                files.append(file(entry: entry, sections: found))
+                files.append(file)
             }
             guard matched == sections.count else { return nil }
             return files
         }
 
-        private static func file(entry: NameStatusEntry, sections: [PatchSection]) -> FileChange {
+        private static func file(entry: NameStatusEntry, sections: [PatchSection]) -> FileChange? {
             let status: FileStatus
             switch entry.letter {
             case "A", "C": status = .added
@@ -339,6 +361,16 @@ extension BranchReview {
             case "T": status = .typeChanged
             default: status = .modified
             }
+            let first = sections[0]
+            let matchesStatus: Bool
+            switch status {
+            case .added: matchesStatus = sections.count == 1 && first.oldPath == nil
+            case .deleted: matchesStatus = sections.count == 1 && first.newPath == nil
+            case .renamed: matchesStatus = sections.count == 1 && first.oldPath == entry.oldPath
+            case .modified: matchesStatus = sections.count == 1 && first.oldPath == first.newPath
+            case .typeChanged: matchesStatus = sections.count <= 2
+            }
+            guard matchesStatus else { return nil }
             var file = FileChange(path: entry.path, status: status)
             if status == .renamed {
                 file.oldPath = entry.oldPath
@@ -353,37 +385,97 @@ extension BranchReview {
                     if section.newPath != nil { file.newObjectID = section.newObjectID }
                 }
                 file.hunks += section.hunks
+                file.additions += section.additions
+                file.deletions += section.deletions
+                file.patchBytes += section.byteCount
             }
             if !file.isBinary {
                 file.oldObjectID = nil
                 file.newObjectID = nil
             }
-            countLines(&file)
+            file.patchHash = patchHash(of: file, changedLines: sections.map(\.changedLines))
             return file
         }
+    }
 
-        static func countLines(_ file: inout FileChange) {
-            file.additions = 0
-            file.deletions = 0
-            for line in file.hunks.lazy.flatMap(\.lines) {
-                if line.kind == .added { file.additions += 1 }
-                if line.kind == .removed { file.deletions += 1 }
-            }
+    /// Reads a section's lines without copying them: slices up to each
+    /// newline byte.
+    struct LineReader {
+        private let bytes: Data
+        private var cursor: Data.Index
+
+        init(_ bytes: Data) {
+            self.bytes = bytes
+            cursor = bytes.startIndex
         }
+
+        mutating func next() -> Data? {
+            guard cursor < bytes.endIndex else { return nil }
+            let end = bytes[cursor...].firstIndex(of: UInt8(ascii: "\n")) ?? bytes.endIndex
+            let line = bytes[cursor..<end]
+            cursor = end < bytes.endIndex ? end + 1 : end
+            return line
+        }
+    }
+}
+
+extension BranchReview.Line {
+    /// A line of a patch, decoded lossily; the bytes are kept only when the
+    /// text isn't them.
+    init(kind: Kind, bytes: Data) {
+        let text = BranchReview.Patch.decoded(bytes)
+        self.init(kind: kind, text: text, bytes: text.utf8.elementsEqual(bytes) ? nil : bytes)
+    }
+}
+
+extension BranchReview.Hunk {
+    init(
+        header: (oldStart: Int, oldCount: Int, newStart: Int, newCount: Int, section: String),
+        lines: [BranchReview.Line]
+    ) {
+        self.init(
+            oldStart: header.oldStart, oldCount: header.oldCount,
+            newStart: header.newStart, newCount: header.newCount,
+            section: header.section, lines: lines
+        )
     }
 }
 
 // MARK: - Patch hash (section 6.3)
 
 extension BranchReview {
-    /// What a "Reviewed" mark is keyed by: the path (both for a rename), the
-    /// status, the mode change, and the `-` and `+` lines of the hunks, in
-    /// order. Context lines, the `@@` lines and the `index` line are left
-    /// out: they change when the base changes the file elsewhere. A binary
-    /// file has no lines, so its object ids stand in for them. A
-    /// "No newline" marker counts only after a changed line; after a
-    /// context line it comes and goes with the context.
-    static func patchHash(of file: FileChange) -> String {
+    /// Hashes a section's `-` and `+` lines, in order, as bytes: two lines
+    /// that aren't UTF-8 and decode to the same replacement characters
+    /// still differ. A "No newline" marker counts only after a changed
+    /// line; after a context line it comes and goes with the context.
+    struct ChangedLineHasher {
+        private var hasher = SHA256()
+        private var previous: Line.Kind = .context
+
+        mutating func add(_ kind: Line.Kind, _ content: Data) {
+            switch kind {
+            case .added, .removed:
+                hasher.update(data: Data([kind == .added ? UInt8(ascii: "+") : UInt8(ascii: "-")]))
+                hasher.update(data: content)
+                hasher.update(data: Data([UInt8(ascii: "\n")]))
+            case .noNewlineMarker where previous != .context:
+                hasher.update(data: Data("\\\n".utf8))
+            case .noNewlineMarker, .context:
+                break
+            }
+            previous = kind
+        }
+
+        func finalize() -> Data { Data(hasher.finalize()) }
+    }
+
+    /// What a "Reviewed" mark is keyed by: the path (both for a rename),
+    /// the status, the mode change, and the `-` and `+` lines of the hunks,
+    /// in order (`changedLines`, one digest per section). Context lines,
+    /// the `@@` lines and the `index` line are left out: they change when
+    /// the base changes the file elsewhere. A binary file has no lines, so
+    /// its object ids stand in for them.
+    static func patchHash(of file: FileChange, changedLines: [Data]) -> String {
         var hasher = SHA256()
         func add(_ text: String) { hasher.update(data: Data(text.utf8)) }
         add("path\0\(file.path)\0")
@@ -393,18 +485,7 @@ extension BranchReview {
         if file.isBinary {
             add("binary\0\(file.oldObjectID ?? "")\0\(file.newObjectID ?? "")\0")
         }
-        for hunk in file.hunks {
-            var previous: Line.Kind = .context
-            for line in hunk.lines {
-                switch line.kind {
-                case .added: add("+\(line.text)\n")
-                case .removed: add("-\(line.text)\n")
-                case .noNewlineMarker where previous != .context: add("\\\n")
-                case .noNewlineMarker, .context: break
-                }
-                previous = line.kind
-            }
-        }
+        for digest in changedLines { hasher.update(data: digest) }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 }

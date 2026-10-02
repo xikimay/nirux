@@ -40,18 +40,24 @@ final class BranchReviewSnapshotTests: XCTestCase {
 
     @discardableResult
     private func git(_ arguments: [String], at directory: String? = nil) throws -> String {
+        try Self.git(arguments, at: directory ?? repo, environment: environment)
+    }
+
+    /// Also for a fake gh, which runs off the test's actor.
+    @discardableResult
+    private static func git(_ arguments: [String], at directory: String, environment: [String: String]) throws -> String {
         let pinned = [
             "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "tag.gpgSign=false",
             "-c", "user.name=Nirux Tests", "-c", "user.email=nirux@example.test"
         ]
-        let result = try XCTUnwrap(BoundedProcess.run(
+        guard let result = BoundedProcess.run(
             executableURL: URL(fileURLWithPath: "/usr/bin/git"),
             arguments: pinned + arguments,
-            currentDirectoryURL: URL(fileURLWithPath: directory ?? repo),
+            currentDirectoryURL: URL(fileURLWithPath: directory),
             environment: environment,
             timeout: 30,
             captureStandardError: true
-        ))
+        ) else { throw NSError(domain: "git", code: -1) }
         let stderr = String(data: result.standardError, encoding: .utf8) ?? ""
         guard result.terminationStatus == 0 else {
             throw NSError(domain: "git", code: Int(result.terminationStatus), userInfo: [
@@ -74,6 +80,18 @@ final class BranchReviewSnapshotTests: XCTestCase {
     private func commit(_ message: String, at directory: String? = nil) throws {
         try git(["add", "-A"], at: directory)
         try git(["commit", "-q", "--allow-empty", "-m", message], at: directory)
+    }
+
+    /// Commits on the branch, then makes it main's too, so the branch
+    /// starts from it.
+    private func commitToMain(_ message: String) throws {
+        try commit(message)
+        try git(["push", "-q", "origin", "HEAD:main"])
+        try git(["fetch", "-q", "origin"])
+    }
+
+    private func head(at directory: String? = nil) throws -> String {
+        try git(["rev-parse", "HEAD"], at: directory).trimmingCharacters(in: .newlines)
     }
 
     private func options(gitHub: BranchReview.GitHubCLI? = nil, fetchBase: Bool = false) -> BranchReview.Options {
@@ -103,47 +121,55 @@ final class BranchReviewSnapshotTests: XCTestCase {
         try FileManager.default.setAttributes(
             [.modificationDate: Date(timeIntervalSinceNow: 60)], ofItemAtPath: repo + "/README.md"
         )
+        func assertIndexUntouched(_ message: String) throws {
+            let after = try FileManager.default.attributesOfItem(atPath: index)
+            XCTAssertEqual(after[.systemFileNumber] as? Int, before[.systemFileNumber] as? Int, "replaced \(message)")
+            XCTAssertEqual(after[.modificationDate] as? Date, before[.modificationDate] as? Date, "written \(message)")
+        }
 
-        let snapshot = try snapshot()
+        XCTAssertEqual(try snapshot().files.map(\.path), ["Sources/App.swift"])
+        try assertIndexUntouched("by the diff")
 
-        XCTAssertEqual(snapshot.files.map(\.path), ["Sources/App.swift"])
-        let after = try FileManager.default.attributesOfItem(atPath: index)
-        XCTAssertEqual(after[.systemFileNumber] as? Int, before[.systemFileNumber] as? Int, "the index was replaced")
-        XCTAssertEqual(after[.modificationDate] as? Date, before[.modificationDate] as? Date, "the index was written")
+        // An untracked file goes through a temporary index and object folder.
+        try write("draft.txt", "untracked\n")
+        XCTAssertEqual(try snapshot().files.map(\.path), ["Sources/App.swift", "draft.txt"])
+        try assertIndexUntouched("for an untracked file")
+        let objects = try FileManager.default.subpathsOfDirectory(atPath: repo + "/.git/objects")
+        XCTAssertFalse(objects.contains { $0.hasPrefix("e6/") }, "the empty blob was written: \(objects)")
     }
 
     func testUserGitConfigChangesNeitherThePatchNorItsHash() throws {
         let long = (1...30).map { "let line\($0) = \($0)\n" }
         try write("Sources/Long.swift", long.joined())
-        try commit("long file")
-        try git(["push", "-q", "origin", "HEAD:main"])
-        try git(["fetch", "-q", "origin"])
+        try write("frob.c", Self.frobnitz)
+        try commitToMain("long files")
         var edited = long
         edited[9] = "let line10 = 100\n"
         edited[19] = "let line20 = 200\n\n"
         try write("Sources/Long.swift", edited.joined())
+        // Myers and patience disagree on this one.
+        try write("frob.c", Self.fibonacci)
         try write("Sources/App.swift", "let a = 1\nlet b = 20\nlet c = 3\n\nlet d = 4\n")
         try git(["mv", "README.md", "README-moved.md"])
         try write("we\tird.txt", "tab\n")
-        try write("sp ace.txt", "space\n")
         try commit("work café")
         let plain = try snapshot()
 
         for setting in [
             "diff.noprefix=true", "diff.mnemonicPrefix=true", "diff.context=8", "diff.interHunkContext=10",
-            "diff.algorithm=patience", "diff.indentHeuristic=false", "diff.renames=false", "color.diff=always",
-            "color.ui=always", "core.quotePath=true", "diff.suppressBlankEmpty=true", "diff.external=/usr/bin/false",
-            "i18n.logOutputEncoding=ISO-8859-1"
+            "diff.algorithm=patience", "diff.renames=false", "color.diff=always", "color.ui=always",
+            "diff.external=/usr/bin/false", "i18n.logOutputEncoding=ISO-8859-1"
         ] {
             let parts = setting.split(separator: "=", maxSplits: 1).map(String.init)
             try git(["config", parts[0], parts[1]])
         }
-        let configured = try snapshot()
+        var configured = options()
+        configured.environment["GIT_DIFF_OPTS"] = "--unified=10"
+        let withConfig = try snapshot(configured)
 
-        XCTAssertEqual(configured.files, plain.files)
-        XCTAssertEqual(configured.commits, plain.commits)
+        XCTAssertEqual(withConfig.files, plain.files)
+        XCTAssertEqual(withConfig.commits, plain.commits)
         XCTAssertEqual(try file("README-moved.md", in: plain).status, .renamed)
-        XCTAssertEqual(try file("Sources/App.swift", in: plain).hunks.first?.lines.first, BranchReview.Line(kind: .context, text: "let a = 1"))
         let hunks = try file("Sources/Long.swift", in: plain).hunks
         XCTAssertEqual(hunks.map(\.oldStart), [7, 17])
         XCTAssertEqual(hunks.map(\.oldCount), [7, 7])
@@ -156,26 +182,36 @@ final class BranchReviewSnapshotTests: XCTestCase {
         try write("Sources/Other.swift", "let z = 0\n")
         try commit("other")
 
-        let snapshot = try snapshot()
+        let committed = try snapshot()
 
-        let app = try file("Sources/App.swift", in: snapshot)
-        XCTAssertEqual(snapshot.files.filter { $0.path == "Sources/App.swift" }.count, 1)
-        XCTAssertFalse(app.isUncommitted)
+        XCTAssertFalse(try file("Sources/App.swift", in: committed).isUncommitted)
+        XCTAssertFalse(committed.hasUncommittedChanges)
         try write("Sources/App.swift", "let a = 10\nlet b = 22\nlet c = 30\n")
-        let edited = try file("Sources/App.swift", in: try self.snapshot())
-        XCTAssertTrue(edited.isUncommitted)
-        XCTAssertEqual(edited.additions, 3, "the whole patch from the merge base")
-        XCTAssertFalse(try file("Sources/Other.swift", in: try self.snapshot()).isUncommitted)
+        let edited = try snapshot()
+        XCTAssertEqual(edited.files.map(\.path), ["Sources/App.swift", "Sources/Other.swift"])
+        XCTAssertTrue(try file("Sources/App.swift", in: edited).isUncommitted)
+        XCTAssertEqual(try file("Sources/App.swift", in: edited).additions, 3, "the whole patch from the merge base")
+        XCTAssertFalse(try file("Sources/Other.swift", in: edited).isUncommitted)
+        XCTAssertTrue(edited.hasUncommittedChanges)
     }
 
     func testUntrackedFilesKeepTheirHashOnceCommitted() throws {
-        try write("notes.txt", "one\ntwo")
+        try write("Sources/Old.swift", (1...20).map { "let line\($0) = \($0)\n" }.joined())
+        try commitToMain("old file")
+        // Moved with mv, not git mv, and edited: a rename once committed.
+        try FileManager.default.moveItem(atPath: repo + "/Sources/Old.swift", toPath: repo + "/Sources/New.swift")
+        try write("Sources/New.swift", (1...20).map { "let line\($0) = \($0)\n" }.joined() + "let more = 0\n")
+        try write(".gitattributes", "*.norm text=auto\n*.lock -diff\n")
+        try write("crlf.norm", "one\r\ntwo\r\n")
         try write("crlf.txt", "one\r\ntwo\r\n")
+        try write("deps.lock", "pinned\n")
+        try write("notes.txt", "one\ntwo")
         try write("run.sh", "#!/bin/sh\necho hi\n")
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: repo + "/run.sh")
         try FileManager.default.createSymbolicLink(atPath: repo + "/link", withDestinationPath: "notes.txt")
         try write("logo.bin", Data([0x89, 0x50, 0x00, 0x01, 0x02]))
         try write("empty.txt", "")
+        try write("\u{301}accent.txt", "accent\n")
         try write(".gitignore", "*.log\n")
         try write("debug.log", "ignored\n")
         try write(".claude-handover.md", "handover\n")
@@ -183,30 +219,48 @@ final class BranchReviewSnapshotTests: XCTestCase {
 
         let untracked = try snapshot()
 
-        XCTAssertEqual(
-            untracked.files.map(\.path), [".gitignore", "crlf.txt", "empty.txt", "link", "logo.bin", "notes.txt", "run.sh"]
-        )
+        XCTAssertEqual(untracked.files.map(\.path), [
+            ".gitattributes", ".gitignore", "Sources/New.swift", "crlf.norm", "crlf.txt", "deps.lock", "empty.txt",
+            "link", "logo.bin", "notes.txt", "run.sh", "\u{301}accent.txt"
+        ])
+        XCTAssertTrue(untracked.files.allSatisfy { $0.isUntracked && $0.isUncommitted })
+        let moved = try file("Sources/New.swift", in: untracked)
+        XCTAssertEqual(moved.status, .renamed)
+        XCTAssertEqual(moved.oldPath, "Sources/Old.swift")
+        XCTAssertEqual(try file("crlf.norm", in: untracked).hunks.first?.lines.map(\.text), ["one", "two"])
         XCTAssertEqual(try file("crlf.txt", in: untracked).hunks.first?.lines.map(\.text), ["one\r", "two\r"])
-        XCTAssertTrue(untracked.files.allSatisfy { $0.isUntracked && $0.isUncommitted && $0.status == .added })
-        try git(["add", "-A"])
+        XCTAssertTrue(try file("deps.lock", in: untracked).isBinary)
+        XCTAssertEqual(try file("run.sh", in: untracked).newMode, "100755")
+        try git(["add", "-A", "--", ".", ":!.claude-handover.md", ":!.claude"])
         try git(["commit", "-q", "-m", "add them"])
         let committed = try snapshot()
         XCTAssertEqual(committed.files.map(\.path), untracked.files.map(\.path))
         for (before, after) in zip(untracked.files, committed.files) {
-            XCTAssertFalse(after.isUntracked)
+            XCTAssertFalse(after.isUntracked, after.path)
             XCTAssertEqual(before.patchHash, after.patchHash, before.path)
             XCTAssertEqual(before.hunks, after.hunks, before.path)
-            XCTAssertEqual(before.newMode, after.newMode, before.path)
-            XCTAssertEqual(before.newObjectID, after.newObjectID, before.path)
         }
     }
 
-    func testCommittedHandoverIsLeftOut() throws {
-        try write(".codex-handover.md", "plan\n")
-        try write("Sources/App.swift", "let a = 2\nlet b = 2\nlet c = 3\n")
-        try commit("with a handover")
+    func testFileUntrackedWithRmCachedIsListedOnceAsDeleted() throws {
+        try git(["rm", "-q", "--cached", "Sources/App.swift"])
 
-        XCTAssertEqual(try snapshot().files.map(\.path), ["Sources/App.swift"])
+        let snapshot = try snapshot()
+
+        XCTAssertEqual(snapshot.files.map(\.path), ["Sources/App.swift"])
+        XCTAssertEqual(try file("Sources/App.swift", in: snapshot).status, .deleted)
+        XCTAssertTrue(try file("Sources/App.swift", in: snapshot).isUncommitted)
+    }
+
+    func testCommittedHandoverIsShownAndAnUntrackedOneIsNot() throws {
+        try write(".codex-handover.md", "plan\n")
+        try commit("with a handover")
+        try write(".claude-handover.md", "another plan\n")
+
+        let snapshot = try snapshot()
+
+        XCTAssertEqual(snapshot.files.map(\.path), [".codex-handover.md"])
+        XCTAssertFalse(snapshot.hasUncommittedChanges)
     }
 
     func testFileThatIsNotUTF8IsReadLossilyBesideTheOthers() throws {
@@ -217,7 +271,7 @@ final class BranchReviewSnapshotTests: XCTestCase {
         let snapshot = try snapshot()
 
         XCTAssertEqual(snapshot.files.map(\.path), ["Sources/App.swift", "latin.txt"])
-        XCTAssertEqual(try file("latin.txt", in: snapshot).hunks.first?.lines, [.init(kind: .added, text: "caf\u{FFFD}")])
+        XCTAssertEqual(try file("latin.txt", in: snapshot).hunks.first?.lines.map(\.text), ["caf\u{FFFD}"])
     }
 
     // MARK: - Base
@@ -236,15 +290,33 @@ final class BranchReviewSnapshotTests: XCTestCase {
         try commit("work")
         try git(["push", "-q", "-u", "origin", "feat/x"])
         // git 2.48+ creates origin/HEAD when it fetches.
-        try? git(["remote", "set-head", "origin", "--delete"])
+        _ = try? git(["remote", "set-head", "origin", "--delete"])
+        try write("Sources/App.swift", "let a = 3\nlet b = 2\nlet c = 3\n")
+        try commit("unpushed")
 
         let snapshot = try snapshot()
 
         XCTAssertEqual(snapshot.base.name, "main")
         XCTAssertEqual(snapshot.base.ref, "refs/remotes/origin/main")
         XCTAssertEqual(snapshot.files.map(\.path), ["Sources/App.swift"])
-        XCTAssertEqual(snapshot.commits.map(\.subject), ["work", "Merge remote-tracking branch 'origin/main' into feat/x"])
-        XCTAssertEqual(snapshot.commits.map(\.isMergeFromBase), [false, true])
+        XCTAssertEqual(
+            snapshot.commits.map(\.subject), ["unpushed", "work", "Merge remote-tracking branch 'origin/main' into feat/x"]
+        )
+        XCTAssertEqual(snapshot.commits.map(\.isMergeFromBase), [false, false, true])
+        XCTAssertEqual(snapshot.upstream, .counted(ahead: 1, behind: 0))
+    }
+
+    func testOriginHeadNamesTheDefaultBranch() throws {
+        try git(["push", "-q", "origin", "main:develop"])
+        try git(["fetch", "-q", "origin"])
+        try git(["remote", "set-head", "origin", "develop"])
+        try write("Sources/App.swift", "let a = 2\nlet b = 2\nlet c = 3\n")
+        try commit("work")
+
+        let snapshot = try snapshot()
+
+        XCTAssertEqual(snapshot.base.name, "develop")
+        XCTAssertNil(snapshot.upstream)
     }
 
     // MARK: - Pull request
@@ -255,18 +327,52 @@ final class BranchReviewSnapshotTests: XCTestCase {
         try git(["remote", "set-url", "--push", "origin", "https://github.com/acme/widgets.git"])
     }
 
-    private func pullRequestJSON(number: Int = 7, base: String = "main", head: String, commits: [String]) -> Data {
-        let object: [[String: Any]] = [[
-            "number": number, "title": "Add x", "body": "Why: because.", "url": "https://github.com/acme/widgets/pull/\(number)",
-            "baseRefName": base, "headRefOid": head, "isDraft": false,
-            "headRepository": ["name": "widgets"], "headRepositoryOwner": ["login": "acme"],
-            "commits": commits.map { ["oid": $0] }
-        ]]
-        return try! JSONSerialization.data(withJSONObject: object)
+    private static let pullRequestURL = "https://github.com/acme/widgets/pull/7"
+
+    private static func pullRequest(base: String = "main", head: String) -> BranchReview.PullRequest {
+        BranchReview.PullRequest(
+            number: 7, title: "Add x", body: "Why: because.", url: pullRequestURL,
+            baseRefName: base, headRefOid: head, isDraft: false
+        )
     }
 
-    private func fakeGitHub(_ answer: Data, status: Int32 = 0, error: String = "") -> BranchReview.GitHubCLI {
-        BranchReview.GitHubCLI { _, _ in .init(status: status, standardOutput: answer, standardError: error) }
+    /// Answers `gh pr list` with one pull request and `gh pr view` with its
+    /// commits, recording every call.
+    private final class FakeGitHub: @unchecked Sendable {
+        private let lock = NSLock()
+        private var recorded: [[String]] = []
+        let list: Data
+        let commits: [String]
+        let onList: @Sendable () -> Void
+
+        init(base: String = "main", head: String, commits: [String], onList: @escaping @Sendable () -> Void = {}) {
+            let object: [[String: Any]] = [[
+                "number": 7, "title": "Add x", "body": "Why: because.", "url": BranchReviewSnapshotTests.pullRequestURL,
+                "baseRefName": base, "headRefOid": head, "isDraft": false,
+                "headRepository": ["name": "widgets"], "headRepositoryOwner": ["login": "acme"]
+            ]]
+            list = try! JSONSerialization.data(withJSONObject: object)
+            self.commits = commits
+            self.onList = onList
+        }
+
+        var calls: [[String]] { lock.withLock { recorded } }
+
+        var cli: BranchReview.GitHubCLI {
+            BranchReview.GitHubCLI { arguments, _ in
+                self.lock.withLock { self.recorded.append(arguments) }
+                if arguments.starts(with: ["pr", "list"]) {
+                    self.onList()
+                    return .init(status: 0, standardOutput: self.list, standardError: "")
+                }
+                let json = try! JSONSerialization.data(withJSONObject: ["commits": self.commits.map { ["oid": $0] }])
+                return .init(status: 0, standardOutput: json, standardError: "")
+            }
+        }
+    }
+
+    private func failingGitHub(status: Int32, error: String) -> BranchReview.GitHubCLI {
+        BranchReview.GitHubCLI { _, _ in .init(status: status, standardOutput: Data(), standardError: error) }
     }
 
     func testOpenPullRequestPicksAndFetchesItsBaseBranch() throws {
@@ -277,7 +383,7 @@ final class BranchReviewSnapshotTests: XCTestCase {
         try FileManager.default.removeItem(atPath: repo + "/.git/FETCH_HEAD")
         try write("Sources/App.swift", "let a = 2\nlet b = 2\nlet c = 3\n")
         try commit("work")
-        let head = try git(["rev-parse", "HEAD"]).trimmingCharacters(in: .newlines)
+        let head = try head()
         try pushAndPointAtGitHub()
         let other = root + "/other"
         try git(["clone", "-q", "-b", "develop", remote, other], at: root)
@@ -285,43 +391,96 @@ final class BranchReviewSnapshotTests: XCTestCase {
         try commit("develop moves", at: other)
         try git(["tag", "v1"], at: other)
         try git(["push", "-q", "origin", "develop", "v1"], at: other)
-        let developTip = try git(["rev-parse", "HEAD"], at: other)
+        let developTip = try self.head(at: other)
         try git(["config", "fetch.writeCommitGraph", "true"])
-        let gitHub = fakeGitHub(pullRequestJSON(base: "develop", head: head, commits: [head]))
+        let gitHub = FakeGitHub(base: "develop", head: head, commits: [head])
 
-        let snapshot = try snapshot(options(gitHub: gitHub, fetchBase: true))
+        let snapshot = try snapshot(options(gitHub: gitHub.cli, fetchBase: true))
 
-        XCTAssertEqual(snapshot.pullRequest.pullRequest?.number, 7)
-        XCTAssertEqual(snapshot.pullRequest.pullRequest?.body, "Why: because.")
+        XCTAssertEqual(snapshot.pullRequest, .found(Self.pullRequest(base: "develop", head: head)))
         XCTAssertEqual(snapshot.base.name, "develop")
+        XCTAssertTrue(snapshot.usesPullRequestBase)
         XCTAssertNil(snapshot.fetchProblem)
-        XCTAssertEqual(try git(["rev-parse", "refs/remotes/origin/develop"]), developTip)
+        XCTAssertEqual(snapshot.pullRequestHead, .counted(ahead: 0, behind: 0))
+        XCTAssertEqual(try git(["rev-parse", "refs/remotes/origin/develop"]).trimmingCharacters(in: .newlines), developTip)
         XCTAssertFalse(FileManager.default.fileExists(atPath: repo + "/.git/FETCH_HEAD"))
         XCTAssertEqual(try git(["tag", "--list"]), "")
         let objectInfo = try FileManager.default.contentsOfDirectory(atPath: repo + "/.git/objects/info")
         XCTAssertFalse(objectInfo.contains { $0.hasPrefix("commit-graph") }, "\(objectInfo)")
+        // GitHub refuses a list with commits: 100 × 100 commits × 100
+        // authors is over its 500,000-node limit. The reflog settled it.
+        XCTAssertEqual(gitHub.calls.count, 1)
+        XCTAssertFalse(gitHub.calls[0].joined(separator: " ").contains("commits"), "\(gitHub.calls)")
     }
 
-    func testPullRequestOfAReusedBranchNameIsIgnoredUnlessItsHeadIsInTheReflog() throws {
+    func testPullRequestOfAReusedBranchNameIsIgnored() throws {
         try write("Sources/App.swift", "let a = 2\nlet b = 2\nlet c = 3\n")
         try commit("work")
-        let pushedHead = try git(["rev-parse", "HEAD"]).trimmingCharacters(in: .newlines)
+        let head = try head()
         try pushAndPointAtGitHub()
         let stranger = String(repeating: "a", count: 40)
 
-        let reused = try snapshot(options(gitHub: fakeGitHub(pullRequestJSON(head: stranger, commits: [stranger]))))
-        XCTAssertEqual(reused.pullRequest, .notFound)
+        let reused = FakeGitHub(head: stranger, commits: [stranger])
+        XCTAssertEqual(try snapshot(options(gitHub: reused.cli)).pullRequest, .notFound)
+        XCTAssertEqual(reused.calls.last, ["pr", "view", Self.pullRequestURL, "--json", "commits"])
         // An old pull request whose commits reached main another way: they
         // are in HEAD's history, but in the base's too.
         let initial = try git(["rev-parse", "origin/main"]).trimmingCharacters(in: .newlines)
-        let landed = try snapshot(options(gitHub: fakeGitHub(pullRequestJSON(head: stranger, commits: [initial]))))
-        XCTAssertEqual(landed.pullRequest, .notFound)
+        XCTAssertEqual(try snapshot(options(gitHub: FakeGitHub(head: stranger, commits: [initial]).cli)).pullRequest, .notFound)
+        // Its head isn't local (the merge queue updated it on GitHub), but
+        // one of its commits is the branch's own.
+        let updated = try snapshot(options(gitHub: FakeGitHub(head: stranger, commits: [head, stranger]).cli))
+        XCTAssertEqual(updated.pullRequest.pullRequest?.number, 7)
+        XCTAssertEqual(updated.pullRequestHead, .notLocal)
+    }
 
+    func testPullRequestRebasedLocallyIsFoundInTheReflog() throws {
+        try write("Sources/App.swift", "let a = 2\nlet b = 2\nlet c = 3\n")
+        try commit("work")
+        let pushedHead = try head()
+        try pushAndPointAtGitHub()
         // Rewritten locally and not pushed yet: none of the pull request's
         // commits is in HEAD's history, but its head is in the reflog.
         try git(["commit", "-q", "--amend", "-m", "work, reworded"])
-        let rebased = try snapshot(options(gitHub: fakeGitHub(pullRequestJSON(head: pushedHead, commits: [pushedHead]))))
+        let gitHub = FakeGitHub(head: pushedHead, commits: [pushedHead])
+
+        let rebased = try snapshot(options(gitHub: gitHub.cli))
+
         XCTAssertEqual(rebased.pullRequest.pullRequest?.headRefOid, pushedHead)
+        XCTAssertEqual(rebased.pullRequestHead, .counted(ahead: 1, behind: 1))
+        XCTAssertEqual(gitHub.calls.count, 1, "no gh pr view: \(gitHub.calls)")
+    }
+
+    func testKnownPullRequestIsUsedWithoutAskingGitHub() throws {
+        try git(["push", "-q", "origin", "main:develop"])
+        try git(["fetch", "-q", "origin"])
+        try write("Sources/App.swift", "let a = 2\nlet b = 2\nlet c = 3\n")
+        try commit("work")
+        var known = options(gitHub: failingGitHub(status: 1, error: "gh must not run"))
+        known.knownPullRequest = .found(Self.pullRequest(base: "develop", head: try head()))
+
+        let snapshot = try snapshot(known)
+
+        XCTAssertEqual(snapshot.base.name, "develop")
+        XCTAssertEqual(snapshot.pullRequest.pullRequest?.number, 7)
+    }
+
+    func testBaseBranchThatCantBeFetchedFallsBackAndSaysSo() throws {
+        try write("Sources/App.swift", "let a = 2\nlet b = 2\nlet c = 3\n")
+        try commit("work")
+        let head = try head()
+        try pushAndPointAtGitHub()
+        let gitHub = FakeGitHub(base: "gone", head: head, commits: [head])
+
+        let opened = try snapshot(options(gitHub: gitHub.cli))
+        XCTAssertEqual(opened.pullRequest.pullRequest?.baseRefName, "gone")
+        XCTAssertEqual(opened.base.name, "main")
+        XCTAssertFalse(opened.usesPullRequestBase)
+        XCTAssertNil(opened.fetchProblem)
+
+        let refreshed = try snapshot(options(gitHub: gitHub.cli, fetchBase: true))
+        XCTAssertEqual(refreshed.base.name, "main")
+        XCTAssertEqual(refreshed.fetchProblem?.hasPrefix("git fetch of gone failed: "), true, refreshed.fetchProblem ?? "nil")
     }
 
     func testMissingOrFailingGitHubCLIIsSaidAndTheBaseStillFound() throws {
@@ -333,9 +492,34 @@ final class BranchReviewSnapshotTests: XCTestCase {
         XCTAssertEqual(missing.pullRequest, .unavailable("The GitHub CLI (gh) isn't installed."))
         XCTAssertEqual(missing.base.name, "main")
 
-        let loggedOut = try snapshot(options(gitHub: fakeGitHub(Data(), status: 4, error: "To get started with GitHub CLI, please run:  gh auth login\n")))
-        XCTAssertEqual(loggedOut.pullRequest, .unavailable("gh couldn't list the pull requests: To get started with GitHub CLI, please run:  gh auth login"))
+        let loggedOut = try snapshot(options(
+            gitHub: failingGitHub(status: 4, error: "To get started with GitHub CLI, please run:  gh auth login\n")
+        ))
+        XCTAssertEqual(
+            loggedOut.pullRequest,
+            .unavailable("gh couldn't list the pull requests: To get started with GitHub CLI, please run:  gh auth login")
+        )
         XCTAssertEqual(loggedOut.files.map(\.path), ["Sources/App.swift"])
+    }
+
+    func testCommitLandingWhileGitHubAnswersIsReadOnce() throws {
+        try write("Sources/App.swift", "let a = 2\nlet b = 2\nlet c = 3\n")
+        try commit("work")
+        try pushAndPointAtGitHub()
+        try write("Sources/New.swift", "let n = 1\n")
+        let (repo, environment) = (repo!, environment!)
+        // The agent commits its new file while gh is listing pull requests.
+        let gitHub = FakeGitHub(head: String(repeating: "a", count: 40), commits: []) {
+            _ = try? Self.git(["add", "-A"], at: repo, environment: environment)
+            _ = try? Self.git(["commit", "-q", "-m", "late"], at: repo, environment: environment)
+        }
+
+        let snapshot = try snapshot(options(gitHub: gitHub.cli))
+
+        XCTAssertEqual(snapshot.head, snapshot.commits.first?.oid)
+        XCTAssertEqual(snapshot.commits.first?.subject, "late")
+        XCTAssertEqual(snapshot.files.map(\.path), ["Sources/App.swift", "Sources/New.swift"])
+        XCTAssertFalse(try file("Sources/New.swift", in: snapshot).isUncommitted)
     }
 
     @MainActor
@@ -363,12 +547,115 @@ final class BranchReviewSnapshotTests: XCTestCase {
         XCTAssertEqual(calledOnMain.value, false)
     }
 
+    // MARK: - States
+
+    func testRebaseMergeOrConflictsPauseTheReview() throws {
+        try write("Sources/App.swift", "let a = 2\nlet b = 2\nlet c = 3\n")
+        try commit("work")
+        try git(["checkout", "-q", "main"])
+        try write("Sources/App.swift", "let a = 3\nlet b = 2\nlet c = 3\n")
+        try commit("main edit")
+        try git(["checkout", "-q", "feat/x"])
+        XCTAssertThrowsError(try git(["merge", "-q", "main"]))
+        XCTAssertEqual(BranchReview.snapshot(at: repo, options: options()), .paused(.merge))
+        try git(["merge", "--abort"])
+
+        XCTAssertThrowsError(try git(["rebase", "-q", "main"]))
+        XCTAssertEqual(BranchReview.snapshot(at: repo, options: options()), .paused(.rebase))
+        try git(["rebase", "--abort"])
+
+        try write("Sources/App.swift", "let a = 4\nlet b = 2\nlet c = 3\n")
+        try git(["stash", "-q"])
+        try git(["merge", "-q", "main", "-X", "theirs", "-m", "take main"])
+        XCTAssertThrowsError(try git(["stash", "pop", "-q"]))
+        XCTAssertEqual(BranchReview.snapshot(at: repo, options: options()), .paused(.conflicts))
+    }
+
+    func testDetachedHeadIsNotReviewed() throws {
+        try git(["checkout", "-q", "--detach"])
+
+        XCTAssertEqual(
+            BranchReview.snapshot(at: repo, options: options()),
+            .unavailable("HEAD is detached: there is no branch to review.")
+        )
+    }
+
+    // MARK: - Sizes
+
+    func testLargeFileGetsAPlaceholderWithoutSendingTheOthersOnDemand() throws {
+        try write("Sources/Big.swift", String(repeating: "let big = 0\n", count: 100))
+        try write("Sources/App.swift", "let a = 2\nlet b = 2\nlet c = 3\n")
+        try commit("big")
+        try write("draft.txt", "draft\n")
+        var limited = options()
+        limited.maxFileDiffBytes = 1_000
+        limited.maxInlineDiffBytes = 1_000
+
+        let placeholder = try snapshot(limited)
+        let big = try file("Sources/Big.swift", in: placeholder)
+        XCTAssertEqual(big.omission, .tooLarge)
+        XCTAssertEqual(big.hunks, [])
+        XCTAssertGreaterThan(big.patchBytes, 1_000)
+        XCTAssertNotNil(big.patchHash)
+        XCTAssertEqual(big.additions, 100)
+        XCTAssertNil(try file("Sources/App.swift", in: placeholder).omission)
+        XCTAssertNil(try file("draft.txt", in: placeholder).omission)
+
+        limited.maxInlineDiffBytes = 100
+        let onDemand = try snapshot(limited)
+        let app = try file("Sources/App.swift", in: onDemand)
+        XCTAssertEqual(app.omission, .onDemand)
+        XCTAssertEqual(app.hunks, [])
+        XCTAssertEqual(try file("draft.txt", in: onDemand).omission, .onDemand)
+        let loaded = try XCTUnwrap(BranchReview.filePatch(app, in: onDemand, options: limited))
+        XCTAssertNil(loaded.omission)
+        XCTAssertEqual(loaded.patchHash, app.patchHash)
+        XCTAssertEqual(loaded.hunks, try file("Sources/App.swift", in: placeholder).hunks)
+        let draft = try XCTUnwrap(BranchReview.filePatch(try file("draft.txt", in: onDemand), in: onDemand, options: limited))
+        XCTAssertEqual(draft.hunks.first?.lines.map(\.text), ["draft"])
+        XCTAssertTrue(draft.isUntracked)
+    }
+
+    func testDiffOverTheReadLimitLeavesOutItsLargestFilesFirst() throws {
+        try write("logo.bin", Data([0x89, 0x50, 0x00, 0x01]))
+        try commitToMain("logo")
+        try write("Sources/Big.swift", String(repeating: "let big = 0\n", count: 100))
+        try write("Sources/App.swift", "let a = 2\nlet b = 2\nlet c = 3\n")
+        try write("logo.bin", Data([0x89, 0x50, 0x00, 0x02]))
+        try commit("big")
+        // Unchanged, but its timestamp is newer than the index says.
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: 60)], ofItemAtPath: repo + "/README.md"
+        )
+        var limited = options()
+        limited.maxFileDiffBytes = 1_000
+        limited.maxDiffBytes = 1_000
+
+        let trimmed = try snapshot(limited)
+        XCTAssertEqual(trimmed.files.map(\.path), ["Sources/App.swift", "Sources/Big.swift", "logo.bin"])
+        let big = try file("Sources/Big.swift", in: trimmed)
+        XCTAssertEqual(big.omission, .notRead)
+        XCTAssertNil(big.patchHash)
+        XCTAssertEqual(big.additions, 100)
+        XCTAssertNil(try file("Sources/App.swift", in: trimmed).omission)
+        XCTAssertNotNil(try file("Sources/App.swift", in: trimmed).patchHash)
+
+        limited.maxDiffBytes = 100
+        let listed = try snapshot(limited)
+        XCTAssertEqual(listed.files.map(\.path), ["Sources/App.swift", "Sources/Big.swift", "logo.bin"])
+        XCTAssertTrue(listed.files.allSatisfy { $0.omission == .notRead && $0.patchHash == nil })
+        XCTAssertEqual(listed.files.map(\.isBinary), [false, false, true])
+        XCTAssertEqual(try file("Sources/App.swift", in: listed).additions, 1)
+        XCTAssertEqual(
+            BranchReview.filePatch(try file("Sources/App.swift", in: listed), in: listed, options: options())?.patchHash,
+            try file("Sources/App.swift", in: try snapshot()).patchHash
+        )
+    }
+
     func testFilePatchTakesItsPathsLiterallyAndKeepsARename() throws {
         try write("x.txt", "plain\n")
         try write("Sources/Old.swift", (1...20).map { "let line\($0) = \($0)\n" }.joined())
-        try commit("more files")
-        try git(["push", "-q", "origin", "HEAD:main"])
-        try git(["fetch", "-q", "origin"])
+        try commitToMain("more files")
         try write("x.txt", "plain, edited\n")
         // As a pathspec, ":(top)x.txt" would name x.txt.
         try write(":(top)x.txt", "magic\n")
@@ -389,76 +676,81 @@ final class BranchReviewSnapshotTests: XCTestCase {
         XCTAssertEqual(loaded.patchHash, renamed.patchHash)
     }
 
-    // MARK: - States
-
-    func testMergeInProgressOrConflictsPauseTheReview() throws {
-        try write("Sources/App.swift", "let a = 2\nlet b = 2\nlet c = 3\n")
-        try commit("work")
-        try git(["checkout", "-q", "main"])
-        try write("Sources/App.swift", "let a = 3\nlet b = 2\nlet c = 3\n")
-        try commit("main edit")
-        try git(["checkout", "-q", "feat/x"])
-        XCTAssertThrowsError(try git(["merge", "-q", "main"]))
-        XCTAssertEqual(BranchReview.snapshot(at: repo, options: options()), .paused(.merge))
-
-        try git(["merge", "--abort"])
-        try write("Sources/App.swift", "let a = 4\nlet b = 2\nlet c = 3\n")
-        try git(["stash", "-q"])
-        try git(["merge", "-q", "main", "-X", "theirs", "-m", "take main"])
-        XCTAssertThrowsError(try git(["stash", "pop", "-q"]))
-        XCTAssertEqual(BranchReview.snapshot(at: repo, options: options()), .paused(.conflicts))
-    }
-
-    func testDetachedHeadIsNotReviewed() throws {
-        try git(["checkout", "-q", "--detach"])
-
-        XCTAssertEqual(
-            BranchReview.snapshot(at: repo, options: options()),
-            .unavailable("HEAD is detached: there is no branch to review.")
-        )
-    }
-
-    // MARK: - Sizes
-
-    func testLargeFilesGetPlaceholdersAndLargeDiffsLoadOnDemand() throws {
-        try write("Sources/Big.swift", String(repeating: "let big = 0\n", count: 100))
-        try write("Sources/App.swift", "let a = 2\nlet b = 2\nlet c = 3\n")
-        try commit("big")
-        try write("draft.txt", "draft\n")
+    func testUntrackedFilesPastTheReadLimitAreListedByName() throws {
+        try write("a.txt", "a\n")
+        try write("b.txt", "b\n")
         var limited = options()
-        limited.maxFileDiffBytes = 1_000
+        limited.maxUntrackedFilesRead = 1
 
-        let placeholder = try snapshot(limited)
-        let big = try file("Sources/Big.swift", in: placeholder)
-        XCTAssertEqual(big.hunks, [])
-        guard case .tooLarge(let bytes) = big.omission else { return XCTFail("\(String(describing: big.omission))") }
-        XCTAssertGreaterThan(bytes, 1_000)
-        XCTAssertNotNil(big.patchHash)
-        XCTAssertEqual(big.additions, 100)
-        XCTAssertNil(try file("Sources/App.swift", in: placeholder).omission)
+        let snapshot = try snapshot(limited)
 
-        limited.maxInlineDiffBytes = 1_000
-        let onDemand = try snapshot(limited)
-        let app = try file("Sources/App.swift", in: onDemand)
-        XCTAssertEqual(app.omission, .onDemand)
-        XCTAssertEqual(app.hunks, [])
-        XCTAssertEqual(try file("draft.txt", in: onDemand).omission, .onDemand)
-        let loaded = try XCTUnwrap(BranchReview.filePatch(app, in: onDemand, options: limited))
-        XCTAssertNil(loaded.omission)
-        XCTAssertEqual(loaded.patchHash, app.patchHash)
-        XCTAssertEqual(loaded.hunks, try file("Sources/App.swift", in: placeholder).hunks)
-
-        limited.maxDiffBytes = 500
-        let listed = try snapshot(limited)
-        XCTAssertEqual(listed.files.map(\.path), ["Sources/App.swift", "Sources/Big.swift", "draft.txt"])
-        XCTAssertTrue(listed.files.allSatisfy { $0.omission == .notRead && $0.patchHash == nil })
-        XCTAssertEqual(try file("Sources/Big.swift", in: listed).additions, 100)
-        XCTAssertNil(listed.diffBytes)
-        XCTAssertEqual(
-            BranchReview.filePatch(try file("Sources/App.swift", in: listed), in: listed, options: options())?.patchHash,
-            app.patchHash
-        )
+        XCTAssertEqual(snapshot.files.map(\.path), ["a.txt", "b.txt"])
+        XCTAssertNil(try file("a.txt", in: snapshot).omission)
+        XCTAssertEqual(try file("b.txt", in: snapshot).omission, .notRead)
+        XCTAssertTrue(try file("b.txt", in: snapshot).isUntracked)
     }
+
+    // MARK: - Fixtures
+
+    /// The classic case where Myers and patience diff disagree.
+    private static let frobnitz = """
+    #include <stdio.h>
+
+    // Frobs foo heartily
+    int frobnitz(int foo)
+    {
+        int i;
+        for(i = 0; i < 10; i++)
+        {
+            printf("Your answer is: ");
+            printf("%d\\n", foo);
+        }
+    }
+
+    int fact(int n)
+    {
+        if(n > 1)
+        {
+            return fact(n-1) * n;
+        }
+        return 1;
+    }
+
+    int main(int argc, char **argv)
+    {
+        frobnitz(fact(10));
+    }
+
+    """
+
+    private static let fibonacci = """
+    #include <stdio.h>
+
+    int fib(int n)
+    {
+        if(n > 2)
+        {
+            return fib(n-1) + fib(n-2);
+        }
+        return 1;
+    }
+
+    // Frobs foo heartily
+    int frobnitz(int foo)
+    {
+        int i;
+        for(i = 0; i < 10; i++)
+        {
+            printf("%d\\n", foo);
+        }
+    }
+
+    int main(int argc, char **argv)
+    {
+        frobnitz(fib(10));
+    }
+
+    """
 }
 
 private final class LockedFlag: @unchecked Sendable {

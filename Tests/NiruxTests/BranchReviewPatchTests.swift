@@ -104,6 +104,20 @@ final class BranchReviewPatchTests: XCTestCase {
         XCTAssertNil(try files(nameStatus: "M\0touched.txt\0", patch: patch))
     }
 
+    func testSectionThatDisagreesWithItsStatusFails() throws {
+        // Listed as added, read back as a rename: the worktree moved between
+        // the two reads.
+        let patch = """
+        diff --git a/old.txt b/new.txt
+        similarity index 100%
+        rename from old.txt
+        rename to new.txt
+
+        """
+        XCTAssertNil(try files(nameStatus: "A\0new.txt\0", patch: patch))
+        XCTAssertNotNil(try files(nameStatus: "R100\0old.txt\0new.txt\0", patch: patch))
+    }
+
     func testTypeChangeSectionsMergeIntoOneFile() throws {
         let patch = """
         diff --git a/same b/same
@@ -211,64 +225,105 @@ final class BranchReviewPatchTests: XCTestCase {
 
     // MARK: - Hash
 
-    private func modified(_ lines: [BranchReview.Line], path: String = "a.swift", start: Int = 1, section: String = "")
-        -> BranchReview.FileChange {
-        var file = BranchReview.FileChange(path: path, status: .modified)
-        file.hunks = [BranchReview.Hunk(
-            oldStart: start, oldCount: 0, newStart: start, newCount: 0, section: section, lines: lines
-        )]
-        return file
+    /// A one-file modification patch.
+    private func modified(
+        _ body: String, path: String = "a.swift", header: String = "@@ -1,3 +1,3 @@", index: String = "1111111..2222222 100644",
+        extraHeaders: String = ""
+    ) -> String {
+        """
+        diff --git a/\(path) b/\(path)
+        \(extraHeaders)index \(index)
+        --- a/\(path)
+        +++ b/\(path)
+        \(header)
+        \(body)
+
+        """
     }
 
-    private func line(_ kind: BranchReview.Line.Kind, _ text: String = "") -> BranchReview.Line {
-        BranchReview.Line(kind: kind, text: text)
+    private func hash(_ patch: String, nameStatus: String = "M\0a.swift\0", keepsLines: Bool = true) throws -> String {
+        try hash(Data(patch.utf8), nameStatus: nameStatus, keepsLines: keepsLines)
     }
 
-    func testHashLeavesOutContextAndHunkPositions() {
-        let reviewed = modified([line(.context, "a"), line(.removed, "b"), line(.added, "B"), line(.context, "c")])
+    private func hash(_ patch: Data, nameStatus: String = "M\0a.swift\0", keepsLines: Bool = true) throws -> String {
+        let entries = try XCTUnwrap(Patch.nameStatus(Data(nameStatus.utf8)))
+        let sections = try XCTUnwrap(Patch.sections(of: patch, keepsLines: { _ in keepsLines }))
+        return try XCTUnwrap(Patch.files(entries: entries, sections: sections)?.first?.patchHash)
+    }
+
+    func testHashLeavesOutContextAndHunkPositions() throws {
+        let reviewed = modified(" a\n-b\n+B\n c")
         // The base changed the file around the hunk: other context, another
         // place, another enclosing function, another index line.
-        var moved = modified(
-            [line(.context, "x"), line(.removed, "b"), line(.added, "B")], start: 40, section: "func other()"
-        )
-        moved.oldObjectID = "1111111"
+        let moved = modified(" x\n-b\n+B\n y", header: "@@ -40,3 +41,3 @@ func other()", index: "3333333..4444444 100644")
 
-        XCTAssertEqual(BranchReview.patchHash(of: reviewed), BranchReview.patchHash(of: moved))
+        XCTAssertEqual(try hash(reviewed), try hash(moved))
     }
 
-    func testHashChangesWithLinesPathsStatusModeAndObjectIDs() {
-        let original = modified([line(.removed, "b"), line(.added, "B")])
-        var variants: [BranchReview.FileChange] = [
-            modified([line(.removed, "b"), line(.added, "C")]),
-            modified([line(.added, "B"), line(.removed, "b")]),
-            modified([line(.removed, "b"), line(.added, "B")], path: "b.swift")
-        ]
-        var renamed = original
-        renamed.status = .renamed
-        renamed.oldPath = "old.swift"
-        var renamedElsewhere = renamed
-        renamedElsewhere.oldPath = "older.swift"
-        var executable = original
-        executable.oldMode = "100644"
-        executable.newMode = "100755"
-        var binary = BranchReview.FileChange(path: "a.png", status: .modified, isBinary: true)
-        binary.oldObjectID = "1111111"
-        binary.newObjectID = "2222222"
-        var otherBinary = binary
-        otherBinary.newObjectID = "3333333"
-        variants += [renamed, renamedElsewhere, executable, binary, otherBinary]
+    func testHashChangesWithLinesPathsStatusModeAndObjectIDs() throws {
+        let binary = """
+        diff --git a/a.png b/a.png
+        index 1111111..2222222 100644
+        Binary files a/a.png and b/a.png differ
 
-        let hashes = ([original] + variants).map(BranchReview.patchHash(of:))
+        """
+        let hashes = [
+            try hash(modified(" a\n-b\n+B\n c")),
+            try hash(modified(" a\n-b\n+C\n c")),
+            try hash(modified(" a\n+B\n-b\n c")),
+            try hash(modified(" a\n-b\n+B\n c", path: "b.swift"), nameStatus: "M\0b.swift\0"),
+            try hash(modified(" a\n-b\n+B\n c", extraHeaders: "old mode 100644\nnew mode 100755\n")),
+            try hash(
+                modified(" a\n-b\n+B\n c", extraHeaders: "similarity index 90%\nrename from old.swift\nrename to a.swift\n"),
+                nameStatus: "R090\0old.swift\0a.swift\0"
+            ),
+            try hash(
+                modified(" a\n-b\n+B\n c", extraHeaders: "similarity index 90%\nrename from older.swift\nrename to a.swift\n"),
+                nameStatus: "R090\0older.swift\0a.swift\0"
+            ),
+            try hash(binary, nameStatus: "M\0a.png\0"),
+            try hash(binary.replacingOccurrences(of: "2222222", with: "3333333"), nameStatus: "M\0a.png\0")
+        ]
+
         XCTAssertEqual(Set(hashes).count, hashes.count)
     }
 
-    func testNoNewlineMarkerCountsOnlyAfterAChangedLine() {
-        let plain = modified([line(.added, "x"), line(.context, "last")])
-        let afterContext = modified([line(.added, "x"), line(.context, "last"), line(.noNewlineMarker)])
-        let added = modified([line(.added, "x")])
-        let addedWithoutNewline = modified([line(.added, "x"), line(.noNewlineMarker)])
+    func testNoNewlineMarkerCountsOnlyAfterAChangedLine() throws {
+        let plain = modified("+x\n last", header: "@@ -1 +1,2 @@")
+        let afterContext = modified("+x\n last\n\\ No newline at end of file", header: "@@ -1 +1,2 @@")
+        let added = modified("-x\n+y", header: "@@ -1 +1 @@")
+        let addedWithoutNewline = modified("-x\n+y\n\\ No newline at end of file", header: "@@ -1 +1 @@")
 
-        XCTAssertEqual(BranchReview.patchHash(of: plain), BranchReview.patchHash(of: afterContext))
-        XCTAssertNotEqual(BranchReview.patchHash(of: added), BranchReview.patchHash(of: addedWithoutNewline))
+        XCTAssertEqual(try hash(plain), try hash(afterContext))
+        XCTAssertNotEqual(try hash(added), try hash(addedWithoutNewline))
+    }
+
+    func testLinesThatAreNotUTF8AreHashedAsBytes() throws {
+        func latin(_ byte: UInt8) -> Data {
+            var patch = Data(modified("-cafe\n+caf", header: "@@ -1 +1 @@").utf8)
+            patch.insert(byte, at: try! XCTUnwrap(patch.lastIndex(of: UInt8(ascii: "f"))) + 1)
+            return patch
+        }
+        let acute = latin(0xE9)
+        let grave = latin(0xE8)
+
+        XCTAssertNotEqual(try hash(acute), try hash(grave))
+        let line = try XCTUnwrap(Patch.sections(of: acute)?.first?.hunks.first?.lines.last)
+        XCTAssertEqual(line.text, "caf\u{FFFD}")
+        XCTAssertEqual(line.bytes, Data([0x63, 0x61, 0x66, 0xE9]))
+    }
+
+    func testSectionReadWithoutItsLinesKeepsItsCountsAndHash() throws {
+        let patch = modified(" a\n-b\n+B\n+C\n c", header: "@@ -1,3 +1,4 @@")
+        let entries = try XCTUnwrap(Patch.nameStatus(Data("M\0a.swift\0".utf8)))
+        let full = try XCTUnwrap(Patch.files(entries: entries, sections: try XCTUnwrap(Patch.sections(of: Data(patch.utf8)))))
+        let counted = try XCTUnwrap(Patch.files(
+            entries: entries, sections: try XCTUnwrap(Patch.sections(of: Data(patch.utf8), keepsLines: { _ in false }))
+        ))
+
+        XCTAssertEqual(counted.first?.hunks, [])
+        XCTAssertEqual(counted.first?.additions, 2)
+        XCTAssertEqual(counted.first?.deletions, 1)
+        XCTAssertEqual(counted.first?.patchHash, full.first?.patchHash)
     }
 }
