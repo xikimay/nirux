@@ -75,14 +75,21 @@ extension MergeQueue {
     static func liveDecision(
         environment: [String: String], bundleURL: URL, signature: () -> ReleaseSignature
     ) -> (isLive: Bool, reason: String) {
-        if environment["NIRUX_MERGE_QUEUE_LIVE"] == "1" { return (true, "NIRUX_MERGE_QUEUE_LIVE=1") }
-        guard (environment["NIRUX_STATE_DIR"] ?? "").isEmpty else { return (false, "NIRUX_STATE_DIR is set") }
-        let checkoutManifest = bundleURL.deletingLastPathComponent().appendingPathComponent("Package.swift").path
-        guard !FileManager.default.fileExists(atPath: checkoutManifest) else { return (false, "a build inside a checkout") }
+        if let decided = decisionWithoutSignature(environment: environment, bundleURL: bundleURL) { return decided }
         let result = signature()
         return result == .release
             ? (true, "the notarized release on the real state")
             : (false, "not the notarized release (\(result.detail))")
+    }
+
+    /// The decision when it doesn't need the signature; nil when it does.
+    static func decisionWithoutSignature(environment: [String: String], bundleURL: URL) -> (isLive: Bool, reason: String)? {
+        if environment["NIRUX_MERGE_QUEUE_LIVE"] == "1" { return (true, "NIRUX_MERGE_QUEUE_LIVE=1") }
+        guard (environment["NIRUX_STATE_DIR"] ?? "").isEmpty else { return (false, "NIRUX_STATE_DIR is set") }
+        guard bundleURL.pathExtension == "app" else { return (false, "not an app bundle") }
+        let checkoutManifest = bundleURL.deletingLastPathComponent().appendingPathComponent("Package.swift").path
+        guard !FileManager.default.fileExists(atPath: checkoutManifest) else { return (false, "a build inside a checkout") }
+        return nil
     }
 
     /// The nightly's signature: a Developer ID Application certificate, and
@@ -133,27 +140,70 @@ extension MergeQueue {
         return status == errSecSuccess ? .release : .notRelease(status)
     }
 
-    /// Checked once, as Nirux launches (`checkSignatureAtLaunch`): an
-    /// install may replace the bundle on disk later, and the check reads it.
-    static let signatureAtLaunch = ownReleaseSignature().signature
-
-    /// Checks the signature off the main thread, as Nirux launches.
-    static func checkSignatureAtLaunch() {
-        DispatchQueue.global(qos: .utility).async { _ = signatureAtLaunch }
+    /// This process's signature, kept once it is definitive: the release,
+    /// or code that fails the requirement or isn't signed. Anything else (a
+    /// busy system service, a bundle replaced mid-check) is checked again
+    /// the next time a queue asks.
+    static func currentSignature() -> ReleaseSignature {
+        if let known = knownSignature.value { return known }
+        let signature = ownReleaseSignature().signature
+        if [.release, .notRelease(errSecCSReqFailed), .notRelease(errSecCSUnsigned)].contains(signature) {
+            knownSignature.value = signature
+        }
+        return signature
     }
 
-    /// `Nirux --check-release-signature [path]`: this app, or the one at
-    /// `path`, printed with the requirement and the Security status. Exits
-    /// 0 for the release, 1 for anything else, 2 for a misused check or
-    /// wrong arguments.
-    static func checkReleaseSignatureCommand(_ arguments: [String]) -> Int32 {
-        guard arguments.count <= 1 else {
-            print("usage: Nirux --check-release-signature [path-to-app]")
+    private static let knownSignature = LockedSignature()
+
+    private final class LockedSignature: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: ReleaseSignature?
+        var value: ReleaseSignature? {
+            get { lock.withLock { stored } }
+            set { lock.withLock { stored = newValue } }
+        }
+    }
+
+    /// Checks the signature off the main thread as Nirux launches, when the
+    /// decision needs it: an install may replace the bundle later. A queue
+    /// opened before it ends checks it itself (about a tenth of a second).
+    static func checkSignatureAtLaunch(
+        environment: [String: String] = ProcessInfo.processInfo.environment, bundleURL: URL = Bundle.main.bundleURL
+    ) {
+        guard decisionWithoutSignature(environment: environment, bundleURL: bundleURL) == nil else { return }
+        DispatchQueue.global(qos: .utility).async { _ = currentSignature() }
+    }
+
+    /// `Nirux --check-release-signature [path]`. Without a path: this app,
+    /// with the requirement, the Security status and the queue's decision
+    /// in this process's environment; exits 0 only when its queue would be
+    /// live. With a path: that app's files; exits 0 for the release. Either
+    /// way 1 for anything else, and 2 for a misused check or wrong
+    /// arguments.
+    static func checkReleaseSignatureCommand(
+        _ arguments: [String],
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        bundleURL: URL = Bundle.main.bundleURL
+    ) -> Int32 {
+        let usage = "usage: Nirux --check-release-signature [path-to-app]"
+        guard arguments.count <= 1, arguments.first?.hasPrefix("-") != true else {
+            print(usage)
             return 2
         }
-        let (signature, path) = arguments.first.map { (releaseSignature(atPath: $0), Optional($0)) } ?? ownReleaseSignature()
-        print("app: \(path ?? "(this process)")\nrequirement: \(releaseRequirement)\nresult: \(signature.detail)")
-        return signature == .release ? 0 : signature.isMisuse ? 2 : 1
+        if let path = arguments.first {
+            guard FileManager.default.fileExists(atPath: path) else {
+                print("no app at \(path)\n\(usage)")
+                return 2
+            }
+            let signature = releaseSignature(atPath: path)
+            print("app: \(path)\nrequirement: \(releaseRequirement)\nresult: \(signature.detail)")
+            return signature == .release ? 0 : signature.isMisuse ? 2 : 1
+        }
+        let (signature, path) = ownReleaseSignature()
+        let decision = liveDecision(environment: environment, bundleURL: bundleURL) { signature }
+        print("app: \(path ?? "(this process)")\nrequirement: \(releaseRequirement)\nresult: \(signature.detail)\n"
+            + "merge queue: \(decision.isLive ? "live" : "dry run"): \(decision.reason)")
+        return signature.isMisuse ? 2 : decision.isLive ? 0 : 1
     }
 
     /// The client this build runs its queues with: `live`, or a dry run of
@@ -162,7 +212,7 @@ extension MergeQueue {
     static func client(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         bundleURL: URL = Bundle.main.bundleURL,
-        signature: @autoclosure () -> ReleaseSignature = signatureAtLaunch,
+        signature: @autoclosure () -> ReleaseSignature = currentSignature(),
         live: @autoclosure () -> any MergeQueueGitHub = GitHubCLIQueueClient.installed
     ) -> any MergeQueueGitHub {
         let client = live()
@@ -185,7 +235,7 @@ struct DryRunQueueClient: MergeQueueGitHub {
     }
 
     func mutate(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> MergeQueue.MutationResult {
-        .dryRun("\(wrapped.commandLine(mutation, settings: settings)) (this build: \(reason))")
+        .dryRun(command: wrapped.commandLine(mutation, settings: settings), reason: reason)
     }
 
     func commandLine(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> String {

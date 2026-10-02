@@ -256,7 +256,7 @@ final class FakeQueueClient: MergeQueueGitHub, @unchecked Sendable {
     func mutate(_ mutation: MergeQueue.Mutation, settings: BoardConfig.QueueSettings) -> MergeQueue.MutationResult {
         lock.withLock {
             recordedMutations.append(mutation)
-            return isDryRun ? .dryRun(commandLine(mutation, settings: settings)) : .sent
+            return isDryRun ? .dryRun(command: commandLine(mutation, settings: settings), reason: "a test") : .sent
         }
     }
 

@@ -344,7 +344,7 @@ final class MergeQueueFlowTests: XCTestCase {
         let files = try XCTUnwrap(queue.files)
         XCTAssertEqual(files.journal.lastPathComponent, "queue.dry-run.log")
         XCTAssertEqual(files.state.lastPathComponent, "queue-state.dry-run.json")
-        XCTAssertTrue(try String(contentsOf: files.journal, encoding: .utf8).contains("not sent (dry run)"))
+        XCTAssertTrue(try String(contentsOf: files.journal, encoding: .utf8).contains("not sent (dry run: "))
         XCTAssertFalse(FileManager.default.fileExists(atPath: files.journal.deletingLastPathComponent()
             .appendingPathComponent("queue.log").path))
     }

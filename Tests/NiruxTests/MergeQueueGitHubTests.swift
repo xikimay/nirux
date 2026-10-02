@@ -373,9 +373,14 @@ final class MergeQueueGitHubTests: XCTestCase {
         // Developer ID one; xctest, which runs these tests, is signed ad hoc.
         XCTAssertEqual(MergeQueue.releaseSignature(atPath: "/System/Applications/Calculator.app"), .notRelease(errSecCSReqFailed))
         XCTAssertEqual(MergeQueue.ownReleaseSignature().signature, .notRelease(errSecCSReqFailed))
-        // The command the nightly runs: 1 for another app, 2 for wrong arguments.
+        // The command: 1 for an app that isn't the release or a queue that
+        // would be a dry run, 2 for wrong arguments, never "not the release".
         XCTAssertEqual(MergeQueue.checkReleaseSignatureCommand(["/System/Applications/Calculator.app"]), 1)
+        XCTAssertEqual(MergeQueue.checkReleaseSignatureCommand([], environment: [:],
+                                                               bundleURL: URL(fileURLWithPath: "/Applications/Nirux.app")), 1)
         XCTAssertEqual(MergeQueue.checkReleaseSignatureCommand(["/tmp/a", "/tmp/b"]), 2)
+        XCTAssertEqual(MergeQueue.checkReleaseSignatureCommand(["--help"]), 2)
+        XCTAssertEqual(MergeQueue.checkReleaseSignatureCommand(["/tmp/no-such-app-\(UUID().uuidString).app"]), 2)
 
         let installed = URL(fileURLWithPath: "/Applications/Nirux.app")
         let release = { MergeQueue.ReleaseSignature.release }
@@ -403,6 +408,9 @@ final class MergeQueueGitHubTests: XCTestCase {
             XCTFail("checked the signature of a build in a checkout")
             return .release
         })
+        // Asking for it still works there; a bare executable is never the app.
+        XCTAssertTrue(isLive(["NIRUX_MERGE_QUEUE_LIVE": "1"], in: checkout.appendingPathComponent("Nirux.app"), signed: adHoc))
+        XCTAssertFalse(isLive([:], in: URL(fileURLWithPath: "/usr/local/bin/nirux"), signed: release))
         // A live Nirux doesn't pass it on to what its terminals run.
         let terminal = WorkspaceState.makeTerminalEnvironment(
             profileID: "p", workspaceID: "w", agentUUID: "u", missionID: nil, missionHandoffsEnabled: false,
@@ -417,9 +425,11 @@ final class MergeQueueGitHubTests: XCTestCase {
                                        live: live)
         XCTAssertTrue(dryRun.isDryRun)
         let mutation = MergeQueue.Mutation.merge(number: 52, head: MQ.sha("a"), method: .merge)
-        XCTAssertEqual(dryRun.mutate(mutation, settings: settings),
-                       .dryRun("\(live.commandLine(mutation, settings: settings)) (this build: not the notarized release "
-                           + "(\(MergeQueue.ReleaseSignature.notRelease(errSecCSReqFailed).detail)))"))
+        guard case .dryRun(let command, let reason) = dryRun.mutate(mutation, settings: settings) else {
+            return XCTFail("a dry run sent a mutation")
+        }
+        XCTAssertEqual(command, live.commandLine(mutation, settings: settings))
+        XCTAssertTrue(reason.hasPrefix("not the notarized release"), reason)
         XCTAssertTrue(MergeQueue.Files(projectID: "p", stateDirectory: URL(fileURLWithPath: "/s"), dryRun: true)?
             .journal.lastPathComponent == "queue.dry-run.log")
     }

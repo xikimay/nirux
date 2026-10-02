@@ -455,24 +455,27 @@ The queue is a pure state machine: `(state, event) -> (state, [command])`.
   goes on). A mutation refused by a rate limit stops the queue; only reads
   pause.
 - **Dev builds can't merge.** A build gets a dry-run client unless it is the
-  release, signed with a Developer ID and notarized with the ticket stapled,
-  as the nightly is, and runs on the real state (no `NIRUX_STATE_DIR`, which
-  the installed app never sets), or `NIRUX_MERGE_QUEUE_LIVE=1` is set.
+  release, an app bundle signed with a Developer ID and notarized with the
+  ticket stapled, as the nightly is, and runs on the real state (no
+  `NIRUX_STATE_DIR`, which the installed app never sets), or
+  `NIRUX_MERGE_QUEUE_LIVE=1` is set.
   - A bundle next to a `Package.swift` (`scripts/bundle.sh`'s, in a checkout)
     is a dry run whatever its signature: `docs/release-signing.md` describes
     notarizing one by hand. Builds from `swift build` or `bundle.sh` aren't
     notarized otherwise, even signed on a Mac that holds the Developer ID, so
     they stay dry runs wherever they are copied and however they are opened:
-    LaunchServices passes no variable at all.
-  - Nirux checks its running code once, off the main thread, as it launches:
-    an install may replace the bundle later. The log, and a dry run's stop,
-    say why a build is a dry run.
+    LaunchServices passes no variable at all. A bare executable is never live.
+  - Nirux checks its running code only when the rest doesn't decide, off the
+    main thread as it launches (a queue opened before that ends waits about a
+    tenth of a second). A definitive answer is kept; a passing failure (a busy
+    system service, a bundle replaced mid-check) is checked again for the next
+    queue. The log, and a dry run's stop, say why a build is a dry run.
   - The nightly runs `scripts/check-release-signature.sh` on the app it
-    publishes: the app checks its own signature as it does at launch (the
-    environment and the checkout rule aside), and a release whose queue would
-    stay a dry run doesn't ship. On failure it prints the
-    app, the requirement, the Security status (telling a misused check from
-    a build that isn't the release) and each clause of the requirement.
+    publishes: a copy outside the checkout, without the dev variables, decides
+    as it would at launch, and a release whose queue would stay a dry run
+    doesn't ship. On failure it prints the app, the requirement, the Security
+    status (telling a misused check from a build that isn't the release), the
+    decision and each clause of the requirement, read from the app.
     `Nirux --check-release-signature <path>` checks another app's files, such
     as a downloaded nightly.
   - Nirux's terminals get an empty `NIRUX_MERGE_QUEUE_LIVE`, so a live Nirux
