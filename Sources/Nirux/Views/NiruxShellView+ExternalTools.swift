@@ -507,6 +507,7 @@ extension NiruxShellView {
 
         relayout(animated: false)
         updateSidebar()
+        focusActiveTerminal(in: window, editorTakesKeyboard: true)
     }
 
     /// Wires every callback an `EditorColumn` needs back into the shell view.
@@ -551,6 +552,9 @@ extension NiruxShellView {
             .compactMap { $0.editorColumn }
             .first { $0.workspaceCwd == editorRoot }
             ?? (workspaceCwd == nil ? workspace.columns.compactMap { $0.editorColumn }.first : nil)
+        // Opened for the user, the editor takes the keyboard, as a browser
+        // column does (`openWebView`).
+        defer { if takeFocus, workspace === activeWorkspace { focusActiveTerminal(in: window, editorTakesKeyboard: true) } }
 
         // focusedIndex moves even for takeFocus:false opens: the camera
         // only keeps the FOCUSED column visible, so leaving it put could
@@ -590,7 +594,8 @@ extension NiruxShellView {
         if let id = request.workspaceID,
            let index = workspaces.firstIndex(where: { $0.id == id }) {
             target = workspaces[index]
-            switchToWorkspace(index)
+            // Its focused column can be the editor an earlier open focused.
+            if target !== activeWorkspace { switchToWorkspace(index, editorTakesKeyboard: false) }
         }
         openInEditorColumn(
             path: request.file, line: request.line, endLine: request.endLine,
@@ -698,10 +703,7 @@ extension NiruxShellView {
 
     /// Focus a column by 1-based number (Cmd+1…9). Out-of-range no-ops.
     func focusColumn(number: Int) {
-        guard let workspace = activeWorkspace,
-              workspace.columns.indices.contains(number - 1)
-        else { return }
-        focusColumnByIndex(number - 1)
+        goToColumn(number - 1)
     }
 
     /// Open the workspace-wide search panel scoped to the active workspace

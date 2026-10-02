@@ -11,8 +11,10 @@ Nirux is alpha software.
 - Agent launchers: start Claude Code or Codex from the command palette with configurable permission and sandbox presets.
 - Attention and Activity: per-column agent status (working / needs attention, with elapsed time) driven by real Claude Code hooks and Codex turn notifications — not output guessing (Gemini CLI and OpenCode, which have no hooks, get output-activity status) — plus a persistent sidebar feed, edge glows for off-screen attention, native macOS notifications that focus the right workspace and column on click, and a Dock badge counting waiting workspaces.
 - Stuck agents: a permission or question left open past a threshold (Settings, 10 minutes by default) shows `waiting 2h05m` on its card and notifies once (Telegram too, and while Nirux is in the background); a Claude turn that ended on an API error shows `API error`, with a Resume button — for transient errors only (overloaded, server error) — that types `continue` only on a click, once Claude is back at an empty prompt; a `claude` that died mid-turn gets an overlay that resumes its conversation in its permission mode.
+- Quick switcher and Next Waiting Agent: type a workspace's name, branch, space or folder in `Cmd+P` and press Return to jump to it — in any space, inactive ones too (listed after active ones that match as well, and left inactive) — each row showing its agents' state (`working`, `waiting 12m`, `API error`); `Cmd+J` goes to the Claude agent blocked on you the longest (a permission, a question, an API error, a mid-turn exit), then on to the next at each press.
 - Keep Mac awake: while an agent works, Nirux keeps the Mac from idle-sleeping and shows a cup in the title bar; it lets go a minute after the last one stops — see [Keep Mac awake while agents work](#keep-mac-awake-while-agents-work).
 - Claude context usage: a Claude column's title bar shows how full its session's context window is (`ctx 62%`, or `ctx 124k` while the window size is unknown), with the session's token totals in a tooltip — read from the session transcript, see [Claude context usage](#claude-context-usage).
+- Claude plan usage limits (opt-in): the window's title bar shows the 5-hour window and the weekly limit of a Pro or Max plan (`5h 42% · 7d 18%`), with their resets in a tooltip, see [Claude plan usage limits](#claude-plan-usage-limits).
 - Opt-in Telegram Remote Access: pair one private Telegram user to list live agent sessions, inspect status and recent output, receive completion/attention alerts, and continue a selected session without exposing a webhook or general-purpose shell.
 - Worktree flow: create or open Git worktrees as new workspaces, optionally handing context from the current agent session into the new workspace.
 - Built-in editor: open files, keep tabs, search the workspace, browse the file tree with Finder icons, view Git changes, and toggle file diffs. Find/replace, word wrap, font zoom, per-tab scroll restore, and disk-conflict protection included.
@@ -95,6 +97,7 @@ Typical command palette actions:
 - New Terminal
 - Open Editor
 - Search Workspace
+- Search Everywhere
 - Open Browser
 - Import Browser Cookies
 - New Workspace
@@ -108,24 +111,28 @@ Useful shortcuts:
 
 | Shortcut | Action |
 | --- | --- |
-| `Cmd+P` | Command palette (fuzzy matching); in the editor, the workspace file picker |
+| `Cmd+P` | Command palette and workspace switcher (fuzzy matching); in the editor, the workspace file picker |
 | `Shift+Cmd+P` | Command palette, including from the editor |
 | `Cmd+T` | New terminal column |
 | `Cmd+B` | Open browser URL flow |
 | `Cmd+W` | Close editor tab, column, or workspace depending on context — asks first when a Claude, Codex, Gemini CLI or OpenCode session is running (Return cancels, ⌘D closes); with Settings or a detached Web Inspector in front, closes that window instead |
 | `Cmd+1…9` | Focus column N |
-| `Cmd+Left` / `Cmd+Right` | Focus previous or next column |
-| `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column |
+| `Cmd+Left` / `Cmd+Right` | Focus previous or next column; while text has the keyboard (the editor, a field of a web page, the address bar, a find field), move to the start or end of the line instead |
+| `Ctrl+Cmd+Left` / `Ctrl+Cmd+Right` | Focus previous or next column, also from text |
+| `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column; in text, select to the start or end of the line (`Columns > Move Left / Move Right` still moves it) |
 | `Cmd+E` | Cycle focused column width through presets |
 | `Cmd+N` | New workspace |
-| `Cmd+Up` / `Cmd+Down` | Switch workspace |
+| `Cmd+Up` / `Cmd+Down` | Switch workspace; in text, move to the start or end of the document (`Shift` selects) |
+| `Ctrl+Cmd+Up` / `Ctrl+Cmd+Down` | Switch workspace, also from text |
 | `Alt+Cmd+Left` / `Alt+Cmd+Right` | Switch to the previous or next space (the workspace group named in the sidebar header) |
+| `Cmd+J` | Next waiting agent: the Claude agent blocked on you the longest, then the next at each press |
 | `Ctrl+Cmd+S` | Toggle sidebar |
 | `Ctrl+Cmd+F` | Enter or exit full screen |
 | `Cmd+M` | Minimize the window |
 | `Cmd+,` | Settings |
 | `Cmd+Z` / `Shift+Cmd+Z` | Undo / redo in the editor and in panel text fields (palette, rename, settings) |
 | `Shift+Cmd+F` | Search workspace |
+| `Alt+Cmd+F` | Search Everywhere: text in the scrollback of every terminal, across workspaces and projects; picking a match opens its terminal's find bar on it. A full-screen program (vim, less, Claude Code in its no-flicker mode) shows no scrollback: only its screen is searched |
 | `Cmd+F` | Find in the focused editor or terminal; a terminal's find bar closes with `Esc` |
 | `Cmd+G` / `Shift+Cmd+G` | Next / previous terminal match (`Return` / `Shift+Return` in the find bar); next moves up to older output, as in Ghostty |
 | `Cmd+S` / `Alt+Cmd+S` | Save the active editor file / save all |
@@ -134,7 +141,7 @@ Useful shortcuts:
 | `Shift+Cmd+M` | Toggle minimap in editor |
 | `Alt+Cmd+Return` | Send the editor selection to the agent terminal |
 | `Cmd+=` / `Cmd+-` / `Cmd+0` | Editor font zoom in / out / reset |
-| `Cmd+L` | Focus browser address bar |
+| `Cmd+L` | Focus browser address bar; in the editor, select the line |
 | `Cmd+[` / `Cmd+]` | Browser back / forward |
 | `Alt+Cmd+I` | Open Web Inspector on the focused browser column |
 
@@ -159,7 +166,7 @@ Both files are global, so every Claude Code and Codex session on the Mac runs th
 
 ### Keep Mac awake while agents work
 
-While at least one agent is working, in any workspace or space, Nirux holds a macOS power assertion named `Nirux: agents working` that prevents idle sleep. An agent waiting for you (a permission dialog, a finished turn) doesn't count, nor does one that has printed nothing and sent no hook event for 10 minutes: a working agent redraws its spinner every second, while a Claude turn interrupted with Esc can stay "working" until the next prompt. Nirux releases it a minute after the last agent stops, so back-to-back turns don't toggle it, and at once when you turn the setting off or quit. A cup at the right end of the title bar shows while it is held; hover it for the number of working agents. The option is **Settings → General → Keep Mac awake while agents work**, on by default.
+While at least one agent is working, in any workspace or space, Nirux holds a macOS power assertion named `Nirux: agents working` that prevents idle sleep. An agent waiting for you (a permission dialog, a finished turn) doesn't count, nor does one that has printed nothing and sent no hook event for 10 minutes: a working agent redraws its spinner every second, while a Claude turn interrupted with Esc can stay "working" until the next prompt. Nirux releases it a minute after the last agent stops, so back-to-back turns don't toggle it, and at once when you turn the setting off or quit. A cup near the right end of the title bar (left of the [plan usage limits](#claude-plan-usage-limits), when they show) shows while it is held; hover it for the number of working agents. The option is **Settings → General → Keep Mac awake while agents work**, on by default.
 
 It prevents idle sleep only: the display still turns off on its own schedule, and closing a MacBook's lid still puts it to sleep, except in clamshell mode (external display and power connected). `pmset -g assertions | grep Nirux` shows whether it is held.
 
@@ -170,6 +177,14 @@ The title bar of a column running Claude Code shows the context of its session's
 Nirux learns the session's transcript from the `transcript_path` of the [agent status hooks](#agent-status-hooks) (session start, prompt submit, stop) and follows it read-only: only what was appended since the last read, off the main thread, at most once a second for columns on screen, keeping token counts and the model ID but never message content. A long transcript is caught up once, in the background, before the label first shows. The label shows only while that session's own `claude` is the column's foreground process; subagents, nested `claude -p` runs and other sessions are ignored.
 
 Claude Code picks a 200k or 1M window depending on the model variant, the account and the provider, and the transcript doesn't record which. Until a response goes past 200k tokens, from which Nirux infers the 1M window, the label shows the token count instead (`ctx 124k`). Switching models starts over (the 200k and 1M variants of one model report the same ID, so a switch between them isn't seen), and models Claude Code may give another window always show the token count: `claude-sonnet-4-6`, and model IDs not in Claude Code's `claude-…` form (Bedrock IDs, non-Claude models). Right after a compaction it shows `ctx —` until the next response. Codex columns show nothing.
+
+### Claude plan usage limits
+
+With **Settings → Claude Code → Show plan usage limits in the title bar** on (off by default), the right end of the window's title bar shows how much of the Claude plan's 5-hour window and weekly limit is used, as `5h 42% · 7d 18%`, turning orange from 80% of either. Hover it for each reset time and when the numbers were last reported. A window drops out once it resets, until a session reports the next one.
+
+Claude Code hands these numbers to one documented place only: the JSON its status line command receives (`rate_limits`, Claude Code 2.1.80 or later, Pro and Max plans, after a session's first response). Hooks don't carry them, `/usage` has no non-interactive form, and nothing under `~/.claude` stores them; Nirux calls no claude.ai endpoint. So turning the option on makes Nirux Claude Code's status line: `~/.claude/settings.json` gains a `statusLine` running `Nirux --hook claude --statusline`, guarded on `NIRUX_AGENT_UUID` like the [hooks](#agent-status-hooks). In a Nirux terminal it records the limits in `claude-usage-limits.json` in the state directory and prints nothing; elsewhere it stops at the shell test. The status line stays blank either way, but Claude Code hides its `? for shortcuts` hint whenever a status line is set, in every session. Turning the option off takes the entry back.
+
+A status line of your own is left as it is, and the limits don't show (Settings says so), also when you set one later (with Claude Code's `/statusline`, say); a project's `.claude/settings.json` status line wins in that project's sessions, which then don't report. The indicator shows what the latest response of a Claude session in Nirux saw, whichever account that session is signed in to; a status line that runs again without a new response (an idle session, a window that reset, `/clear`, `/resume`) repeats older numbers and is ignored. Usage elsewhere (claude.ai, another Mac) shows up with the next response here. Turning the option off forgets the numbers. Only the installed app writes or takes back the entry: a dev build, or a copy run with `NIRUX_STATE_DIR`, leaves the `statusLine` entry as it is. Turn the option off before removing Nirux, or delete the `statusLine` entry afterwards: left behind, it does nothing but keep the hint hidden.
 
 ### Telegram Remote Access
 

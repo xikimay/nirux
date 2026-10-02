@@ -105,6 +105,7 @@ final class TelegramRemoteAccessTests: XCTestCase {
             tokenLoader: { nil }
         )
         app.telegramRemoteAccessController = controller
+        app.claudeStatusLineStateReader = { .none }
         controller.reloadFromPersistence()
         app.showSettings(nil)
         defer {

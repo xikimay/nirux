@@ -75,6 +75,8 @@ final class NiruxShellView: NSView {
     /// A stuck-agent alert went out (Telegram relays it): the reason, the
     /// workspace, the column's index, the column.
     var onStuckAgentAlert: ((AgentAttentionReason, WorkspaceState, Int, ColumnState) -> Void)?
+    /// ⌘P's workspace rows and Next Waiting Agent (⌘J).
+    let quickSwitch = QuickSwitchState()
 
     /// Agent launches, the home folder, cookies and modal alerts; tests
     /// replace them (see ShellSideEffects).
@@ -88,6 +90,7 @@ final class NiruxShellView: NSView {
     var urlPanel: URLInputPanel?
     var filePickerPanel: FilePickerPanel?
     var searchPanel: EditorSearchPanel?
+    var globalSearchPanel: GlobalSearchPanel?
     var worktreeCleanupPanel: WorktreeCleanupPanel?
     /// Worktrees a "Clean Up Worktree…" is checking or confirming, so a
     /// second click doesn't start another. Their cards say so.
@@ -193,11 +196,8 @@ final class NiruxShellView: NSView {
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
             if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }
-            guard self.workspaces[wsIndex].focusedIndex != colIndex else { return }
-            self.workspaces[wsIndex].focusedIndex = colIndex
-            self.relayout(animated: true)
-            self.updateSidebar()
-            self.focusActiveTerminal(in: self.window)
+            guard self.activeWSIndex == wsIndex else { return }
+            self.goToColumn(colIndex)
         }
         updateSidebar()
         relayout(animated: false)
@@ -466,7 +466,7 @@ extension NiruxShellView {
         }
         relayout(animated: true)
         updateSidebar()
-        focusActiveTerminal(in: window)
+        focusActiveTerminal(in: window, editorTakesKeyboard: true)
     }
 
     func cycleActiveColumnWidth() {
@@ -749,7 +749,7 @@ extension NiruxShellView {
         }
 
         commandPalette?.actions = columnPaletteActions() + agentPaletteActions() + workspacePaletteActions()
-        commandPalette?.show(relativeTo: window)
+        commandPalette?.show(relativeTo: window, sections: paletteSections())
     }
 
     func showCommandPalette(prefilter: String) {
@@ -770,11 +770,18 @@ extension NiruxShellView {
 
     // MARK: - Focus + helpers
 
-    func focusActiveTerminal(in window: NSWindow?) {
+    /// Gives the keyboard to the focused column of the active workspace.
+    /// An editor column only takes it when the user went to it
+    /// (`editorTakesKeyboard`): an agent's open focuses its column but
+    /// leaves the keyboard where the user types, and closing a panel later
+    /// must not hand that editor the keys.
+    func focusActiveTerminal(in window: NSWindow?, editorTakesKeyboard: Bool = false) {
         guard let col = activeWorkspace?.columns[safe: activeWorkspace?.focusedIndex ?? 0],
               let window else { return }
         if let webView = col.webViewColumn {
             window.makeFirstResponder(webView.webView)
+        } else if let editor = col.editorColumn {
+            if editorTakesKeyboard { editor.takeKeyboard() }
         } else if let board = col.projectBoard {
             window.makeFirstResponder(board.view)
         } else if col.isFindBarOpen {
@@ -791,7 +798,19 @@ extension NiruxShellView {
         workspace.focusedIndex = index
         relayout(animated: true)
         updateSidebar()
-        focusActiveTerminal(in: window)
+        focusActiveTerminal(in: window, editorTakesKeyboard: true)
+    }
+
+    /// Focuses column `index` of the active workspace at the user's request
+    /// (Cmd+1…9, the sidebar). An agent's open focuses its editor column
+    /// without the keyboard: going to it then hands the keyboard over.
+    func goToColumn(_ index: Int) {
+        guard let workspace = activeWorkspace, workspace.columns.indices.contains(index) else { return }
+        if workspace.focusedIndex == index, workspace.columns[index].isEditor {
+            focusActiveTerminal(in: window, editorTakesKeyboard: true)
+        } else {
+            focusColumnByIndex(index)
+        }
     }
 
     var activeWorkspace: WorkspaceState? { workspaceStore.activeWorkspace }

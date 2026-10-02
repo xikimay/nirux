@@ -440,6 +440,12 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         startFileWatch()
     }
 
+    /// Gives Monaco the keyboard, as a click in it would: its column got
+    /// the focus. The page refocuses what Monaco had focused.
+    func takeKeyboard() {
+        window?.makeFirstResponder(webView)
+    }
+
     /// Switch the active tab. The model already exists on the JS side; we
     /// only ask Monaco to swap to it.
     func switchTo(path: String, takeFocus: Bool = true) {

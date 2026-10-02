@@ -43,6 +43,13 @@ extension NiruxShellView {
                 self?.showWorkspaceSearch()
             },
             PaletteAction(
+                icon: "🔦", title: "Search Everywhere",
+                subtitle: "Find text in every terminal's scrollback, across workspaces and projects",
+                shortcut: .searchEverywhere
+            ) { [weak self] in
+                self?.showGlobalSearch()
+            },
+            PaletteAction(
                 icon: "🔀", title: "Toggle Editor Diff", subtitle: "Show the diff for the active editor file",
                 shortcut: .toggleEditorDiff
             ) { [weak self] in
@@ -64,6 +71,13 @@ extension NiruxShellView {
             },
             PaletteAction(icon: "📦", title: "Open Codex", subtitle: "Launch OpenAI Codex in a new terminal", shortcut: nil) { [weak self] in
                 self?.openCodex()
+            },
+            PaletteAction(
+                icon: "⏳", title: "Next Waiting Agent",
+                subtitle: "Jump to the agent blocked on you the longest, then the next",
+                shortcut: .nextWaitingAgent
+            ) { [weak self] in
+                self?.jumpToNextWaitingAgent()
             }
         ]
     }

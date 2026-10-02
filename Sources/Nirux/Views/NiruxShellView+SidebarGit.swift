@@ -470,6 +470,7 @@ extension NiruxShellView {
         workspace.onColumnTitleChanged = { $0.updateTitleBarLabel(snapshot: ProcessSnapshot()) }
         workspace.onFocusedColumnChanged = { [weak self, weak workspace] in
             guard let self, let workspace else { return }
+            self.quickSwitch.focusMoved()
             self.refreshGitContextNow(for: workspace)
         }
         workspace.onGitContextChanged = { [weak self, weak workspace] in
