@@ -422,8 +422,10 @@ final class SidebarWorkspaceCardRenderer {
             height: SidebarExpandedMetrics.prDetailHeight
         )
         append(ciLabel)
-        let ciUrl = (ciStatus == "FAILURE" ? prInfo.failedCheckUrl : nil) ?? "\(prInfo.url)/checks"
-        hitAreas.append(SidebarHitArea(frame: ciLabel.frame, region: .link(url: openURLAction(ciUrl), label: ciLabel)))
+        hitAreas.append(SidebarHitArea(
+            frame: ciLabel.frame,
+            region: .link(url: openURLAction(PilotSidebarRenderer.ciURL(prInfo)), label: ciLabel)
+        ))
         return yOffset - SidebarExpandedMetrics.prDetailAdvance
     }
 
@@ -459,7 +461,7 @@ final class SidebarWorkspaceCardRenderer {
     }
 
     private func openURLAction(_ url: String) -> String {
-        SidebarView.workspaceURLAction(workspaceIndex: workspace.index, url: url)
+        SidebarView.openActionURL(workspaceIndex: workspace.index, url: url)
     }
 
     private func cardBackground() -> SidebarBackgroundView {

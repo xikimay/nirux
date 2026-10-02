@@ -121,8 +121,8 @@ final class WorkspaceState {
     var onFocusedColumnChanged: (() -> Void)?
     var onGitContextChanged: (() -> Void)?
     var onDiffStatsClicked: (() -> Void)?
-    /// A terminal link was cmd-clicked — the shell opens a browser column
-    /// in this workspace.
+    /// A web link was clicked (terminal cmd-click, local-server chip, Pilot
+    /// panel PR link) — the shell opens a browser column in this workspace.
     var onTerminalOpenURL: ((WorkspaceState, String) -> Void)?
     /// A terminal file: link was cmd-clicked — the shell opens it in an
     /// editor column in this workspace, at the optional line.

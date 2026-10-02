@@ -78,6 +78,12 @@ enum PilotSidebarRenderer {
         case long
     }
 
+    /// The failed check, else the PR's Checks tab, which lists running
+    /// and finished runs.
+    static func ciURL(_ pullRequest: PRInfo) -> String {
+        (pullRequest.ciStatus == "FAILURE" ? pullRequest.failedCheckUrl : nil) ?? "\(pullRequest.url)/checks"
+    }
+
     static func ciStatusDisplay(_ ciStatus: String, style: CIStatusStyle) -> (dot: String, color: NSColor, text: String) {
         switch ciStatus {
         case "SUCCESS":

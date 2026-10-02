@@ -94,6 +94,21 @@ final class SidebarPullRequestLinkTests: XCTestCase {
         let failed = "https://github.com/owner/repo/actions/runs/7/job/8"
         let opened = try clickLinks(of: pullRequest(ciStatus: "FAILURE", failedCheckUrl: failed))
 
-        XCTAssertEqual(opened.map(\.url)[1], failed)
+        XCTAssertEqual(opened.map(\.url), [
+            "https://github.com/owner/repo/pull/42",
+            failed,
+            "https://github.com/owner/repo/pull/42"
+        ])
+    }
+
+    /// A check's details URL is set by whoever reports the check: only a
+    /// web page opens, as for a terminal link.
+    func testNonWebCheckURLOpensNothing() throws {
+        let opened = try clickLinks(of: pullRequest(ciStatus: "FAILURE", failedCheckUrl: "file:///etc/passwd"))
+
+        XCTAssertEqual(opened.map(\.url), [
+            "https://github.com/owner/repo/pull/42",
+            "https://github.com/owner/repo/pull/42"
+        ])
     }
 }

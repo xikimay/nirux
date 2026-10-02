@@ -484,10 +484,9 @@ final class SidebarView: NSView {
                 toggleInactiveSection()
             } else if let workspaceIndex = Self.diffActionWorkspaceIndex(url) {
                 onDiffStatsClicked?(workspaceIndex)
-            } else if let (workspaceIndex, url) = Self.workspaceURLAction(url) {
+            } else if let (workspaceIndex, url) = Self.openActionTarget(url),
+                      case .web = TerminalLinkTarget.parse(url) {
                 onWorkspaceURLClicked?(workspaceIndex, url)
-            } else if let url = URL(string: url) {
-                NSWorkspace.shared.open(url)
             }
         case .column(let workspaceIndex, let columnIndex):
             onColumnClicked?(workspaceIndex, columnIndex)
@@ -662,7 +661,7 @@ final class SidebarView: NSView {
     }
 
     /// Opens `url` in a browser column of the card's workspace.
-    static func workspaceURLAction(workspaceIndex: Int, url: String) -> String {
+    static func openActionURL(workspaceIndex: Int, url: String) -> String {
         "action:open:\(workspaceIndex):\(url)"
     }
 
@@ -674,7 +673,7 @@ final class SidebarView: NSView {
         return Int(value.dropFirst(prefix.count))
     }
 
-    private static func workspaceURLAction(_ value: String) -> (Int, String)? {
+    private static func openActionTarget(_ value: String) -> (Int, String)? {
         let prefix = "action:open:"
         guard value.hasPrefix(prefix) else { return nil }
         let rest = value.dropFirst(prefix.count)
