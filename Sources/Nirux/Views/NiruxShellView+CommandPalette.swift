@@ -64,6 +64,13 @@ extension NiruxShellView {
             },
             PaletteAction(icon: "📦", title: "Open Codex", subtitle: "Launch OpenAI Codex in a new terminal", shortcut: nil) { [weak self] in
                 self?.openCodex()
+            },
+            PaletteAction(
+                icon: "⏳", title: "Next Waiting Agent",
+                subtitle: "Jump to the agent blocked on you the longest, then the next",
+                shortcut: .nextWaitingAgent
+            ) { [weak self] in
+                self?.jumpToNextWaitingAgent()
             }
         ]
     }

@@ -358,6 +358,11 @@ final class PtySession: @unchecked Sendable {
         state.machine.takeStuckAlert(now: now, waitThreshold: waitThreshold, foreground: foreground)
     }
 
+    /// What blocks the agent on the user now (see `AgentWait`).
+    func agentBlockedWait(now: TimeInterval, foreground: ForegroundProcess?) -> AgentWait? {
+        state.machine.blockedWait(now: now, foreground: foreground)
+    }
+
     var agentMidTurnExit: AgentMidTurnExit? { state.machine.midTurnExit }
 
     var agentTurnFailure: AgentTurnFailure? { state.machine.turnFailure }

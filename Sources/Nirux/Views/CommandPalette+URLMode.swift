@@ -56,9 +56,10 @@ extension CommandPalette {
         guard let listContainer else { return }
         rowViews.forEach { $0.removeFromSuperview() }
         rowViews.removeAll()
+        scrollY = 0
 
         let containerHeight = listContainer.bounds.height
-        let rowHeight: CGFloat = 36
+        let rowHeight = Self.urlRowHeight
 
         for (index, hint) in urlSuggestions.enumerated() {
             let yPos = containerHeight - CGFloat(index + 1) * rowHeight
@@ -141,10 +142,8 @@ extension CommandPalette {
 
     func switchToActionsMode() {
         mode = .actions
-        searchField?.placeholderString = "Type a command..."
+        searchField?.placeholderString = actionsPlaceholder
         searchField?.stringValue = ""
-        filteredActions = actions
-        selectedIndex = 0
-        rebuildList()
+        filterActions(query: "")
     }
 }

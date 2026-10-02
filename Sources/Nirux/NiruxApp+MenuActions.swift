@@ -46,6 +46,10 @@ extension NiruxApp {
         shell?.focusWorkspace(.down)
     }
 
+    @objc func jumpToNextWaitingAgent(_ sender: Any?) {
+        shell?.jumpToNextWaitingAgent()
+    }
+
     @objc func previousSpace(_ sender: Any?) {
         shell?.focusSpace(.previous)
     }
@@ -369,6 +373,13 @@ extension NiruxApp {
         nextSpaceItem.keyEquivalent = "\u{F703}"
         nextSpaceItem.keyEquivalentModifierMask = NSEvent.ModifierFlags([.command, .option])
         workspacesMenu.addItem(nextSpaceItem)
+
+        workspacesMenu.addItem(NSMenuItem.separator())
+        workspacesMenu.addItem(
+            withTitle: "Next Waiting Agent",
+            action: #selector(jumpToNextWaitingAgent(_:)),
+            shortcut: .nextWaitingAgent
+        )
 
         let workspacesItem = NSMenuItem()
         workspacesItem.submenu = workspacesMenu

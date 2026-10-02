@@ -21,6 +21,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testBrowserCommands": ["Open Browser", "Toggle Web Inspector"],
             "testImportBrowserCookies": ["Import Browser Cookies"],
             "testAgentCommands": ["Open Claude Code", "Open Codex"],
+            "testNextWaitingAgentCommand": ["Next Waiting Agent"],
             "testWorkspaceCommands": [
                 "New Workspace", "Rename Workspace", "Show/Hide Sidebar", "Show/Hide Inactive Workspaces"
             ],
@@ -115,7 +116,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             // After a URL, the palette opens on the commands again.
             harness.shell.showCommandPalette()
             XCTAssertEqual(palette.mode, .actions)
-            XCTAssertEqual(palette.searchField?.placeholderString, "Type a command...")
+            XCTAssertEqual(palette.searchField?.placeholderString, "Type a command or a workspace...")
             palette.dismiss()
 
             // Reaches the focused browser column; the inspector itself
@@ -155,6 +156,28 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(workspace.columns.count, columnCount + 2)
             XCTAssertEqual(harness.agentLaunches.count, 2)
             XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command codex") == true, "\(harness.agentLaunches)")
+        }
+    }
+
+    /// Goes to the agent blocked on the user (faked: a real one needs a
+    /// `claude` in front), else says none is.
+    func testNextWaitingAgentCommand() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let repo = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "second", cwd: harness.worktree)
+            let waiting = try XCTUnwrap(shell.activeWorkspace?.columns.first)
+            var wait: AgentWait? = AgentWait(reason: .question(nil), since: Date().timeIntervalSince1970 - 60)
+            shell.quickSwitch.agentWait = { column, _, _ in column === waiting ? wait : nil }
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === repo }))
+
+            harness.runPaletteCommand("Next Waiting Agent")
+            XCTAssertEqual(shell.activeWorkspace?.title, "second")
+
+            wait = nil
+            harness.runPaletteCommand("Next Waiting Agent")
+            XCTAssertEqual(shell.activeWorkspace?.title, "second")
+            XCTAssertEqual(shell.quickSwitch.hint?.text, NiruxShellView.noWaitingAgentHint)
         }
     }
 
