@@ -101,6 +101,7 @@ extension CommandPalette {
         }
 
         highlightURLSelected()
+        updateScrollIndicator()
     }
 
     func highlightURLSelected() {

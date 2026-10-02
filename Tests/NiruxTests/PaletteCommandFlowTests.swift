@@ -160,24 +160,19 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
     }
 
     /// Goes to the agent blocked on the user (faked: a real one needs a
-    /// `claude` in front), else says none is.
+    /// `claude` in front). QuickSwitcherFlowTests walks the queue.
     func testNextWaitingAgentCommand() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let repo = try XCTUnwrap(shell.activeWorkspace)
             shell.addWorkspace(title: "second", cwd: harness.worktree)
             let waiting = try XCTUnwrap(shell.activeWorkspace?.columns.first)
-            var wait: AgentWait? = AgentWait(reason: .question(nil), since: Date().timeIntervalSince1970 - 60)
+            let wait = AgentWait(reason: .question(nil), since: Date().timeIntervalSince1970 - 60)
             shell.quickSwitch.agentWait = { column, _, _ in column === waiting ? wait : nil }
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === repo }))
 
             harness.runPaletteCommand("Next Waiting Agent")
             XCTAssertEqual(shell.activeWorkspace?.title, "second")
-
-            wait = nil
-            harness.runPaletteCommand("Next Waiting Agent")
-            XCTAssertEqual(shell.activeWorkspace?.title, "second")
-            XCTAssertEqual(shell.quickSwitch.hint?.text, NiruxShellView.noWaitingAgentHint)
         }
     }
 

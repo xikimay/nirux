@@ -46,6 +46,26 @@ final class QuickSwitcherFlowTests: XCTestCase {
             XCTAssertEqual(headers(all), ["Commands", "Workspaces"])
             XCTAssertEqual(all.filteredActions.first?.title, "Open Browser")
             XCTAssertEqual(all.filteredActions.suffix(2).map(\.title), ["repo", "billing-fix"])
+            XCTAssertTrue(all.filteredActions.suffix(2).first?.subtitle.hasPrefix("Current · ") == true)
+
+            // The last row, scrolled into view with its header: a click
+            // there picks it, a click on the header nothing.
+            for _ in 1..<all.filteredActions.count { harness.press(.down, in: all.panel) }
+            let last = all.filteredActions.count - 1
+            XCTAssertEqual(all.selectedIndex, last)
+            XCTAssertGreaterThan(all.scrollY, 0)
+            let rowItem = try XCTUnwrap(all.listLayout.itemIndex(ofRow: last))
+            let rowView = try XCTUnwrap(all.rowViews[safe: rowItem])
+            XCTAssertEqual(all.row(atListPoint: NSPoint(x: rowView.frame.midX, y: rowView.frame.midY)), last)
+            let headerView = try XCTUnwrap(all.rowViews[safe: rowItem - 2])
+            XCTAssertEqual(all.listLayout.items[rowItem - 2], .header("Workspaces"))
+            XCTAssertNil(all.row(atListPoint: NSPoint(x: headerView.frame.midX, y: headerView.frame.midY)))
+
+            // Back from URL input (Escape), the sections come back.
+            all.switchToURLMode()
+            all.switchToActionsMode()
+            XCTAssertEqual(headers(all), ["Commands", "Workspaces"])
+            XCTAssertEqual(all.searchField?.placeholderString, "Type a command or a workspace...")
 
             // A dialog has waited 12 minutes in it.
             let column = try XCTUnwrap(billing.columns.first)
@@ -78,16 +98,20 @@ final class QuickSwitcherFlowTests: XCTestCase {
                 ["Move to Inactive"],
                 in: shell.sidebar.workspaceActionMenu(workspaceIndex: try index(of: parked, in: shell), columnIndex: nil)
             )
+            shell.addWorkspace(title: "parking-lot", cwd: harness.worktree)
             shell.switchToWorkspace(try index(of: repo, in: shell))
             XCTAssertTrue(parked.isInactive)
             XCTAssertTrue(shell.sidebar.isInactiveSectionCollapsed)
             XCTAssertFalse(shell.sidebar.dotWorkspaceInfos.contains { $0.id == parked.id })
 
-            let palette = try search("parked", in: harness)
-            let row = try XCTUnwrap(palette.filteredActions.first)
-            XCTAssertEqual(row.title, "parked")
+            // Below the active workspace that matches as well.
+            let palette = try search("park", in: harness)
+            XCTAssertEqual(headers(palette).first, "Workspaces")
+            XCTAssertEqual(palette.filteredActions.prefix(2).map(\.title), ["parking-lot", "parked"])
+            let row = palette.filteredActions[1]
             XCTAssertTrue(row.isDimmed)
             XCTAssertTrue(row.subtitle.hasPrefix("Inactive · "), row.subtitle)
+            harness.press(.down, in: palette.panel)
             harness.press(.returnKey, in: palette.panel)
 
             XCTAssertIdentical(shell.activeWorkspace, parked)
@@ -165,6 +189,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
             XCTAssertEqual(landed, ["acme#0", "second#0", "parked#0", "acme#0"])
             XCTAssertEqual(shell.activeProfileID, clients.id)
             XCTAssertTrue(parked.isInactive)
+            XCTAssertTrue(shell.sidebar.isInactiveSectionCollapsed, "landing on an inactive workspace kept the section folded")
             XCTAssertFalse(shell.quickSwitch.hint?.isShowing ?? false)
 
             // Answered at the terminal: the next press starts over at the

@@ -10,7 +10,7 @@ enum PaletteRanking {
         /// Searched with less weight than the title: a command's subtitle;
         /// a workspace's branch, space and folder.
         let keys: [String]
-        /// Listed after the rows that don't sink, whatever its score: an
+        /// Listed after the rows that don't sink and match as well: an
         /// inactive workspace.
         var sinks = false
     }
@@ -33,31 +33,75 @@ enum PaletteRanking {
         return ([title] + keys).compactMap { $0 }.max()
     }
 
-    /// The rows each section lists for `query` and the order the sections
-    /// show in. Rows: best match first, sinking ones after the others,
-    /// equal scores in the order given. Sections: the one holding the best
-    /// match first — typing a workspace's name puts it on top, where Return
-    /// opens it — equal ones in the order given; a section with no match is
-    /// left out. An empty query lists every row in the order given, sinking
-    /// ones last, and every non-empty section in the order given.
-    static func rank(query: String, sections: [[Candidate]]) -> [RankedSection] {
-        let scored = sections.enumerated().map { index, candidates in
-            let matches = candidates.enumerated().compactMap { row, candidate -> (row: Int, score: Int, sinks: Bool)? in
-                if query.isEmpty { return (row, 0, candidate.sinks) }
-                return score(query: query, candidate: candidate).map { (row, $0, candidate.sinks) }
-            }
-            let rows = matches.sorted { lhs, rhs in
-                if lhs.sinks != rhs.sinks { return !lhs.sinks }
-                if lhs.score != rhs.score { return lhs.score > rhs.score }
-                return lhs.row < rhs.row
-            }
-            return (section: index, rows: rows.map(\.row), best: matches.map(\.score).max())
+    /// Whether `query` names `title` the way people type a name: it starts
+    /// one of its words ("term", "new t" for "New Terminal", "quick" for
+    /// "feat/quick-switcher") or spells initials of its words ("nt"). A
+    /// looser match ("notes" scattered across "Clean Up Merged Worktrees")
+    /// doesn't.
+    static func namesTitle(query: String, title: String) -> Bool {
+        let query = Array(query.lowercased())
+        let title = Array(title.lowercased())
+        guard !query.isEmpty else { return false }
+        let wordStarts = title.indices.filter { $0 == 0 || wordSeparators.contains(title[$0 - 1]) }
+        if wordStarts.contains(where: { title[$0...].starts(with: query) }) { return true }
+        var next = query.startIndex
+        for start in wordStarts where next < query.endIndex && title[start] == query[next] {
+            next += 1
         }
-        return scored
-            .filter { !$0.rows.isEmpty }
-            .sorted { lhs, rhs in
-                lhs.best != rhs.best ? (lhs.best ?? 0) > (rhs.best ?? 0) : lhs.section < rhs.section
+        return next == query.endIndex
+    }
+
+    /// FuzzyMatch's word boundaries.
+    private static let wordSeparators: Set<Character> = [" ", "-", "_", "/", ".", "("]
+
+    /// The rows each section lists for `query`, and the order the sections
+    /// show in.
+    ///
+    /// Rows: those whose title `query` names first (typing a workspace's
+    /// name opens it, an inactive one too), then the rows that don't sink
+    /// before those that do, then the best match; equal ones in the order
+    /// given.
+    ///
+    /// Sections are judged by the row they show first. Those whose first
+    /// row's title `query` names come first, in the order given: typing a
+    /// command's name, or its initials, never puts a workspace above it.
+    /// The others follow, best first row first. A section with no match is
+    /// left out.
+    ///
+    /// An empty query lists every row in the order given, sinking ones
+    /// last, and every non-empty section in the order given.
+    static func rank(query: String, sections: [[Candidate]]) -> [RankedSection] {
+        let ranked = sections.enumerated().compactMap { index, candidates -> (section: RankedSection, named: Bool, best: Int)? in
+            let matches = candidates.enumerated().compactMap { row, candidate -> Match? in
+                if query.isEmpty { return Match(row: row, score: 0, named: false, sinks: candidate.sinks) }
+                return score(query: query, candidate: candidate).map {
+                    Match(row: row, score: $0, named: namesTitle(query: query, title: candidate.title), sinks: candidate.sinks)
+                }
             }
-            .map { RankedSection(section: $0.section, rows: $0.rows) }
+            let rows = matches.sorted(by: Match.precedes)
+            guard let first = rows.first else { return nil }
+            return (RankedSection(section: index, rows: rows.map(\.row)), first.named, first.score)
+        }
+        return ranked
+            .sorted { lhs, rhs in
+                if lhs.named != rhs.named { return lhs.named }
+                if !lhs.named, lhs.best != rhs.best { return lhs.best > rhs.best }
+                return lhs.section.section < rhs.section.section
+            }
+            .map(\.section)
+    }
+
+    private struct Match {
+        let row: Int
+        let score: Int
+        let named: Bool
+        let sinks: Bool
+
+        static func precedes(_ lhs: Match, _ rhs: Match) -> Bool {
+            if lhs.named != rhs.named { return lhs.named }
+            if lhs.sinks != rhs.sinks { return !lhs.sinks }
+            if lhs.score != rhs.score { return lhs.score > rhs.score }
+            return lhs.row < rhs.row
+        }
     }
 }

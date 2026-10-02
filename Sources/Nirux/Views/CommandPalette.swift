@@ -7,20 +7,20 @@ struct PaletteAction {
     let subtitle: String
     /// Shown on the right. Only table chords, so every label is bound.
     let shortcut: NiruxShortcuts?
-    /// What the search matches besides the title; nil: the subtitle. A
-    /// workspace's branch, space and folder name.
-    var searchKeys: [String]?
+    /// What the search matches and how the row ranks; nil: its title, then
+    /// its subtitle. A workspace's title, branch, space and folder, inactive
+    /// ones last.
+    var ranking: PaletteRanking.Candidate?
     /// Shown on the right instead of a shortcut: a workspace's agent state.
     var badge: PaletteBadge?
-    /// Listed after the other rows of its section, its title dimmed: an
-    /// inactive workspace.
+    /// The title dimmed: an inactive workspace.
     var isDimmed = false
     /// Draws the icon in this color: a workspace's space dot.
     var iconColor: NSColor?
     let action: () -> Void
 
     var rankingCandidate: PaletteRanking.Candidate {
-        PaletteRanking.Candidate(title: title, keys: searchKeys ?? [subtitle], sinks: isDimmed)
+        ranking ?? PaletteRanking.Candidate(title: title, keys: [subtitle])
     }
 }
 
@@ -272,11 +272,14 @@ final class CommandPalette: NSObject {
     private func rowIndexAtEvent(_ event: NSEvent) -> Int? {
         guard let listContainer, let contentView = panel?.contentView else { return nil }
         let locInContent = contentView.convert(event.locationInWindow, from: nil)
-        let locInList = listContainer.convert(locInContent, from: contentView)
-        guard listContainer.bounds.contains(locInList) else { return nil }
+        return row(atListPoint: listContainer.convert(locInContent, from: contentView))
+    }
 
+    /// The row under `point`, in the list's coordinates: nil on a header.
+    func row(atListPoint point: NSPoint) -> Int? {
+        guard let listContainer, listContainer.bounds.contains(point) else { return nil }
         // From the top of the list's content.
-        let contentY = listContainer.bounds.height + scrollY - locInList.y
+        let contentY = listContainer.bounds.height + scrollY - point.y
         guard mode == .urlInput else { return listLayout.row(atContentY: contentY) }
         let index = Int(floor(contentY / Self.urlRowHeight))
         return urlSuggestions.indices.contains(index) ? index : nil
@@ -343,7 +346,7 @@ final class CommandPalette: NSObject {
         }
     }
 
-    private func updateScrollIndicator() {
+    func updateScrollIndicator() {
         guard let indicator = scrollIndicator, let listContainer else { return }
         let containerHeight = listContainer.bounds.height
         let totalHeight = contentHeight
@@ -356,7 +359,7 @@ final class CommandPalette: NSObject {
         indicator.frame = NSRect(x: listContainer.bounds.width - 6, y: barY, width: 3, height: barHeight)
     }
 
-    func rebuildList() {
+    private func rebuildList() {
         guard let listContainer else { return }
         rowViews.forEach { $0.removeFromSuperview() }
         rowViews.removeAll()

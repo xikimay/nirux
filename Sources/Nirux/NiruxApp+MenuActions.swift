@@ -46,7 +46,9 @@ extension NiruxApp {
         shell?.focusWorkspace(.down)
     }
 
+    /// One jump per press: a held ⌘J would spin through the queue.
     @objc func jumpToNextWaitingAgent(_ sender: Any?) {
+        if let event = NSApp.currentEvent, event.type == .keyDown, event.isARepeat { return }
         shell?.jumpToNextWaitingAgent()
     }
 

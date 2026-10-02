@@ -32,6 +32,7 @@ extension NiruxShellView {
     /// space in sidebar order.
     func quickSwitchWorkspaces(snapshot: ProcessSnapshot, now: TimeInterval) -> [QuickSwitchWorkspace] {
         let spaces = [activeProfileID] + profiles.map(\.id).filter { $0 != activeProfileID }
+        let current = activeWorkspace
         return spaces.flatMap { workspaceStore.visibleWorkspaceIndices(in: $0) }
             .map { workspaces[$0] }
             .filter { !$0.isClosing }
@@ -47,6 +48,8 @@ extension NiruxShellView {
                     spaceColorHex: space.colorHex,
                     folder: workspace.cwd,
                     isInactive: workspace.isInactive,
+                    isCurrent: workspace === current,
+                    showsSpace: profiles.count > 1,
                     agent: .summary(waits: waits, isWorking: isWorking)
                 )
             }
@@ -55,15 +58,13 @@ extension NiruxShellView {
     static let workspacesPaletteSectionTitle = "Workspaces"
 
     func workspacePaletteSection(snapshot: ProcessSnapshot, now: TimeInterval) -> PaletteSection {
-        let showsSpace = profiles.count > 1
         let rows = quickSwitchWorkspaces(snapshot: snapshot, now: now).map { workspace in
-            let subtitle = workspace.subtitle(folderDisplay: workspace.folder.abbreviatedPath(), showsSpace: showsSpace)
-            return PaletteAction(
+            PaletteAction(
                 icon: "●",
                 title: workspace.title,
-                subtitle: workspace.isInactive ? "Inactive · \(subtitle)" : subtitle,
+                subtitle: workspace.subtitle(folderDisplay: workspace.folder.abbreviatedPath()),
                 shortcut: nil,
-                searchKeys: workspace.candidate.keys,
+                ranking: workspace.candidate,
                 badge: workspace.agent.map { PaletteBadge($0, now: now) },
                 isDimmed: workspace.isInactive,
                 iconColor: NSColor.niruxColor(hex: workspace.spaceColorHex) ?? .niruxAccent
@@ -84,19 +85,6 @@ extension NiruxShellView {
 
     // MARK: - Next Waiting Agent
 
-    /// Every agent blocked on the user, in every workspace and space,
-    /// longest wait first.
-    func waitingAgentQueue(snapshot: ProcessSnapshot, now: TimeInterval) -> [WaitingAgent] {
-        let agents = workspaces.filter { !$0.isClosing }.flatMap { workspace in
-            workspace.columns.compactMap { column in
-                quickSwitch.agentWait(column, snapshot, now).map {
-                    WaitingAgent(workspaceID: workspace.id, columnID: column.id, wait: $0)
-                }
-            }
-        }
-        return WaitingAgentQueue.ordered(agents)
-    }
-
     static let noWaitingAgentHint = "No agent is waiting on you"
 
     /// Next Waiting Agent (⌘J): to the agent blocked on the user the
@@ -104,8 +92,12 @@ extension NiruxShellView {
     /// `WaitingAgentQueue.next`), whatever its workspace or space. With
     /// none, a hint says so, without a beep.
     func jumpToNextWaitingAgent() {
-        let queue = waitingAgentQueue(snapshot: ProcessSnapshot(), now: Date().timeIntervalSince1970)
+        let snapshot = ProcessSnapshot()
+        let now = Date().timeIntervalSince1970
+        let queue = WaitingAgentQueue.collect(from: workspaces) { self.quickSwitch.agentWait($0, snapshot, now) }
         let current = activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }?.id
+        // ⌘J with the palette open: the hint would show under it.
+        if commandPalette?.isVisible == true { commandPalette?.dismiss() }
         guard let next = WaitingAgentQueue.next(from: current, lastJump: quickSwitch.lastJump, in: queue),
               let workspace = workspaces.first(where: { $0.id == next.workspaceID }),
               let columnIndex = workspace.columns.firstIndex(where: { $0.id == next.columnID }) else {
@@ -114,7 +106,6 @@ extension NiruxShellView {
             return
         }
         quickSwitch.lastJump = next.columnID
-        if commandPalette?.isVisible == true { commandPalette?.dismiss() }
         focusWorkspace(id: workspace.id, column: columnIndex)
     }
 
@@ -130,10 +121,12 @@ extension NiruxShellView {
 
 extension PaletteBadge {
     init(_ state: QuickSwitchAgentState, now: TimeInterval) {
+        let tone: Tone
         switch state {
-        case .working: self.init(text: state.label(now: now), tone: .working)
-        case .waiting: self.init(text: state.label(now: now), tone: .waiting)
-        case .failed: self.init(text: state.label(now: now), tone: .failure)
+        case .working: tone = .working
+        case .waiting: tone = .waiting
+        case .failed: tone = .failure
         }
+        self.init(text: state.label(now: now), tone: tone)
     }
 }

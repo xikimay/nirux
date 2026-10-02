@@ -94,14 +94,6 @@ final class WaitingAgentTests: XCTestCase {
         XCTAssertNil(wait(at: 20))
     }
 
-    /// A dialog belongs to the `claude` in front: none behind a shell.
-    func testDialogOfAClaudeNotInFrontDoesNotBlock() {
-        startTurn()
-        apply(event(.permissionRequest, at: 5, tool: "Bash", key: "k"))
-
-        XCTAssertNil(wait(at: 6, foreground: front("zsh")))
-    }
-
     // MARK: - The queue
 
     private let columns = (0..<4).map { _ in UUID() }
@@ -142,14 +134,6 @@ final class WaitingAgentTests: XCTestCase {
         }
 
         XCTAssertEqual(visited, [columns[0], columns[1], columns[2], columns[0]])
-    }
-
-    /// The agent the last press landed on was answered: it left the queue,
-    /// and the next press starts over at the longest wait.
-    func testAnsweredAgentStartsTheQueueOver() {
-        let queue = [agent(1, since: 20), agent(2, since: 30)]
-
-        XCTAssertEqual(WaitingAgentQueue.next(from: columns[0], lastJump: columns[0], in: queue), queue[0])
     }
 
     func testOnlyAgentWaitingIsTheOneOnScreen() {

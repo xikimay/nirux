@@ -41,6 +41,17 @@ struct WaitingAgent: Equatable, Sendable {
 /// The agents blocked on the user, longest wait first: what Next Waiting
 /// Agent (⌘J) walks through.
 enum WaitingAgentQueue {
+    /// The agents of `workspaces` that `wait` finds blocked (a workspace
+    /// closing is left out), longest wait first.
+    @MainActor
+    static func collect(from workspaces: [WorkspaceState], wait: (ColumnState) -> AgentWait?) -> [WaitingAgent] {
+        ordered(workspaces.filter { !$0.isClosing }.flatMap { workspace in
+            workspace.columns.compactMap { column in
+                wait(column).map { WaitingAgent(workspaceID: workspace.id, columnID: column.id, wait: $0) }
+            }
+        })
+    }
+
     /// Longest wait first; equal waits keep the order given.
     static func ordered(_ agents: [WaitingAgent]) -> [WaitingAgent] {
         agents.enumerated()
