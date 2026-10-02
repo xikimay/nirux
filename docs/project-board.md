@@ -672,7 +672,8 @@ pull request.
 
 ## 4. Guardrails
 
-- **Nothing without a click.** The board only reads. The queue runs after Start
+- **Nothing without a click.** The board only reads, but for Retarget
+  ([stacked pull requests](pr-stacks.md)). The queue runs after Start
   and a confirmation. Resume, Clean Up and Ask Agent to Resolve are each one
   click on one row, and the last one doesn't even submit.
 - **The confirmation sheet** lists, in order, each PR with its head SHA and
