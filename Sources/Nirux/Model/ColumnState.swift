@@ -66,6 +66,9 @@ final class ColumnState {
     static let boringTitles: Set<String> = ["zsh", "bash", "fish", "sh", "-zsh", "-bash"]
     private(set) var titleBar: NSView?
     private var titleLabel: NSTextField?
+    /// What the title bar reads ("claude · ~/repo"); empty before its
+    /// first refresh.
+    var titleText: String { titleLabel?.stringValue ?? "" }
     private var titleBorder: NSView?
 
     /// Height reserved for the title bar (always shown for terminal columns)

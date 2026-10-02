@@ -80,6 +80,10 @@ extension NiruxApp {
         shell?.showWorkspaceSearch()
     }
 
+    @objc func showGlobalSearch(_ sender: Any?) {
+        shell?.showGlobalSearch()
+    }
+
     // The find items act on the main window's focused terminal column only:
     // with a panel or a detached Web Inspector key, the bar would open
     // behind it.
@@ -216,6 +220,11 @@ extension NiruxApp {
             withTitle: "Search Workspace…",
             action: #selector(showWorkspaceSearch(_:)),
             shortcut: .searchWorkspace
+        )
+        editMenu.addItem(
+            withTitle: "Search Everywhere…",
+            action: #selector(showGlobalSearch(_:)),
+            shortcut: .searchEverywhere
         )
 
         let sendSelectionItem = NSMenuItem(

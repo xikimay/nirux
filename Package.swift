@@ -18,6 +18,7 @@ let package = Package(
         .executableTarget(
             name: "Nirux",
             dependencies: [
+                .product(name: "GhosttyKit", package: "libghostty-spm"),
                 .product(name: "GhosttyTerminal", package: "libghostty-spm"),
                 .product(name: "Sparkle", package: "Sparkle")
             ],

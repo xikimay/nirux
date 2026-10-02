@@ -18,6 +18,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         tests: [
             "testTerminalColumnCommands": ["New Terminal", "Resize Column (Cycle Width)"],
             "testEditorCommands": ["Open Editor", "Toggle Editor Diff", "Search Workspace"],
+            "testSearchEverywhere": ["Search Everywhere"],
             "testBrowserCommands": ["Open Browser", "Toggle Web Inspector"],
             "testImportBrowserCookies": ["Import Browser Cookies"],
             "testAgentCommands": ["Open Claude Code", "Open Codex"],
@@ -91,6 +92,45 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.waitUntil("the result to open in the editor") { editor.activePath == target }
             XCTAssertFalse(field.window?.isVisible ?? true, "the search panel stayed open")
             XCTAssertEqual(workspace.columns.compactMap(\.editorColumn).count, 1, "the result opened a second editor")
+        }
+    }
+
+    /// The match sits far up the scrollback of a terminal in another
+    /// workspace: picking it brings that column forward, find bar open,
+    /// and Ghostty scrolls to that very match.
+    func testSearchEverywhere() throws {
+        try UIFlowHarness.run { harness in
+            let home = try XCTUnwrap(harness.shell.activeWorkspace)
+            harness.shell.addWorkspace(title: "other", cwd: harness.worktree)
+            let other = try XCTUnwrap(harness.shell.activeWorkspace)
+            let column = try XCTUnwrap(other.columns.first)
+            let session = try XCTUnwrap(column.pty?.terminalSession)
+            harness.waitUntil("the terminal's surface") { session.readViewportText() != nil }
+            let needle = "flow-scrollback-needle"
+            session.receive((1...200).map { [20, 150].contains($0) ? "\(needle) \($0)" : "row \($0)" }.joined(separator: "\r\n") + "\r\n")
+            harness.waitUntil("the rows on screen") { session.readViewportText()?.contains("row 200") == true }
+            XCTAssertFalse(session.readViewportText()?.contains("\(needle) 20\n") ?? true, "the older match starts on screen")
+            harness.shell.focusWorkspace(id: home.id)
+
+            harness.runPaletteCommand("Search Everywhere")
+            let field = try XCTUnwrap(harness.waitForField(placeholder: GlobalSearchPanel.placeholder))
+            harness.type(needle.uppercased(), into: field)
+            let panel = try XCTUnwrap(harness.shell.globalSearchPanel)
+            harness.waitUntil("the search to end") { !panel.isSearching && !panel.rows.isEmpty }
+            XCTAssertEqual(panel.rows.map(\.match.excerpt), ["\(needle) 150", "\(needle) 20"])
+            XCTAssertEqual(panel.rows.map(\.place), ["other › Terminal 1", "other › Terminal 1"])
+            XCTAssertEqual(panel.statusLabel?.stringValue, "2 matches in 1 of 2 terminals")
+
+            harness.press(.down, in: field.window)
+            harness.press(.returnKey, in: field.window)
+            XCTAssertFalse(panel.isVisible)
+            XCTAssertIdentical(harness.shell.activeWorkspace, other)
+            XCTAssertIdentical(other.columns[safe: other.focusedIndex], column)
+            XCTAssertTrue(column.isEditingFind)
+            XCTAssertEqual(column.findBar?.field.stringValue, needle.uppercased())
+            harness.waitUntil("Ghostty to scroll to the older match") {
+                session.readViewportText()?.contains("\(needle) 20\n") == true
+            }
         }
     }
 

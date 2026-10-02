@@ -465,7 +465,7 @@ private final class LineBuffer: @unchecked Sendable {
     }
 }
 
-private final class SearchResultRowView: NSTableRowView {
+final class SearchResultRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {
         if selectionHighlightStyle != .none {
             NSColor.niruxAccent.withAlphaComponent(0.18).setFill()

@@ -358,6 +358,27 @@ final class TerminalSearchTests: XCTestCase {
         XCTAssertEqual(recorder.sent, [.search("er")])
     }
 
+    /// Search Everywhere counts its match from Ghostty's newest one: on a
+    /// bar already searching that needle, the pick starts over.
+    @MainActor
+    func testAPickedMatchSearchesAgainFromTheNewestMatch() {
+        let column = ColumnState(cwd: "/tmp")
+        column.showFindBar()
+        let recorder = SearchRecorder()
+        column.terminalSearch = recorder.session
+        guard let bar = column.findBar else { return XCTFail("no find bar") }
+        bar.field.stringValue = "error"
+        bar.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: bar.field))
+        recorder.firePending()
+        column.findNext()
+        recorder.sent = []
+
+        column.showFindBar(searching: "error", selecting: 1)
+        recorder.firePending()
+        XCTAssertEqual(recorder.sent, [.end, .search("error"), .next, .next])
+        XCTAssertTrue(column.isFindBarOpen)
+    }
+
     // MARK: - Key routing
 
     func testKeysInTheFieldEditTheField() {
