@@ -641,22 +641,29 @@ extension NiruxShellView {
         guard let cwd = activeWorkspace?.focusedWorkingDirectory,
               let repoRoot = GitWorktree.repoRoot(at: cwd)
         else { return }
+        let openWorkspaces = workspaces.filter { !$0.isClosing }.map { (id: $0.id, cwd: $0.cwd) }
 
         // List worktrees on background thread, then show palette
         DispatchQueue.global(qos: .userInitiated).async {
             let worktrees = GitWorktree.list(repoRoot: repoRoot)
+            // The worktree each workspace is open in (it reads files).
+            let workspaceWorktrees = openWorkspaces.compactMap { workspace in
+                Self.worktreeCleanupPath(forCwd: workspace.cwd).map { (id: workspace.id, path: Self.comparablePath($0)) }
+            }
+            let comparablePaths = worktrees.map { Self.comparablePath($0.path) }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 // Filter out the main repo (first entry is usually the main worktree)
-                let entries = worktrees.filter { $0.path != repoRoot }
+                let entries = zip(worktrees, comparablePaths).filter { $0.0.path != repoRoot }
                 guard !entries.isEmpty else { return }
 
                 // Build palette actions from worktree entries
-                let actions = entries.map { entry in
+                let actions = entries.map { entry, comparablePath in
                     let title = entry.branch ?? URL(fileURLWithPath: entry.path).lastPathComponent
-                    let subtitle = entry.path.abbreviatedPath()
+                    let open = self.preferredWorkspace(among: workspaceWorktrees.filter { $0.path == comparablePath }.map(\.id))
+                    let subtitle = (open.map { "Open in “\($0.title)” · " } ?? "") + entry.path.abbreviatedPath()
                     return PaletteAction(icon: "🌿", title: title, subtitle: subtitle, shortcut: nil) { [weak self] in
-                        self?.addWorkspace(title: title, cwd: entry.path)
+                        self?.openWorktree(path: entry.path, title: title, workspaceID: open?.id)
                     }
                 }
 
@@ -672,6 +679,24 @@ extension NiruxShellView {
                 self.commandPalette?.actions = actions
                 self.commandPalette?.show(relativeTo: window)
             }
+        }
+    }
+
+    /// "Open Worktree" goes back to a workspace already open in the
+    /// worktree instead of opening another: the active one, else one in the
+    /// active space, else the first.
+    private func preferredWorkspace(among ids: [String]) -> WorkspaceState? {
+        let open = workspaces.filter { !$0.isClosing && ids.contains($0.id) }
+        return open.first { $0 === activeWorkspace }
+            ?? open.first { $0.profileID == activeProfileID }
+            ?? open.first
+    }
+
+    private func openWorktree(path: String, title: String, workspaceID: String?) {
+        if let workspaceID, workspaces.contains(where: { $0.id == workspaceID && !$0.isClosing }) {
+            focusWorkspace(id: workspaceID)
+        } else {
+            addWorkspace(title: title, cwd: path)
         }
     }
 

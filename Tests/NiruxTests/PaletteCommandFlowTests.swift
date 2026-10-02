@@ -209,9 +209,21 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(opened.title, harness.worktreeBranch)
             XCTAssertEqual(NiruxShellView.comparablePath(opened.cwd), NiruxShellView.comparablePath(harness.worktree))
 
+            // Once it is open, it goes back to that workspace.
+            let repoIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0.cwd == harness.repo })
+            shell.switchToWorkspace(repoIndex)
+            let workspaceCount = shell.workspaces.count
+            harness.runPaletteCommand("Open Worktree")
+            harness.waitUntil("the worktree list again") {
+                palette.isVisible && palette.filteredActions.map(\.title) == [harness.worktreeBranch]
+            }
+            XCTAssertTrue(palette.filteredActions.first?.subtitle.hasPrefix("Open in “\(harness.worktreeBranch)”") == true)
+            harness.press(.returnKey, in: palette.panel)
+            XCTAssertTrue(shell.activeWorkspace === opened)
+            XCTAssertEqual(shell.workspaces.count, workspaceCount)
+
             // Creates the worktree off the main thread, then opens it with an
             // agent (the launch double).
-            let repoIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0.cwd == harness.repo })
             shell.switchToWorkspace(repoIndex)
             harness.runPaletteCommand("New Worktree")
             let branchField = try XCTUnwrap(harness.waitForField(placeholder: "Branch name (e.g. feat/my-feature)"))
