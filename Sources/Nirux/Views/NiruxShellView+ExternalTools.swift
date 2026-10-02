@@ -150,12 +150,15 @@ extension NiruxShellView {
         PRDetect.diffPathsAsync(cwd: cwd) { [weak self, weak workspace] paths in
             guard let self, let workspace else { return }
             guard !paths.isEmpty else {
-                NSSound.beep()
+                // An empty list is also what git gives outside a repository.
+                self.showToast(GitWorktree.repoRoot(at: cwd) == nil
+                    ? "Not in a git repository: \(cwd.abbreviatedPath())"
+                    : "No unstaged changes")
                 return
             }
 
             guard let editor = self.editorColumn(in: workspace, cwd: cwd) else {
-                NSSound.beep()
+                self.showToast("Couldn’t open an editor for the changes", tone: .error)
                 return
             }
             editor.showDiffCollection(

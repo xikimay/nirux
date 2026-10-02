@@ -49,7 +49,9 @@ extension NiruxShellView {
 
     func deleteSpace(profileID: String) {
         // Asked while the confirmation was up: a queue started meanwhile.
-        guard mergeQueues[profileID]?.isRunning != true else { return NSSound.beep() }
+        guard mergeQueues[profileID]?.isRunning != true else {
+            return showToast("A merge queue started in this space: stop it before deleting the space")
+        }
         guard workspaceStore.deleteProfile(id: profileID) else { return }
         projectStore.markDeleted(profileID)
         // Opened while the confirmation was up: its space is gone.

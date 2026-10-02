@@ -97,6 +97,11 @@ final class NiruxShellView: NSView {
     var worktreeCleanupsInFlight: Set<String> = [] {
         didSet { if worktreeCleanupsInFlight != oldValue { updateSidebar() } }
     }
+    /// The toast on screen (see NiruxShellView+Toast), and a count that
+    /// tells a pending dismissal whether it still applies.
+    var toast: ToastView?
+    var toastGeneration = 0
+    var toastShownAt: TimeInterval = 0
     var boardSettingsPanel: BoardSettingsPanel?
     /// A "Board Settings…" reading board.json and the checkouts, so a
     /// second click doesn't open a second form.
@@ -291,6 +296,7 @@ final class NiruxShellView: NSView {
             statusBar: NSRect(x: 0, y: 0, width: bounds.width, height: statusH)
         )
         applyChromeLayout(frames, animated: animated)
+        layoutToast(frames)
 
         // Each workspace fills the viewport; the strip stacks them and is
         // positioned so the active workspace is the one on screen.
@@ -582,7 +588,7 @@ extension NiruxShellView {
         guard let window else { return }
         guard let cwd = activeWorkspace?.focusedWorkingDirectory,
               let repoRoot = GitWorktree.repoRoot(at: cwd)
-        else { return }
+        else { return showToast("Not in a git repository: \(activeWorkspace?.focusedWorkingDirectory.abbreviatedPath() ?? "")") }
 
         if worktreePanel == nil {
             worktreePanel = WorktreePanel()
@@ -642,7 +648,7 @@ extension NiruxShellView {
         guard let window else { return }
         guard let cwd = activeWorkspace?.focusedWorkingDirectory,
               let repoRoot = GitWorktree.repoRoot(at: cwd)
-        else { return }
+        else { return showToast("Not in a git repository: \(activeWorkspace?.focusedWorkingDirectory.abbreviatedPath() ?? "")") }
         // Not the active one: its folder is where it was opened, not where
         // its terminal is now, and going back to it would do nothing.
         let openWorkspaces = workspaces.filter { !$0.isClosing && $0 !== activeWorkspace }.map { (id: $0.id, cwd: $0.cwd) }
@@ -664,7 +670,7 @@ extension NiruxShellView {
                 guard let self else { return }
                 // Leave out the checkout the palette was opened from
                 let entries = zip(worktrees, comparablePaths).filter { _, path in path != current }
-                guard !entries.isEmpty else { return }
+                guard !entries.isEmpty else { return self.showToast("No other worktree found in this repository") }
 
                 // Build palette actions from worktree entries
                 let actions = entries.map { entry, comparablePath in

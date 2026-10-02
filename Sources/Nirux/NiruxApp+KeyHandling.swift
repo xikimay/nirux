@@ -7,6 +7,8 @@ extension NiruxApp {
     /// Click on a column to focus it without changing layout.
     func setupClickToFocus() {
         NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+            // Before the click is handled, so a toast it shows stays.
+            if event.window === self?.mainWindow { self?.shell?.dismissToastOnInput() }
             guard let shell = self?.shell,
                   let workspace = shell.activeWorkspaceForKeyIntercept,
                   let contentView = event.window?.contentView
@@ -174,6 +176,8 @@ extension NiruxApp {
             // panels, a detached Web Inspector, Sparkle — keep AppKit's own
             // key handling instead of feeding the focused column.
             guard let shell = self?.shell, event.window === self?.mainWindow else { return event }
+            // Before the key is handled, so a toast it shows stays.
+            shell.dismissToastOnInput()
 
             // Don't intercept when an overlay is active (picker, etc.)
             if shell.isOverlayActive { return event }
