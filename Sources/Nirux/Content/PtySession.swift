@@ -525,15 +525,27 @@ final class PtySession: @unchecked Sendable {
         state.isProcessInForegroundJob(process, snapshot: snapshot)
     }
 
-    /// Returns the cwd of the child process (follows cd).
+    /// Returns the cwd of the child process (follows cd), nil until the
+    /// shell has exec'd.
     /// Uses `proc_pidinfo(PROC_PIDVNODEPATHINFO)` — `/proc` isn't available
     /// on macOS and `proc_pidpath` gives the executable path, not the cwd.
     var childCwd: String? {
         guard state.childPid > 0 else { return nil }
-        return cwdFromPid(state.childPid)
+        return Self.cwd(ofExecedProcess: state.childPid)
     }
 
-    private func cwdFromPid(_ pid: pid_t) -> String? {
+    /// Nil until `pid` has exec'd. Before that, the child `start` forked
+    /// may not have reached its `chdir` yet and still sits in Nirux's own
+    /// working directory (`/` for the app, the checkout under `swift test`):
+    /// an editor, a save or a file picker reading it would root itself
+    /// there. The flag is read first: a fork starts without it, it never
+    /// clears, and the `chdir` comes before the exec, so the cwd read after
+    /// it is the shell's.
+    static func cwd(ofExecedProcess pid: pid_t) -> String? {
+        var bsdInfo = proc_bsdshortinfo()
+        let bsdSize = Int32(MemoryLayout<proc_bsdshortinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &bsdInfo, bsdSize) == bsdSize,
+              bsdInfo.pbsi_flags & UInt32(PROC_FLAG_EXEC) != 0 else { return nil }
         // Use proc_pidinfo with PROC_PIDVNODEPATHINFO to get cwd
         var info = proc_vnodepathinfo()
         let size = MemoryLayout<proc_vnodepathinfo>.size
