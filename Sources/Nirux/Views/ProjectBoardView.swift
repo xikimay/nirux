@@ -578,10 +578,10 @@ final class ProjectBoardView: NSView {
             return cell
         }
         guard pullRequest.isOpen else { return nil }
-        if let merged = row.stack?.mergedBase {
-            return retargetCell(number: number, merged: merged, row: row, queue: queue, baseBranch: baseBranch)
-        }
         if let refusal = ProjectBoard.queueRefusal(row, baseBranch: baseBranch) {
+            if let merged = row.stack?.mergedBase {
+                return retargetCell(number: number, merged: merged, refusal: refusal, queue: queue)
+            }
             return QueueCell(text: refusal, detail: last.map { "last: \($0)" }, detailTone: lastIsFailure ? .failure : .normal,
                              tooltip: lastReason.map { "Can’t join the queue: \(refusal). Last queue: \($0)" }
                                 ?? "Can’t join the queue: \(refusal)")
@@ -598,17 +598,14 @@ final class ProjectBoardView: NSView {
     /// based on that branch's base (docs/pr-stacks.md): the button says
     /// so, under why it can't join yet. A dry run doesn't change GitHub.
     private nonisolated static func retargetCell(
-        number: Int, merged: ProjectBoard.MergedBase, row: ProjectBoard.Row, queue: ProjectBoard.QueueState,
-        baseBranch: String?
+        number: Int, merged: ProjectBoard.MergedBase, refusal: String, queue: ProjectBoard.QueueState
     ) -> QueueCell {
-        let refusal = ProjectBoard.queueRefusal(row, baseBranch: baseBranch) ?? "base #\(merged.number) merged"
-        let command = "gh api --method PATCH …/pulls/\(number) -f base=\(merged.onto)"
         var cell = QueueCell(text: "", detail: refusal, tooltip: "Can’t join the queue: \(refusal)")
         cell.button = QueueButton(
             title: "Retarget to \(merged.onto)", isEnabled: !queue.isDryRun,
             tooltip: queue.isDryRun
-                ? "Dry run: this build doesn’t change GitHub. It would run \(command)."
-                : "#\(merged.number) is merged: base #\(number) on \(merged.onto) (\(command))"
+                ? "Dry run: this build doesn’t change GitHub." + (queue.dryRunReason.map { "\nThis build: \($0)." } ?? "")
+                : "#\(merged.number) is merged: base #\(number) on \(merged.onto), as GitHub does when a merged branch is deleted"
         )
         cell.action = .retarget(number: number, base: merged.onto)
         return cell

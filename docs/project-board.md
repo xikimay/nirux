@@ -163,7 +163,8 @@ Choices the design left open, taken as the most conservative option and
 documented in B1's pull request:
 
 - **Order inside group 2:** rows with an open pull request by number, oldest
-  first, as the queue orders them by default; then the rows with a workspace
+  first, as the queue orders them by default, a stack at its root's place
+  ([stacked pull requests](pr-stacks.md)); then the rows with a workspace
   but no open pull request, by name. Groups 3 and 4 follow, by name and by
   sidebar order.
 - **A merged pull request** marks its branch's worktree ("#52 merged") when
@@ -824,11 +825,13 @@ What the board adds:
 
 - **One batched call per repository:** `gh pr list --repo <owner/name>
   --state open --limit 100 --json number,state,headRefName,headRefOid,
-  headRepositoryOwner,headRepository,baseRefName,isDraft,mergeable,
+  headRepositoryOwner,headRepository,baseRefName,baseRefOid,isDraft,mergeable,
   statusCheckRollup,url`. It costs about 2 GraphQL points (measured with
   `rateLimit(dryRun: true)` on 2026-09-27). Recently merged PRs
   (`--state merged --limit 30`) are read every 10 minutes, for the "merged,
   clean up" rows.
+- **Its one change:** Retarget, `PATCH pulls/{n}` with a new base, on one
+  click ([stacked pull requests](pr-stacks.md)).
 - **Cadence:** every 60 s while the board is on screen, 30 s while a row has
   pending checks, nothing while it is hidden. The sidebar's `PRDetect` keeps
   running as today. Refresh reads now.

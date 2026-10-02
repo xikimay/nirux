@@ -196,8 +196,8 @@ final class ProjectBoardGitHubTests: XCTestCase {
         XCTAssertEqual(
             GitHubCLIBoardClient.pullRequestArguments(repository: "acme/widgets", state: .open),
             ["pr", "list", "--repo", "github.com/acme/widgets", "--state", "open", "--limit", "100", "--json",
-             "number,state,headRefName,headRefOid,headRepositoryOwner,headRepository,baseRefName,isDraft,mergeable,"
-                + "statusCheckRollup,url"]
+             "number,state,headRefName,headRefOid,headRepositoryOwner,headRepository,baseRefName,baseRefOid,isDraft,"
+                + "mergeable,statusCheckRollup,url"]
         )
         XCTAssertEqual(
             Array(GitHubCLIBoardClient.pullRequestArguments(repository: "acme/widgets", state: .merged).prefix(8)),
@@ -207,6 +207,12 @@ final class ProjectBoardGitHubTests: XCTestCase {
             GitHubCLIBoardClient.runArguments(repository: "acme/widgets", workflow: "nightly.yml", branch: "main"),
             ["run", "list", "--repo", "github.com/acme/widgets", "--workflow", "nightly.yml", "--branch", "main",
              "--event", "push", "--limit", "1", "--json", "status,conclusion,headSha,createdAt,updatedAt,url"]
+        )
+        // REST, as the queue's mutations.
+        XCTAssertEqual(
+            GitHubCLIBoardClient.retargetArguments(repository: "acme/widgets", number: 53, base: "main"),
+            ["api", "--hostname", "github.com", "--method", "PATCH", "repos/acme/widgets/pulls/53",
+             "-f", "base=main", "--jq", ".base.ref"]
         )
     }
 

@@ -65,6 +65,9 @@ extension ProjectBoard {
         /// Its head repository is the configured one. A fork's pull
         /// request matches no branch and gets no row.
         let isFromConfiguredRepository: Bool
+        /// The commit its base branch points to: a merged pull request's
+        /// branch untouched since its merge is a stack's spent base.
+        var baseOid: String?
 
         var isOpen: Bool { state == "OPEN" }
         var isConflicting: Bool { mergeable == "CONFLICTING" }
@@ -255,7 +258,7 @@ extension ProjectBoard {
         foreign += outsideRows(outside)
 
         let byName = { (lhs: Row, rhs: Row) in lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending }
-        let stacks = stackPlaces(open: Array(open.values), merged: Array(merged.values), baseBranch: sources.baseBranch)
+        let stacks = stackPlaces(open: open, merged: merged, baseBranch: sources.baseBranch)
         let placed = { (rows: [Row]) in
             rows.map { row in
                 var row = row
@@ -264,12 +267,10 @@ extension ProjectBoard {
             }
         }
         let active = placed(byGroup[.active] ?? [])
-        let order = { (row: Row) -> [Int] in
-            let number = row.pullRequest?.number ?? 0
-            return row.stack.map { [$0.root, $0.depth, number] } ?? [number, 0, number]
+        let order = { (row: Row) -> (Int, Int) in
+            row.stack.map { ($0.root, $0.order) } ?? (row.pullRequest?.number ?? 0, 0)
         }
-        let withOpenPullRequest = active.filter { $0.pullRequest?.isOpen == true }
-            .sorted { order($0).lexicographicallyPrecedes(order($1)) }
+        let withOpenPullRequest = active.filter { $0.pullRequest?.isOpen == true }.sorted { order($0) < order($1) }
         let withoutOpenPullRequest = active.filter { $0.pullRequest?.isOpen != true }.sorted(by: byName)
         return placed(byGroup[.main] ?? []) + withOpenPullRequest + withoutOpenPullRequest
             + (byGroup[.otherWorktree] ?? []).sorted(by: byName)

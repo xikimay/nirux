@@ -4,9 +4,9 @@ import Foundation
 
 /// The board's `gh` reads (docs/project-board.md, section 6), and its one
 /// change, a retarget (docs/pr-stacks.md). Each call runs `gh` and blocks:
-/// never on the main thread. `NiruxShellView` holds
-/// the client, so tests inject a fake: GitHub's runners have `gh`, and a
-/// test must never reach the network.
+/// never on the main thread. `NiruxShellView` holds the client, so tests
+/// inject a fake: GitHub's runners have `gh`, and a test must never reach
+/// the network.
 protocol ProjectBoardGitHub: Sendable {
     /// `gh pr list` of `repository` (`owner/name`) as JSON: the open pull
     /// requests with their checks, or the recently merged ones.
@@ -61,7 +61,7 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
 
     static let openFields = [
         "number", "state", "headRefName", "headRefOid", "headRepositoryOwner", "headRepository",
-        "baseRefName", "isDraft", "mergeable", "statusCheckRollup", "url"
+        "baseRefName", "baseRefOid", "isDraft", "mergeable", "statusCheckRollup", "url"
     ].joined(separator: ",")
     static let mergedFields = [
         "number", "state", "headRefName", "headRefOid", "headRepositoryOwner", "headRepository", "baseRefName", "url"
@@ -161,7 +161,8 @@ extension ProjectBoard {
             checks: rollup.compactMap(check(from:)),
             url: url,
             // The clean-up's own test: head owner and name, on the PR's host.
-            isFromConfiguredRepository: WorktreeCleanup.pullRequest(from: json, headRepository: repository) != nil
+            isFromConfiguredRepository: WorktreeCleanup.pullRequest(from: json, headRepository: repository) != nil,
+            baseOid: (json["baseRefOid"] as? String)?.lowercased()
         )
     }
 

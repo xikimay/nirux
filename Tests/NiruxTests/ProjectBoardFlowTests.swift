@@ -60,9 +60,16 @@ final class ProjectBoardFlowTests: XCTestCase {
             return .success(Data(runs.utf8))
         }
 
+        private var failure: ProjectBoard.FetchError?
+        /// What the next retargets answer, when GitHub refuses them.
+        var retargetFailure: ProjectBoard.FetchError? {
+            get { lock.lock(); defer { lock.unlock() }; return failure }
+            set { lock.lock(); failure = newValue; lock.unlock() }
+        }
+
         func retarget(repository: String, number: Int, base: String) -> Result<Data, ProjectBoard.FetchError> {
             record("retarget \(repository) #\(number) \(base)")
-            return .success(Data(base.utf8))
+            return retargetFailure.map { .failure($0) } ?? .success(Data(base.utf8))
         }
     }
 

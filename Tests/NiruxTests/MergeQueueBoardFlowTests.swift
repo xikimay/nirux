@@ -51,7 +51,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
        "statusCheckRollup": []},
       {"number": 14, "state": "OPEN", "headRefName": "feat/api", "headRefOid": "\(b)",
        "headRepository": {"name": "widgets"}, "headRepositoryOwner": {"login": "acme"}, "baseRefName": "feat/old",
-       "isDraft": false, "mergeable": "MERGEABLE", "url": "https://github.com/acme/widgets/pull/14",
+       "baseRefOid": "\(MQ.sha("c"))", "isDraft": false, "mergeable": "MERGEABLE", "url": "https://github.com/acme/widgets/pull/14",
        "statusCheckRollup": []}
     ]
     """
@@ -150,8 +150,6 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         }
     }
 
-    // MARK: - Helpers
-
     /// #14 is based on #10's branch, merged: Retarget bases it on `main`
     /// off the main thread, then the board reads the pull requests again.
     /// No queue starts, so the live client is never called.
@@ -165,12 +163,21 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         try withBoard(world: world, boardClient: client, isDryRun: false) { _, board in
             try waitUntil("#10 reads merged") { (try? self.row("feat/api", in: board).queueButton?.title) == "Retarget to main" }
             XCTAssertEqual(try row("feat/api", in: board).queueDetail.stringValue, "base #10 merged")
+            // GitHub refuses: the header says why, until Refresh.
+            client.retargetFailure = .failed("HTTP 422: Validation Failed")
+            try click(try XCTUnwrap(try row("feat/api", in: board).queueButton))
+            try waitUntil("the refusal shows") { board.view.statusLabel.stringValue.contains("Retarget #14: gh: HTTP 422") }
+            client.retargetFailure = nil
+            try click(board.view.refreshButton)
+            try waitUntil("Refresh clears it") { board.view.statusLabel.stringValue.hasPrefix("Updated") }
+
             let reads = client.calls.filter { $0.what == "pr open acme/widgets" }.count
             try click(try XCTUnwrap(try row("feat/api", in: board).queueButton))
             try waitUntil("the pull requests are read again") {
                 client.calls.filter { $0.what == "pr open acme/widgets" }.count > reads
             }
-            XCTAssertEqual(client.calls.filter { $0.what.hasPrefix("retarget") }.map(\.what), ["retarget acme/widgets #14 main"])
+            XCTAssertEqual(client.calls.filter { $0.what.hasPrefix("retarget") }.map(\.what),
+                           ["retarget acme/widgets #14 main", "retarget acme/widgets #14 main"])
             XCTAssertFalse(client.calls.contains(where: \.onMainThread), "gh never runs on the main thread")
         }
     }
@@ -193,6 +200,8 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             XCTAssertFalse(client.calls.contains { $0.what.hasPrefix("retarget") })
         }
     }
+
+    // MARK: - Helpers
 
     /// A shell in a window with the board of a project whose repository is
     /// acme/widgets, a workspace in its main checkout and one in the login

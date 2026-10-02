@@ -17,15 +17,15 @@ extension ProjectBoard {
         /// retargeted onto that one's base, as GitHub does when the branch
         /// is deleted. Only a root has one.
         let mergedBase: MergedBase?
-        /// For the board's order: the stack's root, then the depth in it.
+        /// For the board's order: the stack's root, then its place in the
+        /// stack, each pull request followed by those based on it.
         let root: Int
-        let depth: Int
+        let order: Int
 
         /// "2/4" in a straight stack, "on #52" in a fork, nil for a lone
         /// pull request on a merged base.
         var label: String? {
-            // A straight stack lists one pull request per depth.
-            chain.count > 1 ? "\(depth + 1)/\(chain.count)" : parent.map { "on #\($0)" }
+            chain.count > 1 ? "\(order + 1)/\(chain.count)" : parent.map { "on #\($0)" }
         }
 
         /// "Stack: #52 → #53 → #54, on main".
@@ -46,42 +46,46 @@ extension ProjectBoard {
 
     /// The place of each open pull request that is in a stack, by number.
     /// A pull request is in one when another is based on its branch, or
-    /// its own base is the branch of a merged pull request. Both lists are
-    /// of the configured repository, one pull request per head branch.
-    static func stackPlaces(open: [PullRequest], merged: [PullRequest], baseBranch: String?) -> [Int: StackPlace] {
-        let byHead = Dictionary(open.map { ($0.headRefName, $0) }, uniquingKeysWith: { $0.number > $1.number ? $0 : $1 })
-        let mergedByHead = Dictionary(merged.map { ($0.headRefName, $0) }, uniquingKeysWith: { $0.number > $1.number ? $0 : $1 })
+    /// its own base is the branch of a merged pull request, untouched
+    /// since: a long-lived branch merged once (`develop`) has moved on, or
+    /// soon will. Both are of the configured repository, by head branch.
+    /// One on the base branch is never in a stack.
+    /// Without a base branch, no merged base: nothing could tell it apart.
+    static func stackPlaces(
+        open: [String: PullRequest], merged: [String: PullRequest], baseBranch: String?
+    ) -> [Int: StackPlace] {
         func parent(of pullRequest: PullRequest) -> PullRequest? {
-            pullRequest.baseRefName.flatMap { byHead[$0] }.flatMap { $0.number == pullRequest.number ? nil : $0 }
+            guard let base = pullRequest.baseRefName, base != baseBranch else { return nil }
+            return open[base]
         }
         var children: [Int: [PullRequest]] = [:]
-        for pullRequest in open {
+        for pullRequest in open.values {
             if let parent = parent(of: pullRequest) { children[parent.number, default: []].append(pullRequest) }
         }
 
         var places: [Int: StackPlace] = [:]
         // A pull request has one base, so each root heads a tree. Pull
         // requests based on each other in a loop have no root: no place.
-        for root in open where parent(of: root) == nil {
+        for root in open.values where parent(of: root) == nil {
             var mergedBase: MergedBase?
-            if let base = root.baseRefName, base != baseBranch, let merged = mergedByHead[base],
-               let onto = merged.baseRefName, onto != base {
+            if let baseBranch, let base = root.baseRefName, base != baseBranch, let merged = merged[base],
+               root.baseOid == merged.headOid, let onto = merged.baseRefName {
                 mergedBase = MergedBase(number: merged.number, onto: onto)
             }
             guard children[root.number] != nil || mergedBase != nil else { continue }
-            var members: [(pullRequest: PullRequest, depth: Int)] = []
-            var pending = [(root, 0)]
-            while let (pullRequest, depth) = pending.popLast() {
-                members.append((pullRequest, depth))
-                let next = (children[pullRequest.number] ?? []).sorted { $0.number > $1.number }
-                pending += next.map { ($0, depth + 1) }
+            // Depth first, oldest first: each pull request, then those on it.
+            var members: [PullRequest] = []
+            var pending = [root]
+            while let pullRequest = pending.popLast() {
+                members.append(pullRequest)
+                pending += (children[pullRequest.number] ?? []).sorted { $0.number > $1.number }
             }
-            let isStraight = members.allSatisfy { (children[$0.pullRequest.number]?.count ?? 0) <= 1 }
-            let chain = isStraight ? members.map(\.pullRequest.number) : []
-            for (pullRequest, depth) in members {
+            let isStraight = members.allSatisfy { (children[$0.number]?.count ?? 0) <= 1 }
+            let chain = isStraight ? members.map(\.number) : []
+            for (order, pullRequest) in members.enumerated() {
                 places[pullRequest.number] = StackPlace(
                     parent: parent(of: pullRequest)?.number, chain: chain, rootBase: root.baseRefName ?? "",
-                    mergedBase: pullRequest.number == root.number ? mergedBase : nil, root: root.number, depth: depth
+                    mergedBase: pullRequest.number == root.number ? mergedBase : nil, root: root.number, order: order
                 )
             }
         }
