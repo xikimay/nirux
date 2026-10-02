@@ -1,9 +1,10 @@
 # Project Board
 
 Status: design, validated by the user on 2026-09-27. B4 (the config), B1 (the
-read-only board) and B2 (the merge queue's engine, with no way to start it yet)
-are implemented; B3 (the queue's UI) isn't. What B1 and B2 decided along the
-way is in sections 2.1 and 3.7.
+read-only board), B2 (the merge queue's engine) and B3a (starting, following
+and stopping the queue) are implemented; B3b (the journal view and Ask Agent
+to Resolve) isn't. What B1, B2 and B3a decided along the way is in sections
+2.1, 3.7 and 3.8.
 
 On the night of 2026-09-26, one Claude session coordinated about fifteen
 parallel pull requests by hand:
@@ -424,9 +425,8 @@ Rejected:
   - a second live queue on that repository refuses to start;
   - a dry-run queue takes no lock, and tests inject their own folder.
 - **Sleep.**
-  - While a queue runs, Nirux holds the keep-awake assertion (`feat/keep-awake`,
-    in progress). Its controller gains a "queue running" input, under the same
-    setting.
+  - While a queue runs, Nirux holds the keep-awake assertion (#57). Its
+    controller has a "queue running" input, under the same setting.
   - Nirux also opts out of App Nap
     (`ProcessInfo.beginActivity(.userInitiatedAllowingIdleSystemSleep)`), so
     its polls aren't throttled in the background. That option leaves idle sleep
@@ -594,6 +594,81 @@ documented in B2's pull request:
   `statusText`, the saved queue and `reloadSaved()`, `isRunning`, `isDryRun`,
   `runsElsewhere` and `onChange`. `onChange` is a single closure: B3 fans it
   out to the board, the status bar and the quit confirmation.
+
+### 3.8 Decided while building B3
+
+Choices the design left open: those marked were decided with the user on
+2026-09-29, the others are the most conservative option, documented in B3a's
+pull request.
+
+- **Two pull requests** (with the user): B3a starts, follows and stops the
+  queue (Add to Queue, the Queue column, Start and Stop, the confirmation
+  sheet, the status bar, the quit confirmation, keep-awake); B3b adds the
+  journal view and Ask Agent to Resolve.
+- **The list.** "Add to Queue" sits in the Queue column, not in Actions, whose
+  last buttons hide on a narrow board. It adds to the next Start's list, by
+  number, oldest first, until the user reorders one in a sheet; later additions
+  go at its end, and an emptied list starts over by number. The list belongs
+  to the project's `MergeQueueController`, in memory: closing the board keeps
+  it, and a relaunch proposes what the saved queue didn't merge, in its order.
+  It is the list of one repository: once board.json names another, it is
+  empty, and the board no longer marks rows with the last queue's steps. A row
+  the queue would stop on at once (a draft, another base, a conflict, a busy
+  agent) says why instead; the sheet checks the rest. The list doesn't change
+  while a queue runs, here or in another Nirux, nor while the sheet is open or
+  Nirux is quitting. A Start makes it the confirmed list: what the sheet left
+  out leaves it, and each pull request leaves it once merged. A pull request
+  the sheet reads merged or closed leaves it at once: it may have no row left
+  to remove it from.
+- **What the sheet reads**, off the main thread, four pull requests at a time
+  (each next one starts as one ends), until the sheet closes:
+  `gh auth status`, `rate_limit`, whether the base needs GitHub's merge queue,
+  the post-merge runs on the base; then each pull request's snapshot, its title
+  and first 100 files (GraphQL, which gives a renamed file's new path only),
+  the checks of its head, its comparison with the base and its worktrees.
+  Nothing is guessed: a pull request that couldn't be read, a head GitHub can't
+  compare, a worktree that can't be checked is left out; checks, files or a
+  comparison that couldn't be read are shown as unknown.
+- **Order** (with the user): ↑ and ↓ on each pull request, no drag and drop.
+- **Start** in the sheet doesn't answer Return. It reads board.json again and
+  refuses settings changed since the sheet read GitHub. Every Start opens a new
+  sheet; one sheet at a time. A quit that was asked refuses it, and closes the
+  sheet once confirmed.
+- **The local checks keep the project's folders at Start**, plus those opened
+  since: a workspace closed or moved mid-queue doesn't turn them off. A space
+  whose queue runs can't be deleted: stop it first. The board keeps its queue
+  line, and Stop, while a queue runs, even when board.json can't be read.
+- **Warnings and refusals.** Besides section 4's: a post-merge run going on the
+  base (the first merge waits for it), a red check that isn't required (the
+  queue never merges with one), a required check that ended skipped or neutral,
+  more than 100 changed files. "The last post-merge run" is the last completed
+  one. Nothing that can join refuses Start too.
+- **Nightlies**: one per merge. A dry run says how many a real queue would
+  publish, and that it publishes none. Another post-merge workflow is said to
+  run once per merge, not to publish.
+- **Status bar** (with the user): the queue comes first, with Stop, then the
+  crash or update notice. Once the queue ends, "Queue stopped: …" or "Queue
+  finished: …" stays until its ✕, so a stop overnight is seen; of several, the
+  one that ended last. A click shows the board, opening one in the project's
+  first workspace if there is none. With several queues running, the first in
+  sidebar order shows, with "+1 other queue", and its Stop becomes Stop All.
+  Only the queues of this launch show there; an interrupted one shows on its
+  board. A dry run reaching its first mutation isn't shown as a failure.
+- **Quitting** (with the user): Nirux comes to the front and asks, in a sheet
+  on the window, or an alert when the window isn't on screen, with Keep
+  Running first; a dry run is said to be one. "Stop Queue and Quit" stops
+  every queue and waits for a call already sent to answer, 2.5 minutes at most,
+  so the journal records it. The main window's close button quits Nirux: while
+  a queue runs, it keeps the window and quits, which asks. The queue's files
+  are written before Nirux exits.
+- **Keep-awake**: `KeepAwakeController.update(mergeQueueRunning:)`, under the
+  same setting and grace period as agents, renamed "Keep Mac awake while agents
+  work or a merge queue runs"; the indicator's tooltip says why.
+- **A dry run shows everywhere**: a DRY RUN badge on the board's queue line,
+  "Start Dry Run…", the sheet's orange title and banner, "Queue (dry run)" in
+  the status bar, the quit question, and a journal line that says the mutation
+  wasn't sent. The badge, the banner and the status bar say why this build is
+  one ("This build: not the notarized release (…)", "NIRUX_STATE_DIR is set").
 
 ## 4. Guardrails
 
@@ -820,7 +895,8 @@ In delivery order:
 | 2 | B1: read-only board | B4 | Column type, rows, batched PR fetch, last post-merge run, Focus, Open, Clean Up by path, Resume (once stuck-agent detection lands) |
 | 3 | B2: queue engine | B4, B1's data types | State machine, `GitHubClient` (real and dry-run), driver, `MergeQueueController`, journal. No UI |
 | 4 | Nightly retention (CI) | none | Keep the dated nightlies of the last 7 days, and at least 20. Shipped |
-| 5 | B3: queue UI | B2, retention | Add to Queue, confirmation sheet, Start and Stop, status bar item, quit confirmation, journal view, Ask Agent to Resolve, keep-awake input |
+| 5 | B3a: queue UI | B2, retention | Add to Queue, confirmation sheet, Start and Stop, status bar item, quit confirmation, keep-awake input |
+| 6 | B3b: journal and conflicts | B3a | Journal view, Ask Agent to Resolve |
 
 - **Config first:** B1 needs the repository, the required checks and the
   post-merge workflow, and the queue must never run with a guessed workflow.
@@ -828,8 +904,7 @@ In delivery order:
   On 2026-09-27 it published 34, so a busy day left about 12 hours to roll
   back, and a queue publishes several nightlies in a row. It now keeps a week.
 - B2 can start in parallel with B1 if it defines its own PR type.
-- B3's keep-awake input waits for `feat/keep-awake`; without it, B3 ships
-  without the assertion.
+- B3's keep-awake input needed `feat/keep-awake` (#57), which shipped first.
 - **Session history** (Projects, section 6: ledger and resume) becomes a
   "Recent sessions" section of the board, after B3.
 - **Later:** launching a worktree workspace with a handover from the board. The

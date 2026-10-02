@@ -1,11 +1,11 @@
 import AppKit
 
-// MARK: - Project Board (docs/project-board.md; B1 reads only)
+// MARK: - Project Board (docs/project-board.md)
 
 /// The board columns: opening one per project, feeding each the project's
-/// workspaces and agents, and running its buttons through the flows that
-/// already exist (focus, open a workspace, clean up a worktree, resume an
-/// agent). `ProjectBoardController` reads the rest.
+/// workspaces, agents and merge queue, and running its buttons through the
+/// flows that already exist (focus, open a workspace, clean up a worktree,
+/// resume an agent, the queue's). `ProjectBoardController` reads the rest.
 extension NiruxShellView {
     struct ProjectBoardLocation {
         let workspace: WorkspaceState
@@ -96,6 +96,14 @@ extension NiruxShellView {
             guard let self, let board else { return }
             self.performProjectBoardAction(action, board: board)
         }
+        board.view.onStartQueue = { [weak self, weak board] in
+            guard let self, let board else { return }
+            self.requestMergeQueueStart(board: board)
+        }
+        board.view.onStopQueue = { [weak self, weak board] in
+            guard let self, let board else { return }
+            self.stopMergeQueue(projectID: board.projectID)
+        }
         return board
     }
 
@@ -155,6 +163,7 @@ extension NiruxShellView {
         foregroundProcesses: [ObjectIdentifier: ForegroundProcess]? = nil
     ) {
         let inFront = isInFront
+        refreshMergeQueuesElsewhere()
         for location in projectBoardLocations where isProjectBoardShown(location) {
             location.board.tick(onScreen: inFront)
             renderProjectBoard(location.board, snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
@@ -189,7 +198,9 @@ extension NiruxShellView {
             board.expireWorktrees()
         }
         let projects = profiles.map { ProjectBoardView.Project(id: $0.id, name: $0.name) }
-        board.view.show(board.content(workspaces: inputs, projects: projects))
+        var content = board.content(workspaces: inputs, projects: projects)
+        content.queue = projectBoardQueueState(board)
+        board.view.show(content)
     }
 
     /// A worktree was cleaned up: the boards list their worktrees again.
@@ -256,6 +267,10 @@ extension NiruxShellView {
                   let column = workspace.columns.first(where: { $0.id == columnID && !$0.isClosing })
             else { return NSSound.beep() }
             resumeExitedAgent(in: workspace, column: column)
+        case .addToQueue(let number):
+            addToMergeQueue(number, board: board)
+        case .removeFromQueue(let number):
+            removeFromMergeQueue(number, board: board)
         }
         renderProjectBoard(board)
     }

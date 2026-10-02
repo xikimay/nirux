@@ -82,6 +82,18 @@ extension MergeQueue {
         )
     }
 
+    /// The details query: a missing field is unreadable, not "no file".
+    static func parsePullRequestDetails(_ data: Data) -> PullRequestDetails? {
+        guard let json = dig(object(data), "data", "repository", "pullRequest") as? [String: Any],
+              let title = json["title"] as? String,
+              let nodes = dig(json, "files", "nodes") as? [[String: Any]],
+              let hasMore = dig(json, "files", "pageInfo", "hasNextPage") as? Bool
+        else { return nil }
+        let files = nodes.compactMap { $0["path"] as? String }
+        guard files.count == nodes.count else { return nil }
+        return PullRequestDetails(title: title, files: files, hasMoreFiles: hasMore)
+    }
+
     /// The checks query: every suite's latest check runs, and the commit
     /// statuses. More than one page of suites or runs can't be judged:
     /// a check left unread could be red.

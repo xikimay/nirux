@@ -115,6 +115,13 @@ final class NiruxShellView: NSView {
     var mergeQueues: [String: MergeQueueController] = [:]
     /// Where live queues lock their repository. Tests use their own.
     var mergeQueueLockFolder = MergeQueueLock.defaultFolder
+    /// The merge queue's confirmation sheet: one at a time.
+    var mergeQueueConfirmation: MergeQueueConfirmationPanel?
+    /// Projects whose ended queue the user dismissed from the status bar.
+    var dismissedMergeQueueNotices: Set<String> = []
+    /// A quit waiting on the running queues: asked, then waiting for them
+    /// to stop (see `mergeQueueTerminateReply`).
+    var mergeQueueQuit: MergeQueueQuit?
 
     /// Debounce timer used to nudge TUI agents (claude, codex, vim…) to
     /// redraw after the window stops resizing. Without this, agents that
