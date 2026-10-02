@@ -396,15 +396,43 @@ final class SidebarWorkspaceCardRenderer {
             font: .monospacedSystemFont(ofSize: 9, weight: .medium),
             color: stateColor
         )
+        let width = sidebarWidth - padding * 2
         prLabel.frame = NSRect(
             x: padding,
             y: yOffset - SidebarExpandedMetrics.prStateHeight,
-            width: sidebarWidth - padding * 2,
+            width: workspace.offersMergedCleanup ? min(prLabel.fittingSize.width, width) : width,
             height: SidebarExpandedMetrics.prStateHeight
         )
         append(prLabel)
         hitAreas.append(SidebarHitArea(frame: prLabel.frame, region: .link(url: prInfo.url, label: prLabel)))
+        if workspace.offersMergedCleanup {
+            buildCleanupLink(after: prLabel, color: stateColor, maxX: padding + width)
+        }
         return yOffset - SidebarExpandedMetrics.prStateAdvance
+    }
+
+    /// "· Clean up" after "#N merged": the ⋯ menu's "Clean Up Worktree…",
+    /// with the same checks and confirmation.
+    private func buildCleanupLink(after prLabel: NSTextField, color: NSColor, maxX: CGFloat) {
+        let font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
+        let separator = textLabel("·", font: font, color: color.withAlphaComponent(0.6))
+        separator.frame = NSRect(
+            x: prLabel.frame.maxX, y: prLabel.frame.minY,
+            width: separator.fittingSize.width, height: prLabel.frame.height
+        )
+        let link = textLabel("Clean up", font: font, color: color)
+        link.toolTip = "Remove this worktree and its local branch, after checks and a confirmation"
+        link.frame = NSRect(
+            x: separator.frame.maxX, y: prLabel.frame.minY,
+            width: max(0, min(link.fittingSize.width, maxX - separator.frame.maxX)),
+            height: prLabel.frame.height
+        )
+        append(separator)
+        append(link)
+        hitAreas.append(SidebarHitArea(
+            frame: link.frame,
+            region: .link(url: SidebarView.cleanupActionURL(workspaceIndex: workspace.index), label: link)
+        ))
     }
 
     private func buildCIStatusLabel(prInfo: PRInfo, padding: CGFloat, indent: CGFloat, yOffset: CGFloat) -> CGFloat {

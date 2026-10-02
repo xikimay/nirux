@@ -256,7 +256,7 @@ The command palette action `Install Agent Skills` writes the bundled skills to:
 
 ### Cleaning up merged worktrees
 
-`Clean Up Worktree…` in a workspace's `⋯` menu (shown when the workspace is open in a linked worktree, or when its folder is gone) removes the worktree folder and its local branch, then closes the workspaces open in it. `Clean Up Merged Worktrees…` in the command palette lists every worktree a workspace is open in, in any space, plus the other worktrees of the repositories your workspaces are in. It checks them all and cleans up the checked ones one at a time, reporting on each; Stop ends the run after the current one.
+`Clean Up Worktree…` in a workspace's `⋯` menu (shown when the workspace is open in a linked worktree, or when its folder is gone) removes the worktree folder and its local branch, then closes the workspaces open in it. Once the workspace's pull request is merged, its sidebar card shows `merged · Clean up`: the click runs the same `Clean Up Worktree…`. `Clean Up Merged Worktrees…` in the command palette lists every worktree a workspace is open in, in any space, plus the other worktrees of the repositories your workspaces are in. It checks them all and cleans up the checked ones one at a time, reporting on each; Stop ends the run after the current one.
 
 Nothing is merged, pushed or fetched, and the remote branch is never touched. A worktree is cleaned up only when all of these hold, checked with `gh` and git:
 

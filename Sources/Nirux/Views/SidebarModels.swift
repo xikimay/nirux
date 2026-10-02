@@ -211,6 +211,10 @@ struct WorkspaceInfo: Hashable {
     let phase: WorkspacePhase
     let lastSummary: String?
     let lastActivityAt: TimeInterval?
+    /// The pull request is merged and the workspace is open in a linked
+    /// worktree (or its folder is gone): the card offers "Clean up" next
+    /// to "merged".
+    var offersMergedCleanup = false
 
     var sidebarAction: (text: String, isBlocker: Bool)? {
         if let blocker = normalizedContextText(blocker) {

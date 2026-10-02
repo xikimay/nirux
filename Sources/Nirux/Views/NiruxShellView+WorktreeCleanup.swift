@@ -48,6 +48,16 @@ extension NiruxShellView {
         return Self.worktreeCleanupPath(forCwd: workspace.cwd) != nil
     }
 
+    /// The card's "merged · Clean up": the same offer, once the card shows
+    /// the pull request merged. Asked on every sidebar refresh, so the
+    /// files are read only for a merged one.
+    func offersMergedCleanup(workspaceIndex: Int) -> Bool {
+        guard let pullRequest = workspaces[safe: workspaceIndex]?.prInfo,
+              pullRequest.state == "MERGED", !pullRequest.isDraft
+        else { return false }
+        return offersWorktreeCleanup(workspaceIndex: workspaceIndex)
+    }
+
     // MARK: Candidates
 
     /// Every workspace open at `path` or below it, with the agents closing
