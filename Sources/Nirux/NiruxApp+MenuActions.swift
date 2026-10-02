@@ -316,11 +316,13 @@ extension NiruxApp {
         let focusLeftItem = NSMenuItem(title: "Focus Left", action: #selector(focusLeft(_:)), keyEquivalent: "\u{F702}")
         focusLeftItem.keyEquivalentModifierMask = .command
         colMenu.addItem(focusLeftItem)
+        colMenu.addItem(Self.controlAlternate(of: focusLeftItem))
 
         let focusRightItem = NSMenuItem(title: "Focus Right", action: #selector(focusRight(_:)), keyEquivalent: "")
         focusRightItem.keyEquivalent = "\u{F703}"
         focusRightItem.keyEquivalentModifierMask = .command
         colMenu.addItem(focusRightItem)
+        colMenu.addItem(Self.controlAlternate(of: focusRightItem))
 
         colMenu.addItem(NSMenuItem.separator())
 
@@ -352,11 +354,13 @@ extension NiruxApp {
         workspaceUpItem.keyEquivalent = "\u{F700}"
         workspaceUpItem.keyEquivalentModifierMask = .command
         workspacesMenu.addItem(workspaceUpItem)
+        workspacesMenu.addItem(Self.controlAlternate(of: workspaceUpItem))
 
         let workspaceDownItem = NSMenuItem(title: "Workspace Down", action: #selector(workspaceDown(_:)), keyEquivalent: "")
         workspaceDownItem.keyEquivalent = "\u{F701}"
         workspaceDownItem.keyEquivalentModifierMask = .command
         workspacesMenu.addItem(workspaceDownItem)
+        workspacesMenu.addItem(Self.controlAlternate(of: workspaceDownItem))
 
         workspacesMenu.addItem(NSMenuItem.separator())
 
@@ -373,6 +377,18 @@ extension NiruxApp {
         let workspacesItem = NSMenuItem()
         workspacesItem.submenu = workspacesMenu
         return workspacesItem
+    }
+
+    /// `item` on Control+Cmd+Arrow, shown in its place while Control is
+    /// held. Cmd+Arrow moves the caret while text has the keyboard (see
+    /// WebContentKeyRouting.movesCaretToTextEdge); this chord navigates from
+    /// anywhere.
+    @MainActor
+    private static func controlAlternate(of item: NSMenuItem) -> NSMenuItem {
+        let alternate = NSMenuItem(title: item.title, action: item.action, keyEquivalent: item.keyEquivalent)
+        alternate.keyEquivalentModifierMask = item.keyEquivalentModifierMask.union(.control)
+        alternate.isAlternate = true
+        return alternate
     }
 
     static let windowMenuTag = 1
