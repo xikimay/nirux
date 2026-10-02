@@ -548,6 +548,9 @@ extension NiruxShellView {
             .compactMap { $0.editorColumn }
             .first { $0.workspaceCwd == editorRoot }
             ?? (workspaceCwd == nil ? workspace.columns.compactMap { $0.editorColumn }.first : nil)
+        // Opened for the user, the editor takes the keyboard, as a browser
+        // column does (`openWebView`).
+        defer { if takeFocus, workspace === activeWorkspace { focusActiveTerminal(in: window) } }
 
         // focusedIndex moves even for takeFocus:false opens: the camera
         // only keeps the FOCUSED column visible, so leaving it put could

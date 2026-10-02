@@ -144,6 +144,25 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         }
     }
 
+    /// A search result or a terminal's file link opens the editor with the
+    /// keyboard, whether it adds the column or reuses it.
+    func testUserOpensGiveTheEditorTheKeyboard() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let terminal = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.terminalView)
+            for file in ["README.md", UIFlowHarness.searchTarget] {
+                harness.window.makeFirstResponder(terminal)
+                shell.openInEditorColumn(path: harness.repo + "/" + file)
+                let editor = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
+                XCTAssertIdentical(
+                    harness.window.firstResponder, UIFlowHarness.descendant(of: editor, as: WKWebView.self),
+                    "opening \(file) left the keyboard behind"
+                )
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     /// Runs `body` with the app's key interceptor and menu bar on the
