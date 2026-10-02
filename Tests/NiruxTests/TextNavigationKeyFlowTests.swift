@@ -112,27 +112,35 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         }
     }
 
-    /// An agent's open never takes the keyboard from the terminal it may be
-    /// typed in, not even once an earlier open focused the editor column.
-    func testAgentOpensLeaveTheKeyboardInTheTerminal() throws {
+    /// An agent's open never takes the keyboard from where the user may be
+    /// typing, not even once an earlier open focused the editor column, in
+    /// the workspace in front or in another one.
+    func testAgentOpensLeaveTheKeyboardWhereItWas() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let workspace = try XCTUnwrap(shell.activeWorkspace)
-            let terminal = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.terminalView)
-            harness.window.makeFirstResponder(terminal)
-            for file in ["README.md", UIFlowHarness.searchTarget] {
-                let request = try XCTUnwrap(OpenEditorRequest(
+            @MainActor func open(_ file: String) throws {
+                shell.openEditorFromURL(try XCTUnwrap(OpenEditorRequest(
                     queryItems: [
                         URLQueryItem(name: "file", value: harness.repo + "/" + file),
                         URLQueryItem(name: "workspace", value: workspace.id)
                     ],
                     canonicalize: { $0 },
                     isOpenableFile: { _ in true }
-                ))
-                shell.openEditorFromURL(request)
+                )))
+                XCTAssertIdentical(shell.activeWorkspace, workspace)
                 XCTAssertNotNil(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
-                XCTAssertIdentical(harness.window.firstResponder, terminal, "opening \(file) took the keyboard")
             }
+            let terminal = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.terminalView)
+            harness.window.makeFirstResponder(terminal)
+            try open("README.md")
+            try open(UIFlowHarness.searchTarget)
+            XCTAssertIdentical(harness.window.firstResponder, terminal)
+
+            shell.addWorkspace(title: "other", cwd: harness.repo)
+            XCTAssertNotIdentical(shell.activeWorkspace, workspace)
+            try open("README.md")
+            XCTAssertFalse(harness.window.firstResponder is WKWebView, "the editor took the keyboard")
         }
     }
 

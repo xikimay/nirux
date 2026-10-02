@@ -719,13 +719,16 @@ extension NiruxShellView {
 
     // MARK: - Focus + helpers
 
-    func focusActiveTerminal(in window: NSWindow?) {
+    /// Gives the keyboard to the focused column of the active workspace.
+    /// An agent's request passes `editorTakesKeyboard: false`: the user
+    /// may be typing elsewhere, and a file buffer must never get the keys.
+    func focusActiveTerminal(in window: NSWindow?, editorTakesKeyboard: Bool = true) {
         guard let col = activeWorkspace?.columns[safe: activeWorkspace?.focusedIndex ?? 0],
               let window else { return }
         if let webView = col.webViewColumn {
             window.makeFirstResponder(webView.webView)
         } else if let editor = col.editorColumn {
-            editor.takeKeyboard()
+            if editorTakesKeyboard { editor.takeKeyboard() }
         } else if let board = col.projectBoard {
             window.makeFirstResponder(board.view)
         } else if col.isFindBarOpen {

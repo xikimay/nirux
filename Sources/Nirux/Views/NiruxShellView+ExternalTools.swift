@@ -587,9 +587,8 @@ extension NiruxShellView {
         if let id = request.workspaceID,
            let index = workspaces.firstIndex(where: { $0.id == id }) {
             target = workspaces[index]
-            // Switching would give the keyboard to the focused column: in
-            // front already, that can be the editor an earlier open focused.
-            if target !== activeWorkspace { switchToWorkspace(index) }
+            // Its focused column can be the editor an earlier open focused.
+            switchToWorkspace(index, editorTakesKeyboard: false)
         }
         openInEditorColumn(
             path: request.file, line: request.line, endLine: request.endLine,
