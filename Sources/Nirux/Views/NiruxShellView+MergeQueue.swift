@@ -11,7 +11,7 @@ extension NiruxShellView {
         if let existing = mergeQueues[projectID] { return existing }
         let controller = MergeQueueController(
             projectID: projectID,
-            client: mergeQueueClient,
+            client: mergeQueueClient ?? MergeQueue.client(),
             local: MergeQueueLocalAccess(
                 folders: { [weak self] in self?.projectWorkspaces(of: projectID).map(\.cwd) ?? [] },
                 busyAgents: { [weak self] worktrees, allWorktrees in

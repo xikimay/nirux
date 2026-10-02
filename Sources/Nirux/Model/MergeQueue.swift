@@ -237,8 +237,9 @@ extension MergeQueue {
         /// effect.
         case uncertain(String)
         case rateLimited(String)
-        /// The dry-run client didn't send it: the command it would run.
-        case dryRun(String)
+        /// The dry-run client didn't send it: the command it would run, and
+        /// why this build is a dry run.
+        case dryRun(command: String, reason: String)
 
         var isUncertain: Bool {
             if case .uncertain = self { return true }

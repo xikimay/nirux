@@ -129,6 +129,10 @@ jobs:
           rm -f Nirux.app.zip
           ditto -c -k --keepParent Nirux.app Nirux.app.zip
 
+      - name: Check the app runs its merge queue live
+        timeout-minutes: 5
+        run: ./scripts/check-release-signature.sh Nirux.app
+
       - name: Sign and generate appcast
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}

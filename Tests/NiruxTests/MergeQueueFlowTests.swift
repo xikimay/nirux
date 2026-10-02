@@ -1,4 +1,5 @@
 import AppKit
+import Security
 import XCTest
 @testable import Nirux
 
@@ -324,7 +325,8 @@ final class MergeQueueFlowTests: XCTestCase {
     func testADryRunReadsGitHubButNeverChangesItNorTakesTheLock() throws {
         let a = MQ.sha("a")
         let world = GitHubWorld(pullRequests: [52: a])
-        let dryRun = MergeQueue.client(environment: [:], bundleURL: URL(fileURLWithPath: "/work/.build/debug"),
+        let dryRun = MergeQueue.client(environment: [:], bundleURL: URL(fileURLWithPath: "/Applications/Nirux.app"),
+                                       signature: .notRelease(errSecCSReqFailed),
                                        live: GitHubCLIQueueClient(run: world.run))
         let queue = controller(dryRun, clock: VirtualClock())
         queue.beginActivity = { NSObject() }
@@ -343,7 +345,7 @@ final class MergeQueueFlowTests: XCTestCase {
         let files = try XCTUnwrap(queue.files)
         XCTAssertEqual(files.journal.lastPathComponent, "queue.dry-run.log")
         XCTAssertEqual(files.state.lastPathComponent, "queue-state.dry-run.json")
-        XCTAssertTrue(try String(contentsOf: files.journal, encoding: .utf8).contains("not sent (dry run)"))
+        XCTAssertTrue(try String(contentsOf: files.journal, encoding: .utf8).contains("not sent, a dry run because not the notarized release"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: files.journal.deletingLastPathComponent()
             .appendingPathComponent("queue.log").path))
     }

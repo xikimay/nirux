@@ -970,9 +970,9 @@ extension MergeQueue {
         private mutating func mutated(_ result: MutationResult, purpose: Purpose, now: TimeInterval) {
             guard let index = current else { return missingAnswer() }
             let number = entries[index].number
-            if case .dryRun(let command) = result {
-                return stop(StopReason(kind: .dryRun, message: "Dry run: this build doesn’t change GitHub. It stopped "
-                    + "before running: \(command)"))
+            if case .dryRun(let command, let reason) = result {
+                return stop(StopReason(kind: .dryRun, message: "Dry run: this build doesn’t change GitHub, because "
+                    + "\(reason). It stopped before running: \(command)"))
             }
             switch purpose {
             case .update(let from):
@@ -1048,7 +1048,7 @@ extension MergeQueue {
             case .refused(let status, let message): return status.map { "HTTP \($0): \(message)" } ?? message
             case .uncertain(let message): return "no clear answer: \(message)"
             case .rateLimited(let message): return "rate limited: \(message)"
-            case .dryRun(let command): return "not sent (dry run): \(command)"
+            case .dryRun(let command, let reason): return "not sent, a dry run because \(reason): \(command)"
             }
         }
     }
