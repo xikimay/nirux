@@ -83,7 +83,7 @@ final class CrashNoticeStatusBarTests: XCTestCase {
         XCTAssertEqual(actions, [.copySummary, .openReport])
     }
 
-    func testNoticeUsesTheWidthTheHintsLeave() throws {
+    func testNoticeIsNotTruncatedAndButtonsFollowIt() throws {
         let bar = makeBar()
         bar.showCrash(try notice())
         bar.layoutSubtreeIfNeeded()
@@ -95,16 +95,6 @@ final class CrashNoticeStatusBarTests: XCTestCase {
         XCTAssertLessThan(label.frame.maxX, copy.frame.minX)
         XCTAssertLessThan(copy.frame.maxX, open.frame.minX)
         XCTAssertLessThan(open.frame.maxX, dismiss.frame.minX)
-
-        let hints = "⌘↑↓ workspace  ⌘←→ column  ⌘T new  ⌘O exit pilot"
-        bar.setPilotHints(hints)
-        bar.layoutSubtreeIfNeeded()
-        let hintsLabel = try XCTUnwrap(bar.subviews.compactMap { $0 as? NSTextField }.first { $0.stringValue == hints })
-        XCTAssertGreaterThan(hintsLabel.frame.minX, dismiss.frame.maxX, "the hints never cover the buttons")
-        XCTAssertGreaterThanOrEqual(hintsLabel.frame.width, ceil(hintsLabel.attributedStringValue.size().width))
-        XCTAssertEqual(
-            bar.hitTest(NSPoint(x: dismiss.frame.midX, y: dismiss.frame.midY)), dismiss
-        )
     }
 
     func testCopiedFlashDoesNotMoveTheButtons() throws {
@@ -122,31 +112,17 @@ final class CrashNoticeStatusBarTests: XCTestCase {
         XCTAssertEqual([open.frame, dismiss.frame], before)
     }
 
-    func testNarrowPilotLayoutKeepsTheLeftHalf() throws {
+    /// The notice's text shrinks so that its buttons and ✕ never reach the
+    /// version label, whatever the window width.
+    func testNoticeEndsBeforeTheVersionAtEveryWidth() throws {
         let bar = makeBar()
-        bar.setFrameSize(NSSize(width: 720, height: StatusBarView.height))
-        bar.setPilotHints("⌘↑↓ workspace  ⌘←→ column  ⌘T new  ⌘O exit pilot")
-        bar.showUpdate(version: "nightly-2026.09.28")
-        bar.layoutSubtreeIfNeeded()
-        let label = try XCTUnwrap(bar.subviews.compactMap { $0 as? NSTextField }.first { $0.stringValue.hasPrefix("●") })
-        XCTAssertGreaterThanOrEqual(label.frame.width, min(ceil(label.attributedStringValue.size().width), 720 / 2 - 16))
-        let install = try XCTUnwrap(button("Install ↗", in: bar))
-        XCTAssertEqual(bar.hitTest(NSPoint(x: install.frame.midX, y: install.frame.midY)), install)
-    }
-
-    func testButtonsTakeTheirClicksAtEveryWidth() throws {
-        let bar = makeBar()
-        bar.setPilotHints("⌘↑↓ workspace  ⌘←→ column  ⌘T new  ⌘O exit pilot")
         bar.showCrash(try notice())
+        let version = try XCTUnwrap(bar.subviews.compactMap { $0 as? NSTextField }.first { $0.alignment == .right })
         for width in stride(from: CGFloat(600), through: 1400, by: 25) {
             bar.setFrameSize(NSSize(width: width, height: StatusBarView.height))
             bar.layoutSubtreeIfNeeded()
-            for title in ["Copy summary", "Open report", "✕"] {
-                let target = try XCTUnwrap(button(title, in: bar))
-                XCTAssertEqual(
-                    bar.hitTest(NSPoint(x: target.frame.midX, y: target.frame.midY)), target, "\(title) at \(width)"
-                )
-            }
+            let dismiss = try XCTUnwrap(button("✕", in: bar))
+            XCTAssertLessThanOrEqual(dismiss.frame.maxX, version.frame.minX, "at \(width)")
         }
     }
 

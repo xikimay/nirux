@@ -22,7 +22,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testImportBrowserCookies": ["Import Browser Cookies"],
             "testAgentCommands": ["Open Claude Code", "Open Codex"],
             "testWorkspaceCommands": [
-                "New Workspace", "Rename Workspace", "Show/Hide Sidebar", "Show/Hide Inactive Workspaces", "Pilot Mode"
+                "New Workspace", "Rename Workspace", "Show/Hide Sidebar", "Show/Hide Inactive Workspaces"
             ],
             "testWorktreeCommands": ["Open Worktree", "New Worktree", "Clean Up Merged Worktrees…"],
             "testProjectBoardCommand": ["Open Project Board"],
@@ -190,12 +190,6 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertTrue(shell.sidebar.isInactiveSectionCollapsed)
             harness.runPaletteCommand("Show/Hide Inactive Workspaces")
             XCTAssertFalse(shell.sidebar.isInactiveSectionCollapsed)
-
-            harness.runPaletteCommand("Pilot Mode")
-            XCTAssertTrue(shell.isPilotMode)
-            XCTAssertFalse(shell.isSidebarExpanded, "pilot mode hides the sidebar")
-            harness.runPaletteCommand("Pilot Mode")
-            XCTAssertFalse(shell.isPilotMode)
         }
     }
 

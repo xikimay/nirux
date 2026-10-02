@@ -109,7 +109,7 @@ extension NiruxShellView {
         guard let pty = column.pty else { return nil }
         switch pty.agentStuckState(now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess) {
         case .waiting(let reason, let since)?:
-            return .waiting(reason, duration: PilotSidebarRenderer.shortDuration(now - since))
+            return .waiting(reason, duration: SidebarRenderer.shortDuration(now - since))
         case .stoppedOnError(let failure)?:
             let resume = SidebarStuckState.Resume(
                 pty.agentResumeRefusal(foreground: foregroundProcess, snapshot: snapshot, now: now)

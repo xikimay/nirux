@@ -1,12 +1,5 @@
 import AppKit
 
-/// A clickable area in the pilot info panel
-struct PilotClickableArea {
-    let frame: NSRect
-    let url: String
-    let label: NSTextField
-}
-
 struct GitContextObservation: Sendable {
     fileprivate let generation: UInt64
     fileprivate let workingDirectory: String
@@ -103,24 +96,12 @@ final class WorkspaceState {
         )
     }
 
-    // Pilot info panel (per-workspace, shown in pilot mode)
-    var pilotPanel: NSView?
-    var pilotDivider: NSView?
-    var pilotAccentBar: NSView?
-    var pilotPanelViews: [NSView] = []
-    var pilotClickableAreas: [PilotClickableArea] = []
-    var pilotColumnClickAreas: [(frame: NSRect, colIndex: Int)] = []
-    weak var hoveredLabel: NSTextField?
-    var lastPilotFingerprint: String = ""
-    static let pilotAccentColor: NSColor = .niruxAccent
-
     /// Called by NiruxShellView to wire up sidebar refresh
     var onMetadataChanged: (() -> Void)?
     /// A column's terminal title changed (fires before onMetadataChanged).
     var onColumnTitleChanged: ((ColumnState) -> Void)?
     var onFocusedColumnChanged: (() -> Void)?
     var onGitContextChanged: (() -> Void)?
-    var onDiffStatsClicked: (() -> Void)?
     /// A terminal link was cmd-clicked — the shell opens a browser column
     /// in this workspace.
     var onTerminalOpenURL: ((WorkspaceState, String) -> Void)?
@@ -670,24 +651,9 @@ extension WorkspaceState {
 
     func layoutAndScroll(
         viewportWidth: CGFloat, height: CGFloat, animated: Bool,
-        fitAll: Bool = false, pilotMode: Bool = false, skipTerminalResize: Bool = false
+        fitAll: Bool = false, skipTerminalResize: Bool = false
     ) {
         guard !columns.isEmpty else { return }
-
-        // Pilot panel: reserve space on the left in pilot mode
-        let showPanel = pilotMode && pilotPanel != nil
-        let panelWidth: CGFloat = showPanel ? Self.pilotPanelWidth : 0
-        let dividerWidth: CGFloat = panelWidth > 0 ? 1 : 0
-        let columnsViewportWidth = viewportWidth - panelWidth - dividerWidth
-
-        // Position pilot panel and divider
-        if let panel = pilotPanel {
-            panel.frame = NSRect(x: 0, y: 0, width: panelWidth, height: height)
-            panel.isHidden = !showPanel
-            pilotDivider?.frame = NSRect(x: panelWidth, y: 0, width: dividerWidth, height: height)
-            pilotDivider?.isHidden = !showPanel
-            pilotAccentBar?.frame = NSRect(x: 0, y: 0, width: 4, height: height)
-        }
 
         let gap = columns.count > 1 ? Self.columnGap : 0
         let totalGaps = gap * CGFloat(columns.count - 1)
@@ -696,11 +662,11 @@ extension WorkspaceState {
         var totalWidth: CGFloat = 0
 
         if fitAll {
-            let columnWidth = floor((columnsViewportWidth - totalGaps) / CGFloat(columns.count))
+            let columnWidth = floor((viewportWidth - totalGaps) / CGFloat(columns.count))
             for _ in columns { widths.append(columnWidth); totalWidth += columnWidth }
         } else {
             for col in columns {
-                let width = floor(col.widthFraction * (columnsViewportWidth - totalGaps))
+                let width = floor(col.widthFraction * (viewportWidth - totalGaps))
                 widths.append(width); totalWidth += width
             }
         }
@@ -727,8 +693,8 @@ extension WorkspaceState {
             // Resize handle straddling this column's right boundary.
             if resizeHandles.indices.contains(index) {
                 let handle = resizeHandles[index]
-                handle.referenceWidth = max(columnsViewportWidth, 1)
-                handle.isHidden = fitAll || pilotMode
+                handle.referenceWidth = max(viewportWidth, 1)
+                handle.isHidden = fitAll
                 handle.frame = NSRect(
                     x: xOffset + widths[index] + gap / 2 - Self.resizeHandleWidth / 2,
                     y: 0,
@@ -746,7 +712,7 @@ extension WorkspaceState {
 
         // 3. Camera (scroll to keep focused column visible)
         let cameraX: CGFloat
-        if fitAll || totalWidth <= columnsViewportWidth {
+        if fitAll || totalWidth <= viewportWidth {
             cameraX = 0
         } else {
             var focusedLeft: CGFloat = 0
@@ -756,16 +722,16 @@ extension WorkspaceState {
             var camera = lastCameraX
             if focusedLeft < camera {
                 camera = focusedLeft
-            } else if focusedRight > camera + columnsViewportWidth {
-                camera = focusedRight - columnsViewportWidth
+            } else if focusedRight > camera + viewportWidth {
+                camera = focusedRight - viewportWidth
             }
-            cameraX = max(0, min(camera, totalWidth - columnsViewportWidth))
+            cameraX = max(0, min(camera, totalWidth - viewportWidth))
         }
 
         lastCameraX = cameraX
 
-        // 4. Apply — offset strip by panel width
-        let stripX = -cameraX + panelWidth + dividerWidth
+        // 4. Apply
+        let stripX = -cameraX
         let oldX = stripView.frame.origin.x
         stripView.frame.origin.x = stripX
         if animated, let layer = stripView.layer, oldX != stripX {

@@ -17,7 +17,6 @@ Nirux is alpha software.
 - Worktree flow: create or open Git worktrees as new workspaces, optionally handing context from the current agent session into the new workspace.
 - Built-in editor: open files, keep tabs, search the workspace, browse the file tree with Finder icons, view Git changes, and toggle file diffs. Find/replace, word wrap, font zoom, per-tab scroll restore, and disk-conflict protection included.
 - Browser context: open URLs in app, keep URL history, import cookies from Chrome, Brave, Arc, or Edge into the shared WebKit data store, download files to ~/Downloads, and inspect pages with the Web Inspector.
-- Pilot mode: switch to a compact overview of active workspaces with branch, column, diff, PR, CI, and review state where available.
 - Session restore: workspace layout, editor tabs, browser URLs, sidebar state, detected Claude/Codex launch modes, and verified Claude session / Codex thread IDs are saved under Application Support, with rotating backups for corruption recovery. Each agent column resumes its own conversation by exact ID (`claude --resume <id>`, `codex resume <id>`) in the directory it ran in; a Claude session that was never prompted restarts fresh, and legacy, missing, malformed, or duplicate IDs open the agent's interactive resume picker instead of guessing the last session. A `claude -p` launched by a column's agent, or a `codex exec` launched by a Claude, Gemini CLI or OpenCode column, keeps its own session and doesn't drive that column's status, notifications, or restore.
 
 ## Requirements
@@ -59,7 +58,7 @@ On first launch, Nirux opens the sidebar on a **Getting Started** checklist, sho
 - whether `claude` or `codex` is installed where a Nirux terminal finds it, with copyable install commands (Claude Code's native installer, Homebrew for Codex) and a **Check again** link otherwise. Nirux reads the terminal `PATH` and the usual per-user install locations (`~/.local/bin`, the npm prefix from `~/.npmrc`, nvm, fnm, Volta, asdf, mise, Nix profiles) without running your shell's startup files, so a CLI installed elsewhere shows as missing: close the card if you already have one;
 - whether the bundled Agent Skills are installed and match this version, with an **Install**/**Update** button;
 - whether the [agent status hooks](#agent-status-hooks) are present in `~/.claude/settings.json` and `~/.codex/config.toml`;
-- the main shortcuts: `Cmd+P` palette, `Cmd+T` column, `Cmd+N` workspace, `Cmd+O` Pilot Mode.
+- the main shortcuts: `Cmd+P` palette, `Cmd+T` column, `Cmd+N` workspace.
 
 Close it with `×` (or **Done** once every step is done); the choice is saved with your settings. Reopen it anytime with `Show Getting Started` from the command palette. Installs that already had workspaces before the checklist existed don't show it on their own.
 
@@ -99,7 +98,6 @@ Typical command palette actions:
 - Open Browser
 - Import Browser Cookies
 - New Workspace
-- Pilot Mode
 - Show/Hide Sidebar
 - Rename Workspace
 - Resize Column (Cycle Width)
@@ -122,7 +120,6 @@ Useful shortcuts:
 | `Cmd+N` | New workspace |
 | `Cmd+Up` / `Cmd+Down` | Switch workspace |
 | `Alt+Cmd+Left` / `Alt+Cmd+Right` | Switch to the previous or next space (the workspace group named in the sidebar header) |
-| `Cmd+O` | Toggle Pilot Mode |
 | `Ctrl+Cmd+S` | Toggle sidebar |
 | `Ctrl+Cmd+F` | Enter or exit full screen |
 | `Cmd+M` | Minimize the window |
