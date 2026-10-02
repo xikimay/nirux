@@ -23,7 +23,7 @@ enum Persistence {
         // same state file, duplicating live agent sessions. Point
         // NIRUX_STATE_DIR elsewhere to smoke-test safely. (HOME is not
         // respected by Application Support resolution — this is.)
-        if let override = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"], !override.isEmpty {
+        if let override = stateDirectoryOverride(in: ProcessInfo.processInfo.environment) {
             let dir = URL(fileURLWithPath: override, isDirectory: true)
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             return dir.appendingPathComponent("state.json")
@@ -36,6 +36,13 @@ enum Persistence {
             NSLog("[Nirux Persistence] Failed to create state dir: %@", error.localizedDescription)
         }
         return dir.appendingPathComponent("state.json")
+    }
+
+    /// The folder NIRUX_STATE_DIR moves the state to; nil when the state is
+    /// the real one. RealStateGuard asks the same question at launch.
+    static func stateDirectoryOverride(in environment: [String: String]) -> String? {
+        guard let override = environment["NIRUX_STATE_DIR"], !override.isEmpty else { return nil }
+        return override
     }
 
     /// Whether state.json or any recovery copy exists, readable or not. Tells

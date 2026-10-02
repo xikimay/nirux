@@ -34,7 +34,7 @@ Download `Nirux.app.zip` from the nightly release:
 https://github.com/xikimay/nirux/releases/tag/nightly
 ```
 
-Unzip it and move `Nirux.app` to `/Applications`.
+Unzip it and move `Nirux.app` to `/Applications`. Nirux opens your workspaces only from there: a copy started anywhere else explains this and quits, so an old or development copy can't overwrite them.
 
 Current public builds should be signed and notarized. If you are opening an older pre-notarized build and macOS Gatekeeper says Apple cannot verify it, open it once with:
 
@@ -295,17 +295,13 @@ Run tests:
 swift test
 ```
 
-Run from SwiftPM:
-
-```bash
-swift run Nirux
-```
-
-A development build otherwise restores and saves the installed app's workspaces. Isolate smoke runs:
+Run from SwiftPM, on a state of its own:
 
 ```bash
 NIRUX_STATE_DIR=/tmp/nirux-dev swift run Nirux
 ```
+
+Only the installed app, `/Applications/Nirux.app`, opens your workspaces. Any other copy (`swift run`, `.build/debug/Nirux`, a `bundle.sh` bundle, an old `Nirux.app` that a `nirux://` link launched) explains this and quits unless `NIRUX_STATE_DIR` is set. The check follows symlinks and ignores letter case, and recognizes the installed app when Gatekeeper runs it from a translocated copy. `NIRUX_ALLOW_REAL_STATE=1` lets another copy use the real state anyway: it then restores and saves the installed app's workspaces and relaunches their agent sessions.
 
 `NIRUX_STATE_DIR` moves workspaces, settings, Activity and Mission history, URL history, and agent hook events out of `~/Library/Application Support/nirux/` (`HOME` is ignored). The Keychain (Telegram token) and the `nirux://` scheme stay shared with the installed app.
 
