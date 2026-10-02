@@ -115,11 +115,13 @@ Useful shortcuts:
 | `Cmd+B` | Open browser URL flow |
 | `Cmd+W` | Close editor tab, column, or workspace depending on context — asks first when a Claude, Codex, Gemini CLI or OpenCode session is running (Return cancels, ⌘D closes); with Settings or a detached Web Inspector in front, closes that window instead |
 | `Cmd+1…9` | Focus column N |
-| `Cmd+Left` / `Cmd+Right` | Focus previous or next column |
-| `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column |
+| `Cmd+Left` / `Cmd+Right` | Focus previous or next column; while text has the keyboard (the editor, a field of a web page, the address bar, a find field), move to the start or end of the line instead |
+| `Ctrl+Cmd+Left` / `Ctrl+Cmd+Right` | Focus previous or next column, also from text |
+| `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column; in text, select to the start or end of the line (`Columns > Move Left / Move Right` still moves it) |
 | `Cmd+E` | Cycle focused column width through presets |
 | `Cmd+N` | New workspace |
-| `Cmd+Up` / `Cmd+Down` | Switch workspace |
+| `Cmd+Up` / `Cmd+Down` | Switch workspace; in text, move to the start or end of the document (`Shift` selects) |
+| `Ctrl+Cmd+Up` / `Ctrl+Cmd+Down` | Switch workspace, also from text |
 | `Alt+Cmd+Left` / `Alt+Cmd+Right` | Switch to the previous or next space (the workspace group named in the sidebar header) |
 | `Cmd+J` | Next waiting agent: the Claude agent blocked on you the longest, then the next at each press |
 | `Ctrl+Cmd+S` | Toggle sidebar |
@@ -136,7 +138,7 @@ Useful shortcuts:
 | `Shift+Cmd+M` | Toggle minimap in editor |
 | `Alt+Cmd+Return` | Send the editor selection to the agent terminal |
 | `Cmd+=` / `Cmd+-` / `Cmd+0` | Editor font zoom in / out / reset |
-| `Cmd+L` | Focus browser address bar |
+| `Cmd+L` | Focus browser address bar; in the editor, select the line |
 | `Cmd+[` / `Cmd+]` | Browser back / forward |
 | `Alt+Cmd+I` | Open Web Inspector on the focused browser column |
 

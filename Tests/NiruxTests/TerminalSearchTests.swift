@@ -375,8 +375,10 @@ final class TerminalSearchTests: XCTestCase {
             XCTAssertEqual(route(arrow, [.command]), .fieldEditor)
             XCTAssertEqual(route(arrow, [.command, .shift]), .fieldEditor)
             XCTAssertEqual(route(arrow, [.command, .numericPad, .function]), .fieldEditor)
-            // Previous/Next Space keep their chord.
+            // Previous/Next Space keep their chord, and Focus Left/Right
+            // and Workspace Up/Down their Control+Cmd one.
             XCTAssertEqual(route(arrow, [.command, .option]), .menuThenField)
+            XCTAssertEqual(route(arrow, [.command, .control]), .menuThenField)
         }
     }
 
