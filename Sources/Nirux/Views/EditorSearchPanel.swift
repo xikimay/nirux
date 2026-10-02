@@ -98,10 +98,7 @@ final class EditorSearchPanel: NSObject {
         fieldRow.wantsLayer = true
         fieldRow.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.03).cgColor
 
-        let icon = NSTextField(labelWithString: "🔎")
-        icon.font = .systemFont(ofSize: 14)
-        icon.frame = NSRect(x: 14, y: 10, width: 24, height: 24)
-        fieldRow.addSubview(icon)
+        fieldRow.addSubview(PaletteIconView(.symbol("magnifyingglass"), frame: NSRect(x: 14, y: 10, width: 24, height: 24)))
 
         let field = NSTextField()
         field.font = .systemFont(ofSize: 15)
