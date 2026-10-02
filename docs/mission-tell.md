@@ -22,12 +22,15 @@ child's prompt.
 - **Delivery is guarded typing, not a hook.** Nirux types the text and Enter
   into the child's prompt, like the Resume button and Telegram, only when
   `AgentStatusMachine.isPromptFree` holds: the column's interactive `claude`
-  is in front, its hooks reached the column since it started, its turn is
-  over, no dialog is listed, and nothing was typed since its last prompt went
-  in. Otherwise the message waits in the ledger, and Nirux tries again when
-  the child's turn ends (Stop or StopFailure). Typing, unlike a Stop hook's
-  `block` reason, also works for slash commands and for a child that is
-  already idle (a Stop hook never fires again on an idle session).
+  is in front, it was already running when the parent sent the message, it
+  took a prompt since it started (Claude Code shows some dialogs before any
+  hook could list them), its turn is over, no dialog is listed, and nothing
+  was typed since its last prompt went in. Otherwise the message waits in the
+  ledger, and Nirux tries again when a turn ends (Stop or StopFailure). Nirux
+  records the message as typed before typing it, so a failed save never types
+  it twice. Typing, unlike a Stop hook's `block` reason, also works for slash
+  commands and for a child that is already idle (a Stop hook never fires
+  again on an idle session).
 - **Raw text.** No prefix, so `/code-review` stays a slash command. The child
   can't tell the parent from the user, which is fine: the parent acts for the
   user.
@@ -35,14 +38,24 @@ child's prompt.
   `completed`, so once the message is typed the Mission is `active` again and
   the child can `ask` and `completed` again. A message still waiting doesn't
   reopen anything.
+- **An hour at most.** A message not typed within an hour is dropped: nobody
+  may want it any more. A `claude` started after the message (restarted, or
+  restored after Nirux relaunched) never gets it.
+- **`/clear` counts as a prompt.** It fires SessionStart (`source: clear`),
+  not UserPromptSubmit; without this, a `tell` of `/clear` would block every
+  later one. Other built-in commands (`/model`) fire neither: the next `tell`
+  then waits for a prompt from someone else.
 - **`tell` waits like `ask`:** up to 90 s for Nirux to type the message. 0
   typed; 3 not typed yet, and the same command again resumes the wait instead
-  of queuing the text twice (a message typed less than 60 s ago counts as that
-  same one); 4 no Mission on that branch from this terminal, a Codex child,
-  or handoffs off; 2 usage; 1 state.
+  of queuing the text twice (like `ask`, its ID is derived from the text; a
+  message typed less than 60 s ago counts as that same one); 4 no Mission on
+  that branch from this terminal, a Codex child, or handoffs off; 2 usage; 1
+  state.
 - **Ledger:** a new event kind `instruction` (parent → child), with
-  `childConsumedAt` set once typed. Only the recorded parent terminal can
-  send one. It shows in Activity as `told: ...`, read, like a reply.
+  `childConsumedAt` set once typed. Nirux routes only events that carry the
+  recorded parent identity; as for `reply`, any process of the user that can
+  write the queue can forge one. It shows in Activity as `told: ...`, read,
+  like a reply.
 - **Docs:** the README and the `nirux-worktree` skill describe `tell`.
 
 ## Not in this version

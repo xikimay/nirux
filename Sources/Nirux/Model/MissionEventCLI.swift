@@ -18,9 +18,13 @@ enum MissionEventCLI {
     /// Upper bound of the wait-loop backoff while the ledger is unchanged.
     static let maxPollInterval: TimeInterval = 1
     /// How long an identical `ask` still prints an answer the child already
-    /// received, so rerunning a command whose output the shell tool cut short
-    /// is harmless. After that, the same text is a new question.
+    /// received, and an identical `tell` counts as the message already
+    /// typed, so rerunning a command whose output the shell tool cut short
+    /// is harmless. After that, the same text is a new question or message.
     static let answerReplayWindow: TimeInterval = 60
+    /// How long Nirux keeps trying to type a `tell`. Past it, the message is
+    /// never typed: nobody may want it any more.
+    static let instructionLifetime: TimeInterval = 3600
 
     private struct ChildContext {
         let missionID: String
@@ -557,6 +561,10 @@ enum MissionEventCLI {
     }
 }
 
+// MARK: - tell (parent → child)
+
+// An extension only to keep the enum's body under swiftlint's
+// type_body_length; it uses the enum's private helpers.
 extension MissionEventCLI {
     /// Parent-agent instruction for the child on `--branch`: Nirux types it
     /// into the child's prompt once it is free (see
@@ -577,7 +585,9 @@ extension MissionEventCLI {
               let message = validMessage(options["--message"]),
               let timeout = validTimeout(options["--timeout"])
         else {
-            return usage("tell --branch <child-branch> --message <1-\(maxMessageLength) characters>")
+            return usage(
+                "tell --branch <child-branch> --message <1-\(maxMessageLength) characters> [--timeout <seconds>]"
+            )
         }
         var ledger = MissionLedgerReader(url: missionsURL)
         guard loadLedger(&ledger) else { return unreadableLedger(missionsURL) }
@@ -595,12 +605,8 @@ extension MissionEventCLI {
             return 4
         }
         let sentAt = now()
-        let existing = mission.events.last(where: {
-            $0.kind == .instruction && $0.message == message
-                && $0.childConsumedAt.map { sentAt - $0 < answerReplayWindow } ?? true
-        })
-        let instructionID = existing?.id ?? UUID().uuidString
-        if existing == nil {
+        let instructionID = instructionID(for: message, in: mission, now: sentAt)
+        if !mission.events.contains(where: { $0.id == instructionID }) {
             let instruction = MissionEvent(
                 id: instructionID,
                 missionID: mission.id,
@@ -626,9 +632,43 @@ extension MissionEventCLI {
         }
         writeStandardError(
             "Not typed yet: the child is working, a dialog is open, or someone is typing at its prompt. "
-                + "Nirux types it once the child's turn ends. Run the exact same command again to keep "
-                + "waiting; it does not send the message twice."
+                + "Nirux types it once the child's turn ends, within an hour of the first `tell`. Run the "
+                + "exact same command again to keep waiting; it does not send the message twice."
         )
         return 3
+    }
+
+    /// Identical instructions share a derived ID, like questions (see
+    /// `questionID`), so a rerun before Nirux drained the queue queues the
+    /// same event. The text gets a new ID once it was typed more than
+    /// `answerReplayWindow` ago, or was never typed within
+    /// `instructionLifetime`.
+    private static func instructionID(for message: String, in mission: Mission, now: TimeInterval) -> String {
+        func derivedID(_ generation: Int) -> String {
+            derivedEventID([
+                "nirux.mission.instruction",
+                mission.id,
+                mission.parentWorkspaceID,
+                mission.parentAgentUUID,
+                String(generation),
+                message
+            ])
+        }
+        let instructions = mission.events.filter { $0.kind == .instruction }
+        let recorded = Set(instructions.map(\.id))
+        let settled = Set(instructions.compactMap { event -> String? in
+            let over = event.childConsumedAt.map { now - $0 >= answerReplayWindow }
+                ?? (now - event.timestamp >= instructionLifetime)
+            return over ? event.id : nil
+        })
+        var current = derivedID(0)
+        var generation = 0
+        while recorded.contains(current) {
+            let next = derivedID(generation + 1)
+            guard settled.contains(current) || recorded.contains(next) else { break }
+            current = next
+            generation += 1
+        }
+        return current
     }
 }

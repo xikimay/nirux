@@ -294,13 +294,14 @@ extension NiruxShellView {
         limit of the Claude Code shell tool; if your shell tool takes a timeout, allow at least 120
         seconds. Exit statuses:
 
-        - 0: done. The output is the answer or the event, even if the shell tool also reported a
-          timeout.
+        - 0: done. The output is the answer, the event, or (for `tell`) a confirmation, even if
+          the shell tool also reported a timeout.
         - 3: nothing yet. Run the exact same command again to keep waiting, and do the same if the
           shell tool stops the command before it prints anything. An identical `ask` resumes the
           same question instead of sending it twice, and prints the answer if it arrived meanwhile.
           For `reply`, 3 means Nirux has not confirmed the answer yet: do not send it again. For
-          `tell`, 3 means the message is not typed yet; an identical `tell` resumes the wait.
+          `tell`, 3 means the message is not typed yet; an identical `tell` resumes the wait. Nirux
+          drops a `tell` it could not type within an hour.
         - 4: do not retry that command. Mission handoffs are off, the Mission has ended, the
           terminal is not part of it, (for `reply`) the question no longer waits for an answer,
           for example because a human answered it from Nirux Activity, or (for `tell`) no Mission on

@@ -472,6 +472,8 @@ extension NiruxShellView {
             )
         }
         refreshActivitySidebar()
+        // Once the event is marked delivered: a new `tell` may find its
+        // child's prompt free.
         if event.kind == .instruction {
             DispatchQueue.main.async { [weak self] in self?.typeMissionInstructions() }
         }

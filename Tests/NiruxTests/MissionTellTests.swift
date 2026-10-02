@@ -101,10 +101,10 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(queued.childAgentUUID, childAgentUUID)
 
         fixture.center.drain()
-        XCTAssertEqual(fixture.store.pendingInstructions().map(\.event.id), [queued.id])
+        XCTAssertEqual(fixture.store.pendingInstructions(now: 30).map(\.event.id), [queued.id])
 
         XCTAssertTrue(fixture.store.markInstructionTyped(eventID: queued.id, at: 30))
-        XCTAssertTrue(fixture.store.pendingInstructions().isEmpty)
+        XCTAssertTrue(fixture.store.pendingInstructions(now: 30).isEmpty)
         XCTAssertEqual(instructions(in: fixture).first?.childConsumedAt, 30)
     }
 
@@ -124,6 +124,31 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(tell("/code-review", in: fixture, at: replayAt + 2), 3, "later, the same text is sent again")
         fixture.center.drain()
         XCTAssertEqual(instructions(in: fixture).count, 2)
+    }
+
+    func testRetryBeforeTheDrainQueuesTheSameInstruction() throws {
+        let fixture = try makeFixture()
+        XCTAssertEqual(tell("/code-review", in: fixture), 3)
+        XCTAssertEqual(tell("/code-review", in: fixture), 3, "rerun before Nirux drained the queue")
+        let queued = try queuedEvents(in: fixture)
+        XCTAssertEqual(queued.count, 2)
+        XCTAssertEqual(Set(queued.map(\.id)).count, 1, "both attempts carry the same ID")
+        fixture.center.drain()
+        XCTAssertEqual(instructions(in: fixture).count, 1)
+    }
+
+    func testAnInstructionNotTypedWithinItsLifetimeIsDropped() throws {
+        let fixture = try makeFixture()
+        let lifetime = MissionEventCLI.instructionLifetime
+        XCTAssertEqual(tell("/code-review", in: fixture, at: 20), 3)
+        fixture.center.drain()
+        XCTAssertEqual(fixture.store.pendingInstructions(now: 20 + lifetime - 1).count, 1)
+        XCTAssertTrue(fixture.store.pendingInstructions(now: 20 + lifetime).isEmpty, "never typed now")
+
+        XCTAssertEqual(tell("/code-review", in: fixture, at: 20 + lifetime), 3)
+        fixture.center.drain()
+        XCTAssertEqual(instructions(in: fixture).count, 2, "a rerun after that sends it anew")
+        XCTAssertEqual(fixture.store.pendingInstructions(now: 20 + lifetime).count, 1)
     }
 
     func testTellReturnsOnceNiruxTypedIt() async throws {
@@ -184,7 +209,7 @@ final class MissionTellTests: XCTestCase {
         fixture.center.drain()
         XCTAssertEqual(fixture.store.missions[0].status, .completed, "until the child gets it")
 
-        let pending = try XCTUnwrap(fixture.store.pendingInstructions().first)
+        let pending = try XCTUnwrap(fixture.store.pendingInstructions(now: 30).first)
         XCTAssertTrue(fixture.store.markInstructionTyped(eventID: pending.event.id, at: 30))
         XCTAssertEqual(fixture.store.missions[0].status, .active)
         XCTAssertEqual(MissionEventCLI.ask(
@@ -201,7 +226,7 @@ final class MissionTellTests: XCTestCase {
         ), 3, "the child can ask again")
     }
 
-    func testOnlyTheRecordedParentCanTell() throws {
+    func testOnlyEventsWithTheRecordedParentIdentityAreTold() throws {
         let fixture = try makeFixture()
         func instruction(parentAgentUUID: String?) -> MissionEvent {
             MissionEvent(
@@ -222,7 +247,7 @@ final class MissionTellTests: XCTestCase {
         guard case .rejected = fixture.store.process(instruction(parentAgentUUID: otherAgentUUID), enabled: true)
         else { return XCTFail("another terminal cannot tell the child") }
         XCTAssertNotNil(fixture.store.accept(instruction(parentAgentUUID: parentAgentUUID), enabled: true))
-        XCTAssertEqual(fixture.store.pendingInstructions().count, 1)
+        XCTAssertEqual(fixture.store.pendingInstructions(now: 30).count, 1)
     }
 
     // MARK: - Free prompt
@@ -230,16 +255,21 @@ final class MissionTellTests: XCTestCase {
     private let t0: TimeInterval = 1_000
     private let claudeProcess = ProcessInstance(pid: 4242, startedAt: 900)
 
-    private func hook(_ name: AgentHookEvent.Name, at offset: TimeInterval, tool: String? = nil, key: String? = nil)
-        -> AgentHookEvent {
+    private func hook(_ name: AgentHookEvent.Name, at offset: TimeInterval, tool: String? = nil, key: String? = nil,
+                      source: String? = nil) -> AgentHookEvent {
         AgentHookEvent(
-            kind: .claude, name: name, sessionID: "lead", detail: tool, toolName: tool, toolKey: key,
+            kind: .claude, name: name, sessionID: "lead", detail: tool, source: source, toolName: tool, toolKey: key,
             timestamp: t0 + offset
         )
     }
 
     private func claude(_ instance: ProcessInstance? = nil, arguments: [String] = ["claude"]) -> ForegroundProcess {
         ForegroundProcess(instance: instance ?? claudeProcess, name: "claude", arguments: arguments)
+    }
+
+    /// Whether a `tell` sent at `t0 + 100` may be typed now.
+    private func isFree(_ machine: AgentStatusMachine, foreground: ForegroundProcess? = nil) -> Bool {
+        machine.isPromptFree(foreground: foreground ?? claude(), runningSince: t0 + 100)
     }
 
     /// A Claude session that took its first prompt and finished the turn.
@@ -253,35 +283,49 @@ final class MissionTellTests: XCTestCase {
         return machine
     }
 
-    func testPromptIsFreeOnlyAtTheIdlePromptOfTheColumnsClaude() {
+    func testPromptIsFreeOnlyAtTheIdlePromptOfTheClaudeThatWasTold() {
         var machine = idleMachine()
-        XCTAssertTrue(machine.isPromptFree(foreground: claude()))
-        XCTAssertFalse(machine.isPromptFree(foreground: nil))
-        XCTAssertFalse(machine.isPromptFree(
-            foreground: ForegroundProcess(instance: claudeProcess, name: "zsh", arguments: [])
-        ))
-        XCTAssertFalse(machine.isPromptFree(foreground: claude(arguments: ["claude", "-p"])), "headless")
-        XCTAssertFalse(machine.isPromptFree(foreground: claude(ProcessInstance(pid: 7, startedAt: t0 + 6))),
-                       "a claude started after the last hook event")
+        XCTAssertTrue(isFree(machine))
+        XCTAssertFalse(machine.isPromptFree(foreground: nil, runningSince: t0 + 100))
+        XCTAssertFalse(isFree(machine, foreground: ForegroundProcess(instance: claudeProcess, name: "zsh", arguments: [])))
+        XCTAssertFalse(isFree(machine, foreground: claude(arguments: ["claude", "-p"])), "headless")
+        XCTAssertFalse(isFree(machine, foreground: claude(ProcessInstance(pid: 7, startedAt: t0 + 6))),
+                       "a claude that took no prompt since it started")
+        XCTAssertFalse(machine.isPromptFree(foreground: claude(), runningSince: claudeProcess.startedAt - 1),
+                       "a claude started after the tell, such as one restored after a relaunch")
 
         _ = machine.apply(hook(.userPromptSubmit, at: 6), isUserFocused: false)
-        XCTAssertFalse(machine.isPromptFree(foreground: claude()), "working")
+        XCTAssertFalse(isFree(machine), "working")
         _ = machine.apply(hook(.permissionRequest, at: 7, tool: "Bash", key: "k"), isUserFocused: false)
-        XCTAssertFalse(machine.isPromptFree(foreground: claude()), "a dialog is open")
+        XCTAssertFalse(isFree(machine), "a dialog is open")
         _ = machine.apply(hook(.stop, at: 9), isUserFocused: false)
-        XCTAssertTrue(machine.isPromptFree(foreground: claude()))
+        XCTAssertTrue(isFree(machine))
     }
 
     func testPromptIsNotFreeOverADraftOrTextNotSubmittedYet() {
         var machine = idleMachine()
         machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 7))
-        XCTAssertFalse(machine.isPromptFree(foreground: claude()), "the user's draft, or a tell not yet submitted")
+        XCTAssertFalse(isFree(machine), "the user's draft, or a tell not yet submitted")
         _ = machine.apply(hook(.userPromptSubmit, at: 8), isUserFocused: false)
         _ = machine.apply(hook(.stop, at: 9), isUserFocused: false)
-        XCTAssertTrue(machine.isPromptFree(foreground: claude()))
+        XCTAssertTrue(isFree(machine))
+    }
 
-        var fresh = AgentStatusMachine()
-        _ = fresh.tick(fgName: "claude", isUserFocused: false, now: Date(timeIntervalSince1970: t0))
-        XCTAssertFalse(fresh.isPromptFree(foreground: claude()), "no hook yet: Nirux can't see a dialog")
+    /// `/clear` fires SessionStart, not UserPromptSubmit: the text went in.
+    func testClearEmptiesThePrompt() {
+        var machine = idleMachine()
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 7)) // "/clear" typed by a tell
+        _ = machine.apply(hook(.sessionStart, at: 8, source: "clear"), isUserFocused: false)
+        XCTAssertTrue(isFree(machine))
+    }
+
+    /// Claude Code shows some dialogs (trust, MCP servers) before any hook
+    /// that would list them: a session that took no prompt yet is not free.
+    func testASessionThatTookNoPromptIsNotFree() {
+        var machine = AgentStatusMachine()
+        _ = machine.tick(fgName: "claude", isUserFocused: false, now: Date(timeIntervalSince1970: t0))
+        XCTAssertFalse(isFree(machine), "no hook yet")
+        _ = machine.apply(hook(.sessionStart, at: 0), isUserFocused: false)
+        XCTAssertFalse(isFree(machine), "SessionStart alone")
     }
 }

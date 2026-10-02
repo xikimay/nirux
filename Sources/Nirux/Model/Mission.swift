@@ -370,11 +370,13 @@ final class MissionStore {
         }.sorted { $0.event.timestamp < $1.event.timestamp }
     }
 
-    /// Instructions not typed into their child's prompt yet, oldest first.
-    func pendingInstructions() -> [AcceptedEvent] {
+    /// Instructions to type into their child's prompt, oldest first: not
+    /// typed yet, and within `MissionEventCLI.instructionLifetime`.
+    func pendingInstructions(now: TimeInterval = Date().timeIntervalSince1970) -> [AcceptedEvent] {
         missions.flatMap { mission in
             mission.events.compactMap { event in
                 event.kind == .instruction && event.childConsumedAt == nil
+                    && now - event.timestamp < MissionEventCLI.instructionLifetime
                     ? AcceptedEvent(mission: mission, event: event)
                     : nil
             }

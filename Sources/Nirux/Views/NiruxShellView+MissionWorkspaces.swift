@@ -152,21 +152,25 @@ extension NiruxShellView {
 
     /// Types each pending `tell` into its child's prompt if that prompt is
     /// free; the others wait for the child's next turn end. Runs when a
-    /// `tell` arrives and when a Mission child's turn ends.
+    /// `tell` arrives and when a turn ends.
     func typeMissionInstructions() {
-        let pending = MissionStore.shared.pendingInstructions()
-        guard !pending.isEmpty, Self.currentMissionHandoffsEnabled() else { return }
-        // A dialog may still wait out the hook queue's drain debounce:
-        // apply it before deciding.
+        guard !MissionStore.shared.pendingInstructions().isEmpty, Self.currentMissionHandoffsEnabled() else { return }
+        // Apply what may still wait out a queue's drain debounce: a dialog
+        // that opened, or the child's `completed`, which must not close the
+        // Mission after a `tell` reopened it.
         AgentHookCenter.shared.drain()
+        MissionEventCenter.shared.drain()
         let snapshot = ProcessSnapshot()
-        for instruction in pending {
+        for instruction in MissionStore.shared.pendingInstructions() {
             let mission = instruction.mission
             guard let pty = workspaces.first(where: { $0.id == mission.childWorkspaceID })?
                 .columns.first(where: { $0.agentUUID == mission.childAgentUUID })?.pty,
-                pty.typeMissionInstruction(instruction.event.message, snapshot: snapshot)
+                pty.acceptsMissionInstruction(toldAt: instruction.event.timestamp, snapshot: snapshot),
+                let input = RemotePromptSanitizer.terminalInput(for: instruction.event.message),
+                // Recorded first: a failed save must not type it twice.
+                MissionStore.shared.markInstructionTyped(eventID: instruction.event.id)
             else { continue }
-            MissionStore.shared.markInstructionTyped(eventID: instruction.event.id)
+            pty.sendRaw(input)
         }
     }
 

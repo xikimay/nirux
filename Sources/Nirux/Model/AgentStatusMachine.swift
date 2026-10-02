@@ -309,8 +309,10 @@ struct AgentStatusMachine {
         // Auto (mid-turn) or /compact: same conversation, no turn ends.
         guard event.source != "compact" else { return }
         // A new conversation in this process (startup, /clear, /resume):
-        // whatever dialogs the old one showed are gone.
+        // whatever dialogs the old one showed are gone. `/clear` took what
+        // was typed at the prompt, but fires no UserPromptSubmit.
         endTurn()
+        if event.source == "clear" { lastPromptAt = event.timestamp }
         closeDialogs { _ in true }
         lastAttentionReason = nil
         turnFailure = nil

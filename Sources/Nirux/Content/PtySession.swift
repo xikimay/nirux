@@ -344,7 +344,7 @@ final class PtySession: @unchecked Sendable {
         state.machine.dropApproval(requestID: requestID)
     }
 
-    // MARK: Stuck agents (see `AgentStuckState`)
+    // MARK: Stuck agents (see `AgentStuckState`), and Mission `tell`
 
     func agentStuckState(now: TimeInterval, waitThreshold: TimeInterval?, foreground: ForegroundProcess?) -> AgentStuckState? {
         state.machine.stuckState(now: now, waitThreshold: waitThreshold, foreground: foreground)
@@ -400,15 +400,10 @@ final class PtySession: @unchecked Sendable {
         return nil
     }
 
-    /// Type a Mission instruction and Enter, only into a free prompt (see
-    /// `AgentStatusMachine.isPromptFree`). Returns whether it was typed.
-    func typeMissionInstruction(_ message: String, snapshot: ProcessSnapshot) -> Bool {
-        guard !hasExited,
-              state.machine.isPromptFree(foreground: foregroundProcess(snapshot: snapshot)),
-              let input = RemotePromptSanitizer.terminalInput(for: message)
-        else { return false }
-        sendRaw(input)
-        return true
+    /// Whether a Mission `tell` sent at `toldAt` may be typed now (see
+    /// `AgentStatusMachine.isPromptFree`).
+    func acceptsMissionInstruction(toldAt: TimeInterval, snapshot: ProcessSnapshot) -> Bool {
+        !hasExited && state.machine.isPromptFree(foreground: foregroundProcess(snapshot: snapshot), runningSince: toldAt)
     }
 
     /// The user's login shell ($SHELL) when it's a mainstream
