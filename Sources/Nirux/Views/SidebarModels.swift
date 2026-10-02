@@ -211,10 +211,8 @@ struct WorkspaceInfo: Hashable {
     let phase: WorkspacePhase
     let lastSummary: String?
     let lastActivityAt: TimeInterval?
-    /// The pull request is merged and the workspace is open in a linked
-    /// worktree (or its folder is gone): the card offers "Clean up" next
-    /// to "merged".
-    var offersMergedCleanup = false
+    /// What the card shows after "#N merged"; nil shows nothing.
+    var mergedCleanup: MergedCleanupOffer?
 
     var sidebarAction: (text: String, isBlocker: Bool)? {
         if let blocker = normalizedContextText(blocker) {
@@ -231,6 +229,15 @@ struct WorkspaceInfo: Hashable {
               !value.isEmpty else { return nil }
         return value
     }
+}
+
+/// A merged pull request's worktree, offered for clean-up on its card.
+enum MergedCleanupOffer: Hashable {
+    /// "Clean up": runs "Clean Up Worktree…".
+    case available
+    /// A clean-up of the worktree is being checked, confirmed or run:
+    /// "Cleaning up…", which does nothing.
+    case inProgress
 }
 
 struct ProfileInfo: Hashable {

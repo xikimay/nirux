@@ -48,14 +48,22 @@ extension NiruxShellView {
         return Self.worktreeCleanupPath(forCwd: workspace.cwd) != nil
     }
 
-    /// The card's "merged · Clean up": the same offer, once the card shows
-    /// the pull request merged. Asked on every sidebar refresh, so the
-    /// files are read only for a merged one.
-    func offersMergedCleanup(workspaceIndex: Int) -> Bool {
-        guard let pullRequest = workspaces[safe: workspaceIndex]?.prInfo,
-              pullRequest.state == "MERGED", !pullRequest.isDraft
-        else { return false }
-        return offersWorktreeCleanup(workspaceIndex: workspaceIndex)
+    /// The card's "merged · Clean up": the ⋯ menu's offer, once the card
+    /// shows the pull request merged. That pull request is the focused
+    /// folder's branch's, while the clean-up removes the worktree of the
+    /// workspace's folder: offered only when they are the same worktree,
+    /// still on disk. Asked on every sidebar refresh, so the files are
+    /// read only for a merged one.
+    func mergedCleanupOffer(workspaceIndex: Int) -> MergedCleanupOffer? {
+        guard let workspace = workspaces[safe: workspaceIndex], !workspace.isClosing,
+              let pullRequest = workspace.prInfo, pullRequest.state == "MERGED", !pullRequest.isDraft,
+              let repositoryRoot = workspace.gitContext?.identity.repositoryRoot,
+              let path = Self.worktreeCleanupPath(forCwd: workspace.cwd),
+              FileManager.default.fileExists(atPath: path)
+        else { return nil }
+        let key = Self.comparablePath(path)
+        guard Self.comparablePath(repositoryRoot) == key else { return nil }
+        return worktreeCleanupsInFlight.contains(key) ? .inProgress : .available
     }
 
     // MARK: Candidates

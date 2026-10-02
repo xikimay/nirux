@@ -400,28 +400,36 @@ final class SidebarWorkspaceCardRenderer {
         prLabel.frame = NSRect(
             x: padding,
             y: yOffset - SidebarExpandedMetrics.prStateHeight,
-            width: workspace.offersMergedCleanup ? min(prLabel.fittingSize.width, width) : width,
+            width: workspace.mergedCleanup == nil ? width : min(prLabel.fittingSize.width, width),
             height: SidebarExpandedMetrics.prStateHeight
         )
         append(prLabel)
         hitAreas.append(SidebarHitArea(frame: prLabel.frame, region: .link(url: prInfo.url, label: prLabel)))
-        if workspace.offersMergedCleanup {
-            buildCleanupLink(after: prLabel, color: stateColor, maxX: padding + width)
+        if let offer = workspace.mergedCleanup {
+            buildCleanupLink(offer, after: prLabel, color: stateColor, maxX: padding + width)
         }
         return yOffset - SidebarExpandedMetrics.prStateAdvance
     }
 
     /// "· Clean up" after "#N merged": the ⋯ menu's "Clean Up Worktree…",
-    /// with the same checks and confirmation.
-    private func buildCleanupLink(after prLabel: NSTextField, color: NSColor, maxX: CGFloat) {
+    /// with the same checks and confirmation. "· Cleaning up…" while one
+    /// runs, which does nothing.
+    private func buildCleanupLink(_ offer: MergedCleanupOffer, after prLabel: NSTextField, color: NSColor, maxX: CGFloat) {
         let font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
         let separator = textLabel("·", font: font, color: color.withAlphaComponent(0.6))
         separator.frame = NSRect(
             x: prLabel.frame.maxX, y: prLabel.frame.minY,
             width: separator.fittingSize.width, height: prLabel.frame.height
         )
-        let link = textLabel("Clean up", font: font, color: color)
-        link.toolTip = "Remove this worktree and its local branch, after checks and a confirmation"
+        let link: NSTextField
+        switch offer {
+        case .available:
+            link = textLabel("Clean up", font: font, color: color)
+            link.toolTip = "Clean Up Worktree…: checks, then asks before deleting this worktree’s folder and "
+                + "local branch and closing its workspace. The remote branch is kept."
+        case .inProgress:
+            link = textLabel("Cleaning up…", font: font, color: color.withAlphaComponent(0.6))
+        }
         link.frame = NSRect(
             x: separator.frame.maxX, y: prLabel.frame.minY,
             width: max(0, min(link.fittingSize.width, maxX - separator.frame.maxX)),
@@ -429,6 +437,7 @@ final class SidebarWorkspaceCardRenderer {
         )
         append(separator)
         append(link)
+        guard offer == .available else { return }
         hitAreas.append(SidebarHitArea(
             frame: link.frame,
             region: .link(url: SidebarView.cleanupActionURL(workspaceIndex: workspace.index), label: link)

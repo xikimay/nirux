@@ -52,7 +52,7 @@ extension NiruxShellView {
                           purpose: workspace.purpose, nextStep: workspace.nextStep,
                           blocker: workspace.blocker, phase: workspace.effectivePhase,
                           lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt,
-                          offersMergedCleanup: offersMergedCleanup(workspaceIndex: index))
+                          mergedCleanup: mergedCleanupOffer(workspaceIndex: index))
         }
         tickHiddenSpaceAgents(visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses)
         let profileInfos = workspaceStore.navigableProfiles.map { profile in
