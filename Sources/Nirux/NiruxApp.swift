@@ -240,7 +240,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
 
     // MARK: - URL Scheme
 
-    enum WorkspaceAgent: String {
+    enum WorkspaceAgent: String, CaseIterable {
         case claude, codex
     }
 

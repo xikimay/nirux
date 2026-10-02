@@ -280,6 +280,152 @@ final class GitWorktreeValidationTests: XCTestCase {
         XCTAssertNil(GitWorktree.create(branch: "feat/y", repoRoot: repo).path)
     }
 
+    func testANewTaskBranchMustBeNew() throws {
+        try git(["branch", "feat/local"], at: repo)
+        try git(["update-ref", "refs/remotes/origin/feat/remote", "HEAD"], at: repo)
+        _ = try XCTUnwrap(GitWorktree.create(branch: "feat/x", repoRoot: repo).path)
+        // Packed, as after `git gc`: git itself wouldn't see Feat/Local.
+        try git(["pack-refs", "--all"], at: repo)
+
+        for (branch, existing) in [
+            ("Feat/Local", "feat/local"), ("feat/REMOTE", "origin/feat/remote"), ("feat/x", "feat/x")
+        ] {
+            let result = GitWorktree.create(branch: branch, repoRoot: repo, newBranchFrom: "HEAD")
+            XCTAssertNil(result.path, branch)
+            XCTAssertEqual(result.error, "\(existing) already exists: choose another branch name")
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root + "/repo.Feat-Local"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root + "/repo.feat-REMOTE"))
+
+        // A new branch whose folder is taken.
+        try FileManager.default.createDirectory(atPath: root + "/repo.feat-y", withIntermediateDirectories: true)
+        let taken = GitWorktree.create(branch: "feat/y", repoRoot: repo, newBranchFrom: "HEAD")
+        XCTAssertNil(taken.path)
+        XCTAssertEqual(taken.error, "\(root!)/repo.feat-y already exists and is not a worktree of \(repo!)")
+        XCTAssertThrowsError(try gitOutput(["rev-parse", "--verify", "refs/heads/feat/y"], at: repo))
+    }
+
+    func testANewTaskBranchMayNotHideARemoteButMayShareANestedRemoteBranchsEnd() throws {
+        try git(["remote", "add", "upstream", root + "/nowhere"], at: repo)
+        try git(["update-ref", "refs/remotes/upstream/alice/feat/z", "HEAD"], at: repo)
+
+        let shadowing = GitWorktree.create(branch: "Upstream/main", repoRoot: repo, newBranchFrom: "HEAD")
+        XCTAssertNil(shadowing.path)
+        XCTAssertEqual(shadowing.error, "Upstream/main starts with the name of the remote upstream: choose another branch name")
+        XCTAssertNotNil(GitWorktree.create(branch: "feat/z", repoRoot: repo, newBranchFrom: "HEAD").path)
+    }
+
+    func testANewTaskBranchIsntOneAWorktreeHasNotCommittedToYet() throws {
+        let orphan = root + "/orphan"
+        // `worktree add --orphan` needs git 2.42.
+        try git(["worktree", "add", "-q", "--detach", orphan], at: repo)
+        try git(["checkout", "-q", "--orphan", "feat/orphan"], at: orphan)
+        let result = GitWorktree.create(branch: "feat/orphan", repoRoot: repo, newBranchFrom: "HEAD")
+        XCTAssertNil(result.path)
+        XCTAssertEqual(result.error, "feat/orphan is already checked out in \(orphan): choose another branch name")
+    }
+
+    func testANewTaskBranchStartsFromTheStartPointWithoutTrackingIt() throws {
+        try git(["update-ref", "refs/remotes/origin/main", "HEAD"], at: repo)
+        try commit("only in the main checkout", at: repo)
+
+        let created = try XCTUnwrap(
+            GitWorktree.create(branch: "feat/task", repoRoot: repo, newBranchFrom: "refs/remotes/origin/main").path
+        )
+        XCTAssertEqual(created, root + "/repo.feat-task")
+        XCTAssertEqual(try gitOutput(["rev-parse", "HEAD"], at: created), try gitOutput(["rev-parse", "refs/remotes/origin/main"], at: repo))
+        XCTAssertNotEqual(try gitOutput(["rev-parse", "HEAD"], at: created), try gitOutput(["rev-parse", "HEAD"], at: repo))
+        XCTAssertEqual(GitWorktree.currentBranch(at: created), "feat/task")
+        XCTAssertThrowsError(try gitOutput(["rev-parse", "--abbrev-ref", "feat/task@{upstream}"], at: created))
+        XCTAssertEqual(
+            GitWorktree.create(branch: "feat/other", repoRoot: repo, newBranchFrom: "refs/remotes/origin/gone").error,
+            "refs/remotes/origin/gone isn’t a commit of \(repo!)"
+        )
+    }
+
+    func testAFailingHookAfterTheCheckoutStillHandsOverTheWorktree() throws {
+        let hooks = root + "/hooks"
+        try FileManager.default.createDirectory(atPath: hooks, withIntermediateDirectories: true)
+        try "#!/bin/sh\necho 'hook failed' >&2\nexit 2\n".write(toFile: hooks + "/post-checkout", atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hooks + "/post-checkout")
+        try git(["config", "core.hooksPath", hooks], at: repo)
+
+        let result = GitWorktree.create(branch: "feat/hooked", repoRoot: repo, newBranchFrom: "HEAD")
+        XCTAssertEqual(result.path, root + "/repo.feat-hooked")
+        XCTAssertEqual(result.error, "hook failed")
+        XCTAssertEqual(GitWorktree.currentBranch(at: root + "/repo.feat-hooked"), "feat/hooked")
+    }
+
+    func testAFailedCheckoutLeavesNoBranchBehind() throws {
+        // A required filter that fails, as git-lfs does when it's missing.
+        try ".gitattributes filter=broken\n".write(toFile: repo + "/.gitattributes", atomically: true, encoding: .utf8)
+        try git(["add", ".gitattributes"], at: repo)
+        try commit("filtered", at: repo)
+        try git(["config", "filter.broken.smudge", "false"], at: repo)
+        try git(["config", "filter.broken.required", "true"], at: repo)
+
+        let result = GitWorktree.create(branch: "feat/filtered", repoRoot: repo, newBranchFrom: "HEAD")
+        XCTAssertNil(result.path)
+        XCTAssertNotNil(result.error)
+        XCTAssertThrowsError(try gitOutput(["rev-parse", "--verify", "refs/heads/feat/filtered"], at: repo))
+        // So the same name can be tried again.
+        try git(["config", "filter.broken.required", "false"], at: repo)
+        XCTAssertNotNil(GitWorktree.create(branch: "feat/filtered", repoRoot: repo, newBranchFrom: "HEAD").path)
+    }
+
+    func testFetchUpdatesTheRemoteBranchOrSaysWhyNot() throws {
+        let origin = root + "/origin.git"
+        try git(["init", "-q", "--bare", origin], at: root)
+        let branch = try gitOutput(["symbolic-ref", "--short", "HEAD"], at: repo)
+        try git(["remote", "add", "origin", origin], at: repo)
+        // No pre-push hook of the developer's runs.
+        let push = ["-c", "core.hooksPath=/dev/null", "push", "-q", "origin", "HEAD:refs/heads/\(branch)"]
+        try git(push, at: repo)
+        // Someone pushes to origin after this checkout's last fetch.
+        try commit("pushed by someone else", at: repo)
+        try git(push, at: repo)
+        try git(["reset", "-q", "--hard", "HEAD~1"], at: repo)
+        try git(["update-ref", "refs/remotes/origin/\(branch)", "HEAD"], at: repo)
+
+        XCTAssertNil(GitWorktree.fetch(branch: branch, repoRoot: repo))
+        XCTAssertEqual(
+            try gitOutput(["rev-parse", "refs/remotes/origin/\(branch)"], at: repo),
+            try gitOutput(["rev-parse", "refs/heads/\(branch)"], at: origin)
+        )
+        XCTAssertNotEqual(try gitOutput(["rev-parse", "refs/remotes/origin/\(branch)"], at: repo), try gitOutput(["rev-parse", "HEAD"], at: repo))
+
+        try git(["remote", "set-url", "origin", root + "/gone.git"], at: repo)
+        let error = try XCTUnwrap(GitWorktree.fetch(branch: branch, repoRoot: repo))
+        XCTAssertTrue(error.hasPrefix("fatal:"), error)
+    }
+
+    func testHandoversAreExcludedOnceForEveryWorktree() throws {
+        let exclude = root + "/repo/.git/info/exclude"
+        try "# mine\n.claude-handover.md".write(toFile: exclude, atomically: true, encoding: .utf8)
+        let linked = try XCTUnwrap(GitWorktree.create(branch: "feat/x", repoRoot: repo).path)
+
+        XCTAssertTrue(GitWorktree.ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: linked))
+        XCTAssertTrue(GitWorktree.ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repo))
+        XCTAssertEqual(
+            try String(contentsOfFile: exclude, encoding: .utf8),
+            "# mine\n.claude-handover.md\n# Nirux handovers (New Task…)\n.codex-handover.md\n"
+        )
+        // In a folder of the worktree too, where a project's task starts.
+        try FileManager.default.createDirectory(atPath: linked + "/sub", withIntermediateDirectories: true)
+        for folder in [linked, linked + "/sub"] {
+            for name in [".claude-handover.md", ".codex-handover.md"] {
+                try "task".write(toFile: folder + "/" + name, atomically: true, encoding: .utf8)
+            }
+        }
+        XCTAssertEqual(try gitOutput(["status", "--porcelain"], at: linked), "")
+
+        // Never written through a link.
+        try FileManager.default.removeItem(atPath: exclude)
+        try FileManager.default.createSymbolicLink(atPath: exclude, withDestinationPath: root + "/elsewhere")
+        XCTAssertFalse(GitWorktree.ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repo))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root + "/elsewhere"))
+    }
+
     func testRejectsInvalidBranchNames() {
         for branch in ["", "-b", "--detach", "a..b", "a b", "a~1", "feat/", "@{-1}"] {
             let result = GitWorktree.create(branch: branch, repoRoot: repo)

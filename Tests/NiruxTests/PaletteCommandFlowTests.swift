@@ -26,6 +26,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
                 "New Workspace", "Rename Workspace", "Show/Hide Sidebar", "Show/Hide Inactive Workspaces"
             ],
             "testWorktreeCommands": ["Open Worktree", "New Worktree", "Clean Up Merged Worktrees…"],
+            "testNewTaskCommand": ["New Task…"],
             "testProjectBoardCommand": ["Open Project Board"],
             "testSetupCommands": ["Show Getting Started", "Install Agent Skills", "Open Settings"]
         ],
@@ -284,6 +285,61 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             }
             panel.dismiss()
             XCTAssertNil(shell.worktreeCleanupPanel)
+        }
+    }
+
+    /// Reads the project's repository and templates off the main thread,
+    /// then creates the worktree and writes the handover off it too (see
+    /// NewTaskFlowTests for the rest of the form).
+    func testNewTaskCommand() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            harness.runPaletteCommand("New Task…")
+            harness.waitUntil("the new task sheet") { shell.newTaskPanel?.panel?.isSheet == true }
+            let form = try XCTUnwrap(shell.newTaskPanel)
+            XCTAssertIdentical(harness.window.attachedSheet, form.panel)
+            XCTAssertEqual(form.selectedProjectID, shell.activeProfileID)
+            harness.waitUntil("the project's repository") { form.info != nil }
+            XCTAssertEqual(form.info?.target?.repository, harness.repo)
+            XCTAssertEqual(form.info?.templates, TaskTemplates.defaults)
+            // No remote here: the checkout's HEAD.
+            XCTAssertEqual(
+                form.repositoryLabel.stringValue,
+                "\(harness.repo)\nStarts from this checkout’s HEAD (main): origin has no default branch Nirux knows of."
+            )
+
+            // The branch follows the description, then the template.
+            form.descriptionView.string = "Sidebar flickers on resize\n\nSeen with three columns."
+            form.descriptionView.didChangeText()
+            XCTAssertEqual(form.branch, "feat/sidebar-flickers-on-resize")
+            form.templatePopup.selectItem(withTitle: "Bugfix")
+            form.templatePopup.sendAction(form.templatePopup.action, to: form.templatePopup.target)
+            XCTAssertEqual(form.branch, "fix/sidebar-flickers-on-resize")
+
+            form.startButton.performClick(nil)
+            harness.waitUntil("the task's workspace") {
+                shell.workspaces.contains { $0.title == "Sidebar flickers on resize" }
+            }
+            XCTAssertNil(shell.newTaskPanel)
+            XCTAssertNil(harness.window.attachedSheet)
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertEqual(workspace.title, "Sidebar flickers on resize")
+            XCTAssertEqual(workspace.profileID, WorkspaceProfile.defaultID)
+            XCTAssertEqual(
+                NiruxShellView.comparablePath(workspace.cwd),
+                NiruxShellView.comparablePath(harness.root + "/repo.fix-sidebar-flickers-on-resize")
+            )
+            XCTAssertEqual(GitWorktree.currentBranch(at: workspace.cwd), "fix/sidebar-flickers-on-resize")
+            let handover = try String(contentsOfFile: workspace.cwd + "/.claude-handover.md", encoding: .utf8)
+            XCTAssertTrue(handover.contains("## Task\n\nSidebar flickers on resize\n\nSeen with three columns.\n"), handover)
+            XCTAssertTrue(handover.contains("## How to proceed (template “Bugfix”)\n\n1. Reproduce the bug first"), handover)
+            // The repository ignores it: an agent's `git add -A` leaves it out.
+            XCTAssertEqual(try UIFlowHarness.git(["status", "--porcelain"], at: workspace.cwd), "")
+            // Named after the branch (#39), told to read the handover.
+            let launch = try XCTUnwrap(harness.agentLaunches.last)
+            XCTAssertTrue(launch.hasPrefix("command claude"), launch)
+            XCTAssertTrue(launch.contains("'--name=fix/sidebar-flickers-on-resize'"), launch)
+            XCTAssertTrue(launch.contains("Read .claude-handover.md for full context"), launch)
         }
     }
 
