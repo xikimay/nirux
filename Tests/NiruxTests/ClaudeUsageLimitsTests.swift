@@ -133,26 +133,31 @@ final class ClaudeUsageLimitsTests: XCTestCase {
 
     // MARK: - The shared file
 
-    /// Runs the receiver on a status line payload from `column`'s `claude`.
+    /// Runs the receiver on a status line payload from the `claude` with
+    /// pid `process` in `column`.
     @discardableResult
     private func report(
-        _ column: String, api: Double, fiveHour: Double?, sevenDay: Double?, at time: TimeInterval
+        _ column: String, process: pid_t = 100, session: String = "s1",
+        api: Double, fiveHour: Double?, sevenDay: Double?, at time: TimeInterval
     ) throws -> ClaudeUsageLimits? {
         var object = payload(
             fiveHour: fiveHour.map { reading($0, resetsIn: hour) }, sevenDay: sevenDay.map { reading($0, resetsIn: 90 * hour) }
         )
+        object["session_id"] = session
         object["cost"] = ["total_api_duration_ms": api, "total_cost_usd": 0.08]
         XCTAssertTrue(ClaudeStatusLineCLI.record(
-            payload: try JSONSerialization.data(withJSONObject: object), env: ["NIRUX_AGENT_UUID": column], now: time, url: fileURL
+            payload: try JSONSerialization.data(withJSONObject: object), env: ["NIRUX_AGENT_UUID": column], now: time,
+            claude: ProcessInstance(pid: process, startedAt: 1000), url: fileURL
         ))
         return ClaudeUsageLimitsFile.load(from: fileURL)?.current(at: time)
     }
 
-    /// The latest news wins, whichever column brings it. A status line
+    /// The latest news wins, whichever session brings it. A status line
     /// that runs again without a new response repeats old numbers, which
     /// must not come back over newer ones: while the session is idle, once
     /// a window reset (Claude Code then leaves that window out), after
-    /// `/clear` (the API time starts over).
+    /// `/clear` (the API time starts over) or `/resume` (it takes the
+    /// resumed session's).
     func testRecordKeepsTheLatestNewsAndIgnoresRepeats() throws {
         try report("a", api: 2700, fiveHour: 30, sevenDay: 18, at: now)
         var stored = try XCTUnwrap(try report("b", api: 900, fiveHour: 35, sevenDay: 25, at: now + 60))
@@ -164,13 +169,23 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         let afterReset = now + hour + 60
         stored = try XCTUnwrap(try report("a", api: 2700, fiveHour: nil, sevenDay: 18, at: afterReset))
         XCTAssertEqual(stored, ClaudeUsageLimits(sevenDay: window(25, resetsAt: now + 90 * hour, reportedAt: now + 60)))
-        stored = try XCTUnwrap(try report("a", api: 0, fiveHour: nil, sevenDay: 18, at: afterReset + 60))
+        stored = try XCTUnwrap(try report("a", session: "s2", api: 0, fiveHour: nil, sevenDay: 18, at: afterReset + 60))
         XCTAssertEqual(stored.sevenDay?.usedPercentage, 25, "/clear: a repeat")
+        stored = try XCTUnwrap(try report("a", session: "s3", api: 50_000, fiveHour: nil, sevenDay: 18, at: afterReset + 70))
+        XCTAssertEqual(stored.sevenDay?.usedPercentage, 25, "/resume: a repeat")
 
         // A response is news, even with numbers seen before (a is signed in
         // to another account, say).
-        stored = try XCTUnwrap(try report("a", api: 400, fiveHour: nil, sevenDay: 18, at: afterReset + 120))
+        stored = try XCTUnwrap(try report("a", session: "s3", api: 50_400, fiveHour: nil, sevenDay: 18, at: afterReset + 120))
         XCTAssertEqual(stored.sevenDay, window(18, resetsAt: now + 90 * hour, reportedAt: afterReset + 120))
+    }
+
+    /// Two `claude`s in one column (tmux in a Nirux terminal) keep apart.
+    func testRecordTellsTwoClaudesInOneColumnApart() throws {
+        try report("a", process: 100, api: 2700, fiveHour: 30, sevenDay: 18, at: now)
+        try report("a", process: 200, api: 900, fiveHour: 35, sevenDay: 25, at: now + 60)
+        let stored = try XCTUnwrap(try report("a", process: 100, api: 2700, fiveHour: 30, sevenDay: 18, at: now + 300))
+        XCTAssertEqual(stored.fiveHour?.usedPercentage, 35, "the first one's idle repeat")
     }
 
     func testRecordTakesNothingFromOutsideNiruxOrWithoutLimits() throws {

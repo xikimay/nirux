@@ -4,12 +4,16 @@ import Foundation
 /// --statusline` received it: the limits, and what tells news from a repeat.
 struct ClaudeStatusLineReport: Equatable, Sendable {
     var limits: ClaudeUsageLimits
-    /// `cost.total_api_duration_ms`: it grows with each API response of the
-    /// `claude` process, and with nothing else.
+    /// `session_id`.
+    var sessionID: String?
+    /// `cost.total_api_duration_ms`: within one session, it grows with each
+    /// API response and with nothing else (`/resume` restores the resumed
+    /// session's).
     var apiDuration: Double?
 
-    init(limits: ClaudeUsageLimits, apiDuration: Double? = nil) {
+    init(limits: ClaudeUsageLimits, sessionID: String? = nil, apiDuration: Double? = nil) {
         self.limits = limits
+        self.sessionID = sessionID
         self.apiDuration = apiDuration
     }
 
@@ -17,6 +21,7 @@ struct ClaudeStatusLineReport: Equatable, Sendable {
     init?(payload: [String: Any], now: TimeInterval) {
         guard let limits = ClaudeUsageLimits(statusLinePayload: payload, now: now) else { return nil }
         self.limits = limits
+        sessionID = payload["session_id"] as? String
         apiDuration = ((payload["cost"] as? [String: Any])?["total_api_duration_ms"] as? NSNumber)?.doubleValue
     }
 }
@@ -27,8 +32,8 @@ struct ClaudeStatusLineReport: Equatable, Sendable {
 enum ClaudeUsageLimitsFile {
     struct Contents: Codable, Equatable {
         var limits = ClaudeUsageLimits()
-        /// What each column's `claude` last reported, by NIRUX_AGENT_UUID.
-        var columns: [String: ColumnMark] = [:]
+        /// What each `claude` process last reported (see `reporter`).
+        var reporters: [String: ReporterMark] = [:]
 
         init() {}
 
@@ -36,11 +41,11 @@ enum ClaudeUsageLimitsFile {
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             limits = try container.decode(ClaudeUsageLimits.self, forKey: .limits)
-            columns = (try? container.decodeIfPresent([String: ColumnMark].self, forKey: .columns)) ?? [:]
+            reporters = (try? container.decodeIfPresent([String: ReporterMark].self, forKey: .reporters)) ?? [:]
         }
     }
 
-    struct ColumnMark: Codable, Equatable {
+    struct ReporterMark: Codable, Equatable {
         struct Reading: Codable, Equatable {
             var usedPercentage: Double
             var resetsAt: TimeInterval
@@ -52,6 +57,7 @@ enum ClaudeUsageLimitsFile {
             }
         }
 
+        var sessionID: String?
         var apiDuration: Double?
         var fiveHour: Reading?
         var sevenDay: Reading?
@@ -59,10 +65,19 @@ enum ClaudeUsageLimitsFile {
         var changedAt: TimeInterval
     }
 
-    /// A column is forgotten a little after the weekly window it could have
-    /// reported on, and beyond this many.
-    static let columnMemory: TimeInterval = 8 * 24 * 3600
-    static let maximumColumns = 256
+    /// A reporter is forgotten a little after the weekly window it could
+    /// have reported on, and beyond this many.
+    static let reporterMemory: TimeInterval = 8 * 24 * 3600
+    static let maximumReporters = 256
+
+    /// Who reported: the column (NIRUX_AGENT_UUID) and its `claude` process,
+    /// since two can share a column (tmux in a Nirux terminal). Nil without
+    /// a column: then everything counts.
+    static func reporter(column: String?, process: ProcessInstance?) -> String? {
+        guard let column else { return nil }
+        guard let process else { return column }
+        return "\(column) \(process.pid) \(process.startedAt)"
+    }
 
     /// The status line receiver writes here too: it inherits NIRUX_STATE_DIR
     /// from the terminal, like the hook receiver.
@@ -80,24 +95,23 @@ enum ClaudeUsageLimitsFile {
     }
 
     /// Records what `report` brings that is news; the latest news wins,
-    /// whichever column brings it (a session signed in to another account
+    /// whichever reporter brings it (a session signed in to another account
     /// counts like any other).
     ///
     /// A `claude`'s status line also runs while it is idle (its permission
     /// mode changes, its prompt cache expires, a window resets), and after
     /// `/clear` or `/resume`: each time it repeats the limits of its last
-    /// response, which would bring back numbers another column has since
-    /// updated. So a window counts only when the column's `claude` got an
-    /// API response since its last report (its API time grew), or when the
-    /// reading differs from the one the column last reported. `source` is
-    /// the column's NIRUX_AGENT_UUID; without one, everything counts.
+    /// response, which would bring back numbers another session has since
+    /// updated. So a window counts only when the session got an API response
+    /// since its last report (same `session_id`, more API time), or when the
+    /// reading differs from the one the same `claude` last reported.
     ///
     /// Several sessions report at once, so the read-modify-write holds a
     /// lock; a writer that can't get it within `lockWait` gives up, and its
     /// session's next report counts instead. The file is replaced
     /// atomically: the app never reads half of one.
     @discardableResult
-    static func record(_ report: ClaudeStatusLineReport, from source: String?, now: TimeInterval, at url: URL = url) -> Bool {
+    static func record(_ report: ClaudeStatusLineReport, from reporter: String?, now: TimeInterval, at url: URL = url) -> Bool {
         let lockPath = url.path + ".lock"
         let lock = open(lockPath, O_RDWR | O_CREAT, 0o600)
         guard lock >= 0 else { return false }
@@ -108,26 +122,27 @@ enum ClaudeUsageLimitsFile {
         let existing = loadContents(from: url) ?? Contents()
         var contents = existing
         var news = report.limits
-        if let source {
-            let last = contents.columns[source]
-            if let last, (report.apiDuration ?? -1) <= (last.apiDuration ?? -1) {
-                if ColumnMark.Reading(news.fiveHour) == last.fiveHour { news.fiveHour = nil }
-                if ColumnMark.Reading(news.sevenDay) == last.sevenDay { news.sevenDay = nil }
+        if let reporter {
+            let last = contents.reporters[reporter]
+            if let last, last.sessionID != report.sessionID || (report.apiDuration ?? -1) <= (last.apiDuration ?? -1) {
+                if ReporterMark.Reading(news.fiveHour) == last.fiveHour { news.fiveHour = nil }
+                if ReporterMark.Reading(news.sevenDay) == last.sevenDay { news.sevenDay = nil }
             }
-            var mark = ColumnMark(
+            var mark = ReporterMark(
+                sessionID: report.sessionID,
                 apiDuration: report.apiDuration,
-                fiveHour: ColumnMark.Reading(report.limits.fiveHour) ?? last?.fiveHour,
-                sevenDay: ColumnMark.Reading(report.limits.sevenDay) ?? last?.sevenDay,
+                fiveHour: ReporterMark.Reading(report.limits.fiveHour) ?? last?.fiveHour,
+                sevenDay: ReporterMark.Reading(report.limits.sevenDay) ?? last?.sevenDay,
                 changedAt: last?.changedAt ?? now
             )
             if mark != last { mark.changedAt = now }
-            contents.columns[source] = mark
+            contents.reporters[reporter] = mark
         }
         contents.limits = (contents.limits.current(at: now) ?? ClaudeUsageLimits()).updated(with: news)
-        contents.columns = contents.columns
-            .filter { $0.value.changedAt > now - columnMemory }
+        contents.reporters = contents.reporters
+            .filter { $0.value.changedAt > now - reporterMemory }
             .sorted { $0.value.changedAt > $1.value.changedAt }
-            .prefix(maximumColumns)
+            .prefix(maximumReporters)
             .reduce(into: [:]) { $0[$1.key] = $1.value }
         guard contents != existing else { return true }
         let encoder = JSONEncoder()
@@ -167,7 +182,10 @@ enum ClaudeStatusLineCLI {
         // Read the whole payload before anything else: Claude reports a
         // command that closes stdin early as failed.
         let data = readPayload(from: FileHandle.standardInput)
-        record(payload: data, env: ProcessInfo.processInfo.environment, now: Date().timeIntervalSince1970)
+        record(
+            payload: data, env: ProcessInfo.processInfo.environment, now: Date().timeIntervalSince1970,
+            claude: ProcessInstance.hookEmitter(for: .claude)
+        )
         return 0
     }
 
@@ -187,11 +205,13 @@ enum ClaudeStatusLineCLI {
         payload: Data,
         env: [String: String],
         now: TimeInterval,
+        claude: ProcessInstance? = nil,
         url: URL = ClaudeUsageLimitsFile.url
     ) -> Bool {
         guard AgentHookCLI.isFromNiruxTerminal(env: env),
               let object = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any],
               let report = ClaudeStatusLineReport(payload: object, now: now) else { return false }
-        return ClaudeUsageLimitsFile.record(report, from: env["NIRUX_AGENT_UUID"], now: now, at: url)
+        let reporter = ClaudeUsageLimitsFile.reporter(column: env["NIRUX_AGENT_UUID"], process: claude)
+        return ClaudeUsageLimitsFile.record(report, from: reporter, now: now, at: url)
     }
 }
