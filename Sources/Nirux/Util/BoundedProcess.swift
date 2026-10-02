@@ -15,7 +15,8 @@ enum BoundedProcess {
         currentDirectoryURL: URL,
         environment: [String: String] = [:],
         timeout: TimeInterval = 30,
-        captureStandardError: Bool = false
+        captureStandardError: Bool = false,
+        maxStandardOutputBytes: Int? = nil
     ) -> BoundedProcessResult? {
         guard FileManager.default.isExecutableFile(atPath: executableURL.path) else {
             return nil
@@ -62,7 +63,8 @@ enum BoundedProcess {
             errorOutput: errorOutput,
             from: process,
             didTerminate: didTerminate,
-            timeout: timeout
+            timeout: timeout,
+            maxStandardOutputBytes: maxStandardOutputBytes
         ) else { return nil }
         return BoundedProcessResult(
             standardOutput: standardOutput,
@@ -97,13 +99,16 @@ enum BoundedProcess {
     /// fills one pipe while another is being read can never stall. Once the
     /// process has exited, only what it left buffered is taken: later bytes
     /// come from descendants still holding the pipe, and waiting for their
-    /// EOF would wait on them (a hook's background job, say).
+    /// EOF would wait on them (a hook's background job, say). Standard
+    /// output past `maxStandardOutputBytes` stops the process, as a timeout
+    /// does.
     private static func drain(
         output: Pipe,
         errorOutput: Pipe?,
         from process: Process,
         didTerminate: DispatchSemaphore,
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        maxStandardOutputBytes: Int?
     ) -> (standardOutput: Data, standardError: Data)? {
         let readHandles = [output, errorOutput].compactMap { $0?.fileHandleForReading }
         let deadline = ProcessInfo.processInfo.systemUptime + max(0, timeout)
@@ -111,6 +116,11 @@ enum BoundedProcess {
         var openIndices = Array(readHandles.indices)
         var hasExited = false
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+
+        func isOverLimit() -> Bool {
+            guard let maxStandardOutputBytes else { return false }
+            return data[0].count > maxStandardOutputBytes
+        }
 
         func fail() -> (standardOutput: Data, standardError: Data)? {
             // After exit the semaphore is spent and the pid may be reused.
@@ -131,7 +141,7 @@ enum BoundedProcess {
                     openIndices: &openIndices,
                     into: &data,
                     buffer: &buffer
-                ) else { return fail() }
+                ), !isOverLimit() else { return fail() }
                 break
             }
             let remaining = deadline - ProcessInfo.processInfo.systemUptime
@@ -161,7 +171,7 @@ enum BoundedProcess {
                 openIndices: &openIndices,
                 into: &data,
                 buffer: &buffer
-            ) else { return fail() }
+            ), !isOverLimit() else { return fail() }
         }
 
         if !hasExited {
