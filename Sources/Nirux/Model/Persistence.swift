@@ -382,6 +382,10 @@ struct PersistedSettings: Codable {
     var sidebarApprovalsEnabled: Bool = false
     /// See `KeepAwakeController`. On by default: missing decodes to true.
     var keepMacAwakeWhileAgentsWork: Bool = true
+    /// The Claude plan usage limits in the title bar (see
+    /// `ClaudeUsageLimits`). Opt-in: it makes Nirux Claude Code's status
+    /// line. Missing decodes to false.
+    var showClaudeUsageLimits: Bool = false
     /// Master gate. Secrets never live here; the bot token is in Keychain.
     var telegramRemoteAccessEnabled: Bool = false
     var telegramPairedUserID: Int64?
@@ -437,6 +441,7 @@ struct PersistedSettings: Codable {
         case missionHandoffsEnabled
         case sidebarApprovalsEnabled
         case keepMacAwakeWhileAgentsWork
+        case showClaudeUsageLimits
         case telegramRemoteAccessEnabled
         case telegramPairedUserID
         case telegramPairedChatID
@@ -465,6 +470,7 @@ struct PersistedSettings: Codable {
         missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? false
         sidebarApprovalsEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarApprovalsEnabled) ?? false
         keepMacAwakeWhileAgentsWork = try container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileAgentsWork) ?? true
+        showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
         telegramRemoteAccessEnabled = try container.decodeIfPresent(
             Bool.self, forKey: .telegramRemoteAccessEnabled
         ) ?? false
@@ -498,6 +504,7 @@ struct PersistedSettings: Codable {
         try container.encode(missionHandoffsEnabled, forKey: .missionHandoffsEnabled)
         try container.encode(sidebarApprovalsEnabled, forKey: .sidebarApprovalsEnabled)
         try container.encode(keepMacAwakeWhileAgentsWork, forKey: .keepMacAwakeWhileAgentsWork)
+        try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
         try container.encode(telegramRemoteAccessEnabled, forKey: .telegramRemoteAccessEnabled)
         try container.encodeIfPresent(telegramPairedUserID, forKey: .telegramPairedUserID)
         try container.encodeIfPresent(telegramPairedChatID, forKey: .telegramPairedChatID)
