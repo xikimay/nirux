@@ -36,6 +36,10 @@ extension NiruxShellView {
                     closingView.alphaValue = 1
                     return
                 }
+                // Still focused: the user lands on its neighbour. An
+                // agent's open during the animation focused its editor
+                // without the keyboard instead.
+                let landsOnNeighbour = workspace.columns[safe: workspace.focusedIndex] === closingColumn
                 workspace.closeColumn(at: closingIndex)
                 self.relayout(animated: false)
                 // Animate remaining columns sliding into place
@@ -45,8 +49,9 @@ extension NiruxShellView {
                     animated: true
                 )
                 self.updateSidebar()
-                // ⌘W lands the user on the neighbour.
-                self.focusActiveTerminal(in: self.window, editorTakesKeyboard: true)
+                self.focusActiveTerminal(
+                    in: self.window, editorTakesKeyboard: landsOnNeighbour && self.activeWorkspace === workspace
+                )
             }
         })
     }

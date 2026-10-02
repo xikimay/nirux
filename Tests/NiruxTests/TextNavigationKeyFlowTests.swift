@@ -199,6 +199,17 @@ final class TextNavigationKeyFlowTests: XCTestCase {
             shell.closeActiveColumn()
             harness.waitUntil("the column to close", timeout: 10) { workspace.columns.count == editorIndex + 1 }
             XCTAssertIdentical(harness.window.firstResponder, webView, "Cmd+W")
+
+            // Unless an agent's open focused the editor while the column
+            // closed.
+            workspace.addColumn()
+            shell.relayout(animated: false)
+            harness.window.makeFirstResponder(workspace.columns[safe: editorIndex + 1]?.terminalView)
+            shell.closeActiveColumn()
+            shell.openEditorFromURL(try agentOpen(harness.repo + "/README.md", in: workspace))
+            XCTAssertEqual(workspace.focusedIndex, editorIndex)
+            harness.waitUntil("the column to close", timeout: 10) { workspace.columns.count == editorIndex + 1 }
+            XCTAssertNotIdentical(harness.window.firstResponder, webView, "Cmd+W during an agent's open")
         }
     }
 
@@ -215,6 +226,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
             harness.shell.openEditorFromURL(try agentOpen(harness.repo + "/README.md", in: workspace))
             XCTAssertNotNil(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
             XCTAssertIdentical(harness.window.firstResponder, fieldEditor)
+            XCTAssertTrue((fieldEditor.delegate as? NSView)?.isDescendant(of: browser) == true, "another field has the keyboard")
         }
     }
 

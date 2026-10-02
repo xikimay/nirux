@@ -188,6 +188,7 @@ final class NiruxShellView: NSView {
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
             if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }
+            guard self.activeWSIndex == wsIndex else { return }
             self.goToColumn(colIndex)
         }
         updateSidebar()
