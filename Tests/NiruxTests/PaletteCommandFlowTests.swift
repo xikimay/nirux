@@ -21,6 +21,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testBrowserCommands": ["Open Browser", "Toggle Web Inspector"],
             "testImportBrowserCookies": ["Import Browser Cookies"],
             "testAgentCommands": ["Open Claude Code", "Open Codex"],
+            "testNextWaitingAgentCommand": ["Next Waiting Agent"],
             "testWorkspaceCommands": [
                 "New Workspace", "Rename Workspace", "Show/Hide Sidebar", "Show/Hide Inactive Workspaces"
             ],
@@ -115,7 +116,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             // After a URL, the palette opens on the commands again.
             harness.shell.showCommandPalette()
             XCTAssertEqual(palette.mode, .actions)
-            XCTAssertEqual(palette.searchField?.placeholderString, "Type a command...")
+            XCTAssertEqual(palette.searchField?.placeholderString, "Type a command or a workspace...")
             palette.dismiss()
 
             // Reaches the focused browser column; the inspector itself
@@ -155,6 +156,23 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(workspace.columns.count, columnCount + 2)
             XCTAssertEqual(harness.agentLaunches.count, 2)
             XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command codex") == true, "\(harness.agentLaunches)")
+        }
+    }
+
+    /// Goes to the agent blocked on the user (faked: a real one needs a
+    /// `claude` in front). QuickSwitcherFlowTests walks the queue.
+    func testNextWaitingAgentCommand() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let repo = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "second", cwd: harness.worktree)
+            let waiting = try XCTUnwrap(shell.activeWorkspace?.columns.first)
+            let wait = AgentWait(reason: .question(nil), since: Date().timeIntervalSince1970 - 60)
+            shell.quickSwitch.agentWait = { column, _, _ in column === waiting ? wait : nil }
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === repo }))
+
+            harness.runPaletteCommand("Next Waiting Agent")
+            XCTAssertEqual(shell.activeWorkspace?.title, "second")
         }
     }
 
@@ -209,10 +227,43 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(opened.title, harness.worktreeBranch)
             XCTAssertEqual(NiruxShellView.comparablePath(opened.cwd), NiruxShellView.comparablePath(harness.worktree))
 
+            // Picks a row of Open Worktree by its title; returns its subtitle.
+            @MainActor func pickWorktree(_ title: String) throws -> String {
+                harness.runPaletteCommand("Open Worktree")
+                harness.waitUntil("\(title) in the worktree list") {
+                    palette.isVisible && palette.actions.contains { $0.title == title }
+                }
+                harness.type(title, into: try XCTUnwrap(palette.searchField))
+                let row = try XCTUnwrap(palette.filteredActions.first)
+                XCTAssertEqual(row.title, title)
+                harness.press(.returnKey, in: palette.panel)
+                return row.subtitle
+            }
+
+            // Once it is open, it goes back to that workspace...
+            let repoWorkspace = try XCTUnwrap(shell.workspaces.first { $0.cwd == harness.repo })
+            shell.focusWorkspace(id: repoWorkspace.id)
+            let workspaceCount = shell.workspaces.count
+            XCTAssertTrue(try pickWorktree(harness.worktreeBranch).hasPrefix("Already open · "))
+            XCTAssertTrue(shell.activeWorkspace === opened)
+            // ...and, from the worktree, to the main checkout's.
+            XCTAssertTrue(try pickWorktree("main").hasPrefix("Already open · "))
+            XCTAssertTrue(shell.activeWorkspace === repoWorkspace)
+            XCTAssertEqual(shell.workspaces.count, workspaceCount)
+            // A worktree inside the main checkout, as Claude Code makes them:
+            // its workspace is in it, not in the main checkout.
+            let nested = harness.repo + "/.claude/worktrees/nested"
+            try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/nested", nested], at: harness.repo)
+            XCTAssertFalse(try pickWorktree("feat/nested").hasPrefix("Already open"))
+            let nestedWorkspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.focusWorkspace(id: repoWorkspace.id)
+            XCTAssertTrue(try pickWorktree("feat/nested").hasPrefix("Already open · "))
+            XCTAssertTrue(shell.activeWorkspace === nestedWorkspace)
+            XCTAssertEqual(shell.workspaces.count, workspaceCount + 1)
+            shell.focusWorkspace(id: repoWorkspace.id)
+
             // Creates the worktree off the main thread, then opens it with an
             // agent (the launch double).
-            let repoIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0.cwd == harness.repo })
-            shell.switchToWorkspace(repoIndex)
             harness.runPaletteCommand("New Worktree")
             let branchField = try XCTUnwrap(harness.waitForField(placeholder: "Branch name (e.g. feat/my-feature)"))
             harness.submit("feat/new-flow", into: branchField)

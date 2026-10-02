@@ -46,6 +46,12 @@ extension NiruxApp {
         shell?.focusWorkspace(.down)
     }
 
+    /// One jump per press: a held ⌘J would spin through the queue.
+    @objc func jumpToNextWaitingAgent(_ sender: Any?) {
+        if let event = NSApp.currentEvent, event.type == .keyDown, event.isARepeat { return }
+        shell?.jumpToNextWaitingAgent()
+    }
+
     @objc func previousSpace(_ sender: Any?) {
         shell?.focusSpace(.previous)
     }
@@ -373,6 +379,13 @@ extension NiruxApp {
         nextSpaceItem.keyEquivalent = "\u{F703}"
         nextSpaceItem.keyEquivalentModifierMask = NSEvent.ModifierFlags([.command, .option])
         workspacesMenu.addItem(nextSpaceItem)
+
+        workspacesMenu.addItem(NSMenuItem.separator())
+        workspacesMenu.addItem(
+            withTitle: "Next Waiting Agent",
+            action: #selector(jumpToNextWaitingAgent(_:)),
+            shortcut: .nextWaitingAgent
+        )
 
         let workspacesItem = NSMenuItem()
         workspacesItem.submenu = workspacesMenu

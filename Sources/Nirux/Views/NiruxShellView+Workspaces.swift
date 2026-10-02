@@ -192,6 +192,7 @@ extension NiruxShellView {
     func refreshAfterWorkspaceSelection(animated: Bool, editorTakesKeyboard: Bool = true) {
         guard workspaces.indices.contains(activeWSIndex) else { return }
         workspaces[activeWSIndex].hasNotification = false
+        quickSwitch.focusMoved()
         relayout(animated: animated)
         refreshGitContextNow(for: workspaces[activeWSIndex])
         // Title bars of a workspace off screen weren't refreshed: bring
