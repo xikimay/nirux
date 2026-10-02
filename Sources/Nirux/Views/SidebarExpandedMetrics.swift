@@ -36,6 +36,8 @@ enum SidebarExpandedMetrics {
     static let prStateAdvance: CGFloat = 14
     static let prDetailHeight: CGFloat = 10
     static let prDetailAdvance: CGFloat = 12
+    static let reviewHeight: CGFloat = 12
+    static let reviewAdvance: CGFloat = 14
     static let columnGap: CGFloat = 10
     static let columnRowHeight: CGFloat = 18
     static let columnRowAdvance: CGFloat = 24
@@ -107,6 +109,7 @@ enum SidebarExpandedMetrics {
                 height += prDetailAdvance
             }
         }
+        if workspace.reviewBadges != nil { height += reviewAdvance }
         height += columnGap + CGFloat(workspace.columns.count) * columnRowAdvance
         height += workspace.columns.reduce(CGFloat(0)) {
             $0 + approvalBlockAdvance(for: $1) + resumeBlockAdvance(for: $1)

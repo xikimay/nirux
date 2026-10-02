@@ -52,6 +52,9 @@ extension NiruxShellView {
             workspace.lastActivityAt = persistedWS.lastActivityAt
             workspace.nextStep = persistedWS.nextStep
             workspace.blocker = persistedWS.blocker
+            for (rawValue, run) in persistedWS.reviewRuns ?? [:] {
+                if let pass = ReviewPass(rawValue: rawValue) { workspace.reviewRuns[pass] = run }
+            }
             // Remove the default column created by WorkspaceState.init
             if let first = workspace.columns.first { first.view.removeFromSuperview(); workspace.columns.removeAll() }
             for persistedColumn in persistedWS.columns {
@@ -255,7 +258,10 @@ extension NiruxShellView {
                     lastSummaryIsManual: workspace.lastSummaryIsManual,
                     lastActivityAt: workspace.lastActivityAt,
                     nextStep: workspace.nextStep,
-                    blocker: workspace.blocker)
+                    blocker: workspace.blocker,
+                    reviewRuns: workspace.reviewRuns.isEmpty ? nil : Dictionary(
+                        uniqueKeysWithValues: workspace.reviewRuns.map { ($0.key.rawValue, $0.value) }
+                    ))
             },
             activeWorkspaceIndex: activeWSIndex,
             settings: settings,

@@ -58,7 +58,8 @@ extension NiruxShellView {
                           columns: colInfos, prInfo: workspace.prInfo, diffStats: workspace.diffStats,
                           purpose: workspace.purpose, nextStep: workspace.nextStep,
                           blocker: workspace.blocker, phase: workspace.effectivePhase,
-                          lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt)
+                          lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt,
+                          reviewBadges: workspace.reviewBadges)
         }
         tickHiddenSpaceAgents(visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses)
         let profileInfos = workspaceStore.navigableProfiles.map { profile in
@@ -416,6 +417,9 @@ extension NiruxShellView {
             }
 
             if appliedEvent.resolution.workspace.recordAgentHookActivity(event) {
+                changed = true
+            }
+            if appliedEvent.resolution.workspace.recordReviewPasses(event) {
                 changed = true
             }
         }

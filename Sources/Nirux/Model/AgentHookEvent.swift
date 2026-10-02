@@ -72,6 +72,10 @@ struct AgentHookEvent: Codable, Equatable {
     /// events only (see `carriesTranscriptPath`): enough to follow the
     /// column's session usage without growing every tool event's line.
     let transcriptPath: String?
+    /// Review passes the event starts (see `ReviewPass`): from the prompt
+    /// on UserPromptSubmit, from the skill on a `Skill` call's PostToolUse.
+    /// Only the passes are kept, never the prompt.
+    let reviewPasses: [ReviewPass]?
     /// Sidebar approval (see `PermissionApproval`): on a PermissionRequest,
     /// the request ID and deadline (epoch seconds) the receiver waits
     /// under; on approvalResolved, the request and what became of it.
@@ -134,6 +138,14 @@ struct AgentHookEvent: Codable, Equatable {
             promptID = [.userPromptSubmit, .stopFailure].contains(name)
                 ? (payload["prompt_id"] as? String).flatMap { AgentText.clean($0, maxLength: 80) }
                 : nil
+            reviewPasses = switch name {
+            case .userPromptSubmit:
+                (payload["prompt"] as? String).flatMap(ReviewPass.passes(inPrompt:))
+            case .postToolUse where toolName == "Skill":
+                ((payload["tool_input"] as? [String: Any])?["skill"] as? String).flatMap(ReviewPass.passes(inSkill:))
+            default:
+                nil
+            }
             switch name {
             case .notification:
                 detail = (payload["message"] as? String).flatMap { AgentText.clean($0, maxLength: 300) }
@@ -162,6 +174,7 @@ struct AgentHookEvent: Codable, Equatable {
             errorKind = nil
             promptID = nil
             transcriptPath = nil
+            reviewPasses = nil
         }
     }
 
@@ -211,6 +224,7 @@ struct AgentHookEvent: Codable, Equatable {
         errorKind: String? = nil,
         promptID: String? = nil,
         transcriptPath: String? = nil,
+        reviewPasses: [ReviewPass]? = nil,
         approvalRequestID: String? = nil,
         approvalDeadline: TimeInterval? = nil,
         approvalText: String? = nil,
@@ -234,6 +248,7 @@ struct AgentHookEvent: Codable, Equatable {
         self.errorKind = errorKind
         self.promptID = promptID
         self.transcriptPath = transcriptPath
+        self.reviewPasses = reviewPasses
         self.approvalRequestID = approvalRequestID
         self.approvalDeadline = approvalDeadline
         self.approvalText = approvalText

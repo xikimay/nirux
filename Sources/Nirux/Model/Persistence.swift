@@ -525,6 +525,9 @@ struct PersistedWorkspace: Codable {
     var lastActivityAt: TimeInterval?
     var nextStep: String?
     var blocker: String?
+    /// `ReviewPass` raw values: a pass this build doesn't know is dropped
+    /// on load, never a reason to fail the workspace.
+    var reviewRuns: [String: ReviewRun]?
 
     init(
         id: String? = nil,
@@ -542,7 +545,8 @@ struct PersistedWorkspace: Codable {
         lastSummaryIsManual: Bool = false,
         lastActivityAt: TimeInterval? = nil,
         nextStep: String? = nil,
-        blocker: String? = nil
+        blocker: String? = nil,
+        reviewRuns: [String: ReviewRun]? = nil
     ) {
         self.id = id
         self.title = title
@@ -560,12 +564,13 @@ struct PersistedWorkspace: Codable {
         self.lastActivityAt = lastActivityAt
         self.nextStep = nextStep
         self.blocker = blocker
+        self.reviewRuns = reviewRuns
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID
         case purpose, phase, lastSummary, lastSummaryIsManual, lastActivityAt
-        case nextStep, blocker
+        case nextStep, blocker, reviewRuns
     }
 
     init(from decoder: Decoder) throws {
@@ -587,6 +592,7 @@ struct PersistedWorkspace: Codable {
         lastActivityAt = try container.decodeIfPresent(TimeInterval.self, forKey: .lastActivityAt)
         nextStep = try container.decodeIfPresent(String.self, forKey: .nextStep)
         blocker = try container.decodeIfPresent(String.self, forKey: .blocker)
+        reviewRuns = try container.decodeIfPresent([String: ReviewRun].self, forKey: .reviewRuns)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -609,6 +615,7 @@ struct PersistedWorkspace: Codable {
         try container.encodeIfPresent(lastActivityAt, forKey: .lastActivityAt)
         try container.encodeIfPresent(nextStep, forKey: .nextStep)
         try container.encodeIfPresent(blocker, forKey: .blocker)
+        try container.encodeIfPresent(reviewRuns, forKey: .reviewRuns)
     }
 }
 
