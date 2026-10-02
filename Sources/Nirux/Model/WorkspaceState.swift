@@ -522,7 +522,9 @@ extension WorkspaceState {
             NiruxLaunchAuthorization.environmentKey: launchID,
             // A live merge queue is never passed on to the builds an agent
             // runs here: they stay dry runs unless asked for by hand.
-            "NIRUX_MERGE_QUEUE_LIVE": ""
+            "NIRUX_MERGE_QUEUE_LIVE": "",
+            // Nor is a copy's opt-in to the real state (see RealStateGuard).
+            "NIRUX_ALLOW_REAL_STATE": ""
         ]
         if missionHandoffsEnabled {
             environment["NIRUX_MISSION_HANDOFFS"] = "1"

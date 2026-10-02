@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Nirux
 
@@ -42,11 +43,12 @@ final class RealStateGuardTests: XCTestCase {
     private func refused(
         _ executable: String,
         environment: [String: String] = [:],
+        installed: String? = nil,
         originalPath: (String) -> String? = { _ in nil }
     ) -> String? {
         RealStateGuard.refusedExecutable(
             environment: environment, executablePath: executable,
-            installedBundlePath: installedBundle, originalPath: originalPath
+            installedBundlePath: installed ?? installedBundle, originalPath: originalPath
         )
     }
 
@@ -73,21 +75,15 @@ final class RealStateGuardTests: XCTestCase {
         try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: installedExecutable)
         XCTAssertNil(refused(link))
 
-        // The install location spelled in another case than on disk, or
-        // itself a link to the bundle: still the same folder.
-        let otherCase = root.appendingPathComponent("applications/NIRUX.APP").path
-        try XCTSkipUnless(FileManager.default.fileExists(atPath: otherCase), "case-sensitive volume")
-        XCTAssertNil(RealStateGuard.refusedExecutable(
-            environment: [:], executablePath: installedExecutable,
-            installedBundlePath: otherCase, originalPath: { _ in nil }
-        ))
+        // The install location itself a link to the bundle, or spelled in
+        // another case than on disk: still the same folder.
         let linkedInstall = root.appendingPathComponent("Linked/Nirux.app").path
         try makeDirectory((linkedInstall as NSString).deletingLastPathComponent)
         try FileManager.default.createSymbolicLink(atPath: linkedInstall, withDestinationPath: installedBundle)
-        XCTAssertNil(RealStateGuard.refusedExecutable(
-            environment: [:], executablePath: installedExecutable,
-            installedBundlePath: linkedInstall, originalPath: { _ in nil }
-        ))
+        XCTAssertNil(refused(installedExecutable, installed: linkedInstall))
+        let otherCase = root.appendingPathComponent("applications/NIRUX.APP").path
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: otherCase), "case-sensitive volume")
+        XCTAssertNil(refused(installedExecutable, installed: otherCase))
     }
 
     func testATranslocatedAppIsJudgedByWhereItWasOpenedFrom() throws {
@@ -113,6 +109,27 @@ final class RealStateGuardTests: XCTestCase {
         // An empty NIRUX_STATE_DIR leaves Persistence on the real state.
         XCTAssertEqual(refused(copy, environment: ["NIRUX_STATE_DIR": ""]), copy)
         XCTAssertEqual(refused(copy, environment: ["NIRUX_ALLOW_REAL_STATE": "0"]), copy)
+
+        // A copy that opted in doesn't pass it on to what its terminals run.
+        let terminal = WorkspaceState.makeTerminalEnvironment(
+            profileID: "p", workspaceID: "w", agentUUID: "u", missionID: nil, missionHandoffsEnabled: false,
+            executablePath: nil, launchID: "l"
+        )
+        let inherited = ["NIRUX_ALLOW_REAL_STATE": "1"].merging(terminal) { _, terminal in terminal }
+        XCTAssertEqual(refused(copy, environment: inherited), copy)
+    }
+
+    /// ~/Applications counts only while /Applications has no Nirux: an
+    /// account that can't write there still runs Nirux, and an old copy
+    /// left in ~/Applications stays refused once the app is installed.
+    func testTheUsersApplicationsFolderCountsOnlyWithoutASystemInstall() throws {
+        let user = root.appendingPathComponent("Home/Applications/Nirux.app").path
+        try makeExecutable(user + "/Contents/MacOS/Nirux")
+        let missing = root.appendingPathComponent("Missing/Nirux.app").path
+
+        XCTAssertEqual(RealStateGuard.installedBundlePath(system: installedBundle, user: user), installedBundle)
+        XCTAssertEqual(RealStateGuard.installedBundlePath(system: missing, user: user), user)
+        XCTAssertNil(RealStateGuard.installedBundlePath(system: missing, user: missing))
     }
 
     /// The SPI is looked up at run time: if a macOS dropped it, a
@@ -121,5 +138,19 @@ final class RealStateGuardTests: XCTestCase {
     func testTranslocationLookupRunsOnThisMacOS() throws {
         XCTAssertTrue(RealStateGuard.translocationLookupIsAvailable)
         XCTAssertNil(RealStateGuard.translocationOriginalPath(installedBundle))
+    }
+
+    /// The alert's second button copies the command; Quit copies nothing.
+    @MainActor
+    func testOnlyTheCopyButtonCopiesTheCommand() {
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("nirux-real-state-guard-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        let delegate = RefusedLaunchDelegate(copy: "/x/Nirux.app", installed: nil, command: "run me")
+        XCTAssertEqual(delegate.makeAlert().buttons.map(\.title), ["Quit", "Copy Command and Quit"])
+
+        delegate.respond(to: .alertFirstButtonReturn, pasteboard: pasteboard)
+        XCTAssertNil(pasteboard.string(forType: .string))
+        delegate.respond(to: .alertSecondButtonReturn, pasteboard: pasteboard)
+        XCTAssertEqual(pasteboard.string(forType: .string), "run me")
     }
 }
