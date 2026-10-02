@@ -296,18 +296,20 @@ claude -p --model claude-opus-5-5 --effort medium \
   next model. It is a setting, with this default.
 - **The copy.** The working directory is a fresh temporary folder outside the
   state directory, deleted after the run; leftovers are swept at launch. Nirux
-  copies into it, from the working tree, every path `git ls-files -z` lists:
-  committed and staged files with their uncommitted edits, without untracked
-  files (see "Input" below). It skips symlinks, submodules and files missing
-  from disk, so nothing is written to the repository's index or object store.
-  Then it deletes:
+  copies files into it from the working tree, so nothing is written to the
+  repository's index or object store, unlike a temporary index would. The
+  paths come from `git ls-files -z`: committed and staged files with their
+  uncommitted edits, and no untracked file (see "Input" below). That list also
+  holds submodules, deleted files, intent-to-add files and one entry per stage
+  of a conflict, so Nirux copies a path once, and only if `lstat` reports a
+  regular file and no folder above it is a symlink. Then it deletes:
   - paths that look like a secret (`.env*`, `*.pem`, `*.p12`, `*.key`,
     `*.mobileprovision`, `*credentials*`, `id_rsa*`, `id_ed25519*`,
     `.netrc`);
   - text files containing a key marker (`-----BEGIN`, `sk-ant-`, `ghp_`,
     `github_pat_`, `AKIA`), the same markers the input withholds;
-  - `CLAUDE.md`, `CLAUDE.local.md` and `.claude/`: instructions the branch
-    carries must not reach the reviewer as project instructions.
+  - `CLAUDE.md`, `CLAUDE.local.md` and `.claude/`, at any depth: instructions
+    the branch carries must not reach the reviewer as project instructions.
 
   Not a `git worktree add`: it would show in `git worktree list` and on the
   Project Board.
@@ -356,7 +358,7 @@ claude -p --model claude-opus-5-5 --effort medium \
   comment (once R4 has landed), or marked wrong; the marks are kept with the
   run, so the page can say how often notes were wrong.
 - **Cache:** per file, keyed by the file's patch hash (section 6.3). Notes are
-  stored by path and by the hunk's position in the file, not by the run's
+  stored by path and by the hunk's index in the file's patch, not by the run's
   hunk ids (`f12h1`), which only live for one run. When the branch moves,
   Explain again only sends the files whose patch changed, with the previous
   overview as context; the others keep their notes.
@@ -392,9 +394,10 @@ function body, found by tracking braces in the file at the head, and not
 uses them, and local variables would only add noise. A test mentions a symbol
 when the identifier appears as a whole word in a file under `Tests/`. On #57,
 578 test lines for 458 code lines, and a script applying this rule found 11
-of 42 symbols that no test mentions, among them `setUpKeepAwake` (the launch
-wiring), `IOKitSleepAssertions` (the real IOKit calls; the tests inject a
-fake) and `mainQueueSchedule`. A mention isn't coverage, so the line says
+of 42 names (each counted once per file) that no test mentions, among them
+`setUpKeepAwake` (the launch wiring), `IOKitSleepAssertions` (the real IOKit
+calls; the tests inject a fake) and `mainQueueSchedule`. A mention isn't
+coverage, so the line says
 "mentions", never "tested".
 
 The rules start built in, for Swift and macOS. Per-project rules
@@ -446,17 +449,20 @@ say why and change nothing for it. Then say what you did for each number.
   doesn't fit: it refuses any agent without a failed turn, and any agent but
   `claude`. The new one keeps its at-prompt checks without the failed turn:
   the foreground process is `claude` driven by Nirux's hooks (`hookKind ==
-  "claude"`, not a headless `claude -p`), no dialog is pending, no hook says
-  it is working and no turn has started. This is the rule worktree closing
-  already uses to trust "idle" (`WorkspaceClosePolicy`). Every other agent is
+  "claude"`, and not headless as `AgentHookCenter.isHeadlessClaude` reads it),
+  no dialog is pending, no hook says it is working and no turn has started.
+  Closing a column or a workspace already trusts "idle" only on that same
+  condition (`WorkspaceClosePolicy.LiveAgent`: `processName == "claude" &&
+  hookKind == "claude"`). Every other agent is
   refused, with the reason: Codex's notify hook reports turn ends only, so an
   open approval prompt would read as idle; Gemini CLI and OpenCode report
   nothing. It is checked when the sheet opens and again on Send: a Telegram
   prompt or a merge-queue prompt may start a turn meanwhile.
 - **The message is sanitized as a whole**, paths and quoted lines included,
   by the scalar filter of `RemotePromptSanitizer`, factored out: keep `\n` and
-  `\t`, drop the other C0 controls, DEL and C1. Not its `sanitize` as is, which
-  caps at 8,000 characters, nor its `terminalInput`, which appends a Return:
+  `\t`, turn `\r` and `\r\n` into `\n`, drop the other C0 controls, DEL and
+  C1. Not its `sanitize` as is, which also trims and caps at 8,000 Unicode
+  scalars, nor its `terminalInput`, which appends a Return:
   the message is wrapped in `ESC[200~` and `ESC[201~` with nothing after, as
   `sendSelectionToAgent` does. A file named with an ESC[201~ can't end the
   paste and inject a Return. In the sheet, bidi and
@@ -480,12 +486,14 @@ Rejected:
 ### 6.3 Reviewed
 
 - One checkbox per file, keyed by the file's **patch hash**: a hash of its
-  path (both paths for a rename), its status, and the bodies of its hunks from
-  the merge base to the working tree. The `diff --git`, `index`, mode and
-  similarity lines and the `@@` ranges are left out: they change when the base
-  changes the file elsewhere. A change to the file's patch clears it:
-  "changed since you reviewed". A merge from the base that doesn't touch the
-  branch's own changes keeps it, and an uncommitted edit clears it.
+  path (both paths for a rename), its status, its mode change, and the `-` and
+  `+` lines of its hunks, in order, from the merge base to the working tree.
+  Context lines, the whole `@@` line (ranges and the enclosing function's
+  name), and the `diff --git`, `index` and similarity lines are left out: they
+  change when the base changes the file elsewhere, even next to a hunk. A
+  change to the branch's own lines clears it: "changed since you reviewed". A
+  merge from the base keeps it unless it changed those lines, and an
+  uncommitted edit clears it.
 - The header counts reviewed files. Reviewed files can be collapsed.
 - **A new head never re-renders the page under the user.** A banner offers
   Reload; drafts survive it.
@@ -496,20 +504,23 @@ Rejected:
 ## 7. Data and refresh
 
 - **Git.** Every call runs with `GitDetect.readOnlyEnvironment`
-  (`GIT_OPTIONAL_LOCKS=0`). That is not enough on its own: a `git diff`
-  without a tree-ish still refreshes the index (`GitCommand.swift`), so Nirux
-  only runs `git diff <merge base>` and `git status --porcelain=v2 -z`. Patches
-  use `-c core.quotePath=false -c diff.suppressBlankEmpty=false --no-color
-  --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ -M -U3
-  --inter-hunk-context=0 --diff-algorithm=myers`, so the user's git config
-  can't change the patch or its hash. Paths come from `--name-status -z`; the
-  patch parser still reads C-quoted paths. Output is decoded per file,
-  lossily: one Latin-1 file must not empty the page (`GitCommand.output`
-  returns an empty string for non-UTF-8 output).
+  (`GIT_OPTIONAL_LOCKS=0`). That is not enough for `git diff`: with or without
+  a tree-ish, it refreshes the index, which also fires the watcher
+  (`GitCommand.swift` says so). Every `git diff` therefore runs with `-c
+  diff.autoRefreshIndex=false` (checked: the index is left untouched), and an
+  entry without a hunk, a mode change or a rename, which only a stale
+  timestamp can produce, is dropped. Patches also use `-c core.quotePath=false
+  -c diff.suppressBlankEmpty=false --no-color --no-ext-diff --no-textconv
+  --src-prefix=a/ --dst-prefix=b/ -M -l1000 -U3 --inter-hunk-context=0
+  --diff-algorithm=myers --indent-heuristic --submodule=short --no-relative`,
+  so the user's git config doesn't change the patch or its hash. Paths come
+  from `--name-status -z`; the patch parser still reads C-quoted paths.
+  Output is decoded per file, lossily: one Latin-1 file must not empty the
+  page (`GitCommand.output` returns an empty string for non-UTF-8 output).
 - **Base.** With a PR, the merge base of HEAD and the PR's base branch, fetched
   on Refresh: `git fetch --no-auto-maintenance --no-write-fetch-head origin
   <baseRefName>`, with `GIT_TERMINAL_PROMPT=0` and a timeout. Nirux has never
-  fetched before; this updates one remote-tracking ref and is the page's only
+  fetched before. This updates one remote-tracking ref; it is the page's only
   write to the repository. Without one, the merge base
   with the remote's default branch (`origin/HEAD`), else `main` or `master`.
   Not `GitCommand.branchBaseRef`, which tries `@{upstream}` first: after `git
@@ -520,8 +531,10 @@ Rejected:
 - **Which PR.** Found as the sidebar finds it (`PRDetect`: `gh pr list
   --head <branch>` on the upstream repository), then kept only if it is open
   and at least one of its commits (`gh pr view --json commits`) is in HEAD's
-  history and not in the base's. A merged or closed PR, or one under a reused
-  branch name, is ignored. The PR's head may not be local (the merge queue
+  history and not in the base's, or its head (`headRefOid`) is in the branch's
+  reflog: after a local rebase not pushed yet, none of the PR's commits is in
+  HEAD's history. A merged or closed PR, or one under a reused branch name, is
+  ignored. The PR's head may not be local (the merge queue
   updates branches on GitHub): the header then says the PR has commits the
   worktree doesn't. `gh` missing or logged out: the page works without the
   PR, and says so.
@@ -557,7 +570,11 @@ Rejected:
   is kept only if its PR number matches the branch's PR, or, without a PR, if
   its last head is still in the branch's reflog (`git reflog
   refs/heads/<branch>`; `git branch -D` deletes it, a rebase keeps it).
-  Otherwise it is archived and the review starts fresh.
+  Otherwise it is archived and the review starts fresh. Two limits: `git
+  checkout -B` or `git switch -C` reuses a name and keeps its reflog, so only
+  the PR number catches that reuse; and a head a rebase left unreachable leaves
+  the reflog after 30 days (`gc.reflogExpireUnreachable`), which archives a
+  review idle that long.
 - Writes take a blocking exclusive `flock` on a sibling `<file>.lock`, held
   across read, merge and write: the installed app and a dev build can share the
   state directory, and a lock on the data file itself would be lost when the
