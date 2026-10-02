@@ -6,7 +6,10 @@ extension NiruxApp {
     static let settingsWidth: CGFloat = 520
     /// The General section sits on top; the others keep their layout below.
     static let generalSectionHeight: CGFloat = 64
-    static let settingsHeight: CGFloat = 784 + generalSectionHeight
+    /// The usage limits rows close the Claude Code section; the sections
+    /// below it keep their layout, that much lower.
+    static let usageLimitsRowsHeight: CGFloat = 74
+    static let settingsHeight: CGFloat = 784 + generalSectionHeight + usageLimitsRowsHeight
 
     @objc func showSettings(_ sender: Any?) {
         if let existing = settingsPanel {
@@ -43,11 +46,13 @@ extension NiruxApp {
         settingsLaunchModePopup = modePopup
         settingsNoFlickerCheckbox = noFlickerCheck
         settingsStuckAgentPopup = buildStuckAgentRow(in: background, width: width, height: sectionsTop)
-        settingsCodexLaunchModePopup = buildCodexSection(in: background, width: width, height: sectionsTop)
-        let experimental = buildExperimentalSection(in: background, width: width, height: sectionsTop)
+        settingsUsageLimitsCheckbox = buildUsageLimitsRows(in: background, width: width, height: sectionsTop)
+        let lowerSectionsTop = sectionsTop - Self.usageLimitsRowsHeight
+        settingsCodexLaunchModePopup = buildCodexSection(in: background, width: width, height: lowerSectionsTop)
+        let experimental = buildExperimentalSection(in: background, width: width, height: lowerSectionsTop)
         settingsMissionHandoffsCheckbox = experimental.missionHandoffs
         settingsSidebarApprovalsCheckbox = experimental.sidebarApprovals
-        let telegramControls = buildTelegramSection(in: background, width: width, height: sectionsTop)
+        let telegramControls = buildTelegramSection(in: background, width: width, height: lowerSectionsTop)
         settingsTelegramEnabledCheckbox = telegramControls.enabled
         settingsTelegramTokenField = telegramControls.token
         settingsTelegramCompletionCheckbox = telegramControls.completion
@@ -280,6 +285,42 @@ extension NiruxApp {
         return popup
     }
 
+    /// Claude Code section, under its hint: the plan usage limits in the
+    /// title bar, with what turning it on does to Claude Code's status line.
+    private func buildUsageLimitsRows(in background: NSView, width: CGFloat, height: CGFloat) -> NSButton {
+        let checkbox = NSButton(checkboxWithTitle: "Show plan usage limits in the title bar", target: nil, action: nil)
+        checkbox.contentTintColor = NSColor.white.withAlphaComponent(0.85)
+        checkbox.font = .systemFont(ofSize: 12)
+        checkbox.frame = NSRect(x: 22, y: height - 196, width: width - 44, height: 20)
+        checkbox.state = Self.currentShowClaudeUsageLimits() ? .on : .off
+        checkbox.toolTip = "The 5-hour window and the weekly limit of a Claude Pro or Max plan, with their resets, "
+            + "as Claude Code sessions in Nirux report them after each response."
+        background.addSubview(checkbox)
+
+        let hint = NSTextField(wrappingLabelWithString: Self.usageLimitsHint(for: claudeStatusLineStateReader()))
+        hint.font = .systemFont(ofSize: 11)
+        hint.textColor = NSColor.white.withAlphaComponent(0.3)
+        hint.maximumNumberOfLines = 3
+        hint.frame = NSRect(x: 24, y: height - 244, width: width - 48, height: 42)
+        hint.setAccessibilityIdentifier("usageLimitsHint")
+        background.addSubview(hint)
+        return checkbox
+    }
+
+    static func usageLimitsHint(for state: AgentHookInstaller.ClaudeStatusLineState) -> String {
+        switch state {
+        case .none, .nirux:
+            return "Claude Code reports them only to its status line, so Nirux takes that place in sessions it hosts. "
+                + "The line stays blank, and Claude Code then hides its \"? for shortcuts\" hint in every session."
+        case .foreign:
+            return "Claude Code reports them only to its status line, and yours is set in ~/.claude/settings.json: "
+                + "Nirux leaves it as it is, so the limits can't show."
+        case .unreadable:
+            return "Claude Code reports them only to its status line, and ~/.claude/settings.json can't be read: "
+                + "Nirux leaves it as it is, so the limits can't show."
+        }
+    }
+
     static func stuckAgentChoiceTitle(minutes: Int) -> String {
         switch minutes {
         case 0: return "Never"
@@ -433,6 +474,7 @@ extension NiruxApp {
         let sidebarApprovalsEnabled = settingsSidebarApprovalsCheckbox?.state == .on
         // Nil without the checkbox: the saved choice (on by default) stands.
         let keepMacAwake = settingsKeepAwakeCheckbox.map { $0.state == .on }
+        let showUsageLimits = settingsUsageLimitsCheckbox.map { $0.state == .on }
         let telegramEnabled = settingsTelegramEnabledCheckbox?.state == .on
         let enteredToken = settingsTelegramTokenField?.stringValue
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -470,6 +512,7 @@ extension NiruxApp {
                     settings.stuckAgentMinutes = minutes
                 }
                 if let keepMacAwake { settings.keepMacAwakeWhileAgentsWork = keepMacAwake }
+                if let showUsageLimits { settings.showClaudeUsageLimits = showUsageLimits }
             }
             settings.telegramRemoteAccessEnabled = telegramEnabled
             settings.telegramNotifyOnCompletion = settingsTelegramCompletionCheckbox?.state != .off
@@ -525,6 +568,7 @@ extension NiruxApp {
         shell?.stuckAgentWaitThreshold = NiruxShellView.stuckWaitThreshold(minutes: NiruxShellView.currentStuckAgentMinutes())
         // Without the checkbox, the saved choice stands.
         if let keepAwake = settingsKeepAwakeCheckbox { keepAwakeController?.setEnabled(keepAwake.state == .on) }
+        if let usageLimits = settingsUsageLimitsCheckbox { applyUsageLimits(enabled: usageLimits.state == .on) }
     }
 
     /// Turning the option off hands every held request back to its
@@ -608,6 +652,7 @@ extension NiruxApp {
     private func clearSettingsPanelReferences() {
         settingsPanel = nil
         settingsKeepAwakeCheckbox = nil
+        settingsUsageLimitsCheckbox = nil
         settingsLaunchModePopup = nil
         settingsNoFlickerCheckbox = nil
         settingsCodexLaunchModePopup = nil

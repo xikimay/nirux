@@ -317,6 +317,70 @@ final class SettingsPanelTests: XCTestCase {
         }
     }
 
+    /// Opt-in: on, Save installs the status line and shows the indicator;
+    /// off, it takes the status line back and forgets the readings.
+    @MainActor
+    func testUsageLimitsStayOffUntilSavedOn() throws {
+        try withIsolatedState {
+            let app = try openSettings()
+            defer { close(app) }
+            var installs: [Bool] = []
+            app.claudeStatusLineInstaller = { installs.append($0) }
+            let monitor = ClaudeUsageLimitsMonitor(
+                url: Persistence.stateDirectory.appendingPathComponent("limits.json"), isReporting: { true }
+            )
+            app.usageLimitsMonitor = monitor
+            XCTAssertEqual(app.settingsUsageLimitsCheckbox?.state, .off)
+
+            app.settingsUsageLimitsCheckbox?.state = .on
+            app.settingsSave(NSButton())
+            XCTAssertEqual(Persistence.load()?.settings?.showClaudeUsageLimits, true)
+            XCTAssertEqual(installs, [true])
+            XCTAssertTrue(monitor.isEnabled)
+
+            let disabling = try openSettings()
+            defer { close(disabling) }
+            disabling.claudeStatusLineInstaller = { installs.append($0) }
+            disabling.usageLimitsMonitor = monitor
+            XCTAssertEqual(disabling.settingsUsageLimitsCheckbox?.state, .on)
+            try Data("{}".utf8).write(to: ClaudeUsageLimitsFile.url)
+            disabling.settingsUsageLimitsCheckbox?.state = .off
+            disabling.settingsSave(NSButton())
+            XCTAssertEqual(Persistence.load()?.settings?.showClaudeUsageLimits, false)
+            XCTAssertEqual(installs, [true, false])
+            XCTAssertFalse(monitor.isEnabled)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: ClaudeUsageLimitsFile.url.path), "off forgets the readings")
+        }
+    }
+
+    /// The hint says what the option does to Claude Code's status line, or
+    /// why it can't work with the user's own; its rows fit between the
+    /// Claude Code hint and the Codex section.
+    @MainActor
+    func testUsageLimitsRowsExplainTheStatusLineWithoutOverlaps() throws {
+        try withIsolatedState {
+            let app = try openSettings(statusLine: .foreign)
+            defer { close(app) }
+            let content = try XCTUnwrap(app.settingsPanel?.contentView)
+            let hint = try XCTUnwrap(
+                content.subviews.first { $0.accessibilityIdentifier() == "usageLimitsHint" } as? NSTextField
+            )
+            XCTAssertEqual(hint.stringValue, NiruxApp.usageLimitsHint(for: .foreign))
+            XCTAssertNotEqual(hint.stringValue, NiruxApp.usageLimitsHint(for: .none))
+
+            let checkbox = try XCTUnwrap(app.settingsUsageLimitsCheckbox)
+            let stuckPopup = try XCTUnwrap(app.settingsStuckAgentPopup)
+            let codexPopup = try XCTUnwrap(app.settingsCodexLaunchModePopup)
+            XCTAssertLessThan(checkbox.frame.maxY, stuckPopup.frame.minY)
+            XCTAssertGreaterThan(hint.frame.minY, codexPopup.frame.maxY)
+            for row in [checkbox, hint] {
+                for other in content.subviews where other !== row {
+                    XCTAssertFalse(row.frame.intersects(other.frame), "\(row) overlaps \(other)")
+                }
+            }
+        }
+    }
+
     @MainActor
     private static func descendants(of view: NSView) -> [NSView] {
         view.subviews + view.subviews.flatMap { descendants(of: $0) }
@@ -357,13 +421,19 @@ final class SettingsPanelTests: XCTestCase {
     }
 
     /// `visibleHeight` stands in for the screen's; nil fits everything.
+    /// `statusLine` stands in for ~/.claude/settings.json's.
     @MainActor
-    private func openSettings(visibleHeight: CGFloat? = nil) throws -> NiruxApp {
+    private func openSettings(
+        visibleHeight: CGFloat? = nil,
+        statusLine: AgentHookInstaller.ClaudeStatusLineState = .none
+    ) throws -> NiruxApp {
         _ = NSApplication.shared
         let app = NiruxApp()
-        // Keep Save off the real login keychain.
+        // Keep Save off the real login keychain and ~/.claude.
         app.telegramTokenLoader = { nil }
         app.telegramTokenSaver = { _ in XCTFail("Unexpected Keychain write") }
+        app.claudeStatusLineStateReader = { statusLine }
+        app.claudeStatusLineInstaller = { _ in }
         app.settingsVisibleHeight = { visibleHeight }
         app.showSettings(nil)
         _ = try XCTUnwrap(app.settingsPanel)
