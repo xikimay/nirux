@@ -21,6 +21,8 @@ final class ProjectBoardController {
     /// The last post-merge run; `.some(nil)` when there is none yet.
     private(set) var postMergeRun: ProjectBoard.WorkflowRun??
     private(set) var errors: [ProjectBoard.Source: ProjectBoard.FetchError] = [:]
+    /// Why the last Retarget failed: in the header until Refresh.
+    private(set) var retargetFailure: String?
     private(set) var pullRequestsReadAt: Date?
     private(set) var schedule = ProjectBoard.RefreshSchedule()
     /// Bumped when what the reads depend on changes (the project, the
@@ -99,6 +101,7 @@ final class ProjectBoardController {
         let current = configRead
         schedule.makeEverythingDue()
         errors = [:]
+        retargetFailure = nil
         guard let store = BoardConfigStore(spaceID: projectID) else {
             isReadingConfig = false
             loaded = BoardConfigStore.Loaded(config: nil, status: .unreadable)
@@ -144,6 +147,7 @@ final class ProjectBoardController {
         postMergeRun = nil
         pullRequestsReadAt = nil
         errors = [:]
+        retargetFailure = nil
     }
 
     /// Reads what is due. Called on every status refresh (the heartbeat),
@@ -225,6 +229,22 @@ final class ProjectBoardController {
         }
     }
 
+    /// Retarget (docs/pr-stacks.md): bases pull request `number` on `base`,
+    /// then reads the open pull requests again. Never sent twice: another
+    /// click is the user's.
+    func retarget(_ number: Int, onto base: String) {
+        guard let repository else { return }
+        let client = self.client
+        let current = generation
+        Self.readOffMain({ client.retarget(repository: repository.name, number: number, base: base) }, then: { [weak self] result in
+            guard let self, current == self.generation else { return }
+            self.retargetFailure = result.failureValue.map { "Retarget #\(number): \($0.message)" }
+            self.schedule.expire(.openPullRequests)
+            self.onRead?()
+            self.tick(onScreen: self.isShown())
+        })
+    }
+
     private func finish(_ source: ProjectBoard.Source, generation: Int, _ store: (ProjectBoardController) -> Void) {
         // A read for an earlier project or config: its answer is moot.
         guard generation == self.generation else { return }
@@ -290,7 +310,7 @@ final class ProjectBoardController {
             case nil: header.postMergeRun = errors[.postMergeRun] == nil ? "\((workflow as NSString).deletingPathExtension): …" : nil
             }
         }
-        let messages = Set(errors.values.map(\.message)).sorted()
+        let messages = Set(errors.values.map(\.message) + [retargetFailure].compactMap { $0 }).sorted()
         if !messages.isEmpty {
             header.status = messages.joined(separator: " ")
             header.statusIsError = true
@@ -314,6 +334,7 @@ final class ProjectBoardController {
         } else if let local {
             let rows = ProjectBoard.rows(ProjectBoard.Sources(
                 repository: repository?.gitHub,
+                baseBranch: config?.baseBranch,
                 local: local.repositories,
                 workspaces: workspaces,
                 openPullRequests: openPullRequests ?? [],

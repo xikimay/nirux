@@ -42,6 +42,25 @@ final class MergeQueueBoardFlowTests: XCTestCase {
     ]
     """
 
+    /// #14 based on `feat/old`, whose #10 merged.
+    private static let retargetPullRequests = """
+    [
+      {"number": 12, "state": "OPEN", "headRefName": "feat/login", "headRefOid": "\(a)",
+       "headRepository": {"name": "widgets"}, "headRepositoryOwner": {"login": "acme"}, "baseRefName": "main",
+       "isDraft": false, "mergeable": "MERGEABLE", "url": "https://github.com/acme/widgets/pull/12",
+       "statusCheckRollup": []},
+      {"number": 14, "state": "OPEN", "headRefName": "feat/api", "headRefOid": "\(b)",
+       "headRepository": {"name": "widgets"}, "headRepositoryOwner": {"login": "acme"}, "baseRefName": "feat/old",
+       "isDraft": false, "mergeable": "MERGEABLE", "url": "https://github.com/acme/widgets/pull/14",
+       "statusCheckRollup": []}
+    ]
+    """
+    private static let mergedBase = """
+    [{"number": 10, "state": "MERGED", "headRefName": "feat/old", "headRefOid": "\(MQ.sha("c"))",
+      "headRepository": {"name": "widgets"}, "headRepositoryOwner": {"login": "acme"}, "baseRefName": "main",
+      "url": "https://github.com/acme/widgets/pull/10"}]
+    """
+
     // MARK: - Flows
 
     @MainActor
@@ -133,12 +152,56 @@ final class MergeQueueBoardFlowTests: XCTestCase {
 
     // MARK: - Helpers
 
+    /// #14 is based on #10's branch, merged: Retarget bases it on `main`
+    /// off the main thread, then the board reads the pull requests again.
+    /// No queue starts, so the live client is never called.
+    @MainActor
+    func testRetargetFromTheBoardChangesTheBaseThenReadsAgain() throws {
+        let client = ProjectBoardFlowTests.FakeGitHub(
+            openPullRequests: Self.retargetPullRequests, mergedPullRequests: Self.mergedBase,
+            runs: ProjectBoardGitHubTests.postMergeRuns
+        )
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b])
+        try withBoard(world: world, boardClient: client, isDryRun: false) { _, board in
+            try waitUntil("#10 reads merged") { (try? self.row("feat/api", in: board).queueButton?.title) == "Retarget to main" }
+            XCTAssertEqual(try row("feat/api", in: board).queueDetail.stringValue, "base #10 merged")
+            let reads = client.calls.filter { $0.what == "pr open acme/widgets" }.count
+            try click(try XCTUnwrap(try row("feat/api", in: board).queueButton))
+            try waitUntil("the pull requests are read again") {
+                client.calls.filter { $0.what == "pr open acme/widgets" }.count > reads
+            }
+            XCTAssertEqual(client.calls.filter { $0.what.hasPrefix("retarget") }.map(\.what), ["retarget acme/widgets #14 main"])
+            XCTAssertFalse(client.calls.contains(where: \.onMainThread), "gh never runs on the main thread")
+        }
+    }
+
+    /// A dev build can't retarget: the button is disabled, and says why.
+    @MainActor
+    func testADryRunBuildDoesNotRetarget() throws {
+        let client = ProjectBoardFlowTests.FakeGitHub(
+            openPullRequests: Self.retargetPullRequests, mergedPullRequests: Self.mergedBase,
+            runs: ProjectBoardGitHubTests.postMergeRuns
+        )
+        let world = MergeQueueFlowTests.GitHubWorld(pullRequests: [12: Self.a, 14: Self.b])
+        try withBoard(world: world, boardClient: client) { shell, board in
+            try waitUntil("#10 reads merged") { (try? self.row("feat/api", in: board).queueButton?.title) == "Retarget to main" }
+            let button = try XCTUnwrap(try row("feat/api", in: board).queueButton)
+            XCTAssertFalse(button.isEnabled)
+            // Even if it were clicked, the shell refuses.
+            shell.performProjectBoardAction(.retarget(number: 14, base: "main"), board: board)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+            XCTAssertFalse(client.calls.contains { $0.what.hasPrefix("retarget") })
+        }
+    }
+
     /// A shell in a window with the board of a project whose repository is
     /// acme/widgets, a workspace in its main checkout and one in the login
     /// worktree, the board read.
     @MainActor
     private func withBoard(
         world: MergeQueueFlowTests.GitHubWorld,
+        boardClient: ProjectBoardFlowTests.FakeGitHub? = nil,
+        isDryRun: Bool = true,
         _ body: (NiruxShellView, ProjectBoardController) throws -> Void
     ) throws {
         let stateDirectory = root + "/state"
@@ -151,10 +214,11 @@ final class MergeQueueBoardFlowTests: XCTestCase {
         _ = NSApplication.shared
         let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1600, height: 900))
         shell.stopHeartbeat()
-        shell.projectBoardClient = ProjectBoardFlowTests.FakeGitHub(
+        shell.projectBoardClient = boardClient ?? ProjectBoardFlowTests.FakeGitHub(
             openPullRequests: Self.boardPullRequests, runs: ProjectBoardGitHubTests.postMergeRuns
         )
-        shell.mergeQueueClient = DryRunQueueClient(wrapped: GitHubCLIQueueClient(run: world.run), reason: "NIRUX_STATE_DIR is set")
+        let queueClient = GitHubCLIQueueClient(run: world.run)
+        shell.mergeQueueClient = isDryRun ? DryRunQueueClient(wrapped: queueClient, reason: "NIRUX_STATE_DIR is set") : queueClient
         shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1600, height: 900),

@@ -56,7 +56,10 @@ extension ProjectBoard {
                                         baseBranch: baseBranch) {
         case .notOpen(let state)?: return state
         case .draft?: return "draft"
-        case .otherBase(let base)?: return "targets \(base)"
+        case .otherBase(let base)?:
+            if let parent = row.stack?.parent { return "after #\(parent)" }
+            if let merged = row.stack?.mergedBase { return "base #\(merged.number) merged" }
+            return "targets \(base)"
         case .conflict?: return "conflict"
         case nil: break
         }

@@ -271,6 +271,10 @@ extension NiruxShellView {
             addToMergeQueue(number, board: board)
         case .removeFromQueue(let number):
             removeFromMergeQueue(number, board: board)
+        case .retarget(let number, let base):
+            // Changes GitHub: never from a dry-run build, like the queue.
+            guard !mergeQueue(projectID: board.projectID).isDryRun else { return NSSound.beep() }
+            board.retarget(number, onto: base)
         }
         renderProjectBoard(board)
     }

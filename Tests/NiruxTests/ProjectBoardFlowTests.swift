@@ -29,10 +29,12 @@ final class ProjectBoardFlowTests: XCTestCase {
         private let lock = NSLock()
         private var recorded: [FakeGitHubCall] = []
         let openPullRequests: String
+        let mergedPullRequests: String
         let runs: String
 
-        init(openPullRequests: String, runs: String) {
+        init(openPullRequests: String, mergedPullRequests: String = "[]", runs: String) {
             self.openPullRequests = openPullRequests
+            self.mergedPullRequests = mergedPullRequests
             self.runs = runs
         }
 
@@ -50,12 +52,17 @@ final class ProjectBoardFlowTests: XCTestCase {
 
         func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, ProjectBoard.FetchError> {
             record("pr \(state) \(repository)")
-            return .success(Data((state == .open ? openPullRequests : "[]").utf8))
+            return .success(Data((state == .open ? openPullRequests : mergedPullRequests).utf8))
         }
 
         func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, ProjectBoard.FetchError> {
             record("run \(repository) \(workflow) \(branch)")
             return .success(Data(runs.utf8))
+        }
+
+        func retarget(repository: String, number: Int, base: String) -> Result<Data, ProjectBoard.FetchError> {
+            record("retarget \(repository) #\(number) \(base)")
+            return .success(Data(base.utf8))
         }
     }
 

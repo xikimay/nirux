@@ -2,8 +2,9 @@ import Foundation
 
 // MARK: - Client
 
-/// The board's `gh` reads (docs/project-board.md, section 6). Each call
-/// runs `gh` and blocks: never on the main thread. `NiruxShellView` holds
+/// The board's `gh` reads (docs/project-board.md, section 6), and its one
+/// change, a retarget (docs/pr-stacks.md). Each call runs `gh` and blocks:
+/// never on the main thread. `NiruxShellView` holds
 /// the client, so tests inject a fake: GitHub's runners have `gh`, and a
 /// test must never reach the network.
 protocol ProjectBoardGitHub: Sendable {
@@ -12,6 +13,8 @@ protocol ProjectBoardGitHub: Sendable {
     func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, ProjectBoard.FetchError>
     /// `gh run list` as JSON: the last push run of `workflow` on `branch`.
     func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, ProjectBoard.FetchError>
+    /// Bases pull request `number` on `base`.
+    func retarget(repository: String, number: Int, base: String) -> Result<Data, ProjectBoard.FetchError>
 }
 
 extension ProjectBoard {
@@ -81,6 +84,17 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
     static func runArguments(repository: String, workflow: String, branch: String) -> [String] {
         ["run", "list", "--repo", "github.com/\(repository)", "--workflow", workflow, "--branch", branch,
          "--event", "push", "--limit", "1", "--json", runFields]
+    }
+
+    /// REST, as the merge queue's mutations: `gh pr edit` reads much more
+    /// than it changes.
+    static func retargetArguments(repository: String, number: Int, base: String) -> [String] {
+        ["api", "--hostname", "github.com", "--method", "PATCH", "repos/\(repository)/pulls/\(number)",
+         "-f", "base=\(base)", "--jq", ".base.ref"]
+    }
+
+    func retarget(repository: String, number: Int, base: String) -> Result<Data, ProjectBoard.FetchError> {
+        run(Self.retargetArguments(repository: repository, number: number, base: base))
     }
 
     func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, ProjectBoard.FetchError> {
@@ -285,8 +299,9 @@ extension ProjectBoard {
     }
 
     /// "#52 open", "#52 draft", "#52 conflict", "#52 draft · conflict",
-    /// "#52 merged". A base other than the configured one is named ("→ dev").
-    static func pullRequestText(_ pullRequest: PullRequest, baseBranch: String?) -> String {
+    /// "#52 merged". A base other than the configured one is named ("→ dev"),
+    /// or its place in a stack ("· 2/4", "· on #52").
+    static func pullRequestText(_ pullRequest: PullRequest, baseBranch: String?, stack: StackPlace? = nil) -> String {
         var text = "#\(pullRequest.number) "
         if pullRequest.isOpen {
             switch (pullRequest.isDraft, pullRequest.isConflicting) {
@@ -298,7 +313,10 @@ extension ProjectBoard {
         } else {
             text += pullRequest.state.lowercased()
         }
-        if pullRequest.isOpen, let base = pullRequest.baseRefName, let baseBranch, base != baseBranch {
+        if let label = stack?.label {
+            // The stack says what it is based on; its tooltip names the branch.
+            text += " · \(label)"
+        } else if pullRequest.isOpen, let base = pullRequest.baseRefName, let baseBranch, base != baseBranch {
             text += " → \(base)"
         }
         return text

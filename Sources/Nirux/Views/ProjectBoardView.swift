@@ -87,6 +87,8 @@ final class ProjectBoardView: NSView {
         case resumeExited(workspaceID: String, columnID: UUID)
         case addToQueue(number: Int)
         case removeFromQueue(number: Int)
+        /// Its base's pull request merged: base it on that one's base.
+        case retarget(number: Int, base: String)
     }
 
     /// A button of a row, with what it does.
@@ -388,9 +390,9 @@ final class ProjectBoardView: NSView {
         let pullRequest = label("", color: Self.primaryText, size: 11)
         let checks = label("", color: Self.secondaryText, size: 11)
         if row.group != .otherRepository, let pr = row.pullRequest {
-            pullRequest.stringValue = ProjectBoard.pullRequestText(pr, baseBranch: content?.baseBranch)
+            pullRequest.stringValue = ProjectBoard.pullRequestText(pr, baseBranch: content?.baseBranch, stack: row.stack)
             pullRequest.textColor = pr.isConflicting ? Self.failureColor : (pr.isOpen ? Self.primaryText : Self.secondaryText)
-            pullRequest.toolTip = pr.url
+            pullRequest.toolTip = row.stack.map { "\($0.tooltip)\n\(pr.url)" } ?? pr.url
             if pr.isOpen {
                 let summary = ProjectBoard.checkSummary(pr.checks, required: content?.requiredChecks ?? [])
                 checks.stringValue = summary.text
@@ -576,6 +578,9 @@ final class ProjectBoardView: NSView {
             return cell
         }
         guard pullRequest.isOpen else { return nil }
+        if let merged = row.stack?.mergedBase {
+            return retargetCell(number: number, merged: merged, row: row, queue: queue, baseBranch: baseBranch)
+        }
         if let refusal = ProjectBoard.queueRefusal(row, baseBranch: baseBranch) {
             return QueueCell(text: refusal, detail: last.map { "last: \($0)" }, detailTone: lastIsFailure ? .failure : .normal,
                              tooltip: lastReason.map { "Can’t join the queue: \(refusal). Last queue: \($0)" }
@@ -586,6 +591,26 @@ final class ProjectBoardView: NSView {
         cell.button = QueueButton(title: "Add to Queue", isEnabled: !isFrozen,
                                   tooltip: isFrozen ? locked : "Propose #\(number) at the next Start")
         cell.action = .addToQueue(number: number)
+        return cell
+    }
+
+    /// A pull request based on a merged branch can't join until it is
+    /// based on that branch's base (docs/pr-stacks.md): the button says
+    /// so, under why it can't join yet. A dry run doesn't change GitHub.
+    private nonisolated static func retargetCell(
+        number: Int, merged: ProjectBoard.MergedBase, row: ProjectBoard.Row, queue: ProjectBoard.QueueState,
+        baseBranch: String?
+    ) -> QueueCell {
+        let refusal = ProjectBoard.queueRefusal(row, baseBranch: baseBranch) ?? "base #\(merged.number) merged"
+        let command = "gh api --method PATCH …/pulls/\(number) -f base=\(merged.onto)"
+        var cell = QueueCell(text: "", detail: refusal, tooltip: "Can’t join the queue: \(refusal)")
+        cell.button = QueueButton(
+            title: "Retarget to \(merged.onto)", isEnabled: !queue.isDryRun,
+            tooltip: queue.isDryRun
+                ? "Dry run: this build doesn’t change GitHub. It would run \(command)."
+                : "#\(merged.number) is merged: base #\(number) on \(merged.onto) (\(command))"
+        )
+        cell.action = .retarget(number: number, base: merged.onto)
         return cell
     }
 
