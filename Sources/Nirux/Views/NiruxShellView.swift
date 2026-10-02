@@ -646,14 +646,18 @@ extension NiruxShellView {
         // List worktrees on background thread, then show palette
         DispatchQueue.global(qos: .userInitiated).async {
             let worktrees = GitWorktree.list(repoRoot: repoRoot)
-            // The worktree each workspace is open in (it reads files).
-            let workspaceWorktrees = openWorkspaces.compactMap { workspace in
-                Self.worktreeCleanupPath(forCwd: workspace.cwd).map { (id: workspace.id, path: Self.comparablePath($0)) }
-            }
             let comparablePaths = worktrees.map { Self.comparablePath($0.path) }
+            // The worktree each workspace is open in: the deepest one holding
+            // its folder (the main checkout may hold the others).
+            let workspaceWorktrees = openWorkspaces.compactMap { workspace in
+                let cwd = Self.comparablePath(workspace.cwd)
+                return comparablePaths.filter { ProjectBoard.contains($0, cwd) }
+                    .max { $0.count < $1.count }
+                    .map { (id: workspace.id, path: $0) }
+            }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                // Filter out the main repo (first entry is usually the main worktree)
+                // Leave out the checkout the palette was opened from
                 let entries = zip(worktrees, comparablePaths).filter { $0.0.path != repoRoot }
                 guard !entries.isEmpty else { return }
 
@@ -661,9 +665,10 @@ extension NiruxShellView {
                 let actions = entries.map { entry, comparablePath in
                     let title = entry.branch ?? URL(fileURLWithPath: entry.path).lastPathComponent
                     let open = self.preferredWorkspace(among: workspaceWorktrees.filter { $0.path == comparablePath }.map(\.id))
-                    let subtitle = (open.map { "Open in “\($0.title)” · " } ?? "") + entry.path.abbreviatedPath()
+                    let subtitle = (open.map { self.alreadyOpenNote(for: $0) + " · " } ?? "") + entry.path.abbreviatedPath()
+                    let openID = open?.id
                     return PaletteAction(icon: "🌿", title: title, subtitle: subtitle, shortcut: nil) { [weak self] in
-                        self?.openWorktree(path: entry.path, title: title, workspaceID: open?.id)
+                        self?.openWorktree(path: entry.path, title: title, workspaceID: openID)
                     }
                 }
 
@@ -684,12 +689,23 @@ extension NiruxShellView {
 
     /// "Open Worktree" goes back to a workspace already open in the
     /// worktree instead of opening another: the active one, else one in the
-    /// active space, else the first.
+    /// active space, else one in another; a parked one last.
     private func preferredWorkspace(among ids: [String]) -> WorkspaceState? {
         let open = workspaces.filter { !$0.isClosing && ids.contains($0.id) }
         return open.first { $0 === activeWorkspace }
+            ?? open.first { $0.profileID == activeProfileID && !$0.isInactive }
             ?? open.first { $0.profileID == activeProfileID }
+            ?? open.first { !$0.isInactive }
             ?? open.first
+    }
+
+    /// Before the path, in the palette row; the row's title is the branch,
+    /// usually the workspace's name too.
+    private func alreadyOpenNote(for workspace: WorkspaceState) -> String {
+        guard workspace.profileID != activeProfileID,
+              let space = workspaceStore.profiles.first(where: { $0.id == workspace.profileID })
+        else { return "Already open" }
+        return "Already open in “\(space.name)”"
     }
 
     private func openWorktree(path: String, title: String, workspaceID: String?) {

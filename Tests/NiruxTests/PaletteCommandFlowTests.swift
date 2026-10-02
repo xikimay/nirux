@@ -217,14 +217,21 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.waitUntil("the worktree list again") {
                 palette.isVisible && palette.filteredActions.map(\.title) == [harness.worktreeBranch]
             }
-            XCTAssertTrue(palette.filteredActions.first?.subtitle.hasPrefix("Open in “\(harness.worktreeBranch)”") == true)
+            XCTAssertTrue(palette.filteredActions.first?.subtitle.hasPrefix("Already open · ") == true)
             harness.press(.returnKey, in: palette.panel)
             XCTAssertTrue(shell.activeWorkspace === opened)
+            XCTAssertEqual(shell.workspaces.count, workspaceCount)
+            // From the worktree, the main checkout is listed: back to it too.
+            harness.runPaletteCommand("Open Worktree")
+            harness.waitUntil("the main checkout in the list") {
+                palette.isVisible && palette.filteredActions.map(\.title) == ["main"]
+            }
+            harness.press(.returnKey, in: palette.panel)
+            XCTAssertTrue(shell.activeWorkspace === shell.workspaces[repoIndex])
             XCTAssertEqual(shell.workspaces.count, workspaceCount)
 
             // Creates the worktree off the main thread, then opens it with an
             // agent (the launch double).
-            shell.switchToWorkspace(repoIndex)
             harness.runPaletteCommand("New Worktree")
             let branchField = try XCTUnwrap(harness.waitForField(placeholder: "Branch name (e.g. feat/my-feature)"))
             harness.submit("feat/new-flow", into: branchField)
