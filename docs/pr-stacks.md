@@ -34,6 +34,8 @@ call.
   long-lived branch merged once, such as `develop`, gets new commits and stops
   reading spent; right after its merge it still does, and offers Retarget.
 - Pure function, `ProjectBoard.stackPlaces`, tested through `rows`.
+- `baseRefOid` needs gh 2.63.0 (2024-11) or later. An older gh refuses the
+  whole open batch ("Unknown JSON field"), and the header says so.
 
 **2. Show it.**
 
