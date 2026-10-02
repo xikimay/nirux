@@ -251,7 +251,7 @@ extension NiruxShellView {
         4. **Open the worktree in Nirux** — Nirux handles git worktree creation, moves the handover
            file into the worktree as `.claude-handover.md` or `.codex-handover.md`, and launches
            the same agent. Nirux terminals expose `NIRUX_PROFILE_ID`; preserve it in the URL so
-           the new workspace opens in the same Nirux session/space even if the user has focused a
+           the new workspace opens in the same Nirux project even if the user has focused a
            different one. They also expose `NIRUX_LAUNCH_ID`, which proves the request comes from
            a Nirux terminal; without it Nirux asks the user to confirm before doing anything:
            ```bash

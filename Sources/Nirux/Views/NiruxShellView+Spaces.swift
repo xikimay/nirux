@@ -20,7 +20,7 @@ extension NiruxShellView {
             // Deleting needs projects.json: the mirror alone can't record it,
             // so the space would come back at the next launch.
             let alert = NSAlert()
-            alert.messageText = "Spaces can't be deleted right now"
+            alert.messageText = "Projects can't be deleted right now"
             alert.informativeText = "They were saved by a newer version of Nirux, or projects.json can't be read."
             runModal(alert)
             return
@@ -32,9 +32,9 @@ extension NiruxShellView {
             ? "It has no workspaces."
             : "Its \(count == 1 ? "workspace moves" : "\(count) workspaces move") to \"\(target)\"."
         guard confirmDestructiveClose(
-            message: "Delete the space \"\(space.name)\"?",
-            details: [moved, "Its brief stays on disk."],
-            confirmTitle: "Delete Space"
+            message: "Delete the project \"\(space.name)\"?",
+            details: [moved, "Its brief stays on disk. Folders and repositories aren't touched."],
+            confirmTitle: "Delete Project"
         ) else { return }
         deleteSpace(profileID: profileID)
     }
@@ -50,7 +50,7 @@ extension NiruxShellView {
     func deleteSpace(profileID: String) {
         // Asked while the confirmation was up: a queue started meanwhile.
         guard mergeQueues[profileID]?.isRunning != true else {
-            return showToast("A merge queue started in this space: stop it before deleting the space")
+            return showToast("A merge queue started in this project: stop it before deleting the project")
         }
         guard workspaceStore.deleteProfile(id: profileID) else { return }
         projectStore.markDeleted(profileID)

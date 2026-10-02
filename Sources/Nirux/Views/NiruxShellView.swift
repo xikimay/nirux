@@ -581,7 +581,7 @@ extension NiruxShellView {
             self.updateSidebar()
             self.saveState()
         }
-        nameInputPanel?.show(relativeTo: window, currentValue: profile.name, placeholder: "Space name")
+        nameInputPanel?.show(relativeTo: window, currentValue: profile.name, placeholder: "Project name")
     }
 
     // MARK: - Worktree

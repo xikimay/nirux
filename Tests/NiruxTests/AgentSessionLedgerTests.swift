@@ -117,7 +117,7 @@ final class AgentSessionLedgerTests: XCTestCase {
         startSession("ended", in: ledger, at: 5, column: "column-2")
         ledger.closeAllSessions(at: 8)
         startSession("s1", in: ledger, at: 10)
-        // The workspace moved (Move to Space, or its space was deleted).
+        // The workspace moved (Move to Project, or its space was deleted).
         ledger.record(observation(.stop, at: 12), spaceID: "space-2")
         // Another column's event, not the agent's: no move.
         ledger.record(observation(.sessionEnd, session: "ended", at: 13, column: "column-2", fromColumnAgent: false), spaceID: "space-2")

@@ -21,8 +21,8 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 "Rename Workspace", "New Workspace", "Move Up", "Move Down", "Move to Inactive", "Move to Active"
             ],
             "testSpaceMenuItems": [
-                "New Space", "Rename Space…", "Space Color", "Edit Space Brief…", "Edit Task Templates…", "Board Settings…",
-                "Move to Space", "Delete Space…"
+                "New Project", "Rename Project…", "Project Color", "Edit Project Brief…", "Edit Task Templates…",
+                "Board Settings…", "Move to Project", "Delete Project…"
             ]
         ],
         exemptions: [:]
@@ -142,26 +142,26 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 try XCTUnwrap(shell.profiles.first { $0.id == shell.activeProfileID })
             }
 
-            harness.perform(["New Space"], in: shell.sidebar.spaceOptionsMenu())
+            harness.perform(["New Project"], in: shell.sidebar.spaceOptionsMenu())
             let space = try activeSpace()
             XCTAssertNotEqual(space.id, WorkspaceProfile.defaultID)
             let spaceWorkspace = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertEqual(spaceWorkspace.profileID, space.id)
 
-            harness.perform(["Rename Space…"], in: shell.sidebar.spaceOptionsMenu())
-            let nameField = try XCTUnwrap(harness.waitForField(placeholder: "Space name"))
+            harness.perform(["Rename Project…"], in: shell.sidebar.spaceOptionsMenu())
+            let nameField = try XCTUnwrap(harness.waitForField(placeholder: "Project name"))
             XCTAssertEqual(nameField.stringValue, space.name)
-            harness.submit("Flow Space", into: nameField)
-            XCTAssertEqual(try activeSpace().name, "Flow Space")
+            harness.submit("Flow Project", into: nameField)
+            XCTAssertEqual(try activeSpace().name, "Flow Project")
 
             let color = try XCTUnwrap(WorkspaceProfile.palette.first {
                 $0.hex.caseInsensitiveCompare(space.colorHex) != .orderedSame
             })
-            harness.perform(["Space Color", color.name], in: shell.sidebar.spaceOptionsMenu())
+            harness.perform(["Project Color", color.name], in: shell.sidebar.spaceOptionsMenu())
             XCTAssertEqual(try activeSpace().colorHex.uppercased(), color.hex.uppercased())
 
             // The brief opens in the workspace's editor, from the state folder.
-            harness.perform(["Edit Space Brief…"], in: shell.sidebar.spaceOptionsMenu())
+            harness.perform(["Edit Project Brief…"], in: shell.sidebar.spaceOptionsMenu())
             let brief = try XCTUnwrap(SpaceBrief.briefURL(spaceID: space.id)).path
             XCTAssertTrue(brief.hasPrefix(harness.stateDirectory + "/"), brief)
             let editor = try XCTUnwrap(spaceWorkspace.columns.compactMap(\.editorColumn).first)
@@ -195,7 +195,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             let movingIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0 === moving })
             let defaultName = try XCTUnwrap(shell.profiles.first { $0.id == WorkspaceProfile.defaultID }).name
             harness.perform(
-                ["Move to Space", defaultName],
+                ["Move to Project", defaultName],
                 in: shell.sidebar.workspaceActionMenu(workspaceIndex: movingIndex, columnIndex: nil)
             )
             XCTAssertEqual(moving.profileID, WorkspaceProfile.defaultID)
@@ -204,11 +204,11 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             // Deleting asks first: Cancel keeps the space, confirming moves
             // its workspace to the default space.
             harness.alertResponses = [.alertFirstButtonReturn]
-            harness.perform(["Delete Space…"], in: shell.sidebar.spaceOptionsMenu())
-            XCTAssertEqual(harness.alerts.last, "Delete the space \"Flow Space\"?")
+            harness.perform(["Delete Project…"], in: shell.sidebar.spaceOptionsMenu())
+            XCTAssertEqual(harness.alerts.last, "Delete the project \"Flow Project\"?")
             XCTAssertTrue(shell.profiles.contains { $0.id == space.id })
             harness.alertResponses = [.alertSecondButtonReturn]
-            harness.perform(["Delete Space…"], in: shell.sidebar.spaceOptionsMenu())
+            harness.perform(["Delete Project…"], in: shell.sidebar.spaceOptionsMenu())
             XCTAssertFalse(shell.profiles.contains { $0.id == space.id })
             XCTAssertEqual(spaceWorkspace.profileID, WorkspaceProfile.defaultID)
         }

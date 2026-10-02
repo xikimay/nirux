@@ -176,7 +176,7 @@ final class ProjectStoreTests: XCTestCase {
 
         XCTAssertEqual(loaded.map(\.id), ["work", "bare"])
         XCTAssertEqual(loaded.first?.colorHex, WorkspaceProfile.colorHex(for: 0))
-        XCTAssertEqual(loaded.last?.name, "space")
+        XCTAssertEqual(loaded.last?.name, "project")
     }
 
     @MainActor
@@ -229,6 +229,9 @@ final class ProjectStoreTests: XCTestCase {
         try writeBrief("lost", "<!--\nBrief for the space \"Witch Cat\": goals, priorities\n-->\n- Post on Fridays.")
         try writeBrief("empty", "<!--\nBrief for the space \"Nothing\": goals\n-->\n")
         try writeBrief("gone", "<!--\nBrief for the space \"Gone\": goals\n-->\nRule.")
+        // Written by the current template, which says "project".
+        let fresh = try XCTUnwrap(SpaceBrief.ensureBriefFile(spaceID: "new", spaceName: "Night Owl", stateDirectory: directory))
+        try Data((try String(contentsOf: fresh, encoding: .utf8) + "- Ship at dawn.").utf8).write(to: fresh)
         let store = savedStore([main, work])
         store.markDeleted("gone")
         store.save([main, work])
@@ -236,9 +239,9 @@ final class ProjectStoreTests: XCTestCase {
         let loaded = ProjectStore(fileURL: fileURL).load(mirror: nil, markerPresent: true)
 
         // Only a brief with content, and never a deleted space's.
-        XCTAssertEqual(loaded.map(\.id), [main.id, "work", "lost"])
-        XCTAssertEqual(loaded.last?.name, "Witch Cat")
-        XCTAssertFalse([main.colorHex, work.colorHex].contains(loaded.last?.colorHex ?? ""))
+        XCTAssertEqual(loaded.map(\.id), [main.id, "work", "lost", "new"])
+        XCTAssertEqual(loaded.map(\.name).suffix(2), ["Witch Cat", "Night Owl"])
+        XCTAssertEqual(Set(loaded.map { $0.colorHex.uppercased() }).count, loaded.count, "each takes a free color")
     }
 
     @MainActor
