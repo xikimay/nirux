@@ -75,6 +75,8 @@ final class NiruxShellView: NSView {
     /// A stuck-agent alert went out (Telegram relays it): the reason, the
     /// workspace, the column's index, the column.
     var onStuckAgentAlert: ((AgentAttentionReason, WorkspaceState, Int, ColumnState) -> Void)?
+    /// ⌘P's workspace rows and Next Waiting Agent (⌘J).
+    let quickSwitch = QuickSwitchState()
 
     /// Agent launches, the home folder, cookies and modal alerts; tests
     /// replace them (see ShellSideEffects).
@@ -743,7 +745,7 @@ extension NiruxShellView {
         }
 
         commandPalette?.actions = columnPaletteActions() + agentPaletteActions() + workspacePaletteActions()
-        commandPalette?.show(relativeTo: window)
+        commandPalette?.show(relativeTo: window, sections: paletteSections())
     }
 
     func showCommandPalette(prefilter: String) {

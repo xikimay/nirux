@@ -11,6 +11,7 @@ Nirux is alpha software.
 - Agent launchers: start Claude Code or Codex from the command palette with configurable permission and sandbox presets.
 - Attention and Activity: per-column agent status (working / needs attention, with elapsed time) driven by real Claude Code hooks and Codex turn notifications — not output guessing (Gemini CLI and OpenCode, which have no hooks, get output-activity status) — plus a persistent sidebar feed, edge glows for off-screen attention, native macOS notifications that focus the right workspace and column on click, and a Dock badge counting waiting workspaces.
 - Stuck agents: a permission or question left open past a threshold (Settings, 10 minutes by default) shows `waiting 2h05m` on its card and notifies once (Telegram too, and while Nirux is in the background); a Claude turn that ended on an API error shows `API error`, with a Resume button — for transient errors only (overloaded, server error) — that types `continue` only on a click, once Claude is back at an empty prompt; a `claude` that died mid-turn gets an overlay that resumes its conversation in its permission mode.
+- Quick switcher and Next Waiting Agent: type a workspace's name, branch, space or folder in `Cmd+P` and press Return to jump to it — in any space, inactive ones too (listed after active ones that match as well, and left inactive) — each row showing its agents' state (`working`, `waiting 12m`, `API error`); `Cmd+J` goes to the Claude agent blocked on you the longest (a permission, a question, an API error, a mid-turn exit), then on to the next at each press.
 - Keep Mac awake: while an agent works, Nirux keeps the Mac from idle-sleeping and shows a cup in the title bar; it lets go a minute after the last one stops — see [Keep Mac awake while agents work](#keep-mac-awake-while-agents-work).
 - Claude context usage: a Claude column's title bar shows how full its session's context window is (`ctx 62%`, or `ctx 124k` while the window size is unknown), with the session's token totals in a tooltip — read from the session transcript, see [Claude context usage](#claude-context-usage).
 - Opt-in Telegram Remote Access: pair one private Telegram user to list live agent sessions, inspect status and recent output, receive completion/attention alerts, and continue a selected session without exposing a webhook or general-purpose shell.
@@ -108,7 +109,7 @@ Useful shortcuts:
 
 | Shortcut | Action |
 | --- | --- |
-| `Cmd+P` | Command palette (fuzzy matching); in the editor, the workspace file picker |
+| `Cmd+P` | Command palette and workspace switcher (fuzzy matching); in the editor, the workspace file picker |
 | `Shift+Cmd+P` | Command palette, including from the editor |
 | `Cmd+T` | New terminal column |
 | `Cmd+B` | Open browser URL flow |
@@ -120,6 +121,7 @@ Useful shortcuts:
 | `Cmd+N` | New workspace |
 | `Cmd+Up` / `Cmd+Down` | Switch workspace |
 | `Alt+Cmd+Left` / `Alt+Cmd+Right` | Switch to the previous or next space (the workspace group named in the sidebar header) |
+| `Cmd+J` | Next waiting agent: the Claude agent blocked on you the longest, then the next at each press |
 | `Ctrl+Cmd+S` | Toggle sidebar |
 | `Ctrl+Cmd+F` | Enter or exit full screen |
 | `Cmd+M` | Minimize the window |

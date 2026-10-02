@@ -52,6 +52,7 @@ enum NiruxShortcuts: CaseIterable {
     case searchWorkspace
     case toggleEditorDiff
     case toggleSidebar
+    case nextWaitingAgent
     case settings
 
     var chord: KeyChord {
@@ -67,6 +68,7 @@ enum NiruxShortcuts: CaseIterable {
         case .searchWorkspace: KeyChord("f", [.command, .shift])
         case .toggleEditorDiff: KeyChord("d", [.command, .shift])
         case .toggleSidebar: KeyChord("s", [.command, .control])
+        case .nextWaitingAgent: KeyChord("j")
         case .settings: KeyChord(",")
         }
     }

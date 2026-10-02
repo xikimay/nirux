@@ -7,13 +7,56 @@ struct PaletteAction {
     let subtitle: String
     /// Shown on the right. Only table chords, so every label is bound.
     let shortcut: NiruxShortcuts?
+    /// What the search matches and how the row ranks; nil: its title, then
+    /// its subtitle. A workspace's title, branch, space and folder, inactive
+    /// ones below the active ones that match as well.
+    var ranking: PaletteRanking.Candidate?
+    /// Shown on the right instead of a shortcut: a workspace's agent state.
+    var badge: PaletteBadge?
+    /// The title dimmed: an inactive workspace.
+    var isDimmed = false
+    /// Draws the icon in this color: a workspace's space dot.
+    var iconColor: NSColor?
     let action: () -> Void
+
+    var rankingCandidate: PaletteRanking.Candidate {
+        ranking ?? PaletteRanking.Candidate(title: title, keys: [subtitle])
+    }
+}
+
+/// A short colored label on the right of a row.
+struct PaletteBadge: Equatable {
+    enum Tone { case working, waiting, failure }
+    let text: String
+    let tone: Tone
+
+    var color: NSColor {
+        switch tone {
+        case .working: return .systemGreen
+        case .waiting: return .systemOrange
+        case .failure: return .systemRed
+        }
+    }
+}
+
+/// Rows listed under their own header beside the commands: the
+/// workspaces, and whatever else a provider adds (see
+/// `NiruxShellView.paletteSections`).
+struct PaletteSection {
+    let title: String
+    let rows: [PaletteAction]
 }
 
 /// Raycast-style command palette — Cmd+P to open
 @MainActor
 final class CommandPalette: NSObject {
+    /// The commands, searched with `sections`.
     var actions: [PaletteAction] = []
+    /// Listed after the commands when the query is empty, ranked with them
+    /// otherwise; each section and the commands then show a header. Empty
+    /// for a palette listing one kind of row (Open Worktree). Set by `show`.
+    private(set) var sections: [PaletteSection] = []
+    static let commandsSectionTitle = "Commands"
     /// Called when user submits a URL in browser mode
     var onURLSubmit: ((String) -> Void)?
 
@@ -27,7 +70,11 @@ final class CommandPalette: NSObject {
     var separator: NSView?
     var listContainer: NSView?
     var rowViews: [NSView] = []
+    /// The rows the query matches, in display order: what the arrow keys
+    /// walk and Return runs.
     var filteredActions: [PaletteAction] = []
+    /// Where the headers and rows of `filteredActions` sit (actions mode).
+    private(set) var listLayout = PaletteListLayout(items: [])
     var selectedIndex = 0
     var scrollY: CGFloat = 0
     var scrollIndicator: NSView?
@@ -44,16 +91,16 @@ final class CommandPalette: NSObject {
     private var moveMonitor: Any?
     private var scrollMonitor: Any?
 
-    func show(relativeTo window: NSWindow) {
+    func show(relativeTo window: NSWindow, sections: [PaletteSection] = []) {
         if panel == nil { createPanel() }
         guard let panel, let searchField else { return }
 
-        filteredActions = actions
-        selectedIndex = 0
+        self.sections = sections
+
         // Return on a URL, or a click outside, closes the palette still in
         // URL mode: it would read the next commands typed as a URL.
         mode = .actions
-        searchField.placeholderString = "Type a command..."
+        searchField.placeholderString = actionsPlaceholder
 
         let windowFrame = window.frame
         let panelWidth: CGFloat = 520
@@ -63,7 +110,7 @@ final class CommandPalette: NSObject {
         panel.setFrame(NSRect(x: xPos, y: yPos, width: panelWidth, height: panelHeight), display: true)
 
         searchField.stringValue = ""
-        rebuildList()
+        filterActions(query: "")
         installMonitors()
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(searchField)
@@ -225,15 +272,17 @@ final class CommandPalette: NSObject {
     private func rowIndexAtEvent(_ event: NSEvent) -> Int? {
         guard let listContainer, let contentView = panel?.contentView else { return nil }
         let locInContent = contentView.convert(event.locationInWindow, from: nil)
-        let locInList = listContainer.convert(locInContent, from: contentView)
-        guard listContainer.bounds.contains(locInList) else { return nil }
+        return row(atListPoint: listContainer.convert(locInContent, from: contentView))
+    }
 
-        let rowHeight: CGFloat = mode == .urlInput ? 36 : 44
-        let containerHeight = listContainer.bounds.height
-        let index = Int(floor((containerHeight + scrollY - locInList.y) / rowHeight))
-        let count = mode == .urlInput ? urlSuggestions.count : filteredActions.count
-        guard index >= 0, index < count else { return nil }
-        return index
+    /// The row under `point`, in the list's coordinates: nil on a header.
+    func row(atListPoint point: NSPoint) -> Int? {
+        guard let listContainer, listContainer.bounds.contains(point) else { return nil }
+        // From the top of the list's content.
+        let contentY = listContainer.bounds.height + scrollY - point.y
+        guard mode == .urlInput else { return listLayout.row(atContentY: contentY) }
+        let index = Int(floor(contentY / Self.urlRowHeight))
+        return urlSuggestions.indices.contains(index) ? index : nil
     }
 
     private func handleMouseHover(_ index: Int) {
@@ -263,137 +312,172 @@ final class CommandPalette: NSObject {
 
     private func handleScrollWheel(_ event: NSEvent) {
         guard let listContainer else { return }
-        let rowHeight: CGFloat = mode == .urlInput ? 36 : 44
-        let count = mode == .urlInput ? urlSuggestions.count : filteredActions.count
-        let containerHeight = listContainer.bounds.height
-        let totalHeight = CGFloat(count) * rowHeight
-        let maxScrollY = max(0, totalHeight - containerHeight)
-
+        let maxScrollY = max(0, contentHeight - listContainer.bounds.height)
         scrollY = max(0, min(scrollY - event.scrollingDeltaY, maxScrollY))
-
-        for (index, row) in rowViews.enumerated() {
-            row.frame.origin.y = containerHeight - CGFloat(index + 1) * rowHeight + scrollY
-        }
-
-        // Update scroll indicator
-        if let indicator = scrollIndicator {
-            let canScroll = maxScrollY > 0
-            indicator.isHidden = !canScroll
-            if canScroll {
-                let ratio = containerHeight / totalHeight
-                let barHeight = max(20, containerHeight * ratio)
-                let travel = containerHeight - barHeight
-                let barY = travel - (scrollY / maxScrollY) * travel
-                indicator.frame = NSRect(x: listContainer.bounds.width - 6, y: barY, width: 3, height: barHeight)
-            }
-        }
+        positionRows()
+        updateScrollIndicator()
     }
 
     // MARK: - List
 
-    func rebuildList() {
+    static let urlRowHeight: CGFloat = 36
+
+    /// The height of what the list scrolls through.
+    private var contentHeight: CGFloat {
+        mode == .urlInput ? CGFloat(urlSuggestions.count) * Self.urlRowHeight : listLayout.totalHeight
+    }
+
+    /// Places the list's views for the scroll offset. Masking clips the
+    /// rows past the list's edges: the peek effect.
+    func positionRows(animated: Bool = false) {
+        guard let listContainer else { return }
+        let containerHeight = listContainer.bounds.height
+        for (index, view) in rowViews.enumerated() {
+            let top: CGFloat
+            let height: CGFloat
+            if mode == .urlInput {
+                (top, height) = (CGFloat(index) * Self.urlRowHeight, Self.urlRowHeight)
+            } else {
+                guard listLayout.tops.indices.contains(index) else { continue }
+                (top, height) = (listLayout.tops[index], listLayout.heights[index])
+            }
+            let yPos = containerHeight - top - height + scrollY
+            if animated { view.animator().frame.origin.y = yPos } else { view.frame.origin.y = yPos }
+        }
+    }
+
+    func updateScrollIndicator() {
+        guard let indicator = scrollIndicator, let listContainer else { return }
+        let containerHeight = listContainer.bounds.height
+        let totalHeight = contentHeight
+        let maxScrollY = max(0, totalHeight - containerHeight)
+        indicator.isHidden = maxScrollY <= 0
+        guard maxScrollY > 0 else { return }
+        let barHeight = max(20, containerHeight * containerHeight / totalHeight)
+        let travel = containerHeight - barHeight
+        let barY = travel - (scrollY / maxScrollY) * travel
+        indicator.frame = NSRect(x: listContainer.bounds.width - 6, y: barY, width: 3, height: barHeight)
+    }
+
+    private func rebuildList() {
         guard let listContainer else { return }
         rowViews.forEach { $0.removeFromSuperview() }
         rowViews.removeAll()
         scrollY = 0
 
-        let rowHeight: CGFloat = 44
-        let containerHeight = listContainer.bounds.height
-
-        for (index, action) in filteredActions.enumerated() {
-            let yPos = containerHeight - CGFloat(index + 1) * rowHeight
-
-            let row = NSView(frame: NSRect(x: 0, y: yPos, width: listContainer.bounds.width, height: rowHeight))
-            row.wantsLayer = true
-
-            // Icon
-            let iconLabel = NSTextField(labelWithString: action.icon)
-            iconLabel.font = .systemFont(ofSize: 18)
-            iconLabel.frame = NSRect(x: 16, y: 10, width: 28, height: 24)
-            row.addSubview(iconLabel)
-
-            // Title
-            let title = NSTextField(labelWithString: action.title)
-            title.font = .systemFont(ofSize: 13, weight: .medium)
-            title.textColor = .white
-            title.frame = NSRect(x: 52, y: 22, width: 350, height: 18)
-            row.addSubview(title)
-
-            // Subtitle
-            let subtitle = NSTextField(labelWithString: action.subtitle)
-            subtitle.font = .systemFont(ofSize: 11)
-            subtitle.textColor = .secondaryLabelColor
-            subtitle.frame = NSRect(x: 52, y: 4, width: 350, height: 16)
-            row.addSubview(subtitle)
-
-            // Shortcut label (right side)
-            if let chord = action.shortcut?.chord {
-                let shortcut = NSTextField(labelWithString: chord.display)
-                shortcut.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-                shortcut.textColor = .tertiaryLabelColor
-                shortcut.alignment = .right
-                shortcut.frame = NSRect(x: listContainer.bounds.width - 60, y: 14, width: 50, height: 16)
-                row.addSubview(shortcut)
+        for (index, item) in listLayout.items.enumerated() {
+            let frame = NSRect(x: 0, y: 0, width: listContainer.bounds.width, height: listLayout.heights[index])
+            let view: NSView
+            switch item {
+            case .header(let title): view = Self.headerView(title, frame: frame)
+            case .row(let row): view = Self.rowView(filteredActions[row], frame: frame)
             }
-
-            listContainer.addSubview(row)
-            rowViews.append(row)
+            listContainer.addSubview(view)
+            rowViews.append(view)
         }
 
         highlightSelected(animated: false)
     }
 
+    private static func headerView(_ title: String, frame: NSRect) -> NSView {
+        let header = NSView(frame: frame)
+        let label = NSTextField(labelWithString: title.uppercased())
+        label.font = .systemFont(ofSize: 10, weight: .semibold)
+        label.textColor = .tertiaryLabelColor
+        label.frame = NSRect(x: 16, y: 3, width: frame.width - 32, height: 14)
+        header.addSubview(label)
+        return header
+    }
+
+    private static func rowView(_ action: PaletteAction, frame: NSRect) -> NSView {
+        let row = NSView(frame: frame)
+        row.wantsLayer = true
+        row.layer?.cornerRadius = 6
+
+        // Icon: an emoji, or a symbol in its color (a space's dot).
+        let iconLabel = NSTextField(labelWithString: action.icon)
+        if let iconColor = action.iconColor {
+            iconLabel.font = .systemFont(ofSize: 12)
+            iconLabel.textColor = iconColor
+            iconLabel.alignment = .center
+            iconLabel.frame = NSRect(x: 16, y: 13, width: 20, height: 18)
+        } else {
+            iconLabel.font = .systemFont(ofSize: 18)
+            iconLabel.frame = NSRect(x: 16, y: 10, width: 28, height: 24)
+        }
+        row.addSubview(iconLabel)
+
+        // Right side: the badge, else the shortcut.
+        var textRight = frame.width - 18
+        if let badge = action.badge {
+            let label = NSTextField(labelWithString: badge.text)
+            label.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
+            label.textColor = badge.color
+            label.sizeToFit()
+            let width = ceil(label.frame.width)
+            label.frame = NSRect(x: frame.width - 14 - width, y: 14, width: width, height: 16)
+            row.addSubview(label)
+            textRight = label.frame.minX - 12
+        } else if let chord = action.shortcut?.chord {
+            let shortcut = NSTextField(labelWithString: chord.display)
+            shortcut.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+            shortcut.textColor = .tertiaryLabelColor
+            shortcut.alignment = .right
+            shortcut.frame = NSRect(x: frame.width - 60, y: 14, width: 50, height: 16)
+            row.addSubview(shortcut)
+        }
+        let textWidth = min(350, textRight - 52)
+
+        let title = NSTextField(labelWithString: action.title)
+        title.font = .systemFont(ofSize: 13, weight: .medium)
+        title.textColor = action.isDimmed ? .secondaryLabelColor : .white
+        title.lineBreakMode = .byTruncatingTail
+        title.frame = NSRect(x: 52, y: 22, width: textWidth, height: 18)
+        row.addSubview(title)
+
+        let subtitle = NSTextField(labelWithString: action.subtitle)
+        subtitle.font = .systemFont(ofSize: 11)
+        subtitle.textColor = .secondaryLabelColor
+        // Keeps both ends: a workspace's branch and its folder's name.
+        subtitle.lineBreakMode = .byTruncatingMiddle
+        subtitle.frame = NSRect(x: 52, y: 4, width: textWidth, height: 16)
+        row.addSubview(subtitle)
+
+        return row
+    }
+
     func highlightSelected(animated: Bool = true) {
         guard let listContainer else { return }
-        let rowHeight: CGFloat = 44
         let containerHeight = listContainer.bounds.height
-        let totalHeight = CGFloat(filteredActions.count) * rowHeight
-        let maxScrollY = max(0, totalHeight - containerHeight)
+        let maxScrollY = max(0, listLayout.totalHeight - containerHeight)
 
-        // Ensure selected row is fully visible
+        // Ensure the selected row is fully visible — with its section's
+        // header, when it's the first row under one.
         let oldScrollY = scrollY
-        let selTop = CGFloat(selectedIndex) * rowHeight
-        let selBottom = selTop + rowHeight
-        if selTop < scrollY { scrollY = selTop }
-        if selBottom > scrollY + containerHeight { scrollY = selBottom - containerHeight }
+        if let span = listLayout.visibleSpan(ofRow: selectedIndex) {
+            if span.top < scrollY { scrollY = span.top }
+            if span.bottom > scrollY + containerHeight { scrollY = span.bottom - containerHeight }
+        }
         scrollY = max(0, min(scrollY, maxScrollY))
 
-        let needsScroll = animated && oldScrollY != scrollY
-
-        // Position rows (masksToBounds clips naturally → peek effect)
-        if needsScroll {
+        if animated && oldScrollY != scrollY {
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = 0.15
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                for (index, row) in self.rowViews.enumerated() {
-                    row.animator().frame.origin.y = containerHeight - CGFloat(index + 1) * rowHeight + self.scrollY
-                }
+                self.positionRows(animated: true)
             }
         } else {
-            for (index, row) in rowViews.enumerated() {
-                row.frame.origin.y = containerHeight - CGFloat(index + 1) * rowHeight + scrollY
-            }
+            positionRows()
         }
 
         // Highlight
         let accent = NSColor.niruxAccent.withAlphaComponent(0.15)
-        for (index, row) in rowViews.enumerated() {
-            row.layer?.backgroundColor = (index == selectedIndex) ? accent.cgColor : NSColor.clear.cgColor
-            row.layer?.cornerRadius = 6
+        let selectedItem = listLayout.itemIndex(ofRow: selectedIndex)
+        for (index, view) in rowViews.enumerated() {
+            view.layer?.backgroundColor = (index == selectedItem) ? accent.cgColor : NSColor.clear.cgColor
         }
 
-        // Scroll indicator
-        if let indicator = scrollIndicator {
-            let canScroll = maxScrollY > 0
-            indicator.isHidden = !canScroll
-            if canScroll {
-                let ratio = containerHeight / totalHeight
-                let barHeight = max(20, containerHeight * ratio)
-                let travel = containerHeight - barHeight
-                let barY = travel - (scrollY / maxScrollY) * travel
-                indicator.frame = NSRect(x: listContainer.bounds.width - 6, y: barY, width: 3, height: barHeight)
-            }
-        }
+        updateScrollIndicator()
     }
 
     // MARK: - Keyboard
@@ -431,27 +515,87 @@ final class CommandPalette: NSObject {
 
     // MARK: - Filtering
 
-    private func filterActions(query: String) {
+    var actionsPlaceholder: String {
+        sections.isEmpty ? "Type a command..." : "Type a command or a workspace..."
+    }
+
+    /// Lists what `query` matches (see `PaletteRanking.rank`), the first
+    /// row selected. Titles match above subtitles; fuzzy scoring keeps
+    /// acronym-style queries ("nt" → "New Terminal") working.
+    func filterActions(query: String) {
         // Don't filter actions when in URL mode — user is typing a URL
         guard mode == .actions else { return }
 
-        if query.isEmpty {
-            filteredActions = actions
-        } else {
-            // Title matches rank above subtitle matches; fuzzy scoring keeps
-            // acronym-style queries ("nt" → "New Terminal") working.
-            let scored: [(action: PaletteAction, score: Int, index: Int)] = actions.enumerated().compactMap { index, action in
-                let titleScore = FuzzyMatch.score(query: query, candidate: action.title).map { $0 + 25 }
-                let subtitleScore = FuzzyMatch.score(query: query, candidate: action.subtitle)
-                guard let best = [titleScore, subtitleScore].compactMap({ $0 }).max() else { return nil }
-                return (action, best, index)
+        let all = [PaletteSection(title: Self.commandsSectionTitle, rows: actions)] + sections
+        // "billing " still finds billing-fix; "new t" keeps its space.
+        let query = query.trimmingCharacters(in: .whitespaces)
+        let ranked = PaletteRanking.rank(query: query, sections: all.map { $0.rows.map(\.rankingCandidate) })
+        var items: [PaletteListLayout.Item] = []
+        var rows: [PaletteAction] = []
+        for section in ranked {
+            if !sections.isEmpty { items.append(.header(all[section.section].title)) }
+            for row in section.rows {
+                items.append(.row(rows.count))
+                rows.append(all[section.section].rows[row])
             }
-            filteredActions = scored
-                .sorted { $0.score != $1.score ? $0.score > $1.score : $0.index < $1.index }
-                .map { $0.action }
         }
+        filteredActions = rows
+        listLayout = PaletteListLayout(items: items)
         selectedIndex = 0
         rebuildList()
+    }
+}
+
+/// Where the palette's headers and rows sit in the list's content, top
+/// down.
+struct PaletteListLayout {
+    enum Item: Equatable {
+        case header(String)
+        /// An index into `filteredActions`.
+        case row(Int)
+    }
+
+    static let rowHeight: CGFloat = 44
+    static let headerHeight: CGFloat = 22
+
+    let items: [Item]
+    let tops: [CGFloat]
+    let heights: [CGFloat]
+
+    init(items: [Item]) {
+        self.items = items
+        heights = items.map { item in
+            if case .header = item { return Self.headerHeight }
+            return Self.rowHeight
+        }
+        var top: CGFloat = 0
+        tops = heights.map { height in
+            defer { top += height }
+            return top
+        }
+    }
+
+    var totalHeight: CGFloat { (tops.last ?? 0) + (heights.last ?? 0) }
+
+    func itemIndex(ofRow row: Int) -> Int? {
+        items.firstIndex(of: .row(row))
+    }
+
+    /// The row `y` points from the top of the content; nil on a header or
+    /// past the rows.
+    func row(atContentY y: CGFloat) -> Int? {
+        guard let index = tops.lastIndex(where: { $0 <= y }), y < tops[index] + heights[index],
+              case .row(let row) = items[index] else { return nil }
+        return row
+    }
+
+    /// What scrolls into view to show `row`: the row, and its section's
+    /// header when the row comes first under it.
+    func visibleSpan(ofRow row: Int) -> (top: CGFloat, bottom: CGFloat)? {
+        guard let index = itemIndex(ofRow: row) else { return nil }
+        var top = tops[index]
+        if index > 0, case .header = items[index - 1] { top = tops[index - 1] }
+        return (top, tops[index] + heights[index])
     }
 }
 
