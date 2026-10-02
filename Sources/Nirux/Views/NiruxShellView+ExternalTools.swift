@@ -378,12 +378,52 @@ extension NiruxShellView {
         clickable in the Nirux terminal.
         """
 
+    // MARK: - Second-Opinion Skill
+
+    static let secondOpinionSkillContent = """
+        ---
+        name: nirux-second-opinion
+        description: >
+          This skill should be used when the user asks for a second opinion from Codex —
+          "second opinion", "demande à Codex", "qu'en pense Codex", "vérifie avec Codex",
+          "ask Codex", "check this with Codex". Sends the question and Claude's answer to a
+          read-only `codex exec` in the same folder and brings its reply back. Not intended
+          for handing work to Codex, for Codex sessions, or when the user didn't ask.
+        metadata:
+          author: nirux
+        ---
+
+        ## Steps
+
+        1. **Write a brief** Codex can act on without this conversation: the user's
+           question, your answer or claim, and the files, diff or commands that support
+           it. Codex runs in the same folder, so point at files instead of pasting them.
+           Ask it to verify, look for what's wrong or missing, and cite `file:line`.
+           ```bash
+           brief=$(mktemp -t nirux-second-opinion)
+           out=$(mktemp -t nirux-second-opinion)
+           ```
+        2. **Run Codex read-only**, as a background command (a run can take minutes):
+           ```bash
+           codex exec -s read-only -C "$PWD" -o "$out" - < "$brief" > "$out.log" 2>&1
+           ```
+           `-o` writes only Codex's final message. If the command fails, show the end of
+           `$out.log` and stop. Leave model and effort to the user's Codex config.
+        3. **Report**: Codex's reply verbatim, as a quote headed **Codex**, then where you
+           agree, where you don't (with evidence), and what you would change. Apply nothing
+           until the user says so.
+
+        For a follow-up, run a new `codex exec` whose brief includes the previous reply.
+        Never `codex exec resume --last`: it can pick another Codex session in this folder.
+        """
+
     /// Name → content of every skill Nirux ships. Installed together: the
     /// set is small and versioned with the app, so partial installs would
     /// only create confusion about which copy is current.
     static let agentSkills = [
         "nirux-worktree": worktreeSkillContent,
-        "nirux-show-code": showCodeSkillContent
+        "nirux-show-code": showCodeSkillContent,
+        "nirux-second-opinion": secondOpinionSkillContent
     ]
 
     /// Palette action and checklist button. The checklist row turning green

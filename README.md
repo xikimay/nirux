@@ -251,11 +251,13 @@ The command palette action `Install Agent Skills` writes the bundled skills to:
 ```text
 ~/.agents/skills/nirux-worktree/SKILL.md
 ~/.agents/skills/nirux-show-code/SKILL.md
+~/.agents/skills/nirux-second-opinion/SKILL.md
 ~/.claude/skills/nirux-worktree/SKILL.md
 ~/.claude/skills/nirux-show-code/SKILL.md
+~/.claude/skills/nirux-second-opinion/SKILL.md
 ```
 
-`nirux-worktree` lets supported agents open isolated Nirux workspaces when the user asks to start work on a feature, bug, or separate branch. `nirux-show-code` teaches agents to open code in the editor column via `nirux://open-editor` when the user asks to see code.
+`nirux-worktree` lets supported agents open isolated Nirux workspaces when the user asks to start work on a feature, bug, or separate branch. `nirux-show-code` teaches agents to open code in the editor column via `nirux://open-editor` when the user asks to see code. `nirux-second-opinion` lets Claude, when the user asks for a second opinion, send its answer to a read-only `codex exec` in the same folder and show Codex's reply next to its own verdict.
 
 ### Cleaning up merged worktrees
 

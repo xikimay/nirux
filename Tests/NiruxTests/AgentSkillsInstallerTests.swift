@@ -52,6 +52,11 @@ final class AgentSkillsInstallerTests: XCTestCase {
 
     @MainActor
     func testShippedSkillsAreTheOnesTheChecklistChecks() {
-        XCTAssertEqual(NiruxShellView.agentSkills.keys.sorted(), ["nirux-show-code", "nirux-worktree"])
+        XCTAssertEqual(NiruxShellView.agentSkills.keys.sorted(), ["nirux-second-opinion", "nirux-show-code", "nirux-worktree"])
+    }
+
+    @MainActor
+    func testSecondOpinionRunsCodexReadOnly() {
+        XCTAssertTrue(NiruxShellView.secondOpinionSkillContent.contains("codex exec -s read-only "))
     }
 }
