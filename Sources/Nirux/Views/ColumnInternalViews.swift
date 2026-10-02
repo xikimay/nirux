@@ -57,7 +57,7 @@ final class EditorConflictBanner: NSView {
         layer?.backgroundColor = Theme.Color.tint(Theme.Color.waiting, 0.3).cgColor
         layer?.cornerRadius = 7
         layer?.borderWidth = 1
-        layer?.borderColor = NSColor.systemOrange.withAlphaComponent(0.5).cgColor
+        layer?.borderColor = Theme.Color.waiting.withAlphaComponent(0.5).cgColor
 
         messageLabel.font = .systemFont(ofSize: 11, weight: .medium)
         messageLabel.textColor = NSColor.white.withAlphaComponent(0.9)

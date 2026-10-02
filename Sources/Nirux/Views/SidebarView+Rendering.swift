@@ -294,15 +294,7 @@ extension SidebarView {
     }
 
     private static func profileColor(hex: String) -> NSColor {
-        var raw = hex.trimmingCharacters(in: .whitespacesAndNewlines)
-        if raw.hasPrefix("#") { raw.removeFirst() }
-        guard raw.count == 6, let value = UInt32(raw, radix: 16) else { return Theme.Color.accent }
-        return NSColor(
-            red: CGFloat((value >> 16) & 0xFF) / 255.0,
-            green: CGFloat((value >> 8) & 0xFF) / 255.0,
-            blue: CGFloat(value & 0xFF) / 255.0,
-            alpha: 1
-        )
+        NSColor.niruxColor(hex: hex) ?? Theme.Color.accent
     }
 
     // MARK: - Bottom spaces
@@ -677,11 +669,11 @@ extension SidebarView {
 
     private static func activityColor(for category: ActivityEntry.Category) -> NSColor {
         switch category {
-        case .attention: return .systemOrange
+        case .attention: return Theme.Color.waiting
         case .turnComplete: return .systemGreen
         case .sessionStart: return Theme.Color.accent
         case .sessionEnd: return .white.withAlphaComponent(0.35)
-        case .missionQuestion: return .systemOrange
+        case .missionQuestion: return Theme.Color.waiting
         case .missionCompleted: return .systemGreen
         case .missionResponse, .missionInstruction: return .systemBlue
         }

@@ -25,7 +25,7 @@ final class EditorTabBar: NSView {
 
     private static let tabMinWidth: CGFloat = 100
     private static let tabMaxWidth: CGFloat = 220
-    private static let bgColor = Theme.Color.base
+    private static let bgColor = Theme.Color.canvas
 
     private let scrollView = NSScrollView()
     private let documentView = NSView()
@@ -144,7 +144,7 @@ private final class TabItemView: NSView {
         addSubview(label)
 
         dirtyDot.wantsLayer = true
-        dirtyDot.layer?.backgroundColor = Theme.Color.textSecondary.cgColor
+        dirtyDot.layer?.backgroundColor = Theme.Color.textPrimary.cgColor
         dirtyDot.layer?.cornerRadius = 3
         dirtyDot.isHidden = !tab.isDirty
         addSubview(dirtyDot)

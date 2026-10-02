@@ -67,9 +67,9 @@ struct SidebarApprovalBlockRenderer {
         let background = SidebarBackgroundView(frame: frame)
         background.wantsLayer = true
         background.layer?.cornerRadius = 6
-        background.layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.07).cgColor
+        background.layer?.backgroundColor = Theme.Color.waiting.withAlphaComponent(0.07).cgColor
         background.layer?.borderWidth = 1
-        background.layer?.borderColor = NSColor.systemOrange.withAlphaComponent(0.28).cgColor
+        background.layer?.borderColor = Theme.Color.waiting.withAlphaComponent(0.28).cgColor
         return background
     }
 

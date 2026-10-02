@@ -149,7 +149,7 @@ final class SidebarView: NSView {
     private static let dotGap: CGFloat = 8
     static let accentColor: NSColor = Theme.Color.accent
     private static let dimColor = NSColor.white.withAlphaComponent(0.25)
-    private static let notifColor = NSColor.systemOrange
+    private static let notifColor = Theme.Color.waiting
 
     /// Scrollable container for expanded-mode content. In collapsed mode it's
     /// hidden and we just draw dots into the sidebar's own layer.

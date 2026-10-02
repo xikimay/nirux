@@ -198,7 +198,7 @@ final class SidebarWorkspaceCardRenderer {
     private func phaseColor(_ phase: WorkspacePhase) -> NSColor {
         switch phase {
         case .active: return .systemGreen
-        case .waiting: return .systemOrange
+        case .waiting: return Theme.Color.waiting
         case .blocked: return .systemRed
         case .review: return .systemPurple
         case .parked: return NSColor.white.withAlphaComponent(0.38)
@@ -597,11 +597,11 @@ final class SidebarWorkspaceCardRenderer {
         let color: NSColor
         switch (column.stuck, column.agentStatus) {
         case let (stuck?, _):
-            color = stuck.isFailure ? .systemRed : .systemOrange
+            color = stuck.isFailure ? .systemRed : Theme.Color.waiting
         case (nil, .working):
             color = .systemGreen
         case (nil, .needsAttention):
-            color = .systemOrange
+            color = Theme.Color.waiting
         case (nil, .idle):
             color = NSColor.white.withAlphaComponent(0.22)
         }

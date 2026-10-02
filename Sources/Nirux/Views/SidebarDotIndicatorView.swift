@@ -117,7 +117,7 @@ final class SidebarDotIndicatorView: NSView {
             }
 
             if item.hasAttention {
-                ctx.setStrokeColor(NSColor.systemOrange.cgColor)
+                ctx.setStrokeColor(Theme.Color.waiting.cgColor)
                 ctx.setLineWidth(1.5)
                 ctx.strokeEllipse(in: rect.insetBy(dx: -3, dy: -3))
             }
@@ -198,19 +198,5 @@ final class SidebarDotIndicatorView: NSView {
             defer { x += size + gap }
             return CGRect(x: x, y: 16 - size / 2, width: size, height: size)
         }
-    }
-}
-
-extension NSColor {
-    static func niruxColor(hex: String) -> NSColor? {
-        var raw = hex.trimmingCharacters(in: .whitespacesAndNewlines)
-        if raw.hasPrefix("#") { raw.removeFirst() }
-        guard raw.count == 6, let value = UInt32(raw, radix: 16) else { return nil }
-        return NSColor(
-            red: CGFloat((value >> 16) & 0xFF) / 255.0,
-            green: CGFloat((value >> 8) & 0xFF) / 255.0,
-            blue: CGFloat(value & 0xFF) / 255.0,
-            alpha: 1
-        )
     }
 }

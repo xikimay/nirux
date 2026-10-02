@@ -1,10 +1,11 @@
 import AppKit
 
 /// Nirux's design tokens. Views take colors, fonts, spacing, radii and
-/// symbols from here instead of literals, so one change restyles the app.
-/// Tokens are named by role, never by hue.
+/// symbols from here instead of literals. Tokens are named by role, never
+/// by hue. ThemeGuardTests rejects literal colors outside this file.
 ///
-/// Nirux is dark-only: `appearance` is the one place that says so.
+/// Nirux is dark-only: windows and views set `appearance` rather than
+/// naming `.darkAqua`.
 enum Theme {
     static var appearance: NSAppearance? { NSAppearance(named: .darkAqua) }
 
@@ -14,9 +15,9 @@ enum Theme {
         static let canvas = NSColor(hex: 0x16161B)
         /// Sidebar, file trees, settings windows, sheets and panels.
         static let base = NSColor(hex: 0x1B1B23)
-        /// Cards, column title bars, tab bars, find bars.
+        /// Cards, column title bars, the active editor tab, find bars, toolbars.
         static let surface = NSColor(hex: 0x20202A)
-        /// What floats over content: drag ghosts, menus, popovers.
+        /// Above a surface: drag ghosts, menus, popovers, a toolbar's fields.
         static let raised = NSColor(hex: 0x292933)
 
         static let fillHover = NSColor.white.withAlphaComponent(0.05)
@@ -35,12 +36,15 @@ enum Theme {
         /// Focus, selection, links.
         static let accent = NSColor(hex: 0x78A3F7)
 
-        // States: one color per state, the same wherever the state shows.
+        // States: one color per state, used wherever that state shows.
         /// An agent works.
         static let working = NSColor(hex: 0x4CC38A)
         /// The same green for what went well: checks passed, secure URLs.
+        /// Not for agent states: an agent that finished is idle, not green.
         static let success = working
-        /// An agent waits for the user. Amber means nothing else.
+        /// Something waits for the user's answer: an agent's permission or
+        /// question, the editor's file conflict. Amber means nothing else:
+        /// not warnings, not pending checks.
         static let waiting = NSColor(hex: 0xF5A623)
         /// An agent stopped on an error, a failed check, a refusal.
         static let error = NSColor(hex: 0xF0656B)
@@ -49,9 +53,19 @@ enum Theme {
         static let idle = textTertiary
 
         /// `color` laid over `background` at `fraction`, opaque: a tinted
-        /// surface that hides what is behind it.
+        /// surface that hides what is behind it. Mixed in sRGB, like the
+        /// design values (`NSColor.blended` mixes in Generic RGB, lighter).
         static func tint(_ color: NSColor, _ fraction: CGFloat, over background: NSColor = base) -> NSColor {
-            background.blended(withFraction: fraction, of: color) ?? background
+            guard let top = color.usingColorSpace(.sRGB), let bottom = background.usingColorSpace(.sRGB) else {
+                return background
+            }
+            func mix(_ under: CGFloat, _ over: CGFloat) -> CGFloat { under + (over - under) * fraction }
+            return NSColor(
+                srgbRed: mix(bottom.redComponent, top.redComponent),
+                green: mix(bottom.greenComponent, top.greenComponent),
+                blue: mix(bottom.blueComponent, top.blueComponent),
+                alpha: 1
+            )
         }
     }
 
@@ -76,9 +90,9 @@ enum Theme {
     /// A 4 pt grid. 2 pt stays allowed for optical alignment.
     enum Space {
         static let xs: CGFloat = 4
-        static let s: CGFloat = 8
-        static let m: CGFloat = 12
-        static let l: CGFloat = 16
+        static let sm: CGFloat = 8
+        static let md: CGFloat = 12
+        static let lg: CGFloat = 16
         static let xl: CGFloat = 24
     }
 
@@ -134,7 +148,7 @@ enum Theme {
     }
 }
 
-private extension NSColor {
+extension NSColor {
     /// An sRGB color from 0xRRGGBB, like `NSColor(red:green:blue:alpha:)`.
     convenience init(hex: UInt32) {
         self.init(
@@ -143,5 +157,13 @@ private extension NSColor {
             blue: CGFloat(hex & 0xFF) / 255,
             alpha: 1
         )
+    }
+
+    /// A color the user picked, as "#RRGGBB" or "RRGGBB"; nil if malformed.
+    static func niruxColor(hex: String) -> NSColor? {
+        var raw = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.hasPrefix("#") { raw.removeFirst() }
+        guard raw.count == 6, let value = UInt32(raw, radix: 16) else { return nil }
+        return NSColor(hex: value)
     }
 }

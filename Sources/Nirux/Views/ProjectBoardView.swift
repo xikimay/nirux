@@ -160,7 +160,7 @@ final class ProjectBoardView: NSView {
 
     private static let primaryText = NSColor.white.withAlphaComponent(0.85)
     private static let secondaryText = NSColor.white.withAlphaComponent(0.45)
-    private static let waitingColor = NSColor.systemOrange
+    private static let waitingColor = Theme.Color.waiting
     private static let failureColor = Theme.Color.error
     private static let workingColor = Theme.Color.working
     private static let dryRunColor = NSColor.systemOrange

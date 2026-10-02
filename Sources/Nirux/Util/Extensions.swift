@@ -2,8 +2,9 @@ import AppKit
 import Foundation
 
 extension NSColor {
-    /// Old name of `Theme.Color.accent`, left for NiruxApp+Settings.swift
-    /// until its rewrite. New code uses `Theme.Color.accent`.
+    /// Old name of `Theme.Color.accent`, left for the files in
+    /// `ThemeGuardTests.pending`.
+    @available(*, deprecated, message: "Use Theme.Color.accent")
     static let niruxAccent = Theme.Color.accent
     /// A usage close to its limit: a Claude column's context ("ctx 92%"),
     /// the plan usage limits in the title bar.

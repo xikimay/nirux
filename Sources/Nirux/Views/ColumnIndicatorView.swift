@@ -11,7 +11,7 @@ final class ColumnIndicatorView: NSView {
     private static let dotGap: CGFloat = 8
     private static let accentColor: NSColor = Theme.Color.accent
     private static let dimColor = NSColor.white.withAlphaComponent(0.25)
-    private static let notifColor = NSColor.systemOrange
+    private static let notifColor = Theme.Color.waiting
 
     override init(frame: NSRect) {
         super.init(frame: frame)
