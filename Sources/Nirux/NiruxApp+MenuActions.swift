@@ -34,6 +34,10 @@ extension NiruxApp {
         shell?.showNewWorkspacePanel()
     }
 
+    @objc func resumeAllAgents(_ sender: Any?) {
+        shell?.resumeAllDeferredAgents()
+    }
+
     @objc func renameWorkspace(_ sender: Any?) {
         shell?.showRenamePanel()
     }
@@ -363,6 +367,8 @@ extension NiruxApp {
         let workspacesMenu = NSMenu(title: "Workspaces")
         workspacesMenu.addItem(withTitle: "New Workspace", action: #selector(newWorkspace(_:)), shortcut: .newWorkspace)
         workspacesMenu.addItem(withTitle: "Rename Workspace", action: #selector(renameWorkspace(_:)), keyEquivalent: "")
+        workspacesMenu.addItem(NSMenuItem.separator())
+        workspacesMenu.addItem(withTitle: "Resume All Agents", action: #selector(resumeAllAgents(_:)), keyEquivalent: "")
         workspacesMenu.addItem(NSMenuItem.separator())
 
         let workspaceUpItem = NSMenuItem(title: "Workspace Up", action: #selector(workspaceUp(_:)), keyEquivalent: "")

@@ -306,20 +306,28 @@ final class SidebarWorkspaceCardRenderer {
             append(rowHover)
             columnHoverViews[column.index] = rowHover
 
+            // A restored agent that hasn't resumed shows Resume where the
+            // status dot goes: it has no status yet.
+            let trailingWidth = column.deferredAgent == nil
+                ? 18 : SidebarExpandedMetrics.approvalButtonWidth + 8
             let label = NSTextField(labelWithAttributedString: SidebarRenderer.attributedColumn(column, fontSize: 11))
             label.lineBreakMode = .byTruncatingTail
-            label.frame = NSRect(x: padding, y: rowY, width: sidebarWidth - padding * 2 - 18, height: rowHeight)
+            label.frame = NSRect(x: padding, y: rowY, width: sidebarWidth - padding * 2 - trailingWidth, height: rowHeight)
             label.toolTip = SidebarRenderer.attentionTooltip(for: column)
             append(label)
 
-            let dot = statusDot(for: column)
-            dot.frame = NSRect(
-                x: sidebarWidth - padding - rightDotSize,
-                y: rowY + (rowHeight - rightDotSize) / 2,
-                width: rightDotSize,
-                height: rightDotSize
-            )
-            append(dot)
+            if let deferred = column.deferredAgent {
+                buildDeferredResumeButton(deferred, columnIndex: column.index, rowY: rowY, padding: padding)
+            } else {
+                let dot = statusDot(for: column)
+                dot.frame = NSRect(
+                    x: sidebarWidth - padding - rightDotSize,
+                    y: rowY + (rowHeight - rightDotSize) / 2,
+                    width: rightDotSize,
+                    height: rightDotSize
+                )
+                append(dot)
+            }
 
             let hitRect = NSRect(
                 x: padding - 8,
@@ -357,6 +365,34 @@ final class SidebarWorkspaceCardRenderer {
         }
 
         return currentY
+    }
+
+    /// Resume at the end of a not-resumed agent's row. Its hit area goes
+    /// before the row's: the first area under the pointer takes the click.
+    private func buildDeferredResumeButton(_ deferred: SidebarDeferredAgent, columnIndex: Int, rowY: CGFloat, padding: CGFloat) {
+        let color = NSColor.niruxAccent
+        let label = "Resume \(deferred.processName) here"
+        let button = SidebarBadgeView(
+            text: "Resume",
+            textColor: color.withAlphaComponent(0.95),
+            fillColor: color.withAlphaComponent(0.16),
+            font: .systemFont(ofSize: 10.5, weight: .semibold)
+        )
+        button.hoverTextColor = color
+        button.hoverFillColor = color.withAlphaComponent(0.3)
+        button.toolTip = label
+        button.setAccessibilityRole(.button)
+        button.setAccessibilityLabel(label)
+        let width = SidebarExpandedMetrics.approvalButtonWidth
+        button.frame = NSRect(
+            x: sidebarWidth - padding - width, y: rowY, width: width, height: SidebarExpandedMetrics.columnRowHeight
+        )
+        append(button)
+        approvalButtons[SidebarHoverTarget.deferredResumeButtonKey(columnID: deferred.columnID)] = button
+        hitAreas.append(SidebarHitArea(
+            frame: button.frame.insetBy(dx: -3, dy: -3),
+            region: .deferredAgentResume(workspaceIndex: workspace.index, columnIndex: columnIndex, columnID: deferred.columnID)
+        ))
     }
 
     private func buildDiffStatsLabel(stats: String, padding: CGFloat, yOffset: CGFloat) -> CGFloat {

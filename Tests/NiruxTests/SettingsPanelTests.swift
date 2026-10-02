@@ -262,6 +262,50 @@ final class SettingsPanelTests: XCTestCase {
         }
     }
 
+    /// Restored agents resume once their column shows, unless Settings
+    /// says all at once.
+    @MainActor
+    func testResumeAgentsOnLaunchDefaultsToLazilyAndSaves() throws {
+        try withIsolatedState {
+            let app = try openSettings()
+            defer { close(app) }
+            let popup = try XCTUnwrap(app.settingsAgentResumePopup)
+            XCTAssertEqual(popup.itemTitles, ["When their column shows", "All at once"])
+            XCTAssertEqual(selectedRawValue(popup), AgentResumeOnLaunch.lazily.rawValue)
+            let keepAwake = try XCTUnwrap(app.settingsKeepAwakeCheckbox)
+            let launchMode = try XCTUnwrap(app.settingsLaunchModePopup)
+            XCTAssertLessThan(popup.frame.maxY, keepAwake.frame.minY)
+            XCTAssertGreaterThan(popup.frame.minY, launchMode.frame.maxY + 16, "clear of the Claude Code section")
+
+            popup.selectItem(at: popup.indexOfItem(withRepresentedObject: AgentResumeOnLaunch.allAtOnce.rawValue))
+            app.settingsSave(NSButton())
+            XCTAssertEqual(Persistence.load()?.settings?.agentResumeOnLaunch, .allAtOnce)
+            XCTAssertEqual(NiruxShellView.currentAgentResumeOnLaunch(), .allAtOnce)
+
+            let reopened = try openSettings()
+            defer { close(reopened) }
+            XCTAssertEqual(selectedRawValue(reopened.settingsAgentResumePopup), AgentResumeOnLaunch.allAtOnce.rawValue)
+        }
+    }
+
+    /// A choice a newer build saved shows as the default and survives a
+    /// Save that leaves it alone.
+    @MainActor
+    func testUntouchedSaveKeepsANewerBuildsResumeChoice() throws {
+        try withIsolatedState {
+            let stateFile = URL(fileURLWithPath: try XCTUnwrap(ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]))
+                .appendingPathComponent("state.json")
+            try Data(#"{"workspaces":[],"activeWorkspaceIndex":0,"settings":{"agentResumeOnLaunch":"onIdle"}}"#.utf8)
+                .write(to: stateFile)
+            let app = try openSettings()
+            defer { close(app) }
+            XCTAssertEqual(selectedRawValue(app.settingsAgentResumePopup), AgentResumeOnLaunch.lazily.rawValue)
+            app.settingsSave(NSButton())
+            XCTAssertNil(app.settingsPanel, "Save did not complete")
+            XCTAssertTrue(try String(contentsOf: stateFile, encoding: .utf8).contains(#""agentResumeOnLaunch":"onIdle""#))
+        }
+    }
+
     /// The General section tops the panel; nothing spills out of it or into
     /// the Save row.
     @MainActor

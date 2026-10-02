@@ -5,7 +5,7 @@ import AppKit
 extension NiruxApp {
     static let settingsWidth: CGFloat = 520
     /// The General section sits on top; the others keep their layout below.
-    static let generalSectionHeight: CGFloat = 64
+    static let generalSectionHeight: CGFloat = 98
     /// The usage limits rows close the Claude Code section; the sections
     /// below it keep their layout, that much lower.
     static let usageLimitsRowsHeight: CGFloat = 74
@@ -39,7 +39,9 @@ extension NiruxApp {
         background.wantsLayer = true
         background.layer?.backgroundColor = NSColor(red: 0.11, green: 0.11, blue: 0.15, alpha: 1).cgColor
 
-        settingsKeepAwakeCheckbox = buildGeneralSection(in: background, width: width, height: height)
+        let general = buildGeneralSection(in: background, width: width, height: height)
+        settingsKeepAwakeCheckbox = general.keepAwake
+        settingsAgentResumePopup = general.agentResume
         // The sections below lay out from this top.
         let sectionsTop = height - Self.generalSectionHeight
         let (modePopup, noFlickerCheck) = buildClaudeSection(in: background, width: width, height: sectionsTop)
@@ -106,7 +108,9 @@ extension NiruxApp {
         return container
     }
 
-    private func buildGeneralSection(in background: NSView, width: CGFloat, height: CGFloat) -> NSButton {
+    private func buildGeneralSection(
+        in background: NSView, width: CGFloat, height: CGFloat
+    ) -> (keepAwake: NSButton, agentResume: NSPopUpButton) {
         let sectionLabel = NSTextField(labelWithString: "General")
         sectionLabel.font = .systemFont(ofSize: 12, weight: .medium)
         sectionLabel.textColor = NSColor.white.withAlphaComponent(0.6)
@@ -125,7 +129,26 @@ extension NiruxApp {
             + "MacBook's lid still sleeps it (except in clamshell mode)."
         background.addSubview(keepAwake)
 
-        return keepAwake
+        let resumeLabel = NSTextField(labelWithString: "Resume agents on launch")
+        resumeLabel.font = .systemFont(ofSize: 12)
+        resumeLabel.textColor = NSColor.white.withAlphaComponent(0.85)
+        resumeLabel.frame = NSRect(x: 24, y: height - 88, width: 200, height: 18)
+        background.addSubview(resumeLabel)
+
+        let resumePopup = NSPopUpButton(frame: NSRect(x: 230, y: height - 92, width: width - 254, height: 26), pullsDown: false)
+        for choice in AgentResumeOnLaunch.allCases {
+            resumePopup.addItem(withTitle: choice.displayName)
+            resumePopup.lastItem?.representedObject = choice.rawValue
+        }
+        resumePopup.selectItem(at: resumePopup.indexOfItem(
+            withRepresentedObject: NiruxShellView.currentAgentResumeOnLaunch().rawValue
+        ))
+        resumePopup.toolTip = "When Nirux reopens your workspaces, each Claude Code or Codex column resumes once it "
+            + "shows on screen, or when you click Resume (Resume All Agents starts the rest). All at once resumes "
+            + "every agent with the window."
+        background.addSubview(resumePopup)
+
+        return (keepAwake, resumePopup)
     }
 
     private func buildClaudeSection(in background: NSView, width: CGFloat, height: CGFloat) -> (NSPopUpButton, NSButton) {
@@ -472,8 +495,6 @@ extension NiruxApp {
         let noFlicker = settingsNoFlickerCheckbox?.state == .on
         let missionHandoffsEnabled = settingsMissionHandoffsCheckbox?.state == .on
         let sidebarApprovalsEnabled = settingsSidebarApprovalsCheckbox?.state == .on
-        // Nil without the checkbox: the saved choice (on by default) stands.
-        let keepMacAwake = settingsKeepAwakeCheckbox.map { $0.state == .on }
         let showUsageLimits = settingsUsageLimitsCheckbox.map { $0.state == .on }
         let telegramEnabled = settingsTelegramEnabledCheckbox?.state == .on
         let enteredToken = settingsTelegramTokenField?.stringValue
@@ -511,7 +532,7 @@ extension NiruxApp {
                 if let minutes = settingsStuckAgentPopup?.selectedItem?.representedObject as? Int {
                     settings.stuckAgentMinutes = minutes
                 }
-                if let keepMacAwake { settings.keepMacAwakeWhileAgentsWork = keepMacAwake }
+                applyGeneralDrafts(to: &settings)
                 if let showUsageLimits { settings.showClaudeUsageLimits = showUsageLimits }
             }
             settings.telegramRemoteAccessEnabled = telegramEnabled
@@ -556,6 +577,19 @@ extension NiruxApp {
             : "Stored in macOS Keychain — leave blank to keep"
         refreshTelegramSettingsState()
         return true
+    }
+
+    /// The General section's choices. Without a control, the saved choice
+    /// (keep awake: on by default) stands.
+    private func applyGeneralDrafts(to settings: inout PersistedSettings) {
+        if let keepAwake = settingsKeepAwakeCheckbox { settings.keepMacAwakeWhileAgentsWork = keepAwake.state == .on }
+        // Only a changed choice: a value a newer build saved shows as the
+        // default, and an untouched Save keeps it.
+        if let raw = settingsAgentResumePopup?.selectedItem?.representedObject as? String,
+           let choice = AgentResumeOnLaunch(rawValue: raw),
+           choice != settings.agentResumeOnLaunch ?? .defaultValue {
+            settings.agentResumeOnLaunch = choice
+        }
     }
 
     /// The saved agent options take effect in the running app.
@@ -653,6 +687,7 @@ extension NiruxApp {
         settingsPanel = nil
         settingsKeepAwakeCheckbox = nil
         settingsUsageLimitsCheckbox = nil
+        settingsAgentResumePopup = nil
         settingsLaunchModePopup = nil
         settingsNoFlickerCheckbox = nil
         settingsCodexLaunchModePopup = nil

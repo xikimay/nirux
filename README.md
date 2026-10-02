@@ -20,6 +20,7 @@ Nirux is alpha software.
 - Built-in editor: open files, keep tabs, search the workspace, browse the file tree with Finder icons, view Git changes, and toggle file diffs. Find/replace, word wrap, font zoom, per-tab scroll restore, and disk-conflict protection included.
 - Browser context: open URLs in app, keep URL history, import cookies from Chrome, Brave, Arc, or Edge into the shared WebKit data store, download files to ~/Downloads, and inspect pages with the Web Inspector.
 - Session restore: workspace layout, editor tabs, browser URLs, sidebar state, detected Claude/Codex launch modes, and verified Claude session / Codex thread IDs are saved under Application Support, with rotating backups for corruption recovery. Each agent column resumes its own conversation by exact ID (`claude --resume <id>`, `codex resume <id>`) in the directory it ran in; a Claude session that was never prompted restarts fresh, and legacy, missing, malformed, or duplicate IDs open the agent's interactive resume picker instead of guessing the last session. A `claude -p` launched by a column's agent, or a `codex exec` launched by a Claude, Gemini CLI or OpenCode column, keeps its own session and doesn't drive that column's status, notifications, or restore.
+- Agents resume on demand: after a restart, a Claude or Codex column comes back without its agent and resumes it once the column has stayed a moment in the workspace on screen (or gets the focus), so moving through workspaces doesn't start the agents on the way. Until then it reads `Not resumed yet` with the session's title and its last status (`last seen working`), its sidebar row reads `paused` with a **Resume** button that starts it without leaving the workspace you're in, and `Resume All Agents` (command palette, **Workspaces** menu) starts every one left. Closing a paused agent's column asks first, as for a running one. Plain terminals start as usual. **Settings → General → Resume agents on launch** → **All at once** restores the previous behavior.
 
 ## Requirements
 
@@ -92,6 +93,7 @@ Typical command palette actions:
 - Open Claude Code
 - Open Codex
 - New Task…
+- Resume All Agents
 - New Worktree
 - Open Worktree
 - Clean Up Merged Worktrees
@@ -200,7 +202,7 @@ Set it up with a dedicated bot:
 
 Supported commands:
 
-- `/sessions` — list and select live Claude Code and Codex sessions.
+- `/sessions` — list and select live Claude Code and Codex sessions. After Nirux restarts, an agent that hasn't resumed yet (see *Agents resume on demand* above) isn't live and isn't listed until its column shows or you resume it; set **Resume agents on launch** to **All at once** to keep every agent reachable after a restart.
 - `/status` — show the selected session's workspace, column, state, and directory.
 - `/tail` — show a bounded plain-text tail of recent terminal output.
 - `/help` — show the command summary.

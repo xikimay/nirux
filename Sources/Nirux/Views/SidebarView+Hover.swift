@@ -54,7 +54,8 @@ extension SidebarView {
             setHoverTarget(.menuBadge(workspaceIndex))
         case .column(let workspaceIndex, let columnIndex):
             setHoverTarget(.columnRow(workspaceIndex: workspaceIndex, columnIndex: columnIndex))
-        case .permissionDecision(let workspaceIndex, _, _, _), .agentResume(let workspaceIndex, _, _):
+        case .permissionDecision(let workspaceIndex, _, _, _), .agentResume(let workspaceIndex, _, _),
+             .deferredAgentResume(let workspaceIndex, _, _):
             if let key = Self.armedButtonKey(for: area.region) {
                 setHoverTarget(.approvalButton(workspaceIndex: workspaceIndex, key: key))
             }

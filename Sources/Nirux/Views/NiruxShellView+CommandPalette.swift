@@ -78,8 +78,21 @@ extension NiruxShellView {
                 shortcut: .nextWaitingAgent
             ) { [weak self] in
                 self?.jumpToNextWaitingAgent()
+            },
+            PaletteAction(
+                icon: "⏯", title: "Resume All Agents", subtitle: resumeAllAgentsSubtitle(), shortcut: nil
+            ) { [weak self] in
+                if self?.resumeAllDeferredAgents() != true { NSSound.beep() }
             }
         ]
+    }
+
+    private func resumeAllAgentsSubtitle() -> String {
+        switch deferredAgentCount {
+        case 0: return "Every restored agent is running"
+        case 1: return "Start the restored agent that hasn't resumed yet"
+        case let count: return "Start the \(count) restored agents that haven't resumed yet"
+        }
     }
 
     func workspacePaletteActions() -> [PaletteAction] {

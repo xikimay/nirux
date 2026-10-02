@@ -49,6 +49,9 @@ final class NiruxShellView: NSView {
     let gitRefresh = GitRefreshCoordinator()
     /// See scheduleMetadataRefresh(): one process-table scan per window.
     var isMetadataRefreshScheduled = false
+    /// Restored agents on screen resume after a wait (see
+    /// NiruxShellView+LazyRestore.swift).
+    var isOnScreenResumeScheduled = false
     var lastMetadataRefreshAt: TimeInterval = 0
 
     /// Dwell timer that marks visible Activity entries as read. The
@@ -195,6 +198,7 @@ final class NiruxShellView: NSView {
         sidebar.onAgentResume = { [weak self] wsIndex, colIndex, failedAt in
             self?.resumeFailedAgent(workspaceIndex: wsIndex, columnIndex: colIndex, failedAt: failedAt)
         }
+        wireDeferredAgentResume()
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
             if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }
@@ -310,6 +314,7 @@ final class NiruxShellView: NSView {
         ))
 
         syncTerminalOcclusion()
+        scheduleDeferredAgentsOnScreen()
     }
 
     // MARK: - Terminal Occlusion
