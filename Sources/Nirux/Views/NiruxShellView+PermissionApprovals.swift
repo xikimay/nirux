@@ -21,7 +21,7 @@ extension NiruxShellView {
         let now = Date().timeIntervalSince1970
         // Still open: not closed, expired or decided since the sidebar drew it.
         guard let request = pty.markApprovalSent(requestID: requestID, behavior: behavior, now: now) else {
-            NSSound.beep()
+            showToast("This request was already answered, or it expired")
             return
         }
         // The column's `claude` must still run the session that asked.
@@ -41,7 +41,7 @@ extension NiruxShellView {
             if let dropped = pty.dropApproval(requestID: requestID) {
                 hooks.release(dropped, agentUUID: agentUUID)
             }
-            NSSound.beep()
+            showToast("Couldn’t send the answer: answer it in the terminal", tone: .error)
             return
         }
         NSLog("[Approvals] %@ sent for %@ request %@", behavior.rawValue, request.toolName ?? "?", requestID)

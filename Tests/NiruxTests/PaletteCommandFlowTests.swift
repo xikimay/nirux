@@ -18,6 +18,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         tests: [
             "testTerminalColumnCommands": ["New Terminal", "Resize Column (Cycle Width)"],
             "testEditorCommands": ["Open Editor", "Toggle Editor Diff", "Search Workspace"],
+            "testSearchEverywhere": ["Search Everywhere"],
             "testBrowserCommands": ["Open Browser", "Toggle Web Inspector"],
             "testImportBrowserCookies": ["Import Browser Cookies"],
             "testAgentCommands": ["Open Claude Code", "Open Codex"],
@@ -92,6 +93,75 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.waitUntil("the result to open in the editor") { editor.activePath == target }
             XCTAssertFalse(field.window?.isVisible ?? true, "the search panel stayed open")
             XCTAssertEqual(workspace.columns.compactMap(\.editorColumn).count, 1, "the result opened a second editor")
+        }
+    }
+
+    /// The match sits far up the scrollback of a terminal in another
+    /// workspace, and more matches are printed after the search: picking it
+    /// brings that column forward, find bar open, and Ghostty scrolls to
+    /// that very match.
+    func testSearchEverywhere() throws {
+        try UIFlowHarness.run { harness in
+            let home = try XCTUnwrap(harness.shell.activeWorkspace)
+            harness.shell.addWorkspace(title: "other", cwd: harness.worktree)
+            let other = try XCTUnwrap(harness.shell.activeWorkspace)
+            let column = try XCTUnwrap(other.columns.first)
+            let session = try XCTUnwrap(column.pty?.terminalSession)
+            harness.waitUntil("the terminal's surface") { session.readViewportText() != nil }
+            let needle = "flow-scrollback-needle"
+            let rows = (1...200).map { [20, 100, 150].contains($0) ? "\(needle) \($0)" : "row \($0)" }
+            session.receive(rows.joined(separator: "\r\n") + "\r\n")
+            harness.waitUntil("the rows on screen") { session.readViewportText()?.contains("row 200") == true }
+            XCTAssertFalse(session.readViewportText()?.contains("\(needle) 100\n") ?? true, "the match starts on screen")
+            harness.shell.focusWorkspace(id: home.id)
+
+            harness.runPaletteCommand("Search Everywhere")
+            let field = try XCTUnwrap(harness.waitForField(placeholder: GlobalSearchPanel.placeholder))
+            harness.type(needle.uppercased(), into: field)
+            let panel = try XCTUnwrap(harness.shell.globalSearchPanel)
+            harness.waitUntil("the search to end") { !panel.isSearching && !panel.rows.isEmpty }
+            XCTAssertEqual(panel.rows.map(\.match.excerpt), ["\(needle) 150", "\(needle) 100", "\(needle) 20"])
+            XCTAssertEqual(panel.rows.map(\.place), Array(repeating: "other › Terminal 1", count: 3))
+            XCTAssertEqual(panel.statusLabel?.stringValue, "3 matches in 1 of 2 terminals")
+
+            session.receive("\(needle) 201\r\n\(needle) 202\r\n")
+            harness.waitUntil("the new matches") { TerminalScreenText.read(session)?.contains("\(needle) 202") == true }
+            harness.press(.down, in: field.window)
+            harness.press(.returnKey, in: field.window)
+            XCTAssertFalse(panel.isVisible)
+            XCTAssertIdentical(harness.shell.activeWorkspace, other)
+            XCTAssertIdentical(other.columns[safe: other.focusedIndex], column)
+            XCTAssertTrue(column.isEditingFind)
+            XCTAssertEqual(column.findBar?.field.stringValue, needle.uppercased())
+            harness.waitUntil("Ghostty to scroll to the picked match") {
+                session.readViewportText()?.contains("\(needle) 100\n") == true
+            }
+        }
+    }
+
+    /// The panel keeps no column alive: closing one it searched, and found
+    /// matches in, ends its shell, even with the panel still open.
+    func testSearchEverywhereLetsClosedColumnsGo() throws {
+        try UIFlowHarness.run { harness in
+            weak var closedShell: PtySession?
+            let needle = "flow-closing-needle"
+            try {
+                harness.shell.addColumn()
+                let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+                let pty = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.pty)
+                closedShell = pty
+                harness.waitUntil("the terminal's surface") { pty.terminalSession.readViewportText() != nil }
+                pty.terminalSession.receive("\(needle)\r\n")
+            }()
+            harness.shell.showGlobalSearch()
+            let panel = try XCTUnwrap(harness.shell.globalSearchPanel)
+            let field = try XCTUnwrap(panel.searchField)
+            harness.type(needle, into: field)
+            harness.waitUntil("the match") { !panel.isSearching && panel.rows.count == 1 }
+
+            harness.shell.closeActiveColumn()
+            harness.waitUntil("the closed column's shell to go") { closedShell == nil }
+            XCTAssertTrue(panel.isVisible)
         }
     }
 
@@ -216,6 +286,17 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
 
+            // Outside a repository, both say so instead of doing nothing.
+            let repoWorkspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "home", cwd: harness.home)
+            for command in ["Open Worktree", "New Worktree"] {
+                shell.dismissToast()
+                harness.waitUntil("no toast") { shell.toast == nil }
+                harness.runPaletteCommand(command)
+                XCTAssertEqual(shell.toast?.message, "Not in a git repository: \(harness.home.abbreviatedPath())", command)
+            }
+            shell.focusWorkspace(id: repoWorkspace.id)
+
             // Lists the worktrees off the main thread, then offers them in
             // the palette.
             harness.runPaletteCommand("Open Worktree")
@@ -242,7 +323,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             }
 
             // Once it is open, it goes back to that workspace...
-            let repoWorkspace = try XCTUnwrap(shell.workspaces.first { $0.cwd == harness.repo })
+            XCTAssertEqual(repoWorkspace.cwd, harness.repo)
             shell.focusWorkspace(id: repoWorkspace.id)
             let workspaceCount = shell.workspaces.count
             XCTAssertTrue(try pickWorktree(harness.worktreeBranch).hasPrefix("Already open · "))

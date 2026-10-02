@@ -159,7 +159,9 @@ extension NiruxShellView {
     /// workspace: the Project Board's "Clean Up…".
     func requestWorktreeCleanup(path: String) {
         let key = Self.comparablePath(path)
-        guard worktreeCleanupsInFlight.insert(key).inserted else { return }
+        guard worktreeCleanupsInFlight.insert(key).inserted else {
+            return showToast("A clean-up of this worktree is already in progress")
+        }
         DispatchQueue.global(qos: .userInitiated).async {
             let inspection = WorktreeCleanup.inspect(path: path)
             DispatchQueue.main.async { [weak self] in

@@ -21,14 +21,6 @@ final class PermissionApprovalReceiverTests: XCTestCase {
 
     private var eventsURL: URL { stateDir.appendingPathComponent("hook-events.jsonl") }
 
-    private func niruxExecutable() throws -> String {
-        let url = Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("Nirux")
-        return try XCTUnwrap(
-            FileManager.default.isExecutableFile(atPath: url.path) ? url.path : nil,
-            "Nirux executable not found at \(url.path)"
-        )
-    }
-
     private struct Receiver {
         let process: Process
         let stdout: Pipe

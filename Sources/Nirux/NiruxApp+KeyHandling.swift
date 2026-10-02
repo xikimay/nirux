@@ -1,4 +1,5 @@
 import AppKit
+import WebKit
 
 // MARK: - Key Interception & Click-to-Focus
 
@@ -6,6 +7,8 @@ extension NiruxApp {
     /// Click on a column to focus it without changing layout.
     func setupClickToFocus() {
         NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
+            // Before the click is handled, so a toast it shows stays.
+            if event.window === self?.mainWindow { self?.shell?.dismissToastOnInput() }
             guard let shell = self?.shell,
                   let workspace = shell.activeWorkspaceForKeyIntercept,
                   let contentView = event.window?.contentView
@@ -28,7 +31,7 @@ extension NiruxApp {
 
     /// Also consume flagsChanged to prevent ghostty from sending modifier
     /// key events to the PTY (breaks Claude Code's kitty keyboard protocol)
-    private func setupModifierInterceptor() {
+    private func setupModifierInterceptor() -> Any? {
         NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged]) { [weak self] event in
             guard let shell = self?.shell, event.window === self?.mainWindow else { return event }
             if shell.isOverlayActive { return event }
@@ -80,17 +83,101 @@ extension NiruxApp {
         column.dismissAgentExitOnTyping()
     }
 
+    /// Cmd+Arrow and Shift+Cmd+Arrow go to the text that has the keyboard
+    /// in a browser or editor column (Monaco, a field of the page, the
+    /// address bar) rather than to the menu: see
+    /// `WebContentKeyRouting.movesCaretToTextEdge`. True when consumed.
+    private static func moveCaretInFocusedText(_ event: NSEvent, in column: ColumnState) -> Bool {
+        guard WebContentKeyRouting.movesCaretToTextEdge(keyCode: event.keyCode, modifierFlags: event.modifierFlags),
+              let responder = event.window?.firstResponder as? NSView,
+              responder.isDescendant(of: column.view)
+        else { return false }
+        if let webView = responder as? WKWebView {
+            // WKWebView has an input context only while the page's focused
+            // element takes text. It then hands the key to the page, and
+            // resends it if the page leaves it unhandled: that time it
+            // answers false, and the menu gets the key.
+            return webView.inputContext != nil && webView.performKeyEquivalent(with: event)
+        }
+        if let fieldEditor = responder as? NSTextView, fieldEditor.isEditable {
+            // Returned to AppKit, the key would reach the menu first.
+            fieldEditor.keyDown(with: event)
+            return true
+        }
+        return false
+    }
+
+    /// WebView and Editor (Monaco) columns handle their own keyboard
+    /// input, but Cmd+key combos must bypass the WebView so menu
+    /// shortcuts (Cmd+T, Ctrl+Cmd+Arrow, etc.) keep working. A
+    /// WKWebView with the keyboard hands every Cmd-chord to its page
+    /// first, and Monaco keeps the arrows it binds, so we invoke the
+    /// menu action directly and consume the event.
+    private static func routeWebContentKey(_ event: NSEvent, in col: ColumnState) -> NSEvent? {
+        guard event.modifierFlags.contains(.command) else { return event }
+        if moveCaretInFocusedText(event, in: col) { return nil }
+        // Browser back/forward — handled here rather than as
+        // menu items: menu items would also consume Cmd+[/] in
+        // EDITOR columns, killing Monaco's indent/outdent-line
+        // shortcuts with a no-op action.
+        if col.isWebView,
+           event.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command] {
+            let typed = [event.characters, event.charactersIgnoringModifiers]
+            if typed.contains("[") {
+                col.webViewColumn?.goBack()
+                return nil
+            }
+            if typed.contains("]") {
+                col.webViewColumn?.goForward()
+                return nil
+            }
+        }
+        if WebContentKeyRouting.passesToWebContent(
+            isEditor: col.isEditor,
+            characters: event.characters,
+            charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+            keyCode: event.keyCode,
+            modifierFlags: event.modifierFlags
+        ) {
+            return event
+        }
+        // Cmd+W: in an editor with open tabs, close the active
+        // tab first; only fall through to "Close Column" once
+        // the tab list is empty. Mirrors VSCode/Cursor.
+        if col.isEditor,
+           WebContentKeyRouting.typesLetter(
+               "w", ansiKeyCode: 0x0D,
+               characters: event.characters,
+               charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+               keyCode: event.keyCode
+           ),
+           let editor = col.editorColumn, let active = editor.activePath {
+            editor.close(path: active)
+            return nil
+        }
+        // Let the menu bar handle this key equivalent directly,
+        // bypassing the WebView's performKeyEquivalent
+        if NSApp.mainMenu?.performKeyEquivalent(with: event) == true {
+            return nil // consumed by menu
+        }
+        return event // no menu match — let WebView handle it
+    }
+
     /// Route ALL key input directly to PTY, bypassing ghostty entirely.
     /// Ghostty only handles rendering — we handle ALL input.
     /// This prevents ghostty's broken inMemory key handling from interfering.
-    func setupKeyInterceptor() {
-        setupModifierInterceptor()
+    /// Returns the event monitors, for a test to remove.
+    @discardableResult
+    func setupKeyInterceptor() -> [Any] {
+        let modifierMonitor = setupModifierInterceptor()
 
-        NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+        let keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             // Only the main window's columns are routed here. Other windows —
             // panels, a detached Web Inspector, Sparkle — keep AppKit's own
             // key handling instead of feeding the focused column.
             guard let shell = self?.shell, event.window === self?.mainWindow else { return event }
+            // Before the key is handled, so a toast it shows stays.
+            shell.dismissToastOnInput()
 
             // Don't intercept when an overlay is active (picker, etc.)
             if shell.isOverlayActive { return event }
@@ -106,61 +193,8 @@ extension NiruxApp {
                 return Self.routeFindFieldKey(event, in: findColumn)
             }
 
-            // WebView and Editor (Monaco) columns handle their own keyboard
-            // input, but Cmd+key combos must bypass the WebView so menu
-            // shortcuts (Cmd+Arrow, Cmd+T, etc.) keep working. WKWebView's
-            // performKeyEquivalent consumes Cmd+Arrow for back/forward and
-            // Monaco grabs arrow keys before the menu system sees them, so
-            // we invoke the menu action directly and consume the event.
             if col.isWebView || col.isEditor {
-                if event.modifierFlags.contains(.command) {
-                    // Browser back/forward — handled here rather than as
-                    // menu items: menu items would also consume Cmd+[/] in
-                    // EDITOR columns, killing Monaco's indent/outdent-line
-                    // shortcuts with a no-op action.
-                    if col.isWebView,
-                       event.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command] {
-                        let typed = [event.characters, event.charactersIgnoringModifiers]
-                        if typed.contains("[") {
-                            col.webViewColumn?.goBack()
-                            return nil
-                        }
-                        if typed.contains("]") {
-                            col.webViewColumn?.goForward()
-                            return nil
-                        }
-                    }
-                    if WebContentKeyRouting.passesToWebContent(
-                        isEditor: col.isEditor,
-                        characters: event.characters,
-                        charactersIgnoringModifiers: event.charactersIgnoringModifiers,
-                        keyCode: event.keyCode,
-                        modifierFlags: event.modifierFlags
-                    ) {
-                        return event
-                    }
-                    // Cmd+W: in an editor with open tabs, close the active
-                    // tab first; only fall through to "Close Column" once
-                    // the tab list is empty. Mirrors VSCode/Cursor.
-                    if col.isEditor,
-                       WebContentKeyRouting.typesLetter(
-                           "w", ansiKeyCode: 0x0D,
-                           characters: event.characters,
-                           charactersIgnoringModifiers: event.charactersIgnoringModifiers,
-                           keyCode: event.keyCode
-                       ),
-                       let editor = col.editorColumn, let active = editor.activePath {
-                        editor.close(path: active)
-                        return nil
-                    }
-                    // Let the menu bar handle this key equivalent directly,
-                    // bypassing the WebView's performKeyEquivalent
-                    if NSApp.mainMenu?.performKeyEquivalent(with: event) == true {
-                        return nil // consumed by menu
-                    }
-                    return event // no menu match — let WebView handle it
-                }
-                return event
+                return Self.routeWebContentKey(event, in: col)
             }
 
             if Self.closeFindBarOnEscape(event, in: col) { return nil }
@@ -209,5 +243,6 @@ extension NiruxApp {
             }
             return nil // ALWAYS consume — even if bytes is empty (modifier-only)
         }
+        return [modifierMonitor, keyMonitor].compactMap { $0 }
     }
 }
