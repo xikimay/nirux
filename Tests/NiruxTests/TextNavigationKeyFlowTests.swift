@@ -113,8 +113,9 @@ final class TextNavigationKeyFlowTests: XCTestCase {
     }
 
     /// An agent's open never takes the keyboard from where the user may be
-    /// typing, not even once an earlier open focused the editor column, in
-    /// the workspace in front or in another one.
+    /// typing: not even once an earlier open focused the editor column, nor
+    /// when a panel closes afterwards, in the workspace in front or in
+    /// another one.
     func testAgentOpensLeaveTheKeyboardWhereItWas() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -136,28 +137,38 @@ final class TextNavigationKeyFlowTests: XCTestCase {
             try open("README.md")
             try open(UIFlowHarness.searchTarget)
             XCTAssertIdentical(harness.window.firstResponder, terminal)
+            shell.showCommandPalette()
+            shell.commandPalette?.dismiss()
+            XCTAssertIdentical(harness.window.firstResponder, terminal, "closing the palette took the keyboard")
 
             shell.addWorkspace(title: "other", cwd: harness.repo)
-            XCTAssertNotIdentical(shell.activeWorkspace, workspace)
+            let other = try XCTUnwrap(shell.activeWorkspace?.columns.first?.terminalView)
+            XCTAssertIdentical(harness.window.firstResponder, other)
             try open("README.md")
-            XCTAssertFalse(harness.window.firstResponder is WKWebView, "the editor took the keyboard")
+            XCTAssertIdentical(harness.window.firstResponder, other)
         }
     }
 
     /// A search result or a terminal's file link opens the editor with the
-    /// keyboard, whether it adds the column or reuses it.
+    /// keyboard, whether it adds the column or reuses it, and so does the
+    /// palette's Open Editor.
     func testUserOpensGiveTheEditorTheKeyboard() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             let terminal = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.terminalView)
-            for file in ["README.md", UIFlowHarness.searchTarget] {
+            let opens: [(String, () -> Void)] = [
+                ("README.md", { shell.openInEditorColumn(path: harness.repo + "/README.md") }),
+                (UIFlowHarness.searchTarget, { shell.openInEditorColumn(path: harness.repo + "/" + UIFlowHarness.searchTarget) }),
+                ("a new editor", { shell.openEditorColumn() })
+            ]
+            for (name, open) in opens {
                 harness.window.makeFirstResponder(terminal)
-                shell.openInEditorColumn(path: harness.repo + "/" + file)
+                open()
                 let editor = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
                 XCTAssertIdentical(
                     harness.window.firstResponder, UIFlowHarness.descendant(of: editor, as: WKWebView.self),
-                    "opening \(file) left the keyboard behind"
+                    "opening \(name) left the keyboard behind"
                 )
             }
         }

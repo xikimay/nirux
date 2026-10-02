@@ -192,7 +192,7 @@ final class NiruxShellView: NSView {
             self.workspaces[wsIndex].focusedIndex = colIndex
             self.relayout(animated: true)
             self.updateSidebar()
-            self.focusActiveTerminal(in: self.window)
+            self.focusActiveTerminal(in: self.window, editorTakesKeyboard: true)
         }
         updateSidebar()
         relayout(animated: false)
@@ -460,7 +460,7 @@ extension NiruxShellView {
         }
         relayout(animated: true)
         updateSidebar()
-        focusActiveTerminal(in: window)
+        focusActiveTerminal(in: window, editorTakesKeyboard: true)
     }
 
     func cycleActiveColumnWidth() {
@@ -720,9 +720,11 @@ extension NiruxShellView {
     // MARK: - Focus + helpers
 
     /// Gives the keyboard to the focused column of the active workspace.
-    /// An agent's request passes `editorTakesKeyboard: false`: the user
-    /// may be typing elsewhere, and a file buffer must never get the keys.
-    func focusActiveTerminal(in window: NSWindow?, editorTakesKeyboard: Bool = true) {
+    /// An editor column only takes it when the user went to it
+    /// (`editorTakesKeyboard`): an agent's open focuses its column but
+    /// leaves the keyboard where the user types, and closing a panel later
+    /// must not hand that editor the keys.
+    func focusActiveTerminal(in window: NSWindow?, editorTakesKeyboard: Bool = false) {
         guard let col = activeWorkspace?.columns[safe: activeWorkspace?.focusedIndex ?? 0],
               let window else { return }
         if let webView = col.webViewColumn {
@@ -745,7 +747,7 @@ extension NiruxShellView {
         workspace.focusedIndex = index
         relayout(animated: true)
         updateSidebar()
-        focusActiveTerminal(in: window)
+        focusActiveTerminal(in: window, editorTakesKeyboard: true)
     }
 
     var activeWorkspace: WorkspaceState? { workspaceStore.activeWorkspace }
