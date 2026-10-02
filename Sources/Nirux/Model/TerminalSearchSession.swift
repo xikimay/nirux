@@ -43,6 +43,9 @@ final class TerminalSearchSession {
     /// arrives: a navigation sent right behind it finds none and is lost.
     /// Navigating within this delay of a new needle waits it out.
     nonisolated static let navigationDelay: TimeInterval = 0.1
+    /// Most "next match" a pick sends at once: Ghostty's search mailbox
+    /// holds 64 messages, and a full one blocks the sender, the main thread.
+    nonisolated static let maxPickSteps = 50
 
     private let send: (TerminalSearchCommand) -> Void
     private let schedule: Schedule
@@ -59,6 +62,9 @@ final class TerminalSearchSession {
     /// A needle went out less than `navigationDelay` ago.
     private var isNeedleSettling = false
     private var pendingNavigations = 0
+    /// Bumped by every navigation the user asks for, so that a pick waiting
+    /// for Ghostty's matches gives way to it.
+    private var navigations = 0
     /// Navigation scrolled the viewport away from the prompt; cleared by
     /// `returnToPrompt`. Survives `end`: closing the bar keeps the reading
     /// position, as in Ghostty and iTerm.
@@ -98,6 +104,31 @@ final class TerminalSearchSession {
         navigate(.previous)
     }
 
+    /// Search Everywhere's pick: selects the match `fromBottom` of the
+    /// needle sent (0 is the newest) after `delay`, as `fromBottom + 1`
+    /// presses of Return would. Ghostty's navigation stops at the last
+    /// match its search thread has found, so the delay must cover a search
+    /// of the whole scrollback (`pickDelay`). Dropped if the needle changes
+    /// or the user navigates meanwhile.
+    func select(fromBottom: Int, after delay: TimeInterval) {
+        guard !sentNeedle.isEmpty else { return }
+        let expectedSearch = searchGeneration
+        let expectedNavigations = navigations
+        let steps = min(max(fromBottom, 0), Self.maxPickSteps - 1) + 1
+        schedule(delay) { [weak self] in
+            guard let self, self.searchGeneration == expectedSearch, self.navigations == expectedNavigations else { return }
+            self.hasNavigated = true
+            for _ in 0..<steps { self.send(.next) }
+        }
+    }
+
+    /// Long enough for Ghostty to search `textBytes` of scrollback: about
+    /// 4 MB took 50 to 100 ms, so this allows twice that, on top of the
+    /// needle's own settling.
+    nonisolated static func pickDelay(textBytes: Int) -> TimeInterval {
+        min(1, navigationDelay + Double(textBytes) / 20_000_000)
+    }
+
     /// Closes the search: drops a pending needle or navigation and clears
     /// Ghostty's highlights. The viewport stays where navigation left it;
     /// the next `update` starts a new search.
@@ -125,6 +156,7 @@ final class TerminalSearchSession {
     private func navigate(_ command: TerminalSearchCommand) {
         flush()
         guard !sentNeedle.isEmpty else { return }
+        navigations += 1
         hasNavigated = true
         // Queued behind a navigation still waiting, to keep their order.
         guard isNeedleSettling || pendingNavigations > 0 else {

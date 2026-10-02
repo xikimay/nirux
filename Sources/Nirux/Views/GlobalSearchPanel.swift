@@ -9,7 +9,9 @@ import AppKit
 final class GlobalSearchPanel: NSObject {
     /// One terminal to search, in the order its matches are listed.
     struct Target {
-        let column: ColumnState
+        /// Weak: a column closed while the panel is open, or after, must
+        /// go, its shell with it.
+        weak var column: ColumnState?
         /// "workspace › column", as the rows show it.
         let place: String
         let read: GlobalTerminalSearch.Reader
@@ -20,6 +22,8 @@ final class GlobalSearchPanel: NSObject {
         let place: String
         let needle: String
         let match: ScrollbackSearch.Match
+        /// The terminal's matches when it was read.
+        let total: Int
     }
 
     /// A picked match: its column, still open, and where to find it.
@@ -27,6 +31,7 @@ final class GlobalSearchPanel: NSObject {
         let column: ColumnState
         let needle: String
         let fromBottom: Int
+        let total: Int
     }
 
     nonisolated static let minNeedleLength = 2
@@ -93,6 +98,7 @@ final class GlobalSearchPanel: NSObject {
         pendingSearch = nil
         search.cancel()
         progress.isSearching = false
+        targets = []
         removeMonitors()
         panel?.orderOut(nil)
     }
@@ -143,7 +149,7 @@ final class GlobalSearchPanel: NSObject {
         progress.terminalsWithMatches += 1
         progress.matches += result.total
         let added = result.matches.prefix(Self.maxRows - rows.count).map {
-            Row(column: target.column, place: target.place, needle: needle, match: $0)
+            Row(column: target.column, place: target.place, needle: needle, match: $0, total: result.total)
         }
         if !added.isEmpty {
             let wasEmpty = rows.isEmpty
@@ -189,7 +195,7 @@ final class GlobalSearchPanel: NSObject {
         guard let row = rows[safe: index] else { return }
         dismiss()
         guard let column = row.column else { return NSSound.beep() }
-        onPick(Pick(column: column, needle: row.needle, fromBottom: row.match.fromBottom))
+        onPick(Pick(column: column, needle: row.needle, fromBottom: row.match.fromBottom, total: row.total))
     }
 
     @objc private func tableClicked() {
@@ -219,12 +225,20 @@ final class GlobalSearchPanel: NSObject {
 
     private func handleKey(_ event: NSEvent) -> NSEvent? {
         guard let table = tableView, event.window === panel else { return event }
+        // An input method composing in the field keeps its keys.
+        if (searchField?.currentEditor() as? NSTextView)?.hasMarkedText() == true { return event }
         switch event.keyCode {
         case 0x35: // Escape
             dismiss()
             return nil
         case 0x24, 0x4C: // Return / Enter
-            commit(row: table.selectedRow)
+            // The rows still answer the text before the last keystroke:
+            // search the new text instead of picking among them.
+            if pendingSearch != nil {
+                runSearch()
+            } else {
+                commit(row: table.selectedRow)
+            }
             return nil
         case 0x7E, 0x7D: // Up / Down
             guard !rows.isEmpty else { return nil }

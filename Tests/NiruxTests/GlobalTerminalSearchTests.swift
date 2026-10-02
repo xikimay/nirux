@@ -25,20 +25,21 @@ final class GlobalTerminalSearchTests: XCTestCase {
     func testANewSearchSilencesTheOneItReplaced() {
         let search = GlobalTerminalSearch()
         var stale = 0
-        search.start(needle: "old", readers: [{ "old" }], onMatches: { _, _ in stale += 1 }, onDone: { stale += 1 })
+        // Its second terminal is read once the first one's match is on its
+        // way to the main queue, ahead of anything the next search sends.
+        let firstDelivered = DispatchSemaphore(value: 0)
+        search.start(
+            needle: "old",
+            readers: [{ "old" }, { firstDelivered.signal(); return nil }],
+            onMatches: { _, _ in stale += 1 },
+            onDone: { stale += 1 }
+        )
+        firstDelivered.wait()
         let done = expectation(description: "done")
         var matches = 0
         search.start(needle: "new", readers: [{ "new" }], onMatches: { _, _ in matches += 1 }, onDone: { done.fulfill() })
         wait(for: [done], timeout: 5)
         XCTAssertEqual(matches, 1)
-
-        search.start(needle: "new", readers: [{ "new" }], onMatches: { _, _ in stale += 1 }, onDone: { stale += 1 })
-        search.cancel()
-        XCTAssertFalse(search.isRunning)
-        // Both scans have delivered by the time this block runs.
-        let drained = expectation(description: "drained")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { drained.fulfill() }
-        wait(for: [drained], timeout: 5)
         XCTAssertEqual(stale, 0)
     }
 

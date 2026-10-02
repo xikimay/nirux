@@ -359,7 +359,9 @@ final class TerminalSearchTests: XCTestCase {
     }
 
     /// Search Everywhere counts its match from Ghostty's newest one: on a
-    /// bar already searching that needle, the pick starts over.
+    /// bar already searching that needle, the pick starts over, and its
+    /// navigation waits for Ghostty's matches unless the user navigates
+    /// first.
     @MainActor
     func testAPickedMatchSearchesAgainFromTheNewestMatch() {
         let column = ColumnState(cwd: "/tmp")
@@ -373,10 +375,19 @@ final class TerminalSearchTests: XCTestCase {
         column.findNext()
         recorder.sent = []
 
-        column.showFindBar(searching: "error", selecting: 1)
+        column.showFindBar(searching: "error")
+        column.selectFindMatch(fromBottom: 1, after: 0.4)
+        XCTAssertEqual(recorder.sent, [.end, .search("error")])
+        XCTAssertEqual(recorder.pending.map(\.delay), [TerminalSearchSession.navigationDelay, 0.4])
         recorder.firePending()
         XCTAssertEqual(recorder.sent, [.end, .search("error"), .next, .next])
         XCTAssertTrue(column.isFindBarOpen)
+
+        recorder.sent = []
+        column.selectFindMatch(fromBottom: 3, after: 0.4)
+        column.findPrevious()
+        recorder.firePending()
+        XCTAssertEqual(recorder.sent, [.previous])
     }
 
     // MARK: - Key routing

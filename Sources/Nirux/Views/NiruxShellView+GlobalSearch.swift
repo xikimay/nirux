@@ -15,7 +15,8 @@ extension NiruxShellView {
 
     /// Every terminal column of every workspace: the active workspace's
     /// first, then the rest of its project in sidebar order, then the
-    /// other projects'. Columns read left to right.
+    /// other projects'. Columns read left to right. A terminal whose shell
+    /// exited is left out: its restart overlay hides the find bar.
     func globalSearchTargets() -> [GlobalSearchPanel.Target] {
         let visible = visibleWorkspaceIndices
         let order = [activeWSIndex]
@@ -26,8 +27,9 @@ extension NiruxShellView {
             .flatMap { workspace in
                 workspace.columns.enumerated().compactMap { index, column -> GlobalSearchPanel.Target? in
                     guard !column.isClosing, column.terminalView != nil,
-                          let session = column.pty?.terminalSession
+                          let pty = column.pty, !pty.hasExited
                     else { return nil }
+                    let session = pty.terminalSession
                     let title = column.titleText.isEmpty ? "Terminal \(index + 1)" : column.titleText
                     return GlobalSearchPanel.Target(
                         column: column,
@@ -39,13 +41,24 @@ extension NiruxShellView {
     }
 
     /// Brings the picked match's column forward, wherever it is now, and
-    /// opens its find bar on the match.
+    /// opens its find bar on the match. Output printed since the search may
+    /// hold newer matches: they are counted again, and the pick keeps its
+    /// place counted from the oldest.
     func revealSearchMatch(_ pick: GlobalSearchPanel.Pick) {
-        guard let workspace = workspaces.first(where: { $0.columns.contains { $0 === pick.column } }),
-              let columnIndex = workspace.columns.firstIndex(where: { $0 === pick.column })
+        let column = pick.column
+        guard let workspace = workspaces.first(where: { $0.columns.contains { $0 === column } }),
+              let columnIndex = workspace.columns.firstIndex(where: { $0 === column }),
+              let session = column.pty?.terminalSession
         else { return NSSound.beep() }
         window?.makeKey()
         focusWorkspace(id: workspace.id, column: columnIndex)
-        pick.column.showFindBar(searching: pick.needle, selecting: pick.fromBottom)
+        column.showFindBar(searching: pick.needle)
+        let fromBottom = pick.fromBottom
+        let fromTop = pick.total - 1 - fromBottom
+        GlobalTerminalSearch.recount(pick.needle, read: { TerminalScreenText.read(session) }) { [weak column] counted in
+            let fromBottom = counted.map { $0.total - 1 - fromTop } ?? fromBottom
+            let delay = TerminalSearchSession.pickDelay(textBytes: counted?.textBytes ?? 0)
+            column?.selectFindMatch(fromBottom: fromBottom, after: delay)
+        }
     }
 }

@@ -38,18 +38,22 @@ final class ScrollbackSearchTests: XCTestCase {
         XCTAssertEqual(search("  indented", text).matches.map(\.line), [3])
     }
 
-    func testAMatchResumesTheSearchAfterItself() {
-        XCTAssertEqual(search("aa", "aaaaa").total, 2)
+    /// Ghostty resumes one byte after a match's start: matches overlap.
+    func testMatchesOverlapAsInGhostty() {
+        XCTAssertEqual(search("aa", "aaaaa").total, 4)
+        XCTAssertEqual(search("──", "─────").total, 4)
     }
 
     func testTheExcerptHighlightsTheMatchInALongLine() throws {
-        let lead = String(repeating: "x", count: 100)
-        let line = "    👍 " + lead + "needle" + String(repeating: "y", count: 300)
-        let match = try XCTUnwrap(search("NEEDLE", line).matches.first)
-        XCTAssertTrue(match.excerpt.hasPrefix("…" + String(repeating: "x", count: ScrollbackSearch.excerptLead) + "needle"))
-        XCTAssertTrue(match.excerpt.hasSuffix("y…"))
-        XCTAssertEqual(match.excerpt.count, ScrollbackSearch.excerptLength)
-        XCTAssertEqual((match.excerpt as NSString).substring(with: match.highlight), "needle")
+        // Longer than the excerpt, then longer than the bytes read for it.
+        for (before, after) in [(100, 300), (100_000, 300_000)] {
+            let line = "    👍 " + String(repeating: "x", count: before) + "needle" + String(repeating: "é", count: after)
+            let match = try XCTUnwrap(search("NEEDLE", line).matches.first)
+            XCTAssertTrue(match.excerpt.hasPrefix("…" + String(repeating: "x", count: ScrollbackSearch.excerptLead) + "needle"))
+            XCTAssertTrue(match.excerpt.hasSuffix("éé…"))
+            XCTAssertEqual(match.excerpt.count, ScrollbackSearch.excerptLength)
+            XCTAssertEqual((match.excerpt as NSString).substring(with: match.highlight), "needle")
+        }
 
         // UTF-16 offsets, leading spaces dropped.
         let short = try XCTUnwrap(search("go", "   👍 go").matches.first)

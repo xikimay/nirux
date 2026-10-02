@@ -96,8 +96,9 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
     }
 
     /// The match sits far up the scrollback of a terminal in another
-    /// workspace: picking it brings that column forward, find bar open,
-    /// and Ghostty scrolls to that very match.
+    /// workspace, and more matches are printed after the search: picking it
+    /// brings that column forward, find bar open, and Ghostty scrolls to
+    /// that very match.
     func testSearchEverywhere() throws {
         try UIFlowHarness.run { harness in
             let home = try XCTUnwrap(harness.shell.activeWorkspace)
@@ -107,9 +108,10 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             let session = try XCTUnwrap(column.pty?.terminalSession)
             harness.waitUntil("the terminal's surface") { session.readViewportText() != nil }
             let needle = "flow-scrollback-needle"
-            session.receive((1...200).map { [20, 150].contains($0) ? "\(needle) \($0)" : "row \($0)" }.joined(separator: "\r\n") + "\r\n")
+            let rows = (1...200).map { [20, 100, 150].contains($0) ? "\(needle) \($0)" : "row \($0)" }
+            session.receive(rows.joined(separator: "\r\n") + "\r\n")
             harness.waitUntil("the rows on screen") { session.readViewportText()?.contains("row 200") == true }
-            XCTAssertFalse(session.readViewportText()?.contains("\(needle) 20\n") ?? true, "the older match starts on screen")
+            XCTAssertFalse(session.readViewportText()?.contains("\(needle) 100\n") ?? true, "the match starts on screen")
             harness.shell.focusWorkspace(id: home.id)
 
             harness.runPaletteCommand("Search Everywhere")
@@ -117,10 +119,12 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.type(needle.uppercased(), into: field)
             let panel = try XCTUnwrap(harness.shell.globalSearchPanel)
             harness.waitUntil("the search to end") { !panel.isSearching && !panel.rows.isEmpty }
-            XCTAssertEqual(panel.rows.map(\.match.excerpt), ["\(needle) 150", "\(needle) 20"])
-            XCTAssertEqual(panel.rows.map(\.place), ["other › Terminal 1", "other › Terminal 1"])
-            XCTAssertEqual(panel.statusLabel?.stringValue, "2 matches in 1 of 2 terminals")
+            XCTAssertEqual(panel.rows.map(\.match.excerpt), ["\(needle) 150", "\(needle) 100", "\(needle) 20"])
+            XCTAssertEqual(panel.rows.map(\.place), Array(repeating: "other › Terminal 1", count: 3))
+            XCTAssertEqual(panel.statusLabel?.stringValue, "3 matches in 1 of 2 terminals")
 
+            session.receive("\(needle) 201\r\n\(needle) 202\r\n")
+            harness.waitUntil("the new matches") { TerminalScreenText.read(session)?.contains("\(needle) 202") == true }
             harness.press(.down, in: field.window)
             harness.press(.returnKey, in: field.window)
             XCTAssertFalse(panel.isVisible)
@@ -128,9 +132,31 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertIdentical(other.columns[safe: other.focusedIndex], column)
             XCTAssertTrue(column.isEditingFind)
             XCTAssertEqual(column.findBar?.field.stringValue, needle.uppercased())
-            harness.waitUntil("Ghostty to scroll to the older match") {
-                session.readViewportText()?.contains("\(needle) 20\n") == true
+            harness.waitUntil("Ghostty to scroll to the picked match") {
+                session.readViewportText()?.contains("\(needle) 100\n") == true
             }
+        }
+    }
+
+    /// The panel keeps no column alive: closing one after a search ends
+    /// its shell.
+    func testSearchEverywhereLetsClosedColumnsGo() throws {
+        try UIFlowHarness.run { harness in
+            weak var closedShell: PtySession?
+            try {
+                harness.shell.addColumn()
+                let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+                closedShell = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.pty)
+            }()
+            harness.shell.showGlobalSearch()
+            let panel = try XCTUnwrap(harness.shell.globalSearchPanel)
+            let field = try XCTUnwrap(panel.searchField)
+            harness.type("needle", into: field)
+            harness.waitUntil("the search to end") { panel.statusLabel?.stringValue.hasPrefix("No matches") == true }
+            panel.dismiss()
+
+            harness.shell.closeActiveColumn()
+            harness.waitUntil("the closed column's shell to go") { closedShell == nil }
         }
     }
 

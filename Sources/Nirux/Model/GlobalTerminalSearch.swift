@@ -13,10 +13,11 @@ final class GlobalTerminalSearch {
     typealias Reader = @Sendable () -> String?
 
     /// The newest matches kept per terminal: a needle printed on every
-    /// prompt would otherwise fill the list with one terminal.
-    nonisolated static let matchesPerTerminal = 50
+    /// prompt would otherwise fill the list with one terminal. A pick
+    /// reaches at most `TerminalSearchSession.maxPickSteps` matches up.
+    nonisolated static let matchesPerTerminal = TerminalSearchSession.maxPickSteps
 
-    private nonisolated static let queue = DispatchQueue(label: "nirux.global-search", qos: .userInitiated)
+    fileprivate nonisolated static let queue = DispatchQueue(label: "nirux.global-search", qos: .userInitiated)
     /// Set when the running search is superseded: its reads stop at the
     /// next terminal, and what they still deliver is dropped.
     private var running: Cancellation?
@@ -72,11 +73,28 @@ final class GlobalTerminalSearch {
             for (index, read) in readers.enumerated() {
                 guard !cancellation.isCancelled else { return }
                 guard let text = read() else { continue }
+                guard !cancellation.isCancelled else { return }
                 let result = ScrollbackSearch.search(needle, in: text, limit: matchesPerTerminal)
                 guard result.total > 0 else { continue }
                 DispatchQueue.main.async { @MainActor in deliver(index, result) }
             }
             DispatchQueue.main.async { @MainActor in finish() }
+        }
+    }
+}
+
+extension GlobalTerminalSearch {
+    /// Counts one terminal's matches again, off the main thread: a pick
+    /// finds its match among the ones printed since the search. Nil when
+    /// the terminal has no text to give.
+    nonisolated static func recount(
+        _ needle: String,
+        read: @escaping Reader,
+        then completion: @escaping @MainActor @Sendable ((total: Int, textBytes: Int)?) -> Void
+    ) {
+        queue.async {
+            let counted = read().map { (total: ScrollbackSearch.count(needle, in: $0), textBytes: $0.utf8.count) }
+            DispatchQueue.main.async { @MainActor in completion(counted) }
         }
     }
 }

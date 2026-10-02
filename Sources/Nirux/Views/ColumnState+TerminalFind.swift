@@ -27,19 +27,23 @@ extension ColumnState {
         bar.focusField()
     }
 
-    /// Search Everywhere's pick: the find bar opened on `needle`, its match
-    /// `fromBottom` selected (0 is the newest) as `fromBottom + 1` presses
-    /// of Return would.
-    func showFindBar(searching needle: String, selecting fromBottom: Int) {
+    /// Search Everywhere's pick: the find bar opened on `needle` as a new
+    /// search, even on the needle the bar already shows, so that a pick's
+    /// match counts from the newest one (`selectFindMatch`).
+    func showFindBar(searching needle: String) {
         guard terminalView != nil, pty?.hasExited != true else { return }
         let bar = findBar ?? makeFindBar()
         bar.field.stringValue = needle
-        // A new search, even on the needle the bar already shows: counting
-        // starts from the newest match, not from the one selected.
         terminalSearch?.end()
         terminalSearch?.update(needle, immediately: true)
         showFindBar()
-        for _ in 0...max(0, fromBottom) { terminalSearch?.next() }
+    }
+
+    /// Selects the match `fromBottom` (0 is the newest) of the needle the
+    /// bar searches, after `delay` (TerminalSearchSession.select).
+    func selectFindMatch(fromBottom: Int, after delay: TimeInterval) {
+        guard isFindBarOpen else { return }
+        terminalSearch?.select(fromBottom: fromBottom, after: delay)
     }
 
     /// ⌘G / Return: next match. Only while the bar is open.
