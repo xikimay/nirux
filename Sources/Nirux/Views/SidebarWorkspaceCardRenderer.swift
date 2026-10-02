@@ -306,10 +306,10 @@ final class SidebarWorkspaceCardRenderer {
             append(rowHover)
             columnHoverViews[column.index] = rowHover
 
-            let label = NSTextField(labelWithAttributedString: PilotSidebarRenderer.attributedColumn(column, fontSize: 11))
+            let label = NSTextField(labelWithAttributedString: SidebarRenderer.attributedColumn(column, fontSize: 11))
             label.lineBreakMode = .byTruncatingTail
             label.frame = NSRect(x: padding, y: rowY, width: sidebarWidth - padding * 2 - 18, height: rowHeight)
-            label.toolTip = PilotSidebarRenderer.attentionTooltip(for: column)
+            label.toolTip = SidebarRenderer.attentionTooltip(for: column)
             append(label)
 
             let dot = statusDot(for: column)
@@ -360,11 +360,11 @@ final class SidebarWorkspaceCardRenderer {
     }
 
     private func buildDiffStatsLabel(stats: String, padding: CGFloat, yOffset: CGFloat) -> CGFloat {
-        let compact = PilotSidebarRenderer.formatDiffStats(stats)
+        let compact = SidebarRenderer.formatDiffStats(stats)
         let statsLabel = NSTextField(labelWithString: "")
         statsLabel.allowsEditingTextAttributes = true
         statsLabel.isSelectable = false
-        statsLabel.attributedStringValue = PilotSidebarRenderer.diffStatsAttributedString(compact, fontSize: 10)
+        statsLabel.attributedStringValue = SidebarRenderer.diffStatsAttributedString(compact, fontSize: 10)
         statsLabel.lineBreakMode = .byTruncatingTail
         statsLabel.frame = NSRect(
             x: padding,
@@ -391,7 +391,7 @@ final class SidebarWorkspaceCardRenderer {
     }
 
     private func buildPRStateLabel(prInfo: PRInfo, padding: CGFloat, yOffset: CGFloat) -> CGFloat {
-        let (stateText, stateColor) = PilotSidebarRenderer.prStateDisplay(prInfo)
+        let (stateText, stateColor) = SidebarRenderer.prStateDisplay(prInfo)
         let prLabel = textLabel(
             "#\(prInfo.number) \(stateText)",
             font: .monospacedSystemFont(ofSize: 9, weight: .medium),
@@ -410,7 +410,7 @@ final class SidebarWorkspaceCardRenderer {
 
     private func buildCIStatusLabel(prInfo: PRInfo, padding: CGFloat, indent: CGFloat, yOffset: CGFloat) -> CGFloat {
         guard let ciStatus = prInfo.ciStatus else { return yOffset }
-        let (ciDot, ciColor, ciText) = PilotSidebarRenderer.ciStatusDisplay(ciStatus, style: .short)
+        let (ciDot, ciColor, ciText) = SidebarRenderer.ciStatusDisplay(ciStatus)
         let ciLabel = textLabel(
             "\(ciDot) \(ciText)",
             font: .monospacedSystemFont(ofSize: 9, weight: .regular),
@@ -429,7 +429,7 @@ final class SidebarWorkspaceCardRenderer {
     }
 
     private func buildReviewDecisionLabel(prInfo: PRInfo, padding: CGFloat, indent: CGFloat, yOffset: CGFloat) -> CGFloat {
-        guard let display = PilotSidebarRenderer.reviewDecisionDisplay(
+        guard let display = SidebarRenderer.reviewDecisionDisplay(
             reviewDecision: prInfo.reviewDecision,
             mergeable: prInfo.mergeable
         ) else {

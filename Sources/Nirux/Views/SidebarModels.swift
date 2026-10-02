@@ -31,7 +31,7 @@ struct ColumnInfo: Hashable {
     /// change on every 2s heartbeat while an agent merely gets older.
     var elapsedDisplay: String? {
         guard agentStatus == .working, let agentElapsedSeconds else { return nil }
-        return PilotSidebarRenderer.shortDuration(agentElapsedSeconds)
+        return SidebarRenderer.shortDuration(agentElapsedSeconds)
     }
 
     static func == (lhs: ColumnInfo, rhs: ColumnInfo) -> Bool {

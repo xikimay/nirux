@@ -13,14 +13,7 @@ extension NiruxShellView {
             let workspace = workspaces[index]
             let isActive = index == activeWSIndex
             let colInfos = workspace.columns.enumerated().map { colIndex, col in
-                // In pilot mode the user sees every workspace's focused column
-                // through its pilot panel, so treat any focused column as
-                // user-focused — otherwise agents in non-active workspaces get
-                // stuck in .needsAttention even while the user is watching
-                // them, and that state persists incorrectly across mode
-                // switches.
-                let isFocusedCol = colIndex == workspace.focusedIndex
-                let isUserFocused = isFocusedCol && (isActive || isPilotMode)
+                let isUserFocused = colIndex == workspace.focusedIndex && isActive
                 let foregroundProcess = foregroundProcesses[ObjectIdentifier(col)]
                 let editorFile = col.editorColumn?.currentPath.map {
                     ($0 as NSString).lastPathComponent
@@ -34,7 +27,7 @@ extension NiruxShellView {
                     index: colIndex,
                     processName: foregroundProcess?.name,
                     abbreviatedCwd: col.pty?.childCwd?.abbreviatedPath(),
-                    isFocused: isFocusedCol && isActive,
+                    isFocused: isUserFocused,
                     isWebView: col.isWebView,
                     webTitle: col.webViewColumn?.pageTitle,
                     terminalTitle: col.terminalTitle,
@@ -110,6 +103,7 @@ extension NiruxShellView {
                 )
             }
         }
+        closeEndedAgentSessions(now: now)
         return (foregroundProcesses, invalidatedSessionBinding)
     }
 
@@ -141,13 +135,6 @@ extension NiruxShellView {
         NiruxNotifier.shared.updateDockBadge(attentionCount: attentionCount)
         // Same source, the other way: agents still working.
         updateKeepAwake()
-
-        // Update per-workspace pilot panels
-        if isPilotMode {
-            for info in infos {
-                workspaces[info.index].updatePilotPanel(info: info)
-            }
-        }
 
         if let workspace = activeWorkspace,
            let wsInfo = infos.first(where: { $0.index == activeWSIndex }) {
@@ -415,6 +402,7 @@ extension NiruxShellView {
                ) {
                 changed = true
             }
+            recordAgentSession(appliedEvent, snapshot: snapshot)
 
             if appliedEvent.resolution.workspace.recordAgentHookActivity(event) {
                 changed = true
@@ -527,7 +515,6 @@ extension NiruxShellView {
     func gitRefreshTier(for workspace: WorkspaceState) -> GitRefreshTier {
         if workspace === activeWorkspace { return .focused }
         if workspace.isInactive { return .archived }
-        if isPilotMode, workspace.profileID == activeProfileID { return .focused }
         return .background
     }
 
@@ -595,6 +582,8 @@ extension NiruxShellView {
                         for: queriedContext,
                         observation: observation
                     )
+                    // Even unchanged: the history may have loaded since.
+                    self?.noteSessionPullRequest(of: workspace)
                     // Every read of an open PR, changed or not: feedback
                     // moves without the PR's own fields moving.
                     if workspace.prInfo == info { self?.refreshPRFeedback(for: workspace) }
@@ -635,7 +624,7 @@ extension NiruxShellView {
     private static let shells: Set<String> = ["zsh", "bash", "fish", "sh", "-zsh", "-bash"]
     /// Recognized agents redraw correctly from SIGWINCH alone — Ctrl+L clears their session/screen.
     /// Claude Code rebinds Ctrl+L to `/clear` and Gemini CLI's clears its history, so
-    /// broadcasting it on every layout change (e.g. Cmd+E width cycle, pilot-mode toggle)
+    /// broadcasting it on every layout change (e.g. Cmd+E width cycle)
     /// wiped active sessions.
     private static func redrawsFromSigwinchAlone(_ name: String) -> Bool {
         AgentStatusMachine.isRecognizedAgentProcess(name)
