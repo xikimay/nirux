@@ -422,10 +422,13 @@ final class EditorFileTree: NSView {
         guard let name = promptForName(title: "New File", initial: "") else { return }
         let target = parent.appendingPathComponent(name)
         if FileManager.default.fileExists(atPath: target.path) {
-            beep("File already exists")
+            fail("“\(name)” already exists")
             return
         }
-        FileManager.default.createFile(atPath: target.path, contents: nil)
+        guard FileManager.default.createFile(atPath: target.path, contents: nil) else {
+            fail("Couldn’t create “\(name)”")
+            return
+        }
         reload()
         onFilePicked?(target.path)
     }
@@ -437,7 +440,7 @@ final class EditorFileTree: NSView {
         do {
             try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
         } catch {
-            beep("Could not create folder: \(error.localizedDescription)")
+            fail("Couldn’t create the folder: \(error.localizedDescription)")
             return
         }
         reload()
@@ -452,7 +455,7 @@ final class EditorFileTree: NSView {
         do {
             try FileManager.default.moveItem(at: node.url, to: target)
         } catch {
-            beep("Rename failed: \(error.localizedDescription)")
+            fail("Couldn’t rename: \(error.localizedDescription)")
             return
         }
         reload()
@@ -470,7 +473,7 @@ final class EditorFileTree: NSView {
         do {
             try FileManager.default.trashItem(at: node.url, resultingItemURL: nil)
         } catch {
-            beep("Could not move to trash: \(error.localizedDescription)")
+            fail("Couldn’t move to the Trash: \(error.localizedDescription)")
             return
         }
         reload()
@@ -490,8 +493,8 @@ final class EditorFileTree: NSView {
         pb.setString(string, forType: .string)
     }
 
-    private func beep(_ message: String) {
-        NSSound.beep()
+    private func fail(_ message: String) {
+        showToast(message, tone: .error)
         NSLog("[EditorFileTree] %@", message)
     }
 

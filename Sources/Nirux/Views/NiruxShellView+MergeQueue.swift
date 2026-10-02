@@ -142,15 +142,23 @@ extension NiruxShellView {
     }
 
     func addToMergeQueue(_ number: Int, board: ProjectBoardController) {
-        guard mergeQueueConfirmation == nil, mergeQueueQuit == nil, let repository = board.repository?.gitHub else {
-            return NSSound.beep()
+        if let busy = mergeQueueSelectionBusy { return showToast(busy) }
+        guard let repository = board.repository?.gitHub else {
+            return showToast("This board’s repository isn’t on GitHub")
         }
         mergeQueue(projectID: board.projectID).addToSelection(number, repository: repository)
     }
 
     func removeFromMergeQueue(_ number: Int, board: ProjectBoardController) {
-        guard mergeQueueConfirmation == nil, mergeQueueQuit == nil else { return NSSound.beep() }
+        if let busy = mergeQueueSelectionBusy { return showToast(busy) }
         mergeQueue(projectID: board.projectID).removeFromSelection(number)
+    }
+
+    /// Why the queue's selection can't change now, if it can't.
+    private var mergeQueueSelectionBusy: String? {
+        if mergeQueueQuit != nil { return "Nirux is stopping the merge queue to quit" }
+        if mergeQueueConfirmation != nil { return "Start or cancel the merge queue’s confirmation first" }
+        return nil
     }
 
     /// Stop, from the board or the status bar: before the next command.
@@ -174,16 +182,18 @@ extension NiruxShellView {
     /// Start: the sheet reads the queued pull requests on GitHub as they
     /// are now, then shows what will happen. Every Start opens a new one.
     func requestMergeQueueStart(board: ProjectBoardController) {
-        if let open = mergeQueueConfirmation {
-            open.focus()
-            return NSSound.beep()
-        }
+        // Already open: in front, which says it.
+        if let open = mergeQueueConfirmation { return open.focus() }
         let controller = mergeQueue(projectID: board.projectID)
-        guard mergeQueueQuit == nil, let settings = board.loaded?.queueSettings, !controller.isRunning,
-              !controller.runsElsewhere
-        else { return NSSound.beep() }
+        guard mergeQueueQuit == nil else { return showToast("Nirux is stopping the merge queue to quit") }
+        guard let loaded = board.loaded else { return showToast("The board is still loading") }
+        guard let settings = loaded.queueSettings else {
+            return showToast(loaded.queueStartProblems.first ?? "The board isn’t configured yet: open Board Settings…")
+        }
+        guard !controller.isRunning else { return showToast("The merge queue is already running") }
+        guard !controller.runsElsewhere else { return showToast("Another Nirux runs this merge queue") }
         let numbers = controller.selection(for: settings.gitHubRepository)
-        guard !numbers.isEmpty else { return NSSound.beep() }
+        guard !numbers.isEmpty else { return showToast("Add pull requests to the queue first") }
         let panel = MergeQueueConfirmationPanel(
             projectID: board.projectID, isDryRun: controller.isDryRun, numbers: numbers, dryRunReason: controller.dryRunReason
         )
@@ -307,9 +317,9 @@ extension NiruxShellView {
         }
         guard let workspace = projectWorkspaces(of: projectID).first(where: { !$0.isInactive })
             ?? projectWorkspaces(of: projectID).first
-        else { return NSSound.beep() }
+        else { return showToast("This space has no workspace to open its board in") }
         focusWorkspace(id: workspace.id)
-        guard activeWorkspace === workspace else { return NSSound.beep() }
+        guard activeWorkspace === workspace else { return showToast("Couldn’t open the board", tone: .error) }
         openProjectBoard()
     }
 

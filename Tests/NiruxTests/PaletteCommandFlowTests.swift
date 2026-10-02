@@ -197,6 +197,16 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
 
+            // Outside a repository, both say so instead of doing nothing.
+            let repoWorkspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "home", cwd: harness.home)
+            for command in ["Open Worktree", "New Worktree"] {
+                shell.dismissToast()
+                harness.runPaletteCommand(command)
+                XCTAssertEqual(shell.toast?.message, "This workspace isn’t in a git repository", command)
+            }
+            shell.focusWorkspace(id: repoWorkspace.id)
+
             // Lists the worktrees off the main thread, then offers them in
             // the palette.
             harness.runPaletteCommand("Open Worktree")
@@ -223,7 +233,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             }
 
             // Once it is open, it goes back to that workspace...
-            let repoWorkspace = try XCTUnwrap(shell.workspaces.first { $0.cwd == harness.repo })
+            XCTAssertEqual(repoWorkspace.cwd, harness.repo)
             shell.focusWorkspace(id: repoWorkspace.id)
             let workspaceCount = shell.workspaces.count
             XCTAssertTrue(try pickWorktree(harness.worktreeBranch).hasPrefix("Already open · "))

@@ -562,7 +562,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             .filter { seen.insert($0).inserted }
 
         guard !absolutePaths.isEmpty else {
-            NSSound.beep()
+            showToast("No files to compare")
             return
         }
 
@@ -588,7 +588,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                 guard self.diffLoadGeneration == generation else { return }
                 guard self.diffGroupTabs[groupPath] != nil else { return }
                 guard !files.isEmpty else {
-                    NSSound.beep()
+                    self.showToast("Couldn’t read the changes of these files", tone: .error)
                     return
                 }
                 let group = DiffGroupTab(title: title, mode: mode, files: files, isLoading: false)
@@ -660,10 +660,10 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                 switch original {
                 case nil:
                     NSLog("%@", "[EditorColumn] no git \(mode.rawValue) content for \(path) — file untracked, git missing, or branch base unavailable")
-                    NSSound.beep()
+                    self.showToast("Nothing to compare: the file is untracked, or its base isn’t available")
                 case .tooLarge(let byteCount):
                     NSLog("%@", "[EditorColumn] git \(mode.rawValue) original of \(path) too large to diff (\(byteCount) bytes)")
-                    NSSound.beep()
+                    self.showToast("This file is too large to compare")
                 case .text(let original):
                     self.diffActivePath = path
                     self.diffActiveMode = mode

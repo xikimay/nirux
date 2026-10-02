@@ -274,7 +274,7 @@ extension NiruxShellView {
             message: input.stringValue,
             enabled: Self.currentMissionHandoffsEnabled()
         ) else {
-            NSSound.beep()
+            showToast("Couldn’t send the reply: the mission may have ended or been answered", tone: .error)
             return
         }
         if recordMissionActivity(accepted.mission, event: accepted.event) {

@@ -150,12 +150,12 @@ extension NiruxShellView {
         PRDetect.diffPathsAsync(cwd: cwd) { [weak self, weak workspace] paths in
             guard let self, let workspace else { return }
             guard !paths.isEmpty else {
-                NSSound.beep()
+                self.showToast("No uncommitted changes")
                 return
             }
 
             guard let editor = self.editorColumn(in: workspace, cwd: cwd) else {
-                NSSound.beep()
+                self.showToast("Couldn’t open an editor for the changes", tone: .error)
                 return
             }
             editor.showDiffCollection(
