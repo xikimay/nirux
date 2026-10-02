@@ -17,9 +17,9 @@ parallel pull requests by hand:
 - it cleaned up merged worktrees.
 
 Nirux already knows most of that state, spread over sidebar cards, the Pilot
-panel (since removed) and `gh` calls typed by an agent. This document proposes a **Project
-Board**: one table per project, and a **merge queue** that runs the merge
-routine above after one click.
+panel (since removed) and `gh` calls typed by an agent. This document proposes
+a **Project Board**: one table per project, and a **merge queue** that runs the
+merge routine above after one click.
 
 It builds on [Projects](projects.md): it is the "Project view" of section 7,
 brought forward, and its "Finish" action is the worktree cleanup shipped in #46.
@@ -76,11 +76,11 @@ the Project view is a dedicated column type.
 
 Rejected:
 
-- **Evolve Pilot Mode.** Pilot Mode is a layout mode: up to three live
+- **Evolve Pilot Mode.** Pilot Mode was a layout mode: up to three live
   workspaces stacked, each with a 200 pt info panel, for the active space only.
-  It is for watching terminals, not for reading a table of fifteen branches, and
-  it is toggled on and off. Pilot Mode has since been removed: the sidebar and
-  the board cover it.
+  It was for watching terminals, not for reading a table of fifteen branches,
+  and it was toggled on and off. It has since been removed: the sidebar and the
+  board cover it.
 - **A floating panel**, like Clean Up. It hides the terminals, and closing it
   loses the view.
 
@@ -196,7 +196,7 @@ documented in B1's pull request:
   focuses. Focus goes to the most urgent agent column of the row.
 - **Open** opens a workspace with a shell in the worktree, in the board's
   project, as "Open Worktree" does. It launches no agent.
-- **On screen** means its workspace is shown (selected), with Nirux in front
+- **On screen** means its workspace is the selected one, with Nirux in front
   and its window neither minimized nor covered. Periodic reads run only then,
   on the status refresh; in the background they pause, as the sidebar's pull
   request reads do. Opening the board, Refresh and a saved board.json read at

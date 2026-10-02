@@ -173,10 +173,9 @@ extension NiruxShellView {
     func resolveAgentColumn(uuid: String) -> AgentHookCenter.Resolution? {
         for (wsIndex, workspace) in workspaces.enumerated() {
             guard let colIndex = workspace.columns.firstIndex(where: { $0.agentUUID == uuid }) else { continue }
-            let isActive = wsIndex == activeWSIndex
             let isUserFocused = NSApp.isActive
                 && colIndex == workspace.focusedIndex
-                && isActive
+                && wsIndex == activeWSIndex
             return AgentHookCenter.Resolution(
                 workspace: workspace,
                 column: workspace.columns[colIndex],
@@ -373,7 +372,7 @@ extension NiruxShellView {
     // MARK: - Layout Helpers
 
     struct StripLayout {
-        let viewportW, viewportH, totalH, rowH, targetY: CGFloat
+        let viewportW, totalH, rowH, targetY: CGFloat
         let animated: Bool
     }
 
@@ -411,7 +410,7 @@ extension NiruxShellView {
     }
 
     /// Set the frame of each workspace container and of the strip that
-    /// holds them. Column contents are laid out separately.
+    /// holds them.
     private func applyWorkspaceFrames(_ layout: StripLayout) {
         verticalStrip.frame = NSRect(x: 0, y: layout.targetY, width: layout.viewportW, height: layout.totalH)
         let visible = visibleWorkspaceIndices

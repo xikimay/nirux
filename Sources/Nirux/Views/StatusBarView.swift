@@ -1,8 +1,8 @@
 import AppKit
 
 /// Global status bar at the bottom of the window.
-/// Shows app-level info (a merge queue, updates, crashes) —
-/// not workspace-specific.
+/// Shows app-level info (a merge queue, updates, crashes) — not
+/// workspace-specific.
 ///
 /// A merge queue comes first, with its Stop: it must stay in reach while
 /// it runs. Then one notice at a time: a crash of the previous session
@@ -173,11 +173,7 @@ final class StatusBarView: NSView {
             border.frame = NSRect(x: 0, y: height - 1, width: bounds.width, height: 1)
         }
 
-        // The notice (label, then its buttons) takes at least the left half,
-        // and more up to the version label.
         let verW: CGFloat = 120
-        let noticeMaxX = bounds.width - verW - pad * 2
-
         let versionMinX = bounds.width - verW - pad
         let noticeButtons = [installButton, copySummaryButton, openReportButton].compactMap { $0 }.filter { !$0.isHidden }
         noticeButtons.forEach { $0.sizeToFit() }
@@ -211,10 +207,11 @@ final class StatusBarView: NSView {
         let buttonsW = noticeButtonsW
         let dismissW: CGFloat = dismissButton?.isHidden == false ? 22 : 0
         let labelSize = label?.attributedStringValue.size() ?? .zero
-        // At least the left half; never so wide that ✕ goes under the
-        // version label, which would take its clicks.
+        // The notice (label, then its buttons and ✕) takes at least the left
+        // half, and up to a pad before the version label; never so wide that
+        // ✕ reaches the version label. Its text shrinks first.
         let labelMaxW = min(
-            max(80, bounds.width / 2 - start, noticeMaxX - start - buttonsW - dismissW),
+            max(80, bounds.width / 2 - start, versionMinX - pad - start - buttonsW - dismissW),
             max(40, versionMinX - 4 - start - buttonsW - dismissW)
         )
         let labelW = hasNotice ? min(ceil(labelSize.width) + 4, labelMaxW) : 0

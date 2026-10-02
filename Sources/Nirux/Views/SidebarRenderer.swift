@@ -69,7 +69,7 @@ enum SidebarRenderer {
         }
     }
 
-    /// Compact labels: "passed" / "failed" / "running".
+    /// Dot, color and label for a CI rollup: "passed" / "failed" / "running".
     static func ciStatusDisplay(_ ciStatus: String) -> (dot: String, color: NSColor, text: String) {
         switch ciStatus {
         case "SUCCESS":

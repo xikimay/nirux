@@ -50,9 +50,9 @@ extension NiruxShellView {
     /// Whether the sidebar may hold the requests of a column: its card is
     /// drawn with the buttons, for a column the user is not looking at
     /// (its terminal dialog answers). Not in a collapsed sidebar, another
-    /// space (`listed` holds the listed workspaces), a
-    /// workspace the folded inactive section hides, or under VoiceOver,
-    /// which the buttons don't serve.
+    /// space (`listed` holds the listed workspaces), a workspace the folded
+    /// inactive section hides, or under VoiceOver, which the buttons don't
+    /// serve.
     func approvalHold(workspaceIndex: Int, columnIndex: Int, listed: Set<Int>) -> PermissionApprovalHold {
         guard workspaces.indices.contains(workspaceIndex) else { return .never }
         let workspace = workspaces[workspaceIndex]

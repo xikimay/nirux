@@ -274,38 +274,27 @@ final class NiruxShellView: NSView {
 
         let glowWidth: CGFloat = 32
         let vpX = sidebarW + 1
-        let vpFullW = viewportW
 
         let frames = ChromeFrames(
             sidebar: NSRect(x: 0, y: statusH, width: sidebarW, height: bounds.height - statusH),
             divider: NSRect(x: sidebarW, y: statusH, width: 1, height: bounds.height - statusH),
-            viewport: NSRect(x: vpX, y: statusH, width: vpFullW, height: viewportH),
+            viewport: NSRect(x: vpX, y: statusH, width: viewportW, height: viewportH),
             glowLeft: NSRect(x: vpX, y: statusH, width: glowWidth, height: viewportH),
-            glowRight: NSRect(x: vpX + vpFullW - glowWidth, y: statusH, width: glowWidth, height: viewportH),
-            glowTop: NSRect(x: vpX, y: statusH + viewportH - glowWidth, width: vpFullW, height: glowWidth),
-            glowBottom: NSRect(x: vpX, y: statusH, width: vpFullW, height: glowWidth),
-            indicator: NSRect(x: sidebarW + 1, y: 4, width: viewportW, height: 16),
+            glowRight: NSRect(x: vpX + viewportW - glowWidth, y: statusH, width: glowWidth, height: viewportH),
+            glowTop: NSRect(x: vpX, y: statusH + viewportH - glowWidth, width: viewportW, height: glowWidth),
+            glowBottom: NSRect(x: vpX, y: statusH, width: viewportW, height: glowWidth),
+            indicator: NSRect(x: vpX, y: 4, width: viewportW, height: 16),
             statusBar: NSRect(x: 0, y: 0, width: bounds.width, height: statusH)
         )
         applyChromeLayout(frames, animated: animated)
 
-        // Each workspace fills the viewport; the strip stacks them.
-        let rowH = viewportH
-        let totalH = rowH * CGFloat(visibleWorkspaceIndices.count)
-
-        // Position the strip so the active workspace is visible
-        let targetY: CGFloat
-        let activePosition = activeVisibleWorkspacePosition ?? 0
-        if totalH <= viewportH {
-            targetY = viewportH - totalH
-        } else {
-            targetY = -(totalH - CGFloat(activePosition + 1) * rowH)
-        }
-
+        // Each workspace fills the viewport; the strip stacks them and is
+        // positioned so the active workspace is the one on screen.
+        let totalH = viewportH * CGFloat(visibleWorkspaceIndices.count)
+        let activePosition = CGFloat(activeVisibleWorkspacePosition ?? 0)
         layoutWorkspaceStrip(StripLayout(
-            viewportW: viewportW, viewportH: viewportH,
-            totalH: totalH, rowH: rowH,
-            targetY: targetY, animated: animated
+            viewportW: viewportW, totalH: totalH, rowH: viewportH,
+            targetY: (activePosition + 1) * viewportH - totalH, animated: animated
         ))
 
         syncTerminalOcclusion()

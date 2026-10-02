@@ -147,7 +147,7 @@ final class SidebarRendererTests: XCTestCase {
 
     // MARK: - ciStatusDisplay
 
-    func testCIStatusDisplayUsesCompactLabels() {
+    func testCIStatusDisplaySuccessSaysPassed() {
         let (_, _, text) = SidebarRenderer.ciStatusDisplay("SUCCESS")
         XCTAssertEqual(text, "passed")
     }
