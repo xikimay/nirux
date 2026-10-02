@@ -238,7 +238,7 @@ Any app or web page can open a `nirux://` URL, so every action runs without aski
 
 When Mission handoffs are enabled, the optional `parentWorkspace` and `parentAgent` query parameters identify the delegating Nirux workspace and terminal by UUID. Supplying both creates the parent/child Mission record; the bundled `nirux-worktree` skill adds them automatically. See [Mission handoffs](#mission-handoffs-experimental) for the user workflow.
 
-Open a file in the editor column at a line range (used by agents to show code instead of pasting it into the terminal):
+Open a file in the editor column at a line range (used by agents to show code or drafts instead of pasting them into the terminal):
 
 ```text
 nirux://open-editor?file=/path/to/file.swift&line=42&endLine=57&workspace=<NIRUX_WORKSPACE_ID>&launch=<NIRUX_LAUNCH_ID>
@@ -257,7 +257,7 @@ The command palette action `Install Agent Skills` writes the bundled skills to:
 ~/.claude/skills/nirux-draft/SKILL.md
 ```
 
-`nirux-worktree` lets supported agents open isolated Nirux workspaces when the user asks to start work on a feature, bug, or separate branch. `nirux-show-code` teaches agents to open code in the editor column via `nirux://open-editor` when the user asks to see code. `nirux-draft` has agents put text you will paste elsewhere (a Slack message, a PR description, a Linear ticket, a SQL query) in a file under `$TMPDIR` and open it in the editor column, where it copies verbatim with `Cmd+A` `Cmd+C`, instead of printing it in the terminal, whose rendering adds quote bars and line breaks.
+`nirux-worktree` lets supported agents open isolated Nirux workspaces when the user asks to start work on a feature, bug, or separate branch. `nirux-show-code` teaches agents to open code in the editor column via `nirux://open-editor` when the user asks to see code. `nirux-draft` has agents write text the user will paste elsewhere (a Slack message, a PR description, a Linear ticket, a SQL query) to a file under `$TMPDIR` and open it in the editor column; click into it, then `Cmd+A` `Cmd+C` copies it verbatim.
 
 ### Cleaning up merged worktrees
 
