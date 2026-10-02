@@ -79,6 +79,13 @@ final class GitWorktreeValidationTests: XCTestCase {
         try git(["check-ignore", "-q", ".claude-handover.md"], at: created)
         try git(["check-ignore", "-q", ".codex-handover.md"], at: created)
         try git(["check-ignore", "-q", ".claude-handover.md"], at: repo)
+        // Only the handovers Nirux writes, at the top level.
+        XCTAssertThrowsError(try git(["check-ignore", "-q", "docs/.claude-handover.md"], at: created))
+
+        // Reusing a worktree made before this change covers it too.
+        try "".write(toFile: repo + "/.git/info/exclude", atomically: true, encoding: .utf8)
+        XCTAssertEqual(GitWorktree.create(branch: "feat/x", repoRoot: repo).path, created)
+        try git(["check-ignore", "-q", ".claude-handover.md"], at: created)
     }
 
     func testHandoverExcludeKeepsExistingPatternsAndAddsEachNameOnce() throws {
@@ -91,8 +98,31 @@ final class GitWorktreeValidationTests: XCTestCase {
 
         XCTAssertEqual(
             try String(contentsOfFile: exclude, encoding: .utf8),
-            "# mine\n*.log\n.claude-handover.md\n.codex-handover.md\n"
+            "# mine\n*.log\n/.claude-handover.md\n/.codex-handover.md\n"
         )
+    }
+
+    func testHandoverExcludeAppendsToBytesItCannotDecode() throws {
+        let exclude = repo + "/.git/info/exclude"
+        let latin1 = Data("# caf".utf8) + Data([0xE9]) + Data("\r\n/.claude-handover.md\r\n".utf8)
+        try latin1.write(to: URL(fileURLWithPath: exclude))
+
+        XCTAssertNil(GitWorktree.create(branch: "feat/x", repoRoot: repo).error)
+
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: exclude)), latin1 + Data("/.codex-handover.md\n".utf8))
+    }
+
+    func testHandoverExcludeDoesNotWriteThroughASymlink() throws {
+        let target = root + "/elsewhere"
+        try "keep\n".write(toFile: target, atomically: true, encoding: .utf8)
+        let exclude = repo + "/.git/info/exclude"
+        try FileManager.default.removeItem(atPath: exclude)
+        try FileManager.default.createSymbolicLink(atPath: exclude, withDestinationPath: target)
+
+        XCTAssertNil(GitWorktree.create(branch: "feat/x", repoRoot: repo).error)
+
+        XCTAssertEqual(try String(contentsOfFile: target, encoding: .utf8), "keep\n")
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: exclude), target)
     }
 
     func testRefusesToReuseDirectoryThatIsNotAWorktree() throws {
