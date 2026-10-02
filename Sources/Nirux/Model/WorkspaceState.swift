@@ -84,6 +84,8 @@ final class WorkspaceState {
     /// The open PR's feedback (docs/pr-feedback-inbox.md), read after each
     /// PR refresh. Cleared when the PR changes or stops being open.
     var prFeedback: PRFeedback?
+    /// Bumped at each feedback read: only the latest one applies.
+    var prFeedbackGeneration = 0
     var diffStats: String?
 
     // Workspace context. Purpose/next step/blocker are always human-owned.

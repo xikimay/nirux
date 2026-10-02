@@ -175,7 +175,7 @@ final class NiruxShellView: NSView {
             self?.moveWorkspaceToSpace(workspaceID: workspaceID, profileID: profileID)
         }
         sidebar.onDiffStatsClicked = { [weak self] index in self?.openDiffInEditor(workspaceIndex: index) }
-        sidebar.prFeedbackMenu = { [weak self] index in self?.prFeedbackMenu(workspaceIndex: index) }
+        sidebar.prFeedbackMenu = { [weak self] workspaceID in self?.prFeedbackMenu(workspaceID: workspaceID) }
         sidebar.onOnboardingAction = { [weak self] action in self?.handleOnboardingAction(action) }
         NotificationCenter.default.addObserver(
             self,

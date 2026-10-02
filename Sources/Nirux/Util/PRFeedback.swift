@@ -2,9 +2,9 @@ import Foundation
 
 /// The feedback nobody has dealt with yet on a workspace's open pull
 /// request (docs/pr-feedback-inbox.md): unresolved review threads, and
-/// conversation comments newer than both the head commit and the author's
-/// last reply. The author's own comments never count: agents post with
-/// the user's `gh` account.
+/// conversation comments newer than both the head commit and our last
+/// reply. "Our" is the PR's author and the `gh` user: agents post with
+/// that account, so their comments never count.
 struct PRFeedback: Hashable, Sendable {
     struct Item: Hashable, Sendable {
         let author: String
@@ -36,19 +36,26 @@ struct PRFeedback: Hashable, Sendable {
 
 enum PRFeedbackReader {
     /// One call, 1 point of the GraphQL quota.
-    static let query = """
-    query($url: URI!) { resource(url: $url) { ... on PullRequest {
+    private static let query = """
+    query($url: URI!) { viewer { login } resource(url: $url) { ... on PullRequest {
       author { login }
       commits(last: 1) { nodes { commit { committedDate } } }
-      reviewThreads(first: 100) { nodes { isResolved isOutdated path line
-        comments(first: 1) { nodes { author { __typename login } body url createdAt } } } }
-      comments(last: 50) { nodes { author { __typename login } body url createdAt } }
-      reviews(last: 50) { nodes { state author { __typename login } body url createdAt } }
+      reviewThreads(first: 100) { nodes { isResolved isOutdated path line comments(first: 1) { nodes {
+        author { __typename login } authorAssociation isMinimized body url createdAt } } } }
+      comments(last: 50) { nodes { author { __typename login } authorAssociation isMinimized body url createdAt } }
+      reviews(last: 50) { nodes { state author { __typename login } authorAssociation isMinimized body url createdAt } }
     } } }
     """
 
+    /// Anyone can comment on a public repository, and Address hands what
+    /// counts to an agent: only people with a role on the repository, and
+    /// apps someone installed there, count.
+    private static let trustedAssociations: Set<String> = ["OWNER", "MEMBER", "COLLABORATOR"]
+
+    /// The PR's own host: an Enterprise PR is never sent to github.com.
     static func arguments(pullRequestURL: String) -> [String] {
-        ["api", "graphql", "--hostname", "github.com", "-f", "query=\(query)", "-f", "url=\(pullRequestURL)"]
+        let host = URL(string: pullRequestURL)?.host ?? "github.com"
+        return ["api", "graphql", "--hostname", host, "-f", "query=\(query)", "-f", "url=\(pullRequestURL)"]
     }
 
     /// Nil when gh is missing, fails or answers something unreadable.
@@ -66,18 +73,21 @@ enum PRFeedbackReader {
     }
 
     static func feedback(from data: Data) -> PRFeedback? {
-        guard let pullRequest = dig(try? JSONSerialization.jsonObject(with: data), "data", "resource"),
+        let json = try? JSONSerialization.jsonObject(with: data)
+        guard let pullRequest = dig(json, "data", "resource"),
               let threads = dig(pullRequest, "reviewThreads", "nodes") as? [[String: Any]],
               let comments = dig(pullRequest, "comments", "nodes") as? [[String: Any]],
               let reviews = dig(pullRequest, "reviews", "nodes") as? [[String: Any]]
         else { return nil }
-        let pullRequestAuthor = dig(pullRequest, "author", "login") as? String
+        let ours = Set([dig(pullRequest, "author", "login"), dig(json, "data", "viewer", "login")].compactMap { $0 as? String })
         // A pending review is visible to its writer only, and not sent yet.
         let conversation = comments + reviews.filter { $0["state"] as? String != "PENDING" }
         let headCommittedAt = (dig(pullRequest, "commits", "nodes") as? [[String: Any]])?.last
             .flatMap { date(dig($0, "commit", "committedDate")) }
+        // An inline reply comes wrapped in a review with an empty body: it
+        // answers its thread, not the conversation.
         let lastReply = conversation
-            .filter { login(of: $0) == pullRequestAuthor }
+            .filter { login(of: $0).map(ours.contains) == true && !excerpt(of: $0).isEmpty }
             .compactMap { date($0["createdAt"]) }
             .max()
         let cutoff = [headCommittedAt, lastReply].compactMap { $0 }.max() ?? .distantPast
@@ -85,7 +95,7 @@ enum PRFeedbackReader {
         let threadItems = threads.compactMap { thread -> PRFeedback.Item? in
             guard thread["isResolved"] as? Bool == false,
                   let first = (dig(thread, "comments", "nodes") as? [[String: Any]])?.first,
-                  login(of: first) != pullRequestAuthor
+                  counts(first, ours: ours)
             else { return nil }
             let path = thread["path"] as? String ?? ""
             return item(
@@ -95,7 +105,7 @@ enum PRFeedbackReader {
             )
         }
         let conversationItems = conversation.compactMap { node -> PRFeedback.Item? in
-            guard login(of: node) != pullRequestAuthor,
+            guard counts(node, ours: ours),
                   let item = item(from: node, location: "comment", isOutdated: false),
                   !item.excerpt.isEmpty,
                   item.createdAt > cutoff
@@ -105,27 +115,35 @@ enum PRFeedbackReader {
         return PRFeedback(items: (threadItems + conversationItems).sorted { $0.createdAt > $1.createdAt })
     }
 
-    static func addressPrompt(for pullRequest: PRInfo, botsOnly: Bool) -> String {
-        let scope = botsOnly ? "the bots' unresolved review threads and new comments" : "the unresolved review threads and new comments"
-        return "/receiving-code-review Address \(scope) on PR #\(pullRequest.number) (\(pullRequest.url))."
+    /// Not ours, not hidden by a maintainer, and from a bot or a role.
+    private static func counts(_ node: [String: Any], ours: Set<String>) -> Bool {
+        guard login(of: node).map(ours.contains) != true, node["isMinimized"] as? Bool != true else { return false }
+        return isBot(node) || trustedAssociations.contains(node["authorAssociation"] as? String ?? "")
     }
 
     private static func item(from node: [String: Any], location: String, isOutdated: Bool) -> PRFeedback.Item? {
         guard let url = node["url"] as? String, let createdAt = date(node["createdAt"]) else { return nil }
-        let body = node["body"] as? String ?? ""
-        let excerpt = body.split(whereSeparator: \.isNewline)
-            .lazy.map { $0.trimmingCharacters(in: .whitespaces) }
-            .first { !$0.isEmpty } ?? ""
         return PRFeedback.Item(
             // A deleted account comes back as a null author.
             author: login(of: node) ?? "ghost",
-            isBot: dig(node, "author", "__typename") as? String == "Bot",
+            isBot: isBot(node),
             location: location,
             isOutdated: isOutdated,
-            excerpt: String(excerpt.prefix(80)),
+            excerpt: String(excerpt(of: node).prefix(80)),
             url: url,
             createdAt: createdAt
         )
+    }
+
+    private static func excerpt(of node: [String: Any]) -> String {
+        let body = node["body"] as? String ?? ""
+        return body.split(whereSeparator: \.isNewline)
+            .lazy.map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty } ?? ""
+    }
+
+    private static func isBot(_ node: [String: Any]) -> Bool {
+        dig(node, "author", "__typename") as? String == "Bot"
     }
 
     private static func login(of node: [String: Any]) -> String? {

@@ -37,8 +37,9 @@ final class SidebarView: NSView {
     /// Resume clicked: (workspaceIndex, columnIndex, the failure it was for).
     var onAgentResume: ((Int, Int, TimeInterval) -> Void)?
     var onDiffStatsClicked: ((Int) -> Void)?
-    /// The menu of the card's PR feedback line; nil when there's nothing.
-    var prFeedbackMenu: ((Int) -> NSMenu?)?
+    /// The menu of the card's PR feedback line, by workspace id; nil when
+    /// there's nothing.
+    var prFeedbackMenu: ((String) -> NSMenu?)?
     var onWorkspaceAction: ((WorkspaceSidebarAction, Int) -> Void)?
     /// Whether the workspace's menu offers "Clean Up Worktree…" (it's open
     /// in a linked worktree, or its folder is gone). Asked on each menu.
@@ -484,8 +485,8 @@ final class SidebarView: NSView {
                 toggleInactiveSection()
             } else if let workspaceIndex = Self.diffActionWorkspaceIndex(url) {
                 onDiffStatsClicked?(workspaceIndex)
-            } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.prFeedbackActionPrefix) {
-                prFeedbackMenu?(workspaceIndex)?.popUp(positioning: nil, at: convert(event.locationInWindow, from: nil), in: self)
+            } else if let workspaceID = Self.prFeedbackActionWorkspaceID(url) {
+                prFeedbackMenu?(workspaceID)?.popUp(positioning: nil, at: convert(event.locationInWindow, from: nil), in: self)
             } else if let url = URL(string: url) {
                 NSWorkspace.shared.open(url)
             }
@@ -661,21 +662,22 @@ final class SidebarView: NSView {
         "action:diff:\(workspaceIndex)"
     }
 
-    static let prFeedbackActionPrefix = "action:pr-feedback:"
-
-    static func prFeedbackActionURL(workspaceIndex: Int) -> String {
-        "\(prFeedbackActionPrefix)\(workspaceIndex)"
+    static func prFeedbackActionURL(workspaceID: String) -> String {
+        "action:pr-feedback:\(workspaceID)"
     }
 
     static let inactiveSectionActionURL = "action:inactive-section-toggle"
 
     private static func diffActionWorkspaceIndex(_ value: String) -> Int? {
-        actionWorkspaceIndex(value, prefix: "action:diff:")
-    }
-
-    private static func actionWorkspaceIndex(_ value: String, prefix: String) -> Int? {
+        let prefix = "action:diff:"
         guard value.hasPrefix(prefix) else { return nil }
         return Int(value.dropFirst(prefix.count))
+    }
+
+    private static func prFeedbackActionWorkspaceID(_ value: String) -> String? {
+        let prefix = "action:pr-feedback:"
+        guard value.hasPrefix(prefix) else { return nil }
+        return String(value.dropFirst(prefix.count))
     }
 }
 
