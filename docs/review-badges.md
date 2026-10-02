@@ -50,7 +50,8 @@ Two paths reach a skill, and Nirux already receives both:
   the prompt, where Claude Code expands it. Typing `/skill` bypasses
   `PreToolUse`, so this path is needed.
 - **Invoked by the agent** (a handover that says "run /code-review"): the
-  `Skill` tool's `PostToolUse`, with `tool_input.skill`.
+  `Skill` tool's `PostToolUse`, with `tool_input.skill`. A failed call
+  (`PostToolUseFailure`) doesn't count.
 
 Privacy, as the README promises for transcripts: `AgentHookEvent` gains
 `reviewPasses`, computed in the hook receiver. The prompt itself is never
@@ -66,17 +67,23 @@ Codex has no prompt hook: its reviews aren't seen.
 
 ## 3. Record and staleness
 
-- On the event, the workspace stores, per pass, `{head, at}`: the HEAD its git
-  context reads at that moment. That context follows HEAD within 1 s on
-  screen, 5 s in the background (`GitRefreshPolicy`).
-- An event older than the stored run doesn't replace it (launch replay). An
-  event that arrives before the first git read is dropped.
-- **Fresh** when the stored HEAD is the current HEAD, **stale** otherwise. A
+- On the event, Nirux reads HEAD in the agent's own directory (the event's
+  `cwd`), off the main thread, and the workspace stores, per pass,
+  `{head, at}`. Not the workspace's git context: it follows the focused
+  column, and pauses while Nirux is in the background.
+- An event replayed at launch (more than a minute old) is skipped: the HEAD
+  it ran on can't be known any more. An event older than the stored run
+  doesn't replace it.
+- The pass names travel as strings in `hook-events.jsonl`, so an app older
+  than its hook receiver skips a pass it doesn't know, not the whole event.
+- **Fresh** when the stored HEAD is the workspace's current HEAD, **stale**
+  otherwise. A
   review run before the commit that follows it goes stale at that commit: the
   commit isn't what was reviewed. A confirmation pass makes it fresh again.
 - Persisted with the workspace in `state.json` as `reviewRuns`, keyed by the
-  pass's raw value. A pass this build doesn't know is dropped on load; an
-  older build drops the key after a rollback, which only loses badges.
+  pass's raw value. A pass this build doesn't know is dropped on load, and a
+  value it can't read drops the key, never the workspace. An older build
+  drops the key after a rollback, which only loses badges.
 
 ## 4. Display
 
@@ -85,7 +92,7 @@ Codex has no prompt hook: its reviews aren't seen.
   ran on an earlier commit. Dot: never ran.
 - The tooltip says, per pass, when it ran and on which commit, or "not run".
 - Built by `SidebarReviewBadgesRow`, so the card renderer, which other
-  in-flight branches touch, gains one call.
+  in-flight branches touch, only appends its label.
 - Not on the Project Board for now.
 
 ## 5. Run review pipeline (second pull request)

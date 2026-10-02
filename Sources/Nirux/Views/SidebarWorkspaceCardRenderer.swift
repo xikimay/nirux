@@ -274,25 +274,12 @@ final class SidebarWorkspaceCardRenderer {
             currentY = buildPRInfoLabels(prInfo: prInfo, padding: contentX, yOffset: currentY)
         }
         if let badges = workspace.reviewBadges {
-            currentY = buildReviewBadgesRow(badges, padding: contentX, yOffset: currentY)
+            append(SidebarReviewBadgesRow.label(
+                badges, isActive: workspace.isActive, x: contentX, width: sidebarWidth - contentX * 2, top: currentY
+            ))
+            currentY -= SidebarExpandedMetrics.reviewAdvance
         }
         return currentY
-    }
-
-    private func buildReviewBadgesRow(_ badges: ReviewBadges, padding: CGFloat, yOffset: CGFloat) -> CGFloat {
-        let label = NSTextField(
-            labelWithAttributedString: SidebarReviewBadgesRow.attributedText(badges, isActive: workspace.isActive)
-        )
-        label.lineBreakMode = .byTruncatingTail
-        label.toolTip = SidebarReviewBadgesRow.toolTip(badges)
-        label.frame = NSRect(
-            x: padding,
-            y: yOffset - SidebarExpandedMetrics.reviewHeight,
-            width: sidebarWidth - padding * 2,
-            height: SidebarExpandedMetrics.reviewHeight
-        )
-        append(label)
-        return yOffset - SidebarExpandedMetrics.reviewAdvance
     }
 
     private func buildColumnEntries(columns: [ColumnInfo], yOffset: CGFloat, padding: CGFloat) -> CGFloat {

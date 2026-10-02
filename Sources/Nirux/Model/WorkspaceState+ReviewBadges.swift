@@ -3,14 +3,13 @@ import Foundation
 // MARK: - Review badges (docs/review-badges.md)
 
 extension WorkspaceState {
-    /// Records the review passes `event` starts on the current HEAD. Not
-    /// before the first git read: a pass replayed at launch is lost then.
+    /// Records passes that started at `timestamp` on `head`. A replayed
+    /// event older than the stored run doesn't replace it.
     @discardableResult
-    func recordReviewPasses(_ event: AgentHookEvent) -> Bool {
-        guard let passes = event.reviewPasses, let head = gitContext?.identity.head else { return false }
+    func recordReviewPasses(_ passes: [ReviewPass], head: String, at timestamp: TimeInterval) -> Bool {
         var changed = false
-        for pass in passes where reviewRuns[pass].map({ event.timestamp >= $0.at }) ?? true {
-            reviewRuns[pass] = ReviewRun(head: head, at: event.timestamp)
+        for pass in passes where reviewRuns[pass].map({ timestamp >= $0.at }) ?? true {
+            reviewRuns[pass] = ReviewRun(head: head, at: timestamp)
             changed = true
         }
         return changed

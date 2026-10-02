@@ -72,10 +72,12 @@ struct AgentHookEvent: Codable, Equatable {
     /// events only (see `carriesTranscriptPath`): enough to follow the
     /// column's session usage without growing every tool event's line.
     let transcriptPath: String?
-    /// Review passes the event starts (see `ReviewPass`): from the prompt
-    /// on UserPromptSubmit, from the skill on a `Skill` call's PostToolUse.
-    /// Only the passes are kept, never the prompt.
-    let reviewPasses: [ReviewPass]?
+    /// Review passes the event starts (`ReviewPass` raw values): from the
+    /// prompt on UserPromptSubmit, from the skill on a `Skill` call's
+    /// PostToolUse. Only the passes are kept, never the prompt. Strings, so
+    /// an app older than its receiver skips a pass it doesn't know, not
+    /// the whole event.
+    let reviewPasses: [String]?
     /// Sidebar approval (see `PermissionApproval`): on a PermissionRequest,
     /// the request ID and deadline (epoch seconds) the receiver waits
     /// under; on approvalResolved, the request and what became of it.
@@ -140,9 +142,11 @@ struct AgentHookEvent: Codable, Equatable {
                 : nil
             reviewPasses = switch name {
             case .userPromptSubmit:
-                (payload["prompt"] as? String).flatMap(ReviewPass.passes(inPrompt:))
-            case .postToolUse where toolName == "Skill":
-                ((payload["tool_input"] as? [String: Any])?["skill"] as? String).flatMap(ReviewPass.passes(inSkill:))
+                (payload["prompt"] as? String).flatMap(ReviewPass.passes(inPrompt:))?.map(\.rawValue)
+            // A Skill call that failed (PostToolUseFailure) ran nothing.
+            case .postToolUse where toolName == "Skill" && hookName == "PostToolUse":
+                ((payload["tool_input"] as? [String: Any])?["skill"] as? String)
+                    .flatMap(ReviewPass.passes(inSkill:))?.map(\.rawValue)
             default:
                 nil
             }
@@ -224,7 +228,7 @@ struct AgentHookEvent: Codable, Equatable {
         errorKind: String? = nil,
         promptID: String? = nil,
         transcriptPath: String? = nil,
-        reviewPasses: [ReviewPass]? = nil,
+        reviewPasses: [String]? = nil,
         approvalRequestID: String? = nil,
         approvalDeadline: TimeInterval? = nil,
         approvalText: String? = nil,

@@ -592,7 +592,8 @@ struct PersistedWorkspace: Codable {
         lastActivityAt = try container.decodeIfPresent(TimeInterval.self, forKey: .lastActivityAt)
         nextStep = try container.decodeIfPresent(String.self, forKey: .nextStep)
         blocker = try container.decodeIfPresent(String.self, forKey: .blocker)
-        reviewRuns = try container.decodeIfPresent([String: ReviewRun].self, forKey: .reviewRuns)
+        // Only badges: a shape this build can't read never fails the state.
+        reviewRuns = (try? container.decodeIfPresent([String: ReviewRun].self, forKey: .reviewRuns)) ?? nil
     }
 
     func encode(to encoder: Encoder) throws {

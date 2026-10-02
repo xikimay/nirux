@@ -3,7 +3,20 @@ import AppKit
 /// The card's review row: `CR ✓  PM ✓  CS ·  ADV ·`. Green ran on HEAD,
 /// orange ran on an earlier commit, a dot never ran.
 enum SidebarReviewBadgesRow {
-    static func attributedText(_ badges: ReviewBadges, isActive: Bool) -> NSAttributedString {
+    static func label(_ badges: ReviewBadges, isActive: Bool, x: CGFloat, width: CGFloat, top: CGFloat) -> NSTextField {
+        let label = NSTextField(labelWithAttributedString: attributedText(badges, isActive: isActive))
+        label.lineBreakMode = .byTruncatingTail
+        label.toolTip = toolTip(badges)
+        label.frame = NSRect(
+            x: x,
+            y: top - SidebarExpandedMetrics.reviewHeight,
+            width: width,
+            height: SidebarExpandedMetrics.reviewHeight
+        )
+        return label
+    }
+
+    private static func attributedText(_ badges: ReviewBadges, isActive: Bool) -> NSAttributedString {
         let font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
         let text = NSMutableAttributedString()
         for pass in ReviewPass.allCases {
@@ -28,7 +41,7 @@ enum SidebarReviewBadgesRow {
         return text
     }
 
-    static func toolTip(_ badges: ReviewBadges, now: Date = Date()) -> String {
+    private static func toolTip(_ badges: ReviewBadges, now: Date = Date()) -> String {
         ReviewPass.allCases.map { pass in
             guard let run = badges.runs[pass] else { return "\(pass.displayName): not run" }
             let ran = "\(pass.displayName): ran \(SidebarView.relativeAge(since: run.at, now: now)) ago"

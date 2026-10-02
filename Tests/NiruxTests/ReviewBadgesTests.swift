@@ -42,11 +42,11 @@ final class ReviewBadgesTests: XCTestCase {
             env: env,
             now: 1
         ))
-        XCTAssertEqual(event.reviewPasses, [.codeReview])
+        XCTAssertEqual(event.reviewPasses, ["codeReview"])
 
         let line = try XCTUnwrap(String(data: JSONEncoder().encode(event), encoding: .utf8))
         XCTAssertFalse(line.contains("secret-token-in-the-prompt"))
-        XCTAssertEqual(try JSONDecoder().decode(AgentHookEvent.self, from: Data(line.utf8)).reviewPasses, [.codeReview])
+        XCTAssertEqual(try JSONDecoder().decode(AgentHookEvent.self, from: Data(line.utf8)).reviewPasses, ["codeReview"])
     }
 
     func testSkillCallCarriesItsPass() {
@@ -60,7 +60,7 @@ final class ReviewBadgesTests: XCTestCase {
             env: env,
             now: 1
         )
-        XCTAssertEqual(skill?.reviewPasses, [.premortem])
+        XCTAssertEqual(skill?.reviewPasses, ["premortem"])
 
         let bash = AgentHookEvent(
             kind: .claude,
@@ -69,6 +69,14 @@ final class ReviewBadgesTests: XCTestCase {
             now: 1
         )
         XCTAssertNil(bash?.reviewPasses)
+
+        let failedSkill = AgentHookEvent(
+            kind: .claude,
+            payload: ["hook_event_name": "PostToolUseFailure", "tool_name": "Skill", "tool_input": ["skill": "premortem"]],
+            env: env,
+            now: 1
+        )
+        XCTAssertNil(failedSkill?.reviewPasses, "a failed Skill call ran nothing")
     }
 
     func testPassRecordsTheHeadItRanOnAndGoesStaleAfterACommit() {
@@ -76,7 +84,7 @@ final class ReviewBadgesTests: XCTestCase {
         XCTAssertNil(workspace.reviewBadges, "no pull request, no run: no row")
 
         workspace.updateGitContext(context(head: "aaa"))
-        XCTAssertTrue(workspace.recordReviewPasses(promptEvent([.codeReview], at: 10)))
+        XCTAssertTrue(workspace.recordReviewPasses([.codeReview], head: "aaa", at: 10))
         XCTAssertEqual(workspace.reviewRuns[.codeReview], ReviewRun(head: "aaa", at: 10))
         XCTAssertEqual(workspace.reviewBadges?.isFresh(.codeReview), true)
         XCTAssertEqual(workspace.reviewBadges?.isFresh(.premortem), false)
@@ -87,19 +95,12 @@ final class ReviewBadgesTests: XCTestCase {
 
     func testOlderReplayedEventDoesNotReplaceANewerRun() {
         let workspace = WorkspaceState(title: "reviews", cwd: "/tmp")
-        workspace.updateGitContext(context(head: "bbb"))
-        workspace.recordReviewPasses(promptEvent([.codeReview], at: 20))
-        XCTAssertFalse(workspace.recordReviewPasses(promptEvent([.codeReview], at: 10)))
-        XCTAssertEqual(workspace.reviewRuns[.codeReview]?.at, 20)
+        workspace.recordReviewPasses([.codeReview], head: "bbb", at: 20)
+        XCTAssertFalse(workspace.recordReviewPasses([.codeReview], head: "aaa", at: 10))
+        XCTAssertEqual(workspace.reviewRuns[.codeReview], ReviewRun(head: "bbb", at: 20))
     }
 
-    func testNothingIsRecordedBeforeHeadIsKnown() {
-        let workspace = WorkspaceState(title: "reviews", cwd: "/tmp")
-        XCTAssertFalse(workspace.recordReviewPasses(promptEvent([.codeReview], at: 10)))
-        XCTAssertTrue(workspace.reviewRuns.isEmpty)
-    }
-
-    func testRunsRoundTripAndUnknownPassesAreDropped() throws {
+    func testRunsDecodeAsReadAndLegacyWorkspacesHaveNone() throws {
         let json = #"""
         {"title":"w","cwd":"/tmp","columns":[],"focusedColumnIndex":0,"isInactive":false,
          "lastSummaryIsManual":false,
@@ -113,6 +114,12 @@ final class ReviewBadgesTests: XCTestCase {
         {"title":"w","cwd":"/tmp","columns":[],"focusedColumnIndex":0}
         """#.utf8))
         XCTAssertNil(legacy.reviewRuns)
+
+        let malformed = try JSONDecoder().decode(PersistedWorkspace.self, from: Data(#"""
+        {"title":"w","cwd":"/tmp","columns":[],"focusedColumnIndex":0,"reviewRuns":{"codeReview":"aaa"}}
+        """#.utf8))
+        XCTAssertNil(malformed.reviewRuns, "badges only: never a reason to lose the workspace")
+        XCTAssertEqual(malformed.title, "w")
     }
 
     func testCardShowsTheRowUnderItsMetadata() throws {
@@ -138,10 +145,6 @@ final class ReviewBadgesTests: XCTestCase {
 
     private func context(head: String) -> GitContext {
         GitContext(branch: "feat/x", identity: GitIdentity(repositoryRoot: "/tmp", head: head))
-    }
-
-    private func promptEvent(_ passes: [ReviewPass], at timestamp: TimeInterval) -> AgentHookEvent {
-        AgentHookEvent(kind: .claude, name: .userPromptSubmit, reviewPasses: passes, timestamp: timestamp)
     }
 
     private func makeWorkspaceInfo(reviewBadges: ReviewBadges? = nil) -> WorkspaceInfo {

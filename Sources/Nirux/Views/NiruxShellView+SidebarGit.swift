@@ -419,12 +419,29 @@ extension NiruxShellView {
             if appliedEvent.resolution.workspace.recordAgentHookActivity(event) {
                 changed = true
             }
-            if appliedEvent.resolution.workspace.recordReviewPasses(event) {
-                changed = true
-            }
+            recordReviewPasses(of: event, in: appliedEvent.resolution.workspace)
         }
         updateSidebar(snapshot: snapshot)
         if changed { saveState(snapshot: snapshot) }
+    }
+
+    /// HEAD is read in the agent's own directory, now: the workspace's git
+    /// context follows its focused column, and pauses while Nirux is in the
+    /// background. An event replayed at launch is skipped, since the HEAD it
+    /// ran on can't be known any more.
+    private func recordReviewPasses(of event: AgentHookEvent, in workspace: WorkspaceState) {
+        guard let passes = event.reviewPasses?.compactMap(ReviewPass.init(rawValue:)), !passes.isEmpty,
+              let cwd = event.cwd,
+              Date().timeIntervalSince1970 - event.timestamp < 60
+        else { return }
+        GitDetect.contextAsync(at: cwd) { [weak self, weak workspace] result in
+            guard case .observed(let context) = result, let head = context.identity.head,
+                  let self, let workspace,
+                  workspace.recordReviewPasses(passes, head: head, at: event.timestamp)
+            else { return }
+            self.updateSidebar()
+            self.saveState()
+        }
     }
 
     /// MissionEventCenter delivery target. The activity write is flushed

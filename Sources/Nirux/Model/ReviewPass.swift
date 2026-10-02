@@ -39,7 +39,7 @@ enum ReviewPass: String, Codable, CaseIterable {
         return passes.isEmpty ? nil : passes
     }
 
-    /// The pass a skill (Claude's `Skill` tool) runs.
+    /// The passes a skill (Claude's `Skill` tool) runs.
     static func passes(inSkill skill: String) -> [ReviewPass]? {
         if let pass = command(skill) { return [pass] }
         return mentionsAdversarial(skill) ? [.adversarial] : nil
