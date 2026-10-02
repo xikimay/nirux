@@ -30,7 +30,8 @@ final class GlobalSearchPanel: NSObject {
     struct Pick {
         let column: ColumnState
         let needle: String
-        let fromBottom: Int
+        let match: ScrollbackSearch.Match
+        /// The terminal's matches when it was read.
         let total: Int
     }
 
@@ -64,7 +65,6 @@ final class GlobalSearchPanel: NSObject {
         var terminals = 0
         var terminalsWithMatches = 0
         var matches = 0
-        var isSearching = false
     }
 
     /// Shows the panel over `window`. `targets` is asked again on every
@@ -97,7 +97,6 @@ final class GlobalSearchPanel: NSObject {
         pendingSearch?.cancel()
         pendingSearch = nil
         search.cancel()
-        progress.isSearching = false
         targets = []
         removeMonitors()
         panel?.orderOut(nil)
@@ -128,20 +127,17 @@ final class GlobalSearchPanel: NSObject {
         }
         targets = targetsProvider()
         progress.terminals = targets.count
-        progress.isSearching = !targets.isEmpty
+        if !targets.isEmpty {
+            search.start(
+                needle: needle,
+                readers: targets.map(\.read),
+                onMatches: { [weak self] index, result in
+                    self?.append(result, from: index, needle: needle)
+                },
+                onDone: { [weak self] in self?.updateStatus() }
+            )
+        }
         updateStatus()
-        guard !targets.isEmpty else { return }
-        search.start(
-            needle: needle,
-            readers: targets.map(\.read),
-            onMatches: { [weak self] index, result in
-                self?.append(result, from: index, needle: needle)
-            },
-            onDone: { [weak self] in
-                self?.progress.isSearching = false
-                self?.updateStatus()
-            }
-        )
     }
 
     private func append(_ result: ScrollbackSearch.Result, from index: Int, needle: String) {
@@ -168,7 +164,7 @@ final class GlobalSearchPanel: NSObject {
             terminalsWithMatches: progress.terminalsWithMatches,
             matches: progress.matches,
             shown: rows.count,
-            isSearching: progress.isSearching
+            isSearching: search.isRunning
         )
     }
 
@@ -195,7 +191,7 @@ final class GlobalSearchPanel: NSObject {
         guard let row = rows[safe: index] else { return }
         dismiss()
         guard let column = row.column else { return NSSound.beep() }
-        onPick(Pick(column: column, needle: row.needle, fromBottom: row.match.fromBottom, total: row.total))
+        onPick(Pick(column: column, needle: row.needle, match: row.match, total: row.total))
     }
 
     @objc private func tableClicked() {

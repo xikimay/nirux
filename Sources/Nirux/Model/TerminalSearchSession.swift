@@ -43,7 +43,7 @@ final class TerminalSearchSession {
     /// arrives: a navigation sent right behind it finds none and is lost.
     /// Navigating within this delay of a new needle waits it out.
     nonisolated static let navigationDelay: TimeInterval = 0.1
-    /// Most "next match" a pick sends at once: Ghostty's search mailbox
+    /// Most navigations a pick sends at once: Ghostty's search mailbox
     /// holds 64 messages, and a full one blocks the sender, the main thread.
     nonisolated static let maxPickSteps = 50
 
@@ -104,21 +104,45 @@ final class TerminalSearchSession {
         navigate(.previous)
     }
 
+    /// Where the search stands: a pick prepared at one mark gives way to
+    /// any needle sent or navigation asked for since.
+    struct Mark: Equatable {
+        fileprivate let search: Int
+        fileprivate let navigations: Int
+    }
+
+    var mark: Mark { Mark(search: searchGeneration, navigations: navigations) }
+
     /// Search Everywhere's pick: selects the match `fromBottom` of the
-    /// needle sent (0 is the newest) after `delay`, as `fromBottom + 1`
-    /// presses of Return would. Ghostty's navigation stops at the last
+    /// needle's `total` matches (0 is the newest) after `delay`. Ghostty's
+    /// first "next match" selects the newest one and each further one the
+    /// match above; its first "previous match" selects the oldest one: the
+    /// pick takes the shorter way. Ghostty's navigation stops at the last
     /// match its search thread has found, so the delay must cover a search
-    /// of the whole scrollback (`pickDelay`). Dropped if the needle changes
-    /// or the user navigates meanwhile.
-    func select(fromBottom: Int, after delay: TimeInterval) {
-        guard !sentNeedle.isEmpty else { return }
-        let expectedSearch = searchGeneration
-        let expectedNavigations = navigations
-        let steps = min(max(fromBottom, 0), Self.maxPickSteps - 1) + 1
+    /// of the whole scrollback (`pickDelay`). Dropped if the search moved
+    /// past `mark`.
+    func select(fromBottom: Int, of total: Int, after delay: TimeInterval, since mark: Mark) {
+        guard total > 0 else { return }
+        let fromBottom = min(max(fromBottom, 0), total - 1)
+        let fromTop = total - 1 - fromBottom
+        let (command, steps) = fromBottom <= fromTop
+            ? (TerminalSearchCommand.next, fromBottom + 1)
+            : (TerminalSearchCommand.previous, fromTop + 1)
         schedule(delay) { [weak self] in
-            guard let self, self.searchGeneration == expectedSearch, self.navigations == expectedNavigations else { return }
-            self.hasNavigated = true
-            for _ in 0..<steps { self.send(.next) }
+            self?.sendPick(command, steps: steps, since: mark)
+        }
+    }
+
+    /// At most `maxPickSteps` at a time, the rest a moment later: Ghostty's
+    /// search thread empties its mailbox in between.
+    private func sendPick(_ command: TerminalSearchCommand, steps: Int, since mark: Mark) {
+        guard self.mark == mark, steps > 0 else { return }
+        hasNavigated = true
+        let now = min(steps, Self.maxPickSteps)
+        for _ in 0..<now { send(command) }
+        guard steps > now else { return }
+        schedule(Self.navigationDelay) { [weak self] in
+            self?.sendPick(command, steps: steps - now, since: mark)
         }
     }
 

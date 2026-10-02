@@ -84,17 +84,24 @@ final class GlobalTerminalSearch {
 }
 
 extension GlobalTerminalSearch {
-    /// Counts one terminal's matches again, off the main thread: a pick
-    /// finds its match among the ones printed since the search. Nil when
-    /// the terminal has no text to give.
-    nonisolated static func recount(
-        _ needle: String,
+    /// Finds a picked match again in its terminal's text, off the main
+    /// thread (`ScrollbackSearch.relocate`): output may have been printed
+    /// and old lines dropped since the search. Nil when the terminal has no
+    /// text to give.
+    nonisolated static func relocate(
+        _ match: ScrollbackSearch.Match,
+        of needle: String,
         read: @escaping Reader,
-        then completion: @escaping @MainActor @Sendable ((total: Int, textBytes: Int)?) -> Void
+        then completion: @escaping @MainActor @Sendable ((fromBottom: Int, total: Int, textBytes: Int)?) -> Void
     ) {
         queue.async {
-            let counted = read().map { (total: ScrollbackSearch.count(needle, in: $0), textBytes: $0.utf8.count) }
-            DispatchQueue.main.async { @MainActor in completion(counted) }
+            let found = read().map { text in
+                let place = ScrollbackSearch.relocate(
+                    context: match.context, fromBottom: match.fromBottom, of: needle, in: text
+                )
+                return (fromBottom: place.fromBottom, total: place.total, textBytes: text.utf8.count)
+            }
+            DispatchQueue.main.async { @MainActor in completion(found) }
         }
     }
 }

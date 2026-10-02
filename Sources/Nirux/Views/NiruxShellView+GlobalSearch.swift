@@ -41,9 +41,9 @@ extension NiruxShellView {
     }
 
     /// Brings the picked match's column forward, wherever it is now, and
-    /// opens its find bar on the match. Output printed since the search may
-    /// hold newer matches: they are counted again, and the pick keeps its
-    /// place counted from the oldest.
+    /// opens its find bar on the match, found again in the terminal's
+    /// text: output may have been printed and old lines dropped since the
+    /// search.
     func revealSearchMatch(_ pick: GlobalSearchPanel.Pick) {
         let column = pick.column
         guard let workspace = workspaces.first(where: { $0.columns.contains { $0 === column } }),
@@ -52,13 +52,13 @@ extension NiruxShellView {
         else { return NSSound.beep() }
         window?.makeKey()
         focusWorkspace(id: workspace.id, column: columnIndex)
-        column.showFindBar(searching: pick.needle)
-        let fromBottom = pick.fromBottom
-        let fromTop = pick.total - 1 - fromBottom
-        GlobalTerminalSearch.recount(pick.needle, read: { TerminalScreenText.read(session) }) { [weak column] counted in
-            let fromBottom = counted.map { $0.total - 1 - fromTop } ?? fromBottom
-            let delay = TerminalSearchSession.pickDelay(textBytes: counted?.textBytes ?? 0)
-            column?.selectFindMatch(fromBottom: fromBottom, after: delay)
+        guard let mark = column.showFindBar(searching: pick.needle) else { return }
+        let (fromBottom, total) = (pick.match.fromBottom, pick.total)
+        GlobalTerminalSearch.relocate(pick.match, of: pick.needle, read: { TerminalScreenText.read(session) }) { [weak column] found in
+            let delay = TerminalSearchSession.pickDelay(textBytes: found?.textBytes ?? 0)
+            column?.selectFindMatch(
+                fromBottom: found?.fromBottom ?? fromBottom, of: found?.total ?? total, after: delay, since: mark
+            )
         }
     }
 }

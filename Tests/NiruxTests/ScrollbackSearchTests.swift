@@ -44,6 +44,24 @@ final class ScrollbackSearchTests: XCTestCase {
         XCTAssertEqual(search("──", "─────").total, 4)
     }
 
+    /// A pick finds its match again after output was printed below it and
+    /// the scrollback limit dropped lines, with matches, above it.
+    func testAPickFindsItsMatchAgainInTextThatChanged() throws {
+        let before = (1...6).map { "error \($0)" }.joined(separator: "\n")
+        let picked = try XCTUnwrap(search("error", before).matches.first { $0.excerpt == "error 3" })
+        XCTAssertEqual(picked.fromBottom, 3)
+        let after = (3...9).map { "error \($0)" }.joined(separator: "\n")
+        let place = ScrollbackSearch.relocate(context: picked.context, fromBottom: picked.fromBottom, of: "error", in: after)
+        XCTAssertEqual(place.fromBottom, 6)
+        XCTAssertEqual(place.total, 7)
+
+        // Identical lines: the one at its old place, matches only move up.
+        let same = try XCTUnwrap(search("error", "error\nerror\nerror").matches.first { $0.fromBottom == 1 })
+        XCTAssertEqual(ScrollbackSearch.relocate(context: same.context, fromBottom: 1, of: "error", in: "error\nerror\nerror").fromBottom, 1)
+        // Gone: its old place.
+        XCTAssertEqual(ScrollbackSearch.relocate(context: picked.context, fromBottom: 3, of: "error", in: "error 7\nerror 8").fromBottom, 1)
+    }
+
     func testTheExcerptHighlightsTheMatchInALongLine() throws {
         // Longer than the excerpt, then longer than the bytes read for it.
         for (before, after) in [(100, 300), (100_000, 300_000)] {
@@ -54,6 +72,14 @@ final class ScrollbackSearchTests: XCTestCase {
             XCTAssertEqual(match.excerpt.count, ScrollbackSearch.excerptLength)
             XCTAssertEqual((match.excerpt as NSString).substring(with: match.highlight), "needle")
         }
+
+        // A cut never splits a character, however many bytes it holds.
+        let toned = "👍🏽"
+        let line = String(repeating: toned, count: 1_000) + "needle" + String(repeating: toned, count: 1_000)
+        let cut = try XCTUnwrap(search("needle", line).matches.first)
+        XCTAssertTrue(cut.excerpt.hasPrefix("…" + toned))
+        XCTAssertTrue(cut.excerpt.hasSuffix(toned + "…"))
+        XCTAssertEqual(Set(cut.excerpt.replacingOccurrences(of: "needle", with: "")), ["…", Character(toned)])
 
         // UTF-16 offsets, leading spaces dropped.
         let short = try XCTUnwrap(search("go", "   👍 go").matches.first)

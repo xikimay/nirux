@@ -138,25 +138,29 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         }
     }
 
-    /// The panel keeps no column alive: closing one after a search ends
-    /// its shell.
+    /// The panel keeps no column alive: closing one it searched, and found
+    /// matches in, ends its shell, even with the panel still open.
     func testSearchEverywhereLetsClosedColumnsGo() throws {
         try UIFlowHarness.run { harness in
             weak var closedShell: PtySession?
+            let needle = "flow-closing-needle"
             try {
                 harness.shell.addColumn()
                 let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
-                closedShell = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.pty)
+                let pty = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.pty)
+                closedShell = pty
+                harness.waitUntil("the terminal's surface") { pty.terminalSession.readViewportText() != nil }
+                pty.terminalSession.receive("\(needle)\r\n")
             }()
             harness.shell.showGlobalSearch()
             let panel = try XCTUnwrap(harness.shell.globalSearchPanel)
             let field = try XCTUnwrap(panel.searchField)
-            harness.type("needle", into: field)
-            harness.waitUntil("the search to end") { panel.statusLabel?.stringValue.hasPrefix("No matches") == true }
-            panel.dismiss()
+            harness.type(needle, into: field)
+            harness.waitUntil("the match") { !panel.isSearching && panel.rows.count == 1 }
 
             harness.shell.closeActiveColumn()
             harness.waitUntil("the closed column's shell to go") { closedShell == nil }
+            XCTAssertTrue(panel.isVisible)
         }
     }
 

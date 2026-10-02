@@ -5,42 +5,69 @@ import XCTest
 /// newer search silences the one it replaced.
 @MainActor
 final class GlobalTerminalSearchTests: XCTestCase {
+    /// What the callbacks saw: a main-actor object, not captured vars,
+    /// which Swift 6.1 won't let `@Sendable` closures mutate.
+    private final class Calls {
+        var matches: [(Int, [String])] = []
+        var done = 0
+    }
+
     func testMatchesArriveTerminalByTerminalThenTheSearchEnds() {
         let search = GlobalTerminalSearch()
-        var delivered: [(Int, [String])] = []
+        let calls = Calls()
         let done = expectation(description: "done")
         search.start(
             needle: "needle",
             readers: [{ "a needle" }, { nil }, { "nothing" }, { "needle\nneedle 2" }],
-            onMatches: { index, result in delivered.append((index, result.matches.map(\.excerpt))) },
+            onMatches: { index, result in calls.matches.append((index, result.matches.map(\.excerpt))) },
             onDone: { done.fulfill() }
         )
         XCTAssertTrue(search.isRunning)
         wait(for: [done], timeout: 5)
-        XCTAssertEqual(delivered.map(\.0), [0, 3])
-        XCTAssertEqual(delivered.map(\.1), [["a needle"], ["needle 2", "needle"]])
+        XCTAssertEqual(calls.matches.map(\.0), [0, 3])
+        XCTAssertEqual(calls.matches.map(\.1), [["a needle"], ["needle 2", "needle"]])
         XCTAssertFalse(search.isRunning)
     }
 
-    func testANewSearchSilencesTheOneItReplaced() {
+    func testASupersededOrCancelledSearchStaysSilent() {
         let search = GlobalTerminalSearch()
-        var stale = 0
+        let stale = Calls()
         // Its second terminal is read once the first one's match is on its
-        // way to the main queue, ahead of anything the next search sends.
-        let firstDelivered = DispatchSemaphore(value: 0)
-        search.start(
-            needle: "old",
-            readers: [{ "old" }, { firstDelivered.signal(); return nil }],
-            onMatches: { _, _ in stale += 1 },
-            onDone: { stale += 1 }
-        )
-        firstDelivered.wait()
+        // way to the main queue, ahead of anything sent after.
+        func startStaleSearch() {
+            let firstDelivered = DispatchSemaphore(value: 0)
+            search.start(
+                needle: "old",
+                readers: [{ "old" }, { firstDelivered.signal(); return nil }],
+                onMatches: { index, _ in stale.matches.append((index, [])) },
+                onDone: { stale.done += 1 }
+            )
+            firstDelivered.wait()
+        }
+
+        startStaleSearch()
+        let fresh = Calls()
         let done = expectation(description: "done")
-        var matches = 0
-        search.start(needle: "new", readers: [{ "new" }], onMatches: { _, _ in matches += 1 }, onDone: { done.fulfill() })
+        search.start(
+            needle: "new",
+            readers: [{ "new" }],
+            onMatches: { index, _ in fresh.matches.append((index, [])) },
+            onDone: { done.fulfill() }
+        )
         wait(for: [done], timeout: 5)
-        XCTAssertEqual(matches, 1)
-        XCTAssertEqual(stale, 0)
+        XCTAssertEqual(fresh.matches.count, 1)
+
+        startStaleSearch()
+        search.cancel()
+        XCTAssertFalse(search.isRunning)
+        // The search queue is serial: this answers after the cancelled
+        // scan's last word.
+        let drained = expectation(description: "drained")
+        let anyMatch = ScrollbackSearch.Match(line: 1, excerpt: "", highlight: NSRange(), fromBottom: 0, context: 0)
+        GlobalTerminalSearch.relocate(anyMatch, of: "old", read: { nil }) { _ in drained.fulfill() }
+        wait(for: [drained], timeout: 5)
+        XCTAssertTrue(stale.matches.isEmpty)
+        XCTAssertEqual(stale.done, 0)
     }
 
     func testTheStatusLineCountsMatchesAndTerminals() {

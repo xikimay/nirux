@@ -20,6 +20,9 @@ enum ScrollbackSearch {
         /// among those may select another match on screen; matches above
         /// the screen keep their order.
         let fromBottom: Int
+        /// The match and what surrounds it in its line, hashed: a pick
+        /// finds it again in text that changed since (`relocate`).
+        let context: Int
     }
 
     struct Result: Equatable, Sendable {
@@ -54,23 +57,55 @@ enum ScrollbackSearch {
                 line: line,
                 excerpt: excerpt,
                 highlight: highlight,
-                fromBottom: kept.count - 1 - offset
+                fromBottom: kept.count - 1 - offset,
+                context: context(at: start, length: pattern.count, in: haystack)
             ))
         }
         return Result(matches: matches.reversed(), total: starts.count)
     }
 
-    /// How many matches the text holds, as `search` counts them.
-    static func count(_ needle: String, in text: String) -> Int {
+    /// Where a match found earlier stands in `text`, which changed since:
+    /// output printed after it adds matches below it, and the scrollback
+    /// limit drops lines, matches with them, above it. Matches only move
+    /// up, so of the ones with its `context`, the first at or above its old
+    /// `fromBottom`, else the nearest below; when none is left, its old
+    /// place. With the text's match count.
+    static func relocate(
+        context: Int, fromBottom: Int, of needle: String, in text: String
+    ) -> (fromBottom: Int, total: Int) {
         let pattern = Self.pattern(needle)
-        return pattern.isEmpty ? 0 : matchStarts(of: pattern, in: normalized(text)).count
+        guard !pattern.isEmpty else { return (0, 0) }
+        let haystack = normalized(text)
+        let starts = matchStarts(of: pattern, in: haystack)
+        let total = starts.count
+        let old = min(max(fromBottom, 0), max(total - 1, 0))
+        let isIt = { (rank: Int) in Self.context(at: starts[total - 1 - rank], length: pattern.count, in: haystack) == context }
+        let found = (old..<total).first(where: isIt) ?? (0..<old).reversed().first(where: isIt)
+        return (found ?? old, total)
     }
 
     private static let newline = UInt8(ascii: "\n")
     private static let space = UInt8(ascii: " ")
+    /// Bytes of a match's line hashed on each side of it (`Match.context`).
+    private static let contextBytes = 128
+
+    private static func context(at start: Int, length: Int, in haystack: [UInt8]) -> Int {
+        let lower = max(0, start - contextBytes)
+        let upper = min(haystack.count, start + length + contextBytes)
+        let from = haystack[lower..<start].lastIndex(of: newline).map { $0 + 1 } ?? lower
+        let to = haystack[(start + length)..<upper].firstIndex(of: newline) ?? upper
+        var hasher = Hasher()
+        haystack[from..<to].withUnsafeBytes { hasher.combine(bytes: $0) }
+        hasher.combine(start - from)
+        return hasher.finalize()
+    }
 
     private static func pattern(_ needle: String) -> [UInt8] {
         Array(needle.utf8).map(lowercasedASCII)
+    }
+
+    private static func isContinuation(_ byte: UInt8) -> Bool {
+        byte & 0xC0 == 0x80
     }
 
     private static func lowercasedASCII(_ byte: UInt8) -> UInt8 {
@@ -120,12 +155,20 @@ enum ScrollbackSearch {
         let lineStart = haystack[leadWindow..<start].lastIndex(of: newline).map { $0 + 1 }
         let tailWindow = min(haystack.count, start + length + tailBytes)
         let lineEnd = haystack[start..<tailWindow].firstIndex(of: newline)
-        let end = lineEnd ?? tailWindow
+        let leadIsCut = lineStart == nil && leadWindow > 0
+        let tailIsCut = lineEnd == nil && tailWindow < haystack.count
+        // A cut window starts and ends on a code point, and the character
+        // it may have split (a modifier, a combining mark) goes.
+        var leadStart = lineStart ?? leadWindow
+        while leadIsCut, leadStart < start, isContinuation(haystack[leadStart]) { leadStart += 1 }
+        var end = lineEnd ?? tailWindow
+        while tailIsCut, end > start + length, isContinuation(haystack[end]) { end -= 1 }
         let matchEnd = min(start + length, end)
 
-        var lead = String(decoding: haystack[(lineStart ?? leadWindow)..<start], as: UTF8.self)
-        let leadIsCut = lineStart == nil && leadWindow > 0
-        if !leadIsCut {
+        var lead = String(decoding: haystack[leadStart..<start], as: UTF8.self)
+        if leadIsCut {
+            lead = String(lead.dropFirst())
+        } else {
             lead = String(lead.drop { $0 == " " })
         }
         if leadIsCut || lead.count > excerptLead {
@@ -133,8 +176,11 @@ enum ScrollbackSearch {
         }
         let found = String(decoding: haystack[start..<matchEnd], as: UTF8.self)
         var tail = String(decoding: haystack[matchEnd..<end], as: UTF8.self)
+        if tailIsCut {
+            tail = String(tail.dropLast())
+        }
         let room = max(0, excerptLength - lead.count - found.count)
-        if (lineEnd == nil && tailWindow < haystack.count) || tail.count > room {
+        if tailIsCut || tail.count > room {
             tail = tail.prefix(max(0, room - 1)) + "…"
         }
         let highlight = NSRange(location: (lead as NSString).length, length: (found as NSString).length)
