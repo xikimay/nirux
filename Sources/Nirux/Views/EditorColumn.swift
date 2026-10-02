@@ -588,6 +588,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                 guard self.diffLoadGeneration == generation else { return }
                 guard self.diffGroupTabs[groupPath] != nil else { return }
                 guard !files.isEmpty else {
+                    // Not left loading.
+                    self.close(path: groupPath)
                     self.showToast("Couldn’t read the changes of these files", tone: .error)
                     return
                 }
@@ -660,9 +662,12 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                 switch original {
                 case nil:
                     NSLog("%@", "[EditorColumn] no git \(mode.rawValue) content for \(path) — file untracked, git missing, or branch base unavailable")
-                    self.showToast("Nothing to compare: the file is untracked, or its base isn’t available")
+                    // Not asked again each time the tab comes back.
+                    self.diffModeByPath.removeValue(forKey: path)
+                    self.showToast(Self.noDiffOriginalText(path: path, cwd: cwd, mode: mode))
                 case .tooLarge(let byteCount):
                     NSLog("%@", "[EditorColumn] git \(mode.rawValue) original of \(path) too large to diff (\(byteCount) bytes)")
+                    self.diffModeByPath.removeValue(forKey: path)
                     self.showToast("This file is too large to compare")
                 case .text(let original):
                     self.diffActivePath = path
@@ -1049,6 +1054,12 @@ extension EditorColumn {
             // empty original gives Monaco the expected "whole file added" diff.
             return gitContent(relativePath: rel, ref: base, cwd: cwd, maxBytes: maxBytes) ?? .text("")
         }
+    }
+
+    /// Why `gitOriginalContent` found nothing to compare with.
+    private nonisolated static func noDiffOriginalText(path: String, cwd: String, mode: EditorDiffMode) -> String {
+        if relativeGitPath(of: path, cwd: cwd) == nil { return "This file is outside the workspace’s folder" }
+        return mode == .branch ? "No base branch to compare with" : "This file is no longer on disk"
     }
 
     private nonisolated static func relativeGitPath(of absPath: String, cwd: String) -> String? {

@@ -112,9 +112,8 @@ final class ToastView: NSView {
             x: labelX, y: ((bounds.height - labelHeight) / 2).rounded(),
             width: max(0, bounds.width - labelX - Style.paddingX), height: labelHeight
         )
-        layer?.shadowPath = CGPath(
-            roundedRect: bounds, cornerWidth: Style.height / 2, cornerHeight: Style.height / 2, transform: nil
-        )
+        let radius = min(bounds.width, bounds.height) / 2
+        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
     }
 }
 

@@ -52,7 +52,7 @@ extension NiruxShellView {
             openInEditorColumn(path: url.path)
         } catch {
             NiruxDebugLog.log("SpaceBrief: could not create the brief file: \(error)")
-            showToast("Couldn’t create the space’s brief: \(error.localizedDescription)", tone: .error)
+            showToast("Couldn’t create the space’s brief", tone: .error)
         }
     }
 

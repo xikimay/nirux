@@ -143,8 +143,9 @@ extension NiruxShellView {
 
     func addToMergeQueue(_ number: Int, board: ProjectBoardController) {
         if let busy = mergeQueueSelectionBusy { return showToast(busy) }
+        guard board.loaded != nil else { return showToast("The board is still loading") }
         guard let repository = board.repository?.gitHub else {
-            return showToast("This board’s repository isn’t on GitHub")
+            return showToast("The board has no GitHub repository: open Board Settings…")
         }
         mergeQueue(projectID: board.projectID).addToSelection(number, repository: repository)
     }
@@ -154,10 +155,11 @@ extension NiruxShellView {
         mergeQueue(projectID: board.projectID).removeFromSelection(number)
     }
 
-    /// Why the queue's selection can't change now, if it can't.
+    /// Why the queue's list can't change now, if it can't; as the board's
+    /// queue cells say it.
     private var mergeQueueSelectionBusy: String? {
         if mergeQueueQuit != nil { return "Nirux is stopping the merge queue to quit" }
-        if mergeQueueConfirmation != nil { return "Start or cancel the merge queue’s confirmation first" }
+        if mergeQueueConfirmation != nil { return "The confirmation sheet is open: change the list once it closes" }
         return nil
     }
 
@@ -188,10 +190,13 @@ extension NiruxShellView {
         guard mergeQueueQuit == nil else { return showToast("Nirux is stopping the merge queue to quit") }
         guard let loaded = board.loaded else { return showToast("The board is still loading") }
         guard let settings = loaded.queueSettings else {
-            return showToast(loaded.queueStartProblems.first ?? "The board isn’t configured yet: open Board Settings…")
+            let problem = loaded.queueStartProblems.first ?? "The board isn’t configured yet: open Board Settings…"
+            return showToast(problem.hasSuffix(".") ? String(problem.dropLast()) : problem)
         }
         guard !controller.isRunning else { return showToast("The merge queue is already running") }
-        guard !controller.runsElsewhere else { return showToast("Another Nirux runs this merge queue") }
+        guard !controller.runsElsewhere else {
+            return showToast("Another Nirux runs this project’s queue: wait until it ends")
+        }
         let numbers = controller.selection(for: settings.gitHubRepository)
         guard !numbers.isEmpty else { return showToast("Add pull requests to the queue first") }
         let panel = MergeQueueConfirmationPanel(

@@ -437,10 +437,11 @@ final class EditorFileTree: NSView {
         let parent = parentDir(for: sender.representedObject as? FileNode)
         guard let name = promptForName(title: "New Folder", initial: "") else { return }
         let target = parent.appendingPathComponent(name)
+        guard !FileManager.default.fileExists(atPath: target.path) else { return fail("“\(name)” already exists") }
         do {
             try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
         } catch {
-            fail("Couldn’t create the folder: \(error.localizedDescription)")
+            fail("Couldn’t create “\(name)”", error: error)
             return
         }
         reload()
@@ -452,10 +453,11 @@ final class EditorFileTree: NSView {
               newName != node.name
         else { return }
         let target = node.url.deletingLastPathComponent().appendingPathComponent(newName)
+        guard !FileManager.default.fileExists(atPath: target.path) else { return fail("“\(newName)” already exists") }
         do {
             try FileManager.default.moveItem(at: node.url, to: target)
         } catch {
-            fail("Couldn’t rename: \(error.localizedDescription)")
+            fail("Couldn’t rename “\(node.name)”", error: error)
             return
         }
         reload()
@@ -473,7 +475,7 @@ final class EditorFileTree: NSView {
         do {
             try FileManager.default.trashItem(at: node.url, resultingItemURL: nil)
         } catch {
-            fail("Couldn’t move to the Trash: \(error.localizedDescription)")
+            fail("Couldn’t move “\(node.name)” to the Trash", error: error)
             return
         }
         reload()
@@ -493,9 +495,10 @@ final class EditorFileTree: NSView {
         pb.setString(string, forType: .string)
     }
 
-    private func fail(_ message: String) {
+    /// The toast stays short; the log has the error.
+    private func fail(_ message: String, error: Error? = nil) {
         showToast(message, tone: .error)
-        NSLog("[EditorFileTree] %@", message)
+        NSLog("[EditorFileTree] %@%@", message, error.map { ": \($0.localizedDescription)" } ?? "")
     }
 
     private nonisolated static func loadGitChanges(cwd: String) -> [GitChange] {

@@ -202,8 +202,9 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             shell.addWorkspace(title: "home", cwd: harness.home)
             for command in ["Open Worktree", "New Worktree"] {
                 shell.dismissToast()
+                harness.waitUntil("no toast") { shell.toast == nil }
                 harness.runPaletteCommand(command)
-                XCTAssertEqual(shell.toast?.message, "This workspace isn’t in a git repository", command)
+                XCTAssertEqual(shell.toast?.message, "Not in a git repository: \(harness.home.abbreviatedPath())", command)
             }
             shell.focusWorkspace(id: repoWorkspace.id)
 

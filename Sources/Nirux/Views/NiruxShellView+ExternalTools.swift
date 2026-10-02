@@ -150,7 +150,7 @@ extension NiruxShellView {
         PRDetect.diffPathsAsync(cwd: cwd) { [weak self, weak workspace] paths in
             guard let self, let workspace else { return }
             guard !paths.isEmpty else {
-                self.showToast("No uncommitted changes")
+                self.showToast("No unstaged changes")
                 return
             }
 

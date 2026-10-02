@@ -133,8 +133,9 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         defer { updateSidebar(snapshot: snapshot) }
         guard workspaces.indices.contains(workspaceIndex),
-              let pty = workspaces[workspaceIndex].columns[safe: columnIndex]?.pty
+              let column = workspaces[workspaceIndex].columns[safe: columnIndex]
         else { return showToast("That agent’s column was closed") }
+        guard let pty = column.pty else { return showToast("That column has no terminal") }
         let refusal = pty.agentTurnFailure?.failedAt == failedAt
             ? pty.resumeFailedTurn(snapshot: snapshot, now: Date().timeIntervalSince1970)
             : .notStopped
@@ -147,9 +148,9 @@ extension NiruxShellView {
         case .notStopped: "The agent is no longer stopped on that error"
         case .notClaude: "That Claude session is no longer running"
         case .notAtPrompt: "Claude isn’t back at its prompt yet"
-        case .userTyped: "There’s a draft at Claude’s prompt: send continue yourself"
+        case .userTyped: "There’s a draft at Claude’s prompt: send “continue” yourself"
         case .needsFix: "This error needs your fix first: see the terminal"
-        case .alreadySent: "continue was just sent"
+        case .alreadySent: "“continue” was just sent"
         }
     }
 

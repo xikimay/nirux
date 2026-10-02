@@ -587,7 +587,7 @@ extension NiruxShellView {
         guard let window else { return }
         guard let cwd = activeWorkspace?.focusedWorkingDirectory,
               let repoRoot = GitWorktree.repoRoot(at: cwd)
-        else { return showToast("This workspace isn’t in a git repository") }
+        else { return showToast("Not in a git repository: \(activeWorkspace?.focusedWorkingDirectory.abbreviatedPath() ?? "")") }
 
         if worktreePanel == nil {
             worktreePanel = WorktreePanel()
@@ -647,7 +647,7 @@ extension NiruxShellView {
         guard let window else { return }
         guard let cwd = activeWorkspace?.focusedWorkingDirectory,
               let repoRoot = GitWorktree.repoRoot(at: cwd)
-        else { return showToast("This workspace isn’t in a git repository") }
+        else { return showToast("Not in a git repository: \(activeWorkspace?.focusedWorkingDirectory.abbreviatedPath() ?? "")") }
         // Not the active one: its folder is where it was opened, not where
         // its terminal is now, and going back to it would do nothing.
         let openWorkspaces = workspaces.filter { !$0.isClosing && $0 !== activeWorkspace }.map { (id: $0.id, cwd: $0.cwd) }
@@ -669,7 +669,7 @@ extension NiruxShellView {
                 guard let self else { return }
                 // Leave out the checkout the palette was opened from
                 let entries = zip(worktrees, comparablePaths).filter { _, path in path != current }
-                guard !entries.isEmpty else { return self.showToast("This repository has no other worktree") }
+                guard !entries.isEmpty else { return self.showToast("No other worktree found in this repository") }
 
                 // Build palette actions from worktree entries
                 let actions = entries.map { entry, comparablePath in

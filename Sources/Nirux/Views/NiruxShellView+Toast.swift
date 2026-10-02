@@ -13,8 +13,9 @@ extension NiruxShellView {
     func presentToast(_ message: String, tone: ToastView.Tone, duration: TimeInterval? = nil) {
         toastGeneration += 1
         let generation = toastGeneration
-        // A new one, or one fading out, comes in; one on screen changes text.
-        let comesIn = toast == nil || toast?.alphaValue == 0
+        // A new one, one fading out or the same message again comes in;
+        // another message on screen just replaces the text.
+        let comesIn = toast == nil || toast?.alphaValue == 0 || toast?.message == message
         let toast = toast ?? ToastView()
         self.toast = toast
         toast.show(message, tone: tone)
@@ -22,10 +23,11 @@ extension NiruxShellView {
         addSubview(toast, positioned: .above, relativeTo: nil)
         layoutToast()
         if comesIn { animateToast(toast, appearing: true) }
+        let priority: NSAccessibilityPriorityLevel = tone == .error ? .high : .medium
         NSAccessibility.post(
-            element: toast,
+            element: window ?? toast,
             notification: .announcementRequested,
-            userInfo: [.announcement: message, .priority: NSAccessibilityPriorityLevel.high.rawValue]
+            userInfo: [.announcement: message, .priority: priority.rawValue]
         )
         let delay = duration ?? Self.toastDuration(for: message, tone: tone)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
@@ -34,6 +36,9 @@ extension NiruxShellView {
         }
     }
 
+    /// After its time, and on the next key or click in the window
+    /// (NiruxApp's interceptors, which see the keys a terminal consumes):
+    /// it sits over the bottom of the columns, an agent's prompt.
     func dismissToast() {
         guard let toast else { return }
         toastGeneration += 1

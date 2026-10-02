@@ -269,11 +269,14 @@ extension NiruxShellView {
         }
         guard result == .alertFirstButtonReturn else { return }
 
-        guard let accepted = MissionStore.shared.respond(
-            to: questionID,
-            message: input.stringValue,
-            enabled: Self.currentMissionHandoffsEnabled()
-        ) else {
+        let reply = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reply.isEmpty else { return showToast("Type a reply first") }
+        guard reply.count <= MissionEventCLI.maxMessageLength else {
+            return showToast("Replies are limited to \(MissionEventCLI.maxMessageLength) characters")
+        }
+        let enabled = Self.currentMissionHandoffsEnabled()
+        guard enabled else { return showToast("Mission handoffs are off in Settings") }
+        guard let accepted = MissionStore.shared.respond(to: questionID, message: input.stringValue, enabled: enabled) else {
             showToast("Couldn’t send the reply: the mission may have ended or been answered", tone: .error)
             return
         }
