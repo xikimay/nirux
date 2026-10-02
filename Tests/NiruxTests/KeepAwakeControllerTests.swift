@@ -422,6 +422,38 @@ final class KeepAwakeShellTests: XCTestCase {
         }
     }
 
+    /// A Claude turn interrupted with Esc stays "working", with no hook to
+    /// end it. Once it has been silent past the timeout the poll has nothing
+    /// left to re-read, and must still let the controller drop it, or the
+    /// Mac stays awake until Nirux comes back to the front.
+    func testPollReleasesATurnGoneSilentInTheBackground() throws {
+        try withShell { shell in
+            let assertions = FakeSleepAssertions()
+            let clock = ManualSchedule()
+            let controller = KeepAwakeController(enabled: true, assertions: assertions, schedule: clock.schedule)
+            shell.keepAwake = controller
+            let pty = try XCTUnwrap(shell.workspaces.first?.columns.first?.pty)
+            _ = pty.applyAgentHook(
+                AgentHookEvent(
+                    kind: .claude, name: .userPromptSubmit,
+                    timestamp: Date().timeIntervalSince1970 - KeepAwakeController.activityTimeout - 1
+                ),
+                isUserFocused: false
+            )
+            XCTAssertEqual(pty.cachedAgentState, .working)
+            XCTAssertFalse(NiruxShellView.needsBackgroundRefresh(pty))
+            // What the controller saw while the turn still counted.
+            controller.update(workingAgentCount: 1)
+            XCTAssertTrue(controller.isActive)
+
+            shell.lastMetadataRefreshAt = ProcessInfo.processInfo.systemUptime - NiruxShellView.heartbeatStaleAfter - 1
+            shell.refreshAgentStatusInBackground()
+            clock.advance(by: KeepAwakeController.gracePeriod)
+            XCTAssertFalse(controller.isActive)
+            XCTAssertTrue(assertions.held.isEmpty)
+        }
+    }
+
     /// Through the shell's count: a "working" column silent for longer
     /// than the timeout (a Claude turn interrupted with Esc) is dropped.
     func testShellCountDropsSilentWorkingColumns() {
