@@ -96,6 +96,7 @@ extension NiruxShellView {
                 )
             }
         }
+        closeEndedAgentSessions(now: now)
     }
 
     /// What the column's row shows of a stuck agent.

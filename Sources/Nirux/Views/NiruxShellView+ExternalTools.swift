@@ -70,11 +70,15 @@ extension NiruxShellView {
     /// they deliberately never guess with `resume --last`.
     /// `handoverPrompt` is appended as a single-quoted positional prompt
     /// (used by the worktree handover flow).
+    /// `workingDirectory` (`-C`) resumes a thread in that folder rather than
+    /// asking whether to use the one it recorded (see AgentSessionResume).
+    /// It follows the ID, which restore proves by its position.
     ///
     /// `command` prefix mirrors `claudeCommand` so any user alias on `codex`
     /// can't override the launch flags Nirux selected.
     static func codexCommand(
         resume: AgentResumeTarget? = nil,
+        workingDirectory: String? = nil,
         mode: CodexLaunchMode,
         briefFile: String? = nil,
         shell: String = PtySession.defaultShell,
@@ -85,6 +89,9 @@ extension NiruxShellView {
             parts.append("resume")
             if case .session(let sessionID) = resume {
                 parts.append(Self.shellQuotedArgument(sessionID))
+            }
+            if let workingDirectory {
+                parts.append(contentsOf: ["-C", Self.shellQuotedArgument(workingDirectory)])
             }
         }
         parts.append(contentsOf: mode.cliArgs)

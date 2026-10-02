@@ -397,6 +397,11 @@ final class ColumnState {
         codexSessionTracker.sessionID(for: foregroundProcess)
     }
 
+    /// The Codex thread this column's `codex` process proved it runs.
+    func boundCodexSessionID(of process: ProcessInstance) -> String? {
+        codexSessionTracker.boundSessionID(for: process)
+    }
+
     func prepareClaudeResume(sessionID: String) {
         claudeSessionTracker.prepareResume(sessionID: sessionID)
     }
@@ -433,9 +438,11 @@ final class ColumnState {
         return admission
     }
 
-    /// Whether the sidebar may answer this PermissionRequest (#23, #28):
-    /// fired by the column's own `claude` for the session bound to it.
-    func isApprovalEligible(
+    /// Whether the event was fired by the column's own `claude` (or the real
+    /// one under its launcher) for the session it confirmed (#23, #28): the
+    /// sidebar may answer its PermissionRequest, and the session history
+    /// may record it.
+    func isFromOwnClaude(
         _ event: AgentHookEvent,
         foregroundProcess: ForegroundProcess?,
         snapshot: ProcessSnapshot
