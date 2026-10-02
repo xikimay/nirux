@@ -25,6 +25,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var telegramRemoteAccessController: TelegramRemoteAccessController?
     var keepAwakeController: KeepAwakeController?
     var keepAwakeIndicator: KeepAwakeIndicator?
+    var awsSSOMonitor: AWSSSOMonitor?
     /// Keychain access used by the Settings panel; tests stub it.
     var telegramTokenLoader: () throws -> String? = { try TelegramTokenStore.load() }
     var telegramTokenSaver: (String) throws -> Void = { try TelegramTokenStore.save($0) }
@@ -94,6 +95,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         window.contentView = shellView
         shell = shellView
         setUpKeepAwake(window: window, shell: shellView)
+        awsSSOMonitor = AWSSSOMonitor.start(window: window)
         setupStatusBarNotices()
 
         // Native notifications: click focuses the originating workspace/column.
