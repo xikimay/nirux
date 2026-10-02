@@ -127,6 +127,7 @@ enum GitWorktree {
             }
             let existing = worktrees[index].path
             if let reusable = reusableWorktree(existing, branch: branch, requester: repoRoot, worktrees: worktrees) {
+                excludeHandoverFiles(repoRoot: repoRoot)
                 return (reusable, nil)
             }
             if FileManager.default.fileExists(atPath: existing) {
@@ -165,10 +166,36 @@ enum GitWorktree {
 
         let result = gitRunFull(args, cwd: repoRoot)
         if result.status == 0 {
+            excludeHandoverFiles(repoRoot: repoRoot)
             return (worktreePath, nil)
         } else {
             let msg = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             return (nil, msg.isEmpty ? "git worktree add failed" : msg)
+        }
+    }
+
+    /// Handover files stay untracked in every worktree, where a `git add -A`
+    /// would commit them. `info/exclude` sits in the common dir, so one
+    /// write covers every worktree of the repository without changing it.
+    /// A failure only means they stay visible: the worktree is still usable.
+    private static func excludeHandoverFiles(repoRoot: String) {
+        let names = [".claude-handover.md", ".codex-handover.md"]
+        guard let commonDir = absoluteGitPaths(["--git-common-dir"], in: repoRoot)?.first else {
+            NSLog("[Worktree] Couldn't find the git common dir of \(repoRoot)")
+            return
+        }
+        let exclude = commonDir + "/info/exclude"
+        let existing = (try? String(contentsOfFile: exclude, encoding: .utf8)) ?? ""
+        let lines = Set(existing.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) })
+        let missing = names.filter { !lines.contains($0) }
+        guard !missing.isEmpty else { return }
+        let separator = existing.isEmpty || existing.hasSuffix("\n") ? "" : "\n"
+        do {
+            try FileManager.default.createDirectory(atPath: commonDir + "/info", withIntermediateDirectories: true)
+            try (existing + separator + missing.joined(separator: "\n") + "\n")
+                .write(toFile: exclude, atomically: true, encoding: .utf8)
+        } catch {
+            NSLog("[Worktree] Couldn't add handover files to \(exclude): \(error.localizedDescription)")
         }
     }
 

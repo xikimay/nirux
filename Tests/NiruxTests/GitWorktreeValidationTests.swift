@@ -71,6 +71,30 @@ final class GitWorktreeValidationTests: XCTestCase {
         XCTAssertEqual(reused.path, root + "/repo.feat-x")
     }
 
+    func testNewWorktreeIgnoresHandoverFiles() throws {
+        // A repository whose template left no info/ folder.
+        try FileManager.default.removeItem(atPath: repo + "/.git/info")
+
+        let created = try XCTUnwrap(GitWorktree.create(branch: "feat/x", repoRoot: repo).path)
+        try git(["check-ignore", "-q", ".claude-handover.md"], at: created)
+        try git(["check-ignore", "-q", ".codex-handover.md"], at: created)
+        try git(["check-ignore", "-q", ".claude-handover.md"], at: repo)
+    }
+
+    func testHandoverExcludeKeepsExistingPatternsAndAddsEachNameOnce() throws {
+        let exclude = repo + "/.git/info/exclude"
+        try "# mine\n*.log".write(toFile: exclude, atomically: true, encoding: .utf8)
+
+        let linked = try XCTUnwrap(GitWorktree.create(branch: "feat/x", repoRoot: repo).path)
+        XCTAssertNil(GitWorktree.create(branch: "feat/x", repoRoot: repo).error)
+        XCTAssertNil(GitWorktree.create(branch: "feat/y", repoRoot: linked).error)
+
+        XCTAssertEqual(
+            try String(contentsOfFile: exclude, encoding: .utf8),
+            "# mine\n*.log\n.claude-handover.md\n.codex-handover.md\n"
+        )
+    }
+
     func testRefusesToReuseDirectoryThatIsNotAWorktree() throws {
         let squatter = root + "/repo.feat-x"
         try FileManager.default.createDirectory(atPath: squatter, withIntermediateDirectories: true)
