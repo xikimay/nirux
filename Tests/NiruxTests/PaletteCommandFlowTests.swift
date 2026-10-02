@@ -504,11 +504,12 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             let app = NiruxApp()
             app.telegramTokenLoader = { nil }
             app.telegramTokenSaver = { _ in XCTFail("Unexpected Keychain write") }
+            app.claudeStatusLineStateReader = { .none }
             let previousDelegate = NSApp.delegate
             NSApp.delegate = app
             harness.runPaletteCommand("Open Settings")
             NSApp.delegate = previousDelegate
-            let settings = try XCTUnwrap(app.settingsPanel)
+            let settings = try XCTUnwrap(app.settingsWindow)
             XCTAssertTrue(settings.isVisible)
             settings.orderOut(nil)
             settings.close()

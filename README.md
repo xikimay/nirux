@@ -132,7 +132,7 @@ Useful shortcuts:
 | `Ctrl+Cmd+S` | Toggle sidebar |
 | `Ctrl+Cmd+F` | Enter or exit full screen |
 | `Cmd+M` | Minimize the window |
-| `Cmd+,` | Settings |
+| `Cmd+,` | Settings (General, Agents, Notifications, Experimental, Telegram); a change applies at once |
 | `Cmd+Z` / `Shift+Cmd+Z` | Undo / redo in the editor and in panel text fields (palette, rename, settings) |
 | `Shift+Cmd+F` | Search workspace |
 | `Alt+Cmd+F` | Search Everywhere: text in the scrollback of every terminal, across workspaces and projects; picking a match opens its terminal's find bar on it. A full-screen program (vim, less, Claude Code in its no-flicker mode) shows no scrollback: only its screen is searched |
@@ -183,7 +183,7 @@ Claude Code picks a 200k or 1M window depending on the model variant, the accoun
 
 ### Claude plan usage limits
 
-With **Settings → Claude Code → Show plan usage limits in the title bar** on (off by default), the right end of the window's title bar shows how much of the Claude plan's 5-hour window and weekly limit is used, as `5h 42% · 7d 18%`, turning orange from 80% of either. Hover it for each reset time and when the numbers were last reported. A window drops out once it resets, until a session reports the next one.
+With **Settings → Agents → Claude Code → Show plan usage limits in the title bar** on (off by default), the right end of the window's title bar shows how much of the Claude plan's 5-hour window and weekly limit is used, as `5h 42% · 7d 18%`, turning orange from 80% of either. Hover it for each reset time and when the numbers were last reported. A window drops out once it resets, until a session reports the next one.
 
 Claude Code hands these numbers to one documented place only: the JSON its status line command receives (`rate_limits`, Claude Code 2.1.80 or later, Pro and Max plans, after a session's first response). Hooks don't carry them, `/usage` has no non-interactive form, and nothing under `~/.claude` stores them; Nirux calls no claude.ai endpoint. So turning the option on makes Nirux Claude Code's status line: `~/.claude/settings.json` gains a `statusLine` running `Nirux --hook claude --statusline`, guarded on `NIRUX_AGENT_UUID` like the [hooks](#agent-status-hooks). In a Nirux terminal it records the limits in `claude-usage-limits.json` in the state directory and prints nothing; elsewhere it stops at the shell test. The status line stays blank either way, but Claude Code hides its `? for shortcuts` hint whenever a status line is set, in every session. Turning the option off takes the entry back.
 
@@ -196,7 +196,7 @@ Telegram Remote Access is disabled by default. It uses outbound Bot API `getUpda
 Set it up with a dedicated bot:
 
 1. Create a bot with Telegram's `@BotFather` and copy its token.
-2. Open **Nirux → Settings**, enable **Telegram Remote Access**, paste the token, choose the notification preferences, and click **Generate Pairing Code**.
+2. Open **Nirux → Settings → Telegram**, paste the token and press Return (or **Save Token**), enable **Telegram Remote Access**, and click **Generate Pairing Code**. Completion and attention alerts are chosen under **Settings → Notifications**.
 3. Open a private chat with that bot and send `/pair CODE` using the one-time code shown in Settings. Codes expire after 10 minutes.
 4. Send `/sessions`, choose a live agent, then send ordinary text as a prompt. You can also reply directly to a recent completion or attention notification; if its route has expired, use `/sessions` to select the agent again.
 

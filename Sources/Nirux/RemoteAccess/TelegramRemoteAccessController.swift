@@ -75,8 +75,8 @@ final class TelegramRemoteAccessController {
     private var hasToken = false
     private var pairedUserID: Int64?
     private var pairedChatID: Int64?
-    private var notifyOnCompletion = true
-    private var notifyOnAttention = true
+    private(set) var notifyOnCompletion = true
+    private(set) var notifyOnAttention = true
     private var pairingCode: String?
     private var pairingExpiresAt: Date?
     private var pairingFailuresByUser: [Int64: Int] = [:]
