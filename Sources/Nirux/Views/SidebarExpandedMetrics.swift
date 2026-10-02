@@ -106,6 +106,9 @@ enum SidebarExpandedMetrics {
             if let reviewDecision = workspace.prInfo?.reviewDecision, !reviewDecision.isEmpty {
                 height += prDetailAdvance
             }
+            if workspace.prFeedback?.summary != nil {
+                height += prDetailAdvance
+            }
         }
         height += columnGap + CGFloat(workspace.columns.count) * columnRowAdvance
         height += workspace.columns.reduce(CGFloat(0)) {

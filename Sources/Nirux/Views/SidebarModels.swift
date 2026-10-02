@@ -204,6 +204,7 @@ struct WorkspaceInfo: Hashable {
     let isActive: Bool
     let columns: [ColumnInfo]
     let prInfo: PRInfo?
+    var prFeedback: PRFeedback?
     let diffStats: String?
     let purpose: String?
     let nextStep: String?

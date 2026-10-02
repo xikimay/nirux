@@ -55,7 +55,8 @@ extension NiruxShellView {
                           columnCount: workspace.columns.count,
                           focusedColumn: workspace.focusedIndex,
                           gitBranch: workspace.gitBranch, hasNotification: workspace.hasNotification, isActive: index == activeWSIndex,
-                          columns: colInfos, prInfo: workspace.prInfo, diffStats: workspace.diffStats,
+                          columns: colInfos, prInfo: workspace.prInfo, prFeedback: workspace.prFeedback,
+                          diffStats: workspace.diffStats,
                           purpose: workspace.purpose, nextStep: workspace.nextStep,
                           blocker: workspace.blocker, phase: workspace.effectivePhase,
                           lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt)
@@ -589,11 +590,15 @@ extension NiruxShellView {
                         workspace.finishPullRequestObservation(observation)
                         return
                     }
-                    guard workspace.applyPullRequestInfo(
+                    let changed = workspace.applyPullRequestInfo(
                         info,
                         for: queriedContext,
                         observation: observation
-                    ) else { return }
+                    )
+                    // Every read of an open PR, changed or not: feedback
+                    // moves without the PR's own fields moving.
+                    if let info, workspace.prInfo == info { self?.refreshPRFeedback(for: workspace) }
+                    guard changed else { return }
                     self?.scheduleMetadataRefresh()
                 }
             }

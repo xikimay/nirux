@@ -78,7 +78,12 @@ final class WorkspaceState {
         )
     }
     var hasNotification: Bool = false
-    var prInfo: PRInfo?
+    var prInfo: PRInfo? {
+        didSet { if prInfo?.url != oldValue?.url || prInfo?.state != "OPEN" { prFeedback = nil } }
+    }
+    /// The open PR's feedback (docs/pr-feedback-inbox.md), read after each
+    /// PR refresh. Cleared when the PR changes or stops being open.
+    var prFeedback: PRFeedback?
     var diffStats: String?
 
     // Workspace context. Purpose/next step/blocker are always human-owned.

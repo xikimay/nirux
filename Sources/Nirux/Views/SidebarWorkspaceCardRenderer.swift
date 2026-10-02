@@ -386,6 +386,21 @@ final class SidebarWorkspaceCardRenderer {
         currentY = buildPRStateLabel(prInfo: prInfo, padding: padding, yOffset: currentY)
         currentY = buildCIStatusLabel(prInfo: prInfo, padding: padding, indent: indent, yOffset: currentY)
         currentY = buildReviewDecisionLabel(prInfo: prInfo, padding: padding, indent: indent, yOffset: currentY)
+        if let text = workspace.prFeedback?.summary {
+            let label = textLabel(text, font: .monospacedSystemFont(ofSize: 9, weight: .regular), color: .secondaryLabelColor)
+            label.frame = NSRect(
+                x: padding + indent,
+                y: currentY - SidebarExpandedMetrics.prDetailHeight,
+                width: sidebarWidth - padding * 2 - indent,
+                height: SidebarExpandedMetrics.prDetailHeight
+            )
+            append(label)
+            hitAreas.append(SidebarHitArea(
+                frame: label.frame,
+                region: .link(url: SidebarView.prFeedbackActionURL(workspaceIndex: workspace.index), label: label)
+            ))
+            currentY -= SidebarExpandedMetrics.prDetailAdvance
+        }
         return currentY
     }
 
