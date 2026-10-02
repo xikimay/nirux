@@ -163,6 +163,7 @@ extension NiruxShellView {
         foregroundProcesses: [ObjectIdentifier: ForegroundProcess]? = nil
     ) {
         let inFront = isInFront
+        refreshMergeQueuesElsewhere()
         for location in projectBoardLocations where isProjectBoardShown(location) {
             location.board.tick(onScreen: inFront)
             renderProjectBoard(location.board, snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)

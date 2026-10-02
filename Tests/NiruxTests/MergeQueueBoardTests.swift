@@ -433,6 +433,54 @@ final class MergeQueueBoardTests: XCTestCase {
         var value: MergeQueue.ConfirmationReading?
     }
 
+    @MainActor
+    func testAClosedSheetStopsItsReadsAndHearsNoAnswer() {
+        let cancelled = MergeQueueReadCancellation()
+        cancelled.cancel()
+        let client = FakeQueueClient(isDryRun: true)
+        _ = MergeQueueController.fetchConfirmation(
+            settings: MQ.settings(), numbers: [1, 2], isDryRun: true, client: client, folders: [],
+            inspect: { _, _, _, _, _ in .success(MergeQueue.LocalInspection()) }, cancellation: cancelled
+        )
+        XCTAssertEqual(client.reads, [], "nothing is read for a sheet already closed")
+
+        var world = MQ.World()
+        world.pullRequests[1] = MQ.pullRequest(1, head: MQ.sha("a"))
+        let queue = controller(FakeQueueClient(world: world, isDryRun: true))
+        let answered = ReadingBox()
+        let reading = queue.readConfirmation(settings: MQ.settings(), numbers: [1]) { answered.value = $0 }
+        reading.cancel()
+        MergeQueueController.waitForFiles()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertNil(answered.value, "a closed sheet hears no answer")
+    }
+
+    @MainActor
+    func testAQueueChangeThatLeavesTheCellsAloneKeepsTheRows() throws {
+        let view = ProjectBoardView(frame: NSRect(x: 0, y: 0, width: 1000, height: 600))
+        var queue = ProjectBoard.QueueState(isDryRun: false)
+        queue.run = .running(isStopping: false)
+        queue.status = "#1 checking, 1 of 1"
+        queue.entries = [entry(1, .preflight)]
+        queue.selection = [1]
+        var content = ProjectBoardView.Content(
+            header: ProjectBoardView.Header(projectName: "Board", projectID: "board"),
+            body: .rows([row(1), row(2)]), requiredChecks: ["test"], baseBranch: "main", queue: queue
+        )
+        view.show(content)
+        let first = try XCTUnwrap(view.rowViews.first?.queue)
+        XCTAssertEqual(first.stringValue, "1 of 1 · checking")
+
+        content.queue?.status = "#1 checking, 1 of 1 (paused by GitHub’s rate limit)"
+        view.show(content)
+        XCTAssertTrue(view.rowViews.first?.queue === first, "only the header changed: the rows stay")
+        XCTAssertEqual(view.queueLabel.stringValue, "Queue: #1 checking, 1 of 1 (paused by GitHub’s rate limit)")
+
+        content.queue?.entries = [entry(1, .waitingForChecks(MQ.sha("a")))]
+        view.show(content)
+        XCTAssertEqual(view.rowViews.first?.queue.stringValue, "1 of 1 · waiting for checks", "a changed cell redraws")
+    }
+
     // MARK: - The details read
 
     func testTheDetailsQueryReadsTheTitleAndFilesAndFailsClosed() throws {

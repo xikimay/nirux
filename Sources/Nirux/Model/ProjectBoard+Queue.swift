@@ -49,10 +49,15 @@ extension ProjectBoard {
     /// checks the rest (section 4). Nil: it can.
     static func queueRefusal(_ row: Row, baseBranch: String?) -> String? {
         guard let pullRequest = row.pullRequest else { return "no pull request" }
-        guard pullRequest.isOpen else { return pullRequest.state.lowercased() }
-        if pullRequest.isDraft { return "draft" }
-        if let base = pullRequest.baseRefName, let baseBranch, base != baseBranch { return "targets \(base)" }
-        if pullRequest.isConflicting { return "conflict" }
+        switch MergeQueue.openExclusion(state: pullRequest.state, isDraft: pullRequest.isDraft,
+                                        baseRefName: pullRequest.baseRefName, mergeable: pullRequest.mergeable,
+                                        baseBranch: baseBranch) {
+        case .notOpen(let state)?: return state
+        case .draft?: return "draft"
+        case .otherBase(let base)?: return "targets \(base)"
+        case .conflict?: return "conflict"
+        case nil: break
+        }
         if let busy = MergeQueue.busyLabel(row.agent.state) { return "agent \(busy)" }
         return nil
     }

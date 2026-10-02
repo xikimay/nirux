@@ -135,7 +135,7 @@ extension MergeQueue {
     /// draft, another base, a fork, auto-merge or GitHub's merge queue, a
     /// conflict, a busy agent, tracked changes or unpushed commits in its
     /// worktree, or anything Nirux couldn't read.
-    static func confirmation(_ reading: ConfirmationReading) -> Confirmation {
+    static func confirmation(_ reading: ConfirmationReading, now: Date = Date()) -> Confirmation {
         let settings = reading.settings
         var items: [Confirmation.Item] = []
         var excluded: [Confirmation.Excluded] = []
@@ -154,9 +154,11 @@ extension MergeQueue {
             if let limit = reading.rateLimit {
                 let remaining = min(limit.coreRemaining, limit.graphQLRemaining)
                 if remaining < Limits.minimumRateLimit {
-                    let reset = limit.coreRemaining < limit.graphQLRemaining ? limit.coreReset : limit.graphQLReset
+                    // Start works again once every pool short of requests has reset.
+                    let reset = [(limit.coreRemaining, limit.coreReset), (limit.graphQLRemaining, limit.graphQLReset)]
+                        .filter { $0.0 < Limits.minimumRateLimit }.map(\.1).max() ?? limit.coreReset
                     refusals.append("Only \(remaining) GitHub request\(remaining == 1 ? " is" : "s are") left until "
-                        + "\(ProjectBoard.clockTime(reset, now: reset)) (REST \(limit.coreRemaining), GraphQL "
+                        + "\(ProjectBoard.clockTime(reset, now: now)) (REST \(limit.coreRemaining), GraphQL "
                         + "\(limit.graphQLRemaining)): the queue needs \(Limits.minimumRateLimit) in each.")
                 }
             }
@@ -271,10 +273,13 @@ extension MergeQueue {
 
     /// Why the queue would stop on this pull request at once.
     static func exclusionReason(_ pullRequest: PullRequestSnapshot, settings: BoardConfig.QueueSettings) -> String? {
-        if !pullRequest.isOpen { return "It is \(pullRequest.state.lowercased())." }
-        if pullRequest.isDraft { return "It is a draft." }
-        if pullRequest.baseRefName != settings.baseBranch {
-            return "It targets \(pullRequest.baseRefName), not \(settings.baseBranch)."
+        switch openExclusion(state: pullRequest.state, isDraft: pullRequest.isDraft, baseRefName: pullRequest.baseRefName,
+                             mergeable: pullRequest.mergeable, baseBranch: settings.baseBranch) {
+        case .notOpen(let state)?: return "It is \(state)."
+        case .draft?: return "It is a draft."
+        case .otherBase(let base)?: return "It targets \(base), not \(settings.baseBranch)."
+        case .conflict?: return "It conflicts with \(settings.baseBranch): resolve that first."
+        case nil: break
         }
         if pullRequest.headRepository != settings.gitHubRepository {
             return "It comes from a fork: the queue only merges branches of \(settings.repository)."
@@ -283,7 +288,26 @@ extension MergeQueue {
             return "It is set to auto-merge: disable that first (gh pr merge \(pullRequest.number) --disable-auto)."
         }
         if pullRequest.isInMergeQueue { return "It is in GitHub’s merge queue: remove it from there first." }
-        if pullRequest.mergeable == "CONFLICTING" { return "It conflicts with \(settings.baseBranch): resolve that first." }
+        return nil
+    }
+
+    /// What keeps a pull request out that the board knows too, from its
+    /// `gh pr list` row: the board's Queue column and the sheet share it.
+    enum OpenExclusion: Equatable, Sendable {
+        /// "merged", "closed".
+        case notOpen(String)
+        case draft
+        case otherBase(String)
+        case conflict
+    }
+
+    static func openExclusion(
+        state: String, isDraft: Bool, baseRefName: String?, mergeable: String?, baseBranch: String?
+    ) -> OpenExclusion? {
+        if state.uppercased() != "OPEN" { return .notOpen(state.lowercased()) }
+        if isDraft { return .draft }
+        if let baseRefName, let baseBranch, baseRefName != baseBranch { return .otherBase(baseRefName) }
+        if mergeable?.uppercased() == "CONFLICTING" { return .conflict }
         return nil
     }
 

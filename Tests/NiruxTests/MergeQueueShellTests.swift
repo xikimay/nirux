@@ -103,6 +103,28 @@ final class MergeQueueShellTests: XCTestCase {
     }
 
     @MainActor
+    func testTheStatusBarShowsTheQueueThatEndedLast() throws {
+        let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
+        // "aaa" comes first in order, and ends first.
+        let older = start(shell, projectID: "aaa")
+        older.stop()
+        let newer = shell.mergeQueue(projectID: "bbb")
+        newer.beginActivity = { NSObject() }
+        newer.endActivity = { _ in }
+        let gadgets = BoardConfig.QueueSettings(
+            repository: "acme/gadgets", gitHubRepository: GitHubRepository(owner: "acme", name: "gadgets"),
+            baseBranch: "main", requiredChecks: ["test"], postMergeWorkflow: "nightly.yml", mergeMethod: .merge,
+            checksTimeoutMinutes: 30, postMergeTimeoutMinutes: 30
+        )
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        XCTAssertNil(newer.start(settings: gadgets, entries: [MQ.entry(53, head: MQ.sha("b"))]))
+        newer.stop()
+
+        let notice = try XCTUnwrap(shell.statusBar.queueNotice)
+        XCTAssertTrue(notice.tooltip?.contains("acme/gadgets") == true, "the newer stop isn’t hidden behind the older one")
+    }
+
+    @MainActor
     func testTheQueueComesFirstAndACrashNoticeFollowsIt() throws {
         let bar = StatusBarView(frame: NSRect(x: 0, y: 0, width: 1200, height: StatusBarView.height))
         bar.showUpdate(version: "nightly-2026.09.29")
@@ -344,23 +366,25 @@ final class MergeQueueShellTests: XCTestCase {
     }
 
     @MainActor
-    func testTheWindowsCloseButtonAsksOnceThenTheQuitStopsTheQueue() throws {
+    func testTheWindowsCloseButtonQuitsThroughTheOneQuestion() throws {
         let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
         let question = recordQuitQuestions(shell)
-        let queue = start(shell)
         var quits = 0
+        shell.sideEffects.requestQuit = { quits += 1 }
+        XCTAssertTrue(shell.mainWindowShouldClose(), "nothing runs: the window closes, and Nirux quits")
+        let queue = start(shell)
 
-        XCTAssertFalse(shell.confirmCloseWithMergeQueues { quits += 1 })
-        XCTAssertEqual(question.asked.count, 1)
-        XCTAssertTrue(question.asked[0].hasPrefix("A dry-run merge queue is running: closing the window quits Nirux"))
+        XCTAssertFalse(shell.mainWindowShouldClose(), "the window stays while a queue runs")
+        XCTAssertEqual(quits, 0, "asked after the close button returns")
+        waitUntil("the quit is requested") { quits == 1 }
+        XCTAssertTrue(question.asked.isEmpty, "the quit asks, not the close button")
+        var replies: [Bool] = []
+        XCTAssertEqual(shell.mergeQueueTerminateReply { replies.append($0) }, .terminateLater)
+        waitUntil("the question") { question.answer != nil }
         try XCTUnwrap(question.answer)(true)
-        XCTAssertEqual(quits, 1)
-        XCTAssertTrue(queue.isRunning, "the quit that follows stops it")
-
-        XCTAssertEqual(shell.mergeQueueTerminateReply { _ in XCTFail("stopped at once") }, .terminateNow)
-        XCTAssertEqual(question.asked.count, 1, "asked once")
         XCTAssertFalse(queue.isRunning)
-        XCTAssertTrue(shell.confirmCloseWithMergeQueues { XCTFail("nothing runs: nothing to ask") })
+        XCTAssertEqual(replies, [true])
+        XCTAssertEqual(question.asked.count, 1, "asked once")
     }
 }
 

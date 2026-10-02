@@ -259,6 +259,26 @@ final class MergeQueueConfirmationTests: XCTestCase {
                       "only a nightly is said to publish")
     }
 
+    func testTheRefusalNamesWhenEveryShortPoolHasReset() {
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        var limited = reading([candidate(1, head: a)])
+        limited.rateLimit = MergeQueue.RateLimit(
+            coreRemaining: 100, coreReset: now.addingTimeInterval(600),
+            graphQLRemaining: 400, graphQLReset: now.addingTimeInterval(3_000)
+        )
+        let refusal = MergeQueue.confirmation(limited, now: now).refusals[0]
+        XCTAssertTrue(refusal.contains("until \(ProjectBoard.clockTime(now.addingTimeInterval(3_000), now: now)) "), refusal)
+
+        limited.rateLimit = MergeQueue.RateLimit(
+            coreRemaining: 100, coreReset: now.addingTimeInterval(2 * 86_400),
+            graphQLRemaining: 5000, graphQLReset: now.addingTimeInterval(60)
+        )
+        let later = MergeQueue.confirmation(limited, now: now).refusals[0]
+        let day = ProjectBoard.clockTime(now.addingTimeInterval(2 * 86_400), now: now)
+        XCTAssertTrue(day.contains(" "), "another day names it: \(day)")
+        XCTAssertTrue(later.contains("until \(day) "), later)
+    }
+
     func testOneRequestLeftReadsInTheSingular() {
         let limited = MergeQueue.confirmation(reading([candidate(1, head: a)], remaining: 1))
         XCTAssertTrue(limited.refusals[0].hasPrefix("Only 1 GitHub request is left until"), limited.refusals[0])

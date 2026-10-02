@@ -92,6 +92,8 @@ final class MergeQueueController {
         files = MergeQueue.Files(projectID: projectID, stateDirectory: stateDirectory, dryRun: client.isDryRun)
         restore()
         takeLeftOver(saved)
+        // Just read: the first look again waits its interval.
+        savedReadAt = clock.now()
     }
 
     /// Reads the saved queue again, when none runs here: the board asks
@@ -118,10 +120,8 @@ final class MergeQueueController {
     /// The pull requests a stopped queue didn't merge, in its order, for
     /// its repository.
     private func takeLeftOver(_ saved: MergeQueue.SavedQueue?) {
-        guard let saved, !saved.isRunning, BoardConfig.isValidRepository(saved.repository) else { return }
-        let parts = saved.repository.split(separator: "/")
-        setSelection(saved.entries.filter { $0.step != .done }.map(\.number),
-                     repository: GitHubRepository(owner: String(parts[0]), name: String(parts[1])), isNewOrder: true)
+        guard let saved, !saved.isRunning, let repository = GitHubRepository(ownerAndName: saved.repository) else { return }
+        setSelection(saved.entries.filter { $0.step != .done }.map(\.number), repository: repository, isNewOrder: true)
     }
 
     // MARK: The next Start's list
@@ -167,9 +167,9 @@ final class MergeQueueController {
     /// interrupted, unless another Nirux still runs it.
     private func restore() {
         guard let files, let saved = MergeQueue.SavedQueue.load(from: files.state) else { return }
-        guard saved.isRunning, !saved.dryRun, BoardConfig.isValidRepository(saved.repository) else { return settle(saved) }
-        let parts = saved.repository.split(separator: "/")
-        let repository = GitHubRepository(owner: String(parts[0]), name: String(parts[1]))
+        guard saved.isRunning, !saved.dryRun, let repository = GitHubRepository(ownerAndName: saved.repository) else {
+            return settle(saved)
+        }
         // A queue of this Nirux holds the repository: the saved one runs nowhere.
         if isRepositoryBusy(repository) { return settle(saved) }
         // Held while the file is read again and rewritten: a Nirux that

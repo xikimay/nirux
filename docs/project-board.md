@@ -620,7 +620,8 @@ pull request.
   out leaves it, and each pull request leaves it once merged. A pull request
   the sheet reads merged or closed leaves it at once: it may have no row left
   to remove it from.
-- **What the sheet reads**, off the main thread, four pull requests at a time:
+- **What the sheet reads**, off the main thread, four pull requests at a time
+  (each next one starts as one ends), until the sheet closes:
   `gh auth status`, `rate_limit`, whether the base needs GitHub's merge queue,
   the post-merge runs on the base; then each pull request's snapshot, its title
   and first 100 files (GraphQL, which gives a renamed file's new path only),
@@ -647,20 +648,22 @@ pull request.
   run once per merge, not to publish.
 - **Status bar** (with the user): the queue comes first, with Stop, then the
   crash or update notice. Once the queue ends, "Queue stopped: …" or "Queue
-  finished: …" stays until its ✕, so a stop overnight is seen. A click shows
-  the board, opening one in the project's first workspace if there is none.
-  With several queues, the first in sidebar order shows, with "+1 other
-  queue", and its Stop becomes Stop All. Only the queues of this launch show
-  there; an interrupted one shows on its board. A dry run reaching its first
-  mutation isn't shown as a failure.
+  finished: …" stays until its ✕, so a stop overnight is seen; of several, the
+  one that ended last. A click shows the board, opening one in the project's
+  first workspace if there is none. With several queues running, the first in
+  sidebar order shows, with "+1 other queue", and its Stop becomes Stop All.
+  Only the queues of this launch show there; an interrupted one shows on its
+  board. A dry run reaching its first mutation isn't shown as a failure.
 - **Quitting** (with the user): Nirux comes to the front and asks, in a sheet
   on the window, or an alert when the window isn't on screen, with Keep
   Running first; a dry run is said to be one. "Stop Queue and Quit" stops
   every queue and waits for a call already sent to answer, 2.5 minutes at most,
-  so the journal records it. The main window's close button quits Nirux, so it
-  asks the same question. The queue's files are written before Nirux exits.
+  so the journal records it. The main window's close button quits Nirux: while
+  a queue runs, it keeps the window and quits, which asks. The queue's files
+  are written before Nirux exits.
 - **Keep-awake**: `KeepAwakeController.update(mergeQueueRunning:)`, under the
-  same setting and grace period as agents; the indicator's tooltip says why.
+  same setting and grace period as agents, renamed "Keep Mac awake while agents
+  work or a merge queue runs"; the indicator's tooltip says why.
 - **A dry run shows everywhere**: a DRY RUN badge on the board's queue line,
   "Start Dry Run…", the sheet's orange title and banner, "Queue (dry run)" in
   the status bar, and a journal line that says the mutation wasn't sent.

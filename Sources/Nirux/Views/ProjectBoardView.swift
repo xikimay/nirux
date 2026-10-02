@@ -257,17 +257,21 @@ final class ProjectBoardView: NSView {
     private func updateAgentsInPlace(from previous: Content?) -> Bool {
         guard let previous, let content,
               previous.requiredChecks == content.requiredChecks, previous.baseBranch == content.baseBranch,
-              previous.queue == content.queue,
               case .rows(let old) = previous.body, case .rows(let new) = content.body,
               old.count == new.count
         else { return false }
+        // A queue change that leaves every cell as it was (its status, a
+        // sheet opening) only touches the header.
+        let cell = { (row: ProjectBoard.Row, queue: ProjectBoard.QueueState?) in
+            queue.flatMap { Self.queueCell(for: row, queue: $0, baseBranch: content.baseBranch) }
+        }
         for (before, after) in zip(old, new) {
             var lhs = before
             var rhs = after
             lhs.agent.state = .none
             rhs.agent.state = .none
             guard lhs == rhs, Self.actionSignature(before) == Self.actionSignature(after),
-                  queueCell(for: before) == queueCell(for: after)
+                  cell(before, previous.queue) == cell(after, content.queue)
             else { return false }
         }
         for index in rowViews.indices {

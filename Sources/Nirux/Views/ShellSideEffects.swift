@@ -33,6 +33,9 @@ struct ShellSideEffects {
     /// Shows an app-modal alert and waits for its answer.
     var runModal: @MainActor (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }
 
+    /// Quits Nirux, through `applicationShouldTerminate`.
+    var requestQuit: @MainActor () -> Void = { NSApp.terminate(nil) }
+
     /// Asks whether to stop the running merge queues and quit: a sheet on
     /// the window when it is on screen, else an alert. `answer` gets true
     /// to quit. Never waits in the caller: AppKit waits for the answer.
