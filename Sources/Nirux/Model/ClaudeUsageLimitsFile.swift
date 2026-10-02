@@ -4,15 +4,12 @@ import Foundation
 /// --statusline` received it: the limits, and what tells news from a repeat.
 struct ClaudeStatusLineReport: Equatable, Sendable {
     var limits: ClaudeUsageLimits
-    /// `session_id`.
-    var sessionID: String?
     /// `cost.total_api_duration_ms`: it grows with each API response of the
-    /// session, and with nothing else.
+    /// `claude` process, and with nothing else.
     var apiDuration: Double?
 
-    init(limits: ClaudeUsageLimits, sessionID: String? = nil, apiDuration: Double? = nil) {
+    init(limits: ClaudeUsageLimits, apiDuration: Double? = nil) {
         self.limits = limits
-        self.sessionID = sessionID
         self.apiDuration = apiDuration
     }
 
@@ -20,7 +17,6 @@ struct ClaudeStatusLineReport: Equatable, Sendable {
     init?(payload: [String: Any], now: TimeInterval) {
         guard let limits = ClaudeUsageLimits(statusLinePayload: payload, now: now) else { return nil }
         self.limits = limits
-        sessionID = payload["session_id"] as? String
         apiDuration = ((payload["cost"] as? [String: Any])?["total_api_duration_ms"] as? NSNumber)?.doubleValue
     }
 }
@@ -31,20 +27,42 @@ struct ClaudeStatusLineReport: Equatable, Sendable {
 enum ClaudeUsageLimitsFile {
     struct Contents: Codable, Equatable {
         var limits = ClaudeUsageLimits()
-        /// Each session's last recorded report, by `session_id`.
-        var sessions: [String: SessionMark] = [:]
+        /// What each column's `claude` last reported, by NIRUX_AGENT_UUID.
+        var columns: [String: ColumnMark] = [:]
+
+        init() {}
+
+        /// Without its marks (an older file), the readings still count.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            limits = try container.decode(ClaudeUsageLimits.self, forKey: .limits)
+            columns = (try? container.decodeIfPresent([String: ColumnMark].self, forKey: .columns)) ?? [:]
+        }
     }
 
-    struct SessionMark: Codable, Equatable {
+    struct ColumnMark: Codable, Equatable {
+        struct Reading: Codable, Equatable {
+            var usedPercentage: Double
+            var resetsAt: TimeInterval
+
+            init?(_ window: ClaudeUsageLimits.Window?) {
+                guard let window else { return nil }
+                usedPercentage = window.usedPercentage
+                resetsAt = window.resetsAt
+            }
+        }
+
         var apiDuration: Double?
-        var fingerprint: String
-        var reportedAt: TimeInterval
+        var fiveHour: Reading?
+        var sevenDay: Reading?
+        /// When the mark last changed.
+        var changedAt: TimeInterval
     }
 
-    /// Sessions are forgotten a little after the weekly window they could
-    /// have reported on, and beyond this many.
-    static let sessionMemory: TimeInterval = 8 * 24 * 3600
-    static let maximumSessions = 256
+    /// A column is forgotten a little after the weekly window it could have
+    /// reported on, and beyond this many.
+    static let columnMemory: TimeInterval = 8 * 24 * 3600
+    static let maximumColumns = 256
 
     /// The status line receiver writes here too: it inherits NIRUX_STATE_DIR
     /// from the terminal, like the hook receiver.
@@ -61,20 +79,25 @@ enum ClaudeUsageLimitsFile {
         return try? JSONDecoder().decode(Contents.self, from: data)
     }
 
-    /// Records `report` when it carries news: the latest news wins. A
-    /// session's status line also runs while it is idle (its permission mode
-    /// changes, its prompt cache expires), repeating what its last response
-    /// said; such a repeat, same API time and same readings as the session's
-    /// last report, would bring back numbers another session has since
-    /// updated, so it is dropped. A session signed in to another account
-    /// counts like any other: the latest response decides.
+    /// Records what `report` brings that is news; the latest news wins,
+    /// whichever column brings it (a session signed in to another account
+    /// counts like any other).
+    ///
+    /// A `claude`'s status line also runs while it is idle (its permission
+    /// mode changes, its prompt cache expires, a window resets), and after
+    /// `/clear` or `/resume`: each time it repeats the limits of its last
+    /// response, which would bring back numbers another column has since
+    /// updated. So a window counts only when the column's `claude` got an
+    /// API response since its last report (its API time grew), or when the
+    /// reading differs from the one the column last reported. `source` is
+    /// the column's NIRUX_AGENT_UUID; without one, everything counts.
     ///
     /// Several sessions report at once, so the read-modify-write holds a
     /// lock; a writer that can't get it within `lockWait` gives up, and its
     /// session's next report counts instead. The file is replaced
     /// atomically: the app never reads half of one.
     @discardableResult
-    static func record(_ report: ClaudeStatusLineReport, now: TimeInterval, at url: URL = url) -> Bool {
+    static func record(_ report: ClaudeStatusLineReport, from source: String?, now: TimeInterval, at url: URL = url) -> Bool {
         let lockPath = url.path + ".lock"
         let lock = open(lockPath, O_RDWR | O_CREAT, 0o600)
         guard lock >= 0 else { return false }
@@ -84,18 +107,27 @@ enum ClaudeUsageLimitsFile {
 
         let existing = loadContents(from: url) ?? Contents()
         var contents = existing
-        let fingerprint = report.limits.fingerprint
-        if let id = report.sessionID {
-            if let last = contents.sessions[id], last.apiDuration == report.apiDuration, last.fingerprint == fingerprint {
-                return true
+        var news = report.limits
+        if let source {
+            let last = contents.columns[source]
+            if let last, (report.apiDuration ?? -1) <= (last.apiDuration ?? -1) {
+                if ColumnMark.Reading(news.fiveHour) == last.fiveHour { news.fiveHour = nil }
+                if ColumnMark.Reading(news.sevenDay) == last.sevenDay { news.sevenDay = nil }
             }
-            contents.sessions[id] = SessionMark(apiDuration: report.apiDuration, fingerprint: fingerprint, reportedAt: now)
+            var mark = ColumnMark(
+                apiDuration: report.apiDuration,
+                fiveHour: ColumnMark.Reading(report.limits.fiveHour) ?? last?.fiveHour,
+                sevenDay: ColumnMark.Reading(report.limits.sevenDay) ?? last?.sevenDay,
+                changedAt: last?.changedAt ?? now
+            )
+            if mark != last { mark.changedAt = now }
+            contents.columns[source] = mark
         }
-        contents.limits = (contents.limits.current(at: now) ?? ClaudeUsageLimits()).updated(with: report.limits)
-        contents.sessions = contents.sessions
-            .filter { $0.value.reportedAt > now - sessionMemory }
-            .sorted { $0.value.reportedAt > $1.value.reportedAt }
-            .prefix(maximumSessions)
+        contents.limits = (contents.limits.current(at: now) ?? ClaudeUsageLimits()).updated(with: news)
+        contents.columns = contents.columns
+            .filter { $0.value.changedAt > now - columnMemory }
+            .sorted { $0.value.changedAt > $1.value.changedAt }
+            .prefix(maximumColumns)
             .reduce(into: [:]) { $0[$1.key] = $1.value }
         guard contents != existing else { return true }
         let encoder = JSONEncoder()
@@ -160,6 +192,6 @@ enum ClaudeStatusLineCLI {
         guard AgentHookCLI.isFromNiruxTerminal(env: env),
               let object = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any],
               let report = ClaudeStatusLineReport(payload: object, now: now) else { return false }
-        return ClaudeUsageLimitsFile.record(report, now: now, at: url)
+        return ClaudeUsageLimitsFile.record(report, from: env["NIRUX_AGENT_UUID"], now: now, at: url)
     }
 }

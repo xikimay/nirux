@@ -86,8 +86,7 @@ final class ClaudeUsageLimitsTests: XCTestCase {
     func testCurrentRejectsWhatClaudeCodeCouldNotHaveSent() throws {
         try Data(#"""
         {"limits": {"fiveHour": {"usedPercentage": 1e300, "resetsAt": \#(now + hour), "reportedAt": \#(now)},
-                    "sevenDay": {"usedPercentage": 18, "resetsAt": 4102444800, "reportedAt": \#(now)}},
-         "sessions": {}}
+                    "sevenDay": {"usedPercentage": 18, "resetsAt": 4102444800, "reportedAt": \#(now)}}}
         """#.utf8).write(to: fileURL)
         let current = try XCTUnwrap(ClaudeUsageLimitsFile.load(from: fileURL)?.current(at: now))
         XCTAssertEqual(current.fiveHour?.usedPercentage, ClaudeUsageLimits.maximumPercentage)
@@ -134,42 +133,44 @@ final class ClaudeUsageLimitsTests: XCTestCase {
 
     // MARK: - The shared file
 
-    private func report(_ session: String, api: Double, fiveHour: Double, sevenDay: Double? = nil) throws -> Data {
-        var object = payload(fiveHour: reading(fiveHour, resetsIn: hour), sevenDay: sevenDay.map { reading($0, resetsIn: 90 * hour) })
-        object["session_id"] = session
+    /// Runs the receiver on a status line payload from `column`'s `claude`.
+    @discardableResult
+    private func report(
+        _ column: String, api: Double, fiveHour: Double?, sevenDay: Double?, at time: TimeInterval
+    ) throws -> ClaudeUsageLimits? {
+        var object = payload(
+            fiveHour: fiveHour.map { reading($0, resetsIn: hour) }, sevenDay: sevenDay.map { reading($0, resetsIn: 90 * hour) }
+        )
         object["cost"] = ["total_api_duration_ms": api, "total_cost_usd": 0.08]
-        return try JSONSerialization.data(withJSONObject: object)
+        XCTAssertTrue(ClaudeStatusLineCLI.record(
+            payload: try JSONSerialization.data(withJSONObject: object), env: ["NIRUX_AGENT_UUID": column], now: time, url: fileURL
+        ))
+        return ClaudeUsageLimitsFile.load(from: fileURL)?.current(at: time)
     }
 
-    /// The latest news wins, whichever session brings it; a session whose
-    /// status line runs again while it is idle repeats old numbers, which
-    /// must not come back over newer ones.
-    func testRecordKeepsTheLatestNewsAndIgnoresAnIdleRepeat() throws {
-        let env = ["NIRUX_AGENT_UUID": "column-1"]
-        XCTAssertTrue(ClaudeStatusLineCLI.record(
-            payload: try report("a", api: 2700, fiveHour: 30, sevenDay: 18), env: env, now: now, url: fileURL
-        ))
-        // Another session, maybe on another account, answers later.
-        XCTAssertTrue(ClaudeStatusLineCLI.record(
-            payload: try report("b", api: 900, fiveHour: 12), env: env, now: now + 60, url: fileURL
-        ))
-        var stored = try XCTUnwrap(ClaudeUsageLimitsFile.load(from: fileURL))
-        XCTAssertEqual(stored.fiveHour, window(12, resetsAt: now + hour, reportedAt: now + 60))
-        XCTAssertEqual(stored.sevenDay, window(18, resetsAt: now + 90 * hour), "a window the report lacks stays")
+    /// The latest news wins, whichever column brings it. A status line
+    /// that runs again without a new response repeats old numbers, which
+    /// must not come back over newer ones: while the session is idle, once
+    /// a window reset (Claude Code then leaves that window out), after
+    /// `/clear` (the API time starts over).
+    func testRecordKeepsTheLatestNewsAndIgnoresRepeats() throws {
+        try report("a", api: 2700, fiveHour: 30, sevenDay: 18, at: now)
+        var stored = try XCTUnwrap(try report("b", api: 900, fiveHour: 35, sevenDay: 25, at: now + 60))
+        XCTAssertEqual(stored.fiveHour, window(35, resetsAt: now + hour, reportedAt: now + 60))
 
-        // Session a's prompt cache expires: its status line runs again.
-        XCTAssertTrue(ClaudeStatusLineCLI.record(
-            payload: try report("a", api: 2700, fiveHour: 30, sevenDay: 18), env: env, now: now + 300, url: fileURL
-        ))
-        stored = try XCTUnwrap(ClaudeUsageLimitsFile.load(from: fileURL))
-        XCTAssertEqual(stored.fiveHour?.usedPercentage, 12, "an idle repeat is old news")
+        stored = try XCTUnwrap(try report("a", api: 2700, fiveHour: 30, sevenDay: 18, at: now + 300))
+        XCTAssertEqual(stored.fiveHour?.usedPercentage, 35, "a's prompt cache expired: a repeat")
 
-        // Its next response is news again, even with the same numbers.
-        XCTAssertTrue(ClaudeStatusLineCLI.record(
-            payload: try report("a", api: 4100, fiveHour: 30, sevenDay: 18), env: env, now: now + 400, url: fileURL
-        ))
-        stored = try XCTUnwrap(ClaudeUsageLimitsFile.load(from: fileURL))
-        XCTAssertEqual(stored.fiveHour, window(30, resetsAt: now + hour, reportedAt: now + 400))
+        let afterReset = now + hour + 60
+        stored = try XCTUnwrap(try report("a", api: 2700, fiveHour: nil, sevenDay: 18, at: afterReset))
+        XCTAssertEqual(stored, ClaudeUsageLimits(sevenDay: window(25, resetsAt: now + 90 * hour, reportedAt: now + 60)))
+        stored = try XCTUnwrap(try report("a", api: 0, fiveHour: nil, sevenDay: 18, at: afterReset + 60))
+        XCTAssertEqual(stored.sevenDay?.usedPercentage, 25, "/clear: a repeat")
+
+        // A response is news, even with numbers seen before (a is signed in
+        // to another account, say).
+        stored = try XCTUnwrap(try report("a", api: 400, fiveHour: nil, sevenDay: 18, at: afterReset + 120))
+        XCTAssertEqual(stored.sevenDay, window(18, resetsAt: now + 90 * hour, reportedAt: afterReset + 120))
     }
 
     func testRecordTakesNothingFromOutsideNiruxOrWithoutLimits() throws {
@@ -191,7 +192,7 @@ final class ClaudeUsageLimitsTests: XCTestCase {
 
         let start = Date()
         let report = ClaudeStatusLineReport(limits: ClaudeUsageLimits(fiveHour: window(30, resetsAt: now + hour)))
-        XCTAssertFalse(ClaudeUsageLimitsFile.record(report, now: now, at: fileURL))
+        XCTAssertFalse(ClaudeUsageLimitsFile.record(report, from: "column-1", now: now, at: fileURL))
         XCTAssertLessThan(Date().timeIntervalSince(start), ClaudeUsageLimitsFile.lockWait + 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
     }
@@ -207,7 +208,7 @@ final class ClaudeUsageLimitsTests: XCTestCase {
         let clock = Date(timeIntervalSince1970: now)
         func record(_ percent: Double) {
             let limits = ClaudeUsageLimits(fiveHour: window(percent, resetsAt: now + hour))
-            ClaudeUsageLimitsFile.record(ClaudeStatusLineReport(limits: limits), now: now, at: fileURL)
+            ClaudeUsageLimitsFile.record(ClaudeStatusLineReport(limits: limits), from: nil, now: now, at: fileURL)
         }
 
         record(30)

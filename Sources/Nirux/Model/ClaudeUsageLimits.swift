@@ -83,14 +83,6 @@ struct ClaudeUsageLimits: Codable, Equatable, Sendable {
         ClaudeUsageLimits(fiveHour: report.fiveHour ?? fiveHour, sevenDay: report.sevenDay ?? sevenDay)
     }
 
-    /// The readings, without when they were reported: two runs of one
-    /// session's status line with the same fingerprint carry the same news.
-    var fingerprint: String {
-        [fiveHour, sevenDay]
-            .map { $0.map { "\($0.usedPercentage)@\($0.resetsAt)" } ?? "-" }
-            .joined(separator: " ")
-    }
-
     /// Whether a window reached `nearLimitPercent`.
     var isNearLimit: Bool {
         [fiveHour, sevenDay].contains { ($0?.displayedPercent ?? 0) >= Self.nearLimitPercent }

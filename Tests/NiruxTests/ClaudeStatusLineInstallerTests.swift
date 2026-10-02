@@ -138,7 +138,9 @@ final class ClaudeStatusLineInstallerTests: XCTestCase {
             claudeVersion: nil, claudeStatusLine: false
         )
         XCTAssertEqual(statusLineCommand(), AgentHookInstaller.claudeStatusLineCommand(executablePath: "/Apps/Nirux"))
-        XCTAssertNil(AgentHookInstaller.applyClaudeStatusLine(enabled: false, environment: scratch, bundleURL: appBundle))
+        XCTAssertNil(AgentHookInstaller.applyClaudeStatusLine(
+            enabled: false, home: home, environment: scratch, bundleURL: appBundle
+        ))
         XCTAssertEqual(AgentHookInstaller.claudeStatusLineState(home: home), .nirux)
     }
 

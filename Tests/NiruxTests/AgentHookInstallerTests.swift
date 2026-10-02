@@ -581,7 +581,6 @@ final class AgentHookInstallerTests: XCTestCase {
 
     // MARK: - Receiver (end to end)
 
-    /// `swift test` builds the app executable next to the test bundle.
     func testReceiverQueuesOnlyEventsFromNiruxTerminals() throws {
         let nirux = try niruxExecutable()
         let stateDir = home.appendingPathComponent("state")

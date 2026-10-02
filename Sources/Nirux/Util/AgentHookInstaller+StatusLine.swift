@@ -100,11 +100,12 @@ extension AgentHookInstaller {
     @discardableResult
     static func applyClaudeStatusLine(
         enabled: Bool,
+        home: URL = URL(fileURLWithPath: NSHomeDirectory()),
         environment: [String: String] = ProcessInfo.processInfo.environment,
         bundleURL: URL = Bundle.main.bundleURL
     ) -> ClaudeStatusLineState? {
         guard managesClaudeStatusLine(environment: environment, bundleURL: bundleURL) else { return nil }
-        return installClaudeStatusLine(enabled: enabled)
+        return installClaudeStatusLine(enabled: enabled, home: home)
     }
 
     /// Nirux's only when it is exactly what Nirux writes, for some Nirux
