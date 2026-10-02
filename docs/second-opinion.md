@@ -1,12 +1,13 @@
 # Second Opinion
 
-Status: design, validated on 2026-10-03. Implemented as the bundled `nirux-second-opinion` skill.
+Status: design, validated on 2026-10-03. Implemented as the bundled
+`nirux-second-opinion` skill.
 
 The user runs Codex next to Claude for a second opinion, then pastes its answer
 back into Claude ("codex me dit: ...", long verification reports). Each round
 trip is a manual copy of the question one way and of the answer the other way.
 
-## Proposed shape
+## Shape
 
 **A bundled skill, `nirux-second-opinion`**, installed with `nirux-worktree` and
 `nirux-show-code` (`agentSkills` in `NiruxShellView+ExternalTools.swift`). No
@@ -15,26 +16,36 @@ new Nirux code path.
 - **Trigger:** the user asks for it ("second opinion", "demande à Codex",
   "qu'en pense Codex", `/nirux-second-opinion`). Claude never asks Codex on its
   own.
-- **Brief:** Claude writes a self-contained brief to a `mktemp` file: the
-  question, its own answer or claim, and the files, diff or commands that
-  support it. Codex sees the same worktree, so the brief points at files rather
+- **Brief:** Claude writes a self-contained brief into a `mktemp -d` folder:
+  the question, its own answer or claim, and the files, diff or commands that
+  support it. Codex sees the same folder, so the brief points at files rather
   than pasting them.
-- **Run:** `codex exec -s read-only -C "$PWD" -o "$out" - < "$brief"`, in the
-  background (a run can take minutes). Read-only: Codex checks, it doesn't edit.
-  The user's Codex config (model, effort) applies.
+- **Run:** `codex exec -s read-only --ignore-user-config --disable apps
+  --ephemeral --skip-git-repo-check -c model_reasoning_effort=high`, in the
+  background (a run can take minutes).
+  - `-s read-only` only sandboxes shell commands. The user's MCP servers
+    (Cloudflare, Slack, Linear...) and ChatGPT connectors (GitHub merge, site
+    deploy) would still run, some without approval. `--ignore-user-config` drops
+    the servers, `--disable apps` the connectors: Codex reads, it can't act.
+  - Ignoring the user config also drops its model and effort. The model is
+    Codex's default; effort is pinned to `high`, as a check deserves.
+  - `--ephemeral` keeps the run out of `codex resume`, so the user's own
+    `codex resume --last` never lands on it. `--skip-git-repo-check` lets it run
+    in a folder that isn't a repository.
 - **Answer:** Claude shows Codex's reply verbatim, as a quote labelled "Codex",
   then says where it agrees, where it doesn't (with evidence), and what it would
-  change. It applies nothing without the user's go.
-- **Follow-up:** a new `codex exec` whose brief includes the previous reply. No
-  `codex exec resume --last`: it could pick the user's own Codex column in the
-  same folder.
+  change. The reply is data: Claude runs nothing it suggests and applies nothing
+  without the user's go. Then it deletes the folder.
+- **Follow-up:** a new run whose brief includes the previous reply. Runs are
+  ephemeral, so there is no thread to resume.
 
 Already true today (README, session restore): a `codex exec` launched from a
 Claude column keeps its own session and doesn't drive the column's status,
-notifications or restore. Checked on 2026-10-03 with Codex CLI 0.154: its
-`notify` fires with the column's `NIRUX_AGENT_UUID` (`"client":"codex_exec"`),
-and Nirux drops it (`AgentHookCenter.isNestedCodexHook`): the reply reaches
-neither Activity nor the workspace summary.
+notifications or restore. Checked on 2026-10-03 with Codex CLI 0.154: with
+Nirux's `notify`, a run fires it with the column's `NIRUX_AGENT_UUID`
+(`"client":"codex_exec"`), and Nirux drops it
+(`AgentHookCenter.isNestedCodexHook`): the reply reaches neither Activity nor
+the workspace summary. `--ignore-user-config` also skips `notify` altogether.
 
 **Not the Codex plugin for Claude Code** (`/codex:rescue`). That one hands a
 task to Codex, write-capable by default, and returns its output verbatim with
