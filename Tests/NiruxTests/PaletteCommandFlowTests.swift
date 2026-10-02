@@ -23,6 +23,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testImportBrowserCookies": ["Import Browser Cookies"],
             "testAgentCommands": ["Open Claude Code", "Open Codex"],
             "testNextWaitingAgentCommand": ["Next Waiting Agent"],
+            "testResumeAllAgentsCommand": ["Resume All Agents"],
             "testWorkspaceCommands": [
                 "New Workspace", "Rename Workspace", "Show/Hide Sidebar", "Show/Hide Inactive Workspaces"
             ],
@@ -244,6 +245,32 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
 
             harness.runPaletteCommand("Next Waiting Agent")
             XCTAssertEqual(shell.activeWorkspace?.title, "second")
+        }
+    }
+
+    /// A restored agent in a workspace off screen waits until asked.
+    func testResumeAllAgentsCommand() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let onScreen = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "restored", cwd: harness.repo)
+            let restored = try XCTUnwrap(shell.activeWorkspace)
+            let session = "5f0c8a52-6a0e-4d7c-9f0e-2b1f6d1c9a11"
+            restored.addColumn(
+                deferredAgent: DeferredAgentLaunch(
+                    agent: .claude(resume: .session(session), mode: .default), title: nil, lastStatus: nil
+                ),
+                agentUUID: UUID().uuidString,
+                cwd: harness.repo
+            )
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === onScreen }))
+            XCTAssertEqual(shell.deferredAgentCount, 1)
+            XCTAssertEqual(harness.restoredAgentLaunches, [])
+
+            harness.runPaletteCommand("Resume All Agents")
+            XCTAssertEqual(harness.restoredAgentLaunches, ["command claude --resume '\(session)'"])
+            XCTAssertEqual(shell.deferredAgentCount, 0)
+            XCTAssertIdentical(shell.activeWorkspace, onScreen, "agents resume where they are")
         }
     }
 

@@ -9,6 +9,8 @@ final class WindowDragView: NSView {
 /// the PTY via the `onFileDrop` callback.
 final class DropTargetView: NSView {
     var onFileDrop: (([URL]) -> Void)?
+    /// False while nothing could take the paths (no shell runs yet).
+    var acceptsFileDrops: () -> Bool = { true }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -21,14 +23,15 @@ final class DropTargetView: NSView {
     }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
-        guard sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) else {
+        guard acceptsFileDrops(), sender.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) else {
             return []
         }
         return .copy
     }
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
-        guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+        guard acceptsFileDrops(),
+              let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
               !urls.isEmpty else {
             return false
         }
@@ -165,11 +168,16 @@ final class EditorLoadFailureOverlay: NSView {
 ///
 /// Also shown when an agent died mid-turn in a shell that still runs: its
 /// button then resumes the agent's conversation, and Dismiss (or typing,
-/// which goes to the shell) takes the notice down.
+/// which goes to the shell) takes the notice down. And over a restored
+/// agent column whose agent hasn't resumed yet: its button, or a click
+/// anywhere on it, resumes the agent.
 final class ShellExitedOverlay: NSView {
     enum Content: Equatable {
         case shellExited
         case agentExited(processName: String)
+        /// `summary`: the session's title and where it was (see
+        /// `DeferredAgentLaunch.summary`).
+        case notResumed(processName: String, summary: String)
     }
 
     var onRestart: (() -> Void)?
@@ -225,8 +233,23 @@ final class ShellExitedOverlay: NSView {
             hint.stringValue = "It stopped without ending its session. Typing goes to the shell."
             restartButton.title = "Resume Session"
             dismissButton.isHidden = false
+        case .notResumed(let processName, let summary):
+            label.stringValue = "Not resumed yet — click or focus to resume"
+            hint.stringValue = "\(processName) · \(summary)"
+            restartButton.title = "Resume"
+            dismissButton.isHidden = true
         }
+        hint.toolTip = hint.stringValue
         needsLayout = true
+    }
+
+    /// A click anywhere on a not-resumed notice resumes, as its button does.
+    override func mouseDown(with event: NSEvent) {
+        if case .notResumed = content {
+            onRestart?()
+        } else {
+            super.mouseDown(with: event)
+        }
     }
 
     override func layout() {

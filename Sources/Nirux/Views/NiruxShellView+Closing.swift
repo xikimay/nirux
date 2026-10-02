@@ -99,7 +99,7 @@ extension NiruxShellView {
         let agent = column.pty == nil ? nil : column.liveAgent(snapshot: ProcessSnapshot())
         guard let details = WorkspaceClosePolicy.columnConfirmation(for: agent), let agent else { return true }
         guard confirmDestructiveClose(
-            message: "Close column running \(agent.displayName)?",
+            message: agent.isPaused ? "Close paused \(agent.displayName) column?" : "Close column running \(agent.displayName)?",
             details: details,
             confirmTitle: "Close Column"
         ) else { return false }
@@ -223,8 +223,12 @@ extension WorkspaceState {
 
 extension ColumnState {
     /// The recognized agent closing this column would kill, with the
-    /// status its machine last computed.
+    /// status its machine last computed, or the restored one it holds
+    /// until it resumes (nothing runs: idle).
     func liveAgent(snapshot: ProcessSnapshot) -> WorkspaceClosePolicy.LiveAgent? {
+        if let deferredAgent {
+            return WorkspaceClosePolicy.LiveAgent(processName: deferredAgent.processName, status: .idle, isPaused: true)
+        }
         guard let pty, let name = pty.agentProcessName(snapshot: snapshot) else { return nil }
         return WorkspaceClosePolicy.LiveAgent(
             processName: name,

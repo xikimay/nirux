@@ -167,6 +167,24 @@ final class ProcessSnapshot {
         return nil
     }
 
+    /// The arguments of `rootPID`'s descendants whose name is in `names`,
+    /// breadth-first, like `firstDescendantName`.
+    func descendantArguments(of rootPID: pid_t, named names: Set<String>, limit: Int = 256) -> [[String]] {
+        var pending = childrenMap[rootPID] ?? []
+        var visited = Set<pid_t>()
+        var next = 0
+        var found: [[String]] = []
+        while next < pending.count, visited.count < limit {
+            let pid = pending[next]
+            next += 1
+            guard visited.insert(pid).inserted else { continue }
+            let arguments = capturedArguments.map { $0[pid] ?? [] } ?? Self.arguments(of: pid, maxArgs: 32)
+            if let name = Self.execName(from: arguments) ?? commMap[pid], names.contains(name) { found.append(arguments) }
+            pending.append(contentsOf: childrenMap[pid] ?? [])
+        }
+        return found
+    }
+
     func isProcess(_ process: ProcessInstance, childOf parentPID: pid_t) -> Bool {
         instanceMap[process.pid] == process && childrenMap[parentPID]?.contains(process.pid) == true
     }

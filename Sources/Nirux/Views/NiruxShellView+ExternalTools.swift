@@ -618,8 +618,9 @@ extension NiruxShellView {
             NiruxDebugLog.log("sendSelectionToAgent: no editor column in workspace")
             return
         }
-        let terminal = (focused?.pty?.hasExited == false ? focused : nil)
-            ?? workspace.columns.first { $0.pty?.hasExited == false }
+        // A restored agent that hasn't resumed has no shell to take it.
+        func isLive(_ column: ColumnState?) -> Bool { column?.pty?.hasExited == false && column?.isAwaitingResume == false }
+        let terminal = (isLive(focused) ? focused : nil) ?? workspace.columns.first { isLive($0) }
         guard let pty = terminal?.pty, !pty.hasExited else {
             NiruxDebugLog.log("sendSelectionToAgent: no live terminal column in workspace")
             return

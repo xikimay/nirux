@@ -163,6 +163,15 @@ extension NiruxApp {
         return event // no menu match — let WebView handle it
     }
 
+    /// A key typed into a restored agent's column that hasn't resumed asks
+    /// for it now, without the on-screen wait. The key itself has no shell
+    /// to go to. True when consumed.
+    static func resumeAwaitingAgentOnTyping(_ event: NSEvent, in column: ColumnState) -> Bool {
+        guard column.isAwaitingResume else { return false }
+        if !KeyMapper.bytesForEvent(event).isEmpty { column.onResumeDeferredAgent?() }
+        return true
+    }
+
     /// Route ALL key input directly to PTY, bypassing ghostty entirely.
     /// Ghostty only handles rendering — we handle ALL input.
     /// This prevents ghostty's broken inMemory key handling from interfering.
@@ -221,6 +230,8 @@ extension NiruxApp {
                 }
                 return event
             }
+
+            if Self.resumeAwaitingAgentOnTyping(event, in: col) { return nil }
 
             // Shell exited — swallow input instead of writing to a dead PTY;
             // Enter (or keypad Enter) restarts the shell.

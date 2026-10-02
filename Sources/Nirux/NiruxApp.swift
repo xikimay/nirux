@@ -11,6 +11,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var settingsPanel: NSPanel?
     weak var settingsKeepAwakeCheckbox: NSButton?
     weak var settingsUsageLimitsCheckbox: NSButton?
+    weak var settingsAgentResumePopup: NSPopUpButton?
     weak var settingsLaunchModePopup: NSPopUpButton?
     weak var settingsNoFlickerCheckbox: NSButton?
     weak var settingsCodexLaunchModePopup: NSPopUpButton?
@@ -266,6 +267,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     // MARK: - NSMenuItemValidation
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(resumeAllAgents(_:)) {
+            return (shell?.deferredAgentCount ?? 0) > 0
+        }
         if menuItem.action == #selector(toggleInactiveWorkspaces(_:)) {
             guard let shell else { return false }
             menuItem.state = shell.sidebar.isInactiveSectionCollapsed ? .off : .on
