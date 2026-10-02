@@ -58,6 +58,10 @@
   }
 
   function showPierreDiffSurface() {
+    // Hidden, Monaco would keep WebKit's selection in its textarea: the app
+    // would see text with the keyboard and hand Cmd+Arrow to it instead of
+    // the menu. Only a blur before the hide clears it.
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     document.getElementById("editor").style.display = "none";
     document.getElementById("diff-editor").style.display = "none";
     if (pierreDiffRoot) pierreDiffRoot.style.display = "block";

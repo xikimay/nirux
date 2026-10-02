@@ -147,6 +147,7 @@ final class UIFlowHarness {
         shell.stopHeartbeat()
         shell.commandPalette?.dismiss()
         shell.searchPanel?.dismiss()
+        shell.globalSearchPanel?.dismiss()
         shell.filePickerPanel?.dismiss()
         shell.worktreeCleanupPanel?.dismiss()
         shell.boardSettingsPanel?.dismiss()

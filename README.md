@@ -11,6 +11,7 @@ Nirux is alpha software.
 - Agent launchers: start Claude Code or Codex from the command palette with configurable permission and sandbox presets.
 - Attention and Activity: per-column agent status (working / needs attention, with elapsed time) driven by real Claude Code hooks and Codex turn notifications — not output guessing (Gemini CLI and OpenCode, which have no hooks, get output-activity status) — plus a persistent sidebar feed, edge glows for off-screen attention, native macOS notifications that focus the right workspace and column on click, and a Dock badge counting waiting workspaces.
 - Stuck agents: a permission or question left open past a threshold (Settings, 10 minutes by default) shows `waiting 2h05m` on its card and notifies once (Telegram too, and while Nirux is in the background); a Claude turn that ended on an API error shows `API error`, with a Resume button — for transient errors only (overloaded, server error) — that types `continue` only on a click, once Claude is back at an empty prompt; a `claude` that died mid-turn gets an overlay that resumes its conversation in its permission mode.
+- Quick switcher and Next Waiting Agent: type a workspace's name, branch, space or folder in `Cmd+P` and press Return to jump to it — in any space, inactive ones too (listed after active ones that match as well, and left inactive) — each row showing its agents' state (`working`, `waiting 12m`, `API error`); `Cmd+J` goes to the Claude agent blocked on you the longest (a permission, a question, an API error, a mid-turn exit), then on to the next at each press.
 - Keep Mac awake: while an agent works, Nirux keeps the Mac from idle-sleeping and shows a cup in the title bar; it lets go a minute after the last one stops — see [Keep Mac awake while agents work](#keep-mac-awake-while-agents-work).
 - Claude context usage: a Claude column's title bar shows how full its session's context window is (`ctx 62%`, or `ctx 124k` while the window size is unknown), with the session's token totals in a tooltip — read from the session transcript, see [Claude context usage](#claude-context-usage).
 - Claude plan usage limits (opt-in): the window's title bar shows the 5-hour window and the weekly limit of a Pro or Max plan (`5h 42% · 7d 18%`), with their resets in a tooltip, see [Claude plan usage limits](#claude-plan-usage-limits).
@@ -96,6 +97,7 @@ Typical command palette actions:
 - New Terminal
 - Open Editor
 - Search Workspace
+- Search Everywhere
 - Open Browser
 - Import Browser Cookies
 - New Workspace
@@ -109,24 +111,28 @@ Useful shortcuts:
 
 | Shortcut | Action |
 | --- | --- |
-| `Cmd+P` | Command palette (fuzzy matching); in the editor, the workspace file picker |
+| `Cmd+P` | Command palette and workspace switcher (fuzzy matching); in the editor, the workspace file picker |
 | `Shift+Cmd+P` | Command palette, including from the editor |
 | `Cmd+T` | New terminal column |
 | `Cmd+B` | Open browser URL flow |
 | `Cmd+W` | Close editor tab, column, or workspace depending on context — asks first when a Claude, Codex, Gemini CLI or OpenCode session is running (Return cancels, ⌘D closes); with Settings or a detached Web Inspector in front, closes that window instead |
 | `Cmd+1…9` | Focus column N |
-| `Cmd+Left` / `Cmd+Right` | Focus previous or next column |
-| `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column |
+| `Cmd+Left` / `Cmd+Right` | Focus previous or next column; while text has the keyboard (the editor, a field of a web page, the address bar, a find field), move to the start or end of the line instead |
+| `Ctrl+Cmd+Left` / `Ctrl+Cmd+Right` | Focus previous or next column, also from text |
+| `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column; in text, select to the start or end of the line (`Columns > Move Left / Move Right` still moves it) |
 | `Cmd+E` | Cycle focused column width through presets |
 | `Cmd+N` | New workspace |
-| `Cmd+Up` / `Cmd+Down` | Switch workspace |
+| `Cmd+Up` / `Cmd+Down` | Switch workspace; in text, move to the start or end of the document (`Shift` selects) |
+| `Ctrl+Cmd+Up` / `Ctrl+Cmd+Down` | Switch workspace, also from text |
 | `Alt+Cmd+Left` / `Alt+Cmd+Right` | Switch to the previous or next space (the workspace group named in the sidebar header) |
+| `Cmd+J` | Next waiting agent: the Claude agent blocked on you the longest, then the next at each press |
 | `Ctrl+Cmd+S` | Toggle sidebar |
 | `Ctrl+Cmd+F` | Enter or exit full screen |
 | `Cmd+M` | Minimize the window |
 | `Cmd+,` | Settings |
 | `Cmd+Z` / `Shift+Cmd+Z` | Undo / redo in the editor and in panel text fields (palette, rename, settings) |
 | `Shift+Cmd+F` | Search workspace |
+| `Alt+Cmd+F` | Search Everywhere: text in the scrollback of every terminal, across workspaces and projects; picking a match opens its terminal's find bar on it. A full-screen program (vim, less, Claude Code in its no-flicker mode) shows no scrollback: only its screen is searched |
 | `Cmd+F` | Find in the focused editor or terminal; a terminal's find bar closes with `Esc` |
 | `Cmd+G` / `Shift+Cmd+G` | Next / previous terminal match (`Return` / `Shift+Return` in the find bar); next moves up to older output, as in Ghostty |
 | `Cmd+S` / `Alt+Cmd+S` | Save the active editor file / save all |
@@ -135,7 +141,7 @@ Useful shortcuts:
 | `Shift+Cmd+M` | Toggle minimap in editor |
 | `Alt+Cmd+Return` | Send the editor selection to the agent terminal |
 | `Cmd+=` / `Cmd+-` / `Cmd+0` | Editor font zoom in / out / reset |
-| `Cmd+L` | Focus browser address bar |
+| `Cmd+L` | Focus browser address bar; in the editor, select the line |
 | `Cmd+[` / `Cmd+]` | Browser back / forward |
 | `Alt+Cmd+I` | Open Web Inspector on the focused browser column |
 

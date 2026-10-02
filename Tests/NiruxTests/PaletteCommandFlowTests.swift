@@ -18,9 +18,11 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         tests: [
             "testTerminalColumnCommands": ["New Terminal", "Resize Column (Cycle Width)"],
             "testEditorCommands": ["Open Editor", "Toggle Editor Diff", "Search Workspace"],
+            "testSearchEverywhere": ["Search Everywhere"],
             "testBrowserCommands": ["Open Browser", "Toggle Web Inspector"],
             "testImportBrowserCookies": ["Import Browser Cookies"],
             "testAgentCommands": ["Open Claude Code", "Open Codex"],
+            "testNextWaitingAgentCommand": ["Next Waiting Agent"],
             "testWorkspaceCommands": [
                 "New Workspace", "Rename Workspace", "Show/Hide Sidebar", "Show/Hide Inactive Workspaces"
             ],
@@ -93,6 +95,75 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         }
     }
 
+    /// The match sits far up the scrollback of a terminal in another
+    /// workspace, and more matches are printed after the search: picking it
+    /// brings that column forward, find bar open, and Ghostty scrolls to
+    /// that very match.
+    func testSearchEverywhere() throws {
+        try UIFlowHarness.run { harness in
+            let home = try XCTUnwrap(harness.shell.activeWorkspace)
+            harness.shell.addWorkspace(title: "other", cwd: harness.worktree)
+            let other = try XCTUnwrap(harness.shell.activeWorkspace)
+            let column = try XCTUnwrap(other.columns.first)
+            let session = try XCTUnwrap(column.pty?.terminalSession)
+            harness.waitUntil("the terminal's surface") { session.readViewportText() != nil }
+            let needle = "flow-scrollback-needle"
+            let rows = (1...200).map { [20, 100, 150].contains($0) ? "\(needle) \($0)" : "row \($0)" }
+            session.receive(rows.joined(separator: "\r\n") + "\r\n")
+            harness.waitUntil("the rows on screen") { session.readViewportText()?.contains("row 200") == true }
+            XCTAssertFalse(session.readViewportText()?.contains("\(needle) 100\n") ?? true, "the match starts on screen")
+            harness.shell.focusWorkspace(id: home.id)
+
+            harness.runPaletteCommand("Search Everywhere")
+            let field = try XCTUnwrap(harness.waitForField(placeholder: GlobalSearchPanel.placeholder))
+            harness.type(needle.uppercased(), into: field)
+            let panel = try XCTUnwrap(harness.shell.globalSearchPanel)
+            harness.waitUntil("the search to end") { !panel.isSearching && !panel.rows.isEmpty }
+            XCTAssertEqual(panel.rows.map(\.match.excerpt), ["\(needle) 150", "\(needle) 100", "\(needle) 20"])
+            XCTAssertEqual(panel.rows.map(\.place), Array(repeating: "other › Terminal 1", count: 3))
+            XCTAssertEqual(panel.statusLabel?.stringValue, "3 matches in 1 of 2 terminals")
+
+            session.receive("\(needle) 201\r\n\(needle) 202\r\n")
+            harness.waitUntil("the new matches") { TerminalScreenText.read(session)?.contains("\(needle) 202") == true }
+            harness.press(.down, in: field.window)
+            harness.press(.returnKey, in: field.window)
+            XCTAssertFalse(panel.isVisible)
+            XCTAssertIdentical(harness.shell.activeWorkspace, other)
+            XCTAssertIdentical(other.columns[safe: other.focusedIndex], column)
+            XCTAssertTrue(column.isEditingFind)
+            XCTAssertEqual(column.findBar?.field.stringValue, needle.uppercased())
+            harness.waitUntil("Ghostty to scroll to the picked match") {
+                session.readViewportText()?.contains("\(needle) 100\n") == true
+            }
+        }
+    }
+
+    /// The panel keeps no column alive: closing one it searched, and found
+    /// matches in, ends its shell, even with the panel still open.
+    func testSearchEverywhereLetsClosedColumnsGo() throws {
+        try UIFlowHarness.run { harness in
+            weak var closedShell: PtySession?
+            let needle = "flow-closing-needle"
+            try {
+                harness.shell.addColumn()
+                let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+                let pty = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.pty)
+                closedShell = pty
+                harness.waitUntil("the terminal's surface") { pty.terminalSession.readViewportText() != nil }
+                pty.terminalSession.receive("\(needle)\r\n")
+            }()
+            harness.shell.showGlobalSearch()
+            let panel = try XCTUnwrap(harness.shell.globalSearchPanel)
+            let field = try XCTUnwrap(panel.searchField)
+            harness.type(needle, into: field)
+            harness.waitUntil("the match") { !panel.isSearching && panel.rows.count == 1 }
+
+            harness.shell.closeActiveColumn()
+            harness.waitUntil("the closed column's shell to go") { closedShell == nil }
+            XCTAssertTrue(panel.isVisible)
+        }
+    }
+
     func testBrowserCommands() throws {
         try UIFlowHarness.run { harness in
             let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
@@ -115,7 +186,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             // After a URL, the palette opens on the commands again.
             harness.shell.showCommandPalette()
             XCTAssertEqual(palette.mode, .actions)
-            XCTAssertEqual(palette.searchField?.placeholderString, "Type a command...")
+            XCTAssertEqual(palette.searchField?.placeholderString, "Type a command or a workspace...")
             palette.dismiss()
 
             // Reaches the focused browser column; the inspector itself
@@ -155,6 +226,23 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(workspace.columns.count, columnCount + 2)
             XCTAssertEqual(harness.agentLaunches.count, 2)
             XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command codex") == true, "\(harness.agentLaunches)")
+        }
+    }
+
+    /// Goes to the agent blocked on the user (faked: a real one needs a
+    /// `claude` in front). QuickSwitcherFlowTests walks the queue.
+    func testNextWaitingAgentCommand() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let repo = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "second", cwd: harness.worktree)
+            let waiting = try XCTUnwrap(shell.activeWorkspace?.columns.first)
+            let wait = AgentWait(reason: .question(nil), since: Date().timeIntervalSince1970 - 60)
+            shell.quickSwitch.agentWait = { column, _, _ in column === waiting ? wait : nil }
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === repo }))
+
+            harness.runPaletteCommand("Next Waiting Agent")
+            XCTAssertEqual(shell.activeWorkspace?.title, "second")
         }
     }
 
@@ -209,10 +297,43 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(opened.title, harness.worktreeBranch)
             XCTAssertEqual(NiruxShellView.comparablePath(opened.cwd), NiruxShellView.comparablePath(harness.worktree))
 
+            // Picks a row of Open Worktree by its title; returns its subtitle.
+            @MainActor func pickWorktree(_ title: String) throws -> String {
+                harness.runPaletteCommand("Open Worktree")
+                harness.waitUntil("\(title) in the worktree list") {
+                    palette.isVisible && palette.actions.contains { $0.title == title }
+                }
+                harness.type(title, into: try XCTUnwrap(palette.searchField))
+                let row = try XCTUnwrap(palette.filteredActions.first)
+                XCTAssertEqual(row.title, title)
+                harness.press(.returnKey, in: palette.panel)
+                return row.subtitle
+            }
+
+            // Once it is open, it goes back to that workspace...
+            let repoWorkspace = try XCTUnwrap(shell.workspaces.first { $0.cwd == harness.repo })
+            shell.focusWorkspace(id: repoWorkspace.id)
+            let workspaceCount = shell.workspaces.count
+            XCTAssertTrue(try pickWorktree(harness.worktreeBranch).hasPrefix("Already open · "))
+            XCTAssertTrue(shell.activeWorkspace === opened)
+            // ...and, from the worktree, to the main checkout's.
+            XCTAssertTrue(try pickWorktree("main").hasPrefix("Already open · "))
+            XCTAssertTrue(shell.activeWorkspace === repoWorkspace)
+            XCTAssertEqual(shell.workspaces.count, workspaceCount)
+            // A worktree inside the main checkout, as Claude Code makes them:
+            // its workspace is in it, not in the main checkout.
+            let nested = harness.repo + "/.claude/worktrees/nested"
+            try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/nested", nested], at: harness.repo)
+            XCTAssertFalse(try pickWorktree("feat/nested").hasPrefix("Already open"))
+            let nestedWorkspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.focusWorkspace(id: repoWorkspace.id)
+            XCTAssertTrue(try pickWorktree("feat/nested").hasPrefix("Already open · "))
+            XCTAssertTrue(shell.activeWorkspace === nestedWorkspace)
+            XCTAssertEqual(shell.workspaces.count, workspaceCount + 1)
+            shell.focusWorkspace(id: repoWorkspace.id)
+
             // Creates the worktree off the main thread, then opens it with an
             // agent (the launch double).
-            let repoIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0.cwd == harness.repo })
-            shell.switchToWorkspace(repoIndex)
             harness.runPaletteCommand("New Worktree")
             let branchField = try XCTUnwrap(harness.waitForField(placeholder: "Branch name (e.g. feat/my-feature)"))
             harness.submit("feat/new-flow", into: branchField)
