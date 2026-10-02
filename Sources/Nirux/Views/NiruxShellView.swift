@@ -90,8 +90,10 @@ final class NiruxShellView: NSView {
     var searchPanel: EditorSearchPanel?
     var worktreeCleanupPanel: WorktreeCleanupPanel?
     /// Worktrees a "Clean Up Worktree…" is checking or confirming, so a
-    /// second click doesn't start another.
-    var worktreeCleanupsInFlight: Set<String> = []
+    /// second click doesn't start another. Their cards say so.
+    var worktreeCleanupsInFlight: Set<String> = [] {
+        didSet { if worktreeCleanupsInFlight != oldValue { updateSidebar() } }
+    }
     var boardSettingsPanel: BoardSettingsPanel?
     /// A "Board Settings…" reading board.json and the checkouts, so a
     /// second click doesn't open a second form.

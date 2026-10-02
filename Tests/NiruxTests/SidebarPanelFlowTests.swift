@@ -273,6 +273,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             shell.openEditorColumn()
             let editor = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
+            XCTAssertEqual(editor.workspaceCwd, harness.repo)
 
             // What Monaco's ⌘P sends over the bridge. The folder is scanned
             // off the main thread.
