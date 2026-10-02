@@ -41,8 +41,13 @@ extension BranchReview {
     /// one remote-tracking ref. The pull request and the base are settled
     /// first (gh and the fetch take a while); HEAD, the commits, the status
     /// and the diff are then read back to back, and again if HEAD moved
-    /// meanwhile.
+    /// meanwhile. If the worktree switched branch or started a rebase while
+    /// gh answered, it starts over once.
     static func snapshot(at path: String, options: Options = Options()) -> Outcome {
+        snapshot(at: path, options: options, restarts: 1)
+    }
+
+    private static func snapshot(at path: String, options: Options, restarts: Int) -> Outcome {
         guard let located = git(
             ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-path", "index", "--git-path", "objects"]
                 + inProgressMarkers.flatMap { ["--git-path", $0.file] },
@@ -53,10 +58,8 @@ extension BranchReview {
             return .unavailable(firstLine(located.stderr) ?? "\(path) isn't in a git repository.")
         }
         let repository = Repository(root: lines[0], index: lines[1], objects: lines[2])
-        for (marker, markerPath) in zip(inProgressMarkers, lines.dropFirst(3))
-        where FileManager.default.fileExists(atPath: markerPath) {
-            return .paused(marker.operation)
-        }
+        let markers = zip(inProgressMarkers.map(\.operation), lines.dropFirst(3)).map { ($0, $1) }
+        if let operation = operationInProgress(markers) { return .paused(operation) }
 
         let symbolicHead = git(["symbolic-ref", "-q", "HEAD"], in: repository.root, options: options)
         guard let headRef = symbolicHead.map({ $0.text.trimmingCharacters(in: .newlines) }),
@@ -70,13 +73,30 @@ extension BranchReview {
         guard let base = selection.base else {
             return .unavailable("No base branch shares history with \(branch) (tried origin/HEAD, main and master).")
         }
+        let place = Place(repository: repository, headRef: headRef, branch: branch, markers: markers)
         for attempt in 1...2 {
-            switch read(repository, branch: branch, base: base, selection: selection, isLastAttempt: attempt == 2, options: options) {
+            switch read(place, base: base, selection: selection, isLastAttempt: attempt == 2, options: options) {
             case .done(let outcome): return outcome
             case .moved: continue
+            case .switched:
+                guard restarts > 0 else { break }
+                return snapshot(at: path, options: options, restarts: restarts - 1)
             }
         }
         return .unavailable("\(branch) kept moving while it was read. Refresh again.")
+    }
+
+    /// Where a snapshot reads: the worktree, its branch, and the files that
+    /// say an operation is under way.
+    private struct Place {
+        let repository: Repository
+        let headRef: String
+        let branch: String
+        let markers: [(Operation, String)]
+    }
+
+    private static func operationInProgress(_ markers: [(Operation, String)]) -> Operation? {
+        markers.first { FileManager.default.fileExists(atPath: $0.1) }?.0
     }
 
     struct Repository: Equatable, Sendable {
@@ -92,13 +112,20 @@ extension BranchReview {
         case done(Outcome)
         /// HEAD moved, or a file vanished, while it was read.
         case moved
+        /// The worktree is on another branch, or an operation started.
+        case switched
     }
 
     private static func read(
-        _ repository: Repository, branch: String, base selected: Base, selection: BaseSelection,
-        isLastAttempt: Bool, options: Options
+        _ place: Place, base selected: BaseBranch, selection: BaseSelection, isLastAttempt: Bool, options: Options
     ) -> Read {
+        let (repository, branch) = (place.repository, place.branch)
         let root = repository.root
+        func isStillInPlace() -> Bool {
+            git(["symbolic-ref", "-q", "HEAD"], in: root, options: options)?.text
+                .trimmingCharacters(in: .newlines) == place.headRef && operationInProgress(place.markers) == nil
+        }
+        guard isStillInPlace() else { return .switched }
         guard let headRead = git(["rev-parse", "-q", "--verify", "HEAD^{commit}"], in: root, options: options),
               headRead.status == 0
         else { return .done(.unavailable("\(branch) has no commits yet.")) }
@@ -130,11 +157,13 @@ extension BranchReview {
             .map(\.path)
         let uncommitted = Set(statusEntries.filter { $0.code != "??" }.map(\.path))
         // After `git rm --cached`, a file is both deleted in the index and
-        // untracked: the commit will delete it, so it stays out of the
-        // temporary index and reads as deleted.
+        // untracked. One the base has: the commit will delete it, so it
+        // stays out of the temporary index and reads as deleted. One the
+        // branch added reads as added, like any untracked file.
         let stagedDeletions = Set(statusEntries.filter { $0.code.hasPrefix("D") }.map(\.path))
+        let deletedFromBase = paths(untracked.filter(stagedDeletions.contains), in: base.mergeBase, root: root, options: options)
 
-        let toRead = Array(untracked.filter { !stagedDeletions.contains($0) }.prefix(options.maxUntrackedFilesRead))
+        let toRead = Array(readingOrder(untracked.filter { !deletedFromBase.contains($0) }).prefix(options.maxUntrackedFilesRead))
         var files: [FileChange]
         switch readChanges(
             repository, mergeBase: base.mergeBase, head: head, untracked: toRead, uncommitted: uncommitted,
@@ -153,7 +182,7 @@ extension BranchReview {
         // Past the read limit, or when the temporary index couldn't be
         // made: listed by name. A path the diff already has (an agent's
         // `git add` landed meanwhile) isn't listed twice.
-        let listed = Set(files.map(\.path))
+        let listed = Set(files.flatMap { [$0.path] + ($0.oldPath.map { [$0] } ?? []) })
         for path in untracked where !listed.contains(path) {
             var file = FileChange(path: path, status: .added)
             file.isUntracked = true
@@ -163,6 +192,7 @@ extension BranchReview {
         }
         files.sort { $0.path < $1.path }
 
+        guard isStillInPlace() else { return .switched }
         guard git(["rev-parse", "-q", "--verify", "HEAD^{commit}"], in: root, options: options)?
             .text.trimmingCharacters(in: .whitespacesAndNewlines) == head
         else { return .moved }
@@ -176,6 +206,29 @@ extension BranchReview {
             hasUncommittedChanges: !uncommitted.isEmpty || !untracked.isEmpty,
             commits: commits, files: files
         )))
+    }
+
+    /// Which of `paths` the tree has.
+    private static func paths(_ paths: [String], in tree: String, root: String, options: Options) -> Set<String> {
+        guard !paths.isEmpty,
+              let listed = git(
+                  ["ls-tree", "-r", "-z", "--name-only", tree, "--"] + paths,
+                  in: root, options: options, environment: ["GIT_LITERAL_PATHSPECS": "1"]
+              ), listed.status == 0
+        else { return [] }
+        return Set(listed.stdout.split(separator: 0).map(Patch.decoded))
+    }
+
+    /// Untracked files in the order they are read: those of the least
+    /// crowded top-level folders first, so that a folder nobody ignored
+    /// (node_modules) doesn't use up the read limit before the files an
+    /// agent wrote.
+    static func readingOrder(_ paths: [String]) -> [String] {
+        func folder(_ path: String) -> Substring { path.split(separator: "/", maxSplits: 1).first ?? Substring(path) }
+        let crowd = Dictionary(paths.map { (folder($0), 1) }, uniquingKeysWith: +)
+        return paths.enumerated()
+            .sorted { (crowd[folder($0.element)] ?? 0, $0.offset) < (crowd[folder($1.element)] ?? 0, $1.offset) }
+            .map(\.element)
     }
 
     /// `snapshot(at:options:)` on a background queue; `completion` runs on
@@ -207,7 +260,8 @@ extension BranchReview {
         guard case .read(let files) = readChanges(
             Repository(root: snapshot.root, index: paths[0], objects: paths[1]),
             mergeBase: snapshot.base.mergeBase, head: snapshot.head,
-            untracked: file.isUntracked ? [file.path] : [], uncommitted: [],
+            untracked: file.isUntracked ? [file.path] : [],
+            uncommitted: file.isUncommitted ? Set([file.oldPath, file.path].compactMap { $0 }) : [],
             pathspec: [file.oldPath, file.path].compactMap { $0 }, inline: false, canRetry: false, options: literal
         ), var found = files.first(where: { $0.path == file.path })
         else { return nil }
@@ -268,22 +322,52 @@ extension BranchReview {
         case .inconsistent:
             if canRetry { return .vanished }
             return .failed("The worktree changed while it was read. Refresh again.")
-        case .failed(let reason): return .failed(reason)
-        case .notRead: break
+        case .failed(let reason):
+            // The temporary index may be what git trips on: read without
+            // it; the untracked files are then listed by name.
+            guard reading.environment != options.environment else { return .failed(reason) }
+            return readChanges(
+                repository, mergeBase: mergeBase, head: head, untracked: [], uncommitted: uncommitted,
+                pathspec: pathspec, inline: inline, canRetry: canRetry, options: options
+            )
+        case .notRead(let entries):
+            return readTooLarge(
+                entries, root: root, mergeBase: mergeBase, head: head, pathspec: pathspec,
+                uncommitted: uncommitted, inline: inline, options: reading
+            )
         }
-        // Too large to read whole: leave out the files with the most changed
-        // lines, which would get a placeholder anyway.
+    }
+
+    /// Bytes a changed line takes in a patch, roughly: it tells which files
+    /// a placeholder would replace anyway.
+    private static let bytesPerChangedLine = 40
+
+    /// A diff too large to read whole: the files with the most changed
+    /// lines are left out, more at each try (those past the per-file limit
+    /// all go at the first), and the rest is read. Failing that, paths and
+    /// line counts only.
+    private static func readTooLarge(
+        _ entries: [NameStatusEntry], root: String, mergeBase: String, head: String, pathspec: [String],
+        uncommitted: Set<String>, inline: Bool, options: Options
+    ) -> Changes {
         guard let listed = listOnly(
-            root: root, mergeBase: mergeBase, head: head, pathspec: pathspec, uncommitted: uncommitted, options: reading
-        ) else { return .failed("git couldn't list the changes in \(root).") }
-        let giant = listed.filter { $0.additions + $0.deletions > options.maxFileDiffBytes / 40 }
-        guard !giant.isEmpty, pathspec.isEmpty else { return .read(listed) }
-        // Exclusions alone stand for "everything else".
-        let excluded = giant.flatMap { [$0.oldPath, $0.path].compactMap { $0 } }.map { ":(exclude,literal,top)\($0)" }
-        guard case .files(let rest) = readDiff(
-            root: root, mergeBase: mergeBase, pathspec: excluded, inline: inline, options: reading
-        ) else { return .read(listed) }
-        return .read(rest + giant)
+            entries, root: root, mergeBase: mergeBase, head: head, pathspec: pathspec,
+            uncommitted: uncommitted, options: options
+        ) else { return .failed("git couldn't count the changes in \(root).") }
+        guard pathspec.isEmpty else { return .read(listed) }
+        let largestFirst = listed.sorted { $0.additions + $0.deletions > $1.additions + $1.deletions }
+        var leftOut = max(1, listed.count { $0.additions + $0.deletions > options.maxFileDiffBytes / bytesPerChangedLine })
+        for _ in 0..<4 where leftOut < largestFirst.count {
+            let giant = Array(largestFirst.prefix(leftOut))
+            // Exclusions alone stand for "everything else".
+            let excluded = giant.flatMap { [$0.oldPath, $0.path].compactMap { $0 } }.map { ":(exclude,literal,top)\($0)" }
+            switch readDiff(root: root, mergeBase: mergeBase, pathspec: excluded, inline: inline, options: options) {
+            case .files(let rest): return .read(rest + giant)
+            case .notRead: leftOut *= 2
+            case .inconsistent, .failed: return .read(listed)
+            }
+        }
+        return .read(listed)
     }
 
     private enum IntentFailure: Error {
@@ -293,7 +377,11 @@ extension BranchReview {
 
     /// Adds `paths` as intent-to-add to a copy of the index in `scratch`,
     /// whose objects go to `scratch` too; returns the environment that
-    /// points git at them.
+    /// points git at them. The real object folder is an alternate through
+    /// `info/alternates`: `GIT_ALTERNATE_OBJECT_DIRECTORIES` is split on
+    /// ":", which a folder name may hold. Hooks don't run (writing an
+    /// index fires `post-index-change`), and `--sparse` lets a sparse
+    /// checkout add a path outside its cone.
     private static func intentToAdd(
         _ paths: [String], in repository: Repository, scratch: URL, options: Options
     ) -> Result<[String: String], IntentFailure> {
@@ -310,7 +398,8 @@ extension BranchReview {
         }
         guard allPresent() else { return .failure(.vanished) }
         do {
-            try fileManager.createDirectory(at: objects, withIntermediateDirectories: true)
+            try fileManager.createDirectory(at: objects.appendingPathComponent("info"), withIntermediateDirectories: true)
+            try Data((repository.objects + "\n").utf8).write(to: objects.appendingPathComponent("info/alternates"))
             try fileManager.copyItem(at: URL(fileURLWithPath: repository.index), to: index)
             var list = Data()
             for path in paths {
@@ -321,13 +410,10 @@ extension BranchReview {
         } catch {
             return .failure(.failed)
         }
-        let environment = [
-            "GIT_INDEX_FILE": index.path,
-            "GIT_OBJECT_DIRECTORY": objects.path,
-            "GIT_ALTERNATE_OBJECT_DIRECTORIES": repository.objects
-        ]
+        let environment = ["GIT_INDEX_FILE": index.path, "GIT_OBJECT_DIRECTORY": objects.path]
         guard let added = git(
-            ["-c", "core.splitIndex=false", "add", "-N", "--pathspec-from-file=\(pathList.path)", "--pathspec-file-nul"],
+            ["-c", "core.hooksPath=/dev/null", "-c", "core.splitIndex=false", "add", "-N", "--sparse",
+             "--pathspec-from-file=\(pathList.path)", "--pathspec-file-nul"],
             in: repository.root, options: options,
             environment: environment.merging(["GIT_LITERAL_PATHSPECS": "1"]) { _, added in added }
         ) else { return .failure(.failed) }
@@ -337,8 +423,9 @@ extension BranchReview {
 
     enum DiffRead {
         case files([FileChange])
-        /// Over `maxDiffBytes`, or git didn't finish in time.
-        case notRead
+        /// The patch is over `maxDiffBytes`, or git didn't finish it in
+        /// time: only the name-status list was read.
+        case notRead([NameStatusEntry])
         /// The patch and the name-status list disagree: the worktree
         /// changed between the two reads.
         case inconsistent
@@ -351,20 +438,22 @@ extension BranchReview {
     /// file when those left add up to more than `maxInlineDiffBytes`.
     static func readDiff(root: String, mergeBase: String, pathspec: [String], inline: Bool, options: Options) -> DiffRead {
         let diff = diffConfig + ["diff"] + diffSelection
-        guard let names = git(
+        let names = git(
             diff + ["--name-status", "-z", mergeBase, "--"] + pathspec,
             in: root, options: options, maxOutputBytes: options.maxDiffBytes
-        ), names.status == 0, let entries = Patch.nameStatus(names.stdout)
-        else { return .failed("git couldn't list the changes in \(root).") }
+        )
+        guard let names, names.status == 0, let entries = Patch.nameStatus(names.stdout)
+        else { return .failed(failure("git couldn't list the changes in \(root)", names)) }
         guard let patch = git(
             diff + patchFormat + [mergeBase, "--"] + pathspec,
             in: root, options: options, maxOutputBytes: options.maxDiffBytes
-        ) else { return .notRead }
-        guard patch.status == 0 else { return .failed("git diff failed in \(root).") }
+        ) else { return .notRead(entries) }
+        guard patch.status == 0 else { return .failed(failure("git diff failed in \(root)", patch)) }
         let maxFileBytes = options.maxFileDiffBytes
-        let inlineBytes = Patch.sectionRanges(of: patch.stdout).map(\.count).filter { $0 <= maxFileBytes }.reduce(0, +)
+        let ranges = Patch.sectionRanges(of: patch.stdout)
+        let inlineBytes = ranges.map(\.count).filter { $0 <= maxFileBytes }.reduce(0, +)
         let onDemand = inline && inlineBytes > options.maxInlineDiffBytes
-        guard let sections = Patch.sections(of: patch.stdout, keepsLines: { !onDemand && $0 <= maxFileBytes }) else {
+        guard let sections = Patch.sections(of: patch.stdout, in: ranges, keepsLines: { !onDemand && $0 <= maxFileBytes }) else {
             return .failed("git printed a diff Nirux can't read in \(root).")
         }
         guard var files = Patch.files(entries: entries, sections: sections) else { return .inconsistent }
@@ -379,14 +468,11 @@ extension BranchReview {
     /// no hash. A file `--name-status` lists only for its timestamp is left
     /// out: it is neither in the commits nor in what `git status` lists.
     static func listOnly(
-        root: String, mergeBase: String, head: String, pathspec: [String], uncommitted: Set<String>, options: Options
+        _ entries: [NameStatusEntry], root: String, mergeBase: String, head: String, pathspec: [String],
+        uncommitted: Set<String>, options: Options
     ) -> [FileChange]? {
         let diff = diffConfig + ["diff"] + diffSelection
-        guard let names = git(
-            diff + ["--name-status", "-z", mergeBase, "--"] + pathspec,
-            in: root, options: options, maxOutputBytes: options.maxDiffBytes
-        ), names.status == 0, let entries = Patch.nameStatus(names.stdout),
-              let numbers = git(
+        guard let numbers = git(
                   diff + ["--numstat", "-z", mergeBase, "--"] + pathspec,
                   in: root, options: options, maxOutputBytes: options.maxDiffBytes
               ), numbers.status == 0,
@@ -412,19 +498,29 @@ extension BranchReview {
                 // stays "M".
                 guard changed.contains(entry.path) else { return nil }
             }
-            let count = counts[entry.path] ?? nil
-            file.isBinary = counts[entry.path] != nil && count == nil
-            file.additions = count?.additions ?? 0
-            file.deletions = count?.deletions ?? 0
+            switch counts[entry.path] {
+            case .lines(let additions, let deletions)?:
+                file.additions = additions
+                file.deletions = deletions
+            case .binary?:
+                file.isBinary = true
+            case nil:
+                break
+            }
             file.omission = .notRead
             return file
         }
     }
 
-    /// `git diff --numstat -z`: added and deleted lines by path (the new
-    /// path for a rename); nil for a binary file, counted "-".
-    static func numstat(_ data: Data) -> [String: (additions: Int, deletions: Int)?] {
-        var counts: [String: (additions: Int, deletions: Int)?] = [:]
+    enum LineCount: Equatable {
+        case lines(additions: Int, deletions: Int)
+        /// numstat counts a binary file "-".
+        case binary
+    }
+
+    /// `git diff --numstat -z`, by path (the new path for a rename).
+    static func numstat(_ data: Data) -> [String: LineCount] {
+        var counts: [String: LineCount] = [:]
         var fields = data.split(separator: 0, omittingEmptySubsequences: false)[...]
         while let field = fields.popFirst(), !field.isEmpty {
             let parts = Patch.decoded(field).split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
@@ -436,9 +532,9 @@ extension BranchReview {
                 path = fields.popFirst().map(Patch.decoded) ?? ""
             }
             if let additions = Int(parts[0]), let deletions = Int(parts[1]) {
-                counts[path] = (additions, deletions)
+                counts[path] = .lines(additions: additions, deletions: deletions)
             } else {
-                counts[path] = .some(nil)
+                counts[path] = .binary
             }
         }
         return counts
@@ -550,5 +646,11 @@ extension BranchReview {
 
     static func firstLine(_ text: String) -> String? {
         WorktreeCleanup.firstLine(text)
+    }
+
+    /// "What failed: git's first line of standard error."
+    static func failure(_ what: String, _ output: GitOutput?) -> String {
+        guard let output, let reason = firstLine(output.stderr) else { return what + "." }
+        return "\(what): \(reason)"
     }
 }

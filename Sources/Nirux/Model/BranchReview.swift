@@ -80,9 +80,10 @@ enum BranchReview {
         var newObjectID: String?
         var additions = 0
         var deletions = 0
-        /// The size of its patch (an untracked file's size); 0 when not read.
+        /// The size of its patch, header included; 0 when not read.
         var patchBytes = 0
-        /// Not tracked by git: read from disk, shown as added.
+        /// Not tracked by git: read through a temporary index, as git will
+        /// show it once added (an addition, or a rename of a deleted file).
         var isUntracked = false
         /// Part of what isn't committed yet (untracked, or `git status`
         /// lists it): the page's "not committed" group.

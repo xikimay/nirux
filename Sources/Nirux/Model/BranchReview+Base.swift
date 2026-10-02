@@ -37,9 +37,17 @@ extension BranchReview {
         }
     }
 
+    /// The branch the review is based on; the merge base is read with HEAD.
+    struct BaseBranch: Equatable, Sendable {
+        /// "main".
+        let name: String
+        /// "refs/remotes/origin/main".
+        let ref: String
+    }
+
     struct BaseSelection: Equatable, Sendable {
         /// Nil when no candidate shares history with HEAD.
-        let base: Base?
+        let base: BaseBranch?
         let pullRequest: PullRequestLookup
         let fetchProblem: String?
     }
@@ -52,8 +60,15 @@ extension BranchReview {
     /// commits.
     static func selectBase(root: String, branch: String, options: Options) -> BaseSelection {
         var fetchProblem: String?
-        let lookup = options.knownPullRequest
-            ?? lookUpPullRequest(branch: branch, root: root, options: options, fetchProblem: &fetchProblem)
+        let lookup: PullRequestLookup
+        if let known = options.knownPullRequest {
+            lookup = known
+            if options.fetchBase, let pullRequest = known.pullRequest {
+                fetchProblem = fetch(baseBranch: pullRequest.baseRefName, root: root, options: options)
+            }
+        } else {
+            lookup = lookUpPullRequest(branch: branch, root: root, options: options, fetchProblem: &fetchProblem)
+        }
 
         var refs: [String] = []
         if let pullRequest = lookup.pullRequest {
@@ -65,14 +80,12 @@ extension BranchReview {
         }
         refs += [remoteRef("main"), remoteRef("master"), "refs/heads/main", "refs/heads/master"]
         var tried: Set<String> = []
-        for ref in refs where tried.insert(ref).inserted {
-            guard let mergeBase = git(["merge-base", "HEAD", ref], in: root, options: options), mergeBase.status == 0
-            else { continue }
+        for ref in refs where tried.insert(ref).inserted
+            && git(["merge-base", "HEAD", ref], in: root, options: options)?.status == 0 {
             let name = ref.hasPrefix(remotePrefix)
                 ? String(ref.dropFirst(remotePrefix.count))
                 : String(ref.dropFirst("refs/heads/".count))
-            let base = Base(name: name, ref: ref, mergeBase: mergeBase.text.trimmingCharacters(in: .whitespacesAndNewlines))
-            return BaseSelection(base: base, pullRequest: lookup, fetchProblem: fetchProblem)
+            return BaseSelection(base: BaseBranch(name: name, ref: ref), pullRequest: lookup, fetchProblem: fetchProblem)
         }
         return BaseSelection(base: nil, pullRequest: lookup, fetchProblem: fetchProblem)
     }

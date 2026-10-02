@@ -32,7 +32,7 @@ extension BranchReview {
         var additions = 0
         var deletions = 0
         /// SHA-256 of its changed lines' bytes (see `ChangedLineHasher`).
-        var changedLines = Data()
+        var changedLinesDigest = Data()
         /// Its size in the patch, header included.
         var byteCount = 0
 
@@ -61,9 +61,11 @@ extension BranchReview {
         /// ones keep their hunks (the others only count and hash them, so a
         /// huge file never becomes a million Strings). Nil when a section
         /// can't be parsed.
-        static func sections(of data: Data, keepsLines: (Int) -> Bool = { _ in true }) -> [PatchSection]? {
+        static func sections(
+            of data: Data, in ranges: [Range<Data.Index>]? = nil, keepsLines: (Int) -> Bool = { _ in true }
+        ) -> [PatchSection]? {
             var sections: [PatchSection] = []
-            for range in sectionRanges(of: data) {
+            for range in ranges ?? sectionRanges(of: data) {
                 guard let section = section(data[range], keepsLines: keepsLines(range.count)) else { return nil }
                 sections.append(section)
             }
@@ -136,7 +138,7 @@ extension BranchReview {
                 if keepsLines { section.hunks.append(read.hunk) }
                 pendingHunk = read.next
             }
-            section.changedLines = hasher.finalize()
+            section.changedLinesDigest = hasher.finalize()
             return section
         }
 
@@ -393,7 +395,7 @@ extension BranchReview {
                 file.oldObjectID = nil
                 file.newObjectID = nil
             }
-            file.patchHash = patchHash(of: file, changedLines: sections.map(\.changedLines))
+            file.patchHash = patchHash(of: file, changedLinesDigests: sections.map(\.changedLinesDigest))
             return file
         }
     }
@@ -471,11 +473,11 @@ extension BranchReview {
 
     /// What a "Reviewed" mark is keyed by: the path (both for a rename),
     /// the status, the mode change, and the `-` and `+` lines of the hunks,
-    /// in order (`changedLines`, one digest per section). Context lines,
+    /// in order (one digest per section). Context lines,
     /// the `@@` lines and the `index` line are left out: they change when
     /// the base changes the file elsewhere. A binary file has no lines, so
     /// its object ids stand in for them.
-    static func patchHash(of file: FileChange, changedLines: [Data]) -> String {
+    static func patchHash(of file: FileChange, changedLinesDigests: [Data]) -> String {
         var hasher = SHA256()
         func add(_ text: String) { hasher.update(data: Data(text.utf8)) }
         add("path\0\(file.path)\0")
@@ -485,7 +487,7 @@ extension BranchReview {
         if file.isBinary {
             add("binary\0\(file.oldObjectID ?? "")\0\(file.newObjectID ?? "")\0")
         }
-        for digest in changedLines { hasher.update(data: digest) }
+        for digest in changedLinesDigests { hasher.update(data: digest) }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 }
