@@ -70,6 +70,13 @@ final class WebContentKeyRoutingTests: XCTestCase {
         XCTAssertFalse(passes(editor: true, "P", [.command, .shift]))
     }
 
+    /// Cmd+L selects the line in Monaco; Focus Address Bar is a browser's.
+    func testCommandLSelectsTheLineOnlyInTheEditor() {
+        XCTAssertTrue(passes(editor: true, "l", .command))
+        XCTAssertTrue(passes(editor: true, "д", .command, keyCode: 0x25)) // Russian, no Latin Cmd table
+        XCTAssertFalse(passes(editor: false, "l", .command))
+    }
+
     func testCommandOptionReturnStaysWithMonaco() {
         XCTAssertTrue(passes(editor: true, "\r", [.command, .option], keyCode: 0x24))
         XCTAssertFalse(passes(editor: false, "\r", [.command, .option], keyCode: 0x24))

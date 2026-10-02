@@ -191,11 +191,8 @@ final class NiruxShellView: NSView {
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
             if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }
-            guard self.workspaces[wsIndex].focusedIndex != colIndex else { return }
-            self.workspaces[wsIndex].focusedIndex = colIndex
-            self.relayout(animated: true)
-            self.updateSidebar()
-            self.focusActiveTerminal(in: self.window)
+            guard self.activeWSIndex == wsIndex else { return }
+            self.goToColumn(colIndex)
         }
         updateSidebar()
         relayout(animated: false)
@@ -463,7 +460,7 @@ extension NiruxShellView {
         }
         relayout(animated: true)
         updateSidebar()
-        focusActiveTerminal(in: window)
+        focusActiveTerminal(in: window, editorTakesKeyboard: true)
     }
 
     func cycleActiveColumnWidth() {
@@ -767,11 +764,18 @@ extension NiruxShellView {
 
     // MARK: - Focus + helpers
 
-    func focusActiveTerminal(in window: NSWindow?) {
+    /// Gives the keyboard to the focused column of the active workspace.
+    /// An editor column only takes it when the user went to it
+    /// (`editorTakesKeyboard`): an agent's open focuses its column but
+    /// leaves the keyboard where the user types, and closing a panel later
+    /// must not hand that editor the keys.
+    func focusActiveTerminal(in window: NSWindow?, editorTakesKeyboard: Bool = false) {
         guard let col = activeWorkspace?.columns[safe: activeWorkspace?.focusedIndex ?? 0],
               let window else { return }
         if let webView = col.webViewColumn {
             window.makeFirstResponder(webView.webView)
+        } else if let editor = col.editorColumn {
+            if editorTakesKeyboard { editor.takeKeyboard() }
         } else if let board = col.projectBoard {
             window.makeFirstResponder(board.view)
         } else if col.isFindBarOpen {
@@ -788,7 +792,19 @@ extension NiruxShellView {
         workspace.focusedIndex = index
         relayout(animated: true)
         updateSidebar()
-        focusActiveTerminal(in: window)
+        focusActiveTerminal(in: window, editorTakesKeyboard: true)
+    }
+
+    /// Focuses column `index` of the active workspace at the user's request
+    /// (Cmd+1…9, the sidebar). An agent's open focuses its editor column
+    /// without the keyboard: going to it then hands the keyboard over.
+    func goToColumn(_ index: Int) {
+        guard let workspace = activeWorkspace, workspace.columns.indices.contains(index) else { return }
+        if workspace.focusedIndex == index, workspace.columns[index].isEditor {
+            focusActiveTerminal(in: window, editorTakesKeyboard: true)
+        } else {
+            focusColumnByIndex(index)
+        }
     }
 
     var activeWorkspace: WorkspaceState? { workspaceStore.activeWorkspace }
