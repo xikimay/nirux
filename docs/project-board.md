@@ -905,8 +905,9 @@ In delivery order:
   back, and a queue publishes several nightlies in a row. It now keeps a week.
 - B2 can start in parallel with B1 if it defines its own PR type.
 - B3's keep-awake input needed `feat/keep-awake` (#57), which shipped first.
-- **Session history** (Projects, section 6: ledger and resume) becomes a
-  "Recent sessions" section of the board, after B3.
+- **Session history** (Projects, section 6): the ledger and the resume plan
+  shipped without UI; they become a "Recent sessions" section of the board,
+  after B3.
 - **Later:** launching a worktree workspace with a handover from the board. The
   worktree skill does it today from an agent.
 - Projects' plan rows 8 (Project view) and 9 (Finish) are replaced by this plan

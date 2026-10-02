@@ -109,6 +109,7 @@ extension NiruxShellView {
                 )
             }
         }
+        closeEndedAgentSessions(now: now)
         return (foregroundProcesses, invalidatedSessionBinding)
     }
 
@@ -414,6 +415,7 @@ extension NiruxShellView {
                ) {
                 changed = true
             }
+            recordAgentSession(appliedEvent, snapshot: snapshot)
 
             if appliedEvent.resolution.workspace.recordAgentHookActivity(event) {
                 changed = true
@@ -589,11 +591,14 @@ extension NiruxShellView {
                         workspace.finishPullRequestObservation(observation)
                         return
                     }
-                    guard workspace.applyPullRequestInfo(
+                    let changed = workspace.applyPullRequestInfo(
                         info,
                         for: queriedContext,
                         observation: observation
-                    ) else { return }
+                    )
+                    // Even unchanged: the history may have loaded since.
+                    self?.noteSessionPullRequest(of: workspace)
+                    guard changed else { return }
                     self?.scheduleMetadataRefresh()
                 }
             }

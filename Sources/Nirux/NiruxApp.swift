@@ -229,6 +229,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         telegramRemoteAccessController?.shutdown()
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
         ActivityStore.shared.flush()
+        // Every agent goes with its terminal; a restore resumes the session.
+        shell?.sessionLedger.closeAllSessions(at: Date().timeIntervalSince1970)
         // Receivers stop waiting on an app that is gone.
         shell?.releaseAllPermissionApprovals()
         AgentHookCenter.shared.approvalChannel().stopListening(for: ProcessInstance.running(pid: getpid()))
