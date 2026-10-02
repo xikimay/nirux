@@ -309,6 +309,78 @@ extension NiruxShellView {
         Do NOT run git worktree commands directly — Nirux handles worktree creation natively.
         """
 
+    // MARK: - Draft Skill
+
+    static let draftSkillContent = """
+        ---
+        name: nirux-draft
+        description: >
+          This skill should be used when writing text the user will paste somewhere
+          else — a Slack message, a PR description, a review or GitHub comment, a Linear
+          ticket, an email, a SQL query to run in Drizzle Studio or Supabase — or when the
+          user asks for a draft ("draft a Slack reply", "rédige le ticket", "écris la
+          description de la PR", "prépare la requête"), while the session runs inside a
+          Nirux terminal (the NIRUX_WORKSPACE_ID environment variable is set). Opens the
+          draft in the Nirux editor column, where it copies verbatim, instead of printing
+          it in the terminal. Not intended for files that belong in the repository.
+        metadata:
+          author: nirux
+        ---
+
+        ## Overview
+
+        Text copied from the terminal is not the text you wrote: the rendering adds
+        quote bars (`▎`), wraps and indents lines. Nirux (the terminal app hosting this
+        session) has an editor column where the user can edit a draft and copy it as
+        is with ⌘A ⌘C. Write the draft to a file and open it there.
+
+        ## Preconditions
+
+        Only use this when `$NIRUX_WORKSPACE_ID` is set (the session runs inside Nirux):
+
+        ```bash
+        [ -n "$NIRUX_WORKSPACE_ID" ] && echo inside-nirux
+        ```
+
+        If it is unset, do NOT use the URL — give the draft in the reply as usual.
+
+        ## Steps
+
+        1. **Make a private folder**, once per session:
+           ```bash
+           mktemp -d "${TMPDIR:-/tmp}/nirux-draft-XXXXXX"
+           ```
+           Reuse the folder it prints for every draft of the session. Never write a
+           draft into the repository: it would show in `git status`.
+        2. **Write the draft** to `<folder>/<slug>.<ext>`, one draft per file, named
+           after its purpose (`slack-reply-merge-queue.md`, `fix-orders-index.sql`).
+           The file holds the draft only: no preamble, no explanation.
+           - `.sql` for queries, `.md` for everything else.
+           - **Slack**: write Slack's markup, not Markdown: `*bold*`, `_italic_`,
+             `~strike~`, `` `code` ``, fenced code blocks, `•` lists, `>` quotes, plain
+             URLs. No `#` headings, no tables, no `[text](url)` links.
+           - **GitHub, Linear**: GitHub-flavored Markdown.
+        3. **Open it in the editor**:
+           ```bash
+           encoded=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$abs_path")
+           open "nirux://open-editor?file=${encoded}&workspace=$NIRUX_WORKSPACE_ID&launch=${NIRUX_LAUNCH_ID:-}"
+           ```
+           - `file` must be the **absolute** path, URL-encoded.
+           - `workspace=$NIRUX_WORKSPACE_ID` makes Nirux switch to this session's
+             workspace; keep it in the command.
+           - `launch=${NIRUX_LAUNCH_ID:-}` proves the request comes from a Nirux
+             terminal; without it Nirux asks the user to confirm. Keep it in the command.
+        4. **Answer in the terminal** with one line: what the draft is and that it is
+           open in the editor, e.g. `Draft Slack ouvert dans l'éditeur
+           (slack-reply-merge-queue.md).` Do not repeat the draft in the reply.
+
+        To revise a draft, overwrite the same file and open it again: Nirux reloads a
+        tab the user hasn't edited. Several drafts open as several tabs.
+
+        If nothing opens (a Nirux build older than 2026-07-20), give the draft in the
+        reply instead.
+        """
+
     // MARK: - Show-Code Skill
 
     static let showCodeSkillContent = """
@@ -383,7 +455,8 @@ extension NiruxShellView {
     /// only create confusion about which copy is current.
     static let agentSkills = [
         "nirux-worktree": worktreeSkillContent,
-        "nirux-show-code": showCodeSkillContent
+        "nirux-show-code": showCodeSkillContent,
+        "nirux-draft": draftSkillContent
     ]
 
     /// Palette action and checklist button. The checklist row turning green
