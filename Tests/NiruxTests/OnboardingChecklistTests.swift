@@ -211,8 +211,8 @@ final class OnboardingChecklistTests: XCTestCase {
     }
 
     func testShortcutsUseAppVocabulary() {
-        XCTAssertEqual(OnboardingChecklist.shortcuts.map(\.key), ["⌘P", "⌘T", "⌘N", "⌘O"])
-        XCTAssertEqual(OnboardingChecklist.shortcuts.map(\.label), ["palette", "column", "workspace", "pilot mode"])
+        XCTAssertEqual(OnboardingChecklist.shortcuts.map(\.key), ["⌘P", "⌘T", "⌘N"])
+        XCTAssertEqual(OnboardingChecklist.shortcuts.map(\.label), ["palette", "column", "workspace"])
     }
 
     @MainActor

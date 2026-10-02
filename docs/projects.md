@@ -1,8 +1,8 @@
 # Projects
 
 Status: design, partly implemented. Session names (section 1), the space brief
-(section 4) and the first step of the model (section 2) have shipped; the rest
-is still a proposal.
+(section 4), the first step of the model (section 2) and the session ledger's
+data layer (section 6) have shipped; the rest is still a proposal.
 
 Nirux groups workspaces into "spaces" (`WorkspaceProfile`: id, name, color).
 In practice spaces are used as projects, but a space knows nothing about its
@@ -526,49 +526,116 @@ Rules:
 
 Claude Code stores transcripts per directory
 (`~/.claude/projects/<encoded cwd>/`), so a repository with many worktrees has
-one folder per worktree. The transcript format is internal and may change
-between versions ([sessions][sessions]), so Nirux does not parse it.
+one folder per worktree, and nothing ties a cleaned-up worktree's sessions to
+its project. The transcript format is internal and may change between versions
+([sessions][sessions]), so Nirux does not parse it.
 
-Instead Nirux keeps its own **session ledger**, from hook events it receives.
+Instead Nirux keeps its own **session ledger** per space (`AgentSessionLedger`),
+built from the hook events it already routes. The data layer has shipped; the
+list in the Project Board comes later.
 
-- **Fields:** agent kind, session id, project, workspace, cwd, `transcript_path`
-  (Claude), the branch at that time (from the workspace's git context), the
-  name Nirux passed, and first and last seen.
-- **Parsing:** `transcript_path` isn't parsed today. The hook event parser
-  gains it.
-- **Codex:** thread ids only arrive through `notify`, after the first completed
-  turn.
-- **Renames** made with `/rename` or from the phone aren't seen.
-- **Only real session events** are recorded: SessionStart and Stop from the
-  column's own Claude agent, and `notify` from its Codex agent. Tools that run
-  `claude -p` inside a Nirux shell, such as review pipelines, inherit its env
-  and would otherwise flood the ledger.
-  - Codex events already carry their emitting process, but today's check only
-    tests membership in the column's foreground process group. A `claude -p`
-    started by the agent passes it too.
-  - For Claude, the hook command runs through a short-lived `sh`, so the
-    receiver's parent process is useless. The receiver records its nearest
-    `claude` ancestor instead, as pid plus start time.
-  - Nirux compares that process exactly with the column's foreground agent
-    process. Claude emitter recording ships with the ledger (PR 7).
-- **Pruning:** Claude entries go when their transcript is gone (default
-  retention: 30 days). Codex entries go by age. Each project keeps at most a few
-  hundred entries.
+- **File:** `<state dir>/projects/<space id>/sessions.jsonl`, next to the
+  brief. One JSON line per change holding the whole record, the last line of a
+  session winning. Files are 0600. Once superseded lines outnumber the records
+  (and at least 256 of them), the file is rewritten atomically with one line
+  per session; past 500 sessions it keeps the 450 most recently active. Ended
+  sessions never prompted are dropped then.
+- **Fields:** agent, session id, the name Nirux launched it with (`--name`),
+  cwd, Claude's `transcript_path`, the checkout (branch, worktree root, main
+  checkout, GitHub repository, last commit), the pull request, first start,
+  latest start, last activity, end, last status (started, working, waiting,
+  idle, failed), whether it was ever prompted, and the workspace and column.
+  Prompts, tool input and transcripts are never stored.
+- **Writes:** a session start, each prompt, each turn's end, a permission
+  dialog and its answer, the end. Other tool events and notifications are not
+  recorded.
+- **Only the column's own agent** creates a record: the hook must come from
+  the `claude` in the column's foreground (or the real one under its
+  launcher), for the session it confirmed (`ColumnState.isFromOwnClaude`, the
+  same check as sidebar approvals), or from the `codex` bound to the thread.
+  A `claude -p` run by a tool or a review pipeline never shows up, nor a
+  `claude -p` or `codex exec` typed in the column. Other events of the same
+  column (a `SessionEnd` drained after the agent exited) only update its open
+  record.
+- **Ends:** `SessionEnd`; another session starting in the column (`/clear`,
+  `/resume`); the column's agent exiting, being replaced, or its column
+  closing; Nirux quitting. A session found open at load was cut off by a crash
+  and ends at its last activity. A restored column's agent reopens it. The
+  ledger is history, not a lock: a restored Codex thread reads as ended until
+  its first turn completes, so the Project Board must check the live columns
+  before offering Resume.
+- **Space:** a running session follows its workspace into another space
+  (Move to Space, or its space deleted); an ended one stays where it was.
+- **Checkout:** the workspace's, when the agent works inside it. A worktree
+  nested in it (`claude --worktree` puts them under `.claude/worktrees/`) has
+  its own top level, and gets no checkout.
+- **Pull request:** every session of a checkout learns the pull request found
+  for its branch, ended ones included; one that knows another number keeps it,
+  and a session that moves to another branch forgets it. Its state isn't
+  refreshed once the worktree is gone, so the Project Board should ask GitHub.
+- **Damage and other builds:** a line this build can't fully read (a newer
+  `v`, an unknown key or value) is kept as it is through rewrites, and its
+  session is never updated here, so a rollback strips nothing. Lines that
+  aren't sessions (cut by a crash) are dropped; past 10 of them, or past 4 MB,
+  the file is set aside first (`sessions.corrupt.<time>-<random>.jsonl`).
+  Anything but a regular file is left alone, and a file another Nirux appended
+  to is no longer rewritten. The ledger never stops a launch.
+- **Not seen:** renames made with `/rename` or from the phone. Codex thread ids
+  only arrive with `notify`, after the first completed turn.
 
-Using it:
+### Resuming a session whose worktree is gone
 
-- The project view lists the ledger, newest first, across all worktrees.
-- **Resume** opens a column running `claude --resume <id>`, which finds the
-  session from any directory since Claude Code 2.1.223 ([sessions][sessions]).
-  Codex uses `codex resume <id>`.
-- **Where the column opens:**
-  - in the original worktree, if it still exists;
-  - otherwise Nirux offers to recreate the worktree from the recorded branch;
-  - failing that, it opens in the main checkout, with a warning that the
-    conversation was about another branch.
-- **Browse all sessions** covers sessions Nirux didn't launch. It opens a column
-  in the repository running `claude --resume`, whose picker widens to every
-  worktree with `Ctrl+W`, or `codex resume --all`.
+Checked on 2026-10-02 against Claude Code 2.1.287 and Codex CLI 0.151, with
+scratch config folders and a fake API server (no request left the machine).
+
+- **Claude** finds `claude --resume <id>` from any directory, deleted
+  worktrees included: it looks in the current project and its worktrees, then
+  in every project folder ([sessions][sessions]; the docs date it to 2.1.223,
+  the changelog doesn't mention it). Two transcripts with the same id make it
+  give up. The resumed session keeps its id and appends to its original file,
+  but works in the directory it was launched from, without any visible
+  warning; only the model is told the working directory changed. The
+  `SessionStart` of such a resume reports a `transcript_path` under the new
+  directory, which doesn't exist, so the ledger takes the path from the turns.
+  `--fork-session` gives a new id and a new file.
+- **The picker** (`claude --resume`) shows the current worktree; `Ctrl+W`
+  widens it to the repository's worktrees and also lists deleted sibling
+  worktrees (it matches folder names by prefix), `Ctrl+A` to every project.
+- **Codex** finds `codex resume <id>` from any directory too (threads live by
+  date in `~/.codex/sessions/`). When the folder it recorded differs from the
+  current one, it asks which to use and offers the recorded one first, even
+  when it is gone. `-C <dir>` skips the question (or `tui.resume_cwd`).
+
+So `AgentSessionResume.plan` picks:
+
+1. the session's folder (or its worktree root) while it exists, with a warning
+   when that folder now has another branch checked out;
+2. otherwise the same path, recreated from the main checkout with
+   `git worktree prune` then `git worktree add <path> <branch>`, so the
+   conversation's paths are valid again and Codex has nothing to ask. Nirux's
+   own clean-up deletes the branch after its merge: the worktree then comes
+   back at the session's last commit, with no branch checked out, and a
+   warning. After a squash merge that commit is unreachable and `git gc`
+   eventually prunes it; the Project Board can fetch `pull/<number>/head`
+   first;
+3. otherwise the main checkout, with a warning that the paths in the
+   conversation point to the old worktree and edits will land in the main
+   checkout.
+
+It runs `claude --resume <id>`, or `codex resume <id> -C <dir>`
+(`codexCommand(resume:workingDirectory:)`: the id stays right after `resume`,
+where a restore looks for it). Nothing is resumable without a prompted
+conversation, or once Claude deleted the transcript (`cleanupPeriodDays`, 30
+days by default). A read-only view isn't needed: resuming sends no request
+until the user types.
+
+Using it, in the Project Board (later):
+
+- the list of a space's sessions, newest first, filtered by state and pull
+  request (`AgentSessionLedger.sessions(inSpace:matching:)`), with Resume;
+- **Browse all sessions** covers sessions Nirux didn't launch: a column in
+  the main checkout running `claude --resume` (then `Ctrl+W`) or
+  `codex resume --all`.
 
 Rejected: `CLAUDE_CODE_PROJECT_DIR_NAME` could store every worktree's
 transcripts under one name. It only works with `CLAUDE_CONFIG_DIR` set, and
@@ -581,8 +648,9 @@ the view forward and adds a merge queue. The brief preview and pinned URLs below
 are left for later there.
 
 A per-project dashboard, opened as a new column type (like the editor and web
-columns) from the command palette or a shortcut. Today's Pilot panel is per
-workspace, three rows tall, and covers only the active space.
+columns) from the command palette or a shortcut. The Pilot panel of the time
+was per workspace, three rows tall, and covered only the active space (Pilot
+Mode has since been removed).
 
 - **Header:** name, color, anchors, brief preview with Edit, pinned URLs.
 - **Workspaces** (active and inactive): branch, phase, PR and CI, agent status
@@ -617,7 +685,7 @@ branches also change; those wait for them to merge.
 | 4 | Project model, `projects.json`, migration, management UI | none | state persistence and backups, restore |
 | 5 | Routing and anchors | 4 | worktree creation, git detection |
 | 6 | Per-project defaults | 2, 4 | settings, terminal env, `nirux://` request handling |
-| 7 | Session ledger and resume | 4, 5 | hook events, restore |
+| 7 | Session ledger and resume. The ledger and the resume plan shipped; the list and Resume wait for the Project Board | 4, 5 | hook events, restore |
 | 8 | Project view column. Replaced by the [Project Board](project-board.md) plan | 4, 5 | git and PR polling |
 | 9 | "Finish" (PR merged, then remove worktree), with handover files added to `info/exclude`. The cleanup shipped in #46; handover files aren't in `info/exclude` yet | 8 | worktree creation |
 

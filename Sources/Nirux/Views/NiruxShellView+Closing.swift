@@ -42,7 +42,7 @@ extension NiruxShellView {
                 workspace.layoutAndScroll(
                     viewportWidth: self.viewport.frame.width,
                     height: workspace.containerView.frame.height,
-                    animated: true, pilotMode: self.isPilotMode
+                    animated: true
                 )
                 self.updateSidebar()
                 self.focusActiveTerminal(in: self.window)
@@ -116,7 +116,7 @@ extension NiruxShellView {
         workspace.layoutAndScroll(
             viewportWidth: viewport.frame.width,
             height: workspace.containerView.frame.height,
-            animated: true, pilotMode: isPilotMode
+            animated: true
         )
         updateSidebar()
         focusActiveTerminal(in: window)
@@ -150,21 +150,8 @@ extension NiruxShellView {
             guard let self else { return }
             guard let removed = self.workspaceStore.removeWorkspace(wsToRemove) else { return }
 
-            if self.isPilotMode {
-                NSAnimationContext.runAnimationGroup({ ctx in
-                    ctx.duration = 0.25
-                    ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                    removed.containerView.animator().alphaValue = 0
-                }, completionHandler: {
-                    DispatchQueue.main.async {
-                        removed.containerView.removeFromSuperview()
-                    }
-                })
-                self.relayout(animated: true)
-            } else {
-                removed.containerView.removeFromSuperview()
-                self.relayout(animated: false)
-            }
+            removed.containerView.removeFromSuperview()
+            self.relayout(animated: false)
             self.updateSidebar()
         }
     }
