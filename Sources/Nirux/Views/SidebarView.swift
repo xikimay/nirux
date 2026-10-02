@@ -23,7 +23,7 @@ final class SidebarSectionToggleView: NSView {
     }
 }
 
-/// Sidebar: minimal dots in normal mode, expanded detail panel (pilot-style) in expanded mode.
+/// Sidebar: minimal dots in normal mode, expanded detail panel in expanded mode.
 /// Dragging on empty sidebar area moves the window.
 final class SidebarView: NSView {
     // Note: card drags don't move the window even so — the drag-reorder
@@ -480,8 +480,10 @@ final class SidebarView: NSView {
         case .link(let url, _):
             if url == Self.inactiveSectionActionURL {
                 toggleInactiveSection()
-            } else if let workspaceIndex = Self.diffActionWorkspaceIndex(url) {
+            } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.diffActionPrefix) {
                 onDiffStatsClicked?(workspaceIndex)
+            } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.cleanupActionPrefix) {
+                onWorkspaceAction?(.cleanUpWorktree, workspaceIndex)
             } else if let url = URL(string: url) {
                 NSWorkspace.shared.open(url)
             }
@@ -653,14 +655,21 @@ final class SidebarView: NSView {
         NSCursor.arrow.set()
     }
 
+    private static let diffActionPrefix = "action:diff:"
+    private static let cleanupActionPrefix = "action:cleanup:"
+
     static func diffActionURL(workspaceIndex: Int) -> String {
-        "action:diff:\(workspaceIndex)"
+        diffActionPrefix + String(workspaceIndex)
+    }
+
+    /// The card's "Clean up", shown next to a merged pull request.
+    static func cleanupActionURL(workspaceIndex: Int) -> String {
+        cleanupActionPrefix + String(workspaceIndex)
     }
 
     static let inactiveSectionActionURL = "action:inactive-section-toggle"
 
-    private static func diffActionWorkspaceIndex(_ value: String) -> Int? {
-        let prefix = "action:diff:"
+    private static func actionWorkspaceIndex(_ value: String, prefix: String) -> Int? {
         guard value.hasPrefix(prefix) else { return nil }
         return Int(value.dropFirst(prefix.count))
     }

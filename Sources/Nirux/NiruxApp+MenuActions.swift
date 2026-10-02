@@ -46,6 +46,12 @@ extension NiruxApp {
         shell?.focusWorkspace(.down)
     }
 
+    /// One jump per press: a held ⌘J would spin through the queue.
+    @objc func jumpToNextWaitingAgent(_ sender: Any?) {
+        if let event = NSApp.currentEvent, event.type == .keyDown, event.isARepeat { return }
+        shell?.jumpToNextWaitingAgent()
+    }
+
     @objc func previousSpace(_ sender: Any?) {
         shell?.focusSpace(.previous)
     }
@@ -122,10 +128,6 @@ extension NiruxApp {
 
     @objc func focusColumnByNumber(_ sender: NSMenuItem) {
         shell?.focusColumn(number: sender.tag)
-    }
-
-    @objc func togglePilotMode(_ sender: Any?) {
-        shell?.togglePilotMode()
     }
 
     /// Same toggle as the sidebar's INACTIVE header (also in the ⌘P
@@ -240,7 +242,6 @@ extension NiruxApp {
     private func viewMenuItem() -> NSMenuItem {
         let viewMenu = NSMenu(title: "View")
         viewMenu.addItem(withTitle: "Toggle Sidebar", action: #selector(toggleWorkspaceSidebar(_:)), shortcut: .toggleSidebar)
-        viewMenu.addItem(withTitle: "Pilot Mode", action: #selector(togglePilotMode(_:)), shortcut: .pilotMode)
         viewMenu.addItem(
             withTitle: "Show Inactive Workspaces",
             action: #selector(toggleInactiveWorkspaces(_:)),
@@ -374,6 +375,13 @@ extension NiruxApp {
         nextSpaceItem.keyEquivalent = "\u{F703}"
         nextSpaceItem.keyEquivalentModifierMask = NSEvent.ModifierFlags([.command, .option])
         workspacesMenu.addItem(nextSpaceItem)
+
+        workspacesMenu.addItem(NSMenuItem.separator())
+        workspacesMenu.addItem(
+            withTitle: "Next Waiting Agent",
+            action: #selector(jumpToNextWaitingAgent(_:)),
+            shortcut: .nextWaitingAgent
+        )
 
         let workspacesItem = NSMenuItem()
         workspacesItem.submenu = workspacesMenu

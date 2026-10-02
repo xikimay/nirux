@@ -50,7 +50,6 @@ extension NiruxShellView {
         wireWorkspace(workspace)
         workspaceStore.appendWorkspace(workspace)
         verticalStrip.addSubview(workspace.containerView)
-        if isPilotMode { workspace.createPilotPanel() }
         relayout(animated: false)
         updateSidebar()
         focusActiveTerminal(in: window)
@@ -174,10 +173,9 @@ extension NiruxShellView {
     func resolveAgentColumn(uuid: String) -> AgentHookCenter.Resolution? {
         for (wsIndex, workspace) in workspaces.enumerated() {
             guard let colIndex = workspace.columns.firstIndex(where: { $0.agentUUID == uuid }) else { continue }
-            let isActive = wsIndex == activeWSIndex
             let isUserFocused = NSApp.isActive
                 && colIndex == workspace.focusedIndex
-                && (isActive || isPilotMode)
+                && wsIndex == activeWSIndex
             return AgentHookCenter.Resolution(
                 workspace: workspace,
                 column: workspace.columns[colIndex],
@@ -194,6 +192,7 @@ extension NiruxShellView {
     func refreshAfterWorkspaceSelection(animated: Bool) {
         guard workspaces.indices.contains(activeWSIndex) else { return }
         workspaces[activeWSIndex].hasNotification = false
+        quickSwitch.focusMoved()
         relayout(animated: animated)
         refreshGitContextNow(for: workspaces[activeWSIndex])
         // Title bars of a workspace off screen weren't refreshed: bring
@@ -352,7 +351,6 @@ extension NiruxShellView {
     // MARK: - Sidebar toggle
 
     func toggleSidebar() {
-        guard !isPilotMode else { return }
         let expanding = !isSidebarExpanded
         isSidebarExpanded = expanding
         saveState()
@@ -375,7 +373,7 @@ extension NiruxShellView {
     // MARK: - Layout Helpers
 
     struct StripLayout {
-        let viewportW, viewportH, totalH, rowH, gap, targetY: CGFloat
+        let viewportW, totalH, rowH, targetY: CGFloat
         let animated: Bool
     }
 
@@ -410,22 +408,12 @@ extension NiruxShellView {
             columnIndicator.frame = frames.indicator
         }
         statusBar.frame = frames.statusBar
-        sidebar.isHidden = isPilotMode
-        divider.isHidden = isPilotMode
-        columnIndicator.isHidden = isPilotMode
     }
 
-    /// Compute the target frame for each workspace container and the strip
-    /// that holds them, applying them either directly or via `.animator()`.
-    /// Column contents are laid out separately so that animated pilot-mode
-    /// resizing can slide the containers first.
-    private func applyWorkspaceFrames(_ layout: StripLayout, useAnimator: Bool) {
-        let stripFrame = NSRect(x: 0, y: layout.targetY, width: layout.viewportW, height: layout.totalH)
-        if useAnimator {
-            verticalStrip.animator().frame = stripFrame
-        } else {
-            verticalStrip.frame = stripFrame
-        }
+    /// Set the frame of each workspace container and of the strip that
+    /// holds them.
+    private func applyWorkspaceFrames(_ layout: StripLayout) {
+        verticalStrip.frame = NSRect(x: 0, y: layout.targetY, width: layout.viewportW, height: layout.totalH)
         let visible = visibleWorkspaceIndices
         let visibleSet = Set(visible)
         for (index, workspace) in workspaces.enumerated() {
@@ -433,13 +421,8 @@ extension NiruxShellView {
         }
         for (position, index) in visible.enumerated() {
             let workspace = workspaces[index]
-            let wsY = layout.totalH - CGFloat(position + 1) * layout.rowH - CGFloat(position) * layout.gap
-            let wsFrame = NSRect(x: 0, y: wsY, width: layout.viewportW, height: layout.rowH)
-            if useAnimator {
-                workspace.containerView.animator().frame = wsFrame
-            } else {
-                workspace.containerView.frame = wsFrame
-            }
+            let wsY = layout.totalH - CGFloat(position + 1) * layout.rowH
+            workspace.containerView.frame = NSRect(x: 0, y: wsY, width: layout.viewportW, height: layout.rowH)
         }
     }
 
@@ -449,35 +432,20 @@ extension NiruxShellView {
         let targetY = layout.targetY
         let animated = layout.animated
 
-        if animated && isPilotMode {
-            // Pilot mode: animate workspace containers first, then layout columns after
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.2
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                self.applyWorkspaceFrames(layout, useAnimator: true)
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                guard let self else { return }
-                for index in self.visibleWorkspaceIndices {
-                    self.workspaces[index].layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: true, pilotMode: self.isPilotMode)
-                }
-            }
-        } else {
-            let oldY = verticalStrip.frame.origin.y
-            applyWorkspaceFrames(layout, useAnimator: false)
-            for index in visibleWorkspaceIndices {
-                workspaces[index].layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: animated, pilotMode: isPilotMode)
-            }
-            // Normal-mode animated path: add a vertical slide over the direct frame change.
-            if animated, let layer = verticalStrip.layer, oldY != targetY {
-                let anim = CABasicAnimation(keyPath: "transform.translation.y")
-                anim.fromValue = oldY - targetY
-                anim.toValue = 0
-                anim.duration = 0.3
-                anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
-                anim.isRemovedOnCompletion = true
-                layer.add(anim, forKey: "wsSlide")
-            }
+        let oldY = verticalStrip.frame.origin.y
+        applyWorkspaceFrames(layout)
+        for index in visibleWorkspaceIndices {
+            workspaces[index].layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: animated)
+        }
+        // Animated path: add a vertical slide over the direct frame change.
+        if animated, let layer = verticalStrip.layer, oldY != targetY {
+            let anim = CABasicAnimation(keyPath: "transform.translation.y")
+            anim.fromValue = oldY - targetY
+            anim.toValue = 0
+            anim.duration = 0.3
+            anim.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
+            anim.isRemovedOnCompletion = true
+            layer.add(anim, forKey: "wsSlide")
         }
 
         // Focus border only — attention borders are managed by updateSidebar()
@@ -486,221 +454,11 @@ extension NiruxShellView {
             for (colIndex, col) in workspace.columns.enumerated() {
                 let isFocus = (wsIndex == activeWSIndex && colIndex == workspace.focusedIndex)
                 if col.view.layer?.animation(forKey: "attentionPulse") == nil {
-                    let targetRadius: CGFloat = isFocus ? 6 : 0
-                    let targetWidth: CGFloat = isFocus ? 2 : 0
-                    let targetColor: CGColor? = isFocus ? accent : nil
-
-                    if isPilotMode, let layer = col.view.layer {
-                        let dur = 0.25
-                        let timing = CAMediaTimingFunction(name: .easeInEaseOut)
-                        if layer.cornerRadius != targetRadius {
-                            let anim = CABasicAnimation(keyPath: "cornerRadius")
-                            anim.toValue = targetRadius; anim.duration = dur; anim.timingFunction = timing
-                            layer.add(anim, forKey: "cornerFade")
-                        }
-                        if layer.borderWidth != targetWidth {
-                            let anim = CABasicAnimation(keyPath: "borderWidth")
-                            anim.toValue = targetWidth; anim.duration = dur; anim.timingFunction = timing
-                            layer.add(anim, forKey: "borderFade")
-                        }
-                        if layer.borderColor != targetColor {
-                            let anim = CABasicAnimation(keyPath: "borderColor")
-                            anim.toValue = targetColor; anim.duration = dur; anim.timingFunction = timing
-                            layer.add(anim, forKey: "borderColorFade")
-                        }
-                    }
-
-                    col.view.layer?.cornerRadius = targetRadius
-                    col.view.layer?.borderWidth = targetWidth
-                    col.view.layer?.borderColor = targetColor
+                    col.view.layer?.cornerRadius = isFocus ? 6 : 0
+                    col.view.layer?.borderWidth = isFocus ? 2 : 0
+                    col.view.layer?.borderColor = isFocus ? accent : nil
                 }
             }
         }
-
-        updatePilotOverlays(vpW: viewportW, totalH: layout.totalH, rowH: rowH, gap: layout.gap)
-    }
-
-    // MARK: - Pilot Mode
-
-    func togglePilotMode() {
-        if isSidebarExpanded {
-            sidebar.isHidden = true
-            isSidebarExpanded = false
-            sidebar.isExpanded = false
-        }
-
-        let snapshot = NSView(frame: bounds)
-        snapshot.wantsLayer = true
-        if let bitmapRep = bitmapImageRepForCachingDisplay(in: bounds) {
-            cacheDisplay(in: bounds, to: bitmapRep)
-            snapshot.layer?.contents = bitmapRep.cgImage
-        } else {
-            snapshot.layer?.backgroundColor = (layer?.backgroundColor) ?? NSColor.black.cgColor
-        }
-        addSubview(snapshot)
-
-        isPilotMode.toggle()
-        if isPilotMode {
-            for workspace in workspaces { workspace.createPilotPanel() }
-        } else {
-            for workspace in workspaces { workspace.hidePilotPanel() }
-        }
-        relayout(animated: false)
-        updateSidebar()
-        focusActiveTerminal(in: window)
-
-        if isPilotMode {
-            pilotClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
-                self?.handlePilotClick(event) ?? event
-            }
-            pilotHoverMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
-                self?.handlePilotHover(event)
-                return event
-            }
-            startPilotRefresh()
-        } else {
-            if let monitor = pilotClickMonitor {
-                NSEvent.removeMonitor(monitor)
-                pilotClickMonitor = nil
-            }
-            if let monitor = pilotHoverMonitor {
-                NSEvent.removeMonitor(monitor)
-                pilotHoverMonitor = nil
-            }
-            stopPilotRefresh()
-        }
-
-        DispatchQueue.main.async { [weak self] in
-            self?.redrawAllTerminals()
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            self?.redrawAllTerminals()
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.25
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                snapshot.animator().alphaValue = 0
-            } completionHandler: {
-                DispatchQueue.main.async {
-                    snapshot.removeFromSuperview()
-                }
-            }
-        }
-    }
-
-    /// Start the 1.5s pilot sidebar refresh. Caller is responsible for
-    /// ensuring we're currently in pilot mode — this only schedules the
-    /// timer, it doesn't toggle pilot mode itself.
-    func startPilotRefresh() {
-        guard pilotRefreshTimer == nil else { return }
-        pilotRefreshTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, self.isPilotMode else { return }
-                let snap = ProcessSnapshot()
-                self.updateSidebar(snapshot: snap)
-            }
-        }
-    }
-
-    /// Stop the pilot sidebar refresh. Idempotent.
-    func stopPilotRefresh() {
-        pilotRefreshTimer?.invalidate()
-        pilotRefreshTimer = nil
-    }
-
-    func handlePilotClick(_ event: NSEvent) -> NSEvent? {
-        guard isPilotMode else { return event }
-        let windowLoc = event.locationInWindow
-        let vpLoc = viewport.convert(windowLoc, from: nil)
-        guard viewport.bounds.contains(vpLoc) else { return event }
-
-        // 1. Check pilot panel clickable areas (PR links, etc.)
-        for index in visibleWorkspaceIndices where workspaces[index].handlePilotPanelClick(windowPoint: windowLoc) {
-            return nil
-        }
-
-        // 2. Check pilot panel column clicks (window title granularity)
-        for index in visibleWorkspaceIndices {
-            let workspace = workspaces[index]
-            if let colIndex = workspace.handlePilotColumnClick(windowPoint: windowLoc) {
-                if index != activeWSIndex {
-                    workspace.focusedIndex = colIndex
-                    switchToWorkspace(index)
-                } else if workspace.focusedIndex != colIndex {
-                    workspace.focusedIndex = colIndex
-                    relayout(animated: true)
-                    updateSidebar()
-                    focusActiveTerminal(in: window)
-                }
-                return nil
-            }
-        }
-
-        // 3. Check for clicks on non-active workspace containers
-        for index in visibleWorkspaceIndices where index != activeWSIndex {
-            let workspace = workspaces[index]
-            let containerLoc = workspace.containerView.convert(windowLoc, from: nil)
-            guard workspace.containerView.bounds.contains(containerLoc) else { continue }
-
-            for (colIndex, col) in workspace.columns.enumerated() {
-                let colLoc = col.view.convert(windowLoc, from: nil)
-                if col.view.bounds.contains(colLoc) {
-                    workspace.focusedIndex = colIndex
-                    break
-                }
-            }
-            switchToWorkspace(index)
-            return nil
-        }
-        return event
-    }
-
-    func handlePilotHover(_ event: NSEvent) {
-        guard isPilotMode else { return }
-        let windowLoc = event.locationInWindow
-        for index in visibleWorkspaceIndices where workspaces[index].handlePilotPanelHover(windowPoint: windowLoc) {
-            NSCursor.pointingHand.set()
-            return
-        }
-        NSCursor.arrow.set()
-    }
-
-    // MARK: - Pilot Mode Overlays
-
-    func updatePilotOverlays(vpW: CGFloat, totalH: CGFloat, rowH: CGFloat, gap: CGFloat) {
-        // Remove non-highlight overlays
-        for overlay in pilotOverlays where overlay !== pilotActiveHighlight {
-            overlay.removeFromSuperview()
-        }
-        pilotOverlays.removeAll()
-
-        guard isPilotMode else {
-            pilotActiveHighlight?.removeFromSuperview()
-            pilotActiveHighlight = nil
-            statusBar.clearPilotHints()
-            return
-        }
-
-        // Active workspace highlight — persistent view with animated position
-        let activePosition = activeVisibleWorkspacePosition ?? 0
-        let wsY = totalH - CGFloat(activePosition + 1) * rowH - CGFloat(activePosition) * gap
-        let targetFrame = NSRect(x: 0, y: wsY, width: vpW, height: rowH)
-
-        if let highlight = pilotActiveHighlight {
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.25
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                highlight.animator().frame = targetFrame
-            }
-        } else {
-            let highlight = NSView(frame: targetFrame)
-            highlight.wantsLayer = true
-            highlight.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.03).cgColor
-            highlight.layer?.cornerRadius = 8
-            verticalStrip.addSubview(highlight, positioned: .below, relativeTo: verticalStrip.subviews.first)
-            pilotActiveHighlight = highlight
-        }
-        pilotOverlays.append(pilotActiveHighlight!)
-
-        statusBar.setPilotHints("\u{2318}\u{2191}\u{2193} workspace  \u{2318}\u{2190}\u{2192} column  \u{2318}T new  \u{2318}O exit pilot")
     }
 }

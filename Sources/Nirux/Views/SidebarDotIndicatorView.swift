@@ -201,7 +201,7 @@ final class SidebarDotIndicatorView: NSView {
     }
 }
 
-private extension NSColor {
+extension NSColor {
     static func niruxColor(hex: String) -> NSColor? {
         var raw = hex.trimmingCharacters(in: .whitespacesAndNewlines)
         if raw.hasPrefix("#") { raw.removeFirst() }

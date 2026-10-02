@@ -9,6 +9,8 @@ enum FuzzyMatch {
     private static let wordStartBonus = 12
     private static let separatorBonus = 10
     private static let camelBonus = 6
+    /// What starts a new word after it.
+    static let wordSeparators: Set<Character> = [" ", "-", "_", "/", ".", "("]
 
     static func score(query: String, candidate: String) -> Int? {
         if query.isEmpty { return 0 }
@@ -39,7 +41,7 @@ enum FuzzyMatch {
                 score += wordStartBonus
             } else {
                 let prev = candidateLower[candidateIndex - 1]
-                if prev == " " || prev == "-" || prev == "_" || prev == "/" || prev == "." || prev == "(" {
+                if wordSeparators.contains(prev) {
                     score += separatorBonus
                 } else if canCheckCamel,
                           candidateOrig[candidateIndex].isUppercase,

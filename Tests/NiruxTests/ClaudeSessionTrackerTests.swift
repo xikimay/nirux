@@ -216,6 +216,26 @@ final class ClaudeSessionTrackerTests: XCTestCase {
         XCTAssertFalse(AgentHookCenter.isNestedCodexHook(foregroundName: nil))
     }
 
+    func testCodexExecIsARunNotAConversation() {
+        func codex(_ arguments: String...) -> ForegroundProcess {
+            ForegroundProcess(instance: ProcessInstance(pid: 1, startedAt: 1), name: "codex", arguments: ["codex"] + arguments)
+        }
+        XCTAssertTrue(AgentHookCenter.isHeadlessCodex(codex("exec", "fix it")))
+        XCTAssertTrue(AgentHookCenter.isHeadlessCodex(codex("e", "fix it")))
+        XCTAssertTrue(AgentHookCenter.isHeadlessCodex(codex("-c", "model=\"o3\"", "--full-auto", "exec", "fix it")))
+        // Installed with npm or bun: node runs the `codex` script.
+        let script = ForegroundProcess(
+            instance: ProcessInstance(pid: 1, startedAt: 1), name: "codex",
+            arguments: ["node", "/Users/me/.bun/bin/codex", "--model", "o3", "exec", "fix it"]
+        )
+        XCTAssertTrue(AgentHookCenter.isHeadlessCodex(script))
+        XCTAssertFalse(AgentHookCenter.isHeadlessCodex(codex()))
+        XCTAssertFalse(AgentHookCenter.isHeadlessCodex(codex("resume", "t1")))
+        XCTAssertFalse(AgentHookCenter.isHeadlessCodex(codex("--model", "exec")))
+        XCTAssertFalse(AgentHookCenter.isHeadlessCodex(codex("--", "exec")))
+        XCTAssertFalse(AgentHookCenter.isHeadlessCodex(nil))
+    }
+
     func testSuspendingClaudeKeepsItsBinding() {
         _ = admit(.sessionStart, "parent", from: parent.instance, foreground: parent)
         let shell = ForegroundProcess(

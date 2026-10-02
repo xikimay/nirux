@@ -31,7 +31,7 @@ struct ColumnInfo: Hashable {
     /// change on every 2s heartbeat while an agent merely gets older.
     var elapsedDisplay: String? {
         guard agentStatus == .working, let agentElapsedSeconds else { return nil }
-        return PilotSidebarRenderer.shortDuration(agentElapsedSeconds)
+        return SidebarRenderer.shortDuration(agentElapsedSeconds)
     }
 
     static func == (lhs: ColumnInfo, rhs: ColumnInfo) -> Bool {
@@ -211,6 +211,8 @@ struct WorkspaceInfo: Hashable {
     let phase: WorkspacePhase
     let lastSummary: String?
     let lastActivityAt: TimeInterval?
+    /// What the card shows after "#N merged"; nil shows nothing.
+    var mergedCleanup: MergedCleanupOffer?
 
     var sidebarAction: (text: String, isBlocker: Bool)? {
         if let blocker = normalizedContextText(blocker) {
@@ -227,6 +229,15 @@ struct WorkspaceInfo: Hashable {
               !value.isEmpty else { return nil }
         return value
     }
+}
+
+/// A merged pull request's worktree, offered for clean-up on its card.
+enum MergedCleanupOffer: Hashable {
+    /// "Clean up": runs "Clean Up Worktree…".
+    case available
+    /// A clean-up of the worktree is being checked, confirmed or run:
+    /// "Cleaning up…", which does nothing.
+    case inProgress
 }
 
 struct ProfileInfo: Hashable {

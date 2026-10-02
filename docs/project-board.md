@@ -17,9 +17,9 @@ parallel pull requests by hand:
 - it cleaned up merged worktrees.
 
 Nirux already knows most of that state, spread over sidebar cards, the Pilot
-panel and `gh` calls typed by an agent. This document proposes a **Project
-Board**: one table per project, and a **merge queue** that runs the merge
-routine above after one click.
+panel (since removed) and `gh` calls typed by an agent. This document proposes
+a **Project Board**: one table per project, and a **merge queue** that runs the
+merge routine above after one click.
 
 It builds on [Projects](projects.md): it is the "Project view" of section 7,
 brought forward, and its "Finish" action is the worktree cleanup shipped in #46.
@@ -76,10 +76,11 @@ the Project view is a dedicated column type.
 
 Rejected:
 
-- **Evolve Pilot Mode.** Pilot Mode is a layout mode: up to three live
+- **Evolve Pilot Mode.** Pilot Mode was a layout mode: up to three live
   workspaces stacked, each with a 200 pt info panel, for the active space only.
-  It is for watching terminals, not for reading a table of fifteen branches, and
-  it is toggled on and off. Pilot panels could later show a row's queue state.
+  It was for watching terminals, not for reading a table of fifteen branches,
+  and it was toggled on and off. It has since been removed: the sidebar and the
+  board cover it.
 - **A floating panel**, like Clean Up. It hides the terminals, and closing it
   loses the view.
 
@@ -195,12 +196,11 @@ documented in B1's pull request:
   focuses. Focus goes to the most urgent agent column of the row.
 - **Open** opens a workspace with a shell in the worktree, in the board's
   project, as "Open Worktree" does. It launches no agent.
-- **On screen** means its workspace is shown (selected, or any workspace of
-  the space in Pilot Mode), with Nirux in front and its window neither
-  minimized nor covered. Periodic reads run only then, on the status
-  refresh; in the background they pause, as the sidebar's pull request reads
-  do. Opening the board, Refresh and a saved board.json read at once when
-  its workspace is shown. Refresh doesn't start a read already running.
+- **On screen** means its workspace is the selected one, with Nirux in front
+  and its window neither minimized nor covered. Periodic reads run only then,
+  on the status refresh; in the background they pause, as the sidebar's pull
+  request reads do. Opening the board, Refresh and a saved board.json read at
+  once when its workspace is shown. Refresh doesn't start a read already running.
 - The board reads nothing while board.json is being read again, nor for a
   deleted project or one without a repository. Its clock keeps counting
   while the Mac sleeps, so everything is due after a wake. A pull request that leaves the open list makes the merged
@@ -905,8 +905,9 @@ In delivery order:
   back, and a queue publishes several nightlies in a row. It now keeps a week.
 - B2 can start in parallel with B1 if it defines its own PR type.
 - B3's keep-awake input needed `feat/keep-awake` (#57), which shipped first.
-- **Session history** (Projects, section 6: ledger and resume) becomes a
-  "Recent sessions" section of the board, after B3.
+- **Session history** (Projects, section 6): the ledger and the resume plan
+  shipped without UI; they become a "Recent sessions" section of the board,
+  after B3.
 - **Later:** launching a worktree workspace with a handover from the board. The
   worktree skill does it today from an agent.
 - Projects' plan rows 8 (Project view) and 9 (Finish) are replaced by this plan
