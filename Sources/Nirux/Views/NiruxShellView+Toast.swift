@@ -23,6 +23,7 @@ extension NiruxShellView {
         addSubview(toast, positioned: .above, relativeTo: nil)
         layoutToast()
         if comesIn { animateToast(toast, appearing: true) }
+        toastShownAt = ProcessInfo.processInfo.systemUptime
         let priority: NSAccessibilityPriorityLevel = tone == .error ? .high : .medium
         NSAccessibility.post(
             element: window ?? toast,
@@ -36,11 +37,21 @@ extension NiruxShellView {
         }
     }
 
-    /// After its time, and on the next key or click in the window
-    /// (NiruxApp's interceptors, which see the keys a terminal consumes):
-    /// it sits over the bottom of the columns, an agent's prompt.
+    /// The next key or click in the window puts it away (NiruxApp's
+    /// interceptors, which see the keys a terminal consumes): it sits over
+    /// the bottom of the columns, an agent's prompt. Not in its first half
+    /// second: one that came unasked (a diff that ended, a list read off
+    /// the main thread) would vanish under a key already on its way.
+    func dismissToastOnInput() {
+        guard ProcessInfo.processInfo.systemUptime - toastShownAt > Self.toastInputGrace else { return }
+        dismissToast()
+    }
+
+    static let toastInputGrace: TimeInterval = 0.5
+
+    /// Fades it out, unless it already is.
     func dismissToast() {
-        guard let toast else { return }
+        guard let toast, toast.alphaValue > 0 else { return }
         toastGeneration += 1
         let generation = toastGeneration
         animateToast(toast, appearing: false)

@@ -277,7 +277,7 @@ extension NiruxShellView {
         let enabled = Self.currentMissionHandoffsEnabled()
         guard enabled else { return showToast("Mission handoffs are off in Settings") }
         guard let accepted = MissionStore.shared.respond(to: questionID, message: input.stringValue, enabled: enabled) else {
-            showToast("Couldn’t send the reply: the mission may have ended or been answered", tone: .error)
+            showToast("Couldn’t send the reply to the child mission", tone: .error)
             return
         }
         if recordMissionActivity(accepted.mission, event: accepted.event) {

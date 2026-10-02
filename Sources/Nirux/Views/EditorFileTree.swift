@@ -453,7 +453,11 @@ final class EditorFileTree: NSView {
               newName != node.name
         else { return }
         let target = node.url.deletingLastPathComponent().appendingPathComponent(newName)
-        guard !FileManager.default.fileExists(atPath: target.path) else { return fail("“\(newName)” already exists") }
+        // A change of case alone is the same file on a case-insensitive disk.
+        let sameName = newName.caseInsensitiveCompare(node.name) == .orderedSame
+        guard sameName || !FileManager.default.fileExists(atPath: target.path) else {
+            return fail("“\(newName)” already exists")
+        }
         do {
             try FileManager.default.moveItem(at: node.url, to: target)
         } catch {

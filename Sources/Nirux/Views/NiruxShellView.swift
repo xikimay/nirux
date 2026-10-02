@@ -98,6 +98,7 @@ final class NiruxShellView: NSView {
     /// tells a pending dismissal whether it still applies.
     var toast: ToastView?
     var toastGeneration = 0
+    var toastShownAt: TimeInterval = 0
     var boardSettingsPanel: BoardSettingsPanel?
     /// A "Board Settings…" reading board.json and the checkouts, so a
     /// second click doesn't open a second form.

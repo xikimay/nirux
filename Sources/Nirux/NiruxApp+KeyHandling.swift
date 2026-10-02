@@ -7,7 +7,7 @@ extension NiruxApp {
     func setupClickToFocus() {
         NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
             // Before the click is handled, so a toast it shows stays.
-            if event.window === self?.mainWindow { self?.shell?.dismissToast() }
+            if event.window === self?.mainWindow { self?.shell?.dismissToastOnInput() }
             guard let shell = self?.shell,
                   let workspace = shell.activeWorkspaceForKeyIntercept,
                   let contentView = event.window?.contentView
@@ -94,7 +94,7 @@ extension NiruxApp {
             // key handling instead of feeding the focused column.
             guard let shell = self?.shell, event.window === self?.mainWindow else { return event }
             // Before the key is handled, so a toast it shows stays.
-            shell.dismissToast()
+            shell.dismissToastOnInput()
 
             // Don't intercept when an overlay is active (picker, etc.)
             if shell.isOverlayActive { return event }

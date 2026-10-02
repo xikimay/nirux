@@ -662,12 +662,11 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                 switch original {
                 case nil:
                     NSLog("%@", "[EditorColumn] no git \(mode.rawValue) content for \(path) — file untracked, git missing, or branch base unavailable")
-                    // Not asked again each time the tab comes back.
-                    self.diffModeByPath.removeValue(forKey: path)
+                    self.forgetFailedDiffMode(path: path)
                     self.showToast(Self.noDiffOriginalText(path: path, cwd: cwd, mode: mode))
                 case .tooLarge(let byteCount):
                     NSLog("%@", "[EditorColumn] git \(mode.rawValue) original of \(path) too large to diff (\(byteCount) bytes)")
-                    self.diffModeByPath.removeValue(forKey: path)
+                    self.forgetFailedDiffMode(path: path)
                     self.showToast("This file is too large to compare")
                 case .text(let original):
                     self.diffActivePath = path
@@ -676,6 +675,18 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                     self.sendBridge(["type": "enterDiff", "path": path, "original": original])
                 }
             }
+        }
+    }
+
+    /// A diff that failed isn't asked again each time its tab comes back;
+    /// the one still on screen, if any, is.
+    private func forgetFailedDiffMode(path: String) {
+        if diffActivePath == path, let shown = diffActiveMode {
+            diffModeByPath[path] = shown
+            selectedDiffMode = shown
+            refreshTabBar()
+        } else {
+            diffModeByPath.removeValue(forKey: path)
         }
     }
 

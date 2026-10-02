@@ -27,6 +27,30 @@ final class ToastTests: XCTestCase {
         }
     }
 
+    /// A key or click puts it away, not in its first half second (it may
+    /// have come unasked under a key on its way), and keys typed while it
+    /// fades don't hold it on screen.
+    func testInputPutsTheToastAwayAfterItsGraceAndKeysDontHoldIt() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.showToast("Unasked")
+            let toast = try XCTUnwrap(shell.toast)
+            shell.dismissToastOnInput()
+            XCTAssertEqual(toast.alphaValue, 1, "still in its grace")
+
+            shell.toastShownAt -= NiruxShellView.toastInputGrace + 0.01
+            shell.dismissToastOnInput()
+            XCTAssertEqual(toast.alphaValue, 0)
+            // Typing on, faster than the fade; ends as soon as it's gone.
+            let typingEnds = Date().addingTimeInterval(2)
+            while Date() < typingEnds, shell.toast != nil {
+                shell.dismissToastOnInput()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+            }
+            XCTAssertNil(shell.toast, "gone while the keys kept coming")
+        }
+    }
+
     /// Shown while the last one fades out: that one comes back, and stays.
     func testToastShownDuringTheFadeOutStays() throws {
         try UIFlowHarness.run { harness in
