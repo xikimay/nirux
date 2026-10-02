@@ -209,10 +209,43 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(opened.title, harness.worktreeBranch)
             XCTAssertEqual(NiruxShellView.comparablePath(opened.cwd), NiruxShellView.comparablePath(harness.worktree))
 
+            // Picks a row of Open Worktree by its title; returns its subtitle.
+            @MainActor func pickWorktree(_ title: String) throws -> String {
+                harness.runPaletteCommand("Open Worktree")
+                harness.waitUntil("\(title) in the worktree list") {
+                    palette.isVisible && palette.actions.contains { $0.title == title }
+                }
+                harness.type(title, into: try XCTUnwrap(palette.searchField))
+                let row = try XCTUnwrap(palette.filteredActions.first)
+                XCTAssertEqual(row.title, title)
+                harness.press(.returnKey, in: palette.panel)
+                return row.subtitle
+            }
+
+            // Once it is open, it goes back to that workspace...
+            let repoWorkspace = try XCTUnwrap(shell.workspaces.first { $0.cwd == harness.repo })
+            shell.focusWorkspace(id: repoWorkspace.id)
+            let workspaceCount = shell.workspaces.count
+            XCTAssertTrue(try pickWorktree(harness.worktreeBranch).hasPrefix("Already open · "))
+            XCTAssertTrue(shell.activeWorkspace === opened)
+            // ...and, from the worktree, to the main checkout's.
+            XCTAssertTrue(try pickWorktree("main").hasPrefix("Already open · "))
+            XCTAssertTrue(shell.activeWorkspace === repoWorkspace)
+            XCTAssertEqual(shell.workspaces.count, workspaceCount)
+            // A worktree inside the main checkout, as Claude Code makes them:
+            // its workspace is in it, not in the main checkout.
+            let nested = harness.repo + "/.claude/worktrees/nested"
+            try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/nested", nested], at: harness.repo)
+            XCTAssertFalse(try pickWorktree("feat/nested").hasPrefix("Already open"))
+            let nestedWorkspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.focusWorkspace(id: repoWorkspace.id)
+            XCTAssertTrue(try pickWorktree("feat/nested").hasPrefix("Already open · "))
+            XCTAssertTrue(shell.activeWorkspace === nestedWorkspace)
+            XCTAssertEqual(shell.workspaces.count, workspaceCount + 1)
+            shell.focusWorkspace(id: repoWorkspace.id)
+
             // Creates the worktree off the main thread, then opens it with an
             // agent (the launch double).
-            let repoIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0.cwd == harness.repo })
-            shell.switchToWorkspace(repoIndex)
             harness.runPaletteCommand("New Worktree")
             let branchField = try XCTUnwrap(harness.waitForField(placeholder: "Branch name (e.g. feat/my-feature)"))
             harness.submit("feat/new-flow", into: branchField)
