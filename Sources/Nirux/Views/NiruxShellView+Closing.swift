@@ -45,7 +45,8 @@ extension NiruxShellView {
                     animated: true
                 )
                 self.updateSidebar()
-                self.focusActiveTerminal(in: self.window)
+                // ⌘W lands the user on the neighbour.
+                self.focusActiveTerminal(in: self.window, editorTakesKeyboard: true)
             }
         })
     }

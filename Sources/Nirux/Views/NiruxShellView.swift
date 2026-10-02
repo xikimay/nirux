@@ -188,11 +188,7 @@ final class NiruxShellView: NSView {
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
             if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }
-            guard self.workspaces[wsIndex].focusedIndex != colIndex else { return }
-            self.workspaces[wsIndex].focusedIndex = colIndex
-            self.relayout(animated: true)
-            self.updateSidebar()
-            self.focusActiveTerminal(in: self.window, editorTakesKeyboard: true)
+            self.goToColumn(colIndex)
         }
         updateSidebar()
         relayout(animated: false)
@@ -748,6 +744,18 @@ extension NiruxShellView {
         relayout(animated: true)
         updateSidebar()
         focusActiveTerminal(in: window, editorTakesKeyboard: true)
+    }
+
+    /// Focuses column `index` of the active workspace at the user's request
+    /// (Cmd+1…9, the sidebar). An agent's open focuses its editor column
+    /// without the keyboard: going to it then hands the keyboard over.
+    func goToColumn(_ index: Int) {
+        guard let workspace = activeWorkspace, workspace.columns.indices.contains(index) else { return }
+        if workspace.focusedIndex == index, workspace.columns[index].isEditor {
+            focusActiveTerminal(in: window, editorTakesKeyboard: true)
+        } else {
+            focusColumnByIndex(index)
+        }
     }
 
     var activeWorkspace: WorkspaceState? { workspaceStore.activeWorkspace }

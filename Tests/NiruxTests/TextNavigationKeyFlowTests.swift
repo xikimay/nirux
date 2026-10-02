@@ -121,14 +121,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
             let shell = harness.shell
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             @MainActor func open(_ file: String) throws {
-                shell.openEditorFromURL(try XCTUnwrap(OpenEditorRequest(
-                    queryItems: [
-                        URLQueryItem(name: "file", value: harness.repo + "/" + file),
-                        URLQueryItem(name: "workspace", value: workspace.id)
-                    ],
-                    canonicalize: { $0 },
-                    isOpenableFile: { _ in true }
-                )))
+                shell.openEditorFromURL(try agentOpen(harness.repo + "/" + file, in: workspace))
                 XCTAssertIdentical(shell.activeWorkspace, workspace)
                 XCTAssertNotNil(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
             }
@@ -174,7 +167,67 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         }
     }
 
+    /// The user's moves to an editor column give it the keyboard, even to
+    /// the one an agent's open focused without it: Cmd+1…9, the sidebar, a
+    /// workspace switch, Cmd+W on its neighbour.
+    func testUserMovesGiveTheEditorTheKeyboard() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let terminal = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.terminalView)
+            harness.window.makeFirstResponder(terminal)
+            shell.openEditorFromURL(try agentOpen(harness.repo + "/README.md", in: workspace))
+            let editorIndex = workspace.focusedIndex
+            let editor = try XCTUnwrap(workspace.columns[safe: editorIndex]?.editorColumn)
+            let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
+            XCTAssertIdentical(harness.window.firstResponder, terminal)
+
+            shell.focusColumn(number: editorIndex + 1)
+            XCTAssertIdentical(harness.window.firstResponder, webView, "Cmd+\(editorIndex + 1)")
+            harness.window.makeFirstResponder(terminal)
+            shell.sidebar.onColumnClicked?(shell.activeWSIndex, editorIndex)
+            XCTAssertIdentical(harness.window.firstResponder, webView, "the sidebar")
+
+            shell.addWorkspace(title: "other", cwd: harness.repo)
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace }))
+            XCTAssertIdentical(harness.window.firstResponder, webView, "the workspace switch")
+
+            workspace.addColumn()
+            shell.relayout(animated: false)
+            harness.window.makeFirstResponder(workspace.columns[safe: editorIndex + 1]?.terminalView)
+            XCTAssertEqual(workspace.focusedIndex, editorIndex + 1)
+            shell.closeActiveColumn()
+            harness.waitUntil("the column to close", timeout: 10) { workspace.columns.count == editorIndex + 1 }
+            XCTAssertIdentical(harness.window.firstResponder, webView, "Cmd+W")
+        }
+    }
+
+    /// An agent's open in the workspace in front leaves the address bar
+    /// being typed in alone.
+    func testAgentOpensLeaveTheAddressBarTheKeyboard() throws {
+        try UIFlowHarness.run { harness in
+            let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+            workspace.addColumn(webViewURL: URL(fileURLWithPath: harness.repo + "/README.md").absoluteString)
+            let browser = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.webViewColumn)
+            browser.focusAddressBar()
+            let fieldEditor = try XCTUnwrap(harness.window.firstResponder as? NSTextView)
+
+            harness.shell.openEditorFromURL(try agentOpen(harness.repo + "/README.md", in: workspace))
+            XCTAssertNotNil(workspace.columns[safe: workspace.focusedIndex]?.editorColumn)
+            XCTAssertIdentical(harness.window.firstResponder, fieldEditor)
+        }
+    }
+
     // MARK: - Helpers
+
+    /// What `nirux://open-editor` asks for when an agent opens `path`.
+    private func agentOpen(_ path: String, in workspace: WorkspaceState) throws -> OpenEditorRequest {
+        try XCTUnwrap(OpenEditorRequest(
+            queryItems: [URLQueryItem(name: "file", value: path), URLQueryItem(name: "workspace", value: workspace.id)],
+            canonicalize: { $0 },
+            isOpenableFile: { _ in true }
+        ))
+    }
 
     /// Runs `body` with the app's key interceptor and menu bar on the
     /// harness window, as `applicationDidFinishLaunching` sets them up.
