@@ -90,12 +90,6 @@ extension NiruxShellView {
                 self?.showWorktreeCleanupPanel()
             },
             PaletteAction(
-                icon: "🔍", title: "Pilot Mode", subtitle: "Toggle overview of all workspaces",
-                shortcut: .pilotMode
-            ) { [weak self] in
-                self?.togglePilotMode()
-            },
-            PaletteAction(
                 icon: "◧", title: "Show/Hide Sidebar", subtitle: "Toggle the workspace sidebar",
                 shortcut: .toggleSidebar
             ) { [weak self] in

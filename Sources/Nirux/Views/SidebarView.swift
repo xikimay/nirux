@@ -23,7 +23,7 @@ final class SidebarSectionToggleView: NSView {
     }
 }
 
-/// Sidebar: minimal dots in normal mode, expanded detail panel (pilot-style) in expanded mode.
+/// Sidebar: minimal dots in normal mode, expanded detail panel in expanded mode.
 /// Dragging on empty sidebar area moves the window.
 final class SidebarView: NSView {
     // Note: card drags don't move the window even so — the drag-reorder

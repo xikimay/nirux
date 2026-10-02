@@ -83,7 +83,7 @@ final class CrashNoticeStatusBarTests: XCTestCase {
         XCTAssertEqual(actions, [.copySummary, .openReport])
     }
 
-    func testNoticeUsesTheWidthTheHintsLeave() throws {
+    func testNoticeIsNotTruncatedAndButtonsFollowIt() throws {
         let bar = makeBar()
         bar.showCrash(try notice())
         bar.layoutSubtreeIfNeeded()
@@ -95,13 +95,6 @@ final class CrashNoticeStatusBarTests: XCTestCase {
         XCTAssertLessThan(label.frame.maxX, copy.frame.minX)
         XCTAssertLessThan(copy.frame.maxX, open.frame.minX)
         XCTAssertLessThan(open.frame.maxX, dismiss.frame.minX)
-
-        let hints = "⌘↑↓ workspace  ⌘←→ column  ⌘T new  ⌘O exit pilot"
-        bar.setPilotHints(hints)
-        bar.layoutSubtreeIfNeeded()
-        let hintsLabel = try XCTUnwrap(bar.subviews.compactMap { $0 as? NSTextField }.first { $0.stringValue == hints })
-        XCTAssertGreaterThan(hintsLabel.frame.minX, dismiss.frame.maxX, "the hints never cover the buttons")
-        XCTAssertGreaterThanOrEqual(hintsLabel.frame.width, ceil(hintsLabel.attributedStringValue.size().width))
         XCTAssertEqual(
             bar.hitTest(NSPoint(x: dismiss.frame.midX, y: dismiss.frame.midY)), dismiss
         )
@@ -122,10 +115,9 @@ final class CrashNoticeStatusBarTests: XCTestCase {
         XCTAssertEqual([open.frame, dismiss.frame], before)
     }
 
-    func testNarrowPilotLayoutKeepsTheLeftHalf() throws {
+    func testNarrowLayoutKeepsTheLeftHalf() throws {
         let bar = makeBar()
         bar.setFrameSize(NSSize(width: 720, height: StatusBarView.height))
-        bar.setPilotHints("⌘↑↓ workspace  ⌘←→ column  ⌘T new  ⌘O exit pilot")
         bar.showUpdate(version: "nightly-2026.09.28")
         bar.layoutSubtreeIfNeeded()
         let label = try XCTUnwrap(bar.subviews.compactMap { $0 as? NSTextField }.first { $0.stringValue.hasPrefix("●") })
@@ -136,7 +128,6 @@ final class CrashNoticeStatusBarTests: XCTestCase {
 
     func testButtonsTakeTheirClicksAtEveryWidth() throws {
         let bar = makeBar()
-        bar.setPilotHints("⌘↑↓ workspace  ⌘←→ column  ⌘T new  ⌘O exit pilot")
         bar.showCrash(try notice())
         for width in stride(from: CGFloat(600), through: 1400, by: 25) {
             bar.setFrameSize(NSSize(width: width, height: StatusBarView.height))

@@ -7,8 +7,7 @@ final class NiruxShellView: NSView {
     private static let expandedSidebarWidth: CGFloat = 260
     var isSidebarExpanded = false
     private var sidebarWidth: CGFloat {
-        if isPilotMode { return 0 }
-        return isSidebarExpanded ? Self.expandedSidebarWidth : Self.collapsedSidebarWidth
+        isSidebarExpanded ? Self.expandedSidebarWidth : Self.collapsedSidebarWidth
     }
 
     let sidebar = SidebarView()
@@ -40,14 +39,6 @@ final class NiruxShellView: NSView {
         get { workspaceStore.activeProfileID }
         set { workspaceStore.selectProfile(newValue) }
     }
-    var isPilotMode = false
-    var pilotRefreshTimer: Timer?
-    static let pilotMaxRows = 3
-    static let pilotGap: CGFloat = 0
-    var pilotOverlays: [NSView] = []
-    var pilotActiveHighlight: NSView?
-    var pilotClickMonitor: Any?
-    var pilotHoverMonitor: Any?
 
     // Heartbeat
     var heartbeatTimer: Timer?
@@ -226,7 +217,7 @@ final class NiruxShellView: NSView {
                     self.saveState(snapshot: snapshot)
                     // Picks up an agent CLI installed from a terminal, while
                     // the card can be seen (opening the sidebar refreshes too).
-                    if self.onboardingState == .pending, self.isSidebarExpanded, !self.isPilotMode {
+                    if self.onboardingState == .pending, self.isSidebarExpanded {
                         self.refreshOnboardingChecklist()
                     }
                 }
@@ -240,14 +231,10 @@ final class NiruxShellView: NSView {
     }
 
     /// Single place that wires a workspace's shell-facing callbacks —
-    /// sidebar refresh, diff click-through, terminal link opening. Used by
-    /// init, addWorkspace and session restore.
+    /// sidebar refresh, terminal link opening. Used by init, addWorkspace
+    /// and session restore.
     func wireWorkspace(_ workspace: WorkspaceState) {
         wireMetadataAndGitRefresh(workspace)
-        workspace.onDiffStatsClicked = { [weak self, weak workspace] in
-            guard let workspace else { return }
-            self?.openDiffInEditor(for: workspace)
-        }
         workspace.onTerminalOpenURL = { [weak self] targetWorkspace, url in
             self?.openWebView(url: url, in: targetWorkspace)
         }
@@ -274,20 +261,20 @@ final class NiruxShellView: NSView {
 
     func relayout(animated: Bool) {
         let sidebarW = sidebarWidth
-        // Status bar: always visible in pilot mode, or when it has content (update)
-        statusBar.isHidden = !isPilotMode && !statusBar.hasContent
+        // Status bar: only when it has content (update, crash, merge queue)
+        statusBar.isHidden = !statusBar.hasContent
         let statusH = statusBar.isHidden ? CGFloat(0) : StatusBarView.height
         let viewportH = bounds.height - statusH; let viewportW = bounds.width - sidebarW - 1
         guard viewportH > 0, viewportW > 0 else { return }
         NiruxDebugLog.log(
             "relayout bounds=\(bounds.width)x\(bounds.height) "
                 + "window=\(window?.frame.width ?? -1)x\(window?.frame.height ?? -1) "
-                + "viewport=\(viewportW)x\(viewportH) pilot=\(isPilotMode)"
+                + "viewport=\(viewportW)x\(viewportH)"
         )
 
         let glowWidth: CGFloat = 32
-        let vpX = sidebarW + (isPilotMode ? 0 : 1)
-        let vpFullW = viewportW + (isPilotMode ? 1 : 0)
+        let vpX = sidebarW + 1
+        let vpFullW = viewportW
 
         let frames = ChromeFrames(
             sidebar: NSRect(x: 0, y: statusH, width: sidebarW, height: bounds.height - statusH),
@@ -302,38 +289,22 @@ final class NiruxShellView: NSView {
         )
         applyChromeLayout(frames, animated: animated)
 
-        // Compute row height: in focus mode each ws = full viewport,
-        // in pilot mode each ws shrinks to show multiple rows
-        let gap = isPilotMode ? Self.pilotGap : CGFloat(0)
-        let rowH: CGFloat
-        if isPilotMode {
-            // Always show at least 2 rows so even 1 workspace visibly shrinks
-            let displayRows = CGFloat(max(2, min(visibleWorkspaceIndices.count, Self.pilotMaxRows)))
-            rowH = (viewportH - gap * (displayRows - 1)) / displayRows
-        } else {
-            rowH = viewportH
-        }
-
-        let visibleIndices = visibleWorkspaceIndices
-        let wsCount = CGFloat(visibleIndices.count)
-        let totalH = rowH * wsCount + gap * max(wsCount - 1, 0)
+        // Each workspace fills the viewport; the strip stacks them.
+        let rowH = viewportH
+        let totalH = rowH * CGFloat(visibleWorkspaceIndices.count)
 
         // Position the strip so the active workspace is visible
         let targetY: CGFloat
         let activePosition = activeVisibleWorkspacePosition ?? 0
         if totalH <= viewportH {
             targetY = viewportH - totalH
-        } else if !isPilotMode {
-            targetY = -(totalH - CGFloat(activePosition + 1) * rowH)
         } else {
-            let wsCenter = totalH - (CGFloat(activePosition) + 0.5) * rowH - CGFloat(activePosition) * gap
-            let raw = viewportH / 2 - wsCenter
-            targetY = max(viewportH - totalH, min(0, raw))
+            targetY = -(totalH - CGFloat(activePosition + 1) * rowH)
         }
 
         layoutWorkspaceStrip(StripLayout(
             viewportW: viewportW, viewportH: viewportH,
-            totalH: totalH, rowH: rowH, gap: gap,
+            totalH: totalH, rowH: rowH,
             targetY: targetY, animated: animated
         ))
 
@@ -347,15 +318,14 @@ final class NiruxShellView: NSView {
     /// out of view, so the host window's occlusion state isn't enough — every
     /// surface's CVDisplayLink would still hit `waitUntilCompleted` on the
     /// main thread, which freezes the app once a few Claude/Codex sessions
-    /// pile up. In pilot mode every workspace is visible; otherwise only the
-    /// active one is.
+    /// pile up. Only the active workspace is visible.
     private func syncTerminalOcclusion() {
         // A minimized or fully covered window reports itself non-visible via
         // occlusionState; without this AND every surface keeps drawing.
         let windowVisible = window?.occlusionState.contains(.visible) ?? true
         for (index, workspace) in workspaces.enumerated() {
             let isInActiveProfile = workspace.profileID == activeProfileID
-            let visible = windowVisible && isInActiveProfile && (isPilotMode || index == activeWSIndex)
+            let visible = windowVisible && isInActiveProfile && index == activeWSIndex
             for col in workspace.columns {
                 col.terminalView?.setSurfaceVisible(visible)
             }
@@ -365,15 +335,11 @@ final class NiruxShellView: NSView {
     // MARK: - Title Bar Labels
 
     func refreshTitleBarLabels(snapshot: ProcessSnapshot? = nil) {
+        guard let workspace = activeWorkspace else { return }
         let snap = snapshot ?? ProcessSnapshot()
-        let visibleWorkspaces = isPilotMode
-            ? visibleWorkspaceIndices.compactMap { workspaces[safe: $0] }
-            : (activeWorkspace.map { [$0] } ?? [])
-        for workspace in visibleWorkspaces {
-            for col in workspace.columns {
-                col.updateTitleBarLabel(snapshot: snap)
-                col.refreshAgentUsage(snapshot: snap)
-            }
+        for col in workspace.columns {
+            col.updateTitleBarLabel(snapshot: snap)
+            col.refreshAgentUsage(snapshot: snap)
         }
     }
 
@@ -440,7 +406,6 @@ final class NiruxShellView: NSView {
                 self.resumeGitRefresh()
                 self.stopStuckWatch()
                 self.startHeartbeat()
-                if self.isPilotMode { self.startPilotRefresh() }
                 self.forEachEditorColumn { $0.resumeFileWatch() }
             }
         }
@@ -453,7 +418,6 @@ final class NiruxShellView: NSView {
                 if AgentHookCenter.shared.approvalsEnabled { self.updateSidebar() }
                 self.stopHeartbeat()
                 self.startStuckWatch()
-                self.stopPilotRefresh()
                 self.forEachEditorColumn { $0.pauseFileWatch() }
             }
         }
@@ -487,7 +451,7 @@ extension NiruxShellView {
         ws.layoutAndScroll(
             viewportWidth: viewport.frame.width,
             height: ws.containerView.frame.height,
-            animated: true, pilotMode: isPilotMode
+            animated: true
         )
 
         updateSidebar()

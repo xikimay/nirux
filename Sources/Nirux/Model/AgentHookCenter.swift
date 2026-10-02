@@ -24,8 +24,8 @@ final class AgentHookCenter {
         let workspace: WorkspaceState
         let column: ColumnState
         let columnIndex: Int
-        /// App active AND focused column of the active workspace (or any
-        /// focused column in pilot mode) — see resolveAgentColumn.
+        /// App active AND focused column of the active workspace — see
+        /// resolveAgentColumn.
         let isUserFocused: Bool
         /// Whether the sidebar may hold the column's permission requests.
         let approvalHold: PermissionApprovalHold

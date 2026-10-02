@@ -124,10 +124,6 @@ extension NiruxApp {
         shell?.focusColumn(number: sender.tag)
     }
 
-    @objc func togglePilotMode(_ sender: Any?) {
-        shell?.togglePilotMode()
-    }
-
     /// Same toggle as the sidebar's INACTIVE header (also in the ⌘P
     /// palette), for the menu bar and Help search.
     @objc func toggleInactiveWorkspaces(_ sender: Any?) {
@@ -240,7 +236,6 @@ extension NiruxApp {
     private func viewMenuItem() -> NSMenuItem {
         let viewMenu = NSMenu(title: "View")
         viewMenu.addItem(withTitle: "Toggle Sidebar", action: #selector(toggleWorkspaceSidebar(_:)), shortcut: .toggleSidebar)
-        viewMenu.addItem(withTitle: "Pilot Mode", action: #selector(togglePilotMode(_:)), shortcut: .pilotMode)
         viewMenu.addItem(
             withTitle: "Show Inactive Workspaces",
             action: #selector(toggleInactiveWorkspaces(_:)),

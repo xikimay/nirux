@@ -581,8 +581,9 @@ the view forward and adds a merge queue. The brief preview and pinned URLs below
 are left for later there.
 
 A per-project dashboard, opened as a new column type (like the editor and web
-columns) from the command palette or a shortcut. Today's Pilot panel is per
-workspace, three rows tall, and covers only the active space.
+columns) from the command palette or a shortcut. The Pilot panel of the time
+was per workspace, three rows tall, and covered only the active space (Pilot
+Mode has since been removed).
 
 - **Header:** name, color, anchors, brief preview with Edit, pinned URLs.
 - **Workspaces** (active and inactive): branch, phase, PR and CI, agent status
