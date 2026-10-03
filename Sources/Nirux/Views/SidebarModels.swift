@@ -235,6 +235,7 @@ struct WorkspaceInfo: Hashable {
     let phase: WorkspacePhase
     let lastSummary: String?
     let lastActivityAt: TimeInterval?
+    var reviewBadges: ReviewBadges? = nil
     /// What the card shows after "#N merged"; nil shows nothing.
     var mergedCleanup: MergedCleanupOffer?
 

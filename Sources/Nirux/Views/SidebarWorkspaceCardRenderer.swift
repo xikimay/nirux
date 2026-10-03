@@ -273,6 +273,12 @@ final class SidebarWorkspaceCardRenderer {
         if let prInfo = workspace.prInfo {
             currentY = buildPRInfoLabels(prInfo: prInfo, padding: contentX, yOffset: currentY)
         }
+        if let badges = workspace.reviewBadges {
+            append(SidebarReviewBadgesRow.label(
+                badges, isActive: workspace.isActive, x: contentX, width: sidebarWidth - contentX * 2, top: currentY
+            ))
+            currentY -= SidebarExpandedMetrics.reviewAdvance
+        }
         return currentY
     }
 

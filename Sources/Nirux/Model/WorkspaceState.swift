@@ -96,6 +96,8 @@ final class WorkspaceState {
     var nextStep: String?
     var blocker: String?
     var unknownPhaseRawValue: String?
+    /// Each review pass's latest run (docs/review-badges.md).
+    var reviewRuns: [ReviewPass: ReviewRun] = [:]
 
     var effectivePhase: WorkspacePhase {
         if let phase { return phase }
