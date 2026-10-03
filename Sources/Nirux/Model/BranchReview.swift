@@ -48,9 +48,9 @@ enum BranchReview {
         /// Its patch is over `Options.maxFileDiffBytes`: the page shows a
         /// placeholder, as the editor's stacked diff does.
         case tooLarge
-        /// The other files' patches add up to more than
-        /// `Options.maxInlineDiffBytes`: the page lists the files and loads
-        /// one with `filePatch` when its row opens.
+        /// The file is folded (`FileChange.fold`), or the unfolded files'
+        /// patches add up to more than `Options.maxInlineDiffBytes`: the
+        /// page loads it with `filePatch` when its row opens.
         case onDemand
         /// Not read: the diff is over `Options.maxDiffBytes` (the files
         /// with the most changed lines are left out first), git didn't
@@ -59,6 +59,48 @@ enum BranchReview {
         /// hash until `filePatch` loads it: a Reviewed mark must not be
         /// cleared for lack of one.
         case notRead
+    }
+
+    /// Why the page folds a file (section 2): its group is collapsed,
+    /// counted, never hidden. In the order the folded groups are listed;
+    /// the first that applies wins.
+    enum Fold: String, CaseIterable, Equatable, Sendable {
+        case lockfile
+        /// By its name (`*.bundle.js`, `*.min.js`), `linguist-generated` in
+        /// `.gitattributes`, or a marker in its first lines (looked for
+        /// only when its patch is read).
+        case generated
+        /// Renamed with no line or mode changed.
+        case pureRename
+        /// Every hunk reads the same with whitespace and blank lines left
+        /// out.
+        case whitespaceOnly
+        case binary
+    }
+
+    /// The risk signals of section 5, in the order the page lists them.
+    enum RiskKind: String, CaseIterable, Equatable, Sendable {
+        case persistence
+        case security
+        case concurrency
+        case launch
+        case ci
+        case sideEffects
+        case dependencies
+    }
+
+    /// One kind of risk a file raises, and where.
+    struct RiskSignal: Equatable, Sendable {
+        let kind: RiskKind
+        /// What raised it, as the page names it: "@MainActor",
+        /// "*Store.swift", "named in .github/workflows/nightly.yml".
+        var reasons: [String]
+        /// The hunks whose `+` or `-` lines raised it, by index in the
+        /// file's patch (as `filePatch` reads it), even when the snapshot
+        /// left the hunks out.
+        var hunks: [Int]
+        /// Raised by the file's path: the whole file.
+        var byPath: Bool
     }
 
     struct FileChange: Equatable, Sendable {
@@ -93,6 +135,12 @@ enum BranchReview {
         /// Empty when `omission` says why.
         var hunks: [Hunk] = []
         var omission: Omission?
+        /// Set when the page folds it; a folded file raises no signal from
+        /// its lines.
+        var fold: Fold?
+        /// In `RiskKind` order. Lines are read only for a file the diff
+        /// read (`omission` isn't `.notRead`); a doc raises none.
+        var signals: [RiskSignal] = []
     }
 
     struct Commit: Equatable, Sendable {

@@ -165,10 +165,17 @@ Top to bottom:
    - pure renames (similarity 100%) and whitespace-only changes;
    - binaries.
 
+   `-linguist-generated` (or `=false`) in `.gitattributes` unfolds a file
+   whatever its name. A folded file's diff loads when its row opens, and
+   folded files don't count toward the 5 MB of section 7: a generated
+   bundle mustn't send the whole page on demand.
+
 **Uncommitted changes** are part of what the agent did, but not of the PR yet:
 they form their own group at the top, marked "not committed". A file changed
 both in commits and in the working tree is listed there once, with its whole
-patch from the merge base to the working tree. The files
+patch from the merge base to the working tree. A folded file that isn't
+committed stays in that group, collapsed: a build-rewritten
+`Package.resolved` must be seen before it is committed. The files
 Nirux's worktree cleanup already treats as disposable
 (`WorktreeCleanup.disposablePaths`: the handovers,
 `.claude/settings.local.json`) are left out.
@@ -384,6 +391,16 @@ notes are shown apart and never change these signals.
 | CI workflows | `.github/`, scripts the workflows call | The nightly publishes to every install |
 | Side effects outside Nirux | IOKit, `NSWorkspace`, writes to `~/.claude` or the hooks, notifications, process launches | They outlive the app or change the Mac |
 | Dependencies | `Package.swift`, `Package.resolved` | A build-rewritten `Package.resolved` must not be committed |
+
+A line rule matches anywhere in a `+` or `-` line, comments and strings
+included, in every file but docs and folded files; tests raise them too, since
+CI compiles them with the same strictness. A folded file raises only its path
+rules: a generated file can say anything, and a reindented line changes
+nothing. "Scripts the workflows call" are the changed files whose path a file
+under `.github/workflows` or `.github/actions` names (`./scripts/bundle.sh`).
+A change inside `applicationDidFinishLaunching` that doesn't name it is
+raised once the brace tracking of "Tests against code" gives each hunk its
+enclosing function.
 
 **Tests against code.** The header shows lines added in tests against lines
 added in code, and lists the symbols the branch declares that no test

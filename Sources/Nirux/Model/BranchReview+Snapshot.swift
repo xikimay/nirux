@@ -186,13 +186,18 @@ extension BranchReview {
         // made: listed by name. A path the diff already has (an agent's
         // `git add` landed meanwhile) isn't listed twice.
         let listed = Set(files.flatMap { [$0.path] + ($0.oldPath.map { [$0] } ?? []) })
-        for path in untracked where !listed.contains(path) {
+        let unread = untracked.filter { !listed.contains($0) }
+        let noise = unread.isEmpty ? nil : NoiseRules(root: root, paths: unread, options: options)
+        for path in unread {
             var file = FileChange(path: path, status: .added)
             file.isUntracked = true
             file.isUncommitted = true
             file.omission = .notRead
+            file.fold = noise?.fold(path: path)
+            RiskRules.settle(&file)
             files.append(file)
         }
+        addWorkflowSignals(to: &files, root: root)
         files.sort { $0.path < $1.path }
 
         guard isStillInPlace() else { return .switched }
@@ -271,7 +276,9 @@ extension BranchReview {
         else { return nil }
         found.isUntracked = file.isUntracked
         found.isUncommitted = file.isUncommitted
-        return found
+        var loaded = [found]
+        addWorkflowSignals(to: &loaded, root: snapshot.root)
+        return loaded[0]
     }
 
     // MARK: Reading the diff
@@ -445,9 +452,10 @@ extension BranchReview {
     }
 
     /// The patch from `mergeBase` to the working tree, matched with the
-    /// paths of `--name-status -z`, each file hashed. A file past
-    /// `maxFileDiffBytes` keeps no hunks; with `inline`, neither does any
-    /// file when those left add up to more than `maxInlineDiffBytes`.
+    /// paths of `--name-status -z`, each file hashed, folded or not, with
+    /// its signals. A file past `maxFileDiffBytes` keeps no hunks; with
+    /// `inline`, neither does a folded file, nor any file when the unfolded
+    /// ones left add up to more than `maxInlineDiffBytes`.
     static func readDiff(root: String, mergeBase: String, pathspec: [String], inline: Bool, options: Options) -> DiffRead {
         let diff = diffConfig + ["diff"] + diffSelection
         let names = git(
@@ -462,16 +470,44 @@ extension BranchReview {
         ) else { return .notRead(entries) }
         guard patch.status == 0 else { return .failed(failure("git diff failed in \(root)", patch)) }
         let maxFileBytes = options.maxFileDiffBytes
-        let ranges = Patch.sectionRanges(of: patch.stdout)
-        let inlineBytes = ranges.map(\.count).filter { $0 <= maxFileBytes }.reduce(0, +)
+        let data = patch.stdout
+        let ranges = Patch.sectionRanges(of: data)
+        let headers = ranges.map { Patch.header(data[$0]) }
+        let noise = NoiseRules(root: root, paths: entries.map(\.path), options: options)
+        // A deleted file's start is in its patch; the others' in the
+        // worktree.
+        var namedFolds: [String: Fold] = [:]
+        for (range, header) in zip(ranges, headers) {
+            guard let header, let key = header.key, namedFolds[key] == nil else { continue }
+            namedFolds[key] = noise.fold(path: key) {
+                header.newPath == nil
+                    ? Patch.deletedFileStart(data[range]) : readPrefix(of: root + "/" + key, maxBytes: 2_048)
+            }
+        }
+        func isNamedFold(_ index: Int) -> Bool { headers[index]?.key.flatMap { namedFolds[$0] } != nil }
+        let inlineBytes = ranges.indices.filter { !isNamedFold($0) && ranges[$0].count <= maxFileBytes }
+            .map { ranges[$0].count }.reduce(0, +)
         let onDemand = inline && inlineBytes > options.maxInlineDiffBytes
-        guard let sections = Patch.sections(of: patch.stdout, in: ranges, keepsLines: { !onDemand && $0 <= maxFileBytes }) else {
+        guard let sections = Patch.sections(of: data, in: ranges, reading: { index in
+            let folded = isNamedFold(index)
+            return Patch.Reading(
+                keepsLines: !onDemand && !(inline && folded) && ranges[index].count <= maxFileBytes,
+                checksWhitespace: !folded,
+                findsRisks: !folded && headers[index]?.key.map { PathGroup(path: $0) } != .docs
+            )
+        }) else {
             return .failed("git printed a diff Nirux can't read in \(root).")
         }
         guard var files = Patch.files(entries: entries, sections: sections) else { return .inconsistent }
-        for index in files.indices where files[index].patchBytes > maxFileBytes || onDemand {
+        for index in files.indices {
+            files[index].fold = namedFolds[files[index].path] ?? files[index].fold
+            RiskRules.settle(&files[index])
+            let tooLarge = files[index].patchBytes > maxFileBytes
+            // A binary or a pure rename has no line to load.
+            let folded = inline && files[index].fold != nil && files[index].additions + files[index].deletions > 0
+            guard tooLarge || onDemand || folded else { continue }
             files[index].hunks = []
-            files[index].omission = files[index].patchBytes > maxFileBytes ? .tooLarge : .onDemand
+            files[index].omission = tooLarge ? .tooLarge : .onDemand
         }
         return .files(files)
     }
@@ -495,6 +531,7 @@ extension BranchReview {
         else { return nil }
         let counts = numstat(numbers.stdout)
         let changed = uncommitted.union(committed.stdout.split(separator: 0).map(Patch.decoded))
+        let noise = NoiseRules(root: root, paths: entries.map(\.path), options: options)
         return entries.compactMap { entry -> FileChange? in
             var file = FileChange(path: entry.path, status: .modified)
             switch entry.letter {
@@ -520,6 +557,10 @@ extension BranchReview {
                 break
             }
             file.omission = .notRead
+            let isPureRename = file.status == .renamed && entry.score == 100 && counts[entry.path] == .lines(additions: 0, deletions: 0)
+            // Its start isn't read: a diff this large may list thousands.
+            file.fold = noise.fold(path: file.path) ?? (isPureRename ? .pureRename : file.isBinary ? .binary : nil)
+            RiskRules.settle(&file)
             return file
         }
     }
