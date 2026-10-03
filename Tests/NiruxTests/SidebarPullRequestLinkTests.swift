@@ -34,7 +34,9 @@ final class SidebarPullRequestLinkTests: XCTestCase {
             state: "OPEN",
             isDraft: false,
             ciStatus: ciStatus,
-            failedCheckUrl: failedCheckUrl,
+            checks: failedCheckUrl.map {
+                [ProjectBoard.Check(name: "test", workflowName: "Tests", result: .failure, startedAt: nil, url: $0)]
+            } ?? [],
             reviewDecision: "REVIEW_REQUIRED",
             mergeable: nil,
             url: "https://github.com/owner/repo/pull/42",
