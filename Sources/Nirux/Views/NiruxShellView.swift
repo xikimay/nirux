@@ -344,13 +344,13 @@ final class NiruxShellView: NSView {
         }
     }
 
-    // MARK: - Title Bar Labels
+    // MARK: - Header Titles
 
-    func refreshTitleBarLabels(snapshot: ProcessSnapshot? = nil) {
+    func refreshHeaderTitles(snapshot: ProcessSnapshot? = nil) {
         guard let workspace = activeWorkspace else { return }
         let snap = snapshot ?? ProcessSnapshot()
         for col in workspace.columns {
-            col.updateTitleBarLabel(snapshot: snap)
+            col.updateHeaderTitle(snapshot: snap)
             col.refreshAgentUsage(snapshot: snap)
         }
     }
@@ -812,6 +812,17 @@ extension NiruxShellView {
         relayout(animated: true)
         updateSidebar()
         focusActiveTerminal(in: window, editorTakesKeyboard: true)
+    }
+
+    /// Gives the focus to the column of `header`, for the header's ⋯ items
+    /// that act on the focused column. False when that column isn't in the
+    /// active workspace (gone, or in a workspace sliding away).
+    func focusColumn(withHeader header: ColumnHeaderView) -> Bool {
+        guard let workspace = activeWorkspace,
+              let index = workspace.columns.firstIndex(where: { $0.header === header && !$0.isClosing })
+        else { return false }
+        focusColumnByIndex(index)
+        return true
     }
 
     /// Focuses column `index` of the active workspace at the user's request

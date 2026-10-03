@@ -86,7 +86,7 @@ extension ColumnState {
     func setAgentUsage(_ usage: ClaudeSessionUsage?) {
         guard usage != agentUsage else { return }
         agentUsage = usage
-        if let usage, let text = usage.titleBarText {
+        if let usage, let text = usage.headerText {
             let label = usageLabel ?? makeUsageLabel()
             label.stringValue = text
             label.textColor = usage.isNearlyFull ? .niruxNearLimit : Theme.Color.textTertiary

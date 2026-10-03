@@ -130,7 +130,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(run.symbol, Theme.Symbol.checksPassed)
             XCTAssertTrue(run.toolTip?.hasPrefix("nightly: success ") == true, run.toolTip ?? "")
             XCTAssertTrue(run.toolTip?.hasSuffix(", 43a9503") == true, run.toolTip ?? "")
-            XCTAssertTrue(board.view.statusLabel.isHidden, "nothing went wrong")
+            XCTAssertNotEqual(run.tone, .error, "nothing went wrong")
             XCTAssertEqual(board.view.rowViews.map(\.row.name), ["widgets", "login", "fix/remote"])
             let loginRow = try row("login", in: board)
             XCTAssertEqual(loginRow.pullRequest.stringValue, "#12 open")
@@ -271,7 +271,6 @@ final class ProjectBoardFlowTests: XCTestCase {
             widgetsBoard.board.view.chooseProject(id: other.id)
             XCTAssertTrue(shell.activeWorkspace === gadgetsBoard.workspace, "that project's board comes to the front")
             XCTAssertEqual(widgetsBoard.board.projectID, space.id)
-            XCTAssertEqual(Self.checkedProject(widgetsBoard.board.view), "Board", "its menu shows its project again")
 
             widgetsBoard.board.view.chooseProject(id: third.id)
             XCTAssertEqual(widgetsBoard.board.projectID, third.id)

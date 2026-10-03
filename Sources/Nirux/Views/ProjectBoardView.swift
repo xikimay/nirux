@@ -1,9 +1,9 @@
 import AppKit
 
 /// The Project Board column's content (docs/project-board.md, sections 1
-/// and 2): the column header (its repository, the last post-merge run,
-/// Refresh, and the project and Board Settings in its ⋯ menu), a line for
-/// what went wrong, the merge queue's line, then one row per branch.
+/// and 2): the column header (its repository, the last post-merge run or
+/// what went wrong, Refresh, and the project and Board Settings in its ⋯
+/// menu), the merge queue's line, then one row per branch.
 /// It only draws: `ProjectBoardController` fills it, the shell runs its
 /// buttons and the queue.
 @MainActor
@@ -20,9 +20,12 @@ final class ProjectBoardView: NSView {
         /// whole summary ("nightly: success 20:27, 60e0ff2") in its tooltip.
         var postMergeRun: ColumnHeaderView.Status?
         /// When the pull requests were read (Refresh's tooltip), or why
-        /// they weren't (a line of its own).
+        /// they weren't (a red pill in place of the run's, the message in
+        /// its tooltip: the rows never move).
         var status: String?
         var statusIsError = false
+        /// The red pill's words: "GitHub error", "git error".
+        var errorTitle = "GitHub error"
         /// The project menu.
         var projects: [Project] = []
         var projectID: String
@@ -130,8 +133,6 @@ final class ProjectBoardView: NSView {
 
     let header = ColumnHeaderView()
     let refreshButton = ColumnHeaderButton(symbol: Theme.Symbol.reload, toolTip: "Refresh")
-    /// Why the board couldn't read something; hidden otherwise.
-    let statusLabel = NSTextField(labelWithString: "")
     /// "DRY RUN" while this build can't change GitHub.
     let dryRunBadge = NSTextField(labelWithString: "DRY RUN")
     let queueLabel = NSTextField(labelWithString: "")
@@ -183,10 +184,6 @@ final class ProjectBoardView: NSView {
         refreshButton.action = #selector(refreshClicked)
         header.trailingButtons = [refreshButton]
         header.menuProvider = { [weak self] in self?.headerMenu() ?? NSMenu() }
-        statusLabel.font = .systemFont(ofSize: 11)
-        statusLabel.textColor = Self.failureColor
-        statusLabel.lineBreakMode = .byTruncatingTail
-        statusLabel.isHidden = true
         for (button, action) in [
             (startQueueButton, #selector(startQueueClicked)), (stopQueueButton, #selector(stopQueueClicked))
         ] {
@@ -225,7 +222,7 @@ final class ProjectBoardView: NSView {
         scrollView.documentView = documentView
 
         for view in [
-            header, statusLabel, dryRunBadge, queueLabel, startQueueButton, stopQueueButton, separator, scrollView
+            header, dryRunBadge, queueLabel, startQueueButton, stopQueueButton, separator, scrollView
         ] as [NSView] {
             addSubview(view)
         }
@@ -292,16 +289,19 @@ final class ProjectBoardView: NSView {
     }
 
     /// The column header: the repository (or the project, without one),
-    /// the post-merge run, Refresh with when the board last read GitHub.
+    /// the post-merge run or what went wrong, Refresh with when the board
+    /// last read GitHub.
     private func applyHeader(_ content: Header) {
         let projectName = content.projectIsMissing ? "Deleted project" : content.projectName
         header.context = content.repository ?? projectName
         header.titleToolTip = "Project Board · \(projectName)"
-        header.status = content.postMergeRun
-        let error = content.statusIsError ? content.status : nil
-        statusLabel.stringValue = error ?? ""
-        statusLabel.toolTip = error
-        statusLabel.isHidden = error == nil
+        if content.statusIsError, let message = content.status {
+            header.status = ColumnHeaderView.Status(
+                content.errorTitle, tone: .error, symbol: Theme.Symbol.agentError, toolTip: message
+            )
+        } else {
+            header.status = content.postMergeRun
+        }
         refreshButton.toolTip = ["Refresh", content.statusIsError ? nil : content.status].compactMap { $0 }
             .joined(separator: " · ")
     }
@@ -638,7 +638,7 @@ final class ProjectBoardView: NSView {
         switch run.conclusion {
         case "success":
             return ColumnHeaderView.Status(
-                text(nil), tone: .neutral, symbol: Theme.Symbol.checksPassed, symbolTone: .working, toolTip: summary
+                text(nil), tone: .neutral, symbol: Theme.Symbol.checksPassed, symbolTone: .success, toolTip: summary
             )
         case "failure", "timed_out", "startup_failure":
             return ColumnHeaderView.Status(text(nil), tone: .error, symbol: Theme.Symbol.checksFailed, toolTip: summary)
@@ -751,17 +751,12 @@ final class ProjectBoardView: NSView {
         layoutContent()
     }
 
-    /// The header, then the lines shown: what went wrong, the queue, the
-    /// column titles; the rows scroll below.
+    /// The header, the queue's line when the board has one, the column
+    /// titles; the rows scroll below.
     private func layoutContent() {
         let width = bounds.width
-        let pad = Self.padding
         header.frame = NSRect(x: 0, y: 0, width: width, height: ColumnHeaderView.height)
         var y = ColumnHeaderView.height
-        if !statusLabel.isHidden {
-            statusLabel.frame = NSRect(x: pad, y: y + 6, width: max(0, width - 2 * pad), height: 16)
-            y += 24
-        }
         if !queueLabel.isHidden {
             layoutQueueLine(width: width, y: y + 4)
             y += 32

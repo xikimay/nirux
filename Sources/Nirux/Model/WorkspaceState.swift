@@ -712,12 +712,12 @@ extension WorkspaceState {
         // 2. Position each column with gap
         var xOffset: CGFloat = 0
         for (index, col) in columns.enumerated() {
-            // Terminal frames are always set explicitly by layoutWithTitleBar;
+            // Terminal frames are always set explicitly by layoutWithHeader;
             // autoresizing would push intermediate sizes to Ghostty during a
             // window resize before this layout pass runs (garbled display).
             col.terminalView?.autoresizingMask = []
             col.view.frame = NSRect(x: xOffset, y: 0, width: widths[index], height: height)
-            col.layoutWithTitleBar(width: widths[index], height: height, resizeTerminal: !skipTerminalResize)
+            col.layoutWithHeader(width: widths[index], height: height, resizeTerminal: !skipTerminalResize)
             col.view.layer?.masksToBounds = true
 
             col.view.layer?.cornerRadius = 0

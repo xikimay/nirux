@@ -317,6 +317,8 @@ final class ProjectBoardController {
         if !messages.isEmpty {
             header.status = messages.joined(separator: " ")
             header.statusIsError = true
+            // Only the worktrees are read from git; the rest from GitHub.
+            if retargetFailure == nil, errors.keys.allSatisfy({ $0 == .worktrees }) { header.errorTitle = "git error" }
         } else if let readAt = pullRequestsReadAt {
             header.status = "Updated \(ProjectBoard.clockTime(readAt, now: now))"
         } else if repository != nil {

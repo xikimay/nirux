@@ -13,7 +13,7 @@ struct LocalServerURL: Equatable, Hashable, Sendable {
 
     var urlString: String { "\(isSecure ? "https" : "http")://\(host):\(port)\(path)" }
 
-    /// Short label for the title-bar chip.
+    /// Short label for the header chip.
     var displayName: String { "\(host):\(port)" }
 
     /// What a proposal opens: the server root. The first URL printed for a

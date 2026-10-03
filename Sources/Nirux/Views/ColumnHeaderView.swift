@@ -1,11 +1,22 @@
 import AppKit
 
-/// A view among a column header's accessories (the terminal's dev-server
-/// chip, its context usage). It gives up room when the header is narrow:
-/// it returns the width it takes within `maxWidth`, 0 to be hidden.
+/// A view among a column header's accessories: the terminal's dev-server
+/// chip, its context usage, or a column's text button. It gives up room
+/// when the header is narrow: it returns the width it takes within
+/// `maxWidth`, 0 to be hidden (an empty accessory takes none).
 @MainActor
 protocol ColumnHeaderAccessory: NSView {
     func width(fitting maxWidth: CGFloat) -> CGFloat
+    /// Its height in the bar, centered.
+    var accessoryHeight: CGFloat { get }
+    /// Blank its frame keeps on each side of what it draws (a label cell's
+    /// margin): the gaps around it absorb it.
+    var accessoryInset: CGFloat { get }
+}
+
+extension ColumnHeaderAccessory {
+    var accessoryHeight: CGFloat { ColumnHeaderButton.size }
+    var accessoryInset: CGFloat { 0 }
 }
 
 /// The bar on top of every column: terminal, editor, browser, Project Board,
@@ -21,17 +32,20 @@ protocol ColumnHeaderAccessory: NSView {
 ///   truncated in the middle. A column may put its own view in place of
 ///   title and context (the browser's URL field).
 /// - status: a pill, only for an agent or a run.
-/// - buttons: the column's own actions, two at most; the ⋯ menu holds
-///   the rest.
+/// - buttons: the column's own icon actions, two at most; the ⋯ menu holds
+///   the rest. A text button goes among the accessories.
 ///
 /// When the bar runs out of room, the context goes first, then the
-/// accessories, the status, and the trailing buttons, whose actions then
-/// head the ⋯ menu.
+/// accessories, the status, the trailing buttons and the leading ones,
+/// whose actions then head the ⋯ menu. Narrowing the bar never brings
+/// back what it hid.
 ///
 /// A new column type puts one on top of its view, `height` tall, sets its
-/// icon, title, context, buttons and `menuProvider` (ending with
+/// icon (the terminal's by default), title, context, buttons and
+/// `menuProvider` (a fresh menu each time, ending with
 /// `columnMenuItems()`), and returns it from `ColumnState.header` so that
-/// it follows the focus.
+/// it follows the focus. The header shows and hides its buttons itself: to
+/// drop one, take it out of its array.
 @MainActor
 final class ColumnHeaderView: NSView {
     static let height: CGFloat = 30
@@ -43,8 +57,8 @@ final class ColumnHeaderView: NSView {
         case image(NSImage)
     }
 
-    /// A status's color: the state it tells.
-    enum Tone: Equatable { case neutral, working, waiting, error, done }
+    /// A status's color: the state it tells (`Theme.Color`'s states).
+    enum Tone: Equatable { case neutral, working, waiting, error, done, success }
 
     struct Status: Equatable {
         var text: String
@@ -72,12 +86,15 @@ final class ColumnHeaderView: NSView {
         didSet {
             guard title != oldValue else { return }
             titleLabel.stringValue = title
+            applyTitleToolTip()
+            menuButton.setAccessibilityLabel(title.isEmpty ? "More actions" : "More actions: \(title)")
             needsLayout = true
         }
     }
-    /// The title's tooltip; the title itself when nil.
+    /// The title's tooltip; the title itself when nil (a long title is
+    /// cut short).
     var titleToolTip: String? {
-        didSet { titleLabel.toolTip = titleToolTip ?? (title.isEmpty ? nil : title) }
+        didSet { applyTitleToolTip() }
     }
     var context = "" {
         didSet {
@@ -117,16 +134,15 @@ final class ColumnHeaderView: NSView {
             needsLayout = true
         }
     }
-    /// The ⋯ menu, built each time it opens; nil shows no ⋯.
+    /// The ⋯ menu, built each time it opens. Without one, ⋯ shows only to
+    /// hold buttons the bar has no room for.
     var menuProvider: (() -> NSMenu)? {
-        didSet {
-            menuButton.isHidden = menuProvider == nil
-            needsLayout = true
-        }
+        didSet { needsLayout = true }
     }
 
     let menuButton = ColumnHeaderButton(symbol: Theme.Symbol.more, toolTip: "More")
-    /// Trailing buttons hidden for lack of room: their actions head the ⋯ menu.
+    /// Buttons hidden for lack of room, in bar order: their actions head
+    /// the ⋯ menu.
     private(set) var overflowButtons: [ColumnHeaderButton] = []
 
     let iconView = NSImageView()
@@ -135,6 +151,7 @@ final class ColumnHeaderView: NSView {
     let statusPill = ColumnStatusPill()
     private let bottomLine = NSView()
 
+    // The validated mockup's insets: 10 before the icon, 6 after ⋯.
     private static let leadingInset: CGFloat = 10
     private static let trailingInset: CGFloat = 6
     private static let gap = Theme.Space.sm
@@ -144,13 +161,13 @@ final class ColumnHeaderView: NSView {
     /// than the slot, centered on it, and draws it unscaled.
     private static let iconFrame: CGFloat = 18
     private static let textHeight: CGFloat = 16
-    /// Room the title (or the center view) keeps before the status, the
-    /// accessories and the trailing buttons give way.
+    /// Room the title (or the center view) keeps before the other slots
+    /// give way.
     static let minimumTitleWidth: CGFloat = 60
     private static let minimumContextWidth: CGFloat = 40
     private static let minimumTitleBesideContext: CGFloat = 80
     /// The margin an NSTextField cell keeps on each side of its text.
-    private static let labelInset: CGFloat = 2
+    static let labelInset: CGFloat = 2
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -211,11 +228,15 @@ final class ColumnHeaderView: NSView {
         needsLayout = true
     }
 
+    private func applyTitleToolTip() {
+        titleLabel.toolTip = titleToolTip ?? (title.isEmpty ? nil : title)
+    }
+
     private func applyIcon() {
         switch icon {
         case .symbol(let name):
             iconView.image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 13, weight: .regular))
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: Self.iconSize, weight: .regular))
             assert(iconView.image != nil, "No SF Symbol named \(name)")
             iconView.imageScaling = .scaleNone
             iconView.contentTintColor = isFocused ? Theme.Color.accent : Theme.Color.textTertiary
@@ -230,8 +251,9 @@ final class ColumnHeaderView: NSView {
         }
     }
 
-    /// The width a label draws its whole text in: a truncating label's
-    /// intrinsic width leaves out its cell's margins, and truncates.
+    /// The width a label draws its whole text in, its cell's margins
+    /// included: a truncating label's intrinsic width leaves them out, and
+    /// truncates.
     static func textWidth(_ label: NSTextField) -> CGFloat {
         ceil(label.cell?.cellSize.width ?? label.intrinsicContentSize.width)
     }
@@ -240,58 +262,64 @@ final class ColumnHeaderView: NSView {
 
     override func layout() {
         super.layout()
+        bottomLine.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 1)
+        iconView.frame = NSRect(
+            x: Self.leadingInset - (Self.iconFrame - Self.iconSize) / 2,
+            y: ((bounds.height - Self.iconFrame) / 2).rounded(),
+            width: Self.iconFrame, height: Self.iconFrame
+        )
+        let buttonsToShow = !leadingButtons.isEmpty || !trailingButtons.isEmpty
+        layoutSlots(showsMenu: menuProvider != nil)
+        // A button left without room needs ⋯ to be reached.
+        if menuProvider == nil, buttonsToShow, !overflowButtons.isEmpty { layoutSlots(showsMenu: true) }
+    }
+
+    /// From the right edge leftwards: ⋯, the trailing buttons, the
+    /// accessories, the status; then the leading buttons and the middle.
+    /// Buttons sit 2 pt apart, everything else a gap. Each slot shows only
+    /// while every slot before it in that order does.
+    private func layoutSlots(showsMenu: Bool) {
         let height = bounds.height
         let buttonSize = ColumnHeaderButton.size
         let buttonY = ((height - buttonSize) / 2).rounded()
-        bottomLine.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 1)
-
-        var leftX = Self.leadingInset
-        iconView.frame = NSRect(
-            x: leftX - (Self.iconFrame - Self.iconSize) / 2, y: ((height - Self.iconFrame) / 2).rounded(),
-            width: Self.iconFrame, height: Self.iconFrame
-        )
-        leftX += Self.iconSize + Self.gap
-        for (index, button) in leadingButtons.enumerated() {
-            button.frame = NSRect(x: leftX, y: buttonY, width: buttonSize, height: buttonSize)
-            leftX += buttonSize + (index == leadingButtons.count - 1 ? Self.gap : Self.buttonGap)
+        let leadingStart = Self.leadingInset + Self.iconSize + Self.gap
+        func leadingEnd(_ count: Int) -> CGFloat {
+            count == 0 ? leadingStart
+                : leadingStart + CGFloat(count) * (buttonSize + Self.buttonGap) - Self.buttonGap + Self.gap
         }
-
-        // From the right edge leftwards: ⋯, the buttons, the accessories,
-        // the status. Buttons sit 2 pt apart, everything else a gap.
         var edge = bounds.width - Self.trailingInset
         var lastWasButton: Bool?
         func gap(beforeButton isButton: Bool) -> CGFloat {
             guard let lastWasButton else { return 0 }
             return lastWasButton && isButton ? Self.buttonGap : Self.gap
         }
-        func place(_ width: CGFloat, isButton: Bool) -> CGFloat {
-            edge -= gap(beforeButton: isButton) + width
+        /// The frame's x for a slot `width` wide whose drawing is inset by
+        /// `inset` on each side.
+        func place(_ width: CGFloat, isButton: Bool, inset: CGFloat = 0) -> CGFloat {
+            let maxX = edge - gap(beforeButton: isButton) + inset
+            edge = maxX - width + inset
             lastWasButton = isButton
-            return edge
+            return maxX - width
         }
-        // What the middle keeps before anything on the right gives way.
-        let titleWidth = Self.textWidth(titleLabel)
-        let middleNeed = centerView != nil ? Self.minimumTitleWidth : min(titleWidth, Self.minimumTitleWidth)
+        // What the middle keeps before a slot on the right gives way.
+        let titleWidth = Self.textWidth(titleLabel) - 2 * Self.labelInset
+        let middleNeed = centerView != nil ? Self.minimumTitleWidth : min(max(0, titleWidth), Self.minimumTitleWidth)
         func room(beforeButton isButton: Bool, reserving reserved: CGFloat = 0) -> CGFloat {
-            edge - gap(beforeButton: isButton) - Self.gap - leftX - middleNeed - reserved
+            edge - gap(beforeButton: isButton) - Self.gap - leadingEnd(leadingButtons.count) - middleNeed - reserved
         }
 
-        if !menuButton.isHidden {
+        menuButton.isHidden = !showsMenu
+        if showsMenu {
             menuButton.frame = NSRect(x: place(buttonSize, isButton: true), y: buttonY, width: buttonSize, height: buttonSize)
         }
-        // Each slot shows only while every slot before it in priority
-        // does: narrowing the bar never brings back what it hid.
-        var gaveWay = false
-        // The rightmost buttons that fit; the others go to the menu.
-        var shown: [ColumnHeaderButton] = []
+        // The rightmost trailing buttons that fit.
+        var shownTrailing: [ColumnHeaderButton] = []
         for button in trailingButtons.reversed() {
             guard room(beforeButton: true) >= buttonSize else { break }
             button.frame = NSRect(x: place(buttonSize, isButton: true), y: buttonY, width: buttonSize, height: buttonSize)
-            shown.append(button)
+            shownTrailing.append(button)
         }
-        overflowButtons = trailingButtons.filter { button in !shown.contains { $0 === button } }
-        for button in trailingButtons { button.isHidden = !shown.contains { $0 === button } }
-        gaveWay = !overflowButtons.isEmpty
+        var gaveWay = shownTrailing.count < trailingButtons.count
 
         // The status keeps its room before the accessories take theirs.
         let pillWidth = statusPill.idealWidth
@@ -299,17 +327,17 @@ final class ColumnHeaderView: NSView {
         if status != nil, !showsStatus { gaveWay = true }
         let statusReserve = showsStatus ? pillWidth + Self.gap : 0
         for accessory in accessories.reversed() {
-            let width = gaveWay ? 0 : accessory.width(fitting: max(0, room(beforeButton: false, reserving: statusReserve)))
+            let inset = accessory.accessoryInset
+            let fitting = room(beforeButton: false, reserving: statusReserve) + 2 * inset
+            let width = gaveWay ? 0 : accessory.width(fitting: max(0, fitting))
             accessory.isHidden = width == 0
             guard width > 0 else {
-                // An empty accessory gives way to nothing.
                 if accessory.width(fitting: .greatestFiniteMagnitude) > 0 { gaveWay = true }
                 continue
             }
-            let fittingHeight = accessory.fittingSize.height
-            let accessoryHeight = min(fittingHeight > 0 ? fittingHeight : buttonSize, height)
+            let accessoryHeight = min(accessory.accessoryHeight, height)
             accessory.frame = NSRect(
-                x: place(width, isButton: false), y: ((height - accessoryHeight) / 2).rounded(),
+                x: place(width, isButton: false, inset: inset), y: ((height - accessoryHeight) / 2).rounded(),
                 width: width, height: accessoryHeight
             )
         }
@@ -320,50 +348,67 @@ final class ColumnHeaderView: NSView {
                 width: pillWidth, height: ColumnStatusPill.height
             )
         }
-        let rightX = lastWasButton == nil ? edge : edge - Self.gap
+        let middleEnd = lastWasButton == nil ? edge : edge - Self.gap
 
-        let middleWidth = max(0, rightX - leftX)
+        // The leading buttons that leave the middle its room, from the left.
+        var leadingCount = leadingButtons.count
+        while leadingCount > 0, middleEnd - leadingEnd(leadingCount) < middleNeed { leadingCount -= 1 }
+        for (index, button) in leadingButtons.enumerated() where index < leadingCount {
+            let x = leadingStart + CGFloat(index) * (buttonSize + Self.buttonGap)
+            button.frame = NSRect(x: x, y: buttonY, width: buttonSize, height: buttonSize)
+        }
+        let shownLeading = Array(leadingButtons.prefix(leadingCount))
+        gaveWay = gaveWay || leadingCount < leadingButtons.count
+        overflowButtons = (leadingButtons + trailingButtons).filter { button in
+            !shownLeading.contains { $0 === button } && !shownTrailing.contains { $0 === button }
+        }
+        for button in leadingButtons + trailingButtons {
+            button.isHidden = overflowButtons.contains { $0 === button }
+        }
+
+        let middleStart = leadingEnd(leadingCount)
+        let middleWidth = max(0, middleEnd - middleStart)
         if let centerView {
             titleLabel.isHidden = true
             contextLabel.isHidden = true
-            centerView.frame = NSRect(x: leftX, y: buttonY, width: middleWidth, height: buttonSize)
+            centerView.isHidden = middleWidth < Self.minimumTitleWidth
+            centerView.frame = NSRect(x: middleStart, y: buttonY, width: middleWidth, height: buttonSize)
             return
         }
-        layoutTitle(x: leftX, width: middleWidth, titleWidth: titleWidth, showsContext: !gaveWay)
+        layoutTitle(x: middleStart, width: middleWidth, titleWidth: titleWidth, showsContext: !gaveWay)
     }
 
     /// The title takes what it needs, but no more than what leaves the
     /// context its full width, or 40 % of the room when both are long. The
-    /// context goes when it would squeeze the title further.
+    /// context goes when it would squeeze the title further. Widths here
+    /// are the texts'; each label's frame adds its cell's margins.
     private func layoutTitle(x: CGFloat, width: CGFloat, titleWidth: CGFloat, showsContext: Bool) {
+        let inset = Self.labelInset
         titleLabel.isHidden = title.isEmpty
         let textY = ((bounds.height - Self.textHeight) / 2).rounded()
-        let contextWidth = Self.textWidth(contextLabel)
-        var shownTitleWidth = min(titleWidth, max(width * 0.4, width - contextWidth - Self.gap))
-        let contextRoom = width - shownTitleWidth - Self.gap
+        let contextWidth = Self.textWidth(contextLabel) - 2 * inset
+        var shownTitleWidth = title.isEmpty ? 0 : min(titleWidth, max(width * 0.4, width - contextWidth - Self.gap))
+        let contextX = title.isEmpty ? x : x + shownTitleWidth + Self.gap
+        let contextRoom = x + width - contextX
         contextLabel.isHidden = !showsContext || context.isEmpty || contextRoom < Self.minimumContextWidth
             || shownTitleWidth < min(titleWidth, Self.minimumTitleBesideContext)
         if contextLabel.isHidden { shownTitleWidth = min(titleWidth, width) }
-        // Pulled back by the cell's margin, the text starts one gap after the icon.
-        titleLabel.frame = NSRect(x: x - Self.labelInset, y: textY, width: shownTitleWidth, height: Self.textHeight)
-        let contextX = title.isEmpty ? x : x + shownTitleWidth + Self.gap
-        contextLabel.frame = NSRect(
-            x: contextX - Self.labelInset, y: textY,
-            width: max(0, x + width - contextX + Self.labelInset), height: Self.textHeight
-        )
+        titleLabel.frame = NSRect(x: x - inset, y: textY, width: max(0, shownTitleWidth) + 2 * inset, height: Self.textHeight)
+        contextLabel.frame = NSRect(x: contextX - inset, y: textY, width: max(0, contextRoom) + 2 * inset, height: Self.textHeight)
     }
 
     // MARK: - Menu
 
     /// The ⋯ menu as it opens now: the hidden buttons' actions, then the
-    /// column's own items.
+    /// column's own items, bound to this header's column.
     func currentMenu() -> NSMenu {
         let menu = menuProvider?() ?? NSMenu()
+        for item in menu.items where item.representedObject is ColumnCommand {
+            item.target = self
+        }
         guard !overflowButtons.isEmpty else { return menu }
         for (index, button) in overflowButtons.enumerated() {
-            let item = NSMenuItem(
-                title: button.toolTip ?? "", action: button.isEnabled ? button.action : nil, keyEquivalent: ""
-            )
+            let item = NSMenuItem(title: button.menuTitle, action: button.isEnabled ? button.action : nil, keyEquivalent: "")
             item.target = button.target
             item.state = button.isOn ? .on : .off
             menu.insertItem(item, at: index)
@@ -377,28 +422,59 @@ final class ColumnHeaderView: NSView {
         currentMenu().popUp(positioning: nil, at: below, in: sender)
     }
 
+    /// Runs a column item on this header's column: it takes the focus
+    /// first, as a click in it does, so the item can't reach the column
+    /// the focus moved to meanwhile, nor one a keyboard press left focused.
+    @objc func runColumnCommand(_ sender: NSMenuItem) {
+        guard let command = sender.representedObject as? ColumnCommand,
+              let shell = sequence(first: superview, next: { $0?.superview }).lazy.compactMap({ $0 as? NiruxShellView }).first,
+              shell.focusColumn(withHeader: self)
+        else { return }
+        command.perform(shell)
+    }
+
     /// What every column's ⋯ menu ends with: moving, resizing and closing
-    /// the column. The items go to the app like the main menu's, which acts
-    /// on the focused column: a click in a column focuses it first.
+    /// the column.
     static func columnMenuItems() -> [NSMenuItem] {
-        let moveLeft = NSMenuItem(title: "Move Left", action: #selector(NiruxApp.moveColumnLeft(_:)), keyEquivalent: "\u{F702}")
-        moveLeft.keyEquivalentModifierMask = [.command, .shift]
-        let moveRight = NSMenuItem(title: "Move Right", action: #selector(NiruxApp.moveColumnRight(_:)), keyEquivalent: "\u{F703}")
-        moveRight.keyEquivalentModifierMask = [.command, .shift]
-        return [
-            moveLeft,
-            moveRight,
-            menuItem("Cycle Width", action: #selector(NiruxApp.cycleWidth(_:)), shortcut: .cycleWidth),
+        [
+            columnItem("Move Left", mainMenuAction: #selector(NiruxApp.moveColumnLeft(_:))) { $0.moveColumn(.left) },
+            columnItem("Move Right", mainMenuAction: #selector(NiruxApp.moveColumnRight(_:))) { $0.moveColumn(.right) },
+            columnItem("Cycle Width", mainMenuAction: #selector(NiruxApp.cycleWidth(_:))) { $0.cycleActiveColumnWidth() },
             .separator(),
-            menuItem("Close Column", action: #selector(NiruxApp.closeColumn(_:)), shortcut: .closeColumn)
+            columnItem("Close Column", mainMenuAction: #selector(NiruxApp.closeColumn(_:))) { $0.closeActiveColumn() }
         ]
     }
 
-    /// An item that shows its main-menu shortcut.
-    static func menuItem(_ title: String, action: Selector, shortcut: NiruxShortcuts) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: shortcut.chord.key)
-        item.keyEquivalentModifierMask = shortcut.chord.modifiers
+    /// A ⋯ item doing to the header's column what `mainMenuAction` does to
+    /// the focused one (`perform`), with that main-menu item's shortcut.
+    static func columnItem(
+        _ title: String, mainMenuAction: Selector, perform: @escaping @MainActor (NiruxShellView) -> Void
+    ) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(runColumnCommand(_:)), keyEquivalent: "")
+        item.representedObject = ColumnCommand(perform)
+        if let shortcut = NSApp?.mainMenu.flatMap({ Self.item(in: $0, action: mainMenuAction) }) {
+            item.keyEquivalent = shortcut.keyEquivalent
+            item.keyEquivalentModifierMask = shortcut.keyEquivalentModifierMask
+        }
         return item
+    }
+
+    private static func item(in menu: NSMenu, action: Selector) -> NSMenuItem? {
+        for item in menu.items {
+            if item.action == action, !item.isAlternate { return item }
+            if let found = item.submenu.flatMap({ self.item(in: $0, action: action) }) { return found }
+        }
+        return nil
+    }
+}
+
+/// What a column item does, carried by its menu item.
+@MainActor
+final class ColumnCommand: NSObject {
+    let perform: @MainActor (NiruxShellView) -> Void
+
+    init(_ perform: @escaping @MainActor (NiruxShellView) -> Void) {
+        self.perform = perform
     }
 }
 
@@ -415,6 +491,13 @@ final class ColumnHeaderButton: NSButton {
     override var isEnabled: Bool {
         didSet { applyColors() }
     }
+    /// Its item's title in ⋯ when the bar has no room for it: its first
+    /// tooltip, which a column may change to say more.
+    private(set) var menuTitle = ""
+    /// Hidden under the pointer, it would never hear the mouse leave.
+    override var isHidden: Bool {
+        didSet { if isHidden { isHovered = false } }
+    }
 
     private var isHovered = false {
         didSet { applyColors() }
@@ -427,9 +510,10 @@ final class ColumnHeaderButton: NSButton {
     convenience init(symbol: String, toolTip: String) {
         self.init(frame: NSRect(x: 0, y: 0, width: Self.size, height: Self.size))
         image = NSImage(systemSymbolName: symbol, accessibilityDescription: toolTip)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 13, weight: .regular))
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 14, weight: .regular))
         assert(image != nil, "No SF Symbol named \(symbol)")
         self.toolTip = toolTip
+        menuTitle = toolTip
         setAccessibilityLabel(toolTip)
     }
 
@@ -442,6 +526,8 @@ final class ColumnHeaderButton: NSButton {
         imageScaling = .scaleNone
         wantsLayer = true
         layer?.cornerRadius = Theme.Radius.control
+        // A click leaves the keyboard where it was (the terminal, Monaco).
+        refusesFirstResponder = true
         applyColors()
     }
 
@@ -497,6 +583,9 @@ final class ColumnHeaderLabel: NSTextField, ColumnHeaderAccessory {
         font = NSFont.monospacedDigitSystemFont(ofSize: Theme.Font.caption.pointSize, weight: .regular)
         textColor = Theme.Color.textTertiary
     }
+
+    var accessoryHeight: CGFloat { 16 }
+    var accessoryInset: CGFloat { ColumnHeaderView.labelInset }
 
     func width(fitting maxWidth: CGFloat) -> CGFloat {
         guard !stringValue.isEmpty else { return 0 }
@@ -556,6 +645,7 @@ final class ColumnStatusPill: NSView {
         case .waiting: Theme.Color.waiting
         case .error: Theme.Color.error
         case .done: Theme.Color.done
+        case .success: Theme.Color.success
         }
     }
 
@@ -566,6 +656,7 @@ final class ColumnStatusPill: NSView {
         case .waiting: Theme.Color.waiting.withAlphaComponent(0.16)
         case .error: Theme.Color.error.withAlphaComponent(0.15)
         case .done: Theme.Color.done.withAlphaComponent(0.14)
+        case .success: Theme.Color.success.withAlphaComponent(0.12)
         }
     }
 
@@ -582,7 +673,7 @@ final class ColumnStatusPill: NSView {
         let markColor = Self.color(status.symbolTone ?? status.tone)
         if let symbol = status.symbol {
             symbolView.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold))
+                .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: Self.symbolSize, weight: .regular))
             assert(symbolView.image != nil, "No SF Symbol named \(symbol)")
             symbolView.contentTintColor = markColor
         } else {

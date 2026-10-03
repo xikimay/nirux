@@ -17,12 +17,15 @@ extension EditorColumn {
     /// The editor's ⋯ menu: its main-menu items, then the column's.
     private static func headerMenu() -> NSMenu {
         let menu = NSMenu()
-        let saveAll = menu.addItem(withTitle: "Save All", action: #selector(NiruxApp.saveAllInEditor(_:)), keyEquivalent: "s")
-        saveAll.keyEquivalentModifierMask = [.command, .option]
-        let wrap = menu.addItem(withTitle: "Toggle Word Wrap", action: #selector(NiruxApp.toggleWordWrap(_:)), keyEquivalent: "z")
-        wrap.keyEquivalentModifierMask = [.command, .option]
-        let minimap = menu.addItem(withTitle: "Toggle Minimap", action: #selector(NiruxApp.toggleMinimap(_:)), keyEquivalent: "m")
-        minimap.keyEquivalentModifierMask = [.command, .shift]
+        menu.addItem(ColumnHeaderView.columnItem("Save All", mainMenuAction: #selector(NiruxApp.saveAllInEditor(_:))) {
+            $0.saveAllInEditor()
+        })
+        menu.addItem(ColumnHeaderView.columnItem("Toggle Word Wrap", mainMenuAction: #selector(NiruxApp.toggleWordWrap(_:))) {
+            $0.toggleWordWrap()
+        })
+        menu.addItem(ColumnHeaderView.columnItem("Toggle Minimap", mainMenuAction: #selector(NiruxApp.toggleMinimap(_:))) {
+            $0.toggleMinimap()
+        })
         menu.addItem(.separator())
         ColumnHeaderView.columnMenuItems().forEach(menu.addItem)
         return menu

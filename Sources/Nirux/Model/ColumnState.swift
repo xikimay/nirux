@@ -76,15 +76,17 @@ final class ColumnState {
     var header: ColumnHeaderView? {
         terminalHeader ?? webViewColumn?.header ?? editorColumn?.header ?? projectBoard?.view.header
     }
-    /// What a terminal's header reads ("claude · ~/repo"); empty before
-    /// its first refresh.
+    /// What a terminal's header reads ("claude · ~/repo", "claude (not
+    /// resumed) · ~/repo"); empty before its first refresh.
     var titleText: String {
         guard let terminalHeader else { return "" }
-        return [terminalHeader.title, terminalHeader.context].filter { !$0.isEmpty }.joined(separator: " · ")
+        let title = deferredAgent == nil || terminalHeader.title.isEmpty
+            ? terminalHeader.title : "\(terminalHeader.title) (not resumed)"
+        return [title, terminalHeader.context].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     /// Height reserved for the terminal's header.
-    var titleBarHeight: CGFloat {
+    var headerHeight: CGFloat {
         pty != nil ? ColumnHeaderView.height : 0
     }
 
@@ -132,7 +134,9 @@ final class ColumnState {
     /// The terminal's ⋯ menu.
     private static func terminalMenu() -> NSMenu {
         let menu = NSMenu()
-        menu.addItem(withTitle: "Find in Terminal…", action: #selector(NiruxApp.showTerminalFind(_:)), keyEquivalent: "f")
+        menu.addItem(ColumnHeaderView.columnItem(
+            "Find in Terminal…", mainMenuAction: #selector(NiruxApp.showTerminalFind(_:))
+        ) { $0.showTerminalFind() })
         menu.addItem(.separator())
         ColumnHeaderView.columnMenuItems().forEach(menu.addItem)
         return menu
@@ -141,7 +145,7 @@ final class ColumnState {
     /// Update the header's title and context: [title or process], [path].
     /// The snapshot is only evaluated for shell titles, which fall back to
     /// the foreground process name.
-    func updateTitleBarLabel(snapshot: @autoclosure () -> ProcessSnapshot) {
+    func updateHeaderTitle(snapshot: @autoclosure () -> ProcessSnapshot) {
         guard let header = terminalHeader else { return }
         if let deferredAgent {
             header.title = deferredAgent.processName
@@ -159,16 +163,16 @@ final class ColumnState {
     }
 
     /// The terminal header's agent icon and status, from the sidebar's
-    /// reading of the column.
-    func updateHeaderAgentState(_ column: ColumnInfo) {
+    /// reading of the column and what blocks its agent on the user.
+    func updateHeaderAgentState(_ column: ColumnInfo, wait: AgentWait?, now: TimeInterval) {
         guard let header = terminalHeader else { return }
         header.icon = .terminal(processName: column.deferredAgent?.processName ?? column.processName)
-        header.status = .agent(column)
+        header.status = .agent(column, wait: wait, now: now)
     }
 
     /// Position the header and optionally resize terminal to fit. Called from layoutAndScroll.
-    func layoutWithTitleBar(width: CGFloat, height: CGFloat, resizeTerminal: Bool = true) {
-        let barHeight = titleBarHeight
+    func layoutWithHeader(width: CGFloat, height: CGFloat, resizeTerminal: Bool = true) {
+        let barHeight = headerHeight
         terminalHeader?.isHidden = (barHeight == 0)
 
         if barHeight > 0, let header = terminalHeader {

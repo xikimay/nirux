@@ -20,7 +20,7 @@ final class ClaudeUsageFollower: @unchecked Sendable {
     /// The column following it: once gone, a catch-up stops mid-file.
     @MainActor private weak var owner: AnyObject?
     @MainActor private var lastReadAt: TimeInterval = -.infinity
-    /// Title-bar refreshes come up to four times a second while an agent's
+    /// Header refreshes come up to four times a second while an agent's
     /// title spins; the usage needn't follow that closely.
     static let minInterval: TimeInterval = 1
 

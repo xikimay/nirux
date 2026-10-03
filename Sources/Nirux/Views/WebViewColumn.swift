@@ -188,8 +188,7 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
 
     /// Move keyboard focus to the URL field with the text selected (Cmd+L).
     func focusAddressBar() {
-        window?.makeFirstResponder(urlField)
-        urlField.selectText(nil)
+        urlField.beginEditing()
     }
 
     /// Open the Web Inspector. WKWebView has no public API for this;

@@ -1,21 +1,20 @@
 import AppKit
 
 /// What a terminal column's header shows of its agent: the agent's icon,
-/// and a status pill only while the agent works, waits on the user's
-/// answer (the only amber), or stopped on an error. A finished turn or a
-/// plain shell shows no pill.
+/// and a status pill only while the agent works, waits on the user (the
+/// only amber), or stopped on an error. A finished turn or a plain shell
+/// shows no pill.
 extension ColumnHeaderView.Status {
-    static func agent(_ column: ColumnInfo) -> Self? {
+    /// `wait` is what blocks the agent on the user now
+    /// (`PtySession.agentBlockedWait`): unlike `column.agentStatus`, it
+    /// stays while the user looks at the column, as long as the dialog is
+    /// open, like ⌘J and the sidebar's dialog block.
+    static func agent(_ column: ColumnInfo, wait: AgentWait?, now: TimeInterval) -> Self? {
         if let deferred = column.deferredAgent {
             return Self("not resumed", tone: .neutral, symbol: Theme.Symbol.resume, toolTip: deferred.tooltip)
         }
-        if let stuck = column.stuck {
-            switch stuck {
-            case .waiting(let reason, let duration):
-                return waiting(reason, duration: duration, toolTip: stuck.tooltip)
-            case .stoppedOnError, .exitedMidTurn:
-                return failure(stuck.label, toolTip: stuck.tooltip)
-            }
+        if let wait {
+            return attention(wait.reason, waited: now - wait.since)
         }
         switch column.agentStatus {
         case .idle:
@@ -23,49 +22,45 @@ extension ColumnHeaderView.Status {
         case .working:
             return Self(column.elapsedDisplay.map { "working · \($0)" } ?? "working", tone: .working)
         case .needsAttention:
-            guard let reason = column.attentionReason else { return nil }
-            return attention(reason)
+            // An agent without hooks that falls silent may sit in its own
+            // approval prompt: amber, so a dialog is never missed.
+            guard let reason = column.attentionReason else {
+                return Self("needs you", tone: .waiting, toolTip: "The agent went quiet: it may wait for you, or have finished.")
+            }
+            return attention(reason, waited: nil)
         }
     }
 
-    private static func attention(_ reason: AgentAttentionReason) -> Self? {
-        let toolTip = [reason.headline, reason.detailLine.flatMap { AgentText.clean($0, maxLength: 300) }]
-            .compactMap { $0 }.joined(separator: " — ")
-        switch reason {
-        case .permission, .question:
-            return waiting(reason, duration: nil, toolTip: toolTip)
-        case .stillWaiting(let dialog, _):
-            return attention(dialog)
-        case .apiError:
-            return failure("stopped", toolTip: toolTip)
-        case .exitedMidTurn:
-            return failure(reason.shortLabel, toolTip: toolTip)
-        case .turnFinished, .message:
-            return nil
+    /// A dialog's pill reads how long it has waited, from a minute on.
+    private static func attention(_ reason: AgentAttentionReason, waited: TimeInterval?) -> Self? {
+        var dialog = reason
+        if case .stillWaiting(let inner, _) = reason { dialog = inner }
+        let detail = dialog.detailLine.flatMap { AgentText.clean($0, maxLength: 300) }
+        let toolTip = [dialog.headline, detail].compactMap { $0 }.joined(separator: " — ")
+        if dialog.isBlockingDialog {
+            let duration = waited.flatMap { $0 >= 60 ? SidebarRenderer.shortDuration($0) : nil }
+            let symbol: String
+            if case .question = dialog { symbol = Theme.Symbol.question } else { symbol = Theme.Symbol.permission }
+            return Self(
+                [dialog.shortLabel, duration].compactMap { $0 }.joined(separator: " · "),
+                tone: .waiting, symbol: symbol, toolTip: toolTip
+            )
         }
-    }
-
-    private static func waiting(_ reason: AgentAttentionReason, duration: String?, toolTip: String) -> Self {
-        let isQuestion: Bool
-        switch reason {
-        case .question: isQuestion = true
-        case .stillWaiting(.question, _): isQuestion = true
-        default: isQuestion = false
+        if dialog.isFailure {
+            let text: String
+            if case .exitedMidTurn = dialog { text = dialog.shortLabel } else { text = "stopped" }
+            return Self(text, tone: .error, symbol: Theme.Symbol.agentError, toolTip: toolTip)
         }
-        let text = [reason.shortLabel, duration].compactMap { $0 }.joined(separator: " · ")
-        return Self(
-            text, tone: .waiting, symbol: isQuestion ? Theme.Symbol.question : Theme.Symbol.permission, toolTip: toolTip
-        )
-    }
-
-    private static func failure(_ text: String, toolTip: String) -> Self {
-        Self(text, tone: .error, symbol: Theme.Symbol.agentError, toolTip: toolTip)
+        if case .message = dialog {
+            return Self(dialog.shortLabel, tone: .waiting, toolTip: toolTip)
+        }
+        return nil
     }
 }
 
 extension ColumnHeaderView.Icon {
-    /// A terminal's icon: the agent's app icon, else its symbol, else the
-    /// terminal's.
+    /// A terminal's icon: the type's, or the logo of the agent running in
+    /// it (its app icon, else its symbol).
     @MainActor
     static func terminal(processName: String?) -> Self {
         guard let processName else { return .symbol(Theme.Symbol.terminal) }

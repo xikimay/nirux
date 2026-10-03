@@ -16,7 +16,7 @@ enum Theme {
         static let canvas = NSColor(hex: 0x16161B)
         /// Sidebar, file trees, settings windows, sheets and panels.
         static let base = NSColor(hex: 0x1B1B23)
-        /// Cards, column title bars, the active editor tab, find bars, toolbars.
+        /// Cards, column headers, the active editor tab, find bars, toolbars.
         static let surface = NSColor(hex: 0x20202A)
         /// Above a surface: drag ghosts, menus, popovers, a toolbar's fields.
         static let raised = NSColor(hex: 0x292933)

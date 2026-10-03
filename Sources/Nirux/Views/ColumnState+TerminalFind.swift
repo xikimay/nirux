@@ -82,7 +82,7 @@ extension ColumnState {
         let width = min(TerminalFindBar.preferredWidth, max(0, view.bounds.width - margin * 2))
         bar.frame = NSRect(
             x: view.bounds.width - margin - width,
-            y: view.bounds.height - titleBarHeight - margin - TerminalFindBar.height,
+            y: view.bounds.height - headerHeight - margin - TerminalFindBar.height,
             width: width,
             height: TerminalFindBar.height
         )

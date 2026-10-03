@@ -142,7 +142,7 @@ extension NiruxShellView {
            let target = workspaceStore.fallbackIndexAfterClosingWorkspace(at: index) {
             let changesSpace = workspaces[target].profileID != activeProfileID
             workspaceStore.selectWorkspace(at: target)
-            // As any switch: its badge, git context and title bars. Another
+            // As any switch: its badge, git context and headers. Another
             // space shows at once, as when picked in the sidebar: a slide
             // from this space's strip would mean nothing there.
             refreshAfterWorkspaceSelection(animated: !changesSpace)

@@ -195,7 +195,7 @@ extension NiruxShellView {
         quickSwitch.focusMoved()
         relayout(animated: animated)
         refreshGitContextNow(for: workspaces[activeWSIndex])
-        // Title bars of a workspace off screen weren't refreshed: bring
+        // Headers of a workspace off screen weren't refreshed: bring
         // them (and their agent usage) up to date now, not on the next
         // heartbeat. Also refreshes the sidebar.
         refreshMetadata()

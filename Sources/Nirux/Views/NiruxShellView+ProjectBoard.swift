@@ -107,7 +107,7 @@ extension NiruxShellView {
         return board
     }
 
-    /// The header's project menu. A project that has a board already
+    /// The header's ⋯ › Project menu. A project that has a board already
     /// brings that one to the front, and this one keeps its project.
     func switchProjectBoard(_ board: ProjectBoardController, to projectID: String) {
         guard projectID != board.projectID else { return }

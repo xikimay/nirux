@@ -153,9 +153,13 @@ Order:
   never runs by itself.
 - **"Behind"** isn't a column: it costs one REST call per PR. The queue computes
   it for queued PRs only (section 3.2).
-- **The header** shows the project, its repository, the last run of the
-  post-merge workflow on the base branch ("nightly: success 20:27, 60e0ff2"),
-  the queue controls, and a Refresh button.
+- **The header** is the column header every column shares: the repository
+  (the project when it has none), the last run of the post-merge workflow on
+  the base branch as a pill ("nightly 20:27" with a check, a cross or a running
+  sign; "nightly: success 20:27, 60e0ff2" in its tooltip), or a red pill with
+  what went wrong, and a Refresh button whose tooltip says when the board last
+  read GitHub. Its ⋯ menu holds the project and Board Settings…. The queue
+  controls sit on their own line under it.
 - Left for later: Projects' brief preview and pinned URLs (section 7 there).
 
 ### 2.1 Decided while building B1

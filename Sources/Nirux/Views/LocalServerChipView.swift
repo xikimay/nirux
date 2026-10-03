@@ -80,6 +80,8 @@ final class LocalServerChipView: NSView, ColumnHeaderAccessory {
         return compactWidth <= maxWidth ? compactWidth : 0
     }
 
+    var accessoryHeight: CGFloat { Self.height }
+
     // The header drags the window; the chip, padding included, must not.
     override var mouseDownCanMoveWindow: Bool { false }
 

@@ -81,7 +81,7 @@ final class ClaudeUsageColumnTests: XCTestCase {
     func testRefreshHidesWhileTheSessionRunsElsewhereAndDropsItOnceGone() throws {
         let column = ColumnState(cwd: "/tmp")
         column.view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
-        column.layoutWithTitleBar(width: 600, height: 400)
+        column.layoutWithHeader(width: 600, height: 400)
         column.followClaudeTranscript(at: "/t/s1.jsonl", sessionID: "s1", process: claude.instance)
         var parser = ClaudeTranscriptUsageParser()
         parser.consume(line: Data(TranscriptLine.response(id: "msg_1", cacheRead: 50_000).utf8))
@@ -113,7 +113,7 @@ final class ClaudeUsageColumnTests: XCTestCase {
         let column = ColumnState(cwd: "/tmp")
         column.terminalTitle = "claude"
         column.view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
-        column.layoutWithTitleBar(width: 600, height: 400)
+        column.layoutWithHeader(width: 600, height: 400)
         XCTAssertNil(column.usageLabel)
 
         var parser = ClaudeTranscriptUsageParser()
@@ -123,18 +123,21 @@ final class ClaudeUsageColumnTests: XCTestCase {
         XCTAssertEqual(label?.stringValue, "ctx 85%")
         XCTAssertEqual(label?.isHidden, false)
         let header = try XCTUnwrap(column.header)
-        XCTAssertEqual(label?.frame.maxX, header.menuButton.frame.minX - Theme.Space.sm, "just before ⋯")
+        XCTAssertEqual(
+            label.map { $0.frame.maxX - ColumnHeaderView.labelInset }, header.menuButton.frame.minX - Theme.Space.sm,
+            "its text ends a gap before ⋯"
+        )
         XCTAssertTrue(label?.toolTip?.hasPrefix("Context: 850,002 tokens") == true)
 
         // Too narrow: the title keeps the room.
-        column.layoutWithTitleBar(width: 140, height: 400)
+        column.layoutWithHeader(width: 140, height: 400)
         XCTAssertEqual(label?.isHidden, true)
-        column.layoutWithTitleBar(width: 600, height: 400)
+        column.layoutWithHeader(width: 600, height: 400)
         XCTAssertEqual(label?.isHidden, false)
 
         column.setAgentUsage(nil)
         XCTAssertEqual(label?.isHidden, true)
-        column.layoutWithTitleBar(width: 600, height: 400)
+        column.layoutWithHeader(width: 600, height: 400)
         XCTAssertEqual(label?.isHidden, true)
     }
 }

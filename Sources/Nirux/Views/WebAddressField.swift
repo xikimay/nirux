@@ -1,8 +1,9 @@
 import AppKit
 
-/// The browser header's address. At rest it reads the URL without its
-/// scheme, the host dimmed before the path ("localhost:5173/" then
-/// "checkout"); while it has the keyboard it holds the whole URL to edit.
+/// The browser header's address. At rest it reads the URL with the host
+/// dimmed before the path ("localhost:5173/" then "checkout"), and without
+/// an https:// scheme; http:// stays, dimmed, so an unencrypted page shows.
+/// While it has the keyboard it holds the whole URL to edit.
 @MainActor
 final class AddressField: NSTextField {
     /// The page's URL. Shown at once, even while the user edits (a
@@ -26,13 +27,20 @@ final class AddressField: NSTextField {
         setAccessibilityLabel("Address")
     }
 
-    /// Like a browser's address bar, the first click selects the whole URL:
-    /// placing the caret where the shorter address was clicked would land
-    /// it elsewhere in the whole one. Later clicks reach the field editor.
+    /// Like a browser's address bar, the first click selects the whole URL
+    /// (a field taking the keyboard selects its text): placing the caret
+    /// where the shorter address was clicked would land it elsewhere in
+    /// the whole one. Later clicks reach the field editor.
     override func mouseDown(with event: NSEvent) {
         guard currentEditor() == nil, window?.makeFirstResponder(self) == true else {
             return super.mouseDown(with: event)
         }
+    }
+
+    /// Takes the keyboard with the whole URL selected; while it edits, only
+    /// selects what was typed, which taking the keyboard again would drop.
+    func beginEditing() {
+        if currentEditor() == nil { window?.makeFirstResponder(self) }
         currentEditor()?.selectAll(nil)
     }
 
@@ -44,8 +52,8 @@ final class AddressField: NSTextField {
 
     override func textDidEndEditing(_ notification: Notification) {
         super.textDidEndEditing(notification)
-        // Return navigated (the action set `url`); Escape or a click
-        // elsewhere puts the page's URL back.
+        // Return navigated (the action set `url`); leaving without it puts
+        // the page's URL back.
         showURL()
     }
 
@@ -64,17 +72,19 @@ final class AddressField: NSTextField {
         stringValue = url
     }
 
-    /// What the field reads at rest: an http(s) URL's host and the slash
-    /// after it dimmed, its path, query and fragment in primary text. A
-    /// bare host, or another scheme, reads whole in primary text.
+    /// What the field reads at rest: an http(s) URL's scheme (http only),
+    /// host and the slash after it dimmed, its path, query and fragment in
+    /// primary text. Without a path, the host reads in primary text after
+    /// a dimmed http://; another scheme reads whole in primary text.
     static func displayParts(_ url: String) -> (dimmed: String, primary: String) {
         let lowered = url.lowercased()
         guard let scheme = ["https://", "http://"].first(where: { lowered.hasPrefix($0) }) else { return ("", url) }
+        let shownScheme = scheme == "http://" ? String(url.prefix(scheme.count)) : ""
         let rest = String(url.dropFirst(scheme.count))
-        guard let slash = rest.firstIndex(of: "/") else { return ("", rest) }
-        let path = String(rest[rest.index(after: slash)...])
-        guard !path.isEmpty else { return ("", rest) }
-        return (String(rest[...slash]), path)
+        guard let slash = rest.firstIndex(of: "/"), !rest[rest.index(after: slash)...].isEmpty else {
+            return (shownScheme, rest)
+        }
+        return (shownScheme + rest[...slash], String(rest[rest.index(after: slash)...]))
     }
 
     static func display(_ url: String) -> NSAttributedString {
@@ -131,8 +141,9 @@ final class AddressBox: NSView {
         needsLayout = true
     }
 
+    /// Starts editing; a click on the margin while editing keeps it going.
     override func mouseDown(with event: NSEvent) {
-        guard let field else { return super.mouseDown(with: event) }
+        guard let field, field.currentEditor() == nil else { return super.mouseDown(with: event) }
         window?.makeFirstResponder(field)
     }
 }
