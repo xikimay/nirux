@@ -37,10 +37,10 @@ final class PierreDiffRenderTests: XCTestCase {
     /// picks the language today; it stays crafted in case the header comes
     /// back.
     @MainActor
-    func testReviewDiffShowsCraftedPathAndLinesAsText() throws {
+    func testReviewDiffShowsCraftedLinesAsText() throws {
         let lines = [
             ("context", #"let markup = "<b>bold</b>""#),
-            ("removed", #"let old = "</span><img src=x onerror=\"window.pwned = 'line'\">""#),
+            ("removed", #"let old = "</span><img src=x onerror="window.pwned = 'line'">""#),
             ("added", "let new = \"<script>window.pwned = 'script'</script>\""),
             ("added", "let escape = \"\u{1B}[201~\""),
             ("context", "}")
@@ -58,15 +58,56 @@ final class PierreDiffRenderTests: XCTestCase {
     /// patch pierre parses: the rest would read as another line or a hunk.
     @MainActor
     func testLineBreakInsideALineStaysInThatLine() throws {
-        let rendered = try renderReview(path: "A.swift", hunks: [(oldStart: 4, newStart: 4, lines: [
-            ("added", "let a = 1\u{2028}@@ -1,1 +1,1 @@\r+let b = 2\u{2029}c\nd"),
-            ("added", "let crlf = 3\r")
-        ])])
+        let rendered = try renderReview(path: "A.swift", hunks: [
+            (oldStart: 4, newStart: 4, lines: [("added", "let a = 1\u{2028}@@ -1,1 +1,1 @@\r+let b = 2\u{2029}c\nd")]),
+            // A CRLF file's line ending.
+            (oldStart: 20, newStart: 20, lines: [("removed", "let crlf = 3\r"), ("added", "let crlf = 4\r")])
+        ])
         XCTAssertEqual(
             rendered.lines,
-            ["let a = 1⟨U+2028⟩@@ -1,1 +1,1 @@⟨U+000D⟩+let b = 2⟨U+2029⟩c⟨U+000A⟩d", "let crlf = 3"]
+            ["let a = 1⟨U+2028⟩@@ -1,1 +1,1 @@⟨U+000D⟩+let b = 2⟨U+2029⟩c⟨U+000A⟩d", "let crlf = 3", "let crlf = 4"]
         )
-        XCTAssertEqual(rendered.lineNumbers, ["4", "5"])
+        XCTAssertEqual(rendered.lineNumbers, ["4", "20", "20"])
+        XCTAssertNil(rendered.uncolored)
+    }
+
+    /// Only the line ending changed: hidden, the two lines would read the
+    /// same.
+    @MainActor
+    func testLineEndingChangeShowsTheCarriageReturn() throws {
+        let rendered = try renderReview(path: "A.swift", hunks: [(oldStart: 1, newStart: 1, lines: [
+            ("removed", "let a = 1\r"), ("added", "let a = 1")
+        ])])
+        XCTAssertEqual(rendered.lines, ["let a = 1⟨U+000D⟩", "let a = 1"])
+    }
+
+    /// pierre colors a whole file at once, on the page's main thread: past
+    /// a size, the diff is plain text, and says so.
+    @MainActor
+    func testLargeFileIsPlainTextAndSaysSo() throws {
+        let lines = (0..<2000).map { ("added", "export const value\($0) = compute(\($0));") }
+        let rendered = try renderReview(path: "Large.ts", highlighted: false, hunks: [(oldStart: 0, newStart: 1, lines: lines)])
+        XCTAssertEqual(rendered.uncolored, "large")
+        XCTAssertEqual(rendered.lines.first, "export const value0 = compute(0);")
+    }
+
+    /// A page that reloads creates a new review on the same root: the old
+    /// one's diffs go, and it renders nothing more.
+    @MainActor
+    func testNewReviewOnTheSameRootReplacesTheOldOne() throws {
+        let page = try BundlePage()
+        defer { page.close() }
+        let result = try page.run("""
+            const root = document.getElementById("root");
+            const file = { path: "A.swift", hunks: [{ oldStart: 1, newStart: 1, section: "", lines: [{ kind: "added", text: "let a = 1" }] }] };
+            const old = window.NiruxPierreDiff.createReview(document);
+            old.renderFile(root, file);
+            window.NiruxPierreDiff.createReview(document).renderFile(root, file);
+            let oldRenders = true;
+            try { old.renderFile(root, file); } catch { oldRenders = false; }
+            return JSON.stringify({ hosts: root.querySelectorAll("diffs-container").length, oldRenders });
+            """)
+        XCTAssertEqual(result, #"{"hosts":1,"oldRenders":false}"#)
     }
 
     /// A bidi control reorders what follows it ("Trojan Source"), an
@@ -75,11 +116,13 @@ final class PierreDiffRenderTests: XCTestCase {
     func testBidiAndInvisibleCharactersShowTheirCodePoint() throws {
         let rendered = try renderReview(path: "A.swift", hunks: [(oldStart: 1, newStart: 1, lines: [
             ("added", "let isAdmin = false /*\u{202E} } \u{2066}if (isAdmin)\u{2069} \u{2066} begin admins only */"),
-            ("added", "let user\u{200B}Name = \"\u{FEFF}\u{E0041}\u{3164}\"")
+            ("added", "let user\u{200B}Name = \"\u{FEFF}\u{E0041}\u{3164}\""),
+            ("added", "eval(decode(\"\u{E0158}\u{E0159}\u{FE01}\"))")
         ])])
         XCTAssertEqual(rendered.lines, [
             "let isAdmin = false /*⟨U+202E⟩ } ⟨U+2066⟩if (isAdmin)⟨U+2069⟩ ⟨U+2066⟩ begin admins only */",
-            "let user⟨U+200B⟩Name = \"⟨U+FEFF⟩⟨U+E0041⟩⟨U+3164⟩\""
+            "let user⟨U+200B⟩Name = \"⟨U+FEFF⟩⟨U+E0041⟩⟨U+3164⟩\"",
+            "eval(decode(\"⟨U+E0158⟩⟨U+E0159⟩⟨U+FE01⟩\"))"
         ])
     }
 
@@ -132,12 +175,17 @@ final class PierreDiffRenderTests: XCTestCase {
             }
             const rendered = (container) => container.querySelector("diffs-container").shadowRoot?.querySelectorAll("[data-line]").length > 0;
             const heights = () => containers.map((container) => container.getBoundingClientRect().height);
-            const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
-            await settle();
+            const until = async (condition) => {
+              const deadline = Date.now() + 10000;
+              while (!condition() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+            };
+            // Files far down turn into placeholders, once the page sees
+            // where they are.
+            await until(() => rendered(containers[0]) && !rendered(containers.at(-1)));
             const before = heights();
             const placeholders = containers.filter((container) => !rendered(container)).length;
             window.scrollTo(0, document.documentElement.scrollHeight);
-            await settle();
+            await until(() => rendered(containers.at(-1)));
             return JSON.stringify({ before, after: heights(), placeholders, lastRendered: rendered(containers.at(-1)) });
             """)
         let rendered = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(result.utf8)) as? [String: Any])
@@ -152,6 +200,8 @@ final class PierreDiffRenderTests: XCTestCase {
         let lines: [String]
         let lineNumbers: [String]
         let noNewlineMarkers: Int
+        /// The host's `data-uncolored`.
+        let uncolored: String?
         /// Elements whose tag a crafted string names.
         let elements: Int
         let pwned: String?
@@ -188,6 +238,7 @@ final class PierreDiffRenderTests: XCTestCase {
               lines: lines().map((line) => line.textContent),
               lineNumbers: [...shadow().querySelectorAll("[data-column-number]")].map((cell) => cell.textContent),
               noNewlineMarkers: shadow().querySelectorAll("[data-no-newline]").length,
+              uncolored: root.querySelector("diffs-container").dataset.uncolored ?? null,
               elements: shadow().querySelectorAll("b, img, script").length + document.querySelectorAll("b, img, script").length,
               pwned: window.pwned ?? null
             });
@@ -197,6 +248,7 @@ final class PierreDiffRenderTests: XCTestCase {
             lines: rendered["lines"] as? [String] ?? [],
             lineNumbers: rendered["lineNumbers"] as? [String] ?? [],
             noNewlineMarkers: rendered["noNewlineMarkers"] as? Int ?? -1,
+            uncolored: rendered["uncolored"] as? String,
             elements: rendered["elements"] as? Int ?? -1,
             pwned: rendered["pwned"] as? String
         )

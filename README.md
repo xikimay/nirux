@@ -372,7 +372,7 @@ NIRUX_CODESIGN_IDENTITY="Developer ID Application: Example Name (ABCDE12345)" \
 Web/pierre-diff/build.sh
 ```
 
-To change a version, run `npm install <package>@<version>` in `Web/pierre-diff` first: `build.sh` installs with `npm ci`, which refuses a `package.json` and a lock that disagree. A pull request that only updates the lock (Dependabot's) fails `PierreDiffBundleTests` until `build.sh` runs on its branch.
+To change a version, run `npm install --save-exact <package>@<version>` in `Web/pierre-diff` first: `build.sh` installs with `npm ci`, which refuses a `package.json` and a lock that disagree. A pull request that only updates the lock (Dependabot's) fails `PierreDiffBundleTests` until `build.sh` runs on its branch.
 
 `build.sh` records the SHA-256 of the sources and of the bundle in `Web/pierre-diff/SHA256SUMS`; `PierreDiffBundleTests` fails when they no longer match. `Web/pierre-diff/build.sh --check` rebuilds to a temporary file and says whether the committed bundle is what the sources build.
 

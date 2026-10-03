@@ -88,12 +88,15 @@ that does the work.
   its lock, built by `build.sh`) gives the page `createReview`: a file's
   diff from its hunks, unified, without pierre's file header, rendered only
   near the viewport (`VirtualizedFileDiff`). A line break inside a line
-  (CR, U+2028, U+2029) is shown as its code point, `⟨U+2028⟩`: in the patch
-  text pierre parses, it would end the line, and the rest could read as a
-  hunk. So are bidi controls, which reorder what follows ("Trojan Source"),
-  and invisible characters (zero-width, Hangul fillers, tag characters), as
-  the send sheet shows them (section 6.2; decided by the user on
-  2026-10-03).
+  (LF, CR, U+2028, U+2029; not the CR that ends a CRLF file's line) is
+  shown as its code point, `⟨U+2028⟩`: in the patch text pierre parses, it
+  would end the line, and the rest could read as a hunk. So are bidi
+  controls, which reorder what follows ("Trojan Source"), and invisible
+  characters: zero-width ones, Hangul fillers, tag characters, and
+  variation selectors, which can carry a hidden payload (decided by the
+  user on 2026-10-03). A file past 1,500 lines or 100,000 characters is
+  plain text: pierre colors a whole file at once, on the page's main
+  thread, which takes seconds for a few hundred KB.
 - Persistence: `ColumnKind` gains `branchReview`. An older nightly decodes the
   unknown kind as a terminal, as for the board: a rollback turns the column
   into a shell in the worktree. Reopen it after updating.
@@ -778,8 +781,7 @@ button.
 - The page is tested on the JSON Swift sends, and on its pure functions under
   JavaScriptCore (`JSContext`), with crafted strings: a PR body with HTML and
   links, a path with ESC and bidi characters. `@pierre/diffs`'s escaping is
-  tested on the same strings through `renderPartialHTML`'s output; if that
-  needs a DOM, R2 adds the first test that loads a `WKWebView` and proves it
-  stable on CI before relying on it.
+  tested on the same strings through `renderPartialHTML`'s output, in a
+  `WKWebView` that loads the committed bundle (`PierreDiffRenderTests`).
 - Explain is tested against a fake `claude`; the real CLI runs only by hand,
   on a dev build with `NIRUX_STATE_DIR`.

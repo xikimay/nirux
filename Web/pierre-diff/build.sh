@@ -27,8 +27,9 @@ esac
 
 # esbuild is a devDependency: --include=dev installs it even under
 # NODE_ENV=production or omit=dev, and the build runs the locked one, never
-# one found elsewhere on the PATH.
-npm ci --include=dev --no-audit --no-fund --loglevel=error
+# one found elsewhere on the PATH. No package runs an install script:
+# esbuild's binary comes in its platform package.
+npm ci --include=dev --ignore-scripts --no-audit --no-fund --loglevel=error
 esbuild="./node_modules/.bin/esbuild"
 locked="$(node -p 'require("./package-lock.json").packages["node_modules/esbuild"].version')"
 if [ "$("$esbuild" --version)" != "$locked" ]; then
