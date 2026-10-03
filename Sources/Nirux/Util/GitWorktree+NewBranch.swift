@@ -115,7 +115,7 @@ extension GitWorktree {
         let missing = patterns.filter { !lines.contains($0) }
         guard !missing.isEmpty else { return true }
         var text = existing.isEmpty || existing.hasSuffix("\n") ? "" : "\n"
-        text += "# Nirux handovers (New Task…)\n" + missing.joined(separator: "\n") + "\n"
+        text += "# Nirux handovers\n" + missing.joined(separator: "\n") + "\n"
         do {
             try FileManager.default.createDirectory(at: info, withIntermediateDirectories: true)
         } catch {

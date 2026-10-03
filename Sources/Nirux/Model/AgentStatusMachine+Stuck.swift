@@ -1,6 +1,6 @@
 import Foundation
 
-// MARK: - Stuck agents: what the column shows, and whether Resume may type
+// MARK: - Stuck agents: what the column shows, and whether Resume or a Mission `tell` may type
 
 extension AgentStatusMachine {
     /// What keeps the agent from going on, if anything. `foreground` is
@@ -63,5 +63,20 @@ extension AgentStatusMachine {
         let promptWentIn = max(turnFailure.promptAt ?? 0, turnFailure.resumeKeystrokeAt ?? 0)
         guard lastDraftInputAt <= promptWentIn else { return .userTyped }
         return nil
+    }
+
+    /// Whether a Mission `tell` sent at `time` may be typed now, into an
+    /// empty prompt of `foreground`: the column's interactive `claude`,
+    /// already running at `time`, that took a prompt since it started (Claude
+    /// Code shows some dialogs, such as trust or MCP servers, before any
+    /// hook could list them), whose turn is over, with no dialog listed and
+    /// nothing typed since its last prompt went in (a draft, or text typed
+    /// by Nirux that Claude has not submitted yet).
+    func isPromptFree(foreground: ForegroundProcess?, runningSince time: TimeInterval) -> Bool {
+        guard let foreground, foreground.name == "claude", !AgentHookCenter.isHeadlessClaude(foreground),
+              foreground.instance.startedAt <= time,
+              let lastPromptAt, lastPromptAt >= foreground.instance.startedAt
+        else { return false }
+        return pendingDialogs.isEmpty && !hookWorking && turnStartedAt == nil && lastDraftInputAt <= lastPromptAt
     }
 }

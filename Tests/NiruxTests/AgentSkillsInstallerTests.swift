@@ -52,6 +52,14 @@ final class AgentSkillsInstallerTests: XCTestCase {
 
     @MainActor
     func testShippedSkillsAreTheOnesTheChecklistChecks() {
-        XCTAssertEqual(NiruxShellView.agentSkills.keys.sorted(), ["nirux-show-code", "nirux-worktree"])
+        XCTAssertEqual(NiruxShellView.agentSkills.keys.sorted(), ["nirux-draft", "nirux-second-opinion", "nirux-show-code", "nirux-worktree"])
+    }
+
+    @MainActor
+    func testSecondOpinionRunsCodexReadOnlyWithoutTools() {
+        // `-s read-only` only sandboxes shell commands: MCP servers and
+        // connectors come from the user config and the apps feature.
+        XCTAssertTrue(NiruxShellView.secondOpinionSkillContent.contains(
+            "codex exec -s read-only --ignore-user-config --disable apps --ephemeral \\\n"))
     }
 }
