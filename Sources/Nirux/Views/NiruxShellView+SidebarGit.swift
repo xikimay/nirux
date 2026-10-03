@@ -601,8 +601,11 @@ extension NiruxShellView {
                         for: queriedContext,
                         observation: observation
                     )
-                    // Even unchanged: the history may have loaded since.
+                    // Even unchanged: the history may have loaded since,
+                    // and the first read after launch records what is
+                    // already red.
                     self?.noteSessionPullRequest(of: workspace)
+                    self?.reportNewRedChecks(in: workspace)
                     guard changed else { return }
                     self?.scheduleMetadataRefresh()
                 }
