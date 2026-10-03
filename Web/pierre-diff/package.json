@@ -1,0 +1,10 @@
+{
+  "name": "nirux-pierre-diff",
+  "private": true,
+  "dependencies": {
+    "@pierre/diffs": "1.1.22"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.0"
+  }
+}
