@@ -434,13 +434,11 @@ extension WorkspaceState {
         }
     }
 
-    /// Keeps the most urgent of what happened while the user was away.
-    func raiseNotification(_ signal: AttentionSignal) { notification = max(notification ?? signal, signal) }
-
     private func setupAgentAttentionTracking(for col: ColumnState) {
         col.onAgentAttention = { [weak self, weak col] reason in
             guard let self else { return }
-            self.raiseNotification(AttentionSignal.of(reason))
+            // Its columns show a wait or an error while it lasts, not after.
+            self.raiseNotification(.finished)
             self.onMetadataChanged?()
             // Bounce dock icon when app is not active
             if !NSApp.isActive {

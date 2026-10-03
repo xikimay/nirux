@@ -154,6 +154,11 @@ enum AttentionSignal: String, Codable, Comparable, Hashable, Sendable {
     }
 }
 
+extension WorkspaceState {
+    /// Keeps the most urgent of what happened while the user was away.
+    func raiseNotification(_ signal: AttentionSignal) { notification = max(notification ?? signal, signal) }
+}
+
 extension AgentAttentionReason {
     var signal: AttentionSignal {
         switch self {

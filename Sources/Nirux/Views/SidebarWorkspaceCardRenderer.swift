@@ -126,14 +126,15 @@ final class SidebarWorkspaceCardRenderer {
     /// the user, since that's how long it has.
     private func ageLabel() -> NSTextField? {
         guard let lastActivityAt = workspace.lastActivityAt else { return nil }
-        let age = SidebarView.relativeAge(since: lastActivityAt)
+        let age = SidebarView.cardAge(since: lastActivityAt)
         let label = textLabel(
             age, font: Theme.Font.caption,
             color: layout.state == .waiting ? Theme.Color.waiting : Theme.Color.textTertiary
         )
         label.alignment = .right
-        label.toolTip = "Last activity \(age) ago"
-        label.setAccessibilityLabel("Last activity \(age) ago")
+        let description = age == "now" ? "Last activity less than a minute ago" : "Last activity \(age) ago"
+        label.toolTip = description
+        label.setAccessibilityLabel(description)
         return label
     }
 
@@ -191,6 +192,8 @@ final class SidebarWorkspaceCardRenderer {
         animation.repeatCount = .infinity
         animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         animation.timeOffset = CACurrentMediaTime().truncatingRemainder(dividingBy: animation.duration * 2)
+        // A slow fade all day long: no need for 120 frames a second.
+        animation.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)
         layer.add(animation, forKey: "breathe")
     }
 
@@ -268,12 +271,40 @@ final class SidebarWorkspaceCardRenderer {
             label.toolTip = chip.toolTip
             label.setAccessibilityLabel(chip.accessibilityLabel)
             append(label)
+            if let deferred = chip.column.deferredAgent {
+                areas.append(buildResumeChip(deferred, columnIndex: chip.column.index, frame: frame))
+                continue
+            }
+            // A focused column that waits or broke keeps a sign of focus.
+            if chip.column.isFocused, [.waiting, .error].contains(chip.style) {
+                background.layer?.borderWidth = 1
+                background.layer?.borderColor = Theme.Color.accent.withAlphaComponent(0.6).cgColor
+            }
             areas.append(SidebarHitArea(
                 frame: frame.insetBy(dx: -Metrics.chipGap / 2, dy: -2),
                 region: .column(workspaceIndex: workspace.index, columnIndex: chip.column.index)
             ))
         }
         return areas
+    }
+
+    /// A restored agent that hasn't resumed: its chip is Resume, which
+    /// starts it here, and is armed and hovered like Allow / Deny.
+    private func buildResumeChip(_ deferred: SidebarDeferredAgent, columnIndex: Int, frame: NSRect) -> SidebarHitArea {
+        let button = SidebarBadgeView(text: "", textColor: .clear, fillColor: .clear, font: Theme.Font.caption)
+        button.frame = frame
+        button.cornerRadius = Theme.Radius.chip
+        button.hoverFillColor = Theme.Color.accent.withAlphaComponent(0.14)
+        button.toolTip = deferred.tooltip
+        button.setAccessibilityRole(.button)
+        button.setAccessibilityLabel("Resume \(deferred.processName) here")
+        views.last?.setAccessibilityElement(false)
+        append(button)
+        approvalButtons[SidebarHoverTarget.deferredResumeButtonKey(columnID: deferred.columnID)] = button
+        return SidebarHitArea(
+            frame: frame.insetBy(dx: -Metrics.chipGap / 2, dy: -2),
+            region: .deferredAgentResume(workspaceIndex: workspace.index, columnIndex: columnIndex, columnID: deferred.columnID)
+        )
     }
 
     // MARK: - Action block
@@ -317,8 +348,6 @@ final class SidebarWorkspaceCardRenderer {
                 kind: kind, detail: detail, failedAt: failedAt, resume: resume,
                 workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top
             ).render())
-        case let .deferredResume(columnIndex, deferred):
-            buildDeferredResume(deferred, columnIndex: columnIndex, top: top)
         case .blocker(let text):
             let label = textLabel(text, font: Theme.Font.caption, color: Theme.Color.error)
             label.toolTip = text
@@ -362,35 +391,6 @@ final class SidebarWorkspaceCardRenderer {
         views += block.views
         hitAreas += block.hitAreas
         approvalButtons.merge(block.buttons) { _, new in new }
-    }
-
-    /// A restored agent that hasn't resumed: Resume starts it here.
-    private func buildDeferredResume(_ deferred: SidebarDeferredAgent, columnIndex: Int, top: CGFloat) {
-        let rowY = top - Metrics.buttonHeight
-        let label = "Resume \(deferred.processName) here"
-        let button = SidebarActionButton.secondary("Resume", symbol: Theme.Symbol.resume, label: label)
-        button.toolTip = deferred.tooltip
-        let width = button.fittingWidth
-        button.frame = NSRect(x: layout.contentMaxX - width, y: rowY, width: width, height: Metrics.buttonHeight)
-        let text = textLabel(
-            "\(deferred.processName) · not resumed yet", font: Theme.Font.caption, color: Theme.Color.textTertiary
-        )
-        text.toolTip = deferred.tooltip
-        text.frame = NSRect(
-            x: layout.contentX, y: rowY + (Metrics.buttonHeight - Metrics.actionLineHeight) / 2,
-            width: max(0, button.frame.minX - Theme.Space.sm - layout.contentX), height: Metrics.actionLineHeight
-        )
-        append(text)
-        append(button)
-        approvalButtons[SidebarHoverTarget.deferredResumeButtonKey(columnID: deferred.columnID)] = button
-        hitAreas.append(SidebarHitArea(
-            frame: button.frame.insetBy(dx: -3, dy: -3),
-            region: .deferredAgentResume(workspaceIndex: workspace.index, columnIndex: columnIndex, columnID: deferred.columnID)
-        ))
-        hitAreas.append(SidebarHitArea(
-            frame: NSRect(x: layout.contentX, y: rowY, width: layout.contentMaxX - layout.contentX, height: Metrics.buttonHeight),
-            region: .actionBlock(workspaceIndex: workspace.index)
-        ))
     }
 
     /// "PR merged", then "Clean up": the ⋯ menu's "Clean Up Worktree…",

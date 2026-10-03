@@ -63,7 +63,7 @@ extension SidebarView {
         let padding = SidebarExpandedMetrics.padding
         let activeInfos = displayedWorkspaceInfos.filter { !$0.isInactive }
         let inactiveInfos = displayedWorkspaceInfos.filter { $0.isInactive }
-        let listedInactiveInfos = inactiveInfos.filter { listsWorkspace(isInactive: true, isActive: $0.isActive) }
+        let listedInactiveInfos = inactiveInfos.filter(listsWorkspace)
         let hasWorkspaces = !activeInfos.isEmpty || !inactiveInfos.isEmpty
         let activeProfile = lastProfiles.first(where: { $0.isActive })
         let activityRows = ActivityStore.shared.visibleFeedEntries(maxCount: Self.activityMaxRows)
@@ -703,6 +703,12 @@ extension SidebarView {
         case .missionInstruction: summary = "told: \(detail ?? "message sent")"
         }
         return "\(entry.workspaceTitle) · \(entry.agentKind) · \(summary)"
+    }
+
+    /// A card's age: "now" in the first minute, then `relativeAge`. Seconds
+    /// would rebuild the sidebar (and drop its tooltips) every heartbeat.
+    nonisolated static func cardAge(since timestamp: TimeInterval, now: Date = Date()) -> String {
+        now.timeIntervalSince1970 - timestamp < 60 ? "now" : relativeAge(since: timestamp, now: now)
     }
 
     /// Compact relative timestamp ("42s", "12m", "1h05", "3d"). Pure —

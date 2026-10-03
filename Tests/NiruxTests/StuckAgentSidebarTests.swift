@@ -64,8 +64,9 @@ final class StuckAgentSidebarTests: XCTestCase {
         XCTAssertEqual(SidebarColumnChip(waiting).style, .waiting)
         XCTAssertEqual(SidebarRenderer.attentionTooltip(for: waiting), "needs permission — waiting 2h05m — Bash: git push")
 
-        let stopped = column(failed(.offered), status: .needsAttention)
-        XCTAssertEqual(chipText(stopped), "stopped", "the failure outranks the attention label")
+        var stopped = column(failed(.offered), status: .needsAttention)
+        stopped.attentionReason = .apiError(kind: "rate_limit", detail: nil)
+        XCTAssertEqual(chipText(stopped), "stopped", "the failure's own word, not the attention's")
         XCTAssertEqual(SidebarColumnChip(stopped).style, .error)
         XCTAssertEqual(
             SidebarRenderer.attentionTooltip(for: stopped), "Stopped on an API error — rate_limit: API Error: 429"

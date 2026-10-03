@@ -64,6 +64,55 @@ final class SidebarCardStateTests: XCTestCase {
         XCTAssertEqual(workspace([stuck]).cardState, .waiting)
     }
 
+    /// Coming back to the app clears every column's attention, not the
+    /// dialog on screen: the card stays amber until it is answered.
+    func testOpenDialogWaitsAfterTheAttentionIsCleared() {
+        var dialog = column()
+        dialog.openDialog = .permission(tool: "Bash", summary: "git push")
+        XCTAssertEqual(dialog.attention, .waiting)
+        XCTAssertEqual(dialog.attentionLabel, "permission")
+        XCTAssertEqual(workspace([dialog]).cardState, .waiting)
+        XCTAssertEqual(dialog.offScreenAttention, .waiting, "the column border, glow and indicator too")
+    }
+
+    /// The most urgent cause wins: a subagent's dialog after a failed turn
+    /// waits on the user.
+    func testDialogOutranksAStaleError() {
+        var both = column(stuck: stopped)
+        both.openDialog = .question("Which?")
+        XCTAssertEqual(both.attention, .waiting)
+        XCTAssertEqual(both.attentionLabel, "question")
+    }
+
+    /// A child agent's question (`nirux ask`) waits on the user while its
+    /// column works.
+    func testChildAgentQuestionWaits() {
+        let asking = workspace([column(status: .working)], isInactive: true, notification: .waiting)
+        XCTAssertEqual(asking.cardState, .waiting)
+        XCTAssertTrue(asking.asksUser)
+        XCTAssertFalse(asking.showsCompactRow)
+    }
+
+    func testFocusedColumnShowsItsOwnAttention() {
+        let focused = column(status: .needsAttention, reason: .question(nil), focused: true)
+        XCTAssertEqual(focused.attention, .waiting)
+        XCTAssertNil(focused.offScreenAttention, "on screen: no glow, border or indicator pulse")
+        XCTAssertEqual(column(status: .needsAttention, reason: .turnFinished).offScreenAttention, .finished)
+    }
+
+    /// No seconds on a card: they would rebuild the sidebar (and drop its
+    /// tooltips) every heartbeat.
+    func testCardTimesChangeByTheMinute() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        XCTAssertEqual(SidebarView.cardAge(since: 10_000 - 42, now: now), "now")
+        XCTAssertEqual(SidebarView.cardAge(since: 10_000 - 720, now: now), "12m")
+        var working = column(status: .working)
+        working.agentElapsedSeconds = 42
+        XCTAssertNil(working.elapsedDisplay)
+        working.agentElapsedSeconds = 61
+        XCTAssertEqual(working.elapsedDisplay, "1m")
+    }
+
     /// A red check is an error once no agent works: one may be fixing it.
     func testRedCheckIsAnErrorUnlessAnAgentWorks() {
         let red = pullRequest(ci: "FAILURE")
@@ -124,18 +173,12 @@ final class SidebarCardStateTests: XCTestCase {
     // MARK: - Action block
 
     func testActionBlockOrderAndHeight() throws {
-        let deferred = SidebarDeferredAgent(processName: "codex", summary: "codex session", columnID: UUID())
-        let resting = ColumnInfo(
-            index: 2, processName: nil, abbreviatedCwd: nil, isFocused: false, isWebView: false, webTitle: nil,
-            terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil, deferredAgent: deferred
-        )
         let info = workspace(
-            [column(0, stuck: stopped), resting], pullRequest: pullRequest(state: "MERGED"), isActive: true,
+            [column(0, stuck: stopped)], pullRequest: pullRequest(state: "MERGED"), isActive: true,
             blocker: "API access", cleanup: .available
         )
         XCTAssertEqual(info.cardActions, [
             .resume(columnIndex: 0, kind: "rate_limit", detail: nil, failedAt: 1, resume: .offered),
-            .deferredResume(columnIndex: 2, deferred),
             .blocker("Blocker: API access"),
             .cleanup(.available, pullRequest: 7)
         ])
@@ -144,7 +187,43 @@ final class SidebarCardStateTests: XCTestCase {
             900 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: info, sidebarWidth: 260), accuracy: 0.5,
             "layout matches the metrics the scroll view is sized with"
         )
-        XCTAssertEqual(result.approvalButtons.count, 2, "Resume twice")
+        XCTAssertEqual(result.approvalButtons.count, 1, "Resume")
+    }
+
+    /// A restored agent's chip is its Resume button: after every launch the
+    /// cards keep their size, the parked ones their single line.
+    func testRestoredAgentResumesFromItsChip() throws {
+        let deferred = SidebarDeferredAgent(processName: "codex", summary: "codex session", columnID: UUID())
+        let resting = ColumnInfo(
+            index: 2, processName: nil, abbreviatedCwd: nil, isFocused: false, isWebView: false, webTitle: nil,
+            terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil, deferredAgent: deferred
+        )
+        let card = workspace([column(0), resting])
+        XCTAssertEqual(card.cardActions, [])
+        XCTAssertEqual(SidebarColumnChip(resting).style, .resume)
+        XCTAssertTrue(workspace([resting], isInactive: true).showsCompactRow)
+
+        let result = SidebarWorkspaceCardRenderer(workspace: card, sidebarWidth: 260, yOffset: 500).render()
+        let resume = try XCTUnwrap(result.hitAreas.first {
+            if case .deferredAgentResume(1, 2, deferred.columnID) = $0.region { return true }
+            return false
+        })
+        let button = try XCTUnwrap(result.approvalButtons[SidebarHoverTarget.deferredResumeButtonKey(columnID: deferred.columnID)])
+        XCTAssertTrue(resume.frame.contains(NSPoint(x: button.frame.midX, y: button.frame.midY)))
+        XCTAssertEqual(
+            500 - result.bottomY,
+            SidebarExpandedMetrics.workspaceHeight(for: workspace([column(0), column(2)]), sidebarWidth: 260)
+        )
+    }
+
+    /// A press of a double-click after a button acted does nothing: the
+    /// rebuild may have put anything under it.
+    func testSecondPressAfterAButtonActedDoesNothing() {
+        let interval = NSEvent.doubleClickInterval
+        XCTAssertTrue(SidebarView.isLeftoverPress(clickCount: 2, at: 10 + interval / 2, after: 10))
+        XCTAssertFalse(SidebarView.isLeftoverPress(clickCount: 1, at: 10 + interval / 2, after: 10))
+        XCTAssertFalse(SidebarView.isLeftoverPress(clickCount: 2, at: 10 + interval * 2, after: 10))
+        XCTAssertFalse(SidebarView.isLeftoverPress(clickCount: 2, at: 10, after: -.infinity))
     }
 
     // MARK: - Chips
@@ -185,6 +264,63 @@ final class SidebarCardStateTests: XCTestCase {
         XCTAssertFalse(badge.isCardHovered)
     }
 
+    /// A first chip too wide for the space left of the PR links starts on
+    /// the next line: never under them, never losing clicks to them.
+    func testChipsNeverRunUnderThePullRequestLinks() {
+        let stuck = column(stuck: .waiting(.question(nil), duration: "12h05m"))
+        var info = workspace([stuck, column(1)], pullRequest: PRInfo(
+            number: 12345, state: "OPEN", isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: nil,
+            mergeable: nil, url: "https://example.test/pull/12345", additions: nil, deletions: nil, changedFiles: nil
+        ))
+        info.prFeedback = SidebarPRFeedback(humans: 12, bots: 34)
+        let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 500).render()
+        let links = result.hitAreas.filter { if case .link = $0.region { return true }; return false }
+        let chips = result.hitAreas.filter { if case .column = $0.region { return true }; return false }
+        XCTAssertEqual(chips.count, 2)
+        for link in links {
+            XCTAssertFalse(chips.contains { $0.frame.intersects(link.frame) }, "\(link.frame)")
+        }
+        XCTAssertEqual(500 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: info, sidebarWidth: 260))
+    }
+
+    /// The folded INACTIVE section still shows an agent that waits on the
+    /// user or broke; the rest stays folded.
+    func testFoldedSectionListsWaitingWorkspaces() {
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 600))
+        sidebar.isExpanded = true
+        let asking = workspace([column(status: .needsAttention, reason: .question(nil))], isInactive: true)
+        let parked = WorkspaceInfo(
+            id: "parked", index: 2, title: "parked", profileID: WorkspaceProfile.defaultID, isInactive: true,
+            columnCount: 1, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false, columns: [column()],
+            prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .parked,
+            lastSummary: nil, lastActivityAt: nil
+        )
+        sidebar.update(profiles: [], workspaces: [asking, parked])
+        XCTAssertEqual(sidebar.dotWorkspaceInfos.map(\.id), ["ws"])
+        let cards = sidebar.hitAreas.compactMap { area -> Int? in
+            if case .workspace(let index) = area.region { return index }
+            return nil
+        }
+        XCTAssertEqual(cards, [1])
+    }
+
+    /// The approval request's lines are never cut: the rendered field holds
+    /// a full line.
+    func testFullRequestLineFitsItsField() throws {
+        var request = AgentPermissionRequest(
+            toolName: "Bash", summary: "x", key: "k", agentID: nil, sessionID: "lead", requestedAt: 0
+        )
+        let text = String(repeating: "W", count: SidebarExpandedMetrics.approvalCharactersPerLine * 2)
+        request.approval = PermissionApprovalTicket(requestID: "r", deadline: 100, text: text)
+        let approval = try XCTUnwrap(SidebarPermissionApproval(request, now: 1))
+        var asking = column(status: .needsAttention, reason: .permission(tool: "Bash", summary: "x"))
+        asking.permissionApproval = approval
+        let result = SidebarWorkspaceCardRenderer(workspace: workspace([asking]), sidebarWidth: 260, yOffset: 500).render()
+        let field = try XCTUnwrap(result.views.compactMap { $0 as? NSTextField }.first { $0.stringValue.hasPrefix("WWW") })
+        let needed = try XCTUnwrap(field.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: 1000, height: field.frame.height)))
+        XCTAssertLessThanOrEqual(needed.width, field.frame.width)
+    }
+
     // MARK: - Activity feed
 
     /// Amber only for a row that waits on the user; a row older builds
@@ -207,6 +343,27 @@ final class SidebarCardStateTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode([ActivityEntry].self, from: newer).first?.signal, .waiting)
         let roundTrip = try JSONDecoder().decode(ActivityEntry.self, from: JSONEncoder().encode(entry(.finished)))
         XCTAssertEqual(roundTrip.signal, .finished)
+    }
+
+    /// An idle reminder after a failed turn neither hides nor handles it.
+    func testIdleReminderLeavesAFailedTurnRed() throws {
+        func row(_ name: AgentHookEvent.Name, type: String? = nil, at time: TimeInterval) throws -> ActivityEntry {
+            let event = AgentHookEvent(
+                kind: .claude, name: name, agentUUID: "agent", workspaceID: "ws", sessionID: "s",
+                detail: "rate_limit", notificationType: type, errorKind: name == .stopFailure ? "rate_limit" : nil,
+                timestamp: time
+            )
+            return try XCTUnwrap(ActivityEntry(event: event, workspaceTitle: "t", columnIndex: 0))
+        }
+        let failed = try row(.stopFailure, at: 10)
+        let reminder = try row(.notification, type: "idle_prompt", at: 70)
+        XCTAssertEqual(failed.signal, .error)
+        let store = ActivityStore(persistsToDisk: false)
+        store.record(failed)
+        store.record(reminder)
+        let feed = store.feedEntries
+        XCTAssertEqual(feed.map(\.signal), [.finished, .error])
+        XCTAssertFalse(ActivityStore.isAttentionSuperseded(at: 1, in: feed))
     }
 
     func testIdlePromptRowIsAFinishedTurnNotAWait() throws {

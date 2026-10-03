@@ -12,24 +12,37 @@ enum SidebarCardState: Hashable {
 }
 
 extension ColumnInfo {
-    /// What the column asks of the user, if anything. A stuck agent says
-    /// so whatever its status, and so does an approval the card offers:
-    /// focusing the column clears attention, not the dialog.
-    var attention: AttentionSignal? {
-        if let stuck { return stuck.isFailure ? .error : .waiting }
-        if permissionApproval != nil { return .waiting }
-        guard agentStatus == .needsAttention else { return nil }
-        return AttentionSignal.of(attentionReason)
-    }
+    /// What the column asks of the user, if anything: the most urgent of
+    /// its causes.
+    var attention: AttentionSignal? { attentionCauses.map(\.signal).max() }
+
+    /// `attention` while the user looks elsewhere: the focused column of
+    /// the workspace on screen shows its own (column indicator, edge
+    /// glows, borders).
+    var offScreenAttention: AttentionSignal? { isFocused ? nil : attention }
 
     /// The word a chip says for `attention`: "permission", "stopped",
     /// "done"…
     var attentionLabel: String? {
-        if let stuck { return stuck.chipLabel }
-        if let attentionReason, agentStatus == .needsAttention { return attentionReason.chipLabel }
-        if let permissionApproval { return permissionApproval.toolName == "ExitPlanMode" ? "plan" : "permission" }
-        guard agentStatus == .needsAttention else { return nil }
-        return AttentionSignal.of(nil) == .waiting ? "needs you" : "done"
+        guard let attention else { return nil }
+        return attentionCauses.first { $0.signal == attention }?.label
+    }
+
+    /// A stuck agent says so whatever its status, and so do an approval the
+    /// card offers and a dialog on screen: focusing the column, or the app,
+    /// clears the attention, not the dialog.
+    private var attentionCauses: [(signal: AttentionSignal, label: String)] {
+        var causes: [(signal: AttentionSignal, label: String)] = []
+        if let stuck { causes.append((stuck.isFailure ? .error : .waiting, stuck.chipLabel)) }
+        if let permissionApproval {
+            causes.append((.waiting, permissionApproval.toolName == "ExitPlanMode" ? "plan" : "permission"))
+        }
+        if let openDialog { causes.append((openDialog.signal, openDialog.chipLabel)) }
+        if agentStatus == .needsAttention {
+            let signal = AttentionSignal.of(attentionReason)
+            causes.append((signal, attentionReason?.chipLabel ?? (signal == .waiting ? "needs you" : "done")))
+        }
+        return causes
     }
 }
 
@@ -64,7 +77,8 @@ extension WorkspaceInfo {
     /// check only once no agent works (it may be fixing it).
     var cardState: SidebarCardState {
         let signals = columns.compactMap(\.attention)
-        if signals.contains(.waiting) { return .waiting }
+        // A child agent's question (`nirux ask`): its column just works.
+        if signals.contains(.waiting) || notification == .waiting { return .waiting }
         if signals.contains(.error) { return .error }
         if columns.contains(where: { $0.agentStatus == .working }) { return .working }
         if prInfo?.state == "OPEN", prInfo?.ciStatus == "FAILURE" { return .error }
@@ -72,11 +86,19 @@ extension WorkspaceInfo {
         return .idle
     }
 
-    /// The collapsed sidebar's dot: what the columns ask, and what happened
-    /// while the user looked elsewhere.
+    /// The collapsed sidebar's dot and the project switcher's ring: what
+    /// the card says, then what happened while the user looked elsewhere.
     var attention: AttentionSignal? {
-        let away = isActive ? nil : notification
-        return (columns.compactMap(\.attention) + [away].compactMap { $0 }).max()
+        var signals = columns.compactMap(\.attention)
+        if cardState == .error { signals.append(.error) }
+        if !isActive, let notification { signals.append(notification) }
+        return signals.max()
+    }
+
+    /// An agent waits on the user or broke, or a child agent asks: the
+    /// folded INACTIVE section lists the workspace anyway.
+    var asksUser: Bool {
+        columns.contains { $0.attention == .waiting || $0.attention == .error } || notification == .waiting
     }
 
     /// One line in the INACTIVE section: parked work that asks nothing and
@@ -101,9 +123,6 @@ extension WorkspaceInfo {
                 actions.append(.resume(
                     columnIndex: column.index, kind: kind, detail: detail, failedAt: failedAt, resume: resume
                 ))
-            }
-            if let deferred = column.deferredAgent {
-                actions.append(.deferredResume(columnIndex: column.index, deferred))
             }
         }
         if let action = sidebarAction {
@@ -131,8 +150,6 @@ enum SidebarCardAction: Hashable {
     case resume(
         columnIndex: Int, kind: String?, detail: String?, failedAt: TimeInterval, resume: SidebarStuckState.Resume
     )
-    /// Resume a restored agent that hasn't resumed yet.
-    case deferredResume(columnIndex: Int, SidebarDeferredAgent)
     case blocker(String)
     /// "Clean up" a merged pull request's worktree.
     case cleanup(MergedCleanupOffer, pullRequest: Int)
@@ -144,7 +161,7 @@ enum SidebarCardAction: Hashable {
     var isQuiet: Bool {
         switch self {
         case .next, .reviewBadges: return true
-        case .approval, .resume, .deferredResume, .blocker, .cleanup: return false
+        case .approval, .resume, .blocker, .cleanup: return false
         }
     }
 }

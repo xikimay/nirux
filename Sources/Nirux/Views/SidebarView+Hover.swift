@@ -39,6 +39,14 @@ extension SidebarView {
         }
     }
 
+    /// The card under `point`, whatever region of it is on top.
+    func cardIndex(at point: NSPoint) -> Int? {
+        for area in hitAreas where area.frame.contains(point) {
+            if case .workspace(let index) = area.region { return index }
+        }
+        return nil
+    }
+
     /// Re-derive the hover highlight from the live mouse position. Called
     /// after every rebuild — the registered backing views are new, and rows
     /// may have shifted under a stationary pointer.
@@ -63,7 +71,7 @@ extension SidebarView {
         case .actionBlock(let workspaceIndex):
             setHoverTarget(.workspaceCard(workspaceIndex))
         case .link:
-            break
+            if let card = cardIndex(at: point) { setHoverTarget(.workspaceCard(card)) }
         }
     }
 }

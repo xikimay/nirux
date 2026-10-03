@@ -57,7 +57,8 @@ enum SidebarExpandedMetrics {
     static var approvalFont: NSFont { Theme.Font.code }
     static let approvalCharactersPerLine = 28
     static let approvalLineHeight: CGFloat = 16
-    static let approvalBoxPaddingX = Theme.Space.sm
+    /// 28 characters of `approvalFont` take 208 of the box's 212.
+    static let approvalBoxPaddingX: CGFloat = 6
     static let approvalBoxPaddingY: CGFloat = 6
 
     static func approvalLines(_ text: String) -> [String] {
@@ -90,7 +91,6 @@ enum SidebarExpandedMetrics {
         switch action {
         case .approval(_, _, let approval): return approvalBlockHeight(for: approval)
         case .resume(_, _, _, _, let resume): return resumeBlockHeight(for: resume)
-        case .deferredResume: return buttonHeight
         case .blocker, .cleanup, .reviewBadges, .next: return actionLineHeight
         }
     }

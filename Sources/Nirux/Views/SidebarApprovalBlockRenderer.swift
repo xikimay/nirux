@@ -66,7 +66,7 @@ struct SidebarApprovalBlockRenderer {
         return Result(views: views, hitAreas: hitAreas, buttons: buttons)
     }
 
-    /// "claude wants to run", or to use another tool.
+    /// "claude wants to run", or "claude wants WebFetch".
     private func header() -> NSTextField {
         let metrics = SidebarExpandedMetrics.self
         let font = Theme.Font.caption
@@ -75,7 +75,8 @@ struct SidebarApprovalBlockRenderer {
             text.append(SidebarColumnChip.attachment(icon, side: 12, font: font))
             text.append(SidebarColumnChip.spacer(6))
         }
-        let what = approval.toolName == "Bash" ? "wants to run" : "wants to use \(approval.toolName)"
+        // Short: the tool's name must survive a long agent name.
+        let what = approval.toolName == "Bash" ? "wants to run" : "wants \(approval.toolName)"
         text.append(NSAttributedString(string: "\(agent) \(what)", attributes: [
             .font: font, .foregroundColor: Theme.Color.textSecondary
         ]))

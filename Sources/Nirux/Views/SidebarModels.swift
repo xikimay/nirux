@@ -22,6 +22,10 @@ struct ColumnInfo: Hashable {
     var attentionReason: AgentAttentionReason?
     /// A permission request the sidebar can answer (Allow / Deny).
     var permissionApproval: SidebarPermissionApproval?
+    /// The dialog the agent in front shows while it doesn't work, whatever
+    /// its status: focusing the column, or the app, clears the attention,
+    /// not the dialog (`AgentStatusMachine.visibleDialog`).
+    var openDialog: AgentAttentionReason?
     /// An agent that won't go on by itself, whatever the status says.
     var stuck: SidebarStuckState?
     /// A restored agent that hasn't resumed yet.
@@ -30,20 +34,22 @@ struct ColumnInfo: Hashable {
     /// Hashable is hand-written to compare `agentElapsedSeconds` at the
     /// granularity it's *displayed* ("12m" via shortDuration), not raw
     /// seconds: the sidebar's render-signature gate would otherwise see a
-    /// change on every 2s heartbeat while an agent merely gets older.
+    /// change on every 2s heartbeat while an agent merely gets older. The
+    /// terminal title and the cwd, which the card doesn't show, are left
+    /// out: a working agent's spinner retitles its column 4 times a second.
+    /// Nothing in the first minute: a time in seconds would rebuild the
+    /// sidebar (and drop its tooltips) every heartbeat.
     var elapsedDisplay: String? {
-        guard agentStatus == .working, let agentElapsedSeconds else { return nil }
+        guard agentStatus == .working, let agentElapsedSeconds, agentElapsedSeconds >= 60 else { return nil }
         return SidebarRenderer.shortDuration(agentElapsedSeconds)
     }
 
     static func == (lhs: ColumnInfo, rhs: ColumnInfo) -> Bool {
         lhs.index == rhs.index
             && lhs.processName == rhs.processName
-            && lhs.abbreviatedCwd == rhs.abbreviatedCwd
             && lhs.isFocused == rhs.isFocused
             && lhs.isWebView == rhs.isWebView
             && lhs.webTitle == rhs.webTitle
-            && lhs.terminalTitle == rhs.terminalTitle
             && lhs.agentStatus == rhs.agentStatus
             && lhs.isEditor == rhs.isEditor
             && lhs.editorFileName == rhs.editorFileName
@@ -52,6 +58,7 @@ struct ColumnInfo: Hashable {
             && lhs.elapsedDisplay == rhs.elapsedDisplay
             && lhs.attentionReason == rhs.attentionReason
             && lhs.permissionApproval == rhs.permissionApproval
+            && lhs.openDialog == rhs.openDialog
             && lhs.stuck == rhs.stuck
             && lhs.deferredAgent == rhs.deferredAgent
     }
@@ -59,11 +66,9 @@ struct ColumnInfo: Hashable {
     func hash(into hasher: inout Hasher) {
         hasher.combine(index)
         hasher.combine(processName)
-        hasher.combine(abbreviatedCwd)
         hasher.combine(isFocused)
         hasher.combine(isWebView)
         hasher.combine(webTitle)
-        hasher.combine(terminalTitle)
         hasher.combine(agentStatus)
         hasher.combine(isEditor)
         hasher.combine(editorFileName)
@@ -72,6 +77,7 @@ struct ColumnInfo: Hashable {
         hasher.combine(elapsedDisplay)
         hasher.combine(attentionReason)
         hasher.combine(permissionApproval)
+        hasher.combine(openDialog)
         hasher.combine(stuck)
         hasher.combine(deferredAgent)
     }

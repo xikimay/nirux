@@ -240,7 +240,8 @@ extension SidebarView {
         let height = min(SidebarExpandedMetrics.titleRowHeight + 1, drag.rowFrame.height)
         title.frame = NSRect(
             x: inset,
-            y: drag.rowFrame.height - max(SidebarExpandedMetrics.cardPaddingY, (drag.rowFrame.height - height) / 2) - height,
+            // At the card's title; centered on a one-line row.
+            y: drag.rowFrame.height - min(SidebarExpandedMetrics.cardPaddingY, (drag.rowFrame.height - height) / 2) - height,
             width: drag.rowFrame.width - inset - SidebarExpandedMetrics.cardPaddingX,
             height: height
         )

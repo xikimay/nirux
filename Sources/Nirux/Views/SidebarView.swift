@@ -126,6 +126,9 @@ final class SidebarView: NSView {
     /// actually changes — not on every periodic refresh, which would yank
     /// the viewport back while the user is dragging the scroller.
     var lastFollowedActiveIndex: Int = Int.min
+    /// `NSEvent.timestamp` of the release that last made an Allow / Deny /
+    /// Resume act (see `isLeftoverPress`).
+    var lastButtonActionAt: TimeInterval = -.infinity
 
     // Hover-highlight backing views registered per rebuild (workspace index
     // → view), plus the current target. Tinting is applied/cleared directly
@@ -220,7 +223,7 @@ final class SidebarView: NSView {
         hasher.combine(onboardingChecklist)
         for workspace in lastInfos {
             if let lastActivityAt = workspace.lastActivityAt {
-                hasher.combine(Self.relativeAge(since: lastActivityAt))
+                hasher.combine(Self.cardAge(since: lastActivityAt))
             }
         }
         hasher.combine(bounds.width)
@@ -343,7 +346,7 @@ final class SidebarView: NSView {
     }
 
     var dotWorkspaceInfos: [WorkspaceInfo] {
-        displayedWorkspaceInfos.filter { listsWorkspace(isInactive: $0.isInactive, isActive: $0.isActive) }
+        displayedWorkspaceInfos.filter(listsWorkspace)
     }
 
     // MARK: - Click handling
@@ -354,6 +357,9 @@ final class SidebarView: NSView {
             // coordinate space, so we hit-test there (which automatically
             // accounts for the current scroll offset).
             let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
+            if Self.isLeftoverPress(clickCount: event.clickCount, at: event.timestamp, after: lastButtonActionAt) {
+                return
+            }
 
             if let area = hitArea(at: docLocation) {
                 // Workspace rows don't click on mouseDown: run the drag
@@ -443,7 +449,8 @@ final class SidebarView: NSView {
 
         switch area.region {
         case .link(_, let label):
-            setHoverTarget(nil)
+            // A card's link keeps its card lit (and its "⋯" shown).
+            setHoverTarget(cardIndex(at: point).map { .workspaceCard($0) })
             NSCursor.pointingHand.set()
             if hoveredLabel !== label {
                 clearHover()
@@ -656,10 +663,13 @@ final class SidebarView: NSView {
         setHoverTarget(nil)
     }
 
+    /// Under the text only, not under a link's icons.
     private func applyUnderline(to label: NSTextField) {
         let attr = NSMutableAttributedString(attributedString: label.attributedStringValue)
-        attr.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue,
-                          range: NSRange(location: 0, length: attr.length))
+        attr.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attr.length)) { attachment, range, _ in
+            guard attachment == nil else { return }
+            attr.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
+        }
         label.attributedStringValue = attr
     }
 
@@ -720,9 +730,14 @@ final class SidebarView: NSView {
 extension SidebarView {
     /// Whether the sidebar lists a workspace. The folded section still
     /// lists the inactive workspace on screen, alone, until the user moves
-    /// to another one — the section itself stays folded.
-    func listsWorkspace(isInactive: Bool, isActive: Bool) -> Bool {
-        !isInactive || isActive || !isInactiveSectionCollapsed
+    /// to another one, and those whose agent waits on the user or broke
+    /// (`asksUser`) — the section itself stays folded.
+    func listsWorkspace(isInactive: Bool, isActive: Bool, asksUser: Bool = false) -> Bool {
+        !isInactive || isActive || asksUser || !isInactiveSectionCollapsed
+    }
+
+    func listsWorkspace(_ workspace: WorkspaceInfo) -> Bool {
+        listsWorkspace(isInactive: workspace.isInactive, isActive: workspace.isActive, asksUser: workspace.asksUser)
     }
 
     var hasInactiveWorkspaces: Bool { lastInfos.contains(where: \.isInactive) }

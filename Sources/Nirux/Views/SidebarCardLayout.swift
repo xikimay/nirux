@@ -1,10 +1,11 @@
 import AppKit
 
 /// A column chip on a card's third line: the column's icon, then what it
-/// is doing. Clicking it focuses the column.
+/// is doing. Clicking it focuses the column; a restored agent's chip is its
+/// Resume button.
 @MainActor
 struct SidebarColumnChip {
-    enum Style { case plain, focused, waiting, error }
+    enum Style { case plain, focused, waiting, error, resume }
 
     let column: ColumnInfo
     let style: Style
@@ -16,20 +17,8 @@ struct SidebarColumnChip {
     init(_ column: ColumnInfo) {
         self.column = column
         let attention = column.attention
-        let style: Style
-        switch attention {
-        case .waiting?: style = .waiting
-        case .error?: style = .error
-        case .finished?, nil: style = column.isFocused ? .focused : .plain
-        }
-        self.style = style
-        let color: NSColor
-        switch style {
-        case .plain: color = Theme.Color.textSecondary
-        case .focused: color = Theme.Color.textPrimary
-        case .waiting: color = Theme.Color.waiting
-        case .error: color = Theme.Color.error
-        }
+        style = Self.style(of: column)
+        let color = Self.color(of: style)
 
         let font = Theme.Font.caption
         let text = NSMutableAttributedString()
@@ -45,9 +34,7 @@ struct SidebarColumnChip {
         if column.deferredAgent != nil {
             status = "paused"
             text.append(Self.spacer())
-            text.append(NSAttributedString(string: "paused", attributes: [
-                .font: font, .foregroundColor: Theme.Color.textTertiary
-            ]))
+            text.append(NSAttributedString(string: "Resume", attributes: [.font: font, .foregroundColor: color]))
         } else if let attention, let label = column.attentionLabel {
             status = label
             text.append(Self.spacer())
@@ -73,16 +60,38 @@ struct SidebarColumnChip {
         accessibilityLabel = column.isFocused ? "\(name), focused" : name
     }
 
+    private static func style(of column: ColumnInfo) -> Style {
+        if column.deferredAgent != nil { return .resume }
+        switch column.attention {
+        case .waiting?: return .waiting
+        case .error?: return .error
+        case .finished?, nil: return column.isFocused ? .focused : .plain
+        }
+    }
+
+    private static func color(of style: Style) -> NSColor {
+        switch style {
+        case .plain: return Theme.Color.textSecondary
+        case .focused: return Theme.Color.textPrimary
+        case .waiting: return Theme.Color.waiting
+        case .error: return Theme.Color.error
+        case .resume: return Theme.Color.accent
+        }
+    }
+
     var fillColor: NSColor {
         switch style {
         case .plain: return Theme.Color.fillHover
         case .focused: return Theme.Color.fillSelected
         case .waiting: return Theme.Color.waiting.withAlphaComponent(0.16)
         case .error: return Theme.Color.error.withAlphaComponent(0.15)
+        case .resume: return Theme.Color.accent.withAlphaComponent(0.16)
         }
     }
 
-    /// An image sitting on the caption's text line, centered on its x-height.
+    /// An image sitting on the text line, centered on its cap height. The
+    /// run carries the line's font: a fontless one would make the line
+    /// taller and clip its descenders.
     static func attachment(_ image: NSImage, side: CGFloat, font: NSFont) -> NSAttributedString {
         let attachment = NSTextAttachment()
         attachment.image = image
@@ -91,15 +100,21 @@ struct SidebarColumnChip {
         attachment.bounds = CGRect(
             x: 0, y: (font.capHeight - height) / 2, width: height * aspect, height: height
         )
-        return NSAttributedString(attachment: attachment)
+        return withFont(NSAttributedString(attachment: attachment), font)
     }
 
     /// Four points between a chip's parts.
-    static func spacer(_ width: CGFloat = Theme.Space.xs) -> NSAttributedString {
+    static func spacer(_ width: CGFloat = Theme.Space.xs, font: NSFont = Theme.Font.caption) -> NSAttributedString {
         let attachment = NSTextAttachment()
         attachment.image = NSImage(size: NSSize(width: width, height: 1))
         attachment.bounds = CGRect(x: 0, y: 0, width: width, height: 1)
-        return NSAttributedString(attachment: attachment)
+        return withFont(NSAttributedString(attachment: attachment), font)
+    }
+
+    private static func withFont(_ text: NSAttributedString, _ font: NSFont) -> NSAttributedString {
+        let result = NSMutableAttributedString(attributedString: text)
+        result.addAttribute(.font, value: font, range: NSRange(location: 0, length: result.length))
+        return result
     }
 }
 
@@ -160,7 +175,9 @@ struct SidebarCardLayout {
         var x: CGFloat = 0
         for chip in workspace.columns.map(SidebarColumnChip.init) {
             let available = rows.isEmpty ? firstRowWidth : rowWidth
-            if !row.isEmpty, x + chip.width > available {
+            // A first chip too wide for the space left of the links starts
+            // on the next line, never under them.
+            if x + chip.width > available, !row.isEmpty || (rows.isEmpty && available < rowWidth) {
                 rows.append(row)
                 row = []
                 x = 0
