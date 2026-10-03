@@ -388,6 +388,88 @@ extension NiruxShellView {
         clickable in the Nirux terminal.
         """
 
+    // MARK: - Draft Skill
+
+    static let draftSkillContent = """
+        ---
+        name: nirux-draft
+        description: >
+          This skill should be used when writing text the user will paste somewhere
+          else — a Slack message, a PR description or review comment the user posts
+          themselves, a Linear ticket, an email, a SQL query to run in Drizzle Studio or
+          Supabase — or when the user asks for a draft ("draft a Slack reply", "rédige
+          le ticket", "prépare le message", "prépare la requête"), while the session
+          runs inside a Nirux terminal (the NIRUX_WORKSPACE_ID environment variable is
+          set). Opens the draft in the Nirux editor column, where it copies verbatim,
+          instead of printing it in the terminal. Not intended for files that belong in
+          the repository, nor for text you send yourself (commit messages,
+          `gh pr create` bodies, messages posted through a tool).
+        metadata:
+          author: nirux
+        ---
+
+        ## Overview
+
+        Text copied from the terminal is not the text you wrote: the rendering adds
+        quote bars (`▎`), wraps and indents lines. Nirux (the terminal app hosting this
+        session) has an editor column where the user can edit a draft, then click
+        into it and copy it as is with ⌘A ⌘C. Write the draft to a file and open it
+        there.
+
+        ## Preconditions
+
+        Only use this when `$NIRUX_WORKSPACE_ID` is set (the session runs inside Nirux):
+
+        ```bash
+        [ -n "$NIRUX_WORKSPACE_ID" ] && echo inside-nirux
+        ```
+
+        If it is unset, do NOT use the URL — give the draft in the reply as usual.
+
+        ## Steps
+
+        1. **Make a private folder**, once per session:
+           ```bash
+           mktemp -d "${TMPDIR:-/tmp}/nirux-draft-XXXXXX"
+           ```
+           Reuse the folder it prints for every draft of the session. If you no
+           longer have its exact path, run `mktemp -d` again: never search for or
+           guess an existing `nirux-draft-*` folder. Never write a draft into the
+           repository: it would show in `git status`.
+        2. **Write the draft** to `<folder>/<slug>.<ext>`, one draft per file. The
+           slug says what the draft is for, in lowercase letters, digits and `-` only
+           (`slack-reply-merge-queue`, `fix-orders-index`). The file holds the draft
+           only: no preamble, no explanation.
+           - `.sql` for queries, `.md` for everything else.
+           - One paragraph per line, never hard-wrapped: the target keeps every
+             newline.
+           - **Slack**: write Slack's markup, not Markdown: `*bold*`, `_italic_`,
+             `~strike~`, `` `code` ``, fenced code blocks, `•` lists, `>` quotes, plain
+             URLs. No `#` headings, no tables, no `[text](url)` links.
+           - **GitHub, Linear**: GitHub-flavored Markdown.
+        3. **Open it in the editor**:
+           ```bash
+           abs_path="<folder>/<slug>.<ext>"
+           encoded=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$abs_path")
+           open "nirux://open-editor?file=${encoded}&workspace=$NIRUX_WORKSPACE_ID&launch=${NIRUX_LAUNCH_ID:-}"
+           ```
+           - `workspace=$NIRUX_WORKSPACE_ID` makes Nirux switch to this session's
+             workspace; keep it in the command.
+           - `launch=${NIRUX_LAUNCH_ID:-}` proves the request comes from a Nirux
+             terminal; without it Nirux asks the user to confirm. Keep it in the command.
+        4. **Answer in the terminal** with one line: what the draft is and that it is
+           open in the editor, e.g. `Draft Slack ouvert dans l'éditeur
+           (slack-reply-merge-queue.md).` Do not repeat the draft in the reply.
+
+        To revise a draft, overwrite the same file: Nirux reloads a tab the user hasn't
+        edited, and offers to reload one they have. Several drafts open as several tabs.
+
+        The user may edit a draft before you use it. If they ask you to send or post
+        it, read the file back first; an edit is on disk only once they save it (⌘S).
+
+        If nothing opens, give the draft in the reply instead.
+        """
+
     // MARK: - Second-Opinion Skill
 
     static let secondOpinionSkillContent = """
@@ -443,6 +525,7 @@ extension NiruxShellView {
     static let agentSkills = [
         "nirux-worktree": worktreeSkillContent,
         "nirux-show-code": showCodeSkillContent,
+        "nirux-draft": draftSkillContent,
         "nirux-second-opinion": secondOpinionSkillContent
     ]
 
