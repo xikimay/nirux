@@ -84,10 +84,23 @@ that does the work.
   `renderGutterUtility`, `onGutterUtilityClick`; the hover variants are
   deprecated) to start a comment, line selection (`enableLineSelection`,
   `onLineSelected`) for ranges, and virtualization for long branches. The
-  bundle only imports `FileDiff` today, so the wrapper must also import the
-  virtualized components. The wrapper (`pierre-diff-entry.js`,
-  `package.json`, esbuild) only exists in the private proof of concept; R2
-  brings it into this repository.
+  wrapper (`Web/pierre-diff`: `pierre-diff-entry.js`, `package.json` and
+  its lock, built by `build.sh`) gives the page `createReview`: a file's
+  diff from its hunks, unified, without pierre's file header, rendered only
+  near the viewport (`VirtualizedFileDiff`). A line break inside a line
+  (LF, CR, U+2028, U+2029) is shown as its code point, `⟨U+2028⟩`: in the
+  patch text pierre parses, it would end the line, and the rest could read
+  as a hunk. The CR that ends a CRLF file's line stays hidden, unless the
+  hunk's lines don't all end with one: a change of line ending would read
+  as no change. Bidi controls, which reorder what follows ("Trojan
+  Source"), and invisible characters are shown the same way: zero-width
+  ones, Hangul fillers, tag characters, and variation selectors, which can
+  carry a hidden payload; U+FE0E and U+FE0F only stay right after an
+  emoji, whose look they pick (decided by the user on 2026-10-03). A diff
+  past 1,500 lines or 100,000 characters, both sides counted, is plain
+  text, and its element says so (`data-uncolored="large"`): pierre colors
+  a whole file at once, on the page's main thread, which takes seconds for
+  a few hundred KB.
 - Persistence: `ColumnKind` gains `branchReview`. An older nightly decodes the
   unknown kind as a terminal, as for the board: a rollback turns the column
   into a shell in the worktree. Reopen it after updating.
@@ -108,8 +121,9 @@ The page has a bridge to Swift, so:
 - The page's own code sets every untrusted string with `textContent` and
   never uses `innerHTML`. Markdown in a PR body is rendered without raw HTML.
   `@pierre/diffs` writes the diff through `innerHTML`
-  (`renderPartialHTML`) after escaping it; a test covers that escaping on a
-  crafted line and path (section 9.1).
+  (`renderPartialHTML`) after escaping it; a test covers that escaping on
+  crafted lines (section 9.1). With its file header off, pierre writes no
+  path: the page's own row shows it.
 - Bridge messages carry ids, never text to type: Swift builds the message to
   send to the agent from its own stored comments, and the sheet that confirms
   it is native.
@@ -274,13 +288,13 @@ What the runs found:
   setting and `setEnabled` could diverge (both run under `!telegramOnly`).
 - **With read-only access, Opus checked before asking, and found a real bug**
   that the reviews of #57 missed (two adversarial reviews, a confirmation
-  review and `/code-review`), still on `main`. In the background, after 10
-  minutes of silence, a Claude with hooks interrupted with Esc no longer needs
-  a background refresh, so `refreshAgentStatusInBackground` returns before
-  `updateKeepAwake()`. The assertion stays held until Nirux comes back to the
-  front or other activity refreshes the sidebar: another column still polled
-  (an agent without Claude hooks, an open dialog), a title change, another
-  Claude's hook event.
+  review and `/code-review`), still on `main` then (fixed since by #89). In
+  the background, after 10 minutes of silence, a Claude with hooks
+  interrupted with Esc no longer needs a background refresh, so
+  `refreshAgentStatusInBackground` returns before `updateKeepAwake()`. The
+  assertion stays held until Nirux comes back to the front or other activity
+  refreshes the sidebar: another column still polled (an agent without Claude
+  hooks, an open dialog), a title change, another Claude's hook event.
 - **Sonnet with the same access opened no file** (two turns, no read). It
   raised no false alarm, and found nothing either.
 - Opus also grouped better: `MainActorSchedule` and `TerminalSearchSession` in
@@ -771,8 +785,7 @@ button.
 - The page is tested on the JSON Swift sends, and on its pure functions under
   JavaScriptCore (`JSContext`), with crafted strings: a PR body with HTML and
   links, a path with ESC and bidi characters. `@pierre/diffs`'s escaping is
-  tested on the same strings through `renderPartialHTML`'s output; if that
-  needs a DOM, R2 adds the first test that loads a `WKWebView` and proves it
-  stable on CI before relying on it.
+  tested on the same strings through `renderPartialHTML`'s output, in a
+  `WKWebView` that loads the committed bundle (`PierreDiffRenderTests`).
 - Explain is tested against a fake `claude`; the real CLI runs only by hand,
   on a dev build with `NIRUX_STATE_DIR`.
