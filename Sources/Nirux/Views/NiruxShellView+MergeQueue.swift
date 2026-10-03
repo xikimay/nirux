@@ -173,8 +173,8 @@ extension NiruxShellView {
     func refuseToDeleteSpaceWithRunningQueue(profileID: String) -> Bool {
         guard mergeQueues[profileID]?.isRunning == true else { return false }
         let alert = NSAlert()
-        alert.messageText = "This space’s merge queue is running"
-        alert.informativeText = "Stop it from the board or the status bar, then delete the space."
+        alert.messageText = "This project’s merge queue is running"
+        alert.informativeText = "Stop it from the board or the status bar, then delete the project."
         runModal(alert)
         return true
     }
@@ -322,7 +322,7 @@ extension NiruxShellView {
         }
         guard let workspace = projectWorkspaces(of: projectID).first(where: { !$0.isInactive })
             ?? projectWorkspaces(of: projectID).first
-        else { return showToast("This space has no workspace to open its board in") }
+        else { return showToast("This project has no workspace to open its board in") }
         focusWorkspace(id: workspace.id)
         guard activeWorkspace === workspace else { return showToast("Couldn’t open the board", tone: .error) }
         openProjectBoard()

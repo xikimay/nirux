@@ -788,7 +788,7 @@ and the journal:
   - A base branch may hold `#` or `%`: percent-encode it in REST paths.
 - `BoardConfigStore.didSaveNotification` announces each save, with the
   space's id, for the board to reload.
-- **Editing:** "Board Settings…" in the space's menu (B4), a small form in a
+- **Editing:** "Board Settings…" in the project's menu (B4), a small form in a
   sheet. B1 adds it to the board header, and opens it the first time a board
   lacks a repository.
   - Fields show the saved values, else values read from the local checkouts,

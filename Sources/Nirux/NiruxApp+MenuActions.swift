@@ -385,12 +385,12 @@ extension NiruxApp {
 
         workspacesMenu.addItem(NSMenuItem.separator())
 
-        let previousSpaceItem = NSMenuItem(title: "Previous Space", action: #selector(previousSpace(_:)), keyEquivalent: "")
+        let previousSpaceItem = NSMenuItem(title: "Previous Project", action: #selector(previousSpace(_:)), keyEquivalent: "")
         previousSpaceItem.keyEquivalent = "\u{F702}"
         previousSpaceItem.keyEquivalentModifierMask = NSEvent.ModifierFlags([.command, .option])
         workspacesMenu.addItem(previousSpaceItem)
 
-        let nextSpaceItem = NSMenuItem(title: "Next Space", action: #selector(nextSpace(_:)), keyEquivalent: "")
+        let nextSpaceItem = NSMenuItem(title: "Next Project", action: #selector(nextSpace(_:)), keyEquivalent: "")
         nextSpaceItem.keyEquivalent = "\u{F703}"
         nextSpaceItem.keyEquivalentModifierMask = NSEvent.ModifierFlags([.command, .option])
         workspacesMenu.addItem(nextSpaceItem)
