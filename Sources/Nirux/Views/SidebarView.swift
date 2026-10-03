@@ -26,7 +26,7 @@ final class SidebarSectionToggleView: NSView {
 /// Sidebar: the collapsed rail of workspace tiles (SidebarView+Rail), or
 /// the expanded workspace cards. Both are views in the scrollable document
 /// view, with the same hit areas: click, drag, right-click and hover work
-/// alike. Dragging on empty sidebar area moves the window.
+/// alike.
 final class SidebarView: NSView {
     // Note: card drags don't move the window even so — the drag-reorder
     // tracking loop (SidebarView+Drag) consumes the mouse events before
@@ -146,9 +146,14 @@ final class SidebarView: NSView {
 
     /// The rail's tiles, by the hover target that lights them.
     var railTileViews: [SidebarHoverTarget: SidebarRailTileView] = [:]
-    /// The hovered tile's tooltip, laid over the columns (see
-    /// `updateRailTooltip`); nil while none shows.
+    /// The hovered tile's tooltip, laid over the columns while it shows
+    /// (see `updateRailTooltip`), kept for the next one.
     var railTooltipView: SidebarRailTooltipView?
+    /// A click hid the tooltip: it stays hidden until the pointer moves,
+    /// not to cover the terminal the click brought up.
+    var isRailTooltipSuppressed = false
+    /// Tests turn it off: xctest never makes the app active.
+    var railTooltipNeedsKeyWindow = true
     /// The rail faded out for an expansion: rebuilds leave it empty until
     /// the cards come in.
     var isRailHidden = false
@@ -183,7 +188,7 @@ final class SidebarView: NSView {
         contentScrollView.documentView = contentDocumentView
         addSubview(contentScrollView)
         observeScrollingForApprovalArming()
-        observeScrollingForRailHover()
+        observeRailTooltipDismissals()
     }
 
     @available(*, unavailable)
@@ -296,6 +301,10 @@ final class SidebarView: NSView {
         if Self.isLeftoverPress(clickCount: event.clickCount, at: event.timestamp, after: lastButtonActionAt) {
             return
         }
+        if !isExpanded {
+            isRailTooltipSuppressed = true
+            hideRailTooltip()
+        }
 
         if let area = hitArea(at: docLocation) {
             // Workspace rows don't click on mouseDown: run the drag
@@ -334,6 +343,8 @@ final class SidebarView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        isRailTooltipSuppressed = false
+        defer { if !isExpanded { updateRailTooltip() } }
         // The bottom space switcher tracks its own hover — keep the pointing
         // hand (its cursor rect would otherwise be overridden below) and drop
         // any list highlight while the pointer is there.

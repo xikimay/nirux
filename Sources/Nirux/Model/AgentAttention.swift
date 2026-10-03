@@ -119,7 +119,7 @@ enum AgentAttentionReason: Hashable, Sendable {
     }
 }
 /// What a lit attention signal asks of the user, least urgent first: the
-/// sidebar's cards and dots, the project switcher's ring and the activity
+/// sidebar's cards and rail, the project switcher's ring and the activity
 /// feed draw it. Only `.waiting` is amber (`Theme.Color.waiting`).
 enum AttentionSignal: String, Codable, Comparable, Hashable, Sendable {
     /// A turn ended: the agent waits for its next prompt, nobody is blocked.

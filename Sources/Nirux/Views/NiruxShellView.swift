@@ -6,6 +6,9 @@ final class NiruxShellView: NSView {
     private static let collapsedSidebarWidth = SidebarRailMetrics.width
     private static let expandedSidebarWidth: CGFloat = 260
     var isSidebarExpanded = false
+    /// Counts sidebar toggles: an expansion's delayed step checks that no
+    /// toggle came after it.
+    var sidebarToggleGeneration = 0
     private var sidebarWidth: CGFloat {
         isSidebarExpanded ? Self.expandedSidebarWidth : Self.collapsedSidebarWidth
     }

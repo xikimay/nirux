@@ -5,9 +5,9 @@ import AppKit
 /// sidebar rebuilds are suspended while a drag is in flight.
 struct SidebarWorkspaceDrag {
     let workspaceID: String      // stable identity — store indices can shift mid-drag
-    let title: String            // shown on the floating ghost card
-    let rowFrame: NSRect         // dragged card frame
-    let groupRowFrames: [NSRect] // cards in the same active/inactive group, top → bottom
+    let title: String            // shown on the floating ghost card (a rail ghost shows the tile)
+    let rowFrame: NSRect         // dragged card's (or rail tile's) hit area
+    let groupRowFrames: [NSRect] // rows in the same active/inactive group, top → bottom
     let position: Int            // dragged card's position within groupRowFrames
     let startPoint: NSPoint
     var isDragging = false       // movement exceeded the click threshold
@@ -294,7 +294,8 @@ extension SidebarView {
             return
         }
         let rows = drag.groupRowFrames
-        let gap = SidebarExpandedMetrics.workspaceGap
+        // A rail tile's hit area already spans half the gap around it.
+        let gap = isExpanded ? SidebarExpandedMetrics.workspaceGap : 0
         let y: CGFloat
         if slot == 0 {
             y = rows[0].maxY + gap / 2
@@ -303,12 +304,9 @@ extension SidebarView {
         } else {
             y = (rows[slot - 1].minY + rows[slot].maxY) / 2
         }
-        indicator.frame = NSRect(
-            x: SidebarExpandedMetrics.workspaceInsetX,
-            y: y - 1,
-            width: bounds.width - SidebarExpandedMetrics.workspaceInsetX * 2,
-            height: 2
-        )
+        let inset = isExpanded ? SidebarExpandedMetrics.workspaceInsetX : SidebarRailMetrics.tileX
+        let width = isExpanded ? bounds.width - inset * 2 : SidebarRailMetrics.tileSize
+        indicator.frame = NSRect(x: inset, y: y - 1, width: width, height: 2)
         indicator.isHidden = false
     }
 

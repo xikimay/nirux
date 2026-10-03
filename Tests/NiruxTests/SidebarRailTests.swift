@@ -6,22 +6,27 @@ import XCTest
 final class SidebarRailTests: XCTestCase {
     private func workspace(
         _ id: String, index: Int, isInactive: Bool = false, isActive: Bool = false,
-        columns: [ColumnInfo] = [], prInfo: PRInfo? = nil
+        columns: [ColumnInfo] = [], prInfo: PRInfo? = nil, notification: AttentionSignal? = nil
     ) -> WorkspaceInfo {
         WorkspaceInfo(
             id: id, index: index, title: id, profileID: "p", isInactive: isInactive, columnCount: columns.count,
-            focusedColumn: 0, gitBranch: nil, notification: nil, isActive: isActive, columns: columns, prInfo: prInfo,
+            focusedColumn: 0, gitBranch: nil, notification: notification, isActive: isActive, columns: columns, prInfo: prInfo,
             diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: isInactive ? .parked : .active,
             lastSummary: nil, lastActivityAt: Date().timeIntervalSince1970 - 240
         )
     }
 
-    private func agent(_ status: AgentStatus, reason: AgentAttentionReason? = nil) -> ColumnInfo {
+    private func agent(
+        _ status: AgentStatus, reason: AgentAttentionReason? = nil, stuck: SidebarStuckState? = nil
+    ) -> ColumnInfo {
         ColumnInfo(
             index: 0, processName: "claude", abbreviatedCwd: nil, isFocused: false, isWebView: false, webTitle: nil,
-            terminalTitle: nil, agentStatus: status, isEditor: false, editorFileName: nil, attentionReason: reason
+            terminalTitle: nil, agentStatus: status, isEditor: false, editorFileName: nil, attentionReason: reason,
+            stuck: stuck
         )
     }
+
+    private var permission: ColumnInfo { agent(.needsAttention, reason: .permission(tool: "Bash", summary: "git push")) }
 
     private func failedPullRequest(_ number: Int) -> PRInfo {
         PRInfo(
@@ -43,6 +48,7 @@ final class SidebarRailTests: XCTestCase {
         let window = NSWindow(contentRect: host.bounds, styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
+        sidebar.railTooltipNeedsKeyWindow = false
         sidebar.update(profiles: profiles, workspaces: workspaces)
         host.layoutSubtreeIfNeeded()
         return (sidebar, window)
@@ -81,7 +87,9 @@ final class SidebarRailTests: XCTestCase {
         XCTAssertEqual(SidebarRailInitials.initials(of: "feat/crash-report"), "CR")
         XCTAssertEqual(SidebarRailInitials.initials(of: "main"), "MA")
         XCTAssertEqual(SidebarRailInitials.initials(of: "CelticFantasyMusicLofi"), "CF")
-        XCTAssertEqual(SidebarRailInitials.initials(of: "ws_2"), "W2")
+        XCTAssertEqual(SidebarRailInitials.initials(of: "ws 12"), "W12")
+        XCTAssertEqual(SidebarRailInitials.initials(of: "nirux-101"), "N101")
+        XCTAssertEqual(SidebarRailInitials.initials(of: "Update CI/CD pipeline"), "UC")
         XCTAssertEqual(SidebarRailInitials.initials(of: "  "), "?")
         XCTAssertEqual(
             SidebarRailInitials.initials(for: ["feat/merge-queue-engine", "feat/merge-queue-ui", "docs/merge-queue"]),
@@ -177,14 +185,15 @@ final class SidebarRailTests: XCTestCase {
     }
 
     /// The cards' rule: amber only for a wait on the user; a red check
-    /// only once no agent works.
+    /// only once no agent works. Plus a question a Mission child asked.
     func testTilesTakeTheCardsState() {
         let (sidebar, window) = rail([
             workspace("selected", index: 0, isActive: true),
             workspace("permission", index: 1, columns: [agent(.needsAttention, reason: .permission(tool: "Bash", summary: "git push"))]),
             workspace("finished", index: 2, columns: [agent(.needsAttention, reason: .turnFinished)]),
             workspace("red", index: 3, prInfo: failedPullRequest(7)),
-            workspace("fixing", index: 4, columns: [agent(.working)], prInfo: failedPullRequest(8))
+            workspace("fixing", index: 4, columns: [agent(.working)], prInfo: failedPullRequest(8)),
+            workspace("child asked", index: 5, notification: .waiting)
         ])
         defer { window.close() }
         func style(_ index: Int) -> SidebarRailTileStyle? { sidebar.railTileViews[.workspaceCard(index)]?.style }
@@ -196,11 +205,13 @@ final class SidebarRailTests: XCTestCase {
         XCTAssertEqual(style(2)?.textColor, Theme.Color.textSecondary)
         XCTAssertEqual(style(3)?.badge, Theme.Color.error)
         XCTAssertEqual(style(4)?.badge, Theme.Color.working)
+        // The cards leave a Mission child's question to Activity, which
+        // the rail doesn't show.
+        XCTAssertEqual(style(5)?.badge, Theme.Color.waiting)
     }
 
     func testHoveredTileShowsItsTooltipBesideTheRail() throws {
-        let asking = workspace("asking", index: 1, columns: [agent(.needsAttention, reason: .permission(tool: "Bash", summary: "git push"))])
-        let (sidebar, window) = rail([workspace("a", index: 0, isActive: true), asking])
+        let (sidebar, window) = rail([workspace("a", index: 0, isActive: true), workspace("asking", index: 1, columns: [permission])])
         defer { window.close() }
         let host = try XCTUnwrap(sidebar.superview)
         func tooltips() -> [SidebarRailTooltipView] { host.subviews.compactMap { $0 as? SidebarRailTooltipView } }
@@ -211,15 +222,77 @@ final class SidebarRailTests: XCTestCase {
         XCTAssertEqual(tooltip.frame.minX, sidebar.frame.maxX + SidebarRailMetrics.tooltipGap)
         let tile = try XCTUnwrap(sidebar.railTileViews[.workspaceCard(1)])
         XCTAssertEqual(tooltip.frame.midY, host.convert(SidebarRailTileView.tileRect, from: tile).midY, accuracy: 1)
-        XCTAssertEqual(sidebar.railTooltip(for: .workspaceCard(1)), SidebarRailTooltip(
-            title: "asking", detail: "claude needs permission · 4m", detailColor: Theme.Color.waiting, note: "Bash: git push"
-        ))
 
         sidebar.setHoverTarget(nil)
         XCTAssertTrue(tooltips().isEmpty)
         sidebar.isExpanded = true
         sidebar.setHoverTarget(.workspaceCard(1))
         XCTAssertTrue(tooltips().isEmpty)
+    }
+
+    /// A click hides the tooltip, rebuilds included, until the pointer
+    /// moves: it would cover the terminal the click brought up.
+    func testClickHidesTheTooltipUntilThePointerMoves() throws {
+        let (sidebar, window) = rail([workspace("a", index: 0, isActive: true), workspace("b", index: 1)])
+        defer { window.close() }
+        let host = try XCTUnwrap(sidebar.superview)
+        func showsTooltip() -> Bool { host.subviews.contains { $0 is SidebarRailTooltipView } }
+        let center = try frame(of: "1", in: sidebar).center
+
+        NSApp.postEvent(try mouseEvent(.leftMouseUp, at: center, in: sidebar, window: window), atStart: false)
+        sidebar.mouseDown(with: try mouseEvent(.leftMouseDown, at: center, in: sidebar, window: window))
+        sidebar.update(profiles: [], workspaces: [workspace("a", index: 0), workspace("b", index: 1, isActive: true)])
+        sidebar.setHoverTarget(.workspaceCard(1))
+        XCTAssertFalse(showsTooltip())
+
+        sidebar.mouseMoved(with: try mouseEvent(.mouseMoved, at: center, in: sidebar, window: window))
+        XCTAssertTrue(showsTooltip())
+    }
+
+    /// The tooltip says what the card's state line and chips say.
+    func testTooltipsSayWhatTheWorkspaceIsDoing() {
+        let stopped = agent(.idle, stuck: .stoppedOnError(kind: "overloaded", detail: nil, failedAt: 0, resume: .offered))
+        let (sidebar, window) = rail([
+            workspace("asking", index: 0, columns: [permission]),
+            workspace("stopped", index: 1, columns: [stopped]),
+            workspace("finished", index: 2, columns: [agent(.needsAttention, reason: .turnFinished)]),
+            workspace("child asked", index: 3, notification: .waiting)
+        ], profiles: [profile("p", isActive: true)])
+        defer { window.close() }
+        let age = SidebarView.cardAge(since: Date().timeIntervalSince1970 - 240)
+
+        XCTAssertEqual(sidebar.railTooltip(for: .workspaceCard(0)), SidebarRailTooltip(
+            title: "asking", detail: "claude needs permission · \(age)", detailColor: Theme.Color.waiting, note: "Bash: git push"
+        ))
+        XCTAssertEqual(sidebar.railTooltip(for: .workspaceCard(1)), SidebarRailTooltip(
+            title: "stopped", detail: "claude stopped on an API error", detailColor: Theme.Color.error, note: "overloaded"
+        ))
+        XCTAssertEqual(sidebar.railTooltip(for: .workspaceCard(2)), SidebarRailTooltip(
+            title: "finished", detail: "claude finished its turn · \(age)", detailColor: Theme.Color.textSecondary
+        ))
+        XCTAssertEqual(sidebar.railTooltip(for: .workspaceCard(3))?.detailColor, Theme.Color.waiting)
+        // A finished turn isn't a wait.
+        XCTAssertEqual(sidebar.railTooltip(for: .railButton(.project))?.detail, "2 waiting")
+    }
+
+    /// VoiceOver presses do what clicks do.
+    func testTilesAreButtonsForVoiceOver() throws {
+        let (sidebar, window) = rail(
+            [workspace("a", index: 0, isActive: true), workspace("parked", index: 1, isInactive: true)],
+            profiles: [profile("p", isActive: true)]
+        )
+        defer { window.close() }
+        var clicked: [Int] = []
+        sidebar.onWorkspaceClicked = { clicked.append($0) }
+
+        let tile = try XCTUnwrap(sidebar.railTileViews[.workspaceCard(0)])
+        XCTAssertEqual(tile.accessibilityRole(), .button)
+        XCTAssertTrue(tile.accessibilityPerformPress())
+        XCTAssertEqual(clicked, [0])
+        XCTAssertEqual(sidebar.railTileViews[.railButton(.project)]?.accessibilityRole(), .menuButton)
+        XCTAssertTrue(try XCTUnwrap(sidebar.railTileViews[.railButton(.inactiveSection)]).accessibilityPerformPress())
+        XCTAssertFalse(sidebar.isInactiveSectionCollapsed)
+        XCTAssertNotNil(sidebar.railTileViews[.workspaceCard(1)])
     }
 
     /// The sidebar widens empty: tiles don't come back behind the fade or

@@ -10,20 +10,22 @@ extension SidebarView {
     /// the bottom, or after the last tile when they overflow. Returns the
     /// document's height.
     func buildRail() -> CGFloat {
-        let infos = displayedWorkspaceInfos
         // Over every workspace, folded ones too: unfolding renumbers nothing.
-        let initials = SidebarRailInitials.initials(for: infos.map(\.title))
-        let tiles = zip(infos, initials).map { (info: $0, initials: $1) }
-        let active = tiles.filter { !$0.info.isInactive }
-        let inactive = tiles.filter(\.info.isInactive)
-        let project = lastProfiles.first(where: \.isActive)
+        let displayed = displayedWorkspaceInfos
+        let initials = Dictionary(
+            zip(displayed.map(\.id), SidebarRailInitials.initials(for: displayed.map(\.title))),
+            uniquingKeysWith: { first, _ in first }
+        )
+        let listed = railWorkspaceInfos
+        let inactiveCount = lastInfos.filter(\.isInactive).count
 
         var groups: [[RailItem]] = []
-        if let project { groups.append([.project(project)]) }
-        if !active.isEmpty { groups.append(active.map { .workspace($0.info, $0.initials) }) }
-        if !inactive.isEmpty {
-            groups.append([.inactiveToggle(count: inactive.count)] + inactive.filter { listsWorkspace($0.info) }
-                .map { .workspace($0.info, $0.initials) })
+        if let project = lastProfiles.first(where: \.isActive) { groups.append([.project(project)]) }
+        let active = listed.filter { !$0.isInactive }
+        if !active.isEmpty { groups.append(active.map { .workspace($0, initials[$0.id] ?? "?") }) }
+        if inactiveCount > 0 {
+            groups.append([.inactiveToggle(count: inactiveCount)]
+                + listed.filter(\.isInactive).map { .workspace($0, initials[$0.id] ?? "?") })
         }
         let items = Array(groups.joined(separator: [.separator]))
 
@@ -49,17 +51,17 @@ extension SidebarView {
                 let tile = SidebarRailTileView(
                     style: .inactiveToggle(isUnfolded: !isInactiveSectionCollapsed), symbolName: Theme.Symbol.inactiveWorkspaces
                 )
+                tile.acceptsFirstClick = true
                 tile.setAccessibilityLabel("Inactive workspaces, \(count)")
                 tile.setAccessibilityExpanded(!isInactiveSectionCollapsed)
                 tile.onPress = { [weak self] in self?.toggleInactiveSection() }
                 addRailTile(tile, target: .railButton(.inactiveSection), region: .railButton(.inactiveSection), top: top)
             case .workspace(let info, let initials):
                 let tile = SidebarRailTileView(
-                    style: .workspace(state: info.cardState, isSelected: info.isActive, isInactive: info.isInactive),
+                    style: .workspace(state: info.railState, isSelected: info.isActive, isInactive: info.isInactive),
                     text: initials
                 )
-                let tooltip = info.railTooltip
-                tile.setAccessibilityLabel([tooltip.title, tooltip.detail].compactMap { $0 }.joined(separator: ", "))
+                describe(tile, as: info.railTooltip)
                 tile.setAccessibilitySelected(info.isActive)
                 let index = info.index
                 tile.onPress = { [weak self] in self?.onWorkspaceClicked?(index) }
@@ -92,16 +94,20 @@ extension SidebarView {
     }
 
     private func projectTile(_ profile: ProfileInfo) -> SidebarRailTileView {
-        let tile = SidebarRailTileView(
-            style: .project(color: Self.profileColor(hex: profile.colorHex)),
-            text: profile.name.first.map(String.init) ?? "?"
-        )
-        tile.setAccessibilityLabel("Project \(profile.name)")
+        let tile = SidebarRailTileView(style: .project, text: profile.name.first.map(String.init) ?? "?")
+        tile.role = .menuButton
+        if let tooltip = railTooltip(for: .railButton(.project)) { describe(tile, as: tooltip) }
         tile.onPress = { [weak self, weak tile] in
             guard let self, let tile else { return }
             projectMenu().popUp(positioning: nil, at: NSPoint(x: tile.frame.maxX, y: tile.frame.maxY), in: contentDocumentView)
         }
         return tile
+    }
+
+    /// VoiceOver reads the tooltip: its first two lines, then the rest.
+    private func describe(_ tile: SidebarRailTileView, as tooltip: SidebarRailTooltip) {
+        tile.setAccessibilityLabel([tooltip.title, tooltip.detail].compactMap { $0 }.joined(separator: ", "))
+        tile.setAccessibilityHelp(tooltip.note)
     }
 
     /// A tile whose top is at `top`; its hit area spans the rail's width
@@ -150,8 +156,8 @@ extension SidebarView {
             return lastInfos.first { $0.index == index }?.railTooltip
         case .railButton(.project):
             guard let profile = lastProfiles.first(where: \.isActive) else { return nil }
-            let count = "\(profile.workspaceCount) \(profile.workspaceCount == 1 ? "workspace" : "workspaces")"
-            let waiting = lastInfos.filter { $0.cardState == .waiting }.count
+            let count = Self.workspaceCountText(profile.workspaceCount)
+            let waiting = lastInfos.filter { $0.railState == .waiting }.count
             guard waiting > 0 else { return SidebarRailTooltip(title: profile.name, detail: count) }
             return SidebarRailTooltip(title: profile.name, detail: "\(waiting) waiting", detailColor: Theme.Color.waiting, note: count)
         case .railButton(.inactiveSection):
@@ -167,35 +173,50 @@ extension SidebarView {
         }
     }
 
+    /// Whether the tooltip may show: the pointer moved since the last
+    /// click, no menu or drag tracks the mouse, and the window gets the
+    /// mouse events (Nirux active, the window key) — otherwise nothing
+    /// would take it down.
+    private var isRailTooltipAllowed: Bool {
+        guard !isRailTooltipSuppressed, RunLoop.current.currentMode != .eventTracking else { return false }
+        return !railTooltipNeedsKeyWindow || (NSApp.isActive && window?.isKeyWindow == true)
+    }
+
     /// Shows the hovered tile's tooltip beside the rail, over the columns,
-    /// or hides it. Called on every hover change.
+    /// or hides it. Called on every hover change and pointer move.
     func updateRailTooltip() {
-        guard !isExpanded, workspaceDrag == nil, let target = hoveredTarget, let tile = railTileViews[target],
-              let tooltip = railTooltip(for: target), let host = superview else {
+        guard !isExpanded, workspaceDrag == nil, isRailTooltipAllowed, let target = hoveredTarget,
+              let tile = railTileViews[target], let tooltip = railTooltip(for: target), let host = superview else {
             hideRailTooltip()
             return
         }
         let view = railTooltipView ?? SidebarRailTooltipView()
+        railTooltipView = view
         view.show(tooltip)
         if view.superview !== host { host.addSubview(view, positioned: .above, relativeTo: nil) }
         let tileRect = host.convert(SidebarRailTileView.tileRect, from: tile)
         let margin = Theme.Space.xs
         let y = min(max(tileRect.midY - view.frame.height / 2, host.bounds.minY + margin), host.bounds.maxY - view.frame.height - margin)
         view.setFrameOrigin(NSPoint(x: frame.maxX + Metrics.tooltipGap, y: y))
-        railTooltipView = view
     }
 
     func hideRailTooltip() {
         railTooltipView?.removeFromSuperview()
-        railTooltipView = nil
     }
 
-    func observeScrollingForRailHover() {
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(railClipViewScrolled(_:)),
-            name: NSView.boundsDidChangeNotification,
-            object: contentScrollView.contentView
+    func observeRailTooltipDismissals() {
+        let center = NotificationCenter.default
+        center.addObserver(
+            self, selector: #selector(railClipViewScrolled(_:)),
+            name: NSView.boundsDidChangeNotification, object: contentScrollView.contentView
+        )
+        center.addObserver(
+            self, selector: #selector(railMouseEventsStopped(_:)),
+            name: NSApplication.didResignActiveNotification, object: nil
+        )
+        center.addObserver(
+            self, selector: #selector(railMouseEventsStopped(_:)),
+            name: NSWindow.didResignKeyNotification, object: nil
         )
     }
 
@@ -205,5 +226,13 @@ extension SidebarView {
         guard !isExpanded, workspaceDrag == nil else { return }
         setHoverTarget(nil)
         refreshHoverTargetFromMouse()
+    }
+
+    /// Nirux or its window stopped getting mouse events (another app, a
+    /// panel): no `mouseExited` will come to take the tooltip down.
+    @objc func railMouseEventsStopped(_ notification: Notification) {
+        if let window = notification.object as? NSWindow, window !== self.window { return }
+        guard !isExpanded else { return }
+        setHoverTarget(nil)
     }
 }

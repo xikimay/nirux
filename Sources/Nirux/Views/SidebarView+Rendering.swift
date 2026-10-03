@@ -43,7 +43,7 @@ private final class SidebarActivityHitView: NSView {
     }
 }
 
-// MARK: - Expanded mode rendering helpers
+// MARK: - Rendering
 
 extension SidebarView {
 
@@ -304,8 +304,7 @@ extension SidebarView {
     /// "6 workspaces · 2 waiting": the waiting count in amber, when any.
     private func spaceSubtitle(_ profile: ProfileInfo) -> NSAttributedString {
         let font = Theme.Font.caption
-        let count = profile.workspaceCount
-        let text = NSMutableAttributedString(string: "\(count) \(count == 1 ? "workspace" : "workspaces")", attributes: [
+        let text = NSMutableAttributedString(string: Self.workspaceCountText(profile.workspaceCount), attributes: [
             .font: font, .foregroundColor: Theme.Color.textTertiary
         ])
         let waiting = lastInfos.filter { $0.cardState == .waiting }.count
@@ -316,6 +315,11 @@ extension SidebarView {
             ]))
         }
         return text
+    }
+
+    /// "1 workspace", "6 workspaces".
+    static func workspaceCountText(_ count: Int) -> String {
+        "\(count) \(count == 1 ? "workspace" : "workspaces")"
     }
 
     static func profileColor(hex: String) -> NSColor {

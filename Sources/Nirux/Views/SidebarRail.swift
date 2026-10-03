@@ -1,7 +1,7 @@
 import AppKit
 
 /// The collapsed sidebar: a 52 pt rail, the project on top, a tile per
-/// workspace (its initials, its state), "+" at the bottom.
+/// listed workspace (its initials, its state), "+" at the bottom.
 enum SidebarRailMetrics {
     static let width: CGFloat = 52
     static let tileSize: CGFloat = 32
@@ -22,9 +22,9 @@ enum SidebarRailMetrics {
 }
 
 /// A tile's letters: the first letter of the first two words ("Fix login
-/// rate limit" → "FL"). A branch drops its type ("feat/crash-report" →
-/// "CR"); one word gives its first two letters ("main" → "MA"). A repeat
-/// takes a number: "CR2".
+/// rate limit" → "FL"), a number whole ("ws 12" → "W12"). A branch drops
+/// its type ("feat/crash-report" → "CR"); one word gives its first two
+/// letters ("main" → "MA"). A repeat takes a number: "CR2".
 enum SidebarRailInitials {
     static func initials(for titles: [String]) -> [String] {
         var used: Set<String> = []
@@ -43,36 +43,41 @@ enum SidebarRailInitials {
 
     static func initials(of title: String) -> String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let name = trimmed.split(separator: "/").last.map(String.init) ?? trimmed
-        let words = words(in: name)
-        let letters: [Character]
+        let words = words(in: branchName(trimmed) ?? trimmed)
+        let letters: String
         switch words.count {
-        case 0: letters = Array(trimmed.prefix(1))
-        case 1: letters = Array(words[0].prefix(2))
-        default: letters = [words[0].first, words[1].first].compactMap { $0 }
+        case 0: letters = String(trimmed.prefix(1))
+        case 1: letters = String(words[0].prefix(2))
+        default:
+            let second = words[1].allSatisfy(\.isNumber) ? words[1].prefix(3) : words[1].prefix(1)
+            letters = String(words[0].prefix(1) + second)
         }
-        let result = String(letters).uppercased()
-        return result.isEmpty ? "?" : result
+        return letters.isEmpty ? "?" : letters.uppercased()
     }
 
-    /// Runs of letters and digits; "CelticFantasy" is two words.
+    /// "feat/crash-report" → "crash-report": what follows a branch's last
+    /// "/". Nil for a title with a space ("Fix A/B test").
+    private static func branchName(_ title: String) -> String? {
+        guard title.contains("/"), !title.contains(where: \.isWhitespace) else { return nil }
+        return title.split(separator: "/").last.map(String.init)
+    }
+
+    /// Runs of letters, or of digits; "CelticFantasy" is two words.
     private static func words(in text: String) -> [String] {
         var words: [String] = []
         var current = ""
-        var previousIsLower = false
         for character in text {
             guard character.isLetter || character.isNumber else {
                 if !current.isEmpty { words.append(current) }
                 current = ""
-                previousIsLower = false
                 continue
             }
-            if character.isUppercase, previousIsLower, !current.isEmpty {
+            if let last = current.last,
+               (character.isUppercase && last.isLowercase) || character.isNumber != last.isNumber {
                 words.append(current)
                 current = ""
             }
             current.append(character)
-            previousIsLower = character.isLowercase
         }
         if !current.isEmpty { words.append(current) }
         return words
@@ -127,10 +132,12 @@ struct SidebarRailTileStyle {
         return style
     }
 
-    /// The project, in its color.
-    static func project(color: NSColor) -> SidebarRailTileStyle {
+    /// The project: the selected look, whatever the project's color (a
+    /// yellow one would read as amber).
+    static var project: SidebarRailTileStyle {
         SidebarRailTileStyle(
-            fill: color.withAlphaComponent(0.16), border: nil, textColor: color, hoverTextColor: color, font: Theme.Font.title
+            fill: Theme.Color.fillSelected, border: nil, textColor: Theme.Color.accent,
+            hoverTextColor: Theme.Color.accent, font: Theme.Font.title
         )
     }
 
@@ -154,6 +161,11 @@ final class SidebarRailTileView: NSView {
     private let symbolName: String?
     /// VoiceOver's press: what a click on the tile does.
     var onPress: (() -> Void)?
+    var role: NSAccessibility.Role = .button
+    /// Takes the first click on a window in the background, like the
+    /// expanded INACTIVE header (`SidebarSectionToggleView`), and hands it
+    /// on up the responder chain to the sidebar's hit areas.
+    var acceptsFirstClick = false
 
     var isHovered = false {
         didSet { if oldValue != isHovered { needsDisplay = true } }
@@ -172,9 +184,10 @@ final class SidebarRailTileView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func hitTest(_ point: NSPoint) -> NSView? { acceptsFirstClick ? super.hitTest(point) : nil }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { acceptsFirstClick }
     override func isAccessibilityElement() -> Bool { true }
-    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    override func accessibilityRole() -> NSAccessibility.Role? { role }
     override func accessibilityPerformPress() -> Bool {
         guard let onPress else { return false }
         onPress()
@@ -191,8 +204,7 @@ final class SidebarRailTileView: NSView {
         setFrameOrigin(NSPoint(x: origin.x, y: origin.y - SidebarRailMetrics.badgeOverhang))
     }
 
-    /// A view, not a bare layer: the snapshot the rail fades out with
-    /// (`cacheDisplay`) keeps it.
+    /// The state badge, over the tile's bottom-right corner.
     private func addBadge() {
         guard let color = style.badge else { return }
         let size = SidebarRailMetrics.badgeSize
@@ -227,7 +239,7 @@ final class SidebarRailTileView: NSView {
             path.stroke()
         }
         let color = isHovered ? style.hoverTextColor : style.textColor
-        if let symbolName, let image = SidebarRenderer.symbol(symbolName, color: color, pointSize: 13) {
+        if let symbolName, let image = SidebarRenderer.symbol(symbolName, color: color, pointSize: 14) {
             let size = image.size
             image.draw(in: NSRect(
                 x: rect.midX - size.width / 2, y: rect.midY - size.height / 2, width: size.width, height: size.height
@@ -262,47 +274,61 @@ struct SidebarRailTooltip: Equatable {
 
 @MainActor
 extension WorkspaceInfo {
+    /// The tile's state: the card's (`cardState`), and amber for a question
+    /// a Mission child asked while the user was elsewhere (`notification`),
+    /// which the cards leave to the Activity feed the rail doesn't show.
+    var railState: SidebarCardState {
+        let state = cardState
+        return state != .waiting && !isActive && notification == .waiting ? .waiting : state
+    }
+
     /// The rail tooltip: the title, then what the card's first line and
     /// chips tell ("claude needs permission · 4m", "Bash: git push").
     var railTooltip: SidebarRailTooltip {
         let age = lastActivityAt.map { SidebarView.cardAge(since: $0) }
-        /// "claude needs permission", "Bash: git push".
-        func asking(_ signal: AttentionSignal) -> (String, String?)? {
-            guard let column = columns.first(where: { $0.attention == signal }) else { return nil }
-            let what = column.attentionToolTip ?? column.attentionLabel ?? "needs you"
-            let parts = what.components(separatedBy: " — ")
-            let rest = parts.dropFirst().joined(separator: " — ")
-            return ("\(SidebarRenderer.columnName(column)) \(parts[0])", rest.isEmpty ? nil : rest)
+        /// "claude needs permission" and "Bash: git push", from the column
+        /// whose cause the card's chip shows.
+        func asking(_ signal: AttentionSignal) -> (headline: String, detail: String?)? {
+            guard let column = columns.first(where: { $0.attention == signal }),
+                  let summary = column.attentionSummary else { return nil }
+            return ("\(SidebarRenderer.columnName(column)) \(summary.headline)", summary.detail)
         }
-        let state = cardState
-        var detail: String?
+        func withAge(_ text: String) -> String { [text, age].compactMap { $0 }.joined(separator: " · ") }
+        let state = railState
+        var detail: String
         var note: String?
+        var color: NSColor
         switch state {
         case .waiting:
-            let waiting = asking(.waiting)
-            detail = [waiting?.0, age].compactMap { $0 }.joined(separator: " · ")
-            note = waiting?.1
+            color = Theme.Color.waiting
+            if let waiting = asking(.waiting) {
+                (detail, note) = (withAge(waiting.headline), waiting.detail)
+            } else {
+                (detail, note) = ("a child agent asked a question", "Reply from Activity, in the expanded sidebar")
+            }
         case .error:
+            color = Theme.Color.error
             if let error = asking(.error) {
                 (detail, note) = error
             } else {
                 detail = prInfo.map { "checks failed on #\($0.number)" } ?? "checks failed"
             }
         case .working:
+            color = Theme.Color.working
             let working = columns.filter { $0.agentStatus == .working }
             let who = working.count == 1 ? SidebarRenderer.columnName(working[0]) : "\(working.count) agents"
             detail = (["\(who) working"] + [working.first?.elapsedDisplay].compactMap { $0 }).joined(separator: " · ")
         case .done:
+            color = Theme.Color.done
             detail = prInfo.map { "#\($0.number) merged" } ?? "merged"
         case .idle:
-            detail = age.map { $0 == "now" ? "idle" : "idle · \($0)" } ?? "no activity yet"
-        }
-        let color: NSColor = switch state {
-        case .waiting: Theme.Color.waiting
-        case .error: Theme.Color.error
-        case .working: Theme.Color.working
-        case .done: Theme.Color.done
-        case .idle: Theme.Color.textTertiary
+            if let finished = asking(.finished) {
+                color = SidebarRenderer.color(for: .finished)
+                detail = withAge(finished.headline)
+            } else {
+                color = Theme.Color.textTertiary
+                detail = age.map { $0 == "now" ? "idle" : "idle · \($0)" } ?? "no activity yet"
+            }
         }
         return SidebarRailTooltip(title: title, detail: detail, detailColor: color, note: note)
     }
@@ -339,7 +365,9 @@ final class SidebarRailTooltipView: NSView {
         detailLabel.font = Theme.Font.caption
         noteLabel.font = Theme.Font.caption
         noteLabel.textColor = Theme.Color.textSecondary
+        // The tile says it all to VoiceOver.
         setAccessibilityElement(false)
+        for label in [titleLabel, detailLabel, noteLabel] { label.setAccessibilityElement(false) }
     }
 
     @available(*, unavailable)
