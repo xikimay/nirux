@@ -35,6 +35,7 @@ extension NiruxShellView {
                     isEditor: col.isEditor,
                     editorFileName: editorFile,
                     isProjectBoard: col.isProjectBoard,
+                    isBranchReview: col.isBranchReview,
                     editorIsDirty: col.editorColumn?.isDirty ?? false,
                     agentElapsedSeconds: col.pty?.agentTurnStartedAt
                         .map { Date().timeIntervalSince($0) },

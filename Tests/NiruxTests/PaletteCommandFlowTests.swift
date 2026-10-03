@@ -30,6 +30,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testWorktreeCommands": ["Open Worktree", "New Worktree", "Clean Up Merged Worktrees…"],
             "testNewTaskCommand": ["New Task…"],
             "testProjectBoardCommand": ["Open Project Board"],
+            "testReviewBranchCommand": ["Review Branch"],
             "testSetupCommands": ["Show Getting Started", "Install Agent Skills", "Open Settings"]
         ],
         exemptions: [:]
@@ -496,6 +497,34 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertIdentical(workspace.columns[safe: workspace.focusedIndex]?.projectBoard, board)
             XCTAssertEqual(workspace.columns.filter(\.isProjectBoard).count, 1)
             XCTAssertEqual(client.calls, [])
+        }
+    }
+
+    // MARK: - Branch Review
+
+    func testReviewBranchCommand() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.branchReviewReader = BranchReviewPageTests.reader
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let columns = workspace.columns.count
+
+            // Next to the focused column, at two-thirds of the width.
+            harness.runPaletteCommand("Review Branch")
+            XCTAssertEqual(workspace.columns.count, columns + 1)
+            let column = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            let review = try XCTUnwrap(column.branchReview)
+            XCTAssertEqual(review.worktree, workspace.cwd)
+            XCTAssertEqual(column.widthFraction, ColumnWidth.twoThirds.fraction)
+            harness.waitUntil("the review to read its branch") { review.snapshot != nil }
+            XCTAssertEqual(review.branch, "feat/keep-awake")
+            XCTAssertEqual(review.view.header.context, "feat/keep-awake → main")
+
+            // From another column: the same review comes to the front.
+            shell.focusColumnByIndex(0)
+            harness.runPaletteCommand("Review Branch")
+            XCTAssertIdentical(workspace.columns[safe: workspace.focusedIndex]?.branchReview, review)
+            XCTAssertEqual(workspace.columns.filter(\.isBranchReview).count, 1)
         }
     }
 

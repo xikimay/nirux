@@ -650,6 +650,11 @@ extension WorkspaceState {
         insertColumn(ColumnState(projectBoard: board))
     }
 
+    /// Insert a Branch Review column next to the focused one.
+    func addBranchReviewColumn(_ review: BranchReviewController) {
+        insertColumn(ColumnState(branchReview: review))
+    }
+
     func closeColumn(at index: Int) {
         guard columns.count > 1 else { return }
         let previouslyFocusedColumn = columns[safe: focusedIndex]

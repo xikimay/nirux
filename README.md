@@ -322,6 +322,16 @@ In the palette list, a ready worktree is checked in advance only when:
 
 `Select All Ready` checks the others.
 
+### Reviewing a branch
+
+`Review Branch`, in the palette or a workspace's menu, opens a Branch Review column next to the agent, at two-thirds of the width. It reads the branch checked out in the workspace's folder, from its merge base with the base branch to the working tree, uncommitted changes included, without writing to the repository. The page shows:
+
+- the pull request's description, the handover and the commits, each labeled with its source;
+- risk signals from fixed rules (persistence, security, concurrency, launch, CI, side effects, dependencies), and how the tests compare with the code;
+- the files grouped by path, with lockfiles, generated files, pure renames, whitespace-only changes and binary files folded.
+
+A row opens into its diff. Bidi controls and invisible characters in paths and diffs show as their code point (`⟨U+202E⟩`). The page doesn't follow the worktree yet: it says when it read the branch, and Refresh reads it again, after fetching the pull request's base: a remote-tracking ref, the column's only write to the repository. A review restored at launch reads its branch once its workspace shows. The design is in [docs/branch-review.md](docs/branch-review.md).
+
 ## Local Development
 
 Build the Swift package:

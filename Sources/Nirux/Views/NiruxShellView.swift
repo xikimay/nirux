@@ -112,6 +112,9 @@ final class NiruxShellView: NSView {
     var newTaskPanel: NewTaskPanel?
     /// The Project Board's `gh` reads. Tests set a fake before a board opens.
     lazy var projectBoardClient: any ProjectBoardGitHub = GitHubCLIBoardClient.installed
+    /// How Branch Review columns read their worktree: git and gh, or a
+    /// test's fixture.
+    lazy var branchReviewReader: BranchReviewController.Reader = BranchReviewController.readWorktree
     /// Reloads the boards whose board.json was saved.
     var boardConfigSaveObserver: NSObjectProtocol?
     /// The merge queue's `gh` client. Nil: each new queue gets
@@ -321,6 +324,7 @@ final class NiruxShellView: NSView {
 
         syncTerminalOcclusion()
         scheduleDeferredAgentsOnScreen()
+        scheduleBranchReviewsOnScreen()
     }
 
     // MARK: - Terminal Occlusion
@@ -797,6 +801,8 @@ extension NiruxShellView {
             if editorTakesKeyboard { editor.takeKeyboard() }
         } else if let board = col.projectBoard {
             window.makeFirstResponder(board.view)
+        } else if let review = col.branchReview {
+            review.view.takeKeyboard()
         } else if col.isFindBarOpen {
             // An open find bar keeps the keyboard: text typed for it must
             // not reach the agent. A click on the terminal takes it back.

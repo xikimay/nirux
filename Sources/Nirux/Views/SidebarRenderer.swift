@@ -176,6 +176,9 @@ enum SidebarRenderer {
         if column.isProjectBoard {
             return symbol(Theme.Symbol.projectBoard, color: color)
         }
+        if column.isBranchReview {
+            return symbol(Theme.Symbol.branchReview, color: color)
+        }
         if column.isWebView {
             return symbol(Theme.Symbol.browser, color: color)
         }
@@ -206,6 +209,7 @@ enum SidebarRenderer {
     static func columnName(_ column: ColumnInfo) -> String {
         if column.isEditor { return column.editorFileName ?? "editor" }
         if column.isProjectBoard { return "Project Board" }
+        if column.isBranchReview { return "Branch Review" }
         if column.isWebView { return column.webTitle?.isEmpty == false ? column.webTitle! : "web" }
         return column.deferredAgent?.processName ?? column.stuck?.agentName ?? column.processName ?? "shell"
     }

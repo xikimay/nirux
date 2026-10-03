@@ -12,6 +12,7 @@ struct ColumnInfo: Hashable {
     let isEditor: Bool
     let editorFileName: String?
     var isProjectBoard = false
+    var isBranchReview = false
     /// Active editor tab has unsaved changes — rendered as a dirty dot
     /// next to the file name.
     var editorIsDirty: Bool = false
@@ -54,6 +55,7 @@ struct ColumnInfo: Hashable {
             && lhs.isEditor == rhs.isEditor
             && lhs.editorFileName == rhs.editorFileName
             && lhs.isProjectBoard == rhs.isProjectBoard
+            && lhs.isBranchReview == rhs.isBranchReview
             && lhs.editorIsDirty == rhs.editorIsDirty
             && lhs.elapsedDisplay == rhs.elapsedDisplay
             && lhs.attentionReason == rhs.attentionReason
@@ -73,6 +75,7 @@ struct ColumnInfo: Hashable {
         hasher.combine(isEditor)
         hasher.combine(editorFileName)
         hasher.combine(isProjectBoard)
+        hasher.combine(isBranchReview)
         hasher.combine(editorIsDirty)
         hasher.combine(elapsedDisplay)
         hasher.combine(attentionReason)
@@ -307,7 +310,7 @@ struct SidebarUpdatePayload {
 
 enum WorkspaceSidebarAction {
     case moveUp, moveDown, markActive, markInactive
-    case close, rename, editContext, newWorkspace
+    case close, rename, editContext, newWorkspace, reviewBranch
     case closeColumn(columnIndex: Int)
     case cleanUpWorktree
     case askWhyCIFailed, rerunFailedCI

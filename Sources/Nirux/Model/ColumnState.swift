@@ -15,6 +15,8 @@ final class ColumnState {
     var editorColumn: EditorColumn?
     /// The Project Board this column shows.
     private(set) var projectBoard: ProjectBoardController?
+    /// The branch this column reviews.
+    private(set) var branchReview: BranchReviewController?
     /// Column width as a fraction of the columns viewport (0.15…2.0).
     /// Freeform (drag the resize handles); the ColumnWidth presets are just
     /// named stops the width cycler snaps to.
@@ -75,6 +77,7 @@ final class ColumnState {
     /// The column's header, whatever its type (see `ColumnHeaderView`).
     var header: ColumnHeaderView? {
         terminalHeader ?? webViewColumn?.header ?? editorColumn?.header ?? projectBoard?.view.header
+            ?? branchReview?.view.header
     }
     /// What a terminal's header reads ("claude · ~/repo", "claude (not
     /// resumed) · ~/repo"); empty before its first refresh.
@@ -213,6 +216,8 @@ final class ColumnState {
     var isEditor: Bool { editorColumn != nil }
 
     var isProjectBoard: Bool { projectBoard != nil }
+
+    var isBranchReview: Bool { branchReview != nil }
 
     /// Escape a file path for safe pasting into a shell.
     private static func shellEscape(_ path: String) -> String {
@@ -395,6 +400,18 @@ final class ColumnState {
         board.autoresizingMask = [.width, .height]
         view.addSubview(board)
         self.projectBoard = projectBoard
+    }
+
+    /// Branch Review column: one branch, read-only.
+    init(branchReview: BranchReviewController) {
+        agentUUID = nil
+        view = NSView()
+        view.wantsLayer = true
+
+        let review = branchReview.view
+        review.autoresizingMask = [.width, .height]
+        view.addSubview(review)
+        self.branchReview = branchReview
     }
 
     /// Snap to the next preset (same cycle order as before: from any
