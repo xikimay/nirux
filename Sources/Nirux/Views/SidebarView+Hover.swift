@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Card / column / "⋯" badge hover highlights
+// MARK: - Card / column / "⋯" badge / rail tile hover highlights
 
 extension SidebarView {
     /// Swap the card/column/badge hover highlight to a new target. Hovering
@@ -11,17 +11,19 @@ extension SidebarView {
         applyHover(hoveredTarget, on: false)
         applyHover(target, on: true)
         hoveredTarget = target
+        updateRailTooltip()
     }
 
     private func applyHover(_ target: SidebarHoverTarget?, on: Bool) {
         guard let target else { return }
+        railTileViews[target]?.isHovered = on
         if let workspaceIndex = target.workspaceIndex {
             cardHoverViews[workspaceIndex]?.layer?.backgroundColor =
                 on ? Theme.Color.fillHover.cgColor : NSColor.clear.cgColor
             menuBadgeViews[workspaceIndex]?.isCardHovered = on
         }
         switch target {
-        case .workspaceCard:
+        case .workspaceCard, .railButton:
             break
         case .spaceHeader:
             // The whole header is one menu trigger, so its "⋯" brightens
@@ -51,7 +53,7 @@ extension SidebarView {
     /// after every rebuild — the registered backing views are new, and rows
     /// may have shifted under a stationary pointer.
     func refreshHoverTargetFromMouse() {
-        guard isExpanded, let window else { return }
+        guard let window else { return }
         let point = contentDocumentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
         guard let area = hitArea(at: point) else { return }
         switch area.region {
@@ -72,6 +74,8 @@ extension SidebarView {
             setHoverTarget(.workspaceCard(workspaceIndex))
         case .link:
             if let card = cardIndex(at: point) { setHoverTarget(.workspaceCard(card)) }
+        case .railButton(let button):
+            setHoverTarget(.railButton(button))
         }
     }
 }

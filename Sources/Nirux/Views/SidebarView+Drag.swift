@@ -33,7 +33,7 @@ enum SidebarDragMath {
     }
 }
 
-// MARK: - Drag-to-reorder tracking (expanded mode)
+// MARK: - Drag-to-reorder tracking (cards and rail tiles)
 
 extension SidebarView {
 
@@ -147,7 +147,7 @@ extension SidebarView {
             NSEvent.startPeriodicEvents(afterDelay: 0.15, withPeriod: 0.05)
         }
         contentDocumentView.autoscroll(with: event)
-        dragGhostView?.frame.origin.y = drag.rowFrame.origin.y + (point.y - drag.startPoint.y)
+        dragGhostView?.frame.origin.y = dragGhostOriginY + (point.y - drag.startPoint.y)
         let slot = SidebarDragMath.insertionSlot(forY: point.y, rowMidYs: drag.groupRowFrames.map(\.midY))
         drag.currentSlot = slot
         updateInsertionIndicator(slot: slot, drag: drag)
@@ -210,27 +210,39 @@ extension SidebarView {
     // MARK: - Visuals
 
     private func beginDragVisuals(for drag: SidebarWorkspaceDrag) {
-        // Card-shaped veil dimming the original row.
-        let dim = SidebarBackgroundView(frame: drag.rowFrame)
-        dim.wantsLayer = true
-        dim.layer?.backgroundColor = Theme.Color.base.withAlphaComponent(0.6).cgColor
-        dim.layer?.cornerRadius = 8
-        contentDocumentView.addSubview(dim)
-        dragDimView = dim
+        hideRailTooltip()
+        let dragged = lastInfos.first { $0.id == drag.workspaceID }
+        let railTile = isExpanded ? nil : dragged.flatMap { railTileViews[.workspaceCard($0.index)] }
+        let ghost = railTile.map(railDragGhost) ?? cardDragGhost(for: drag)
+        contentDocumentView.addSubview(ghost)
+        dragGhostView = ghost
+        dragGhostOriginY = ghost.frame.origin.y
 
-        // Lightweight ghost card that follows the cursor. Built from
-        // scratch rather than snapshotted: the card chrome lives in layer
-        // properties, which cacheDisplay does not reliably composite.
+        let indicator = SidebarBackgroundView()
+        indicator.wantsLayer = true
+        indicator.layer?.backgroundColor = Self.accentColor.cgColor
+        indicator.layer?.cornerRadius = 1
+        indicator.isHidden = true
+        contentDocumentView.addSubview(indicator)
+        dragInsertionView = indicator
+
+        NSCursor.closedHand.set()
+    }
+
+    /// Dims the card and returns a ghost of it. Built from scratch rather
+    /// than snapshotted: the card chrome lives in layer properties, which
+    /// cacheDisplay does not reliably composite.
+    private func cardDragGhost(for drag: SidebarWorkspaceDrag) -> NSView {
+        // Card-shaped veil dimming the original row.
+        addDragDim(frame: drag.rowFrame)
+
         let ghost = SidebarBackgroundView(frame: drag.rowFrame)
         ghost.wantsLayer = true
         ghost.layer?.backgroundColor = Theme.Color.raised.withAlphaComponent(0.95).cgColor
         ghost.layer?.cornerRadius = 8
         ghost.layer?.borderWidth = 1
         ghost.layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
-        ghost.layer?.shadowColor = NSColor.black.cgColor
-        ghost.layer?.shadowOpacity = 0.5
-        ghost.layer?.shadowRadius = 8
-        ghost.layer?.shadowOffset = .zero
+        addGhostShadow(ghost)
 
         let title = NSTextField(labelWithString: drag.title)
         title.font = Theme.Font.title
@@ -246,18 +258,33 @@ extension SidebarView {
             height: height
         )
         ghost.addSubview(title)
-        contentDocumentView.addSubview(ghost)
-        dragGhostView = ghost
+        return ghost
+    }
 
-        let indicator = SidebarBackgroundView()
-        indicator.wantsLayer = true
-        indicator.layer?.backgroundColor = Self.accentColor.cgColor
-        indicator.layer?.cornerRadius = 1
-        indicator.isHidden = true
-        contentDocumentView.addSubview(indicator)
-        dragInsertionView = indicator
+    /// Dims the rail tile and returns a copy of it.
+    private func railDragGhost(_ tile: SidebarRailTileView) -> NSView {
+        addDragDim(frame: SidebarRailTileView.tileRect.offsetBy(dx: tile.frame.minX, dy: tile.frame.minY))
+        let ghost = SidebarRailTileView(style: tile.style, text: tile.text)
+        ghost.frame = tile.frame
+        ghost.isHovered = true
+        addGhostShadow(ghost)
+        return ghost
+    }
 
-        NSCursor.closedHand.set()
+    private func addDragDim(frame: NSRect) {
+        let dim = SidebarBackgroundView(frame: frame)
+        dim.wantsLayer = true
+        dim.layer?.backgroundColor = Theme.Color.base.withAlphaComponent(0.6).cgColor
+        dim.layer?.cornerRadius = 8
+        contentDocumentView.addSubview(dim)
+        dragDimView = dim
+    }
+
+    private func addGhostShadow(_ ghost: NSView) {
+        ghost.layer?.shadowColor = NSColor.black.cgColor
+        ghost.layer?.shadowOpacity = 0.5
+        ghost.layer?.shadowRadius = 8
+        ghost.layer?.shadowOffset = .zero
     }
 
     private func updateInsertionIndicator(slot: Int, drag: SidebarWorkspaceDrag) {

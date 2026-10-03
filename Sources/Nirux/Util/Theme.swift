@@ -82,6 +82,8 @@ enum Theme {
         static var bodyEmphasized: NSFont { NSFont.systemFont(ofSize: 12, weight: .semibold) }
         /// Durations, counts, chips, tooltips.
         static var caption: NSFont { NSFont.systemFont(ofSize: 11) }
+        /// The collapsed sidebar's tile initials.
+        static var captionEmphasized: NSFont { NSFont.systemFont(ofSize: 11, weight: .semibold) }
         /// Section labels only, uppercased and tracked by `labelKern`.
         static var label: NSFont { NSFont.systemFont(ofSize: 10, weight: .semibold) }
         static let labelKern: CGFloat = 0.6
@@ -119,6 +121,8 @@ enum Theme {
         static let projectBoard = "tablecells"
         static let branchReview = "checklist.checked"
         static let newWorkspace = "plus.rectangle.on.rectangle"
+        /// The collapsed rail's "+".
+        static let add = "plus"
         static let rename = "pencil"
         static let search = "magnifyingglass"
         static let resizeColumn = "arrow.left.and.right"

@@ -47,7 +47,8 @@ private final class SidebarActivityHitView: NSView {
 
 extension SidebarView {
 
-    /// Main entry point for rebuilding expanded sidebar content.
+    /// Main entry point for rebuilding the sidebar's content: the rail or
+    /// the cards.
     func rebuildContent() {
         // Never rebuild mid-drag: rows would shift under the captured drag
         // geometry. SidebarView+Drag defers updates until the drag ends.
@@ -56,7 +57,16 @@ extension SidebarView {
             return
         }
         resetRenderState()
-        guard isExpanded else { approvalButtonArming.removeAll(); setNeedsDisplay(bounds); return }
+        guard isExpanded else {
+            // Kept across rebuilds, put back by the next expanded one.
+            onboardingCardView?.removeFromSuperview()
+            approvalButtonArming.removeAll()
+            guard !isRailHidden else { return }
+            let docHeight = buildRail()
+            refreshHoverTargetFromMouse()
+            followActiveWorkspace(docHeight: docHeight)
+            return
+        }
 
         rebuildBottomIndicators()
 
@@ -122,6 +132,16 @@ extension SidebarView {
 
         refreshHoverTargetFromMouse()
         refreshApprovalArming()
+        followActiveWorkspace(docHeight: docHeight)
+        if revealsOnboardingCardOnNextBuild, onboardingCard != nil {
+            revealsOnboardingCardOnNextBuild = false
+            revealOnboardingCard()
+        }
+    }
+
+    /// Scrolls the active workspace into view when it changed, or to the
+    /// top on the first build.
+    private func followActiveWorkspace(docHeight: CGFloat) {
         let clip = contentScrollView.contentView
         let activeIndex = activeWorkspaceIndex
         let activeChanged = activeIndex != lastFollowedActiveIndex
@@ -136,10 +156,6 @@ extension SidebarView {
             clip.scroll(to: topOrigin)
             contentScrollView.reflectScrolledClipView(clip)
             lastFollowedActiveIndex = activeIndex
-        }
-        if revealsOnboardingCardOnNextBuild, onboardingCard != nil {
-            revealsOnboardingCardOnNextBuild = false
-            revealOnboardingCard()
         }
     }
 
@@ -175,8 +191,8 @@ extension SidebarView {
         return height
     }
 
-    /// Tear down every view and state snapshot from the previous expanded
-    /// render pass before rebuilding.
+    /// Tear down every view and state snapshot from the previous render
+    /// pass before rebuilding.
     private func resetRenderState() {
         expandedViews.forEach { $0.removeFromSuperview() }
         expandedViews.removeAll()
@@ -189,7 +205,9 @@ extension SidebarView {
         approvalButtonViews.removeAll()
         spaceHeaderHoverView = nil
         spaceHeaderBadge = nil
+        railTileViews.removeAll()
         hoveredTarget = nil
+        hideRailTooltip()
     }
 
     /// Index of the active workspace in `lastInfos`, or -1 if none. Used by
@@ -300,7 +318,7 @@ extension SidebarView {
         return text
     }
 
-    private static func profileColor(hex: String) -> NSColor {
+    static func profileColor(hex: String) -> NSColor {
         NSColor.niruxColor(hex: hex) ?? Theme.Color.accent
     }
 

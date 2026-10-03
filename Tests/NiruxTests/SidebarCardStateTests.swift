@@ -301,7 +301,7 @@ final class SidebarCardStateTests: XCTestCase {
             lastSummary: nil, lastActivityAt: nil
         )
         sidebar.update(profiles: [], workspaces: [asking, parked])
-        XCTAssertEqual(sidebar.dotWorkspaceInfos.map(\.id), ["ws"])
+        XCTAssertEqual(sidebar.railWorkspaceInfos.map(\.id), ["ws"])
         let cards = sidebar.hitAreas.compactMap { area -> Int? in
             if case .workspace(let index) = area.region { return index }
             return nil

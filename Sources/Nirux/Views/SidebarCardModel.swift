@@ -115,10 +115,10 @@ extension WorkspaceInfo {
         return .idle
     }
 
-    /// The collapsed sidebar's dot and the project switcher's ring: what
-    /// the columns ask, then what happened while the user looked elsewhere
-    /// (a child agent's question, a red check: a pulse for as long as a
-    /// check stays red would be noise).
+    /// The project switcher's ring: what the columns ask, then what
+    /// happened while the user looked elsewhere (a child agent's question,
+    /// a red check: a pulse for as long as a check stays red would be
+    /// noise).
     var attention: AttentionSignal? {
         let away = isActive ? nil : notification
         return (columns.compactMap(\.attention) + [away].compactMap { $0 }).max()

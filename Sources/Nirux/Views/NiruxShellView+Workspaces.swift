@@ -366,10 +366,11 @@ extension NiruxShellView {
 
         if expanding {
             refreshOnboardingChecklist()
-            sidebar.fadeOutDots {
+            sidebar.fadeOutRail {
                 self.relayout(animated: true)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                    guard let self else { return }
+                    // Collapsed again meanwhile: the rail stays.
+                    guard let self, self.isSidebarExpanded else { return }
                     self.sidebar.isExpanded = true
                 }
             }
