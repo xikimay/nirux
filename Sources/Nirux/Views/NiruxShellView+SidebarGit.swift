@@ -49,7 +49,8 @@ extension NiruxShellView {
                           columnCount: workspace.columns.count,
                           focusedColumn: workspace.focusedIndex,
                           gitBranch: workspace.gitBranch, hasNotification: workspace.hasNotification, isActive: index == activeWSIndex,
-                          columns: colInfos, prInfo: workspace.prInfo, diffStats: workspace.diffStats,
+                          columns: colInfos, prInfo: workspace.prInfo, prFeedbackSummary: workspace.prFeedback?.summary,
+                          diffStats: workspace.diffStats,
                           purpose: workspace.purpose, nextStep: workspace.nextStep,
                           blocker: workspace.blocker, phase: workspace.effectivePhase,
                           lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt,
@@ -416,6 +417,11 @@ extension NiruxShellView {
         }
         updateSidebar(snapshot: snapshot)
         if changed { saveState(snapshot: snapshot) }
+        // After this drain: a turn that ended may have freed a Mission
+        // child's prompt for a waiting `tell`.
+        if events.contains(where: { [.stop, .stopFailure].contains($0.event.name) }) {
+            DispatchQueue.main.async { [weak self] in self?.typeMissionInstructions() }
+        }
     }
 
     /// HEAD is read in the agent's own directory, now: the workspace's git
@@ -448,11 +454,12 @@ extension NiruxShellView {
         case .question: category = .missionQuestion
         case .completed: category = .missionCompleted
         case .response: category = .missionResponse
+        case .instruction: category = .missionInstruction
         case .acknowledged: return false
         }
         let entry = ActivityEntry(
             category: category,
-            agentKind: event.kind == .response ? "parent" : mission.childAgentKind,
+            agentKind: [.response, .instruction].contains(event.kind) ? "parent" : mission.childAgentKind,
             agentUUID: mission.childAgentUUID,
             workspaceID: mission.childWorkspaceID,
             columnIndex: columnIndex,
@@ -480,6 +487,11 @@ extension NiruxShellView {
             )
         }
         refreshActivitySidebar()
+        // Once the event is marked delivered: a new `tell` may find its
+        // child's prompt free.
+        if event.kind == .instruction {
+            DispatchQueue.main.async { [weak self] in self?.typeMissionInstructions() }
+        }
         return true
     }
 
@@ -611,8 +623,14 @@ extension NiruxShellView {
                         for: queriedContext,
                         observation: observation
                     )
-                    // Even unchanged: the history may have loaded since.
+                    // Even unchanged: the history may have loaded since,
+                    // and the first read after launch records what is
+                    // already red.
                     self?.noteSessionPullRequest(of: workspace)
+                    // Every read of an open PR, changed or not: feedback
+                    // moves without the PR's own fields moving.
+                    if workspace.prInfo == info { self?.refreshPRFeedback(for: workspace) }
+                    self?.reportNewRedChecks(in: workspace)
                     guard changed else { return }
                     self?.scheduleMetadataRefresh()
                 }

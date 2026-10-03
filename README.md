@@ -12,6 +12,7 @@ Nirux is alpha software.
 - Attention and Activity: per-column agent status (working / needs attention, with elapsed time) driven by real Claude Code hooks and Codex turn notifications — not output guessing (Gemini CLI and OpenCode, which have no hooks, get output-activity status) — plus a persistent sidebar feed, edge glows for off-screen attention, native macOS notifications that focus the right workspace and column on click, and a Dock badge counting waiting workspaces.
 - Stuck agents: a permission or question left open past a threshold (Settings, 10 minutes by default) shows `waiting 2h05m` on its card and notifies once (Telegram too, and while Nirux is in the background); a Claude turn that ended on an API error shows `API error`, with a Resume button — for transient errors only (overloaded, server error) — that types `continue` only on a click, once Claude is back at an empty prompt; a `claude` that died mid-turn gets an overlay that resumes its conversation in its permission mode.
 - Review badges: a workspace's card shows which of `/code-review`, `/premortem`, `/code-style-review` and an adversarial review ran on the current HEAD (`CR ✓  PM ✓  CS ·  ADV ·`), orange once a newer commit lands. Nirux keeps the pass's name, never the prompt. See [docs/review-badges.md](docs/review-badges.md).
+- CI failures: when a workspace's open pull request turns red (only the latest run of each check counts), its card asks for attention and Nirux notifies once per failed job, once its run has ended, while in the background. The card's menu, and the notification's buttons, offer **Ask Agent Why CI Failed**, which types `gh run view <id> --repo <repository> --log-failed` into the workspace's agent, and **Rerun Failed CI Jobs…**, which runs `gh run rerun <id> --failed` once confirmed. Both act only on GitHub Actions runs of the pull request's own repository. See [docs/ci-failure-actions.md](docs/ci-failure-actions.md).
 - Quick switcher and Next Waiting Agent: type a workspace's name, branch, project or folder in `Cmd+P` and press Return to jump to it — in any project, inactive ones too (listed after active ones that match as well, and left inactive) — each row showing its agents' state (`working`, `waiting 12m`, `API error`); `Cmd+J` goes to the Claude agent blocked on you the longest (a permission, a question, an API error, a mid-turn exit), then on to the next at each press.
 - Keep Mac awake: while an agent works, Nirux keeps the Mac from idle-sleeping and shows a cup in the title bar; it lets go a minute after the last one stops — see [Keep Mac awake while agents work](#keep-mac-awake-while-agents-work).
 - Claude context usage: a Claude column's title bar shows how full its session's context window is (`ctx 62%`, or `ctx 124k` while the window size is unknown), with the session's token totals in a tooltip — read from the session transcript, see [Claude context usage](#claude-context-usage).
@@ -20,6 +21,7 @@ Nirux is alpha software.
 - Worktree flow: create or open Git worktrees as new workspaces, optionally handing context from the current agent session into the new workspace.
 - Built-in editor: open files, keep tabs, search the workspace, browse the file tree with Finder icons, view Git changes, and toggle file diffs. Find/replace, word wrap, font zoom, per-tab scroll restore, and disk-conflict protection included.
 - Browser context: open URLs in app, keep URL history, import cookies from Chrome, Brave, Arc, or Edge into the shared WebKit data store, download files to ~/Downloads, and inspect pages with the Web Inspector.
+- PR links: a card's PR, CI, and review lines open in a browser column of that workspace. CI opens the failed check, else the PR's Checks tab.
 - Session restore: workspace layout, editor tabs, browser URLs, sidebar state, detected Claude/Codex launch modes, and verified Claude session / Codex thread IDs are saved under Application Support, with rotating backups for corruption recovery. Each agent column resumes its own conversation by exact ID (`claude --resume <id>`, `codex resume <id>`) in the directory it ran in; a Claude session that was never prompted restarts fresh, and legacy, missing, malformed, or duplicate IDs open the agent's interactive resume picker instead of guessing the last session. A `claude -p` launched by a column's agent, or a `codex exec` launched by a Claude, Gemini CLI or OpenCode column, keeps its own session and doesn't drive that column's status, notifications, or restore.
 - Agents resume on demand: after a restart, a Claude or Codex column comes back without its agent and resumes it once the column has stayed a moment in the workspace on screen (or gets the focus), so moving through workspaces doesn't start the agents on the way. Until then it reads `Not resumed yet` with the session's title and its last status (`last seen working`), its sidebar row reads `paused` with a **Resume** button that starts it without leaving the workspace you're in, and `Resume All Agents` (command palette, **Workspaces** menu) starts every one left. Closing a paused agent's column asks first, as for a running one. Plain terminals start as usual. **Settings → General → Resume agents on launch** → **All at once** restores the previous behavior.
 
@@ -85,7 +87,9 @@ Mission handoffs add an explicit, durable mailbox between the agent that delegat
 
 With Mission handoffs enabled, worktrees opened by the installed skill can send correlated questions and wait for answers, while the parent agent can receive and reply from its terminal. Each wait lasts at most 90 seconds, under the default 2-minute limit of Claude Code's shell tool, then exits with status 3; running the identical `ask` again resumes the same question instead of sending a duplicate. Once a Mission has ended, `ask` and `completed` exit with status 4 so the child stops retrying. Questions and explicit completion results also appear in the Activity section of the expanded sidebar and in native notifications while Nirux is in the background. Click a question in Activity to reply or open its child workspace.
 
-Mission completion is always reported explicitly by the child agent. Nirux does not infer completion from a stopped turn and does not inject replies into a terminal. Worktrees opened without Mission metadata keep the existing handover behavior.
+The parent can also give a Claude Code child more work, even after it completed: `"$NIRUX_CLI_PATH" --mission tell --branch <child-branch> --message "..."`. Nirux types the message and Enter into the child's prompt, so a slash command such as `/code-review` runs, but only once the child's `claude` is in front, its turn is over, no dialog is listed and nothing was typed at its prompt since its last prompt went in; otherwise the message waits for the child's next turn end. Nirux types it only into the `claude` that was running when the parent sent it, and only within an hour: a `claude` restarted since, for example after Nirux relaunched, never gets it. Once typed, the Mission is active again. `tell` waits up to 90 seconds for that, like `ask`; it shows in Activity as `told: ...`. Codex children are refused: Codex reports no dialogs, so Nirux can't tell that its prompt is free.
+
+Mission completion is always reported explicitly by the child agent. Nirux does not infer completion from a stopped turn, and answers to a child's `ask` are never typed into its terminal. Worktrees opened without Mission metadata keep the existing handover behavior.
 
 Typical command palette actions:
 
@@ -254,7 +258,7 @@ Any app or web page can open a `nirux://` URL, so every action runs without aski
 
 When Mission handoffs are enabled, the optional `parentWorkspace` and `parentAgent` query parameters identify the delegating Nirux workspace and terminal by UUID. Supplying both creates the parent/child Mission record; the bundled `nirux-worktree` skill adds them automatically. See [Mission handoffs](#mission-handoffs-experimental) for the user workflow.
 
-Open a file in the editor column at a line range (used by agents to show code instead of pasting it into the terminal):
+Open a file in the editor column at a line range (used by agents to show code or drafts instead of pasting them into the terminal):
 
 ```text
 nirux://open-editor?file=/path/to/file.swift&line=42&endLine=57&workspace=<NIRUX_WORKSPACE_ID>&launch=<NIRUX_LAUNCH_ID>
@@ -267,11 +271,15 @@ The command palette action `Install Agent Skills` writes the bundled skills to:
 ```text
 ~/.agents/skills/nirux-worktree/SKILL.md
 ~/.agents/skills/nirux-show-code/SKILL.md
+~/.agents/skills/nirux-draft/SKILL.md
+~/.agents/skills/nirux-second-opinion/SKILL.md
 ~/.claude/skills/nirux-worktree/SKILL.md
 ~/.claude/skills/nirux-show-code/SKILL.md
+~/.claude/skills/nirux-draft/SKILL.md
+~/.claude/skills/nirux-second-opinion/SKILL.md
 ```
 
-`nirux-worktree` lets supported agents open isolated Nirux workspaces when the user asks to start work on a feature, bug, or separate branch. `nirux-show-code` teaches agents to open code in the editor column via `nirux://open-editor` when the user asks to see code.
+`nirux-worktree` lets supported agents open isolated Nirux workspaces when the user asks to start work on a feature, bug, or separate branch. `nirux-show-code` teaches agents to open code in the editor column via `nirux://open-editor` when the user asks to see code. `nirux-draft` has agents write text the user will paste elsewhere (a Slack message, a PR description, a Linear ticket, a SQL query) to a file under `$TMPDIR` and open it in the editor column; click into it, then `Cmd+A` `Cmd+C` copies it verbatim. `nirux-second-opinion` lets Claude, when the user asks for a second opinion, send its answer to a read-only `codex exec` in the same folder and show Codex's reply next to its own verdict.
 
 ### Starting a task from Nirux
 

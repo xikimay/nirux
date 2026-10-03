@@ -37,7 +37,7 @@ extension WorkspaceContextTests {
             state: "OPEN",
             isDraft: false,
             ciStatus: nil,
-            failedCheckUrl: nil,
+            checks: [],
             reviewDecision: nil,
             mergeable: nil,
             url: "https://example.test/pull/42",

@@ -447,6 +447,9 @@ final class NiruxURLRequestTests: XCTestCase {
         XCTAssertTrue(worktree.contains("mktemp /tmp/nirux-handover-<agent>-XXXXXX"))
         XCTAssertFalse(worktree.contains("cat > /tmp/"), "never write to a guessable /tmp name")
         XCTAssertTrue(NiruxShellView.showCodeSkillContent.contains("&launch=${NIRUX_LAUNCH_ID:-}"))
+        let draft = NiruxShellView.draftSkillContent
+        XCTAssertTrue(draft.contains("&launch=${NIRUX_LAUNCH_ID:-}"))
+        XCTAssertTrue(draft.contains("mktemp -d \"${TMPDIR:-/tmp}/nirux-draft-XXXXXX\""))
     }
 
     func testInAppWorktreeURLIsAcceptedOnceTheShellExpandsTheLaunchID() throws {

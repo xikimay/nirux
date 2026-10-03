@@ -171,22 +171,18 @@ enum PRDetect {
             return (check["conclusion"] as? String)?.isEmpty ?? false
         }
         let allChecksPending = !rollup.isEmpty && conclusions.allSatisfy({ $0.isEmpty })
+        // Red as the Project Board defines it (docs/project-board.md,
+        // section 3.2): only the latest run of each check counts.
+        let checks = ProjectBoard.latest(rollup.compactMap(ProjectBoard.check(from:)))
         let ciStatus: String?
-        let failedCheckUrl: String?
-        if conclusions.contains("FAILURE") {
+        if checks.contains(where: { $0.result == .failure }) {
             ciStatus = "FAILURE"
-            failedCheckUrl = rollup
-                .first { ($0["conclusion"] as? String) == "FAILURE" }
-                .flatMap { $0["detailsUrl"] as? String }
         } else if conclusions.contains("PENDING") || allChecksPending || hasRunningCheck {
             ciStatus = "PENDING"
-            failedCheckUrl = nil
         } else if !conclusions.isEmpty {
             ciStatus = "SUCCESS"
-            failedCheckUrl = nil
         } else {
             ciStatus = nil
-            failedCheckUrl = nil
         }
 
         return PRInfo(
@@ -194,7 +190,7 @@ enum PRDetect {
             state: candidate["state"] as? String ?? "",
             isDraft: candidate["isDraft"] as? Bool ?? false,
             ciStatus: ciStatus,
-            failedCheckUrl: failedCheckUrl,
+            checks: checks,
             reviewDecision: candidate["reviewDecision"] as? String,
             mergeable: candidate["mergeable"] as? String,
             url: candidate["url"] as? String ?? "",
