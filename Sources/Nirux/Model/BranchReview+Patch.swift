@@ -35,6 +35,14 @@ extension BranchReview {
         var changedLinesDigest = Data()
         /// Its size in the patch, header included.
         var byteCount = 0
+        /// Counted even when parsed without its lines.
+        var hunkCount = 0
+        /// Each hunk reads the same before and after but for whitespace
+        /// (see `WhitespaceCheck`). False when not checked.
+        var isWhitespaceOnly = false
+        /// The line rules its `+` and `-` lines match, by hunk index in
+        /// the section. Empty when not looked for.
+        var riskHits: Set<RiskHit> = []
 
         /// The path its name-status entry lists last: the new path, or the
         /// old one for a deletion.
@@ -57,16 +65,28 @@ extension BranchReview {
             }
         }
 
-        /// Parses every section; `keepsLines` says, from its size, which
-        /// ones keep their hunks (the others only count and hash them, so a
-        /// huge file never becomes a million Strings). Nil when a section
-        /// can't be parsed.
+        /// What a parse does with a section's lines besides counting and
+        /// hashing them, which it always does.
+        struct Reading: Equatable {
+            /// Keep the hunks: a huge file must never become a million
+            /// Strings.
+            var keepsLines = true
+            /// How to set `PatchSection.isWhitespaceOnly`; nil doesn't
+            /// check. Never checked for an added or a deleted file, nor a
+            /// mode change: they can't be whitespace only.
+            var whitespace: WhitespaceCheck.Mode? = .ignoringIndentation
+            /// Fill `PatchSection.riskHits`.
+            var findsRisks = true
+        }
+
+        /// Parses every section, read as `reading` says for each (by its
+        /// index). Nil when a section can't be parsed.
         static func sections(
-            of data: Data, in ranges: [Range<Data.Index>]? = nil, keepsLines: (Int) -> Bool = { _ in true }
+            of data: Data, in ranges: [Range<Data.Index>]? = nil, reading: (Int) -> Reading = { _ in Reading() }
         ) -> [PatchSection]? {
             var sections: [PatchSection] = []
-            for range in ranges ?? sectionRanges(of: data) {
-                guard let section = section(data[range], keepsLines: keepsLines(range.count)) else { return nil }
+            for (index, range) in (ranges ?? sectionRanges(of: data)).enumerated() {
+                guard let section = section(data[range], reading: reading(index)) else { return nil }
                 sections.append(section)
             }
             return sections
@@ -77,11 +97,57 @@ extension BranchReview {
         /// makes one Character of "\r\n", and of "+" and a combining accent
         /// after it. Text is decoded lossily, one line at a time, so one
         /// file that isn't UTF-8 doesn't empty the page; the hash reads the
-        /// bytes.
-        static func section(_ bytes: Data, keepsLines: Bool = true) -> PatchSection? {
+        /// bytes. Each line is seen once: what is found in the lines is
+        /// found while they are counted, since a large file's are never
+        /// kept.
+        static func section(_ bytes: Data, reading: Reading = Reading()) -> PatchSection? {
             var reader = LineReader(bytes)
+            guard var (section, pendingHunk) = header(&reader, byteCount: bytes.count) else { return nil }
+            var hasher = ChangedLineHasher()
+            // An added or a deleted file's mode appears or goes.
+            let keepsMode = section.oldMode == section.newMode
+            var whitespace = reading.whitespace.flatMap { keepsMode ? WhitespaceCheck(mode: $0) : nil }
+            while let header = pendingHunk {
+                guard let read = hunk(
+                    header, from: &reader, into: &section, hasher: &hasher, whitespace: &whitespace, reading: reading
+                ) else { return nil }
+                if reading.keepsLines { section.hunks.append(read.hunk) }
+                section.hunkCount += 1
+                pendingHunk = read.next
+            }
+            section.changedLinesDigest = hasher.finalize()
+            section.isWhitespaceOnly = section.hunkCount > 0 && whitespace?.isWhitespaceOnly == true
+            return section
+        }
+
+        /// A section's header alone: its paths, modes and object ids, no
+        /// hunk. Nil when it can't be parsed.
+        static func header(_ bytes: Data) -> PatchSection? {
+            var reader = LineReader(bytes)
+            return header(&reader, byteCount: bytes.count)?.section
+        }
+
+        /// The first lines of a deleted file, from its section: the `-`
+        /// lines its only hunk starts with, up to `maxBytes`. Nil when it
+        /// has none.
+        static func deletedFileStart(_ bytes: Data, maxLines: Int = 5, maxBytes: Int = 2_048) -> Data? {
+            var reader = LineReader(bytes)
+            guard header(&reader, byteCount: bytes.count)?.pendingHunk != nil else { return nil }
+            var start = Data()
+            for _ in 0..<maxLines where start.count < maxBytes {
+                guard let raw = reader.next(), raw.first == UInt8(ascii: "-") else { break }
+                start.append(raw.dropFirst().prefix(maxBytes - start.count))
+                start.append(UInt8(ascii: "\n"))
+            }
+            return start
+        }
+
+        /// Reads up to the first `@@` line, which it returns too.
+        private static func header(
+            _ reader: inout LineReader, byteCount: Int
+        ) -> (section: PatchSection, pendingHunk: Data?)? {
             guard let first = reader.next(), first.starts(with: Data("diff --git ".utf8)) else { return nil }
-            var section = PatchSection(byteCount: bytes.count)
+            var section = PatchSection(byteCount: byteCount)
             var oldName: String??
             var newName: String??
             var renamedFrom: String?
@@ -130,16 +196,7 @@ extension BranchReview {
             section.oldPath = renamedFrom ?? oldFromHeaders
             section.newPath = renamedTo ?? newFromHeaders
             guard section.key != nil else { return nil }
-
-            var hasher = ChangedLineHasher()
-            while let header = pendingHunk {
-                guard let read = hunk(header, from: &reader, into: &section, hasher: &hasher, keepsLines: keepsLines)
-                else { return nil }
-                if keepsLines { section.hunks.append(read.hunk) }
-                pendingHunk = read.next
-            }
-            section.changedLinesDigest = hasher.finalize()
-            return section
+            return (section, pendingHunk)
         }
 
         /// Reads one hunk after its `@@` line. Returns it, and the next
@@ -149,12 +206,14 @@ extension BranchReview {
             from reader: inout LineReader,
             into section: inout PatchSection,
             hasher: inout ChangedLineHasher,
-            keepsLines: Bool
+            whitespace: inout WhitespaceCheck?,
+            reading: Reading
         ) -> (hunk: Hunk, next: Data?)? {
             guard let header = hunkHeader(Substring(decoded(headerLine))) else { return nil }
             var oldRemaining = header.oldCount
             var newRemaining = header.newCount
             var body: [Line] = []
+            let index = section.hunkCount
             // The counts say where the hunk ends: an added line may well
             // read "+++ b/x" or "@@ -1 +1 @@".
             while let raw = reader.next() {
@@ -163,6 +222,7 @@ extension BranchReview {
                     kind = .noNewlineMarker
                 } else if oldRemaining == 0, newRemaining == 0 {
                     guard raw.starts(with: Data("@@ ".utf8)) else { return nil }
+                    whitespace?.endHunk()
                     return (Hunk(header: header, lines: body), raw)
                 } else {
                     switch raw.first {
@@ -187,11 +247,16 @@ extension BranchReview {
                 }
                 let content = raw.dropFirst()
                 hasher.add(kind, content)
-                if keepsLines {
+                whitespace?.add(kind, content)
+                if reading.findsRisks, kind == .added || kind == .removed {
+                    RiskRules.forEachLineRule(matching: content) { section.riskHits.insert(RiskHit(rule: $0, hunk: index)) }
+                }
+                if reading.keepsLines {
                     body.append(kind == .noNewlineMarker ? Line(kind: kind, text: "") : Line(kind: kind, bytes: content))
                 }
             }
             guard oldRemaining == 0, newRemaining == 0 else { return nil }
+            whitespace?.endHunk()
             return (Hunk(header: header, lines: body), nil)
         }
 
@@ -378,6 +443,8 @@ extension BranchReview {
                 file.oldPath = entry.oldPath
                 file.similarity = entry.score
             }
+            var riskHits: [RiskHit] = []
+            var hunkCount = 0
             for section in sections {
                 file.oldMode = file.oldMode ?? section.oldMode
                 file.newMode = section.newMode ?? file.newMode
@@ -390,13 +457,30 @@ extension BranchReview {
                 file.additions += section.additions
                 file.deletions += section.deletions
                 file.patchBytes += section.byteCount
+                // A type change's second section numbers its hunks after
+                // the first's.
+                riskHits += section.riskHits.map { RiskHit(rule: $0.rule, hunk: hunkCount + $0.hunk) }
+                hunkCount += section.hunkCount
             }
             if !file.isBinary {
                 file.oldObjectID = nil
                 file.newObjectID = nil
             }
             file.patchHash = patchHash(of: file, changedLinesDigests: sections.map(\.changedLinesDigest))
+            file.fold = contentFold(of: file, whitespaceOnly: sections.allSatisfy(\.isWhitespaceOnly))
+            file.signals = RiskRules.signals(lineHits: riskHits)
             return file
+        }
+
+        /// The folds a file's patch shows; those its name shows come first
+        /// (`Fold`), and are settled by the snapshot.
+        private static func contentFold(of file: FileChange, whitespaceOnly: Bool) -> Fold? {
+            let lines = file.additions + file.deletions
+            if file.status == .renamed, file.similarity == 100, lines == 0, file.oldMode == file.newMode {
+                return .pureRename
+            }
+            if whitespaceOnly, !file.isBinary { return .whitespaceOnly }
+            return file.isBinary ? .binary : nil
         }
     }
 
@@ -440,6 +524,75 @@ extension BranchReview.Hunk {
             newStart: header.newStart, newCount: header.newCount,
             section: header.section, lines: lines
         )
+    }
+}
+
+extension BranchReview {
+    /// Compares each hunk's old side with its new side, context lines
+    /// included, with trailing whitespace and, unless the indentation
+    /// carries meaning, leading whitespace and blank lines left out. Not
+    /// git's `-w`: whitespace inside a line is kept, since `" "` becoming
+    /// `""` or `a - -b` becoming `a --b` changes what the code does. Hunk
+    /// by hunk, not run by run: a reindent pairs a closing brace with
+    /// another one as context. A Swift multi-line string can't be told
+    /// apart from code here: its indentation reads as code's.
+    struct WhitespaceCheck {
+        enum Mode: Equatable {
+            case ignoringIndentation
+            /// Python, YAML, Makefiles, shell scripts: a line moved in or
+            /// out of a block, a blank line in a string or a heredoc.
+            case keepingIndentation
+        }
+
+        let mode: Mode
+        private var old = SHA256()
+        private var new = SHA256()
+        private(set) var isWhitespaceOnly = true
+
+        init(mode: Mode) {
+            self.mode = mode
+        }
+
+        mutating func add(_ kind: Line.Kind, _ content: Data) {
+            guard isWhitespaceOnly, kind != .noNewlineMarker, let kept = significant(content) else { return }
+            if kind != .added { Self.feed(kept, into: &old) }
+            if kind != .removed { Self.feed(kept, into: &new) }
+        }
+
+        mutating func endHunk() {
+            guard isWhitespaceOnly else { return }
+            if old.finalize() != new.finalize() { isWhitespaceOnly = false }
+            old = SHA256()
+            new = SHA256()
+        }
+
+        /// Nil for a line left out.
+        private func significant(_ content: Data) -> Data.SubSequence? {
+            var kept = content[...]
+            while let last = kept.last, Self.whitespace.contains(last) { kept = kept.dropLast() }
+            guard mode == .ignoringIndentation else { return kept }
+            while let first = kept.first, Self.whitespace.contains(first) { kept = kept.dropFirst() }
+            return kept.isEmpty ? nil : kept
+        }
+
+        private static func feed(_ line: Data.SubSequence, into hasher: inout SHA256) {
+            hasher.update(data: line)
+            hasher.update(data: Data([UInt8(ascii: "\n")]))
+        }
+
+        /// Space, tab, CR, vertical tab, form feed.
+        private static let whitespace: Set<UInt8> = [0x20, 0x09, 0x0D, 0x0B, 0x0C]
+
+        /// Files whose indentation carries meaning.
+        static func mode(for path: String) -> Mode {
+            let name = fileName(path)
+            if ["Makefile", "makefile", "GNUmakefile"].contains(name) { return .keepingIndentation }
+            let suffixes = [
+                ".py", ".pyi", ".pyw", ".yml", ".yaml", ".mk", ".sh", ".bash", ".zsh", ".md", ".markdown", ".haml",
+                ".pug", ".jade", ".sass", ".styl", ".coffee", ".nim", ".fs", ".fsx", ".fsi", ".hs", ".elm"
+            ]
+            return suffixes.contains { name.lowercased().hasSuffix($0) } ? .keepingIndentation : .ignoringIndentation
+        }
     }
 }
 

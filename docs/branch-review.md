@@ -165,10 +165,31 @@ Top to bottom:
    - pure renames (similarity 100%) and whitespace-only changes;
    - binaries.
 
+   `-linguist-generated` (or `=false`) keeps a file out of the generated
+   group whatever its name. When the branch changes a `.gitattributes`, its
+   `linguist-generated` marks are ignored: a branch mustn't fold its own
+   files. A marker counts outside quotes, or opening a line or its
+   comment: a script that writes the marker isn't generated. Minified code
+   with another name isn't folded: one long line would fold a hand-written
+   script. Whitespace only means each hunk reads the same without its blank
+   lines and the whitespace around its lines; whitespace inside a line
+   changes what the code does (`" "` and `""`), and in Python, YAML, a
+   Makefile or a shell script the indentation and blank lines do too. A
+   multi-line string (Swift, a JavaScript template) reads as code until the
+   brace tracking of "Tests against code" tells them apart. A folded file's diff loads when
+   its row opens, and folded files don't count toward the 5 MB of section
+   7: a generated bundle or a reformatted repository mustn't send the whole
+   page on demand. Listed without its patch (section 7, past 64 MB), a file
+   folds only by its name and attributes.
+
 **Uncommitted changes** are part of what the agent did, but not of the PR yet:
 they form their own group at the top, marked "not committed". A file changed
 both in commits and in the working tree is listed there once, with its whole
-patch from the merge base to the working tree. The files
+patch from the merge base to the working tree. A folded file that isn't
+committed stays in that group, collapsed: a build-rewritten
+`Package.resolved` must be seen before it is committed. The group refreshes
+while the agent works, so it lists added files first, then by path: a row
+doesn't move under the pointer. The files
 Nirux's worktree cleanup already treats as disposable
 (`WorktreeCleanup.disposablePaths`: the handovers,
 `.claude/settings.local.json`) are left out.
@@ -185,9 +206,9 @@ The page is useful before anyone clicks Explain. Nirux groups by path:
 | --- | --- |
 | Code | everything not below |
 | Tests | `Tests/`, `*Tests.swift`, `*_test.*`, `*.test.*`, `*.spec.*` |
-| Config and dependencies | `Package.swift`, `*.plist`, `*.entitlements`, `.swiftlint.yml`, `scripts/` |
+| Config and dependencies | `Package.swift`, `*.plist`, `*.entitlements`, `.swiftlint.yml`, `.gitattributes`, `scripts/`, the rest of `.github/` |
 | CI | `.github/workflows/`, `.github/actions/` |
-| Docs | `*.md`, `docs/` |
+| Docs | `*.md`, `docs/` at the top level |
 
 The rules apply top to bottom, and the first that matches wins: the table
 lists "Code" first for reading, but it is the fallback, tried last
@@ -377,13 +398,31 @@ notes are shown apart and never change these signals.
 
 | Signal | Raised by | Why it matters |
 | --- | --- | --- |
-| Persistence and state | `Codable` types, `CodingKeys`, `decodeIfPresent`, `Persistence*.swift`, `*Store.swift`, keys of `state.json` or `board.json` | Defaults for missing keys, rollback to an older nightly, data loss |
+| Persistence and state | `Codable` types, `CodingKeys`, `decodeIfPresent`, `*Persistence*`, `*Store.swift`, keys of `state.json` or `board.json` | Defaults for missing keys, rollback to an older nightly, data loss |
 | Security | Keychain (`SecItem`), `SecCode`/`SecStaticCode`, entitlements, the `nirux://` scheme (`NiruxURLRequest`), `HandoverFile`, Telegram remote access, `/tmp` paths, `Process` arguments | Input from outside, secrets, signing |
 | Concurrency | `@MainActor`, `nonisolated`, `@Sendable`, `@unchecked Sendable`, `DispatchQueue`, `OperationQueue`, `Task {`, `MainActor.assumeIsolated`, `RunLoop.main.perform` | CI's Swift 6.1 is stricter than local 6.2; a main-actor closure run off the main thread crashed a nightly (#48) |
 | App launch and quit | `applicationDidFinishLaunching`, `applicationWillTerminate`, the `--hook` mode, `NIRUX_*` variables, `Info.plist`, Sparkle, `bundle.sh` | Paths that only the installed, notarized app takes |
 | CI workflows | `.github/`, scripts the workflows call | The nightly publishes to every install |
-| Side effects outside Nirux | IOKit, `NSWorkspace`, writes to `~/.claude` or the hooks, notifications, process launches | They outlive the app or change the Mac |
+| Side effects outside Nirux | IOKit, `NSWorkspace`, writes to `~/.claude`, `~/.codex` or the hooks, notifications, `launchctl` | They outlive the app or change the Mac |
 | Dependencies | `Package.swift`, `Package.resolved` | A build-rewritten `Package.resolved` must not be committed |
+
+`Process` arguments are a launched process's (`Process(`, `BoundedProcess`,
+`.arguments =`), not `CommandLine.arguments`; launching one is a security
+signal, not a side effect, so that every git run doesn't raise two chips. A
+line rule matches anywhere in a `+` or `-` line, strings and trailing
+comments included, but not in a line that is only a comment, nor in a doc or
+a folded file: a generated file can say anything, and a reindented line
+changes nothing. A folded file raises only its path rules. A test ships
+nothing: it raises only the concurrency rules, which CI checks more strictly.
+Path rules also cover the files whose changes may name no rule: a name with
+`Persistence`, `HandoverFile`, `NiruxURLRequest`, `+URLScheme`, `Telegram`,
+the app delegate (`NiruxApp.swift`), the hook and skill installers.
+"Scripts the workflows call" are the changed files, docs and tests aside,
+whose path a workflow (`.github/workflows/*.yml`) or an action
+(`action.yml` under `.github/actions`, outside its `node_modules`) names:
+`./scripts/bundle.sh`. A change inside `applicationDidFinishLaunching` that
+doesn't name it is raised once the brace tracking of "Tests against code"
+gives each hunk its enclosing function.
 
 **Tests against code.** The header shows lines added in tests against lines
 added in code, and lists the symbols the branch declares that no test

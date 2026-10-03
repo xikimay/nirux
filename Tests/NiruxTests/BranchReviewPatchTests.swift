@@ -247,7 +247,7 @@ final class BranchReviewPatchTests: XCTestCase {
 
     private func hash(_ patch: Data, nameStatus: String = "M\0a.swift\0", keepsLines: Bool = true) throws -> String {
         let entries = try XCTUnwrap(Patch.nameStatus(Data(nameStatus.utf8)))
-        let sections = try XCTUnwrap(Patch.sections(of: patch, keepsLines: { _ in keepsLines }))
+        let sections = try XCTUnwrap(Patch.sections(of: patch, reading: { _ in Patch.Reading(keepsLines: keepsLines) }))
         return try XCTUnwrap(Patch.files(entries: entries, sections: sections)?.first?.patchHash)
     }
 
@@ -318,7 +318,7 @@ final class BranchReviewPatchTests: XCTestCase {
         let entries = try XCTUnwrap(Patch.nameStatus(Data("M\0a.swift\0".utf8)))
         let full = try XCTUnwrap(Patch.files(entries: entries, sections: try XCTUnwrap(Patch.sections(of: Data(patch.utf8)))))
         let counted = try XCTUnwrap(Patch.files(
-            entries: entries, sections: try XCTUnwrap(Patch.sections(of: Data(patch.utf8), keepsLines: { _ in false }))
+            entries: entries, sections: try XCTUnwrap(Patch.sections(of: Data(patch.utf8), reading: { _ in Patch.Reading(keepsLines: false) }))
         ))
 
         XCTAssertEqual(counted.first?.hunks, [])
