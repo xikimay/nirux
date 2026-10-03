@@ -364,6 +364,16 @@ NIRUX_CODESIGN_IDENTITY="Developer ID Application: Example Name (ABCDE12345)" \
   ./scripts/bundle.sh "dev" "1"
 ```
 
+### The diff bundle
+
+`Sources/Nirux/EditorAssets/pierre-diff.bundle.js` draws the editor's diffs with [`@pierre/diffs`](https://www.npmjs.com/package/@pierre/diffs). It is built from `Web/pierre-diff`: the wrapper `pierre-diff-entry.js`, and the versions its `package-lock.json` pins. CI doesn't build JavaScript, so the bundle is committed. After changing the wrapper or a version, rebuild it with Node.js and npm:
+
+```bash
+Web/pierre-diff/build.sh
+```
+
+It records the SHA-256 of the sources and of the bundle in `Web/pierre-diff/SHA256SUMS`; `PierreDiffBundleTests` fails when they no longer match. `Web/pierre-diff/build.sh --check` rebuilds to a temporary file and says whether the committed bundle is what the sources build.
+
 ### Fingerprint mismatch for libghostty-spm
 
 If SwiftPM fails with `Revision be4e5b6… for libghostty-spm … version 1.3.1 does not match previously recorded value b093032…`, your machine recorded the `1.3.1` tag before upstream re-tagged it onto an identical source tree. Clear the stale fingerprint once:
@@ -380,7 +390,8 @@ Nirux is a Swift Package with an AppKit executable target:
 - `Sources/Nirux/Views/NiruxShellView.swift`: workspace and column layout.
 - `Sources/Nirux/Model`: persisted workspace, column, and settings state.
 - `Sources/Nirux/Content`: PTY session handling and browser cookie import.
-- `Sources/Nirux/EditorAssets`: Monaco editor assets copied into release bundles.
+- `Sources/Nirux/EditorAssets`: Monaco editor assets and the diff bundle, copied into release bundles.
+- `Web/pierre-diff`: the source of the diff bundle and its build script.
 - `Resources/Info.plist`: bundle metadata, Sparkle feed, public key, and URL scheme.
 
 Primary dependencies:

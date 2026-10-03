@@ -84,10 +84,12 @@ that does the work.
   `renderGutterUtility`, `onGutterUtilityClick`; the hover variants are
   deprecated) to start a comment, line selection (`enableLineSelection`,
   `onLineSelected`) for ranges, and virtualization for long branches. The
-  bundle only imports `FileDiff` today, so the wrapper must also import the
-  virtualized components. The wrapper (`pierre-diff-entry.js`,
-  `package.json`, esbuild) only exists in the private proof of concept; R2
-  brings it into this repository.
+  wrapper (`Web/pierre-diff`: `pierre-diff-entry.js`, `package.json` and
+  its lock, built by `build.sh`) gives the page `createReview`: a file's
+  diff from its hunks, unified, without pierre's file header, rendered only
+  near the viewport (`VirtualizedFileDiff`). A line break inside a line
+  (CR, U+2028, U+2029) is shown as a symbol: in the patch text pierre parses,
+  it would end the line, and the rest could read as a hunk.
 - Persistence: `ColumnKind` gains `branchReview`. An older nightly decodes the
   unknown kind as a terminal, as for the board: a rollback turns the column
   into a shell in the worktree. Reopen it after updating.
@@ -274,13 +276,13 @@ What the runs found:
   setting and `setEnabled` could diverge (both run under `!telegramOnly`).
 - **With read-only access, Opus checked before asking, and found a real bug**
   that the reviews of #57 missed (two adversarial reviews, a confirmation
-  review and `/code-review`), still on `main`. In the background, after 10
-  minutes of silence, a Claude with hooks interrupted with Esc no longer needs
-  a background refresh, so `refreshAgentStatusInBackground` returns before
-  `updateKeepAwake()`. The assertion stays held until Nirux comes back to the
-  front or other activity refreshes the sidebar: another column still polled
-  (an agent without Claude hooks, an open dialog), a title change, another
-  Claude's hook event.
+  review and `/code-review`), still on `main` then (fixed since by #89). In
+  the background, after 10 minutes of silence, a Claude with hooks
+  interrupted with Esc no longer needs a background refresh, so
+  `refreshAgentStatusInBackground` returns before `updateKeepAwake()`. The
+  assertion stays held until Nirux comes back to the front or other activity
+  refreshes the sidebar: another column still polled (an agent without Claude
+  hooks, an open dialog), a title change, another Claude's hook event.
 - **Sonnet with the same access opened no file** (two turns, no read). It
   raised no false alarm, and found nothing either.
 - Opus also grouped better: `MainActorSchedule` and `TerminalSearchSession` in
