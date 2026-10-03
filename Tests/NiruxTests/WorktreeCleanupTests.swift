@@ -481,6 +481,53 @@ final class WorktreeCleanupTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: worktree))
     }
 
+    // MARK: - Branch Review files
+
+    /// The review of `branch` as the Branch Review column files it,
+    /// written once.
+    private func review(of branch: String = "feat/x", head: String) throws -> BranchReview.Store {
+        let options = BranchReview.Options(gitHub: nil, environment: environment)
+        let repository = try XCTUnwrap(BranchReview.repositoryIdentity(root: worktree, options: options))
+        let store = try XCTUnwrap(BranchReview.Store(
+            repository: repository, branch: branch, stateDirectory: URL(fileURLWithPath: root + "/state")
+        ))
+        let opened = store.open(
+            head: head, pullRequest: .notFound,
+            history: BranchReview.History(isOwnCommit: { _ in true }, isInReflog: { _ in true })
+        )
+        _ = try store.update(try XCTUnwrap(opened.access)) { _ in }.get()
+        return store
+    }
+
+    func testCleanedUpBranchLosesItsReview() throws {
+        tools.reviewStateDirectory = URL(fileURLWithPath: root + "/state")
+        let tip = try head(at: worktree)
+        let branchReview = try review(head: tip)
+        let mainReview = try review(of: "main", head: try head(at: repo))
+        try setPullRequests([pullRequest(12, "MERGED", head: tip)])
+
+        XCTAssertEqual(WorktreeCleanup.execute(try readyPlan(), tools: tools), .cleaned(forcedBranchDelete: false, trashFolder: nil))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: branchReview.fileURL.path))
+        XCTAssertEqual(mainReview.load().status, .loaded)
+    }
+
+    func testBranchKeptByTheCleanUpKeepsItsReview() throws {
+        tools.reviewStateDirectory = URL(fileURLWithPath: root + "/state")
+        let tip = try head(at: worktree)
+        let branchReview = try review(head: tip)
+        try setPullRequests([pullRequest(12, "MERGED", head: tip)])
+        try git(["update-ref", "-d", "refs/remotes/origin/feat/x"], at: repo)
+        let plan = try readyPlan()
+        // git can't delete a branch whose ref is locked.
+        try write("", to: "refs/heads/feat/x.lock", in: root + "/widgets/.git")
+
+        guard case .branchKept = WorktreeCleanup.execute(plan, tools: tools) else {
+            return XCTFail("the branch should have been kept")
+        }
+        XCTAssertTrue(branchExists("feat/x"))
+        XCTAssertEqual(branchReview.load().status, .loaded)
+    }
+
     func testTrashFailurePutsTheLeftoversBack() throws {
         try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
         try write("# handover\n", to: ".claude-handover.md", in: worktree)
@@ -582,7 +629,8 @@ final class WorktreeCleanupVerdictTests: XCTestCase {
 
     func testBuildOutputSummaryFoldsRepeatedNames() {
         let worktree = WorktreeCleanup.Worktree(
-            path: "/tmp/w", mainCheckout: "/tmp/m", branch: "b", tip: nil, isLocked: false, changes: [],
+            path: "/tmp/w", mainCheckout: "/tmp/m", commonDirectory: "/tmp/m/.git", branch: "b", tip: nil,
+            isLocked: false, changes: [],
             hiddenFiles: [], nestedWorktrees: [], untrackedDisposable: [],
             ignoredEntries: [".DS_Store", ".build/", ".env", "Sources/.DS_Store", "Tests/.DS_Store"],
             buildOutput: [".DS_Store", ".build/", "Sources/.DS_Store", "Tests/.DS_Store"]
@@ -609,7 +657,7 @@ final class WorktreeCleanupCandidateTests: XCTestCase {
         folder: String = "widgets.feat-x", disposable: [String] = [], ignored: [String] = []
     ) -> WorktreeCleanup.Plan {
         let worktree = WorktreeCleanup.Worktree(
-            path: "/tmp/\(folder)", mainCheckout: "/tmp/widgets", branch: "feat/x",
+            path: "/tmp/\(folder)", mainCheckout: "/tmp/widgets", commonDirectory: "/tmp/widgets/.git", branch: "feat/x",
             tip: String(repeating: "a", count: 40), isLocked: false, changes: [], hiddenFiles: [],
             nestedWorktrees: [], untrackedDisposable: disposable, ignoredEntries: ignored,
             buildOutput: ignored.filter(WorktreeCleanup.isRegenerable)

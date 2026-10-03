@@ -40,6 +40,9 @@ enum WorktreeCleanup {
         /// For the git commands that delete: killing `git worktree remove`
         /// midway would leave half a worktree, so only a wedged git hits it.
         var writeTimeout: TimeInterval = 3600
+        /// The state directory whose Branch Review files a deleted branch's
+        /// review is deleted from. Nil leaves reviews alone.
+        var reviewStateDirectory: URL?
         /// Moves a folder to the Trash and returns where it went.
         var trash: @Sendable (URL) throws -> URL = { url in
             var trashed: NSURL?
@@ -47,11 +50,15 @@ enum WorktreeCleanup {
             return (trashed as URL?) ?? url
         }
 
-        /// The system git and the GitHub CLI where PRDetect looks for it.
+        /// The system git and the GitHub CLI where PRDetect looks for it,
+        /// and Nirux's state directory.
         static var installed: Tools {
-            Tools(ghPath: ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"].first {
-                FileManager.default.isExecutableFile(atPath: $0)
-            })
+            Tools(
+                ghPath: ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"].first {
+                    FileManager.default.isExecutableFile(atPath: $0)
+                },
+                reviewStateDirectory: Persistence.stateDirectory
+            )
         }
     }
 
@@ -70,6 +77,9 @@ enum WorktreeCleanup {
         /// Where git runs to remove it: the main checkout, or the bare
         /// repository, listed first by `git worktree list`.
         let mainCheckout: String
+        /// The repository's common git folder, resolved with realpath:
+        /// what Branch Review files a branch's review under.
+        let commonDirectory: String
         /// Nil on a detached HEAD.
         let branch: String?
         /// Nil on a branch without commits.
@@ -249,6 +259,7 @@ enum WorktreeCleanup {
         return .worktree(Worktree(
             path: resolved,
             mainCheckout: location.mainCheckout,
+            commonDirectory: location.commonDirectory,
             branch: branch,
             tip: tip.isEmpty ? nil : tip,
             isLocked: location.isLocked,
@@ -267,6 +278,7 @@ enum WorktreeCleanup {
 
     private struct Location {
         let mainCheckout: String
+        let commonDirectory: String
         let isLocked: Bool
         let nestedWorktrees: [String]
     }
@@ -318,7 +330,9 @@ enum WorktreeCleanup {
             guard let otherPath = other.path.realPath, otherPath.hasPrefix(resolved + "/") else { return nil }
             return String(otherPath.dropFirst(resolved.count + 1))
         }
-        return .success(Location(mainCheckout: main, isLocked: entry.isLocked, nestedWorktrees: nested.sorted()))
+        return .success(Location(
+            mainCheckout: main, commonDirectory: commonDir, isLocked: entry.isLocked, nestedWorktrees: nested.sorted()
+        ))
     }
 
     /// A `.git` file whose `gitdir:` points at a folder that's gone: what
