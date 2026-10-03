@@ -1,7 +1,7 @@
 import XCTest
 @testable import Nirux
 
-/// Which transcript a column follows, and how its title bar shows it.
+/// Which transcript a column follows, and how its header shows it.
 @MainActor
 final class ClaudeUsageColumnTests: XCTestCase {
     private let claude = ForegroundProcess(
@@ -81,7 +81,7 @@ final class ClaudeUsageColumnTests: XCTestCase {
     func testRefreshHidesWhileTheSessionRunsElsewhereAndDropsItOnceGone() throws {
         let column = ColumnState(cwd: "/tmp")
         column.view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
-        column.layoutWithTitleBar(width: 600, height: 400)
+        column.layoutWithHeader(width: 600, height: 400)
         column.followClaudeTranscript(at: "/t/s1.jsonl", sessionID: "s1", process: claude.instance)
         var parser = ClaudeTranscriptUsageParser()
         parser.consume(line: Data(TranscriptLine.response(id: "msg_1", cacheRead: 50_000).utf8))
@@ -109,10 +109,11 @@ final class ClaudeUsageColumnTests: XCTestCase {
         XCTAssertEqual(column.usageLabel?.isHidden, true)
     }
 
-    func testTitleBarShowsTheUsageWhenThereIsRoom() {
+    func testHeaderShowsTheUsageWhenThereIsRoom() throws {
         let column = ColumnState(cwd: "/tmp")
+        column.terminalTitle = "claude"
         column.view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
-        column.layoutWithTitleBar(width: 600, height: 400)
+        column.layoutWithHeader(width: 600, height: 400)
         XCTAssertNil(column.usageLabel)
 
         var parser = ClaudeTranscriptUsageParser()
@@ -121,18 +122,22 @@ final class ClaudeUsageColumnTests: XCTestCase {
         let label = try? XCTUnwrap(column.usageLabel)
         XCTAssertEqual(label?.stringValue, "ctx 85%")
         XCTAssertEqual(label?.isHidden, false)
-        XCTAssertEqual(label?.frame.maxX, 588)
+        let header = try XCTUnwrap(column.header)
+        XCTAssertEqual(
+            label.map { $0.frame.maxX - ColumnHeaderView.labelInset }, header.menuButton.frame.minX - Theme.Space.sm,
+            "its text ends a gap before ⋯"
+        )
         XCTAssertTrue(label?.toolTip?.hasPrefix("Context: 850,002 tokens") == true)
 
         // Too narrow: the title keeps the room.
-        column.layoutWithTitleBar(width: 140, height: 400)
+        column.layoutWithHeader(width: 140, height: 400)
         XCTAssertEqual(label?.isHidden, true)
-        column.layoutWithTitleBar(width: 600, height: 400)
+        column.layoutWithHeader(width: 600, height: 400)
         XCTAssertEqual(label?.isHidden, false)
 
         column.setAgentUsage(nil)
         XCTAssertEqual(label?.isHidden, true)
-        column.layoutWithTitleBar(width: 600, height: 400)
+        column.layoutWithHeader(width: 600, height: 400)
         XCTAssertEqual(label?.isHidden, true)
     }
 }

@@ -204,10 +204,10 @@ extension ClaudeSessionUsage {
     /// From this share of the window on, the label turns orange.
     static let nearlyFullFraction = 0.8
 
-    /// Column title-bar text: "ctx 62%" when the window is known, "ctx 124k"
+    /// Column header text: "ctx 62%" when the window is known, "ctx 124k"
     /// otherwise, "ctx —" right after a compaction. Nil before the first
     /// response.
-    var titleBarText: String? {
+    var headerText: String? {
         guard responses > 0 else { return nil }
         guard let contextTokens else { return "ctx —" }
         if let contextFraction { return "ctx \(Self.percent(contextFraction))" }

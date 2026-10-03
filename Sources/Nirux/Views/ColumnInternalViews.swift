@@ -1,10 +1,5 @@
 import AppKit
 
-/// NSView subclass whose background drags the window (like a title bar).
-final class WindowDragView: NSView {
-    override var mouseDownCanMoveWindow: Bool { true }
-}
-
 /// NSView that accepts file drops and pastes the dropped file paths into
 /// the PTY via the `onFileDrop` callback.
 final class DropTargetView: NSView {

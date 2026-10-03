@@ -14,7 +14,7 @@ struct LocalServerTracking {
 // MARK: - Dev-server proposals
 
 /// A terminal printed `http://localhost:5173/` → once the port has a
-/// listening socket, its title bar offers to open it in a browser column
+/// listening socket, its header offers to open it in a browser column
 /// of this workspace, and ⌘B lists it first. The proposal goes away when
 /// opened, dismissed, the server stops, or a browser column shows the port.
 extension WorkspaceState {

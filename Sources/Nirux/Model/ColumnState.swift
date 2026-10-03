@@ -1,8 +1,8 @@
 import AppKit
 import GhosttyTerminal
 
-// WindowDragView and DropTargetView now live in Views/ColumnInternalViews.swift
-// — NSView subclasses don't belong in the model layer.
+// DropTargetView lives in Views/ColumnInternalViews.swift — NSView
+// subclasses don't belong in the model layer.
 
 /// A single column in a workspace — terminal or webview
 @MainActor
@@ -65,21 +65,34 @@ final class ColumnState {
 
     /// Terminal title from OSC 0/2 (agent context, vim filename, etc.)
     var terminalTitle: String? {
-        didSet { titleLabel?.stringValue = terminalTitle ?? "" }
+        didSet { terminalHeader?.title = terminalTitle ?? "" }
     }
 
-    // MARK: - Integrated title bar (pushes terminal down)
+    // MARK: - Header (pushes the terminal down)
     static let boringTitles: Set<String> = ["zsh", "bash", "fish", "sh", "-zsh", "-bash"]
-    private(set) var titleBar: NSView?
-    private var titleLabel: NSTextField?
-    /// What the title bar reads ("claude · ~/repo"); empty before its
-    /// first refresh.
-    var titleText: String { titleLabel?.stringValue ?? "" }
-    private var titleBorder: NSView?
+    /// A terminal column's header; the other types own theirs.
+    private(set) var terminalHeader: ColumnHeaderView?
+    /// The column's header, whatever its type (see `ColumnHeaderView`).
+    var header: ColumnHeaderView? {
+        terminalHeader ?? webViewColumn?.header ?? editorColumn?.header ?? projectBoard?.view.header
+    }
+    /// What a terminal's header reads ("claude · ~/repo", "claude (not
+    /// resumed) · ~/repo"); empty before its first refresh.
+    var titleText: String {
+        guard let terminalHeader else { return "" }
+        let title = deferredAgent == nil || terminalHeader.title.isEmpty
+            ? terminalHeader.title : "\(terminalHeader.title) (not resumed)"
+        return [title, terminalHeader.context].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
 
-    /// Height reserved for the title bar (always shown for terminal columns)
-    var titleBarHeight: CGFloat {
-        pty != nil ? 32 : 0
+    /// Height reserved for the terminal's header.
+    var headerHeight: CGFloat {
+        pty != nil ? ColumnHeaderView.height : 0
+    }
+
+    /// The header shows the column has the focus.
+    func setHeaderFocused(_ isFocused: Bool) {
+        header?.isFocused = isFocused
     }
 
     /// Spec needed to respawn the shell after it exits.
@@ -104,45 +117,39 @@ final class ColumnState {
     var terminalSearch: TerminalSearchSession?
 
     /// Claude session transcript this column follows, its latest usage and
-    /// the title-bar label showing it (ColumnState+AgentUsage.swift).
+    /// the header label showing it (ColumnState+AgentUsage.swift).
     var claudeTranscript: ClaudeTranscriptFollow?
     var agentUsage: ClaudeSessionUsage?
-    var usageLabel: NSTextField?
+    var usageLabel: ColumnHeaderLabel?
 
-    private func setupTitleBar() {
-        let bar = WindowDragView()
-        bar.wantsLayer = true
-        bar.layer?.backgroundColor = Theme.Color.surface.cgColor
-
-        let label = NSTextField(labelWithString: "")
-        label.font = .systemFont(ofSize: 12, weight: .medium)
-        label.textColor = Theme.Color.accent
-        label.lineBreakMode = .byTruncatingTail
-        label.isBezeled = false
-        label.drawsBackground = false
-        bar.addSubview(label)
-
-        let border = NSView()
-        border.wantsLayer = true
-        border.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
-        bar.addSubview(border)
-
-        bar.isHidden = true
-        view.addSubview(bar)
-        titleBar = bar
-        titleLabel = label
-        titleBorder = border
+    private func setupHeader() {
+        let header = ColumnHeaderView()
+        header.icon = .symbol(Theme.Symbol.terminal)
+        header.menuProvider = { Self.terminalMenu() }
+        header.isHidden = true
+        view.addSubview(header)
+        terminalHeader = header
     }
 
-    /// Update the title bar label text: [title or process] · [path]
+    /// The terminal's ⋯ menu.
+    private static func terminalMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(ColumnHeaderView.columnItem(
+            "Find in Terminal…", mainMenuAction: #selector(NiruxApp.showTerminalFind(_:))
+        ) { $0.showTerminalFind() })
+        menu.addItem(.separator())
+        ColumnHeaderView.columnMenuItems().forEach(menu.addItem)
+        return menu
+    }
+
+    /// Update the header's title and context: [title or process], [path].
     /// The snapshot is only evaluated for shell titles, which fall back to
     /// the foreground process name.
-    func updateTitleBarLabel(snapshot: @autoclosure () -> ProcessSnapshot) {
-        guard let label = titleLabel else { return }
+    func updateHeaderTitle(snapshot: @autoclosure () -> ProcessSnapshot) {
+        guard let header = terminalHeader else { return }
         if let deferredAgent {
-            let path = launchDirectory?.abbreviatedPath(maxComponents: 2) ?? ""
-            label.stringValue = ["\(deferredAgent.processName) (not resumed)", path].filter { !$0.isEmpty }
-                .joined(separator: " · ")
+            header.title = deferredAgent.processName
+            header.context = launchDirectory?.abbreviatedPath(maxComponents: 2) ?? ""
             return
         }
         let name: String
@@ -151,23 +158,30 @@ final class ColumnState {
         } else {
             name = pty?.foregroundProcessName(snapshot: snapshot()) ?? "shell"
         }
-        let path = pty?.childCwd?.abbreviatedPath(maxComponents: 2) ?? ""
-        label.stringValue = path.isEmpty ? name : "\(name) · \(path)"
+        header.title = name
+        header.context = pty?.childCwd?.abbreviatedPath(maxComponents: 2) ?? ""
     }
 
-    /// Position title bar and optionally resize terminal to fit. Called from layoutAndScroll.
-    func layoutWithTitleBar(width: CGFloat, height: CGFloat, resizeTerminal: Bool = true) {
-        let barHeight = titleBarHeight
-        titleBar?.isHidden = (barHeight == 0)
+    /// The terminal header's agent icon and status, from the sidebar's
+    /// reading of the column and what blocks its agent on the user.
+    func updateHeaderAgentState(_ column: ColumnInfo, wait: AgentWait?, now: TimeInterval) {
+        guard let header = terminalHeader else { return }
+        header.icon = .terminal(processName: column.deferredAgent?.processName ?? column.processName)
+        header.status = .agent(column, wait: wait, now: now)
+    }
 
-        if barHeight > 0, let bar = titleBar {
-            // Title bar at top of column (NSView: y=0 is bottom)
-            bar.frame = NSRect(x: 0, y: height - barHeight, width: width, height: barHeight)
-            layoutTitleBarContents()
-            titleBorder?.frame = NSRect(x: 0, y: 0, width: width, height: 1)
+    /// Position the header and optionally resize terminal to fit. Called from layoutAndScroll.
+    func layoutWithHeader(width: CGFloat, height: CGFloat, resizeTerminal: Bool = true) {
+        let barHeight = headerHeight
+        terminalHeader?.isHidden = (barHeight == 0)
+
+        if barHeight > 0, let header = terminalHeader {
+            // Header at the top of the column (NSView: y=0 is bottom).
+            header.frame = NSRect(x: 0, y: height - barHeight, width: width, height: barHeight)
+            header.layoutNow()
         }
 
-        // Terminal fills the remaining space below the title bar
+        // Terminal fills the remaining space below the header
         if resizeTerminal, let terminal = terminalView {
             terminal.frame = NSRect(x: 0, y: 0, width: width, height: height - barHeight)
             shellExitedOverlay?.frame = terminal.frame
@@ -177,54 +191,19 @@ final class ColumnState {
         layoutFindBar()
     }
 
-    /// Title label on the left; the dev-server chip, when shown, on the
-    /// right. The chip gets priority up to half the bar, then goes compact.
-    /// The agent usage label sits before the chip while the title keeps
-    /// room to be read.
-    func layoutTitleBarContents() {
-        guard let bar = titleBar else { return }
-        let width = bar.bounds.width
-        var trailingX = width - 12
-        if let chip = localServerChip, chip.url != nil {
-            let chipWidth = chip.width(fitting: max(0, width / 2 - 12))
-            chip.isHidden = chipWidth == 0
-            if chipWidth > 0 {
-                let chipX = width - chipWidth - 8
-                chip.frame = NSRect(
-                    x: chipX,
-                    y: (bar.bounds.height - LocalServerChipView.height) / 2,
-                    width: chipWidth,
-                    height: LocalServerChipView.height
-                )
-                trailingX = chipX - 8
-            }
-        }
-        if let usageLabel {
-            let usageWidth = ceil(usageLabel.intrinsicContentSize.width)
-            let fits = trailingX - usageWidth - 8 - 12 >= Self.minTitleWidthBesideUsage
-            usageLabel.isHidden = agentUsage?.titleBarText == nil || !fits
-            if !usageLabel.isHidden {
-                usageLabel.frame = NSRect(x: trailingX - usageWidth, y: 8, width: usageWidth, height: 16)
-                trailingX -= usageWidth + 8
-            }
-        }
-        titleLabel?.frame = NSRect(x: 12, y: 8, width: max(0, trailingX - 12), height: 16)
-    }
-
-    private static let minTitleWidthBesideUsage: CGFloat = 80
-
-    /// Show (or hide, with nil) the "open this dev server" chip.
+    /// Show (or hide, with nil) the "open this dev server" chip, the
+    /// header's last accessory: it keeps its room before the usage label.
     func setLocalServerChip(_ url: LocalServerURL?) {
         if localServerChip == nil {
-            guard url != nil, let bar = titleBar else { return }
+            guard url != nil, let header = terminalHeader else { return }
             let chip = LocalServerChipView(frame: .zero)
             chip.onOpen = { [weak self] url in self?.onLocalServerChipOpen?(url) }
             chip.onDismiss = { [weak self] url in self?.onLocalServerChipDismiss?(url) }
-            bar.addSubview(chip)
+            header.accessories.append(chip)
             localServerChip = chip
         }
         localServerChip?.configure(url: url)
-        layoutTitleBarContents()
+        terminalHeader?.layoutNow()
     }
 
     /// True if this column is a WebView (not a terminal)
@@ -305,8 +284,8 @@ final class ColumnState {
         view.addSubview(terminal)
         terminalView = terminal
 
-        // Title bar (above terminal, not overlapping)
-        setupTitleBar()
+        // Header (above the terminal, not overlapping)
+        setupHeader()
 
         // Forward cwd changes
         ptySession.onCwdChanged = { [weak self] path in

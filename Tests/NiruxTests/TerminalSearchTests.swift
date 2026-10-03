@@ -310,7 +310,7 @@ final class TerminalSearchTests: XCTestCase {
     func testTheFindBarOpensInTheTopRightCornerUnderTheTitleBar() {
         let column = ColumnState(cwd: "/tmp")
         column.view.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
-        column.layoutWithTitleBar(width: 600, height: 400)
+        column.layoutWithHeader(width: 600, height: 400)
         XCTAssertFalse(column.isFindBarOpen)
 
         column.showFindBar()
@@ -318,12 +318,12 @@ final class TerminalSearchTests: XCTestCase {
         XCTAssertTrue(column.isFindBarOpen)
         XCTAssertTrue(column.view.subviews.last === bar, "drawn above the terminal")
         XCTAssertEqual(bar?.frame.maxX, 590)
-        XCTAssertEqual(bar?.frame.maxY, 400 - column.titleBarHeight - 10)
+        XCTAssertEqual(bar?.frame.maxY, 400 - column.headerHeight - 10)
         XCTAssertEqual(bar?.frame.width, TerminalFindBar.preferredWidth)
 
         // A narrow column shrinks the bar instead of overflowing it.
         column.view.frame = NSRect(x: 0, y: 0, width: 200, height: 400)
-        column.layoutWithTitleBar(width: 200, height: 400)
+        column.layoutWithHeader(width: 200, height: 400)
         XCTAssertEqual(bar?.frame.minX, 10)
         XCTAssertEqual(bar?.frame.width, 180)
     }

@@ -75,14 +75,14 @@ extension ColumnState {
         }
     }
 
-    /// Top-right corner of the terminal, under the title bar.
+    /// Top-right corner of the terminal, under the header.
     func layoutFindBar() {
         guard let bar = findBar, !bar.isHidden else { return }
         let margin: CGFloat = 10
         let width = min(TerminalFindBar.preferredWidth, max(0, view.bounds.width - margin * 2))
         bar.frame = NSRect(
             x: view.bounds.width - margin - width,
-            y: view.bounds.height - titleBarHeight - margin - TerminalFindBar.height,
+            y: view.bounds.height - headerHeight - margin - TerminalFindBar.height,
             width: width,
             height: TerminalFindBar.height
         )

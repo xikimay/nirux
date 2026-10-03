@@ -3,8 +3,8 @@ import WebKit
 
 /// A Monaco-backed editor column. WKWebView hosts the Monaco editor; Swift
 /// reads/writes files and pushes content over the JS bridge. Each open file
-/// has its own Monaco model on the JS side, and the tab bar at the top lets
-/// the user switch between them.
+/// has its own Monaco model on the JS side, and the tab bar under the
+/// column header lets the user switch between them.
 @MainActor
 final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     let workspaceCwd: String
@@ -33,6 +33,8 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     private(set) var diffActiveMode: EditorDiffMode?
     private var diffModeByPath: [String: EditorDiffMode] = [:]
     private var diffGroupTabs: [String: DiffGroupTab] = [:]
+    /// The title of the active tab when it shows several files' diff.
+    var activeDiffGroupTitle: String? { activePath.flatMap { diffGroupTabs[$0]?.title } }
     private var selectedDiffMode: EditorDiffMode = .head
     private var diffLoadGeneration = 0
 
@@ -71,6 +73,10 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     var onSendSelectionShortcut: (() -> Void)?
 
     private let webView: WKWebView
+    /// The active file and its directory, the diff toggle and the search.
+    let header = ColumnHeaderView()
+    let diffButton = ColumnHeaderButton(symbol: Theme.Symbol.diff, toolTip: "Toggle Editor Diff")
+    let searchButton = ColumnHeaderButton(symbol: Theme.Symbol.search, toolTip: "Search Workspace")
     private let tabBar: EditorTabBar
     private let fileTree: EditorFileTree
     private let treeDivider: NSView
@@ -113,6 +119,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         wantsLayer = true
         layer?.backgroundColor = Theme.Color.base.cgColor
 
+        setupHeader()
         setupTree()
         setupTabBar()
         setupWebView(config: config)
@@ -248,29 +255,33 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     }
 
     private func layoutViews() {
+        let headerH = ColumnHeaderView.height
         let tabH = EditorTabBar.tabHeight
         let showTree = bounds.width >= Self.treeHideThreshold
         let treeW: CGFloat = showTree ? Self.treeWidth : 0
         let dividerW: CGFloat = showTree ? 1 : 0
+        // Below the header, which spans the tree too.
+        let contentH = max(0, bounds.height - headerH)
+        header.frame = NSRect(x: 0, y: contentH, width: bounds.width, height: headerH)
 
         fileTree.isHidden = !showTree
         treeDivider.isHidden = !showTree
 
         if showTree {
-            fileTree.frame = NSRect(x: 0, y: 0, width: treeW, height: bounds.height)
-            treeDivider.frame = NSRect(x: treeW, y: 0, width: dividerW, height: bounds.height)
+            fileTree.frame = NSRect(x: 0, y: 0, width: treeW, height: contentH)
+            treeDivider.frame = NSRect(x: treeW, y: 0, width: dividerW, height: contentH)
         }
 
         let editorX = treeW + dividerW
         let editorW = bounds.width - editorX
-        tabBar.frame = NSRect(x: editorX, y: bounds.height - tabH, width: editorW, height: tabH)
-        webView.frame = NSRect(x: editorX, y: 0, width: editorW, height: bounds.height - tabH)
+        tabBar.frame = NSRect(x: editorX, y: contentH - tabH, width: editorW, height: tabH)
+        webView.frame = NSRect(x: editorX, y: 0, width: editorW, height: max(0, contentH - tabH))
         loadFailureOverlay.frame = webView.frame
         if !conflictBanner.isHidden {
             let bannerH = EditorConflictBanner.height
             conflictBanner.frame = NSRect(
                 x: editorX + 8,
-                y: bounds.height - tabH - bannerH - 8,
+                y: contentH - tabH - bannerH - 8,
                 width: editorW - 16,
                 height: bannerH
             )
@@ -915,6 +926,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             return EditorTabBar.Tab(path: path, isDirty: dirty, title: diffGroupTabs[path]?.title)
         }
         tabBar.update(tabs: bars, activePath: activePath)
+        refreshHeader()
         updateConflictBanner()
     }
 
@@ -1093,7 +1105,7 @@ extension EditorColumn {
         "\(diffGroupPathPrefix)\(mode.rawValue)"
     }
 
-    private nonisolated static func isDiffGroupPath(_ path: String) -> Bool {
+    nonisolated static func isDiffGroupPath(_ path: String) -> Bool {
         path.hasPrefix(diffGroupPathPrefix)
     }
 

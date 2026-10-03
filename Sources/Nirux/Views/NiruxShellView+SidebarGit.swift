@@ -58,6 +58,7 @@ extension NiruxShellView {
                           mergedCleanup: mergedCleanupOffer(workspaceIndex: index))
         }
         tickHiddenSpaceAgents(visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses)
+        updateColumnHeaders(infos: infos, foregroundProcesses: foregroundProcesses, now: now)
         let profileInfos = workspaceStore.navigableProfiles.map { profile in
             let profileWorkspaces = workspaces.filter { $0.profileID == profile.id }
             let hasAttention = profileWorkspaces.contains { workspace in
@@ -108,6 +109,21 @@ extension NiruxShellView {
         }
         closeEndedAgentSessions(now: now)
         return (foregroundProcesses, invalidatedSessionBinding)
+    }
+
+    /// The terminal headers show their agent as the sidebar reads it, and
+    /// what blocks it on the user as ⌘J does.
+    private func updateColumnHeaders(
+        infos: [WorkspaceInfo], foregroundProcesses: [ObjectIdentifier: ForegroundProcess], now: TimeInterval
+    ) {
+        for info in infos {
+            guard let workspace = workspaces[safe: info.index] else { continue }
+            for column in info.columns {
+                guard let state = workspace.columns[safe: column.index], state.pty != nil else { continue }
+                let wait = state.pty?.agentBlockedWait(now: now, foreground: foregroundProcesses[ObjectIdentifier(state)])
+                state.updateHeaderAgentState(column, wait: wait, now: now)
+            }
+        }
     }
 
     /// The other spaces' columns tick too, unfocused: the space dots, the
@@ -499,9 +515,9 @@ extension NiruxShellView {
 
     func wireMetadataAndGitRefresh(_ workspace: WorkspaceState) {
         workspace.onMetadataChanged = { [weak self] in self?.scheduleMetadataRefresh() }
-        // The title bar follows its title immediately (no "· path" flicker);
+        // The header follows its title immediately (no "· path" flicker);
         // the snapshot is only taken for shell titles such as "zsh".
-        workspace.onColumnTitleChanged = { $0.updateTitleBarLabel(snapshot: ProcessSnapshot()) }
+        workspace.onColumnTitleChanged = { $0.updateHeaderTitle(snapshot: ProcessSnapshot()) }
         workspace.onFocusedColumnChanged = { [weak self, weak workspace] in
             guard let self, let workspace else { return }
             self.quickSwitch.focusMoved()
@@ -520,7 +536,7 @@ extension NiruxShellView {
     /// whole process table.
     static let metadataRefreshInterval: TimeInterval = 0.25
 
-    /// Coalesce sidebar/title-bar refreshes: the first request after a quiet
+    /// Coalesce sidebar/header refreshes: the first request after a quiet
     /// period runs on the next main-queue turn, later ones within the window
     /// collapse into one trailing refresh.
     func scheduleMetadataRefresh() {
@@ -537,7 +553,7 @@ extension NiruxShellView {
         }
     }
 
-    /// One process-table scan shared by the title bars and the sidebar.
+    /// One process-table scan shared by the headers and the sidebar.
     func refreshMetadata(snapshot: ProcessSnapshot? = nil) {
         isMetadataRefreshScheduled = false
         lastMetadataRefreshAt = ProcessInfo.processInfo.systemUptime
@@ -545,7 +561,7 @@ extension NiruxShellView {
         // width) resumes from here at the latest.
         scheduleDeferredAgentsOnScreen(restartingWait: false)
         let snapshot = snapshot ?? ProcessSnapshot()
-        refreshTitleBarLabels(snapshot: snapshot)
+        refreshHeaderTitles(snapshot: snapshot)
         updateSidebar(snapshot: snapshot)
     }
 

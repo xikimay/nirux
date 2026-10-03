@@ -128,7 +128,7 @@ final class ClaudeSessionUsageTests: XCTestCase {
         parser.consume(line: Data(TranscriptLine.response(id: "msg_1", cacheRead: 180_000).utf8))
         parser.consume(line: Data(TranscriptLine.compactBoundary().utf8))
         XCTAssertNil(parser.usage.contextTokens)
-        XCTAssertEqual(parser.usage.titleBarText, "ctx —")
+        XCTAssertEqual(parser.usage.headerText, "ctx —")
         XCTAssertEqual(parser.usage.responses, 1)
 
         parser.consume(line: Data(TranscriptLine.response(id: "msg_2", cacheWrite: 20_000).utf8))
@@ -149,7 +149,7 @@ final class ClaudeSessionUsageTests: XCTestCase {
             TranscriptLine.user("\"usage\" appears in plain text")
         ])
         XCTAssertEqual(usage, ClaudeSessionUsage())
-        XCTAssertNil(usage.titleBarText)
+        XCTAssertNil(usage.headerText)
     }
 
     func testHugeCountsAreClampedInsteadOfOverflowing() {
@@ -168,7 +168,7 @@ final class ClaudeSessionUsageTests: XCTestCase {
         var usage = parse([TranscriptLine.response(id: "msg_1", cacheRead: 150_000)])
         XCTAssertNil(usage.contextWindow)
         XCTAssertNil(usage.contextFraction)
-        XCTAssertEqual(usage.titleBarText, "ctx 150k")
+        XCTAssertEqual(usage.headerText, "ctx 150k")
         XCTAssertFalse(usage.isNearlyFull)
 
         usage = parse([
@@ -177,10 +177,10 @@ final class ClaudeSessionUsageTests: XCTestCase {
             TranscriptLine.response(id: "msg_2", cacheRead: 40_000)
         ])
         XCTAssertEqual(usage.contextWindow, 1_000_000)
-        XCTAssertEqual(usage.titleBarText, "ctx 4%")
+        XCTAssertEqual(usage.headerText, "ctx 4%")
 
         usage = parse([TranscriptLine.response(id: "msg_1", cacheRead: 850_000)])
-        XCTAssertEqual(usage.titleBarText, "ctx 85%")
+        XCTAssertEqual(usage.headerText, "ctx 85%")
         XCTAssertTrue(usage.isNearlyFull)
     }
 
@@ -223,7 +223,7 @@ final class ClaudeSessionUsageTests: XCTestCase {
         for model in ["claude-sonnet-4-6", "claude-sonnet-4-6-20260101", "gpt-5", "us.anthropic.claude-opus-4-8-v1:0"] {
             let usage = parse([TranscriptLine.response(id: "msg_1", cacheRead: 450_000, model: model)])
             XCTAssertNil(usage.contextWindow, model)
-            XCTAssertEqual(usage.titleBarText, "ctx 450k", model)
+            XCTAssertEqual(usage.headerText, "ctx 450k", model)
         }
         for model in ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-4-5", "claude-sonnet-5"] {
             XCTAssertEqual(parse([TranscriptLine.response(id: "msg_1", cacheRead: 450_000, model: model)]).contextWindow, 1_000_000, model)
@@ -238,7 +238,7 @@ final class ClaudeSessionUsageTests: XCTestCase {
         ])
         XCTAssertEqual(usage.peakContextTokens, 60_002)
         XCTAssertNil(usage.contextWindow)
-        XCTAssertEqual(usage.titleBarText, "ctx 60k")
+        XCTAssertEqual(usage.headerText, "ctx 60k")
         XCTAssertEqual(usage.model, "claude-sonnet-4-5")
     }
 

@@ -7,7 +7,7 @@ import XCTest
 final class ThemeGuardTests: XCTestCase {
     private static let advice = """
         use Theme instead of literal colors: window, board, status bar → Theme.Color.canvas; sidebar, panel, palette, \
-        sheet → .base; card, column title bar, active tab, find bar → .surface; menu, popover, toast, hint → .raised; \
+        sheet → .base; card, column header, active tab, find bar → .surface; menu, popover, toast, hint → .raised; \
         text → .textPrimary/.textSecondary/.textTertiary; \
         agent states → .working/.waiting/.error/.idle (.waiting only when something waits for the user's answer); \
         merged PR → .done; checks passed → .success; a warning → NSColor.systemOrange, never .waiting; \

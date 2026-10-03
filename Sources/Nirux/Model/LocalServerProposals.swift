@@ -13,7 +13,7 @@ import Foundation
 struct LocalServerProposalBook<ColumnID: Hashable> {
     struct Proposal: Equatable {
         let url: LocalServerURL
-        /// The terminal column that printed the URL; its title bar shows the chip.
+        /// The terminal column that printed the URL; its header shows the chip.
         let column: ColumnID
         /// When scans stopped finding a listener (nil while listening).
         var missingSince: TimeInterval?

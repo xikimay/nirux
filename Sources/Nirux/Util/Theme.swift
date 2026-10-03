@@ -16,7 +16,7 @@ enum Theme {
         static let canvas = NSColor(hex: 0x16161B)
         /// Sidebar, file trees, settings windows, sheets and panels.
         static let base = NSColor(hex: 0x1B1B23)
-        /// Cards, column title bars, the active editor tab, find bars, toolbars.
+        /// Cards, column headers, the active editor tab, find bars, toolbars.
         static let surface = NSColor(hex: 0x20202A)
         /// Above a surface: drag ghosts, menus, popovers, a toolbar's fields.
         static let raised = NSColor(hex: 0x292933)
@@ -78,6 +78,8 @@ enum Theme {
         /// Card titles, palette rows.
         static var title: NSFont { NSFont.systemFont(ofSize: 13, weight: .semibold) }
         static var body: NSFont { NSFont.systemFont(ofSize: 12) }
+        /// Column header titles.
+        static var bodyEmphasized: NSFont { NSFont.systemFont(ofSize: 12, weight: .semibold) }
         /// Durations, counts, chips, tooltips.
         static var caption: NSFont { NSFont.systemFont(ofSize: 11) }
         /// Section labels only, uppercased and tracked by `labelKern`.

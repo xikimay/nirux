@@ -119,14 +119,17 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertTrue(location.column === shell.activeWorkspace?.columns[location.workspace.focusedIndex],
                           "the board opens next to the focused column, focused")
             let board = location.board
-            try waitUntil("the pull requests are read") { board.view.statusLabel.stringValue.hasPrefix("Updated") }
-            try waitUntil("the post-merge run is read") { board.view.runLabel.stringValue.contains("success") }
+            try waitUntil("the pull requests are read") { Self.wasUpdated(board.view) }
+            try waitUntil("the post-merge run is read") { board.view.header.status?.toolTip?.contains("success") == true }
             try waitUntil("the worktrees are listed") { !board.view.rowViews.isEmpty }
 
-            XCTAssertEqual(board.view.repositoryLabel.stringValue, "acme/widgets")
-            XCTAssertEqual(board.view.projectPopup.titleOfSelectedItem, "Board")
-            XCTAssertTrue(board.view.runLabel.stringValue.hasPrefix("nightly: success "))
-            XCTAssertTrue(board.view.runLabel.stringValue.hasSuffix(", 43a9503"))
+            XCTAssertEqual(board.view.header.context, "acme/widgets")
+            XCTAssertEqual(Self.checkedProject(board.view), "Board")
+            let run = try XCTUnwrap(board.view.header.status)
+            XCTAssertTrue(run.text.hasPrefix("nightly "), run.text)
+            XCTAssertEqual(run.symbol, Theme.Symbol.checksPassed)
+            XCTAssertTrue(run.toolTip?.hasPrefix("nightly: success ") == true, run.toolTip ?? "")
+            XCTAssertTrue(run.toolTip?.hasSuffix(", 43a9503") == true, run.toolTip ?? "")
             XCTAssertEqual(board.view.rowViews.map(\.row.name), ["widgets", "login", "fix/remote"])
             let loginRow = try row("login", in: board)
             XCTAssertEqual(loginRow.pullRequest.stringValue, "#12 open")
@@ -204,7 +207,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             try click(form.saveButton)
             XCTAssertNil(shell.boardSettingsPanel)
             try waitUntil("the saved config is read, then the pull requests") {
-                board.view.statusLabel.stringValue.hasPrefix("Updated") && !board.view.rowViews.isEmpty
+                Self.wasUpdated(board.view) && !board.view.rowViews.isEmpty
             }
             XCTAssertEqual(board.view.rowViews.map(\.row.name), ["widgets", "feat/login", "fix/remote"],
                            "no worktree for either pull request")
@@ -267,16 +270,15 @@ final class ProjectBoardFlowTests: XCTestCase {
             widgetsBoard.board.view.chooseProject(id: other.id)
             XCTAssertTrue(shell.activeWorkspace === gadgetsBoard.workspace, "that project's board comes to the front")
             XCTAssertEqual(widgetsBoard.board.projectID, space.id)
-            XCTAssertEqual(widgetsBoard.board.view.projectPopup.titleOfSelectedItem, "Board", "its menu shows its project again")
 
             widgetsBoard.board.view.chooseProject(id: third.id)
             XCTAssertEqual(widgetsBoard.board.projectID, third.id)
-            XCTAssertEqual(widgetsBoard.board.view.projectPopup.titleOfSelectedItem, "Tools")
+            XCTAssertEqual(Self.checkedProject(widgetsBoard.board.view), "Tools")
 
             _ = shell.workspaceStore.deleteProfile(id: third.id)
             shell.updateSidebar()
             shell.renderProjectBoard(widgetsBoard.board)
-            XCTAssertEqual(widgetsBoard.board.view.projectPopup.titleOfSelectedItem, "Deleted project")
+            XCTAssertEqual(Self.checkedProject(widgetsBoard.board.view), "Deleted project")
             guard case .message(let message)? = widgetsBoard.board.view.content?.body else { return XCTFail("no message") }
             XCTAssertTrue(message.contains("deleted"), message)
         }
@@ -401,6 +403,19 @@ final class ProjectBoardFlowTests: XCTestCase {
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         }
         XCTAssertTrue(condition(), "timed out: \(what)")
+    }
+
+    /// Refresh's tooltip says when the board last read GitHub.
+    @MainActor
+    static func wasUpdated(_ board: ProjectBoardView) -> Bool {
+        board.refreshButton.toolTip?.hasPrefix("Refresh · Updated ") == true
+    }
+
+    /// The project the ⋯ menu's Project submenu checks.
+    @MainActor
+    static func checkedProject(_ board: ProjectBoardView) -> String? {
+        let checked = board.projectMenu().items.filter { $0.state == .on }
+        return checked.count == 1 ? checked[0].title : nil
     }
 
     /// The button must be what the window hit-tests under the pointer, as

@@ -19,6 +19,10 @@ final class EdgeGlowView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Decoration only: clicks reach the column headers and edges it
+    /// glows over.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
     func setVisible(_ visible: Bool) {
         guard visible != glowVisible else { return }
         glowVisible = visible

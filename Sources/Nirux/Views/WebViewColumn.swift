@@ -1,15 +1,18 @@
 import AppKit
 import WebKit
 
-/// A WKWebView column with navigation bar, integrated into Nirux's niri scroll.
+/// A WKWebView column with its header (back, forward, reload, the address,
+/// the Web Inspector), integrated into Nirux's niri scroll.
 @MainActor
 final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     let webView: WKWebView
-    private let navBar: NSView
-    private let backBtn: NSButton
-    private let fwdBtn: NSButton
-    private let reloadBtn: NSButton
-    private let urlField: NSTextField
+    let header = ColumnHeaderView()
+    let backButton = ColumnHeaderButton(symbol: Theme.Symbol.back, toolTip: "Back")
+    let forwardButton = ColumnHeaderButton(symbol: Theme.Symbol.forward, toolTip: "Forward")
+    let reloadButton = ColumnHeaderButton(symbol: Theme.Symbol.reload, toolTip: "Reload")
+    let inspectorButton = ColumnHeaderButton(symbol: Theme.Symbol.webInspector, toolTip: "Toggle Web Inspector")
+    let urlField = AddressField()
+    private let addressBox = AddressBox()
     private let progressBar: NSView
     private(set) var currentURL: String = "" {
         didSet { if currentURL != oldValue { onURLChanged?() } }
@@ -22,9 +25,6 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     /// notification's reveal-in-Finder action.
     private var downloadDestinations: [ObjectIdentifier: URL] = [:]
 
-    private static let barHeight: CGFloat = 32
-    private static let barBg = Theme.Color.surface
-    private static let fieldBg = Theme.Color.raised
     private static let accent: NSColor = Theme.Color.accent
 
     /// Shared data store — all WebViews share the same cookies
@@ -39,18 +39,13 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
         config.mediaTypesRequiringUserActionForPlayback = []
 
         webView = WKWebView(frame: .zero, configuration: config)
-        navBar = NSView()
-        backBtn = NSButton()
-        fwdBtn = NSButton()
-        reloadBtn = NSButton()
-        urlField = NSTextField()
         progressBar = NSView()
 
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = Theme.Color.surface.cgColor
 
-        setupNavBar()
+        setupHeader()
         setupProgressBar()
         setupWebView()
         navigate(to: url)
@@ -61,52 +56,31 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
 
     // MARK: - Setup
 
-    private func setupNavBar() {
-        navBar.wantsLayer = true
-        navBar.layer?.backgroundColor = Self.barBg.cgColor
-        addSubview(navBar)
+    private func setupHeader() {
+        header.icon = .symbol(Theme.Symbol.browser)
+        for (button, action) in [
+            (backButton, #selector(goBackAction)), (forwardButton, #selector(goForwardAction)),
+            (reloadButton, #selector(reloadAction)), (inspectorButton, #selector(inspectorAction))
+        ] {
+            button.target = self
+            button.action = action
+        }
+        backButton.isEnabled = false
+        forwardButton.isEnabled = false
+        header.leadingButtons = [backButton, forwardButton, reloadButton]
+        header.trailingButtons = [inspectorButton]
+        header.menuProvider = {
+            let menu = NSMenu()
+            ColumnHeaderView.columnMenuItems().forEach(menu.addItem)
+            return menu
+        }
 
-        // Back button
-        configureNavButton(backBtn, symbol: "◀", action: #selector(goBackAction))
-        backBtn.isEnabled = false
-        navBar.addSubview(backBtn)
-
-        // Forward button
-        configureNavButton(fwdBtn, symbol: "▶", action: #selector(goForwardAction))
-        fwdBtn.isEnabled = false
-        navBar.addSubview(fwdBtn)
-
-        // Reload button
-        configureNavButton(reloadBtn, symbol: "↻", action: #selector(reloadAction))
-        navBar.addSubview(reloadBtn)
-
-        // URL field
-        urlField.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        urlField.textColor = .white
-        urlField.backgroundColor = Self.fieldBg
-        urlField.isBezeled = false
-        urlField.focusRingType = .none
-        urlField.drawsBackground = true
-        urlField.isEditable = true
         urlField.placeholderString = "Enter URL..."
-        urlField.cell?.wraps = false
-        urlField.cell?.isScrollable = true
-        urlField.cell?.usesSingleLineMode = true
         urlField.target = self
         urlField.action = #selector(urlFieldAction)
-        urlField.wantsLayer = true
-        urlField.layer?.cornerRadius = 4
-        navBar.addSubview(urlField)
-    }
-
-    private func configureNavButton(_ btn: NSButton, symbol: String, action: Selector) {
-        btn.title = symbol
-        btn.bezelStyle = .accessoryBarAction
-        btn.isBordered = false
-        btn.font = .systemFont(ofSize: 14)
-        btn.contentTintColor = .secondaryLabelColor
-        btn.target = self
-        btn.action = action
+        addressBox.field = urlField
+        header.centerView = addressBox
+        addSubview(header)
     }
 
     private func setupProgressBar() {
@@ -147,19 +121,17 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
                 MainActor.assumeIsolated {
                     guard let self, let url = wv.url?.absoluteString else { return }
                     self.currentURL = url
-                    self.urlField.stringValue = url
+                    self.urlField.url = url
                 }
             },
             webView.observe(\.canGoBack, options: .new) { [weak self] wv, _ in
                 MainActor.assumeIsolated {
-                    self?.backBtn.isEnabled = wv.canGoBack
-                    self?.backBtn.contentTintColor = wv.canGoBack ? .white : .tertiaryLabelColor
+                    self?.backButton.isEnabled = wv.canGoBack
                 }
             },
             webView.observe(\.canGoForward, options: .new) { [weak self] wv, _ in
                 MainActor.assumeIsolated {
-                    self?.fwdBtn.isEnabled = wv.canGoForward
-                    self?.fwdBtn.contentTintColor = wv.canGoForward ? .white : .tertiaryLabelColor
+                    self?.forwardButton.isEnabled = wv.canGoForward
                 }
             }
         ]
@@ -178,26 +150,14 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     }
 
     private func layoutViews() {
-        let height = Self.barHeight
-        let pad: CGFloat = 4
-        let btnW: CGFloat = 28
-
-        navBar.frame = NSRect(x: 0, y: bounds.height - height, width: bounds.width, height: height)
-
-        // Buttons: back, forward, reload
-        backBtn.frame = NSRect(x: pad, y: 4, width: btnW, height: height - 8)
-        fwdBtn.frame = NSRect(x: pad + btnW, y: 4, width: btnW, height: height - 8)
-        reloadBtn.frame = NSRect(x: pad + btnW * 2, y: 4, width: btnW, height: height - 8)
-
-        // URL field fills the rest
-        let fieldX = pad + btnW * 3 + 4
-        urlField.frame = NSRect(x: fieldX, y: 5, width: bounds.width - fieldX - pad, height: height - 10)
+        let height = ColumnHeaderView.height
+        header.frame = NSRect(x: 0, y: bounds.height - height, width: bounds.width, height: height)
 
         // Progress bar
         progressBar.frame = NSRect(x: 0, y: bounds.height - height - 2, width: 0, height: 2)
 
-        // WebView fills below nav bar
-        webView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height - height - 2)
+        // WebView fills below the header
+        webView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - height - 2))
     }
 
     // MARK: - Navigation
@@ -212,7 +172,7 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
             }
         }
         currentURL = url
-        urlField.stringValue = url
+        urlField.url = url
         if let parsedURL = URL(string: url) {
             webView.load(URLRequest(url: parsedURL))
         }
@@ -221,14 +181,14 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     @objc private func goBackAction() { webView.goBack() }
     @objc private func goForwardAction() { webView.goForward() }
     @objc private func reloadAction() { webView.reload() }
+    @objc private func inspectorAction() { toggleInspector() }
 
     func goBack() { webView.goBack() }
     func goForward() { webView.goForward() }
 
     /// Move keyboard focus to the URL field with the text selected (Cmd+L).
     func focusAddressBar() {
-        window?.makeFirstResponder(urlField)
-        urlField.selectText(nil)
+        urlField.beginEditing()
     }
 
     /// Open the Web Inspector. WKWebView has no public API for this;

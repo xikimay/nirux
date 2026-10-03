@@ -1,9 +1,9 @@
 import AppKit
 
-/// Terminal title-bar chip offering to open a dev server that the terminal
+/// Terminal header chip offering to open a dev server that the terminal
 /// printed: "● localhost:5173 ↗  ✕". Clicking the label opens it in a
 /// browser column; ✕ dismisses the proposal.
-final class LocalServerChipView: NSView {
+final class LocalServerChipView: NSView, ColumnHeaderAccessory {
     static let height: CGFloat = 20
 
     /// Called with the URL the chip showed when clicked.
@@ -53,8 +53,8 @@ final class LocalServerChipView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    /// Show `url`, or clear the chip with nil. The view stays in the title
-    /// bar either way: removing it could free a button mid-click.
+    /// Show `url`, or clear the chip with nil. The view stays in the header
+    /// either way: removing it could free a button mid-click.
     func configure(url: LocalServerURL?) {
         guard url != self.url else { return }
         self.url = url
@@ -73,13 +73,16 @@ final class LocalServerChipView: NSView {
     }
 
     /// Width the chip takes within `maxWidth`: full label, else the compact
-    /// ":5173" one, else zero (the caller hides the chip).
+    /// ":5173" one, else zero (the header hides the chip), as without a URL.
     func width(fitting maxWidth: CGFloat) -> CGFloat {
+        guard url != nil else { return 0 }
         if fullWidth <= maxWidth { return fullWidth }
         return compactWidth <= maxWidth ? compactWidth : 0
     }
 
-    // The title bar drags the window; the chip, padding included, must not.
+    var accessoryHeight: CGFloat { Self.height }
+
+    // The header drags the window; the chip, padding included, must not.
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func resetCursorRects() {
