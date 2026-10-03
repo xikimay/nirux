@@ -2,7 +2,7 @@ import Foundation
 
 /// The Project Board (docs/project-board.md): one table per project of the
 /// branches its agents work on, with their workspaces, agents, pull
-/// requests and checks. B1 only reads: nothing here changes a repository.
+/// requests and checks. It only reads, but for Retarget (docs/pr-stacks.md).
 ///
 /// This file holds the pure types and the row builder (section 2). The
 /// `gh` client and its parsers, the refresh schedule and the agent states
@@ -68,6 +68,9 @@ extension ProjectBoard {
         /// Its head repository is the configured one. A fork's pull
         /// request matches no branch and gets no row.
         let isFromConfiguredRepository: Bool
+        /// The commit its base branch points to: a merged pull request's
+        /// branch untouched since its merge is a stack's spent base.
+        var baseOid: String?
 
         var isOpen: Bool { state == "OPEN" }
         var isConflicting: Bool { mergeable == "CONFLICTING" }
@@ -158,6 +161,8 @@ extension ProjectBoard {
         let folder: String?
         /// `folder` no longer exists: only its workspaces are left to close.
         var folderIsGone = false
+        /// Its open pull request's place in a stack (docs/pr-stacks.md).
+        var stack: StackPlace?
 
         /// The first workspace's title, else the branch, else the folder.
         var name: String {
@@ -180,6 +185,8 @@ extension ProjectBoard {
         /// The configured repository. Nil: no local repository is the
         /// project's, and pull requests aren't read.
         var repository: GitHubRepository?
+        /// The configured base branch: a pull request on it is never retargeted.
+        var baseBranch: String?
         var local: [LocalRepository] = []
         var workspaces: [Workspace] = []
         var openPullRequests: [PullRequest] = []
@@ -188,8 +195,9 @@ extension ProjectBoard {
 
     /// The rows, in board order (section 2):
     /// 1. the main working tree of each of the project's local repositories;
-    /// 2. branches with an open pull request (oldest first), then branches
-    ///    with a workspace but none;
+    /// 2. branches with an open pull request (oldest first, a stack at its
+    ///    root's place, in stack order), then branches with a workspace but
+    ///    none;
     /// 3. the other worktrees, with neither;
     /// 4. workspaces in another repository, or outside any.
     ///
@@ -253,11 +261,21 @@ extension ProjectBoard {
         foreign += outsideRows(outside)
 
         let byName = { (lhs: Row, rhs: Row) in lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending }
-        let active = byGroup[.active] ?? []
-        let withOpenPullRequest = active.filter { $0.pullRequest?.isOpen == true }
-            .sorted { ($0.pullRequest?.number ?? 0) < ($1.pullRequest?.number ?? 0) }
+        let stacks = stackPlaces(open: open, merged: merged, baseBranch: sources.baseBranch)
+        let placed = { (rows: [Row]) in
+            rows.map { row in
+                var row = row
+                row.stack = row.pullRequest.flatMap { $0.isOpen ? stacks[$0.number] : nil }
+                return row
+            }
+        }
+        let active = placed(byGroup[.active] ?? [])
+        let order = { (row: Row) -> (Int, Int) in
+            row.stack.map { ($0.root, $0.order) } ?? (row.pullRequest?.number ?? 0, 0)
+        }
+        let withOpenPullRequest = active.filter { $0.pullRequest?.isOpen == true }.sorted { order($0) < order($1) }
         let withoutOpenPullRequest = active.filter { $0.pullRequest?.isOpen != true }.sorted(by: byName)
-        return (byGroup[.main] ?? []) + withOpenPullRequest + withoutOpenPullRequest
+        return placed(byGroup[.main] ?? []) + withOpenPullRequest + withoutOpenPullRequest
             + (byGroup[.otherWorktree] ?? []).sorted(by: byName)
             + foreign.sorted { $0.order < $1.order }.map(\.row)
     }

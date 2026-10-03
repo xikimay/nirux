@@ -29,10 +29,12 @@ final class ProjectBoardFlowTests: XCTestCase {
         private let lock = NSLock()
         private var recorded: [FakeGitHubCall] = []
         let openPullRequests: String
+        let mergedPullRequests: String
         let runs: String
 
-        init(openPullRequests: String, runs: String) {
+        init(openPullRequests: String, mergedPullRequests: String = "[]", runs: String) {
             self.openPullRequests = openPullRequests
+            self.mergedPullRequests = mergedPullRequests
             self.runs = runs
         }
 
@@ -50,12 +52,24 @@ final class ProjectBoardFlowTests: XCTestCase {
 
         func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, ProjectBoard.FetchError> {
             record("pr \(state) \(repository)")
-            return .success(Data((state == .open ? openPullRequests : "[]").utf8))
+            return .success(Data((state == .open ? openPullRequests : mergedPullRequests).utf8))
         }
 
         func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, ProjectBoard.FetchError> {
             record("run \(repository) \(workflow) \(branch)")
             return .success(Data(runs.utf8))
+        }
+
+        private var failure: ProjectBoard.FetchError?
+        /// What the next retargets answer, when GitHub refuses them.
+        var retargetFailure: ProjectBoard.FetchError? {
+            get { lock.lock(); defer { lock.unlock() }; return failure }
+            set { lock.lock(); failure = newValue; lock.unlock() }
+        }
+
+        func retarget(repository: String, number: Int, base: String) -> Result<Data, ProjectBoard.FetchError> {
+            record("retarget \(repository) #\(number) \(base)")
+            return retargetFailure.map { .failure($0) } ?? .success(Data(base.utf8))
         }
     }
 
