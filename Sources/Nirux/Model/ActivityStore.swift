@@ -12,6 +12,7 @@ struct ActivityEntry: Codable, Hashable {
         case missionQuestion
         case missionCompleted
         case missionResponse
+        case missionInstruction
     }
 
     let category: Category
@@ -161,7 +162,8 @@ final class ActivityStore {
             .turnComplete,
             .missionQuestion,
             .missionCompleted,
-            .missionResponse
+            .missionResponse,
+            .missionInstruction
         ].contains(entry.category) {
             if let last = result.last,
                last.missionEventID == nil,
@@ -236,6 +238,7 @@ final class ActivityStore {
         let feed = feedEntries
         return feed.enumerated().filter { index, entry in
             guard entry.category != .missionResponse,
+                  entry.category != .missionInstruction,
                   entry.timestamp > lastReadTimestamp
             else { return false }
             return entry.category != .missionQuestion

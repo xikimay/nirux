@@ -144,6 +144,7 @@ enum GitWorktree {
             }
             let existing = worktrees[index].path
             if let reusable = reusableWorktree(existing, branch: branch, requester: repoRoot, worktrees: worktrees) {
+                ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repoRoot)
                 return (reusable, nil)
             }
             if FileManager.default.fileExists(atPath: existing) {
@@ -184,6 +185,7 @@ enum GitWorktree {
 
         let result = gitRunFull(args, cwd: repoRoot)
         if result.status == 0 {
+            ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repoRoot)
             return (worktreePath, nil)
         }
         let msg = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)

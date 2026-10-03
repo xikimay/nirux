@@ -43,6 +43,8 @@ final class SidebarView: NSView {
     /// The menu of the card's PR feedback line, by workspace id; nil when
     /// there's nothing.
     var prFeedbackMenu: ((String) -> NSMenu?)?
+    /// A card's PR link clicked: (workspaceIndex, url).
+    var onWorkspaceURLClicked: ((Int, String) -> Void)?
     var onWorkspaceAction: ((WorkspaceSidebarAction, Int) -> Void)?
     /// Whether the workspace's menu offers "Clean Up Worktree…" (it's open
     /// in a linked worktree, or its folder is gone). Asked on each menu.
@@ -494,8 +496,9 @@ final class SidebarView: NSView {
                 onWorkspaceAction?(.cleanUpWorktree, workspaceIndex)
             } else if let workspaceID = Self.prFeedbackActionWorkspaceID(url) {
                 prFeedbackMenu?(workspaceID)?.popUp(positioning: nil, at: convert(event.locationInWindow, from: nil), in: self)
-            } else if let url = URL(string: url) {
-                NSWorkspace.shared.open(url)
+            } else if let (workspaceIndex, url) = Self.openActionTarget(url),
+                      case .web = TerminalLinkTarget.parse(url) {
+                onWorkspaceURLClicked?(workspaceIndex, url)
             }
         case .column(let workspaceIndex, let columnIndex):
             onColumnClicked?(workspaceIndex, columnIndex)
@@ -564,6 +567,7 @@ final class SidebarView: NSView {
             self?.onWorkspaceAction?(.close, workspaceIndex)
         }.isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
         addWorktreeCleanupItem(to: menu, workspaceIndex: workspaceIndex)
+        addCIFailureItems(to: menu, pullRequest: workspace?.prInfo, workspaceIndex: workspaceIndex)
         menu.addClosureItem(title: "View/Edit Context…") { [weak self] in
             self?.onWorkspaceAction?(.editContext, workspaceIndex)
         }
@@ -682,6 +686,11 @@ final class SidebarView: NSView {
         "action:pr-feedback:\(workspaceID)"
     }
 
+    /// Opens `url` in a browser column of the card's workspace.
+    static func openActionURL(workspaceIndex: Int, url: String) -> String {
+        "action:open:\(workspaceIndex):\(url)"
+    }
+
     static let inactiveSectionActionURL = "action:inactive-section-toggle"
 
     private static func actionWorkspaceIndex(_ value: String, prefix: String) -> Int? {
@@ -693,6 +702,14 @@ final class SidebarView: NSView {
         let prefix = "action:pr-feedback:"
         guard value.hasPrefix(prefix) else { return nil }
         return String(value.dropFirst(prefix.count))
+    }
+
+    private static func openActionTarget(_ value: String) -> (Int, String)? {
+        let prefix = "action:open:"
+        guard value.hasPrefix(prefix) else { return nil }
+        let rest = value.dropFirst(prefix.count)
+        guard let colon = rest.firstIndex(of: ":"), let workspaceIndex = Int(rest[..<colon]) else { return nil }
+        return (workspaceIndex, String(rest[rest.index(after: colon)...]))
     }
 }
 

@@ -313,6 +313,12 @@ extension NiruxShellView {
         case .cleanUpWorktree:
             requestWorktreeCleanup(workspaceIndex: workspaceIndex)
             return
+        case .askWhyCIFailed:
+            askAgentWhyCIFailed(workspaces[workspaceIndex])
+            return
+        case .rerunFailedCI:
+            confirmRerunFailedCI(workspaces[workspaceIndex])
+            return
         }
         guard didChange else { return }
         refreshAfterWorkspaceMutation()

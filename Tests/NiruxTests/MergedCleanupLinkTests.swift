@@ -65,7 +65,7 @@ final class MergedCleanupLinkTests: XCTestCase {
 
     private func pullRequest(state: String) -> PRInfo {
         PRInfo(
-            number: 7, state: state, isDraft: false, ciStatus: nil, failedCheckUrl: nil, reviewDecision: nil,
+            number: 7, state: state, isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
             mergeable: nil, url: "https://example.test/pull/7", additions: nil, deletions: nil, changedFiles: nil
         )
     }

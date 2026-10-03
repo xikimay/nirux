@@ -184,6 +184,11 @@ final class NiruxShellView: NSView {
         }
         sidebar.onDiffStatsClicked = { [weak self] index in self?.openDiffInEditor(workspaceIndex: index) }
         sidebar.prFeedbackMenu = { [weak self] workspaceID in self?.prFeedbackMenu(workspaceID: workspaceID) }
+        sidebar.onWorkspaceURLClicked = { [weak self] index, url in
+            guard let self else { return }
+            if self.activeWSIndex != index { self.switchToWorkspace(index) }
+            self.openWebView(url: url, in: self.workspaces[index])
+        }
         sidebar.onOnboardingAction = { [weak self] action in self?.handleOnboardingAction(action) }
         NotificationCenter.default.addObserver(
             self,

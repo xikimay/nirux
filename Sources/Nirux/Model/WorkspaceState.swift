@@ -79,6 +79,10 @@ final class WorkspaceState {
     var prFeedback: PRFeedback?
     /// Bumped at each feedback read: only the latest one applies.
     var prFeedbackGeneration = 0
+    /// The red checks already reported (`CIFailure.reportKey`), and on
+    /// which branch. The first call, at launch or on another branch, only
+    /// records: a pull request that was already red isn't news.
+    private var reportedRedChecks: (branch: String?, keys: Set<String>)?
     var diffStats: String?
 
     // Workspace context. Purpose/next step/blocker are always human-owned.
@@ -252,6 +256,20 @@ extension WorkspaceState {
         else { return false }
         prInfo = info
         return true
+    }
+
+    /// The red checks of `prInfo` not reported yet, each once
+    /// (docs/ci-failure-actions.md).
+    func takeNewRedChecks() -> [ProjectBoard.Check] {
+        let red = prInfo.map(CIFailure.redChecks) ?? []
+        let keys = red.map(CIFailure.reportKey)
+        let branch = gitContext?.branch
+        guard let reported = reportedRedChecks, reported.branch == branch else {
+            reportedRedChecks = (branch, Set(keys))
+            return []
+        }
+        reportedRedChecks = (branch, reported.keys.union(keys))
+        return red.filter { !reported.keys.contains(CIFailure.reportKey($0)) }
     }
 
     func beginPullRequestObservation(for context: GitContext) -> PullRequestObservation? {

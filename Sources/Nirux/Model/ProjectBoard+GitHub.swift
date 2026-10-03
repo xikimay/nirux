@@ -154,6 +154,8 @@ extension ProjectBoard {
     /// A `CheckRun` or a `StatusContext` of the rollup.
     static func check(from json: [String: Any]) -> Check? {
         let startedAt = json["startedAt"] as? String
+        // gh writes a missing URL as "".
+        let url = ((json["detailsUrl"] ?? json["targetUrl"]) as? String).flatMap { $0.isEmpty ? nil : $0 }
         if let context = json["context"] as? String {
             let result: CheckResult
             switch (json["state"] as? String)?.uppercased() {
@@ -161,7 +163,7 @@ extension ProjectBoard {
             case "FAILURE", "ERROR": result = .failure
             default: result = .pending
             }
-            return Check(name: context, workflowName: nil, result: result, startedAt: startedAt)
+            return Check(name: context, workflowName: nil, result: result, startedAt: startedAt, url: url)
         }
         guard let name = json["name"] as? String else { return nil }
         let status = (json["status"] as? String)?.uppercased() ?? ""
@@ -178,7 +180,9 @@ extension ProjectBoard {
             default: result = .pending
             }
         }
-        return Check(name: name, workflowName: json["workflowName"] as? String, result: result, startedAt: startedAt)
+        return Check(
+            name: name, workflowName: json["workflowName"] as? String, result: result, startedAt: startedAt, url: url
+        )
     }
 
     /// `gh run list --json …` output, newest first; nil when it isn't a
@@ -257,6 +261,18 @@ extension ProjectBoard {
     /// it reran. Several matching a required name (jobs of several
     /// workflows) show the worst of them.
     static func checkSummary(_ checks: [Check], required: [String]) -> CheckSummary {
+        let current = latest(checks)
+        return CheckSummary(
+            required: required.map { name in
+                RequiredCheck(name: name, result: current.filter { $0.matches(name) }.map(\.result).max())
+            },
+            others: current.filter { check in !required.contains { check.matches($0) } }.map(\.result)
+        )
+    }
+
+    /// The latest run of each check (by workflow and name), in first-seen
+    /// order. The sidebar's pull request keeps them too.
+    static func latest(_ checks: [Check]) -> [Check] {
         var latest: [String: Check] = [:]
         var order: [String] = []
         for check in checks {
@@ -268,13 +284,7 @@ extension ProjectBoard {
             }
             if startOrder(check) >= startOrder(known) { latest[key] = check }
         }
-        let current = order.compactMap { latest[$0] }
-        return CheckSummary(
-            required: required.map { name in
-                RequiredCheck(name: name, result: current.filter { $0.matches(name) }.map(\.result).max())
-            },
-            others: current.filter { check in !required.contains { check.matches($0) } }.map(\.result)
-        )
+        return order.compactMap { latest[$0] }
     }
 
     /// A run not started yet (a rerun waiting for a runner) has no start,

@@ -101,7 +101,7 @@ struct AgentStatusMachine {
     /// earlier prompt arrived late (Claude doesn't wait for it) and ends
     /// nothing; one about a prompt never seen (a turn Claude started by
     /// itself) counts.
-    private var lastPromptAt: TimeInterval?
+    private(set) var lastPromptAt: TimeInterval?
     private var turnPromptID: String?
     private var recentPromptIDs: [String] = []
 
@@ -309,8 +309,10 @@ struct AgentStatusMachine {
         // Auto (mid-turn) or /compact: same conversation, no turn ends.
         guard event.source != "compact" else { return }
         // A new conversation in this process (startup, /clear, /resume):
-        // whatever dialogs the old one showed are gone.
+        // whatever dialogs the old one showed are gone. `/clear` took what
+        // was typed at the prompt, but fires no UserPromptSubmit.
         endTurn()
+        if event.source == "clear" { lastPromptAt = event.timestamp }
         closeDialogs { _ in true }
         lastAttentionReason = nil
         turnFailure = nil
