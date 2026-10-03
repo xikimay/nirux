@@ -1,6 +1,6 @@
 import AppKit
 
-/// The block under a column whose Claude turn failed on an API error: the
+/// The block of a card whose Claude turn failed on an API error: the
 /// error, then Resume (which types `continue`), `continue` on its way, or
 /// why Resume waits.
 @MainActor
@@ -18,84 +18,65 @@ struct SidebarResumeBlockRenderer {
 
     func render() -> SidebarApprovalBlockRenderer.Result {
         let metrics = SidebarExpandedMetrics.self
-        let height = metrics.resumeBlockHeight
-        let blockFrame = NSRect(x: x - 7, y: top - height, width: width + 14, height: height)
-        var views: [NSView] = [background(frame: blockFrame), errorLine()]
+        let height = metrics.resumeBlockHeight(for: resume)
+        let blockFrame = NSRect(x: x, y: top - height, width: width, height: height)
+        var views: [NSView] = []
         var hitAreas: [SidebarHitArea] = []
         var buttons: [String: SidebarBadgeView] = [:]
 
-        let buttonsY = top - height + metrics.approvalInset
         if let status = resume.status {
-            views.append(self.status(status, x: x, y: buttonsY, width: width, alpha: resume == .sending ? 0.55 : 0.7))
+            views.append(errorLine(y: top - metrics.actionLineHeight, width: width))
+            views.append(self.status(status, y: top - height))
         } else {
-            let button = resumeButton()
-            button.frame = NSRect(x: x, y: buttonsY, width: metrics.resumeButtonWidth, height: metrics.approvalButtonHeight)
-            views.append(button)
-            let region = SidebarHitRegion.agentResume(
-                workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt
+            let button = SidebarActionButton.secondary(
+                "Resume", symbol: Theme.Symbol.resume, label: "Resume: type “continue” into claude"
             )
+            let buttonWidth = button.fittingWidth
+            button.frame = NSRect(x: x + width - buttonWidth, y: top - height, width: buttonWidth, height: metrics.buttonHeight)
+            views.append(errorLine(
+                y: top - (metrics.buttonHeight + metrics.actionLineHeight) / 2,
+                width: button.frame.minX - Theme.Space.sm - x
+            ))
+            views.append(button)
             buttons[SidebarHoverTarget.resumeButtonKey(
                 workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt
             )] = button
-            hitAreas.append(SidebarHitArea(frame: button.frame.insetBy(dx: -3, dy: -3), region: region))
-            let offset = metrics.resumeButtonWidth + 8
-            views.append(status("types “continue”", x: x + offset, y: buttonsY, width: width - offset, alpha: 0.4))
+            hitAreas.append(SidebarHitArea(
+                frame: button.frame.insetBy(dx: -3, dy: -3),
+                region: .agentResume(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt)
+            ))
         }
         hitAreas.append(SidebarHitArea(frame: blockFrame, region: .actionBlock(workspaceIndex: workspaceIndex)))
-        return SidebarApprovalBlockRenderer.Result(
-            views: views, hitAreas: hitAreas, buttons: buttons, bottomY: top - height - metrics.approvalBottomGap
-        )
+        return SidebarApprovalBlockRenderer.Result(views: views, hitAreas: hitAreas, buttons: buttons)
     }
 
-    private func background(frame: NSRect) -> NSView {
-        let background = SidebarBackgroundView(frame: frame)
-        background.wantsLayer = true
-        background.layer?.cornerRadius = 6
-        background.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.07).cgColor
-        background.layer?.borderWidth = 1
-        background.layer?.borderColor = NSColor.systemRed.withAlphaComponent(0.28).cgColor
-        return background
-    }
-
-    /// "rate_limit — API Error: 429 …", cut to one line; whole in the tooltip.
-    private func errorLine() -> NSTextField {
+    /// "rate_limit"; "rate_limit — API Error: 429 …" in the tooltip.
+    private func errorLine(y: CGFloat, width: CGFloat) -> NSTextField {
         let metrics = SidebarExpandedMetrics.self
+        let font = Theme.Font.caption
         let text = [kind ?? "error", detail].compactMap { $0 }.joined(separator: " — ")
-        let label = NSTextField(labelWithString: text)
-        label.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-        label.textColor = NSColor.white.withAlphaComponent(0.8)
-        label.lineBreakMode = .byTruncatingTail
-        label.frame = NSRect(
-            x: x, y: top - metrics.approvalInset - metrics.resumeLineHeight, width: width, height: metrics.resumeLineHeight
-        )
+        let line = NSMutableAttributedString()
+        // The kind fits the line; the error as the terminal showed it is in
+        // the tooltip.
+        let shown = kind ?? detail ?? "error"
+        if let icon = SidebarRenderer.symbol(Theme.Symbol.agentError, color: Theme.Color.error) {
+            line.append(SidebarColumnChip.attachment(icon, side: 12, font: font))
+            line.append(SidebarColumnChip.spacer(6))
+        }
+        line.append(NSAttributedString(string: shown, attributes: [.font: font, .foregroundColor: Theme.Color.error]))
+        let label = NSTextField.sidebarLine(line)
+        label.frame = NSRect(x: x, y: y - 1, width: max(0, width), height: metrics.actionLineHeight + 2)
         label.toolTip = text
         label.setAccessibilityLabel("Claude stopped on an API error: \(text)")
         return label
     }
 
-    private func status(_ text: String, x: CGFloat, y: CGFloat, width: CGFloat, alpha: CGFloat) -> NSTextField {
+    private func status(_ text: String, y: CGFloat) -> NSTextField {
         let status = NSTextField(labelWithString: text)
-        status.font = .systemFont(ofSize: 10.5, weight: .medium)
-        status.textColor = NSColor.white.withAlphaComponent(alpha)
+        status.font = Theme.Font.caption
+        status.textColor = resume == .sending ? Theme.Color.textTertiary : Theme.Color.textSecondary
         status.lineBreakMode = .byTruncatingTail
-        status.frame = NSRect(x: x, y: y + 2, width: max(0, width), height: 16)
+        status.frame = NSRect(x: x, y: y, width: width, height: SidebarExpandedMetrics.actionLineHeight)
         return status
-    }
-
-    private func resumeButton() -> SidebarBadgeView {
-        let color = Theme.Color.accent
-        let label = "Resume: type “continue” into claude"
-        let button = SidebarBadgeView(
-            text: "Resume",
-            textColor: color.withAlphaComponent(0.95),
-            fillColor: color.withAlphaComponent(0.16),
-            font: .systemFont(ofSize: 11, weight: .semibold)
-        )
-        button.hoverTextColor = color
-        button.hoverFillColor = color.withAlphaComponent(0.3)
-        button.toolTip = label
-        button.setAccessibilityRole(.button)
-        button.setAccessibilityLabel(label)
-        return button
     }
 }

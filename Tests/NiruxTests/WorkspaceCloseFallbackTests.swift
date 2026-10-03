@@ -210,7 +210,7 @@ final class WorkspaceCloseFallbackTests: XCTestCase {
             for title in ["a", "x"] { shell.addWorkspace(title: title, cwd: folder, profileID: side.id) }
             shell.handleWorkspaceSidebarAction(.markInactive, workspaceIndex: index(of: workspace("x", in: shell), in: shell))
             shell.switchToWorkspace(index(of: workspace("a", in: shell), in: shell))
-            home.hasNotification = true
+            home.raiseNotification(.waiting)
 
             let strip = try XCTUnwrap(shell.verticalStrip.layer)
             strip.removeAllAnimations()  // selecting a slid the strip

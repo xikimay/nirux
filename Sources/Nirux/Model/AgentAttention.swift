@@ -118,6 +118,57 @@ enum AgentAttentionReason: Hashable, Sendable {
         }
     }
 }
+/// What a lit attention signal asks of the user, least urgent first: the
+/// sidebar's cards and dots, the project switcher's ring and the activity
+/// feed draw it. Only `.waiting` is amber (`Theme.Color.waiting`).
+enum AttentionSignal: String, Codable, Comparable, Hashable, Sendable {
+    /// A turn ended: the agent waits for its next prompt, nobody is blocked.
+    case finished
+    /// Something broke: an API error, an agent that exited mid-turn, a red
+    /// check.
+    case error
+    /// An agent waits for the user's answer: a permission, a question.
+    case waiting
+
+    private var rank: Int {
+        switch self {
+        case .finished: return 0
+        case .error: return 1
+        case .waiting: return 2
+        }
+    }
+
+    static func < (lhs: AttentionSignal, rhs: AttentionSignal) -> Bool { lhs.rank < rhs.rank }
+
+    /// A kind a newer build wrote reads as the most urgent: never a missed
+    /// wait, and never a history that fails to load.
+    init(from decoder: Decoder) throws {
+        self = AttentionSignal(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .waiting
+    }
+
+    /// A column's attention, its reason known or not. An agent without
+    /// hooks that falls silent may sit in its own approval prompt: amber,
+    /// so a dialog is never missed.
+    static func of(_ reason: AgentAttentionReason?) -> AttentionSignal {
+        reason?.signal ?? .waiting
+    }
+}
+
+extension WorkspaceState {
+    /// Keeps the most urgent of what happened while the user was away.
+    func raiseNotification(_ signal: AttentionSignal) { notification = max(notification ?? signal, signal) }
+}
+
+extension AgentAttentionReason {
+    var signal: AttentionSignal {
+        switch self {
+        case .permission, .question, .message: return .waiting
+        case .apiError, .exitedMidTurn: return .error
+        case .turnFinished: return .finished
+        case .stillWaiting(let dialog, _): return dialog.signal
+        }
+    }
+}
 
 /// A permission (or question) dialog Claude may be showing. Recorded from
 /// PermissionRequest (or, when that hook never fired, from the delayed

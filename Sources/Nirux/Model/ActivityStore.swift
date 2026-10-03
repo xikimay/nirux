@@ -44,13 +44,16 @@ struct ActivityEntry: Codable, Hashable {
     let missionID: String?
     let missionEventID: String?
     let missionReplyToEventID: String?
+    /// What an `.attention` row asks of the user: a dialog, an error, a
+    /// finished turn. Nil in entries older builds wrote, which ignore it.
+    let signal: AttentionSignal?
 
     init(
         category: Category, agentKind: String, agentUUID: String? = nil,
         workspaceID: String?, columnIndex: Int?, workspaceTitle: String,
         detail: String?, timestamp: TimeInterval,
         missionID: String? = nil, missionEventID: String? = nil,
-        missionReplyToEventID: String? = nil
+        missionReplyToEventID: String? = nil, signal: AttentionSignal? = nil
     ) {
         self.category = category
         self.agentKind = agentKind
@@ -63,6 +66,7 @@ struct ActivityEntry: Codable, Hashable {
         self.missionID = missionID
         self.missionEventID = missionEventID
         self.missionReplyToEventID = missionReplyToEventID
+        self.signal = signal
     }
 
     /// Events worth a feed row. Prompt and tool events fire far too often —
@@ -108,6 +112,7 @@ struct ActivityEntry: Codable, Hashable {
         missionID = nil
         missionEventID = nil
         missionReplyToEventID = nil
+        signal = category == .attention ? outcome.attention?.signal : nil
     }
 }
 
@@ -169,6 +174,7 @@ final class ActivityStore {
                last.missionEventID == nil,
                entry.missionEventID == nil,
                last.category == entry.category,
+               last.signal == entry.signal,
                last.agentKind == entry.agentKind,
                last.agentUUID == entry.agentUUID,
                last.workspaceID == entry.workspaceID,
@@ -223,6 +229,8 @@ final class ActivityStore {
             }
         }
         return feed[..<index].contains { newer in
+            // The idle reminder after a failed turn doesn't handle it.
+            if newer.category == .attention, newer.signal == .finished, entry.signal == .error { return false }
             if let uuid = entry.agentUUID { return newer.agentUUID == uuid }
             // Positional fallback needs SOME identity: events from hooks
             // running outside Nirux have nil workspace, column and uuid,

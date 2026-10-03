@@ -122,36 +122,44 @@ final class ReviewBadgesTests: XCTestCase {
         XCTAssertEqual(malformed.title, "w")
     }
 
-    func testCardShowsTheRowUnderItsMetadata() throws {
+    /// The selected card shows the passes under its chips; the others keep
+    /// three lines.
+    func testSelectedCardShowsTheRow() throws {
         let badges = ReviewBadges(
             runs: [.codeReview: ReviewRun(head: "aaa", at: 0), .premortem: ReviewRun(head: "old1234567", at: 0)],
             head: "aaa"
         )
         let workspace = makeWorkspaceInfo(reviewBadges: badges)
         XCTAssertEqual(
-            SidebarExpandedMetrics.workspaceHeight(for: workspace)
-                - SidebarExpandedMetrics.workspaceHeight(for: makeWorkspaceInfo()),
-            SidebarExpandedMetrics.reviewAdvance
+            SidebarExpandedMetrics.workspaceHeight(for: workspace, sidebarWidth: 260)
+                - SidebarExpandedMetrics.workspaceHeight(for: makeWorkspaceInfo(), sidebarWidth: 260),
+            SidebarExpandedMetrics.actionBlockHeight([.reviewBadges(badges)])
         )
 
-        let labels = SidebarWorkspaceCardRenderer(workspace: workspace, sidebarWidth: 260, padding: 20, yOffset: 400)
+        let labels = SidebarWorkspaceCardRenderer(workspace: workspace, sidebarWidth: 260, yOffset: 400)
             .render().views.compactMap { $0 as? NSTextField }
         let row = try XCTUnwrap(labels.first { $0.stringValue == "CR ✓  PM ✓  CS ·  ADV ·" })
         let toolTip = try XCTUnwrap(row.toolTip)
         XCTAssertTrue(toolTip.contains("Premortem: ran"))
         XCTAssertTrue(toolTip.contains("on old1234, not the current HEAD"))
         XCTAssertTrue(toolTip.contains("Adversarial review: not run"))
+
+        let other = makeWorkspaceInfo(reviewBadges: badges, isActive: false)
+        XCTAssertEqual(
+            SidebarExpandedMetrics.workspaceHeight(for: other, sidebarWidth: 260),
+            SidebarExpandedMetrics.workspaceHeight(for: makeWorkspaceInfo(isActive: false), sidebarWidth: 260)
+        )
     }
 
     private func context(head: String) -> GitContext {
         GitContext(branch: "feat/x", identity: GitIdentity(repositoryRoot: "/tmp", head: head))
     }
 
-    private func makeWorkspaceInfo(reviewBadges: ReviewBadges? = nil) -> WorkspaceInfo {
+    private func makeWorkspaceInfo(reviewBadges: ReviewBadges? = nil, isActive: Bool = true) -> WorkspaceInfo {
         WorkspaceInfo(
             id: "workspace", index: 0, title: "reviews", profileID: WorkspaceProfile.defaultID,
-            isInactive: false, columnCount: 0, focusedColumn: 0, gitBranch: nil, hasNotification: false,
-            isActive: true, columns: [], prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil,
+            isInactive: false, columnCount: 0, focusedColumn: 0, gitBranch: nil, notification: nil,
+            isActive: isActive, columns: [], prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil,
             blocker: nil, phase: .active, lastSummary: nil, lastActivityAt: nil, reviewBadges: reviewBadges
         )
     }

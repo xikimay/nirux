@@ -1,38 +1,37 @@
 import AppKit
 
-/// The card's review row: `CR ✓  PM ✓  CS ·  ADV ·`. Green ran on HEAD,
-/// orange ran on an earlier commit, a dot never ran.
+/// The selected card's review passes: `CR ✓  PM ✓  CS ·  ADV ·`. Green ran
+/// on HEAD, grey ran on an earlier commit, a dot never ran.
 @MainActor
 enum SidebarReviewBadgesRow {
-    static func label(_ badges: ReviewBadges, isActive: Bool, x: CGFloat, width: CGFloat, top: CGFloat) -> NSTextField {
-        let label = NSTextField(labelWithAttributedString: attributedText(badges, isActive: isActive))
-        label.lineBreakMode = .byTruncatingTail
+    static func label(_ badges: ReviewBadges, x: CGFloat, width: CGFloat, top: CGFloat) -> NSTextField {
+        let label = NSTextField.sidebarLine(attributedText(badges))
         label.toolTip = toolTip(badges)
         label.frame = NSRect(
             x: x,
-            y: top - SidebarExpandedMetrics.reviewHeight,
+            y: top - SidebarExpandedMetrics.actionLineHeight,
             width: width,
-            height: SidebarExpandedMetrics.reviewHeight
+            height: SidebarExpandedMetrics.actionLineHeight
         )
         return label
     }
 
-    private static func attributedText(_ badges: ReviewBadges, isActive: Bool) -> NSAttributedString {
-        let font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
+    private static func attributedText(_ badges: ReviewBadges) -> NSAttributedString {
+        let font = Theme.Font.caption
         let text = NSMutableAttributedString()
         for pass in ReviewPass.allCases {
-            if text.length > 0 { text.append(NSAttributedString(string: "  ")) }
+            if text.length > 0 { text.append(NSAttributedString(string: "  ", attributes: [.font: font])) }
             let mark: String
             let color: NSColor
             if badges.isFresh(pass) {
                 mark = "✓"
-                color = .systemGreen
+                color = Theme.Color.success
             } else if badges.runs[pass] != nil {
                 mark = "✓"
-                color = .systemOrange
+                color = Theme.Color.textSecondary
             } else {
                 mark = "·"
-                color = NSColor.white.withAlphaComponent(isActive ? 0.42 : 0.30)
+                color = Theme.Color.textTertiary
             }
             text.append(NSAttributedString(
                 string: "\(pass.badge) \(mark)",

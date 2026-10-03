@@ -233,15 +233,17 @@ extension SidebarView {
         ghost.layer?.shadowOffset = .zero
 
         let title = NSTextField(labelWithString: drag.title)
-        title.font = .monospacedSystemFont(ofSize: 14, weight: .bold)
-        title.textColor = NSColor.white.withAlphaComponent(0.92)
+        title.font = Theme.Font.title
+        title.textColor = Theme.Color.textPrimary
         title.lineBreakMode = .byTruncatingTail
-        let inset = SidebarExpandedMetrics.padding - SidebarExpandedMetrics.workspaceInsetX
+        let inset = SidebarExpandedMetrics.cardPaddingX + SidebarExpandedMetrics.cardIndent
+        let height = min(SidebarExpandedMetrics.titleRowHeight + 1, drag.rowFrame.height)
         title.frame = NSRect(
             x: inset,
-            y: drag.rowFrame.height - SidebarExpandedMetrics.workspacePaddingY - SidebarExpandedMetrics.titleHeight,
-            width: drag.rowFrame.width - inset * 2,
-            height: SidebarExpandedMetrics.titleHeight
+            // At the card's title; centered on a one-line row.
+            y: drag.rowFrame.height - min(SidebarExpandedMetrics.cardPaddingY, (drag.rowFrame.height - height) / 2) - height,
+            width: drag.rowFrame.width - inset - SidebarExpandedMetrics.cardPaddingX,
+            height: height
         )
         ghost.addSubview(title)
         contentDocumentView.addSubview(ghost)

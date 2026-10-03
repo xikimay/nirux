@@ -24,13 +24,9 @@ struct PRFeedback: Hashable, Sendable {
     var humanCount: Int { items.filter { !$0.isBot }.count }
     var botCount: Int { items.filter(\.isBot).count }
 
-    /// The card line, "💬 2 · 🤖 3", humans first; either half hidden at
-    /// zero, nil when both are.
-    var summary: String? {
-        let parts = [("💬", humanCount), ("🤖", botCount)]
-            .filter { $0.1 > 0 }
-            .map { "\($0.0) \($0.1)" }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    /// What the card shows; nil when there's nothing.
+    var sidebarCounts: SidebarPRFeedback? {
+        items.isEmpty ? nil : SidebarPRFeedback(humans: humanCount, bots: botCount)
     }
 }
 

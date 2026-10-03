@@ -17,7 +17,7 @@ extension WorkspaceContextTests {
             columnCount: 0,
             focusedColumn: 0,
             gitBranch: nil,
-            hasNotification: false,
+            notification: nil,
             isActive: true,
             columns: [],
             prInfo: nil,

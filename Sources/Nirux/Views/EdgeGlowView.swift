@@ -1,11 +1,13 @@
 import AppKit
 
-/// Directional edge glow that pulses amber to indicate attention is needed off-screen
+/// Directional edge glow that pulses when an agent off-screen waits on the
+/// user (amber) or broke (red)
 final class EdgeGlowView: NSView {
     enum Edge { case left, right, top, bottom }
 
     private let edge: Edge
     private var glowVisible = false
+    private var color = Theme.Color.waiting
 
     init(edge: Edge) {
         self.edge = edge
@@ -22,6 +24,18 @@ final class EdgeGlowView: NSView {
     /// Decoration only: clicks reach the column headers and edges it
     /// glows over.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// Glows in the signal's color; nil fades it out.
+    func show(_ signal: AttentionSignal?) {
+        if let signal {
+            let color = SidebarRenderer.color(for: signal)
+            if color != self.color {
+                self.color = color
+                setNeedsDisplay(bounds)
+            }
+        }
+        setVisible(signal != nil)
+    }
 
     func setVisible(_ visible: Bool) {
         guard visible != glowVisible else { return }
@@ -63,8 +77,8 @@ final class EdgeGlowView: NSView {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
 
         let colors: [CGColor] = [
-            Theme.Color.waiting.withAlphaComponent(0.5).cgColor,
-            Theme.Color.waiting.withAlphaComponent(0).cgColor
+            color.withAlphaComponent(0.5).cgColor,
+            color.withAlphaComponent(0).cgColor
         ]
         let locations: [CGFloat] = [0, 1]
         guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),

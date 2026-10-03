@@ -15,7 +15,7 @@ final class SidebarCollapseTests: XCTestCase {
             columnCount: 0,
             focusedColumn: 0,
             gitBranch: nil,
-            hasNotification: false,
+            notification: nil,
             isActive: isActive,
             columns: [],
             prInfo: nil,
@@ -48,7 +48,7 @@ final class SidebarCollapseTests: XCTestCase {
 
     private func profile(_ id: String, isActive: Bool) -> ProfileInfo {
         ProfileInfo(
-            id: id, name: id, colorHex: "#7AA2F7", isActive: isActive, workspaceCount: 2, hasAttention: false
+            id: id, name: id, colorHex: "#7AA2F7", isActive: isActive, workspaceCount: 2, attention: nil
         )
     }
 

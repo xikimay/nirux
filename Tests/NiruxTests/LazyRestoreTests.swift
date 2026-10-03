@@ -417,34 +417,33 @@ final class LazyRestoreTests: XCTestCase {
         XCTAssertEqual(title(String(repeating: "a", count: 200))?.count, DeferredAgentLaunch.maxTitleLength)
     }
 
-    func testRowAndNoticeSayWhatTheColumnHolds() {
+    func testRowAndNoticeSayWhatTheColumnHolds() throws {
         let agent = SidebarDeferredAgent(processName: "claude", summary: "claude session", columnID: UUID())
         let info = ColumnInfo(
             index: 1, processName: nil, abbreviatedCwd: nil, isFocused: false, isWebView: false, webTitle: nil,
             terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil, deferredAgent: agent
         )
-        XCTAssertEqual(
-            SidebarRenderer.attributedColumn(info, fontSize: 11).string.replacingOccurrences(of: "\u{FFFC} ", with: ""),
-            "  claude · paused"
-        )
+        XCTAssertEqual(SidebarColumnChip(info).text.string.replacingOccurrences(of: "\u{FFFC}", with: ""), "Resume")
+        XCTAssertTrue(SidebarColumnChip(info).toolTip.hasPrefix("claude · paused"))
         let workspace = WorkspaceInfo(
             id: "ws", index: 2, title: "t", profileID: WorkspaceProfile.defaultID, isInactive: false, columnCount: 1,
-            focusedColumn: 0, gitBranch: nil, hasNotification: false, isActive: false, columns: [info], prInfo: nil,
+            focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false, columns: [info], prInfo: nil,
             diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active, lastSummary: nil,
             lastActivityAt: nil
         )
-        let card = SidebarWorkspaceCardRenderer(workspace: workspace, sidebarWidth: 260, padding: 20, yOffset: 800).render()
+        let card = SidebarWorkspaceCardRenderer(workspace: workspace, sidebarWidth: 260, yOffset: 800).render()
         let regions = card.hitAreas.map(\.region)
         let resume = regions.firstIndex {
             if case .deferredAgentResume(2, 1, agent.columnID) = $0 { return true }
             return false
         }
-        let row = regions.firstIndex {
-            if case .column(2, 1) = $0 { return true }
+        let cardHit = regions.firstIndex {
+            if case .workspace(2) = $0 { return true }
             return false
         }
-        XCTAssertNotNil(resume)
-        XCTAssertLessThan(try XCTUnwrap(resume), try XCTUnwrap(row), "the button takes the click before its row")
+        let icon = try XCTUnwrap(card.hitAreas.first { if case .column(2, 1) = $0.region { return true }; return false })
+        XCTAssertFalse(icon.frame.intersects(card.hitAreas[try XCTUnwrap(resume)].frame), "its icon focuses the column")
+        XCTAssertLessThan(try XCTUnwrap(resume), try XCTUnwrap(cardHit), "the button takes the click before its card")
         XCTAssertEqual(Array(card.approvalButtons.keys), [SidebarHoverTarget.deferredResumeButtonKey(columnID: agent.columnID)])
 
         let pressed = SidebarHitRegion.deferredAgentResume(workspaceIndex: 2, columnIndex: 1, columnID: agent.columnID)

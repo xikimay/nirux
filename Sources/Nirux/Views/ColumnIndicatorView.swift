@@ -4,14 +4,14 @@ import AppKit
 final class ColumnIndicatorView: NSView {
     private var columnCount: Int = 0
     private var focusedIndex: Int = 0
-    private var columnStatuses: [AgentStatus] = []
+    /// What each column asks while the user looks elsewhere.
+    private var columnSignals: [AttentionSignal?] = []
     private var pulseLayers: [CALayer] = []
 
     private static let dotSize: CGFloat = 6
     private static let dotGap: CGFloat = 8
     private static let accentColor: NSColor = Theme.Color.accent
     private static let dimColor = NSColor.white.withAlphaComponent(0.25)
-    private static let notifColor = Theme.Color.waiting
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -21,12 +21,12 @@ final class ColumnIndicatorView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func update(columnCount: Int, focusedIndex: Int, columnStatuses: [AgentStatus] = []) {
+    func update(columnCount: Int, focusedIndex: Int, columnSignals: [AttentionSignal?] = []) {
         guard columnCount != self.columnCount || focusedIndex != self.focusedIndex
-              || columnStatuses != self.columnStatuses else { return }
+              || columnSignals != self.columnSignals else { return }
         self.columnCount = columnCount
         self.focusedIndex = focusedIndex
-        self.columnStatuses = columnStatuses
+        self.columnSignals = columnSignals
         setNeedsDisplay(bounds)
     }
 
@@ -55,11 +55,12 @@ final class ColumnIndicatorView: NSView {
         // Dots
         for i in 0..<columnCount {
             let isFocused = (i == focusedIndex)
-            let status = columnStatuses[safe: i] ?? .idle
-            let isNotif = status == .needsAttention && !isFocused
+            let signal = isFocused ? nil : columnSignals[safe: i] ?? nil
+            // A wait or an error pulses; a finished turn is a brighter dot.
+            let isNotif = signal.map { $0 != .finished } ?? false
             let color: NSColor
-            if isNotif {
-                color = Self.notifColor
+            if let signal {
+                color = SidebarRenderer.color(for: signal)
             } else if isFocused {
                 color = Self.accentColor
             } else {
@@ -77,7 +78,7 @@ final class ColumnIndicatorView: NSView {
                 glow.cornerRadius = glowSize / 2
                 glow.backgroundColor = NSColor.clear.cgColor
                 glow.borderWidth = 1.5
-                glow.borderColor = Self.notifColor.cgColor
+                glow.borderColor = color.cgColor
 
                 let pulse = CABasicAnimation(keyPath: "opacity")
                 pulse.fromValue = 1.0

@@ -40,6 +40,10 @@ extension NiruxShellView {
                         .map { Date().timeIntervalSince($0) },
                     attentionReason: agentStatus == .needsAttention ? col.pty?.agentAttentionReason : nil,
                     permissionApproval: permissionApproval,
+                    // The Project Board's rule: an approved dialog stays
+                    // listed while its tool runs, the column working.
+                    openDialog: agentStatus == .working
+                        ? nil : col.pty?.agentVisibleDialog(foreground: foregroundProcess)?.reason,
                     stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
                     deferredAgent: Self.sidebarDeferredAgent(of: col)
                 )
@@ -48,8 +52,8 @@ extension NiruxShellView {
                           profileID: workspace.profileID, isInactive: workspace.isInactive,
                           columnCount: workspace.columns.count,
                           focusedColumn: workspace.focusedIndex,
-                          gitBranch: workspace.gitBranch, hasNotification: workspace.hasNotification, isActive: index == activeWSIndex,
-                          columns: colInfos, prInfo: workspace.prInfo, prFeedbackSummary: workspace.prFeedback?.summary,
+                          gitBranch: workspace.gitBranch, notification: workspace.notification, isActive: index == activeWSIndex,
+                          columns: colInfos, prInfo: workspace.prInfo, prFeedback: workspace.prFeedback?.sidebarCounts,
                           diffStats: workspace.diffStats,
                           purpose: workspace.purpose, nextStep: workspace.nextStep,
                           blocker: workspace.blocker, phase: workspace.effectivePhase,
@@ -61,16 +65,19 @@ extension NiruxShellView {
         updateColumnHeaders(infos: infos, foregroundProcesses: foregroundProcesses, now: now)
         let profileInfos = workspaceStore.navigableProfiles.map { profile in
             let profileWorkspaces = workspaces.filter { $0.profileID == profile.id }
-            let hasAttention = profileWorkspaces.contains { workspace in
-                workspace.hasNotification || workspace.columns.contains { $0.pty?.cachedAgentState == .needsAttention }
-            }
             return ProfileInfo(
                 id: profile.id,
                 name: profile.name,
                 colorHex: profile.colorHex,
                 isActive: profile.id == activeProfileID,
                 workspaceCount: profileWorkspaces.count,
-                hasAttention: hasAttention
+                // The space on screen: what its cards say. Another one: the
+                // same rule, read off its columns.
+                attention: profile.id == activeProfileID
+                    ? infos.compactMap(\.attention).max()
+                    : profileWorkspaces.compactMap {
+                        Self.attention(of: $0, foregroundProcesses: foregroundProcesses, now: now)
+                    }.max()
             )
         }
         sidebar.update(profiles: profileInfos, workspaces: infos)
@@ -145,6 +152,29 @@ extension NiruxShellView {
         }
     }
 
+    /// `WorkspaceInfo.attention` for a workspace of another space, which
+    /// has no card: what blocks its agents (a dialog on screen, a failed
+    /// turn, an exit mid-turn), their attention, and what happened while
+    /// the user was away.
+    private static func attention(
+        of workspace: WorkspaceState,
+        foregroundProcesses: [ObjectIdentifier: ForegroundProcess],
+        now: TimeInterval
+    ) -> AttentionSignal? {
+        var signals: [AttentionSignal] = []
+        for column in workspace.columns {
+            guard let pty = column.pty else { continue }
+            let status = pty.cachedAgentState
+            if let wait = pty.agentBlockedWait(now: now, foreground: foregroundProcesses[ObjectIdentifier(column)]),
+               wait.reason.signal != .waiting || status != .working {
+                signals.append(wait.reason.signal)
+            }
+            if status == .needsAttention { signals.append(AttentionSignal.of(pty.agentAttentionReason)) }
+        }
+        if let notification = workspace.notification { signals.append(notification) }
+        return signals.max()
+    }
+
     private func updateSidebarAttention(infos: [WorkspaceInfo]) {
         // Dock badge: workspaces currently waiting for attention.
         let attentionCount = workspaces.filter { workspace in
@@ -157,50 +187,56 @@ extension NiruxShellView {
 
         if let workspace = activeWorkspace,
            let wsInfo = infos.first(where: { $0.index == activeWSIndex }) {
-            let statuses = wsInfo.columns.map { $0.agentStatus }
-            columnIndicator.update(columnCount: workspace.columns.count, focusedIndex: workspace.focusedIndex, columnStatuses: statuses)
+            columnIndicator.update(
+                columnCount: workspace.columns.count, focusedIndex: workspace.focusedIndex,
+                columnSignals: wsInfo.columns.map(\.offScreenAttention)
+            )
 
-            // Horizontal edge glow: column needs attention left/right of focused column
+            // Horizontal edge glow: a column left/right of the focused one
+            // waits on the user or broke.
             let focused = workspace.focusedIndex
-            let hasLeft = wsInfo.columns.enumerated().contains { idx, col in idx < focused && col.agentStatus == .needsAttention }
-            let hasRight = wsInfo.columns.enumerated().contains { idx, col in idx > focused && col.agentStatus == .needsAttention }
-            edgeGlowLeft.setVisible(hasLeft)
-            edgeGlowRight.setVisible(hasRight)
+            edgeGlowLeft.show(Self.alert(in: wsInfo.columns.enumerated().filter { $0.offset < focused }.map(\.element)))
+            edgeGlowRight.show(Self.alert(in: wsInfo.columns.enumerated().filter { $0.offset > focused }.map(\.element)))
         } else {
-            edgeGlowLeft.setVisible(false)
-            edgeGlowRight.setVisible(false)
+            edgeGlowLeft.show(nil)
+            edgeGlowRight.show(nil)
         }
 
-        // Vertical edge glow: workspace above/below active has agent needing attention
+        // Vertical edge glow: a workspace above/below the active one
         let activePosition = infos.firstIndex { $0.index == activeWSIndex } ?? 0
-        let hasAbove = infos.enumerated().contains { position, wsInfo in
-            position < activePosition && wsInfo.columns.contains { $0.agentStatus == .needsAttention }
-        }
-        let hasBelow = infos.enumerated().contains { position, wsInfo in
-            position > activePosition && wsInfo.columns.contains { $0.agentStatus == .needsAttention }
-        }
-        edgeGlowTop.setVisible(hasAbove)
-        edgeGlowBottom.setVisible(hasBelow)
+        edgeGlowTop.show(Self.alert(in: infos.prefix(activePosition).flatMap(\.columns)))
+        edgeGlowBottom.show(Self.alert(in: infos.dropFirst(activePosition + 1).flatMap(\.columns)))
 
         updateAttentionBorders(infos: infos)
     }
 
-    /// Pulsing amber border on columns with agent needing attention.
+    /// The most urgent wait or error among `columns` while the user looks
+    /// elsewhere; a finished turn doesn't glow.
+    private static func alert(in columns: [ColumnInfo]) -> AttentionSignal? {
+        columns.compactMap(\.offScreenAttention).filter { $0 != .finished }.max()
+    }
+
+    /// A pulsing border on columns that wait on the user (amber) or broke
+    /// (red); a finished turn gets none.
     private func updateAttentionBorders(infos: [WorkspaceInfo]) {
-        let attentionBorder = Theme.Color.waiting.cgColor
         let infoByIndex = Dictionary(uniqueKeysWithValues: infos.map { ($0.index, $0) })
         for (wsIndex, workspace) in workspaces.enumerated() {
             for (colIndex, col) in workspace.columns.enumerated() {
-                let needsAttention = infoByIndex[wsIndex]?.columns[safe: colIndex]?.agentStatus == .needsAttention
+                let signal = infoByIndex[wsIndex]?.columns[safe: colIndex]
+                    .flatMap { Self.alert(in: [$0]) }
                 let colLayer = col.view.layer
-                if needsAttention {
+                if let signal {
+                    let color = SidebarRenderer.color(for: signal)
+                    let attentionBorder = color.cgColor
+                    // A wait that turns into an error pulses red from then on.
+                    if colLayer?.borderColor != attentionBorder { colLayer?.removeAnimation(forKey: "attentionPulse") }
                     colLayer?.cornerRadius = 6
                     colLayer?.borderWidth = 2
                     colLayer?.borderColor = attentionBorder
                     if colLayer?.animation(forKey: "attentionPulse") == nil {
                         let pulse = CABasicAnimation(keyPath: "borderColor")
                         pulse.fromValue = attentionBorder
-                        pulse.toValue = Theme.Color.waiting.withAlphaComponent(0.15).cgColor
+                        pulse.toValue = color.withAlphaComponent(0.15).cgColor
                         pulse.duration = 0.6
                         pulse.autoreverses = true
                         pulse.repeatCount = .infinity
@@ -231,7 +267,7 @@ extension NiruxShellView {
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
         NiruxNotifier.shared.clearDelivered()
         for (wsIndex, workspace) in workspaces.enumerated() {
-            workspace.hasNotification = false
+            workspace.notification = nil
             for (colIndex, col) in workspace.columns.enumerated() {
                 col.pty?.clearAgentAttention()
                 let colLayer = col.view.layer
@@ -489,9 +525,9 @@ extension NiruxShellView {
         ActivityStore.shared.record(entry)
         ActivityStore.shared.flush()
         if event.kind == .question {
-            workspace?.hasNotification = true
+            workspace?.raiseNotification(.waiting)
         } else if event.kind == .response {
-            workspace?.hasNotification = false
+            workspace?.notification = nil
         }
         if event.kind == .question || event.kind == .completed {
             NiruxNotifier.shared.postMissionEvent(
