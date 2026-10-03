@@ -121,11 +121,11 @@ final class BranchReviewSwiftReadingTests: BranchReviewRepositoryTestCase {
         try write("Sources/Ends.swift", "let s = \"\"\"\n    a\n    \"\"\"\n")
         let interpolated = "let s = \"\"\"\n    Hello \\(\n        name\n    )!\n    \"\"\"\n"
         try write("Sources/Opens.swift", interpolated)
-        try write("Sources/Resumes.swift", interpolated)
+        try write("Sources/Resumes.swift", interpolated.replacingOccurrences(of: ")!\n", with: ")!  \n"))
         try commitToMain("strings")
         try write("Sources/Template.swift", "let template = \"\"\"\n        name: nirux\n    \"\"\"\n")
         try write("Sources/Blank.swift", "let text = \"\"\"\n    a\n\n    b\n    \"\"\"\n")
-        try write("Sources/Worker.swift", "func run() {\n    work()\n}\n")
+        try write("Sources/Worker.swift", "func run() {\n\n    work()\n}\n")
         // As Swift reads them, these strings don't change: the text moved
         // with its closing delimiter, a line of blanks emptied, line
         // endings.
@@ -136,7 +136,7 @@ final class BranchReviewSwiftReadingTests: BranchReviewRepositoryTestCase {
         // Text around an interpolation that spans lines: before it, its
         // indentation; after it, its trailing spaces.
         try write("Sources/Opens.swift", interpolated.replacingOccurrences(of: "    Hello", with: "      Hello"))
-        try write("Sources/Resumes.swift", interpolated.replacingOccurrences(of: ")!\n", with: ")!  \n"))
+        try write("Sources/Resumes.swift", interpolated)
 
         let snapshot = try snapshot()
 

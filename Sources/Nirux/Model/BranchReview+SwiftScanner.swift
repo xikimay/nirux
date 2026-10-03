@@ -730,7 +730,7 @@ extension BranchReview.SwiftScanner {
             isPrivate: parent?.isPrivate == true || (!local && typeIsPrivate),
             container: local ? nil : pendingContainer,
             extended: local ? nil : pendingExtended,
-            function: local && statement.depth == 0 ? statement.function : nil,
+            function: local ? statement.function : nil,
             isMainType: !local && typeIsMain,
             outer: statement
         ))
