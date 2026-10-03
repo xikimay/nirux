@@ -483,35 +483,38 @@ final class WorktreeCleanupTests: XCTestCase {
 
     // MARK: - Branch Review files
 
-    private func review(of branch: String = "feat/x", space: String = "default") throws -> BranchReview.Store {
-        try XCTUnwrap(BranchReview.Store(
-            spaceID: space, repository: root + "/widgets/.git", branch: branch,
-            stateDirectory: URL(fileURLWithPath: root + "/state")
+    /// The review of `branch` as the Branch Review column files it,
+    /// written once.
+    private func review(of branch: String = "feat/x", head: String) throws -> BranchReview.Store {
+        let options = BranchReview.Options(gitHub: nil, environment: environment)
+        let repository = try XCTUnwrap(BranchReview.repositoryIdentity(root: worktree, options: options))
+        let store = try XCTUnwrap(BranchReview.Store(
+            repository: repository, branch: branch, stateDirectory: URL(fileURLWithPath: root + "/state")
         ))
+        let opened = store.open(
+            head: head, pullRequest: .notFound,
+            history: BranchReview.History(isOwnCommit: { _ in true }, isInReflog: { _ in true })
+        )
+        _ = try store.update(try XCTUnwrap(opened.access)) { _ in }.get()
+        return store
     }
 
-    func testCleanedUpBranchLosesItsReviewInEveryProject() throws {
+    func testCleanedUpBranchLosesItsReview() throws {
         tools.reviewStateDirectory = URL(fileURLWithPath: root + "/state")
         let tip = try head(at: worktree)
-        let reviews = [try review(space: "default"), try review(space: "space-b")]
-        let mainReview = try review(of: "main")
-        for store in reviews + [mainReview] {
-            _ = try store.update(head: tip, pullRequest: 12) { _ in }.get()
-        }
+        let branchReview = try review(head: tip)
+        let mainReview = try review(of: "main", head: try head(at: repo))
         try setPullRequests([pullRequest(12, "MERGED", head: tip)])
 
         XCTAssertEqual(WorktreeCleanup.execute(try readyPlan(), tools: tools), .cleaned(forcedBranchDelete: false, trashFolder: nil))
-        for store in reviews {
-            XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
-        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: branchReview.fileURL.path))
         XCTAssertEqual(mainReview.load().status, .loaded)
     }
 
     func testBranchKeptByTheCleanUpKeepsItsReview() throws {
         tools.reviewStateDirectory = URL(fileURLWithPath: root + "/state")
         let tip = try head(at: worktree)
-        let review = try review()
-        _ = try review.update(head: tip, pullRequest: 12) { _ in }.get()
+        let branchReview = try review(head: tip)
         try setPullRequests([pullRequest(12, "MERGED", head: tip)])
         try git(["update-ref", "-d", "refs/remotes/origin/feat/x"], at: repo)
         let plan = try readyPlan()
@@ -522,7 +525,7 @@ final class WorktreeCleanupTests: XCTestCase {
             return XCTFail("the branch should have been kept")
         }
         XCTAssertTrue(branchExists("feat/x"))
-        XCTAssertEqual(review.load().status, .loaded)
+        XCTAssertEqual(branchReview.load().status, .loaded)
     }
 
     func testTrashFailurePutsTheLeftoversBack() throws {

@@ -46,17 +46,18 @@ extension BranchReview {
     }
 
     /// One branch's stored review: the file's top-level object, keys this
-    /// build doesn't know included, read through typed accessors. R3 to R5
-    /// add their own keys beside these (comments, drafts, what was sent,
-    /// the explanation cache, usage). An older build keeps a top-level key
-    /// it doesn't know, and every entry it doesn't change. A key added
-    /// inside an entry (a mark, say) is lost when an older build rewrites
-    /// that entry, and a key whose meaning changes needs a new `version`:
-    /// older builds then open the file read-only.
+    /// build doesn't know included, read through typed accessors. Later
+    /// parts (comments, drafts, what was sent, the explanation cache,
+    /// usage) add their own keys and accessors beside these. An older
+    /// build keeps a top-level key it doesn't know, and every entry it
+    /// doesn't change. A key added inside an entry (a mark, say) is lost
+    /// when an older build rewrites that entry, and a key whose meaning
+    /// changes needs a new `version`: older builds then open the file
+    /// read-only.
     struct Record: Equatable, Sendable {
         static let currentVersion = 1
 
-        private(set) var fields: [String: JSONValue]
+        var fields: [String: JSONValue]
 
         init(fields: [String: JSONValue] = [:]) {
             self.fields = fields
@@ -68,8 +69,8 @@ extension BranchReview {
         /// The branch's pull request when the review was last opened or
         /// written. Kept when the branch no longer has an open one.
         var pullRequest: Int? { fields["pullRequest"]?.intValue }
-        /// The last head reviewed: the one the page showed when the review
-        /// was last opened or written.
+        /// The head the page showed when the review was last opened or
+        /// written.
         var lastHead: String? { fields["lastHead"]?.stringValue }
 
         /// By path. Malformed entries are skipped, and kept in the file.
@@ -150,41 +151,107 @@ extension BranchReview {
         case unverified
     }
 
-    /// Kept only when its pull request is the branch's, or, when that
-    /// can't settle it, when its last head is the branch's head or in the
+    /// What the branch's history says about a commit, for `disposition`.
+    /// Each answer is nil when git couldn't say.
+    struct History {
+        /// In the head's history and not in the base's: one of the
+        /// branch's own commits.
+        var isOwnCommit: (String) -> Bool?
+        /// In the branch's reflog.
+        var isInReflog: (String) -> Bool?
+    }
+
+    /// Kept when its last head is the branch's head or one of its own
+    /// commits (the branch moved on from what was reviewed); else when its
+    /// pull request is the branch's; else when its last head is in the
     /// branch's reflog (`git branch -D` deletes the reflog, a rebase keeps
-    /// it). With gh missing or failing, the reflog decides: a review is
-    /// never archived for want of gh.
+    /// it). A new pull request for the same commits doesn't archive it, and
+    /// a review is never archived for want of gh.
     static func disposition(
         of record: Record, branch: String, repository: String, head: String,
-        pullRequest: PullRequestLookup, reflogContains: (String) -> Bool?
+        pullRequest: PullRequestLookup, history: History
     ) -> Disposition {
-        guard record.branch == branch, record.repository == repository else { return .archive }
+        guard record.branch == branch, record.repository == repository, let lastHead = record.lastHead
+        else { return .archive }
+        if lastHead == head { return .keep }
+        let isOwnCommit = history.isOwnCommit(lastHead)
+        if isOwnCommit == true { return .keep }
         if let current = pullRequest.pullRequest?.number, let stored = record.pullRequest {
             return stored == current ? .keep : .archive
         }
-        guard let lastHead = record.lastHead else { return .archive }
-        if lastHead == head { return .keep }
-        switch reflogContains(lastHead) {
+        switch history.isInReflog(lastHead) {
         case true?: return .keep
-        case false?: return .archive
+        case false?: return isOwnCommit == nil ? .unverified : .archive
         case nil: return .unverified
         }
     }
 
-    /// Whether `commit` is in the reflog of `refs/heads/<branch>`. Nil when
-    /// git couldn't read it.
+    /// What `disposition` asks, answered by git for `snapshot`'s branch.
+    static func history(of snapshot: Snapshot, options: Options) -> History {
+        History(
+            isOwnCommit: { commit in
+                isOwnCommit(commit, head: snapshot.head, mergeBase: snapshot.base.mergeBase, root: snapshot.root, options: options)
+            },
+            isInReflog: { commit in
+                reflog(of: snapshot.branch, contains: commit, root: snapshot.root, options: options)
+            }
+        )
+    }
+
+    /// A full object id. Anything else read from a review file never
+    /// reaches git, where it could pass for an option.
+    static func isCommitID(_ text: String) -> Bool {
+        (text.utf8.count == 40 || text.utf8.count == 64)
+            && text.utf8.allSatisfy { (UInt8(ascii: "0")...UInt8(ascii: "9")).contains($0) || (UInt8(ascii: "a")...UInt8(ascii: "f")).contains($0) }
+    }
+
+    /// Whether `commit` is in `head`'s history and not in `mergeBase`'s.
+    /// False for a commit that is gone (a rebase left it, and gc pruned
+    /// it). Nil when git couldn't say.
+    static func isOwnCommit(_ commit: String, head: String, mergeBase: String, root: String, options: Options) -> Bool? {
+        guard isCommitID(commit) else { return false }
+        guard let exists = git(["rev-parse", "-q", "--verify", "\(commit)^{commit}"], in: root, options: options)
+        else { return nil }
+        switch exists.status {
+        case 0: break
+        case 1: return false
+        default: return nil
+        }
+        func isAncestor(of other: String) -> Bool? {
+            switch git(["merge-base", "--is-ancestor", commit, other], in: root, options: options)?.status {
+            case 0?: return true
+            case 1?: return false
+            default: return nil
+            }
+        }
+        guard let inHead = isAncestor(of: head) else { return nil }
+        guard inHead else { return false }
+        return isAncestor(of: mergeBase).map { !$0 }
+    }
+
+    /// Whether `commit` is in the reflog of `refs/heads/<branch>`, the
+    /// head before its oldest entry included: the one the branch was
+    /// created at when that wasn't logged (from a bare repository), or
+    /// left at when older entries expired. Nil when git couldn't read it.
     static func reflog(of branch: String, contains commit: String, root: String, options: Options) -> Bool? {
+        guard isCommitID(commit) else { return false }
         guard let reflog = git(["log", "-g", "--format=%H", "refs/heads/\(branch)", "--"], in: root, options: options),
               reflog.status == 0
         else { return nil }
-        return reflog.text.split(separator: "\n").contains { $0 == commit }
+        let entries = reflog.text.split(separator: "\n")
+        if entries.contains(where: { $0 == commit }) { return true }
+        // Fails when the oldest entry is the branch's creation.
+        guard !entries.isEmpty,
+              let before = git(["rev-parse", "-q", "--verify", "refs/heads/\(branch)@{\(entries.count)}"], in: root, options: options),
+              before.status == 0
+        else { return false }
+        return before.text.trimmingCharacters(in: .whitespacesAndNewlines) == commit
     }
 
     /// The repository a review belongs to: its common git folder
     /// (`--git-common-dir`), symlinks resolved. Every worktree of a
-    /// repository shares it, so two repositories of a project can each
-    /// have a `main` without sharing a review. Nil when git can't say.
+    /// repository shares it, so two repositories can each have a `main`
+    /// without sharing a review. Nil when git can't say.
     static func repositoryIdentity(root: String, options: Options = Options()) -> String? {
         guard let output = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: root, options: options),
               output.status == 0
@@ -192,23 +259,30 @@ extension BranchReview {
         return output.text.trimmingCharacters(in: .newlines).realPath
     }
 
-    /// The review file of one branch in one project:
-    /// `<state dir>/reviews/<space id>/<branch>-<hash>.json`. `<branch>` is
-    /// percent-encoded and `<hash>` is a hash of the repository
-    /// (`repositoryIdentity`) and the exact branch name: APFS ignores case,
-    /// so `Fix/A` and `fix/a` need it to differ.
+    /// The review file of one branch: `<state dir>/reviews/<branch>-<hash>.json`.
+    /// `<branch>` is percent-encoded and `<hash>` is a hash of the
+    /// repository (`repositoryIdentity`) and the exact branch name: APFS
+    /// ignores case, so `Fix/A` and `fix/a` need it to differ. Not per
+    /// project: a workspace moved to another project keeps its review.
     ///
     /// - Reading never locks: writes replace the file atomically.
-    /// - Every write takes a blocking exclusive `flock` on `<file>.lock`,
-    ///   held across reading, changing and writing the file, so two writers
+    /// - Every write takes an exclusive `flock` on `<file>.lock`, held
+    ///   across reading, changing and writing the file, so two writers
     ///   (the installed app and a dev build sharing the state directory)
     ///   both keep their changes. A lock on the data file itself would be
-    ///   lost when it is replaced. Writes block: call them off the main
-    ///   thread.
+    ///   lost when it is replaced. A write waits up to `lockTimeout` for
+    ///   it, and git never runs while it is held. Taking it again inside a
+    ///   write's change blocks until the timeout. Call writes, and `open`,
+    ///   off the main thread.
+    /// - Only what `open` returns can write (`Access`): a write never takes
+    ///   over a reused name's review, and never brings back one deleted
+    ///   since it was opened.
     /// - A file from a newer `version`, anything but a regular file, or a
-    ///   file over `maxFileBytes` is never written; an unreadable one is
-    ///   set aside before the first write replaces it.
-    /// - Set-aside files go to `archive/` beside it, and stay there.
+    ///   file over `maxFileBytes` is never written; one that can't be read
+    ///   right now is read-only. One that isn't a review (not JSON, a
+    ///   `version` that isn't a number) is set aside before the first write
+    ///   replaces it.
+    /// - Set-aside files go to `reviews/archive/`, and stay there.
     /// - Files are 0600, folders 0700.
     struct Store: Sendable {
         static let folderName = "reviews"
@@ -222,33 +296,26 @@ extension BranchReview {
         let branch: String
         let repository: String
         let fileURL: URL
+        /// A lock held longer than this is another Nirux stopped (in a
+        /// debugger, say): the write fails rather than wait forever.
+        var lockTimeout: TimeInterval = 10
 
         var lockURL: URL { fileURL.appendingPathExtension("lock") }
         var folder: URL { fileURL.deletingLastPathComponent() }
         var archiveFolder: URL { folder.appendingPathComponent(Self.archiveFolderName, isDirectory: true) }
 
-        /// Nil for a space id that isn't a plain name (see
-        /// `SpaceBrief.isPlainSpaceID`), or an empty branch or repository.
-        init?(spaceID: String, repository: String, branch: String, stateDirectory: URL = Persistence.stateDirectory) {
-            guard SpaceBrief.isPlainSpaceID(spaceID), !repository.isEmpty, !branch.isEmpty else { return nil }
-            let folder = stateDirectory.appendingPathComponent(Self.folderName, isDirectory: true)
-                .appendingPathComponent(spaceID, isDirectory: true)
-            self.init(folder: folder, repository: repository, branch: branch)
-        }
-
-        private init(folder: URL, repository: String, branch: String) {
+        /// Nil for an empty branch or repository.
+        init?(repository: String, branch: String, stateDirectory: URL = Persistence.stateDirectory) {
+            guard !repository.isEmpty, !branch.isEmpty else { return nil }
             self.branch = branch
             self.repository = repository
-            fileURL = folder.appendingPathComponent(Self.fileName(branch: branch, repository: repository))
+            fileURL = stateDirectory.appendingPathComponent(Self.folderName, isDirectory: true)
+                .appendingPathComponent(Self.fileName(branch: branch, repository: repository))
         }
 
         static func fileName(branch: String, repository: String) -> String {
-            "\(stem(branch: branch, repository: repository)).json"
-        }
-
-        private static func stem(branch: String, repository: String) -> String {
             let digest = SHA256.hash(data: Data("repository\0\(repository)\0branch\0\(branch)".utf8))
-            return encodedBranch(branch) + "-" + digest.prefix(8).map { String(format: "%02x", $0) }.joined()
+            return encodedBranch(branch) + "-" + digest.prefix(8).map { String(format: "%02x", $0) }.joined() + ".json"
         }
 
         /// Byte by byte (UTF-8): ASCII letters, digits, "-", "_" and "."
@@ -273,6 +340,23 @@ extension BranchReview {
 
         // MARK: Loading
 
+        /// What `open` checked, which a write needs: the review is this
+        /// branch's, opened at `head`.
+        struct Access: Equatable, Sendable {
+            let branch: String
+            let repository: String
+            /// What writes record as the last head.
+            let head: String
+            let pullRequest: Int?
+            /// The last heads the file may hold for a write to go ahead:
+            /// another means it was archived and started again, or opened
+            /// at another head, since.
+            fileprivate let lastHeads: Set<String>
+            /// The review was on disk: a write never recreates it once
+            /// deleted (Clean Up).
+            fileprivate let existed: Bool
+        }
+
         struct Loaded: Equatable, Sendable {
             enum Status: Equatable, Sendable {
                 /// No review yet: the first write creates it.
@@ -282,7 +366,7 @@ extension BranchReview {
                 /// that isn't a number): read as empty, and set aside by
                 /// the first write.
                 case unreadable
-                /// This build never writes it.
+                /// This build doesn't write it.
                 case readOnly(ReadOnlyReason)
             }
 
@@ -291,17 +375,17 @@ extension BranchReview {
             var status: Status
             /// Where `open` set aside a reused name's review.
             var setAside: URL?
-
-            var isWritable: Bool {
-                if case .readOnly = status { return false }
-                return true
-            }
+            /// Nil when it can't be written: read-only, or not opened.
+            var access: Access?
         }
 
         enum ReadOnlyReason: Equatable, Sendable {
             case newerVersion(Int)
             case notARegularFile
             case tooLarge
+            /// A regular file whose bytes can't be read now (permissions,
+            /// too many open files): nothing is set aside for it.
+            case couldNotRead
             /// It couldn't be checked against the branch, or set aside
             /// once found to be a reused name's: why. The record is as
             /// read in the first case, empty in the second.
@@ -317,6 +401,8 @@ extension BranchReview {
                 case .tooLarge:
                     return "The review file is larger than \(Store.maxFileBytes / 1_000_000) MB. "
                         + "Nirux won’t read or replace it."
+                case .couldNotRead:
+                    return "Nirux couldn’t read the review file. Refresh to try again."
                 case .unverified(let reason):
                     return reason
                 }
@@ -324,14 +410,20 @@ extension BranchReview {
         }
 
         /// The file as it is now, without the lock and without checking
-        /// whose it is: `open` checks.
+        /// whose it is: `open` checks. It can't be written.
         func load() -> Loaded {
+            read().loaded
+        }
+
+        /// The bytes too, for `open` to tell whether the file changed
+        /// while git answered.
+        private func read() -> (loaded: Loaded, bytes: Data?) {
             switch BoardConfigStore.read(fileURL, maxBytes: Self.maxFileBytes) {
-            case .missing: return Loaded(record: Record(), status: .missing)
-            case .notARegularFile: return Loaded(record: Record(), status: .readOnly(.notARegularFile))
-            case .tooLarge: return Loaded(record: Record(), status: .readOnly(.tooLarge))
-            case .unreadableBytes: return Loaded(record: Record(), status: .unreadable)
-            case .data(let data): return Self.decode(data)
+            case .missing: return (Loaded(record: Record(), status: .missing), nil)
+            case .notARegularFile: return (Loaded(record: Record(), status: .readOnly(.notARegularFile)), nil)
+            case .tooLarge: return (Loaded(record: Record(), status: .readOnly(.tooLarge)), nil)
+            case .unreadableBytes: return (Loaded(record: Record(), status: .readOnly(.couldNotRead)), nil)
+            case .data(let data): return (Self.decode(data), data)
             }
         }
 
@@ -349,64 +441,96 @@ extension BranchReview {
 
         // MARK: Opening
 
-        /// The review to show for the branch at `head`: the file if it is
-        /// this branch's (`disposition`), with `head` and the pull request
-        /// recorded; otherwise set aside, and the review starts fresh. The
-        /// lock is taken only when there is a file, so opening a branch
-        /// never reviewed leaves nothing behind. `reflogContains` may run
-        /// git: call this off the main thread.
-        func open(head: String, pullRequest: PullRequestLookup, reflogContains: (String) -> Bool?) -> Loaded {
-            guard Self.exists(fileURL) else { return load() }
-            do {
-                return try Self.withExclusiveLock(at: lockURL) {
-                    let loaded = load()
-                    guard case .loaded = loaded.status else { return loaded }
-                    switch BranchReview.disposition(
-                        of: loaded.record, branch: branch, repository: repository, head: head,
-                        pullRequest: pullRequest, reflogContains: reflogContains
-                    ) {
-                    case .unverified:
-                        return Loaded(record: loaded.record, status: .readOnly(.unverified(
-                            "Nirux couldn’t read the history of \(branch) to check that this review is its own. "
-                                + "Refresh to try again."
-                        )))
-                    case .archive:
-                        do {
-                            let setAside = try setAside(reason: "reused")
-                            return Loaded(record: Record(), status: .missing, setAside: setAside)
-                        } catch {
-                            return Loaded(record: Record(), status: .readOnly(.unverified(
-                                "The review stored for \(branch) belongs to an earlier branch of that name, "
-                                    + "and Nirux couldn’t set it aside: \(error.localizedDescription)"
-                            )))
+        /// The review to show for the branch at `head`, with the access to
+        /// write it: the file if it is this branch's (`disposition`), with
+        /// `head` and the pull request recorded; otherwise set aside, and
+        /// the review starts fresh. git runs before the lock is taken; if
+        /// the file changed meanwhile, it decides again. Opening a branch
+        /// never reviewed leaves nothing behind. Call it off the main
+        /// thread.
+        func open(head: String, pullRequest: PullRequestLookup, history: History) -> Loaded {
+            let number = pullRequest.pullRequest?.number
+            func access(lastHeads: Set<String>, existed: Bool) -> Access {
+                Access(
+                    branch: branch, repository: repository, head: head, pullRequest: number,
+                    lastHeads: lastHeads, existed: existed
+                )
+            }
+            for _ in 0..<3 {
+                var (found, bytes) = read()
+                switch found.status {
+                case .missing, .unreadable:
+                    found.access = access(lastHeads: [head], existed: false)
+                    return found
+                case .readOnly:
+                    return found
+                case .loaded:
+                    break
+                }
+                let disposition = BranchReview.disposition(
+                    of: found.record, branch: branch, repository: repository, head: head,
+                    pullRequest: pullRequest, history: history
+                )
+                var stamped = found.record
+                stamped.stamp(branch: branch, repository: repository, head: head, pullRequest: number)
+                switch disposition {
+                case .unverified:
+                    return Loaded(record: found.record, status: .readOnly(.unverified(
+                        "Nirux couldn’t read the history of \(branch) to check that this review is its own. "
+                            + "Refresh to try again."
+                    )))
+                case .keep where stamped == found.record:
+                    return Loaded(record: found.record, status: .loaded, access: access(lastHeads: [head], existed: true))
+                case .keep, .archive:
+                    break
+                }
+                let acted: Loaded?
+                do {
+                    acted = try Self.withExclusiveLock(at: lockURL, timeout: lockTimeout) { () -> Loaded? in
+                        guard read().bytes == bytes else { return nil }
+                        if disposition == .archive {
+                            do {
+                                let setAside = try setAside(reason: "reused")
+                                return Loaded(
+                                    record: Record(), status: .missing, setAside: setAside,
+                                    access: access(lastHeads: [head], existed: false)
+                                )
+                            } catch {
+                                return Loaded(record: Record(), status: .readOnly(.unverified(
+                                    "The review stored for \(branch) belongs to an earlier branch of that name, "
+                                        + "and Nirux couldn’t set it aside: \(error.localizedDescription)"
+                                )))
+                            }
                         }
-                    case .keep:
-                        var record = loaded.record
-                        record.stamp(
-                            branch: branch, repository: repository, head: head,
-                            pullRequest: pullRequest.pullRequest?.number
-                        )
-                        // A failed stamp leaves the file as it was: the
-                        // next write records it.
-                        if record != loaded.record, case .failure(let error) = write(record) {
+                        // A failed write leaves the file as it was: the
+                        // next one records the head.
+                        if case .failure(let error) = write(stamped) {
                             NiruxDebugLog.log("BranchReview.Store: could not record the head in \(fileURL.path): \(error)")
                         }
-                        return Loaded(record: record, status: .loaded)
+                        let lastHeads = Set([head] + [found.record.lastHead].compactMap { $0 })
+                        return Loaded(record: stamped, status: .loaded, access: access(lastHeads: lastHeads, existed: true))
                     }
+                } catch {
+                    return Loaded(record: Record(), status: .readOnly(.unverified(
+                        "Nirux couldn’t lock the review of \(branch): \(error.localizedDescription)"
+                    )))
                 }
-            } catch {
-                return Loaded(record: Record(), status: .readOnly(.unverified(
-                    "Nirux couldn’t lock the review of \(branch): \(error.localizedDescription)"
-                )))
+                if let acted { return acted }
             }
+            return Loaded(record: Record(), status: .readOnly(.unverified(
+                "The review of \(branch) kept changing while Nirux opened it. Refresh to try again."
+            )))
         }
 
-        /// `open` for a snapshot: its head and pull request, and its
-        /// branch's reflog.
+        /// `open` for a snapshot of this store's branch: its head, its pull
+        /// request, and git's answers about its history.
         func open(for snapshot: Snapshot, options: Options = Options()) -> Loaded {
-            open(head: snapshot.head, pullRequest: snapshot.pullRequest) { commit in
-                BranchReview.reflog(of: snapshot.branch, contains: commit, root: snapshot.root, options: options)
+            guard snapshot.branch == branch else {
+                return Loaded(record: Record(), status: .readOnly(.unverified(
+                    "The worktree is on \(snapshot.branch) now, not \(branch)."
+                )))
             }
+            return open(head: snapshot.head, pullRequest: snapshot.pullRequest, history: BranchReview.history(of: snapshot, options: options))
         }
 
         // MARK: Writing
@@ -414,6 +538,9 @@ extension BranchReview {
         enum WriteError: Error, Equatable {
             /// What's on disk now is read-only for this build.
             case readOnly(ReadOnlyReason)
+            /// Deleted, archived, or opened at another head since `open`:
+            /// open it again.
+            case changedSinceOpened
             /// The review would be larger than `maxFileBytes`, which this
             /// build wouldn't read back.
             case tooLarge
@@ -423,24 +550,27 @@ extension BranchReview {
         }
 
         /// Applies `change` to the review as it is on disk now, under the
-        /// lock, records `head` and the pull request, and writes it back:
-        /// a change another process wrote meanwhile is kept. Returns what
-        /// was written. Call `open` first: this doesn't check whose review
-        /// it is. Blocks while another write holds the lock: call it off
-        /// the main thread.
-        func update(head: String, pullRequest: Int?, _ change: (inout Record) -> Void) -> Result<Record, WriteError> {
+        /// lock, records the access's head and pull request, and writes it
+        /// back: a change another process wrote meanwhile is kept. Returns
+        /// what was written, with the access for the next write. Call it
+        /// off the main thread.
+        func update(_ access: Access, _ change: (inout Record) -> Void) -> Result<Loaded, WriteError> {
+            guard access.branch == branch, access.repository == repository else { return .failure(.changedSinceOpened) }
             do {
                 try Self.createPrivateFolder(folder)
             } catch {
                 return .failure(.couldNotWrite(error.localizedDescription))
             }
             do {
-                return try Self.withExclusiveLock(at: lockURL) {
-                    let current = load()
+                return try Self.withExclusiveLock(at: lockURL, timeout: lockTimeout) {
+                    let current = read().loaded
                     var record: Record
                     switch current.status {
                     case .readOnly(let reason):
                         return .failure(.readOnly(reason))
+                    case .missing:
+                        guard !access.existed else { return .failure(.changedSinceOpened) }
+                        record = Record()
                     case .unreadable:
                         do {
                             _ = try setAside(reason: "unreadable")
@@ -448,15 +578,21 @@ extension BranchReview {
                             return .failure(.couldNotSetAside(error.localizedDescription))
                         }
                         record = Record()
-                    case .missing:
-                        record = Record()
                     case .loaded:
+                        guard current.record.branch == branch, current.record.repository == repository,
+                              let lastHead = current.record.lastHead, access.lastHeads.contains(lastHead)
+                        else { return .failure(.changedSinceOpened) }
                         record = current.record
                     }
                     change(&record)
-                    record.stamp(branch: branch, repository: repository, head: head, pullRequest: pullRequest)
-                    if case .loaded = current.status, record == current.record { return .success(record) }
-                    return write(record).map { record }
+                    record.stamp(branch: branch, repository: repository, head: access.head, pullRequest: access.pullRequest)
+                    let next = Access(
+                        branch: branch, repository: repository, head: access.head, pullRequest: access.pullRequest,
+                        lastHeads: [access.head], existed: true
+                    )
+                    let written = Loaded(record: record, status: .loaded, access: next)
+                    if case .loaded = current.status, record == current.record { return .success(written) }
+                    return write(record).map { written }
                 }
             } catch {
                 return .failure(.couldNotLock(error.localizedDescription))
@@ -466,7 +602,7 @@ extension BranchReview {
         /// Atomically, 0600. Under the lock.
         private func write(_ record: Record) -> Result<Void, WriteError> {
             let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             guard var data = try? encoder.encode(record.fields) else {
                 return .failure(.couldNotWrite("The review couldn’t be encoded."))
             }
@@ -482,7 +618,7 @@ extension BranchReview {
             }
         }
 
-        /// Moves the file to `archive/<stem>.<reason>.<time>-<random>.json`.
+        /// Moves the file to `archive/<name>.<reason>.<time>-<random>.json`.
         /// Under the lock.
         private func setAside(reason: String) throws -> URL {
             try Self.createPrivateFolder(archiveFolder)
@@ -497,13 +633,14 @@ extension BranchReview {
 
         // MARK: Deleting
 
-        /// Deletes the review and its lock file, under the lock. True when
-        /// there was a review.
+        /// Clean Up of a worktree: its branch is gone, so is its review and
+        /// its lock file. Set-aside reviews stay. True when there was a
+        /// review.
         @discardableResult
         func delete() -> Bool {
             guard Self.exists(fileURL) || Self.exists(lockURL) else { return false }
             do {
-                return try Self.withExclusiveLock(at: lockURL) {
+                return try Self.withExclusiveLock(at: lockURL, timeout: lockTimeout) {
                     let deleted = unlink(fileURL.path) == 0
                     // A writer waiting on this lock file sees it gone, and
                     // locks the one that replaces it.
@@ -516,24 +653,6 @@ extension BranchReview {
             }
         }
 
-        /// Clean Up of a worktree: its branch is gone, so is its review, in
-        /// every project. Clean Up doesn't know which project reviewed it
-        /// (the Project Board cleans up a folder no workspace is open in).
-        /// Set-aside reviews stay. Returns the files deleted.
-        @discardableResult
-        static func deleteReviews(branch: String, repository: String, stateDirectory: URL) -> [URL] {
-            guard !branch.isEmpty, !repository.isEmpty else { return [] }
-            let reviews = stateDirectory.appendingPathComponent(folderName, isDirectory: true)
-            let spaces = (try? FileManager.default.contentsOfDirectory(atPath: reviews.path)) ?? []
-            return spaces.sorted().filter(SpaceBrief.isPlainSpaceID).compactMap { spaceID in
-                let store = Store(
-                    folder: reviews.appendingPathComponent(spaceID, isDirectory: true),
-                    repository: repository, branch: branch
-                )
-                return store.delete() ? store.fileURL : nil
-            }
-        }
-
         // MARK: Files
 
         struct LockError: LocalizedError {
@@ -541,27 +660,36 @@ extension BranchReview {
         }
 
         /// Runs `body` holding an exclusive `flock` on `url`, created if
-        /// needed, waiting as long as another holder keeps it. The lock
-        /// file may be deleted (`delete`) or replaced while this waits:
+        /// needed, waiting up to `timeout` for another holder to let go.
+        /// The lock file may be deleted (`delete`) or replaced meanwhile:
         /// once locked, the file locked must still be the one at `url`, or
         /// it starts over on the new one. Opened close-on-exec, so a
-        /// process `body` starts doesn't keep the lock.
-        static func withExclusiveLock<T>(at url: URL, _ body: () throws -> T) throws -> T {
-            for _ in 0..<100 {
-                let descriptor = Darwin.open(url.path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
-                guard descriptor >= 0 else { throw lockError("open", url) }
-                defer { close(descriptor) }
-                while flock(descriptor, LOCK_EX) != 0 {
-                    guard errno == EINTR else { throw lockError("flock", url) }
+        /// process started meanwhile doesn't keep the lock.
+        static func withExclusiveLock<T>(at url: URL, timeout: TimeInterval, _ body: () throws -> T) throws -> T {
+            let deadline = Date().addingTimeInterval(timeout)
+            var pause: useconds_t = 1_000
+            while true {
+                do {
+                    let descriptor = Darwin.open(url.path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+                    guard descriptor >= 0 else { throw lockError("open", url) }
+                    defer { close(descriptor) }
+                    if flock(descriptor, LOCK_EX | LOCK_NB) == 0 {
+                        var held = stat()
+                        var named = stat()
+                        guard fstat(descriptor, &held) == 0 else { throw lockError("fstat", url) }
+                        if lstat(url.path, &named) == 0, named.st_dev == held.st_dev, named.st_ino == held.st_ino {
+                            return try body()
+                        }
+                    } else if errno != EWOULDBLOCK, errno != EINTR {
+                        throw lockError("flock", url)
+                    }
                 }
-                var held = stat()
-                var named = stat()
-                guard fstat(descriptor, &held) == 0 else { throw lockError("fstat", url) }
-                guard lstat(url.path, &named) == 0, named.st_dev == held.st_dev, named.st_ino == held.st_ino
-                else { continue }
-                return try body()
+                guard Date() < deadline else {
+                    throw LockError(errorDescription: "Another Nirux has held \(url.lastPathComponent) for over \(Int(timeout)) s.")
+                }
+                usleep(pause)
+                pause = min(pause * 2, 50_000)
             }
-            throw LockError(errorDescription: "\(url.lastPathComponent) kept being replaced.")
         }
 
         private static func lockError(_ call: String, _ url: URL) -> LockError {

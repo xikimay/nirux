@@ -20,8 +20,8 @@ extension WorktreeCleanup {
     /// files since the check, and anything new stops it. The leftovers go
     /// to the Trash, then `git worktree remove` runs without `--force`, so
     /// git checks the folder once more itself. Stops at the first failure.
-    /// Once the branch is deleted, so is its Branch Review file, in every
-    /// project; a kept branch keeps it.
+    /// Once the branch is deleted, so is its Branch Review file; a kept
+    /// branch keeps it.
     static func execute(_ plan: Plan, tools: Tools = .installed) -> Execution {
         guard case .worktree(let current) = readWorktree(at: plan.worktree.path, tools: tools) else {
             return .failed("\(plan.worktree.path) can no longer be read. Nothing was deleted.")
@@ -49,9 +49,9 @@ extension WorktreeCleanup {
 
         func cleaned(forcedBranchDelete: Bool) -> Execution {
             if let stateDirectory = tools.reviewStateDirectory {
-                BranchReview.Store.deleteReviews(
-                    branch: plan.branch, repository: current.commonDirectory, stateDirectory: stateDirectory
-                )
+                BranchReview.Store(
+                    repository: current.commonDirectory, branch: plan.branch, stateDirectory: stateDirectory
+                )?.delete()
             }
             return .cleaned(forcedBranchDelete: forcedBranchDelete, trashFolder: trashFolder)
         }
