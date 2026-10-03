@@ -2,6 +2,7 @@ import AppKit
 
 /// The card's review row: `CR ✓  PM ✓  CS ·  ADV ·`. Green ran on HEAD,
 /// orange ran on an earlier commit, a dot never ran.
+@MainActor
 enum SidebarReviewBadgesRow {
     static func label(_ badges: ReviewBadges, isActive: Bool, x: CGFloat, width: CGFloat, top: CGFloat) -> NSTextField {
         let label = NSTextField(labelWithAttributedString: attributedText(badges, isActive: isActive))
