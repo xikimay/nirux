@@ -61,7 +61,7 @@ Source: [PullRequestReviewThread](https://docs.github.com/en/graphql/reference/o
 ## 2. Data
 
 - One query per open PR, on the PR's own host: `viewer`,
-  `reviewThreads(first: 100)` with the first comment of each,
+  `reviewThreads(last: 100)` (the newest) with the first comment of each,
   `comments(last: 50)`, `reviews(last: 50)`, the head commit's date. It costs
   1 point of the 5000 per hour (measured).
 - It runs after each read of an open PR, changed or not, so it follows the PR

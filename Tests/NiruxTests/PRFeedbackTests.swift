@@ -169,6 +169,12 @@ final class PRFeedbackTests: XCTestCase {
         XCTAssertEqual(arguments.last, "url=https://ghe.example.com/o/r/pull/7")
     }
 
+    /// GitHub lists threads oldest first: past 100, the newest must stay.
+    func testTheQueryReadsTheNewestThreads() {
+        let arguments = PRFeedbackReader.arguments(pullRequestURL: "https://github.com/o/r/pull/7")
+        XCTAssertTrue(arguments.contains { $0.contains("reviewThreads(last: 100)") })
+    }
+
     // MARK: - Card and Address
 
     func testSummaryPutsHumansFirstAndHidesZeroes() throws {

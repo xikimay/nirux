@@ -40,7 +40,7 @@ enum PRFeedbackReader {
     query($url: URI!) { viewer { login } resource(url: $url) { ... on PullRequest {
       author { login }
       commits(last: 1) { nodes { commit { committedDate } } }
-      reviewThreads(first: 100) { nodes { isResolved isOutdated path line comments(first: 1) { nodes {
+      reviewThreads(last: 100) { nodes { isResolved isOutdated path line comments(first: 1) { nodes {
         author { __typename login } authorAssociation isMinimized body url createdAt } } } }
       comments(last: 50) { nodes { author { __typename login } authorAssociation isMinimized body url createdAt } }
       reviews(last: 50) { nodes { state author { __typename login } authorAssociation isMinimized body url createdAt } }
