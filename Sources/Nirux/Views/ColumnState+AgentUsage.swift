@@ -35,7 +35,7 @@ struct ClaudeTranscriptFollow {
     }
 }
 
-/// "ctx 62%" in the column title bar: the context and token usage of the
+/// "ctx 62%" in the column header: the context and token usage of the
 /// column's Claude session, read from its transcript (read-only, off the
 /// main thread — see `ClaudeUsageFollower`). Shown only while the
 /// session's own `claude` is the column's foreground process.
@@ -81,26 +81,26 @@ extension ColumnState {
         }
     }
 
+    /// Shown in the header's accessories, before the dev-server chip; an
+    /// empty label takes no room.
     func setAgentUsage(_ usage: ClaudeSessionUsage?) {
         guard usage != agentUsage else { return }
         agentUsage = usage
         if let usage, let text = usage.titleBarText {
             let label = usageLabel ?? makeUsageLabel()
             label.stringValue = text
-            label.textColor = usage.isNearlyFull ? .niruxNearLimit : NSColor.white.withAlphaComponent(0.45)
+            label.textColor = usage.isNearlyFull ? .niruxNearLimit : Theme.Color.textTertiary
             label.toolTip = usage.tooltip
+        } else {
+            usageLabel?.stringValue = ""
         }
-        layoutTitleBarContents()
+        terminalHeader?.layoutNow()
     }
 
-    private func makeUsageLabel() -> NSTextField {
-        let label = NSTextField(labelWithString: "")
-        label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        label.alignment = .right
-        label.isBezeled = false
-        label.drawsBackground = false
+    private func makeUsageLabel() -> ColumnHeaderLabel {
+        let label = ColumnHeaderLabel()
         label.setAccessibilityLabel("Claude context usage")
-        titleBar?.addSubview(label)
+        terminalHeader?.accessories.insert(label, at: 0)
         usageLabel = label
         return label
     }

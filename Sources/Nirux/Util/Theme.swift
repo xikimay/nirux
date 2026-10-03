@@ -78,6 +78,8 @@ enum Theme {
         /// Card titles, palette rows.
         static var title: NSFont { NSFont.systemFont(ofSize: 13, weight: .semibold) }
         static var body: NSFont { NSFont.systemFont(ofSize: 12) }
+        /// Column header titles.
+        static var bodyEmphasized: NSFont { NSFont.systemFont(ofSize: 12, weight: .semibold) }
         /// Durations, counts, chips, tooltips.
         static var caption: NSFont { NSFont.systemFont(ofSize: 11) }
         /// Section labels only, uppercased and tracked by `labelKern`.

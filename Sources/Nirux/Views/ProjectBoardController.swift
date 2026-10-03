@@ -306,8 +306,11 @@ final class ProjectBoardController {
         )
         if let config, config.baseBranch != nil, case .workflow(let workflow) = config.postMergeWorkflow, repository != nil {
             switch postMergeRun {
-            case .some(let run): header.postMergeRun = ProjectBoard.runSummary(run, workflow: workflow, now: now)
-            case nil: header.postMergeRun = errors[.postMergeRun] == nil ? "\((workflow as NSString).deletingPathExtension): …" : nil
+            case .some(let run): header.postMergeRun = ProjectBoardView.runStatus(run, workflow: workflow, now: now)
+            case nil:
+                let label = (workflow as NSString).deletingPathExtension
+                header.postMergeRun = errors[.postMergeRun] == nil
+                    ? ColumnHeaderView.Status("\(label) …", tone: .neutral, toolTip: "Reading the last \(label) run…") : nil
             }
         }
         let messages = Set(errors.values.map(\.message) + [retargetFailure].compactMap { $0 }).sorted()
@@ -322,7 +325,7 @@ final class ProjectBoardController {
 
         let body: ProjectBoardView.Body
         if project == nil {
-            body = .message("This project was deleted. Pick another one in the menu above.")
+            body = .message("This project was deleted. Pick another one in the ⋯ menu above.")
         } else if let loaded, loaded.status == .unreadable {
             body = .message("board.json can’t be read: open Board Settings… to replace it.")
         } else if let loaded, case .readOnly(let reason) = loaded.status, repository == nil {

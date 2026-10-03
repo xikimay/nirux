@@ -1,6 +1,6 @@
 import AppKit
 
-/// Horizontal tab bar shown above the Monaco surface. Each tab maps 1:1 to
+/// Horizontal tab bar between the column header and the Monaco surface. Each tab maps 1:1 to
 /// a Monaco model on the JS side; closing a tab disposes the model, switching
 /// a tab swaps `editor.setModel`. The bar is frame-laid (no NSStackView) so
 /// we can size each tab to its filename and keep the rest of the editor
@@ -21,7 +21,7 @@ final class EditorTabBar: NSView {
     var onSelect: ((String) -> Void)?
     var onClose: ((String) -> Void)?
 
-    static let tabHeight: CGFloat = 30
+    static let tabHeight: CGFloat = 26
 
     private static let tabMinWidth: CGFloat = 100
     private static let tabMaxWidth: CGFloat = 220

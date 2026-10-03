@@ -58,6 +58,7 @@ extension NiruxShellView {
                           mergedCleanup: mergedCleanupOffer(workspaceIndex: index))
         }
         tickHiddenSpaceAgents(visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses)
+        updateColumnHeaders(infos: infos)
         let profileInfos = workspaceStore.navigableProfiles.map { profile in
             let profileWorkspaces = workspaces.filter { $0.profileID == profile.id }
             let hasAttention = profileWorkspaces.contains { workspace in
@@ -108,6 +109,16 @@ extension NiruxShellView {
         }
         closeEndedAgentSessions(now: now)
         return (foregroundProcesses, invalidatedSessionBinding)
+    }
+
+    /// The terminal headers show their agent as the sidebar reads it.
+    private func updateColumnHeaders(infos: [WorkspaceInfo]) {
+        for info in infos {
+            guard let workspace = workspaces[safe: info.index] else { continue }
+            for column in info.columns {
+                workspace.columns[safe: column.index]?.updateHeaderAgentState(column)
+            }
+        }
     }
 
     /// The other spaces' columns tick too, unfocused: the space dots, the

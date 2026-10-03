@@ -167,9 +167,12 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             client.retargetFailure = .failed("HTTP 422: Validation Failed")
             try click(try XCTUnwrap(try row("feat/api", in: board).queueButton))
             try waitUntil("the refusal shows") { board.view.statusLabel.stringValue.contains("Retarget #14: gh: HTTP 422") }
+            XCTAssertFalse(board.view.statusLabel.isHidden)
             client.retargetFailure = nil
             try click(board.view.refreshButton)
-            try waitUntil("Refresh clears it") { board.view.statusLabel.stringValue.hasPrefix("Updated") }
+            try waitUntil("Refresh clears it") {
+                board.view.statusLabel.isHidden && ProjectBoardFlowTests.wasUpdated(board.view)
+            }
 
             let reads = client.calls.filter { $0.what == "pr open acme/widgets" }.count
             try click(try XCTUnwrap(try row("feat/api", in: board).queueButton))

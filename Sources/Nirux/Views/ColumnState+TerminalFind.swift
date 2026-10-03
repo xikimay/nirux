@@ -75,7 +75,7 @@ extension ColumnState {
         }
     }
 
-    /// Top-right corner of the terminal, under the title bar.
+    /// Top-right corner of the terminal, under the header.
     func layoutFindBar() {
         guard let bar = findBar, !bar.isHidden else { return }
         let margin: CGFloat = 10

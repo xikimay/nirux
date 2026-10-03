@@ -454,11 +454,12 @@ extension NiruxShellView {
             layer.add(anim, forKey: "wsSlide")
         }
 
-        // Focus border only — attention borders are managed by updateSidebar()
+        // Focus border and header icon — attention borders are managed by updateSidebar()
         let accent = Theme.Color.accent.withAlphaComponent(0.7).cgColor
         for (wsIndex, workspace) in workspaces.enumerated() {
             for (colIndex, col) in workspace.columns.enumerated() {
                 let isFocus = (wsIndex == activeWSIndex && colIndex == workspace.focusedIndex)
+                col.setHeaderFocused(isFocus)
                 if col.view.layer?.animation(forKey: "attentionPulse") == nil {
                     col.view.layer?.cornerRadius = isFocus ? 6 : 0
                     col.view.layer?.borderWidth = isFocus ? 2 : 0

@@ -112,7 +112,6 @@ extension NiruxShellView {
     func switchProjectBoard(_ board: ProjectBoardController, to projectID: String) {
         guard projectID != board.projectID else { return }
         if let existing = projectBoardLocation(projectID: projectID) {
-            board.view.resetProjectMenu()
             focusProjectBoard(existing)
             return
         }
