@@ -1,6 +1,6 @@
 import AppKit
 
-/// Directional edge glow that pulses orange to indicate attention is needed off-screen
+/// Directional edge glow that pulses amber to indicate attention is needed off-screen
 final class EdgeGlowView: NSView {
     enum Edge { case left, right, top, bottom }
 
@@ -59,8 +59,8 @@ final class EdgeGlowView: NSView {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
 
         let colors: [CGColor] = [
-            NSColor.systemOrange.withAlphaComponent(0.5).cgColor,
-            NSColor.systemOrange.withAlphaComponent(0).cgColor
+            Theme.Color.waiting.withAlphaComponent(0.5).cgColor,
+            Theme.Color.waiting.withAlphaComponent(0).cgColor
         ]
         let locations: [CGFloat] = [0, 1]
         guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),

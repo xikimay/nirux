@@ -83,13 +83,13 @@ final class FilePickerPanel: NSObject {
         p.backgroundColor = .clear
         p.isOpaque = false
         p.hasShadow = true
-        p.appearance = NSAppearance(named: .darkAqua)
+        p.appearance = Theme.appearance
         p.becomesKeyOnlyIfNeeded = false
 
         let bg = NSView(frame: NSRect(origin: .zero, size: Self.panelSize))
         bg.wantsLayer = true
         bg.layer?.cornerRadius = 12
-        bg.layer?.backgroundColor = NSColor(red: 0.11, green: 0.11, blue: 0.15, alpha: 0.98).cgColor
+        bg.layer?.backgroundColor = Theme.Color.base.withAlphaComponent(0.98).cgColor
         bg.layer?.borderWidth = 1
         bg.layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
         bg.layer?.masksToBounds = true
@@ -298,7 +298,7 @@ private final class FilePickerCellView: NSTableCellView {
 private final class FilePickerRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {
         if selectionHighlightStyle != .none {
-            NSColor.niruxAccent.withAlphaComponent(0.18).setFill()
+            Theme.Color.accent.withAlphaComponent(0.18).setFill()
             let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 6, dy: 2), xRadius: 6, yRadius: 6)
             path.fill()
         }

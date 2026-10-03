@@ -76,7 +76,7 @@ final class SidebarRendererTests: XCTestCase {
         XCTAssertNil(SidebarRenderer.attentionTooltip(for: column(.idle, reason: nil)))
     }
 
-    /// The dot stays orange for any attention (like the glows and
+    /// The dot stays amber for any attention (like the glows and
     /// borders); the label tells a blocked agent from a finished turn.
     func testBlockedAndFinishedLabelsDiffer() {
         let blocked = SidebarRenderer.attentionTextColor(for: .permission(tool: "Bash", summary: nil))

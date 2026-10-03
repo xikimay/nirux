@@ -198,7 +198,7 @@ final class SidebarWorkspaceCardRenderer {
     private func phaseColor(_ phase: WorkspacePhase) -> NSColor {
         switch phase {
         case .active: return .systemGreen
-        case .waiting: return .systemOrange
+        case .waiting: return Theme.Color.waiting
         case .blocked: return .systemRed
         case .review: return .systemPurple
         case .parked: return NSColor.white.withAlphaComponent(0.38)
@@ -300,7 +300,7 @@ final class SidebarWorkspaceCardRenderer {
                 let selected = SidebarBackgroundView(frame: rowBackingFrame)
                 selected.wantsLayer = true
                 selected.layer?.cornerRadius = 6
-                selected.layer?.backgroundColor = NSColor.niruxAccent.withAlphaComponent(0.10).cgColor
+                selected.layer?.backgroundColor = Theme.Color.accent.withAlphaComponent(0.10).cgColor
                 append(selected)
             }
 
@@ -376,7 +376,7 @@ final class SidebarWorkspaceCardRenderer {
     /// Resume at the end of a not-resumed agent's row. Its hit area goes
     /// before the row's: the first area under the pointer takes the click.
     private func buildDeferredResumeButton(_ deferred: SidebarDeferredAgent, columnIndex: Int, rowY: CGFloat, padding: CGFloat) {
-        let color = NSColor.niruxAccent
+        let color = Theme.Color.accent
         let label = "Resume \(deferred.processName) here"
         let button = SidebarBadgeView(
             text: "Resume",
@@ -589,7 +589,7 @@ final class SidebarWorkspaceCardRenderer {
     }
 
     /// A stuck agent's dot says so whatever its status: red when it broke,
-    /// orange while its dialog waits.
+    /// amber while its dialog waits.
     private func statusDot(for column: ColumnInfo) -> NSView {
         let dot = SidebarBackgroundView()
         dot.wantsLayer = true
@@ -597,11 +597,11 @@ final class SidebarWorkspaceCardRenderer {
         let color: NSColor
         switch (column.stuck, column.agentStatus) {
         case let (stuck?, _):
-            color = stuck.isFailure ? .systemRed : .systemOrange
+            color = stuck.isFailure ? .systemRed : Theme.Color.waiting
         case (nil, .working):
             color = .systemGreen
         case (nil, .needsAttention):
-            color = .systemOrange
+            color = Theme.Color.waiting
         case (nil, .idle):
             color = NSColor.white.withAlphaComponent(0.22)
         }

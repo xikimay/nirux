@@ -18,7 +18,7 @@ final class TransientHintView: NSView {
         super.init(frame: frame)
         wantsLayer = true
         layer?.cornerRadius = 8
-        layer?.backgroundColor = NSColor(red: 0.16, green: 0.16, blue: 0.2, alpha: 0.96).cgColor
+        layer?.backgroundColor = Theme.Color.raised.withAlphaComponent(0.96).cgColor
         layer?.borderWidth = 1
         layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
         label.font = .systemFont(ofSize: 12, weight: .medium)

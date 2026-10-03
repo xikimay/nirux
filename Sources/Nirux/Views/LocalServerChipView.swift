@@ -28,9 +28,9 @@ final class LocalServerChipView: NSView {
         super.init(frame: frame)
         wantsLayer = true
         layer?.cornerRadius = Self.height / 2
-        layer?.backgroundColor = NSColor.niruxAccent.withAlphaComponent(0.14).cgColor
+        layer?.backgroundColor = Theme.Color.accent.withAlphaComponent(0.14).cgColor
         layer?.borderWidth = 1
-        layer?.borderColor = NSColor.niruxAccent.withAlphaComponent(0.35).cgColor
+        layer?.borderColor = Theme.Color.accent.withAlphaComponent(0.35).cgColor
         isHidden = true
 
         openButton.isBordered = false
@@ -130,7 +130,7 @@ final class LocalServerChipView: NSView {
         ])
         title.append(NSAttributedString(string: "\(text) ↗", attributes: [
             .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .medium),
-            .foregroundColor: NSColor(red: 0.72, green: 0.80, blue: 1.0, alpha: 0.95)
+            .foregroundColor: Theme.Color.accent
         ]))
         return title
     }

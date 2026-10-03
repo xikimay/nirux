@@ -64,7 +64,7 @@ final class WorktreePanel {
         else { return }
 
         statusLabel?.stringValue = "Creating worktree..."
-        statusLabel?.textColor = .niruxAccent
+        statusLabel?.textColor = Theme.Color.accent
 
         DispatchQueue.global(qos: .userInitiated).async {
             let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot)

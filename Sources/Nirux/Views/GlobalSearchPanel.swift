@@ -264,13 +264,13 @@ final class GlobalSearchPanel: NSObject {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
-        panel.appearance = NSAppearance(named: .darkAqua)
+        panel.appearance = Theme.appearance
         panel.becomesKeyOnlyIfNeeded = false
 
         let background = NSView(frame: NSRect(origin: .zero, size: size))
         background.wantsLayer = true
         background.layer?.cornerRadius = 12
-        background.layer?.backgroundColor = NSColor(red: 0.11, green: 0.11, blue: 0.15, alpha: 0.98).cgColor
+        background.layer?.backgroundColor = Theme.Color.base.withAlphaComponent(0.98).cgColor
         background.layer?.borderWidth = 1
         background.layer?.borderColor = NSColor.white.withAlphaComponent(0.08).cgColor
         background.layer?.masksToBounds = true
@@ -403,7 +403,7 @@ private final class GlobalSearchCellView: NSTableCellView {
         if NSMaxRange(row.match.highlight) <= excerpt.length {
             excerpt.addAttributes([
                 .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .bold),
-                .foregroundColor: NSColor.niruxAccent
+                .foregroundColor: Theme.Color.accent
             ], range: row.match.highlight)
         }
         excerptLabel.attributedStringValue = excerpt

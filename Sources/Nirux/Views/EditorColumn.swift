@@ -111,7 +111,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
 
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(red: 0.10, green: 0.11, blue: 0.15, alpha: 1).cgColor
+        layer?.backgroundColor = Theme.Color.base.cgColor
 
         setupTree()
         setupTabBar()
@@ -169,7 +169,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         config.userContentController.add(self, name: "nirux")
         webView.navigationDelegate = self
         webView.setValue(false, forKey: "drawsBackground")
-        webView.underPageBackgroundColor = NSColor(red: 0.10, green: 0.11, blue: 0.15, alpha: 1)
+        webView.underPageBackgroundColor = Theme.Color.base
         addSubview(webView)
 
         // Conflict banner floats over the editor surface — added last so it

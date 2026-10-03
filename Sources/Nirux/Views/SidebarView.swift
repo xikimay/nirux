@@ -147,9 +147,9 @@ final class SidebarView: NSView {
 
     private static let dotSize: CGFloat = 6
     private static let dotGap: CGFloat = 8
-    static let accentColor: NSColor = .niruxAccent
+    static let accentColor: NSColor = Theme.Color.accent
     private static let dimColor = NSColor.white.withAlphaComponent(0.25)
-    private static let notifColor = NSColor.systemOrange
+    private static let notifColor = Theme.Color.waiting
 
     /// Scrollable container for expanded-mode content. In collapsed mode it's
     /// hidden and we just draw dots into the sidebar's own layer.
@@ -165,7 +165,7 @@ final class SidebarView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(red: 0.11, green: 0.11, blue: 0.14, alpha: 1).cgColor
+        layer?.backgroundColor = Theme.Color.base.cgColor
 
         contentScrollView.drawsBackground = false
         contentScrollView.hasVerticalScroller = true

@@ -7,7 +7,7 @@ import AppKit
 /// bottom accessories (a hidden trailing one keeps its frame and stays
 /// drawn), so the view hides and shrinks to nothing itself.
 final class KeepAwakeIndicator: NSTitlebarAccessoryViewController {
-    static let symbolName = "cup.and.saucer.fill"
+    static let symbolName = Theme.Symbol.keepAwake
     private static let size = NSSize(width: 30, height: 22)
 
     private let imageView = NSImageView()

@@ -2,7 +2,10 @@ import AppKit
 import Foundation
 
 extension NSColor {
-    static let niruxAccent = NSColor(red: 0.47, green: 0.64, blue: 0.97, alpha: 1)
+    /// Old name of `Theme.Color.accent`, kept so branches written before
+    /// the tokens still build; ThemeGuardTests then points them to the token.
+    @available(*, deprecated, message: "Use Theme.Color.accent")
+    static let niruxAccent = Theme.Color.accent
     /// A usage close to its limit: a Claude column's context ("ctx 92%"),
     /// the plan usage limits in the title bar.
     static let niruxNearLimit = NSColor.systemOrange.withAlphaComponent(0.9)

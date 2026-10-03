@@ -165,7 +165,7 @@ enum SidebarStuckState: Hashable {
         }
     }
 
-    /// Red when something broke, orange while a dialog waits.
+    /// Red when something broke, amber while a dialog waits.
     var isFailure: Bool {
         if case .waiting = self { return false }
         return true

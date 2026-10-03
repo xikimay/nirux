@@ -25,7 +25,7 @@ final class EditorTabBar: NSView {
 
     private static let tabMinWidth: CGFloat = 100
     private static let tabMaxWidth: CGFloat = 220
-    private static let bgColor = NSColor(red: 0.09, green: 0.09, blue: 0.13, alpha: 1)
+    private static let bgColor = Theme.Color.canvas
 
     private let scrollView = NSScrollView()
     private let documentView = NSView()
@@ -115,9 +115,9 @@ private final class TabItemView: NSView {
     private let dirtyDot = NSView()
     private let closeButton = NSButton()
 
-    private static let activeBg = NSColor(red: 0.13, green: 0.13, blue: 0.18, alpha: 1)
+    private static let activeBg = Theme.Color.surface
     private static let inactiveBg = NSColor.clear
-    private static let activeAccent = NSColor.niruxAccent
+    private static let activeAccent = Theme.Color.accent
     private var accentBar: CALayer?
 
     init(tab: EditorTabBar.Tab, isActive: Bool) {
@@ -144,7 +144,7 @@ private final class TabItemView: NSView {
         addSubview(label)
 
         dirtyDot.wantsLayer = true
-        dirtyDot.layer?.backgroundColor = NSColor(red: 0.95, green: 0.7, blue: 0.3, alpha: 1).cgColor
+        dirtyDot.layer?.backgroundColor = Theme.Color.textPrimary.cgColor
         dirtyDot.layer?.cornerRadius = 3
         dirtyDot.isHidden = !tab.isDirty
         addSubview(dirtyDot)

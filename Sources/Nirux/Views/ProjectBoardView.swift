@@ -160,9 +160,12 @@ final class ProjectBoardView: NSView {
 
     private static let primaryText = NSColor.white.withAlphaComponent(0.85)
     private static let secondaryText = NSColor.white.withAlphaComponent(0.45)
-    private static let waitingColor = NSColor.systemOrange
-    private static let failureColor = NSColor(red: 0.97, green: 0.46, blue: 0.56, alpha: 1)
-    private static let workingColor = NSColor(red: 0.62, green: 0.81, blue: 0.42, alpha: 1)
+    private static let waitingColor = Theme.Color.waiting
+    private static let failureColor = Theme.Color.error
+    private static let workingColor = Theme.Color.working
+    private static let successColor = Theme.Color.success
+    /// Checks still running: not a wait on the user, so not `waiting`.
+    private static let pendingColor = NSColor.systemOrange
     private static let dryRunColor = NSColor.systemOrange
 
     nonisolated static let dryRunTooltip = "This build can’t change GitHub: its queue reads GitHub, then stops before its first "
@@ -179,8 +182,8 @@ final class ProjectBoardView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(red: 0.1, green: 0.1, blue: 0.12, alpha: 1).cgColor
-        appearance = NSAppearance(named: .darkAqua)
+        layer?.backgroundColor = Theme.Color.canvas.cgColor
+        appearance = Theme.appearance
 
         projectPopup.controlSize = .small
         projectPopup.font = .systemFont(ofSize: 12, weight: .semibold)
@@ -692,7 +695,7 @@ final class ProjectBoardView: NSView {
         switch tone {
         case .normal: return secondaryText
         case .active: return primaryText
-        case .success: return workingColor
+        case .success: return successColor
         case .failure: return failureColor
         }
     }
@@ -700,8 +703,8 @@ final class ProjectBoardView: NSView {
     private static func color(for result: ProjectBoard.CheckResult?) -> NSColor {
         switch result {
         case .failure?: return failureColor
-        case .pending?: return waitingColor
-        case .success?: return workingColor
+        case .pending?: return pendingColor
+        case .success?: return successColor
         case .neutral?, .skipped?, nil: return secondaryText
         }
     }

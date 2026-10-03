@@ -332,8 +332,8 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         )
         panel.titlebarAppearsTransparent = true
         panel.titleVisibility = .hidden
-        panel.appearance = NSAppearance(named: .darkAqua)
-        panel.backgroundColor = NSColor(red: 0.105, green: 0.105, blue: 0.14, alpha: 1)
+        panel.appearance = Theme.appearance
+        panel.backgroundColor = Theme.Color.base
         panel.isReleasedWhenClosed = false
         panel.autorecalculatesKeyViewLoop = true
         panel.contentView = container

@@ -31,7 +31,7 @@ final class MergeQueueConfirmationPanel: NSObject {
 
     private static let size = NSSize(width: 700, height: 640)
     private static let dryRunColor = NSColor.systemOrange
-    private static let refusalColor = NSColor(red: 0.97, green: 0.46, blue: 0.56, alpha: 1)
+    private static let refusalColor = Theme.Color.error
     private static let primaryText = NSColor.white.withAlphaComponent(0.9)
     private static let secondaryText = NSColor.white.withAlphaComponent(0.5)
 
@@ -236,8 +236,8 @@ final class MergeQueueConfirmationPanel: NSObject {
         panel.isReleasedWhenClosed = false
         panel.titlebarAppearsTransparent = true
         panel.titleVisibility = .hidden
-        panel.appearance = NSAppearance(named: .darkAqua)
-        panel.backgroundColor = NSColor(red: 0.105, green: 0.105, blue: 0.14, alpha: 1)
+        panel.appearance = Theme.appearance
+        panel.backgroundColor = Theme.Color.base
 
         let container = NSView(frame: NSRect(origin: .zero, size: size))
         let heading = NSTextField(labelWithString: isDryRun ? "Dry Run of the Merge Queue" : "Start the Merge Queue")
