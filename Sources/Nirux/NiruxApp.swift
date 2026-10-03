@@ -8,7 +8,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var shell: NiruxShellView?
     var updaterController: SPUStandardUpdaterController?
     var updateDot: NSView?
-    var settingsPanel: NSPanel?
+    var settingsWindow: NSWindow?
     weak var settingsKeepAwakeCheckbox: NSButton?
     weak var settingsUsageLimitsCheckbox: NSButton?
     weak var settingsAgentResumePopup: NSPopUpButton?
@@ -30,17 +30,16 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var usageLimitsIndicator: ClaudeUsageIndicator?
     var usageLimitsMonitor: ClaudeUsageLimitsMonitor?
     /// What Settings reports about Claude Code's status line, and how it
-    /// installs Nirux's; Settings tests stub both, so Save never writes to
+    /// installs Nirux's; Settings tests stub both, so they never write to
     /// ~/.claude.
     var claudeStatusLineStateReader: () -> AgentHookInstaller.ClaudeStatusLineState = {
         AgentHookInstaller.claudeStatusLineState()
     }
     var claudeStatusLineInstaller: (Bool) -> Void = { AgentHookInstaller.applyClaudeStatusLine(enabled: $0) }
-    /// Keychain access used by the Settings panel; tests stub it.
+    /// Keychain access used by the Settings window; tests stub it.
     var telegramTokenLoader: () throws -> String? = { try TelegramTokenStore.load() }
     var telegramTokenSaver: (String) throws -> Void = { try TelegramTokenStore.save($0) }
-    /// Screen height the Settings panel may take; tests stub it.
-    var settingsVisibleHeight: @MainActor () -> CGFloat? = { NSScreen.main?.visibleFrame.height }
+    var telegramTokenDeleter: () throws -> Void = { try TelegramTokenStore.delete() }
     var isManualUpdateCheck = false
     var updaterReady = false
     var urlConfirmations = URLConfirmationQueue()

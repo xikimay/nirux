@@ -60,7 +60,7 @@ final class OnboardingChecklistTests: XCTestCase {
     }
 
     func testStateFileWithoutWorkspacesCountsAsFreshInstall() {
-        // Settings saved before the first workspace save (Settings panel,
+        // Settings saved before the first workspace save (Settings window,
         // Telegram) write a state with no workspaces.
         let settingsOnly = state(workspaces: [])
         XCTAssertEqual(OnboardingChecklist.launchState(persisted: settingsOnly), .pending)
