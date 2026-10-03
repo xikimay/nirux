@@ -52,6 +52,6 @@ final class AgentSkillsInstallerTests: XCTestCase {
 
     @MainActor
     func testShippedSkillsAreTheOnesTheChecklistChecks() {
-        XCTAssertEqual(NiruxShellView.agentSkills.keys.sorted(), ["nirux-show-code", "nirux-worktree"])
+        XCTAssertEqual(NiruxShellView.agentSkills.keys.sorted(), ["nirux-draft", "nirux-show-code", "nirux-worktree"])
     }
 }
