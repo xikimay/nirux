@@ -452,8 +452,9 @@ app delegate's `applicationWillFinishLaunching`,
 in the same file), where the `--hook` and `--check-release-signature`
 modes live (decided by the user on 2026-10-03); not another type's `main`,
 such as a subcommand's. A signature may wrap before its body (`-> T`,
-`where`, `async`, `throws`, generic parameters, `{` on its own line); a
-line of comments or blanks changes nothing. On #57 (`setUpKeepAwake(...)`, `keepAwakeController?.shutdown()`)
+`where`, `async`, `throws`, generic parameters, `{` on its own line); the
+line that opens the body, and a closure in the signature, count as inside;
+a line of comments or blanks changes nothing. On #57 (`setUpKeepAwake(...)`, `keepAwakeController?.shutdown()`)
 and #65 (the release check at launch and in `main`), `NiruxApp.swift`
 already raised "launch" by its path: this names the reasons and the hunks.
 

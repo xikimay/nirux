@@ -150,8 +150,9 @@ enum BranchReview {
         /// symlink, a deletion, or a change that adds no line.
         var symbols: SymbolScan?
         /// How a Swift file's changed lines were read (section 5, "Swift
-        /// files read in context"). Nil for the other files, a link, a
-        /// folded file, and a file whose patch wasn't read.
+        /// files read in context"). Nil for the other files, a link, a file
+        /// folded by its name or attributes, one with no changed line, and
+        /// one whose patch wasn't read.
         var swiftContext: SwiftContext?
     }
 

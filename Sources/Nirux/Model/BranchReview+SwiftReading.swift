@@ -16,8 +16,7 @@ extension BranchReview {
         /// in, by hunk index. A line of comments or blanks changes nothing.
         var lifecycleHunks: [String: Set<Int>] = [:]
         /// Each hunk reads the same before and after but for whitespace, a
-        /// multi-line string's text read as Swift reads it (see
-        /// `stringLine`).
+        /// multi-line string's text read as Swift reads it (see `side`).
         var isWhitespaceOnly = false
         /// What its added lines declare outside function bodies, but the
         /// names its removed lines declared: a changed value, conformance,
@@ -236,17 +235,24 @@ extension BranchReview {
             let file = files[index]
             // A link (added, or modified as its `index` line says) declares
             // nothing.
+            let isDeletedLink = file.status == .deleted && file.oldMode == "120000"
             guard file.path.hasSuffix(".swift"), namedFolds[file.path] == nil, file.additions + file.deletions > 0,
-                  file.newMode != "120000", let parts = sections[file.path], let section = parts.last,
+                  file.newMode != "120000", !isDeletedLink, let parts = sections[file.path], let section = parts.last,
                   Patch.header(section)?.indexMode != "120000"
             else { continue }
             switch read(file, section: section, root: root, options: options, budget: &budget) {
             case .success(let reading):
-                let offset = parts.dropLast().compactMap {
-                    Patch.section($0, reading: Patch.Reading(keepsLines: false, whitespace: nil, findsRisks: false))?.hunkCount
-                }.reduce(0, +)
+                // A type change's link section comes first: its hits as the
+                // first pass read them, the new file's hunks after them.
+                var offset = 0
+                var lineHits: [RiskHit] = []
+                for part in parts.dropLast() {
+                    let link = Patch.section(part, reading: Patch.Reading(keepsLines: false, whitespace: nil))
+                    lineHits += (link?.riskHits ?? []).map { RiskHit(rule: $0.rule, hunk: offset + $0.hunk) }
+                    offset += link?.hunkCount ?? 0
+                }
                 if PathGroup(path: file.path) != .docs {
-                    let lineHits = reading.riskHits.map { RiskHit(rule: $0.rule, hunk: offset + $0.hunk) }
+                    lineHits += reading.riskHits.map { RiskHit(rule: $0.rule, hunk: offset + $0.hunk) }
                     files[index].signals = merged(RiskRules.signals(lineHits: lineHits) + reading.lifecycleHunks.map {
                         RiskSignal(kind: .launch, reasons: ["inside \($0.key)"], hunks: $0.value.map { offset + $0 }.sorted(), byPath: false)
                     })

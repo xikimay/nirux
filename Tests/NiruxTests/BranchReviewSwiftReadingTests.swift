@@ -209,19 +209,24 @@ final class BranchReviewSwiftReadingTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(gauge.symbols, .read([BranchReview.Symbol(name: "limit", line: 3, kind: .variable, container: "Gauge")]))
     }
 
-    func testTypeChangeKeepsItsFirstPassSignalsAndGivesItsSymbols() throws {
+    func testTypeChangeIsReadInContextAfterItsLinksHunk() throws {
         try FileManager.default.createDirectory(atPath: repo + "/Sources", withIntermediateDirectories: true)
-        try FileManager.default.createSymbolicLink(atPath: repo + "/Sources/Link.swift", withDestinationPath: "App.swift")
+        try FileManager.default.createSymbolicLink(atPath: repo + "/Sources/Link.swift", withDestinationPath: "/tmp/App.swift")
+        try FileManager.default.createSymbolicLink(atPath: repo + "/Sources/Gone.swift", withDestinationPath: "App.swift")
         try commitToMain("link")
         try FileManager.default.removeItem(atPath: repo + "/Sources/Link.swift")
+        try FileManager.default.removeItem(atPath: repo + "/Sources/Gone.swift")
         try write("Sources/Link.swift", "let queue = DispatchQueue.main\n")
 
-        let link = try file("Sources/Link.swift", in: try snapshot())
+        let snapshot = try snapshot()
+        let link = try file("Sources/Link.swift", in: snapshot)
 
         XCTAssertEqual(link.status, .typeChanged)
         XCTAssertEqual(link.signals, [
+            BranchReview.RiskSignal(kind: .security, reasons: ["/tmp"], hunks: [0], byPath: false),
             BranchReview.RiskSignal(kind: .concurrency, reasons: ["DispatchQueue"], hunks: [1], byPath: false)
         ])
+        XCTAssertNil(try file("Sources/Gone.swift", in: snapshot).swiftContext, "a link isn't Swift")
         XCTAssertEqual(link.symbols, .read([BranchReview.Symbol(name: "queue", line: 1, kind: .variable, container: nil)]))
         XCTAssertEqual(link.swiftContext, .read)
     }
