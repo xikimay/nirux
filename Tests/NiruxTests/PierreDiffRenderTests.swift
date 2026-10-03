@@ -196,8 +196,8 @@ final class PierreDiffRenderTests: XCTestCase {
         let result = try page.run("""
             window.requestAnimationFrame = (callback) => setTimeout(() => callback(performance.now()), 0);
             const root = document.getElementById("root");
-            // A line height off WebKit's 1/64 pt grid, which the review
-            // rounds onto it.
+            // A line height in fractions of a point, which the review
+            // rounds to whole points: WebKits lay fractions out apart.
             const review = window.NiruxPierreDiff.createReview(document, { lineHeight: 18.3 });
             const containers = [];
             for (let index = 0; index < 30; index++) {

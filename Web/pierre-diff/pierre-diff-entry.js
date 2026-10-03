@@ -300,11 +300,9 @@ function reviewOptions(fontSize, lineHeight, onRendered) {
   };
 }
 
-// They go into CSS: a number, or the default. On WebKit's layout grid
-// (1/64 pt): a line height off it would make placeholders and rendered
-// files differ by a fraction of a point.
+// They go into CSS: a number, or the default.
 function points(value, fallback) {
-  const number = Math.round(Number(value) * 64) / 64;
+  const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
@@ -315,7 +313,10 @@ const reviewsByRoot = new WeakMap();
 // are in points.
 function createReview(scrollRoot, { fontSize, lineHeight, onRendered } = {}) {
   fontSize = points(fontSize, 12);
-  lineHeight = points(lineHeight, 18);
+  // Whole points: placeholders count lines at this height, and a fraction
+  // isn't laid out the same way by every WebKit (macOS 15's rounds it,
+  // later ones keep 1/64 pt).
+  lineHeight = Math.max(1, Math.round(points(lineHeight, 18)));
   const root = scrollRoot instanceof HTMLElement ? scrollRoot : document;
   // One review per scroll root: a page that reloads its data creates a new
   // one, and the old one's diffs go.
