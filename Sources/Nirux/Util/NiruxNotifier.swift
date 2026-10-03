@@ -113,7 +113,7 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         switch kind {
         case .question: content.title = "Mission needs input"
         case .completed: content.title = "Mission completed"
-        case .response, .acknowledged: return
+        case .response, .instruction, .acknowledged: return
         }
         content.subtitle = workspaceTitle
         content.body = message

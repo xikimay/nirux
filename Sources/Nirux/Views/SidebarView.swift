@@ -40,6 +40,8 @@ final class SidebarView: NSView {
     /// (workspaceIndex, columnIndex, column id).
     var onDeferredAgentResume: ((Int, Int, UUID) -> Void)?
     var onDiffStatsClicked: ((Int) -> Void)?
+    /// A card's PR link clicked: (workspaceIndex, url).
+    var onWorkspaceURLClicked: ((Int, String) -> Void)?
     var onWorkspaceAction: ((WorkspaceSidebarAction, Int) -> Void)?
     /// Whether the workspace's menu offers "Clean Up Worktree…" (it's open
     /// in a linked worktree, or its folder is gone). Asked on each menu.
@@ -489,8 +491,9 @@ final class SidebarView: NSView {
                 onDiffStatsClicked?(workspaceIndex)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.cleanupActionPrefix) {
                 onWorkspaceAction?(.cleanUpWorktree, workspaceIndex)
-            } else if let url = URL(string: url) {
-                NSWorkspace.shared.open(url)
+            } else if let (workspaceIndex, url) = Self.openActionTarget(url),
+                      case .web = TerminalLinkTarget.parse(url) {
+                onWorkspaceURLClicked?(workspaceIndex, url)
             }
         case .column(let workspaceIndex, let columnIndex):
             onColumnClicked?(workspaceIndex, columnIndex)
@@ -674,11 +677,24 @@ final class SidebarView: NSView {
         cleanupActionPrefix + String(workspaceIndex)
     }
 
+    /// Opens `url` in a browser column of the card's workspace.
+    static func openActionURL(workspaceIndex: Int, url: String) -> String {
+        "action:open:\(workspaceIndex):\(url)"
+    }
+
     static let inactiveSectionActionURL = "action:inactive-section-toggle"
 
     private static func actionWorkspaceIndex(_ value: String, prefix: String) -> Int? {
         guard value.hasPrefix(prefix) else { return nil }
         return Int(value.dropFirst(prefix.count))
+    }
+
+    private static func openActionTarget(_ value: String) -> (Int, String)? {
+        let prefix = "action:open:"
+        guard value.hasPrefix(prefix) else { return nil }
+        let rest = value.dropFirst(prefix.count)
+        guard let colon = rest.firstIndex(of: ":"), let workspaceIndex = Int(rest[..<colon]) else { return nil }
+        return (workspaceIndex, String(rest[rest.index(after: colon)...]))
     }
 }
 

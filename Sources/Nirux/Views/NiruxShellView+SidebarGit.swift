@@ -414,6 +414,11 @@ extension NiruxShellView {
         }
         updateSidebar(snapshot: snapshot)
         if changed { saveState(snapshot: snapshot) }
+        // After this drain: a turn that ended may have freed a Mission
+        // child's prompt for a waiting `tell`.
+        if events.contains(where: { [.stop, .stopFailure].contains($0.event.name) }) {
+            DispatchQueue.main.async { [weak self] in self?.typeMissionInstructions() }
+        }
     }
 
     /// MissionEventCenter delivery target. The activity write is flushed
@@ -427,11 +432,12 @@ extension NiruxShellView {
         case .question: category = .missionQuestion
         case .completed: category = .missionCompleted
         case .response: category = .missionResponse
+        case .instruction: category = .missionInstruction
         case .acknowledged: return false
         }
         let entry = ActivityEntry(
             category: category,
-            agentKind: event.kind == .response ? "parent" : mission.childAgentKind,
+            agentKind: [.response, .instruction].contains(event.kind) ? "parent" : mission.childAgentKind,
             agentUUID: mission.childAgentUUID,
             workspaceID: mission.childWorkspaceID,
             columnIndex: columnIndex,
@@ -459,6 +465,11 @@ extension NiruxShellView {
             )
         }
         refreshActivitySidebar()
+        // Once the event is marked delivered: a new `tell` may find its
+        // child's prompt free.
+        if event.kind == .instruction {
+            DispatchQueue.main.async { [weak self] in self?.typeMissionInstructions() }
+        }
         return true
     }
 
