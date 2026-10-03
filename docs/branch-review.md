@@ -427,17 +427,41 @@ gives each hunk its enclosing function.
 **Tests against code.** The header shows lines added in tests against lines
 added in code, and lists the symbols the branch declares that no test
 mentions. A symbol is an identifier declared on an added line (`func`, `var`,
-`let`, `class`, `struct`, `enum`, `case`, `protocol`, `typealias`) outside any
-function body, found by tracking braces in the file at the head, and not
-`private` or `fileprivate`: private members are tested through the API that
-uses them, and local variables would only add noise. A test mentions a symbol
-when the identifier appears as a whole word in a file under `Tests/`. On #57,
-578 test lines for 458 code lines, and a script applying this rule found 11
-of 42 names (each counted once per file) that no test mentions, among them
-`setUpKeepAwake` (the launch wiring), `IOKitSleepAssertions` (the real IOKit
-calls; the tests inject a fake) and `mainQueueSchedule`. A mention isn't
-coverage, so the line says
-"mentions", never "tested".
+`let`, `class`, `struct`, `enum`, `case`, `protocol`, `typealias`, `actor`)
+outside any function body, found by tracking braces in the file at the head,
+and not `private` or `fileprivate`, nor in a private type or extension:
+private members are tested through the API that uses them, and local
+variables would only add noise. Nor an `override` (decided by the user on
+2026-10-03): its name is the superclass's, and tests reach it through the API
+that calls it. A test mentions a symbol when the identifier appears as a whole
+word in a file of the Tests group. On #57, 578 test lines for 458 code lines,
+and 12 of 45 names (each counted once per file) that no test mentions, among
+them `setUpKeepAwake` (the launch wiring), `IOKitSleepAssertions` (the real
+IOKit calls; the tests inject a fake) and `mainQueueSchedule`. A mention isn't
+coverage, so the line says "mentions", never "tested".
+
+- **Lines.** The added lines of the Tests and Code groups' files, folded files
+  aside. An untracked file listed by name only counts no line.
+- **Symbols.** Only Swift files of the Code group, not folded, not deleted. The
+  first pass over the patch keeps the new side's numbers of their `+` lines,
+  as ranges, and a digest of those lines. The file is then read from the
+  worktree and lexed whole: strings (multi-line, raw, with interpolations),
+  nested comments and `#/…/#` regexes hold no brace and no declaration.
+  `class func` is a method, `private(set)` doesn't make a property private,
+  `if let` and `guard let` at a file's level declare nothing, `case a, b(Int)`
+  declares two names, and a name in backticks counts without them. When the
+  file's lines no longer match the digest (the agent edited it meanwhile, a
+  clean filter), or it is past 2 MB, or the files read pass 32 MB, or its
+  patch wasn't read, its symbols are unknown: the header names the file
+  rather than reading "nothing declared". A CRLF file whose patch shows LF
+  (`eol=crlf`) still matches. Known limits: a bare `/regex/` literal reads as
+  code, and `#if` branches that each open a brace read as two.
+- **Mentions.** The test files are listed by git (`ls-files --cached --others
+  --exclude-standard`, untracked tests included), Swift files first, and read
+  up to 4,000 files, 1 MB each and 32 MB in all; reading stops once every name
+  is found. A file cut short loses its last word, which may be a longer one.
+  The header says how many test files went unread while a name was still
+  missing, and when git couldn't list them.
 
 The rules start built in, for Swift and macOS. Per-project rules
 (`board.json`) can come later.

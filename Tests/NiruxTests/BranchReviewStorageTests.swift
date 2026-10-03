@@ -412,7 +412,7 @@ final class BranchReviewStorageTests: XCTestCase {
         let snapshot = BranchReview.Snapshot(
             root: root, branch: "feat/y", head: "b2", base: BranchReview.Base(name: "main", ref: "refs/heads/main", mergeBase: "m0"),
             pullRequest: pullRequest(60), fetchProblem: nil, upstream: nil, pullRequestHead: nil,
-            hasUncommittedChanges: false, commits: [], files: []
+            hasUncommittedChanges: false, commits: [], files: [], testsAgainstCode: BranchReview.TestsAgainstCode()
         )
 
         let opened = store.open(for: snapshot)

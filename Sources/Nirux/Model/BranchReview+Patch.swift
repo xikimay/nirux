@@ -43,6 +43,8 @@ extension BranchReview {
         /// The line rules its `+` and `-` lines match, by hunk index in
         /// the section. Empty when not looked for.
         var riskHits: Set<RiskHit> = []
+        /// Nil when not collected, or past `AddedLineCollector`'s limit.
+        var addedLines: AddedLines?
 
         /// The path its name-status entry lists last: the new path, or the
         /// old one for a deletion.
@@ -77,6 +79,8 @@ extension BranchReview {
             var whitespace: WhitespaceCheck.Mode? = .ignoringIndentation
             /// Fill `PatchSection.riskHits`.
             var findsRisks = true
+            /// Fill `PatchSection.addedLines`.
+            var collectsAddedLines = false
         }
 
         /// Parses every section, read as `reading` says for each (by its
@@ -107,15 +111,18 @@ extension BranchReview {
             // An added or a deleted file's mode appears or goes.
             let keepsMode = section.oldMode == section.newMode
             var whitespace = reading.whitespace.flatMap { keepsMode ? WhitespaceCheck(mode: $0) : nil }
+            var added = reading.collectsAddedLines ? AddedLineCollector() : nil
             while let header = pendingHunk {
                 guard let read = hunk(
-                    header, from: &reader, into: &section, hasher: &hasher, whitespace: &whitespace, reading: reading
+                    header, from: &reader, into: &section, hasher: &hasher, whitespace: &whitespace, added: &added,
+                    reading: reading
                 ) else { return nil }
                 if reading.keepsLines { section.hunks.append(read.hunk) }
                 section.hunkCount += 1
                 pendingHunk = read.next
             }
             section.changedLinesDigest = hasher.finalize()
+            section.addedLines = added?.finalize()
             section.isWhitespaceOnly = section.hunkCount > 0 && whitespace?.isWhitespaceOnly == true
             return section
         }
@@ -207,6 +214,7 @@ extension BranchReview {
             into section: inout PatchSection,
             hasher: inout ChangedLineHasher,
             whitespace: inout WhitespaceCheck?,
+            added: inout AddedLineCollector?,
             reading: Reading
         ) -> (hunk: Hunk, next: Data?)? {
             guard let header = hunkHeader(Substring(decoded(headerLine))) else { return nil }
@@ -228,6 +236,7 @@ extension BranchReview {
                     switch raw.first {
                     case UInt8(ascii: "+"):
                         guard newRemaining > 0 else { return nil }
+                        added?.add(header.newStart + header.newCount - newRemaining, raw.dropFirst())
                         newRemaining -= 1
                         section.additions += 1
                         kind = .added
