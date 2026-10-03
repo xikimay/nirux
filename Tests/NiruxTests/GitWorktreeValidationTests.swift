@@ -71,6 +71,23 @@ final class GitWorktreeValidationTests: XCTestCase {
         XCTAssertEqual(reused.path, root + "/repo.feat-x")
     }
 
+    func testNewWorktreeIgnoresHandoverFiles() throws {
+        // A repository whose template left no info/ folder.
+        try FileManager.default.removeItem(atPath: repo + "/.git/info")
+
+        let created = try XCTUnwrap(GitWorktree.create(branch: "feat/x", repoRoot: repo).path)
+        try git(["check-ignore", "-q", ".claude-handover.md"], at: created)
+        try git(["check-ignore", "-q", ".codex-handover.md"], at: created)
+        try git(["check-ignore", "-q", ".claude-handover.md"], at: repo)
+        // In any folder, where a project's task may start.
+        try git(["check-ignore", "-q", "docs/.claude-handover.md"], at: created)
+
+        // Reusing a worktree made before this change covers it too.
+        try "".write(toFile: repo + "/.git/info/exclude", atomically: true, encoding: .utf8)
+        XCTAssertEqual(GitWorktree.create(branch: "feat/x", repoRoot: repo).path, created)
+        try git(["check-ignore", "-q", ".claude-handover.md"], at: created)
+    }
+
     func testRefusesToReuseDirectoryThatIsNotAWorktree() throws {
         let squatter = root + "/repo.feat-x"
         try FileManager.default.createDirectory(atPath: squatter, withIntermediateDirectories: true)
@@ -408,7 +425,7 @@ final class GitWorktreeValidationTests: XCTestCase {
         XCTAssertTrue(GitWorktree.ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repo))
         XCTAssertEqual(
             try String(contentsOfFile: exclude, encoding: .utf8),
-            "# mine\n.claude-handover.md\n# Nirux handovers (New Task…)\n.codex-handover.md\n"
+            "# mine\n.claude-handover.md\n# Nirux handovers\n.codex-handover.md\n"
         )
         // In a folder of the worktree too, where a project's task starts.
         try FileManager.default.createDirectory(atPath: linked + "/sub", withIntermediateDirectories: true)
