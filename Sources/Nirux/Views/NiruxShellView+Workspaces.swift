@@ -267,7 +267,7 @@ extension NiruxShellView {
 
     func createProfileFromActiveContext() {
         let sourceWorkspace = activeWorkspace
-        let baseName = sourceWorkspace.flatMap { profileName(for: $0) } ?? "profile"
+        let baseName = sourceWorkspace.flatMap { profileName(for: $0) } ?? "project"
         let cwd = sourceWorkspace?.focusedWorkingDirectory ?? sideEffects.homeDirectory()
         // Spaces persist: reuse an empty one of that name rather than pile up
         // "name 2", "name 3"…

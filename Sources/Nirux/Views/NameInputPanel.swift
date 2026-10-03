@@ -25,7 +25,7 @@ final class NameInputPanel {
             RaycastPanel.Config(
                 width: Self.size.width,
                 height: Self.size.height,
-                icon: "\u{270F}\u{FE0F}",
+                icon: "pencil",
                 placeholder: "Name"
             ),
             fieldTarget: self,

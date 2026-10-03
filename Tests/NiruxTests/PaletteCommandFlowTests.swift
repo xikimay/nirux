@@ -41,9 +41,28 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
 
     func testEveryPaletteCommandHasAFlowTest() throws {
         try UIFlowHarness.run { harness in
+            // Import Browser Cookies is offered only with a Chromium browser.
+            harness.cookieBrowsers = [.chrome]
             let titles = harness.paletteCommandTitles()
             XCTAssertEqual(titles.count, Set(titles).count, "two palette commands share a title: \(titles)")
             Self.commandCoverage.checkEveryItemIsCovered(offered: titles, testNames: UIFlowCoverage.testNames(of: Self.self))
+        }
+    }
+
+    /// A symbol newer than the deployment target draws nothing there, and
+    /// CI runs a later macOS: check each against the system's list of when
+    /// symbols shipped.
+    func testPaletteSymbolsShipWithMacOS14() throws {
+        let availability = try SymbolAvailability()
+        try UIFlowHarness.run { harness in
+            harness.cookieBrowsers = [.chrome]
+            var names = ["circle.fill", "command"] + ["claude", "codex"].compactMap(SidebarRenderer.agentSymbol(processName:))
+            for action in harness.paletteCommands() {
+                if case .symbol(let name) = action.icon { names.append(name) }
+            }
+            for name in names {
+                XCTAssertTrue(try availability.ships(name, byMacOS: [14, 0]), name)
+            }
         }
     }
 
@@ -200,8 +219,11 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
 
     func testImportBrowserCookies() throws {
         try UIFlowHarness.run { harness in
+            XCTAssertFalse(harness.paletteCommandTitles().contains("Import Browser Cookies"), "no Chromium browser to import from")
             harness.cookieBrowsers = [.chrome, .arc]
-            XCTAssertEqual(harness.shell.importCookieSubtitle(), "From Chrome, Arc")
+            XCTAssertEqual(
+                harness.paletteCommands().first { $0.title == "Import Browser Cookies" }?.subtitle, "From Chrome, Arc"
+            )
             // The browser choice: Arc, the second button.
             harness.alertResponses = [.alertSecondButtonReturn]
 
@@ -514,5 +536,28 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             settings.orderOut(nil)
             settings.close()
         }
+    }
+}
+
+/// When each SF Symbol first shipped, from the system's own table.
+private struct SymbolAvailability {
+    private static let path = "/System/Library/CoreServices/CoreGlyphs.bundle/Contents/Resources/name_availability.plist"
+    private let symbols: [String: String]
+    private let releases: [String: [String: String]]
+
+    init() throws {
+        guard let table = NSDictionary(contentsOfFile: Self.path),
+              let symbols = table["symbols"] as? [String: String],
+              let releases = table["year_to_release"] as? [String: [String: String]]
+        else { throw XCTSkip("no SF Symbols availability table at \(Self.path)") }
+        self.symbols = symbols
+        self.releases = releases
+    }
+
+    func ships(_ name: String, byMacOS target: [Int]) throws -> Bool {
+        let year = try XCTUnwrap(symbols[name], "\(name) is not an SF Symbol")
+        let macOS = try XCTUnwrap(releases[year]?["macOS"], "no macOS release for \(year)")
+        let version = macOS.split(separator: ".").compactMap { Int($0) }
+        return version.lexicographicallyPrecedes(target) || version == target
     }
 }

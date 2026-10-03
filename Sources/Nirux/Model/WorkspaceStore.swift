@@ -328,7 +328,7 @@ final class WorkspaceStore {
 
     private func uniqueProfileName(_ base: String, excluding excludedID: String? = nil) -> String {
         let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallback = trimmed.isEmpty ? "profile" : trimmed
+        let fallback = trimmed.isEmpty ? "project" : trimmed
         let existing = Set(profiles.compactMap { profile in
             profile.id == excludedID ? nil : profile.name
         })

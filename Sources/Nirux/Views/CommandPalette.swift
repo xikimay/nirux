@@ -2,7 +2,7 @@ import AppKit
 
 /// Action item in the command palette
 struct PaletteAction {
-    let icon: String
+    let icon: PaletteIcon
     let title: String
     let subtitle: String
     /// Shown on the right. Only table chords, so every label is bound.
@@ -15,8 +15,6 @@ struct PaletteAction {
     var badge: PaletteBadge?
     /// The title dimmed: an inactive workspace.
     var isDimmed = false
-    /// Draws the icon in this color: a workspace's space dot.
-    var iconColor: NSColor?
     let action: () -> Void
 
     var rankingCandidate: PaletteRanking.Candidate {
@@ -172,11 +170,7 @@ final class CommandPalette: NSObject {
         fieldContainer.wantsLayer = true
         fieldContainer.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.03).cgColor
 
-        let icon = NSTextField(labelWithString: "⌘")
-        icon.font = .systemFont(ofSize: 14)
-        icon.textColor = .tertiaryLabelColor
-        icon.frame = NSRect(x: 14, y: 10, width: 24, height: 24)
-        fieldContainer.addSubview(icon)
+        fieldContainer.addSubview(PaletteIconView(.symbol("command"), frame: NSRect(x: 14, y: 10, width: 24, height: 24)))
 
         let field = NSTextField()
         field.font = .systemFont(ofSize: 15, weight: .regular)
@@ -394,18 +388,7 @@ final class CommandPalette: NSObject {
         row.wantsLayer = true
         row.layer?.cornerRadius = 6
 
-        // Icon: an emoji, or a symbol in its color (a space's dot).
-        let iconLabel = NSTextField(labelWithString: action.icon)
-        if let iconColor = action.iconColor {
-            iconLabel.font = .systemFont(ofSize: 12)
-            iconLabel.textColor = iconColor
-            iconLabel.alignment = .center
-            iconLabel.frame = NSRect(x: 16, y: 13, width: 20, height: 18)
-        } else {
-            iconLabel.font = .systemFont(ofSize: 18)
-            iconLabel.frame = NSRect(x: 16, y: 10, width: 28, height: 24)
-        }
-        row.addSubview(iconLabel)
+        row.addSubview(PaletteIconView(action.icon, frame: NSRect(x: 20, y: frame.height / 2 - 10, width: 20, height: 20)))
 
         // Right side: the badge, else the shortcut.
         var textRight = frame.width - 18
@@ -475,6 +458,9 @@ final class CommandPalette: NSObject {
         let selectedItem = listLayout.itemIndex(ofRow: selectedIndex)
         for (index, view) in rowViews.enumerated() {
             view.layer?.backgroundColor = (index == selectedItem) ? accent.cgColor : NSColor.clear.cgColor
+            for case let icon as PaletteIconView in view.subviews {
+                icon.setSelected(index == selectedItem)
+            }
         }
 
         updateScrollIndicator()

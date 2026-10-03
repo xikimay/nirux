@@ -15,12 +15,12 @@ extension NiruxShellView {
             if panel.spaceID == profileID {
                 panel.focus()
             } else {
-                showToast("Another space’s board settings are open: close them first")
+                showToast("Another project’s board settings are open: close them first")
             }
             return
         }
         guard let store = BoardConfigStore(spaceID: profileID) else {
-            showToast("Couldn’t find this space’s board settings", tone: .error)
+            showToast("Couldn’t find this project’s board settings", tone: .error)
             return
         }
         // Inactive workspaces belong to the project too.
