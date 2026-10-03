@@ -145,6 +145,19 @@ final class ColumnHeaderViewTests: XCTestCase {
 
     @objc private func dummyAction() {}
 
+    /// A title cut short has itself as tooltip; one read whole has none.
+    func testCutShortTitleHasItsTooltip() {
+        let header = ColumnHeaderView(frame: NSRect(x: 0, y: 0, width: 160, height: ColumnHeaderView.height))
+        header.title = "✳ Refactor the login redirect so that it keeps the query string"
+        header.layoutNow()
+        XCTAssertEqual(header.titleLabel.toolTip, header.title)
+        header.frame.size.width = 900
+        header.layoutNow()
+        XCTAssertNil(header.titleLabel.toolTip)
+        header.titleToolTip = "/repo/Sources/a.swift"
+        XCTAssertEqual(header.titleLabel.toolTip, "/repo/Sources/a.swift")
+    }
+
     func testFocusTintsTheTypeSymbolButNotAnAppIcon() {
         let header = ColumnHeaderView(frame: NSRect(x: 0, y: 0, width: 400, height: ColumnHeaderView.height))
         header.icon = .symbol(Theme.Symbol.editor)

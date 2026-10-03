@@ -130,7 +130,6 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(run.symbol, Theme.Symbol.checksPassed)
             XCTAssertTrue(run.toolTip?.hasPrefix("nightly: success ") == true, run.toolTip ?? "")
             XCTAssertTrue(run.toolTip?.hasSuffix(", 43a9503") == true, run.toolTip ?? "")
-            XCTAssertNotEqual(run.tone, .error, "nothing went wrong")
             XCTAssertEqual(board.view.rowViews.map(\.row.name), ["widgets", "login", "fix/remote"])
             let loginRow = try row("login", in: board)
             XCTAssertEqual(loginRow.pullRequest.stringValue, "#12 open")

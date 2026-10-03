@@ -86,16 +86,16 @@ final class ColumnHeaderView: NSView {
         didSet {
             guard title != oldValue else { return }
             titleLabel.stringValue = title
-            applyTitleToolTip()
             menuButton.setAccessibilityLabel(title.isEmpty ? "More actions" : "More actions: \(title)")
             needsLayout = true
         }
     }
-    /// The title's tooltip; the title itself when nil (a long title is
-    /// cut short).
+    /// The title's tooltip; when nil, the title itself while it is cut
+    /// short.
     var titleToolTip: String? {
         didSet { applyTitleToolTip() }
     }
+    private var isTitleCutShort = false
     var context = "" {
         didSet {
             guard context != oldValue else { return }
@@ -228,8 +228,12 @@ final class ColumnHeaderView: NSView {
         needsLayout = true
     }
 
+    /// Set only when it changes: a terminal's title changes several times
+    /// a second while its agent works, and a new tooltip closes the one
+    /// shown.
     private func applyTitleToolTip() {
-        titleLabel.toolTip = titleToolTip ?? (title.isEmpty ? nil : title)
+        let toolTip = titleToolTip ?? (isTitleCutShort ? title : nil)
+        if titleLabel.toolTip != toolTip { titleLabel.toolTip = toolTip }
     }
 
     private func applyIcon() {
@@ -393,6 +397,8 @@ final class ColumnHeaderView: NSView {
         contextLabel.isHidden = !showsContext || context.isEmpty || contextRoom < Self.minimumContextWidth
             || shownTitleWidth < min(titleWidth, Self.minimumTitleBesideContext)
         if contextLabel.isHidden { shownTitleWidth = min(titleWidth, width) }
+        isTitleCutShort = shownTitleWidth < titleWidth
+        applyTitleToolTip()
         titleLabel.frame = NSRect(x: x - inset, y: textY, width: max(0, shownTitleWidth) + 2 * inset, height: Self.textHeight)
         contextLabel.frame = NSRect(x: contextX - inset, y: textY, width: max(0, contextRoom) + 2 * inset, height: Self.textHeight)
     }
