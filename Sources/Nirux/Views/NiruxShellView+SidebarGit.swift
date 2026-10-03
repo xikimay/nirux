@@ -48,8 +48,8 @@ extension NiruxShellView {
                           profileID: workspace.profileID, isInactive: workspace.isInactive,
                           columnCount: workspace.columns.count,
                           focusedColumn: workspace.focusedIndex,
-                          gitBranch: workspace.gitBranch, hasNotification: workspace.hasNotification, isActive: index == activeWSIndex,
-                          columns: colInfos, prInfo: workspace.prInfo, prFeedbackSummary: workspace.prFeedback?.summary,
+                          gitBranch: workspace.gitBranch, notification: workspace.notification, isActive: index == activeWSIndex,
+                          columns: colInfos, prInfo: workspace.prInfo, prFeedback: workspace.prFeedback?.sidebarCounts,
                           diffStats: workspace.diffStats,
                           purpose: workspace.purpose, nextStep: workspace.nextStep,
                           blocker: workspace.blocker, phase: workspace.effectivePhase,
@@ -61,16 +61,13 @@ extension NiruxShellView {
         updateColumnHeaders(infos: infos, foregroundProcesses: foregroundProcesses, now: now)
         let profileInfos = workspaceStore.navigableProfiles.map { profile in
             let profileWorkspaces = workspaces.filter { $0.profileID == profile.id }
-            let hasAttention = profileWorkspaces.contains { workspace in
-                workspace.hasNotification || workspace.columns.contains { $0.pty?.cachedAgentState == .needsAttention }
-            }
             return ProfileInfo(
                 id: profile.id,
                 name: profile.name,
                 colorHex: profile.colorHex,
                 isActive: profile.id == activeProfileID,
                 workspaceCount: profileWorkspaces.count,
-                hasAttention: hasAttention
+                attention: profileWorkspaces.compactMap(Self.attention).max()
             )
         }
         sidebar.update(profiles: profileInfos, workspaces: infos)
@@ -143,6 +140,16 @@ extension NiruxShellView {
                 )
             }
         }
+    }
+
+    /// What a workspace asks of the user, for the project switcher's ring:
+    /// its columns' attention and what happened while the user was away.
+    private static func attention(of workspace: WorkspaceState) -> AttentionSignal? {
+        let columns = workspace.columns.compactMap { column -> AttentionSignal? in
+            guard let pty = column.pty, pty.cachedAgentState == .needsAttention else { return nil }
+            return AttentionSignal.of(pty.agentAttentionReason)
+        }
+        return (columns + [workspace.notification].compactMap { $0 }).max()
     }
 
     private func updateSidebarAttention(infos: [WorkspaceInfo]) {
@@ -231,7 +238,7 @@ extension NiruxShellView {
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
         NiruxNotifier.shared.clearDelivered()
         for (wsIndex, workspace) in workspaces.enumerated() {
-            workspace.hasNotification = false
+            workspace.notification = nil
             for (colIndex, col) in workspace.columns.enumerated() {
                 col.pty?.clearAgentAttention()
                 let colLayer = col.view.layer
@@ -489,9 +496,9 @@ extension NiruxShellView {
         ActivityStore.shared.record(entry)
         ActivityStore.shared.flush()
         if event.kind == .question {
-            workspace?.hasNotification = true
+            workspace?.raiseNotification(.waiting)
         } else if event.kind == .response {
-            workspace?.hasNotification = false
+            workspace?.notification = nil
         }
         if event.kind == .question || event.kind == .completed {
             NiruxNotifier.shared.postMissionEvent(

@@ -415,7 +415,7 @@ final class BoardSettingsPanelTests: XCTestCase {
         let menu = NSMenu()
         shell.sidebar.addSpaceManagementItems(to: menu, for: ProfileInfo(
             id: space.id, name: space.name, colorHex: space.colorHex,
-            isActive: false, workspaceCount: 1, hasAttention: false
+            isActive: false, workspaceCount: 1, attention: nil
         ))
         return menu
     }

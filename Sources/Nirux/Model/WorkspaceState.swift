@@ -70,7 +70,9 @@ final class WorkspaceState {
             workspaceCwd: cwd
         )
     }
-    var hasNotification: Bool = false
+    /// The most urgent of what happened while the user looked elsewhere.
+    var notification: AttentionSignal?
+    var hasNotification: Bool { notification != nil }
     var prInfo: PRInfo? {
         didSet { if prInfo?.url != oldValue?.url || prInfo?.state != "OPEN" { prFeedback = nil } }
     }
@@ -432,10 +434,13 @@ extension WorkspaceState {
         }
     }
 
+    /// Keeps the most urgent of what happened while the user was away.
+    func raiseNotification(_ signal: AttentionSignal) { notification = max(notification ?? signal, signal) }
+
     private func setupAgentAttentionTracking(for col: ColumnState) {
         col.onAgentAttention = { [weak self, weak col] reason in
             guard let self else { return }
-            self.hasNotification = true
+            self.raiseNotification(AttentionSignal.of(reason))
             self.onMetadataChanged?()
             // Bounce dock icon when app is not active
             if !NSApp.isActive {

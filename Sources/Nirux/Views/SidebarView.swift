@@ -148,8 +148,6 @@ final class SidebarView: NSView {
     private static let dotSize: CGFloat = 6
     private static let dotGap: CGFloat = 8
     static let accentColor: NSColor = Theme.Color.accent
-    private static let dimColor = NSColor.white.withAlphaComponent(0.25)
-    private static let notifColor = Theme.Color.waiting
 
     /// Scrollable container for expanded-mode content. In collapsed mode it's
     /// hidden and we just draw dots into the sidebar's own layer.
@@ -298,28 +296,32 @@ final class SidebarView: NSView {
             let dotWidth = isFocused ? dotDiameter + 2 : dotDiameter
             let dotX = (bounds.width - dotWidth) / 2
 
-            let hasColumnAttention = workspace.columns.contains { $0.agentStatus == .needsAttention }
-            let isNotification = hasColumnAttention || (workspace.hasNotification && !workspace.isActive)
-
-            if isNotification {
-                ctx.setFillColor(Self.notifColor.cgColor)
+            // A wait on the user or an error outranks the focus; a finished
+            // turn doesn't.
+            let attention = workspace.attention
+            let alert = attention.flatMap { $0 == .finished ? nil : $0 }
+            let color: NSColor
+            if let alert {
+                color = SidebarRenderer.color(for: alert)
             } else if isFocused {
-                ctx.setFillColor(Self.accentColor.cgColor)
+                color = Self.accentColor
+            } else if let attention {
+                color = SidebarRenderer.color(for: attention)
             } else {
-                ctx.setFillColor(Self.dimColor.cgColor)
+                color = Theme.Color.idle
             }
-
+            ctx.setFillColor(color.cgColor)
             ctx.fillEllipse(in: CGRect(x: dotX, y: dotY - (isFocused ? 1 : 0), width: dotWidth, height: dotWidth))
 
-            // Add pulsing glow ring for notification dots
-            if isNotification, let rootLayer = layer {
+            // Pulsing glow ring for what needs the user
+            if alert != nil, let rootLayer = layer {
                 let glowSize = dotWidth + 6
                 let glow = CALayer()
                 glow.frame = CGRect(x: dotX - 3, y: dotY - (isFocused ? 1 : 0) - 3, width: glowSize, height: glowSize)
                 glow.cornerRadius = glowSize / 2
                 glow.backgroundColor = NSColor.clear.cgColor
                 glow.borderWidth = 1.5
-                glow.borderColor = Self.notifColor.cgColor
+                glow.borderColor = color.cgColor
 
                 let pulse = CABasicAnimation(keyPath: "opacity")
                 pulse.fromValue = 1.0

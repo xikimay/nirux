@@ -225,7 +225,7 @@ final class PermissionApprovalSidebarTests: XCTestCase {
     private func workspace(_ columns: [ColumnInfo]) -> WorkspaceInfo {
         WorkspaceInfo(
             id: "ws", index: 2, title: "fix-login", profileID: WorkspaceProfile.defaultID, isInactive: false,
-            columnCount: columns.count, focusedColumn: 0, gitBranch: nil, hasNotification: false, isActive: false,
+            columnCount: columns.count, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false,
             columns: columns, prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
             phase: .active, lastSummary: nil, lastActivityAt: nil
         )
@@ -234,24 +234,30 @@ final class PermissionApprovalSidebarTests: XCTestCase {
     func testRequestTextWrapsIntoExactLines() {
         let text = String(repeating: "abcdefgh", count: 20)
         let lines = SidebarExpandedMetrics.approvalLines(text)
+        let perLine = SidebarExpandedMetrics.approvalCharactersPerLine
         XCTAssertEqual(lines.joined(), text)
-        XCTAssertEqual(lines.count, 5)
+        XCTAssertEqual(lines.count, (text.count + perLine - 1) / perLine)
         XCTAssertTrue(lines.dropLast().allSatisfy { $0.count == SidebarExpandedMetrics.approvalCharactersPerLine })
         XCTAssertEqual(SidebarExpandedMetrics.approvalLines("ls"), ["ls"])
     }
 
-    /// Every character of a full line fits the card: nothing is clipped.
+    /// Every character of a full line fits the request's box: nothing is
+    /// clipped.
     func testFullLineFitsTheExpandedSidebar() {
-        let line = String(repeating: "W", count: SidebarExpandedMetrics.approvalCharactersPerLine)
-        let width = (line as NSString).size(withAttributes: [.font: SidebarExpandedMetrics.approvalFont]).width
-        XCTAssertLessThanOrEqual(width, 260 - SidebarExpandedMetrics.padding * 2)
+        let metrics = SidebarExpandedMetrics.self
+        let line = String(repeating: "W", count: metrics.approvalCharactersPerLine)
+        let width = (line as NSString).size(withAttributes: [.font: metrics.approvalFont]).width
+        let card = 260 - (metrics.workspaceInsetX + metrics.cardPaddingX) * 2
+        XCTAssertLessThanOrEqual(width, card - metrics.approvalBoxPaddingX * 2)
     }
 
     func testCardGrowsByTheApprovalBlock() throws {
         let block = try XCTUnwrap(approval(String(repeating: "x", count: 40)))
-        let plain = SidebarExpandedMetrics.workspaceHeight(for: workspace([column(nil)]))
-        let held = SidebarExpandedMetrics.workspaceHeight(for: workspace([column(block)]))
-        XCTAssertEqual(held - plain, SidebarExpandedMetrics.approvalBlockHeight(for: block) + SidebarExpandedMetrics.approvalBottomGap)
+        let plain = SidebarExpandedMetrics.workspaceHeight(for: workspace([column(nil)]), sidebarWidth: 260)
+        let held = SidebarExpandedMetrics.workspaceHeight(for: workspace([column(block)]), sidebarWidth: 260)
+        XCTAssertEqual(
+            held - plain, SidebarExpandedMetrics.actionBlockHeight([.approval(columnIndex: 1, agent: "claude", block)])
+        )
         XCTAssertGreaterThan(
             SidebarExpandedMetrics.approvalBlockHeight(for: block),
             SidebarExpandedMetrics.approvalBlockHeight(for: try XCTUnwrap(approval("ls")))
@@ -281,15 +287,18 @@ final class PermissionApprovalSidebarTests: XCTestCase {
     func testCardShowsTheExactRequestWithAllowAndDeny() throws {
         let text = "git push --force-with-lease origin feat/permission-approval"
         let result = SidebarWorkspaceCardRenderer(
-            workspace: workspace([column(approval(text))]), sidebarWidth: 260, padding: 20, yOffset: 800
+            workspace: workspace([column(approval(text))]), sidebarWidth: 260, yOffset: 800
         ).render()
 
         XCTAssertEqual(decisionRegions(result.hitAreas), [
             DecisionRegion(workspace: 2, column: 1, requestID: requestID, behavior: .deny),
             DecisionRegion(workspace: 2, column: 1, requestID: requestID, behavior: .allow)
-        ], "Allow last, away from where row labels start")
+        ], "macOS order: Allow last")
+        XCTAssertTrue(labels(result.views).contains { $0.hasSuffix("claude wants to run") }, "who asks")
         XCTAssertTrue(
-            labels(result.views).contains(SidebarExpandedMetrics.approvalLines(text).joined(separator: "\n")),
+            labels(result.views).contains(
+                SidebarApprovalBlockRenderer.attributedLines(SidebarExpandedMetrics.approvalLines(text)).string
+            ),
             "the whole request, split only into lines"
         )
         // The rest of the block swallows clicks meant for what was there.
@@ -314,7 +323,7 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         XCTAssertLessThan(allowHit, workspaceHit)
         XCTAssertEqual(
             800 - result.bottomY,
-            SidebarExpandedMetrics.workspaceHeight(for: workspace([column(approval(text))])),
+            SidebarExpandedMetrics.workspaceHeight(for: workspace([column(approval(text))]), sidebarWidth: 260),
             accuracy: 0.5,
             "layout matches the metrics the scroll view is sized with"
         )
@@ -322,7 +331,7 @@ final class PermissionApprovalSidebarTests: XCTestCase {
 
     func testSentDecisionShowsProgressInsteadOfButtons() {
         let result = SidebarWorkspaceCardRenderer(
-            workspace: workspace([column(approval("ls", sent: .deny))]), sidebarWidth: 260, padding: 20, yOffset: 800
+            workspace: workspace([column(approval("ls", sent: .deny))]), sidebarWidth: 260, yOffset: 800
         ).render()
         XCTAssertTrue(decisionRegions(result.hitAreas).isEmpty)
         XCTAssertTrue(labels(result.views).contains("Denying…"))
@@ -340,28 +349,28 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         request.approval = ticket
         let result = SidebarWorkspaceCardRenderer(
             workspace: workspace([column(SidebarPermissionApproval(request, now: 11))]),
-            sidebarWidth: 260, padding: 20, yOffset: 800
+            sidebarWidth: 260, yOffset: 800
         ).render()
         XCTAssertTrue(labels(result.views).contains("Not delivered — answer in the terminal"))
         XCTAssertTrue(decisionRegions(result.hitAreas).isEmpty)
     }
 
-    /// A line break never hides a space: `rm -rf ./dist/assets/old-bundle *`
-    /// must not read as `old-bundle*`.
+    /// A line break never hides a space: `rm -rf ./dist/assets/old-js *`
+    /// must not read as `old-js*`.
     func testSpacesAtLineBreaksStayVisible() {
-        let text = "rm -rf ./dist/assets/old-bundle *"
+        let text = "rm -rf ./dist/assets/old-js *"
         let lines = SidebarExpandedMetrics.approvalLines(text)
-        XCTAssertEqual(lines, ["rm -rf ./dist/assets/old-bundle ", "*"])
+        XCTAssertEqual(lines, ["rm -rf ./dist/assets/old-js ", "*"])
         let shown = SidebarApprovalBlockRenderer.attributedLines(lines).string
-        XCTAssertEqual(shown, "rm -rf ./dist/assets/old-bundle\u{2423}\n*")
+        XCTAssertEqual(shown, "rm -rf ./dist/assets/old-js\u{2423}\n*")
         for line in shown.split(separator: "\n") {
             XCTAssertFalse(line.hasPrefix(" ") || line.hasSuffix(" "), String(line))
         }
         let inner = SidebarApprovalBlockRenderer.attributedLines(["a b"]).string
         XCTAssertEqual(inner, "a b", "spaces inside a line stay plain")
         XCTAssertEqual(
-            SidebarApprovalBlockRenderer.attributedLines(SidebarExpandedMetrics.approvalLines("x" + String(repeating: "y", count: 30) + " z")).string,
-            "x" + String(repeating: "y", count: 30) + "\u{2423}\nz"
+            SidebarApprovalBlockRenderer.attributedLines(SidebarExpandedMetrics.approvalLines("x" + String(repeating: "y", count: 26) + " z")).string,
+            "x" + String(repeating: "y", count: 26) + "\u{2423}\nz"
         )
     }
 

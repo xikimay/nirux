@@ -155,12 +155,12 @@ extension SidebarView {
             + SidebarExpandedMetrics.bottomReserve
         if !activeInfos.isEmpty {
             height += SidebarExpandedMetrics.sectionHeaderAdvance
-            height += SidebarExpandedMetrics.groupHeight(for: activeInfos)
+            height += SidebarExpandedMetrics.groupHeight(for: activeInfos, sidebarWidth: bounds.width)
         }
         if !inactiveInfos.isEmpty {
             height += SidebarExpandedMetrics.sectionGap
             height += SidebarExpandedMetrics.sectionHeaderAdvance
-            height += SidebarExpandedMetrics.groupHeight(for: listedInactiveInfos)
+            height += SidebarExpandedMetrics.groupHeight(for: listedInactiveInfos, sidebarWidth: bounds.width)
         }
         if let onboardingHeight {
             height += SidebarExpandedMetrics.onboardingCardGap + onboardingHeight
@@ -245,25 +245,19 @@ extension SidebarView {
         addSubviewDoc(dot)
         expandedViews.append(dot)
 
-        let title = textLabel(
-            profile.name,
-            font: .systemFont(ofSize: 17, weight: .semibold),
-            color: NSColor.white.withAlphaComponent(0.92)
-        )
-        title.frame = NSRect(x: padding + 16, y: yOffset - 35, width: bounds.width - padding * 2 - 16 - 40, height: 24)
+        let title = textLabel(profile.name, font: Theme.Font.display, color: Theme.Color.textPrimary)
+        title.frame = NSRect(x: padding + 16, y: yOffset - 33, width: bounds.width - padding * 2 - 16 - 40, height: 20)
         addSubviewDoc(title)
         expandedViews.append(title)
 
         // "⋯" space-options badge — same affordance language as the
         // workspace cards; brightens with the header hover.
         let badge = SidebarBadgeView(
-            text: "⋯",
-            textColor: NSColor.white.withAlphaComponent(0.58),
-            fillColor: NSColor.white.withAlphaComponent(0.045),
-            font: .monospacedSystemFont(ofSize: 10, weight: .semibold)
+            text: "", textColor: Theme.Color.textSecondary, fillColor: Theme.Color.fillHover, font: Theme.Font.caption
         )
-        badge.hoverTextColor = NSColor.white.withAlphaComponent(0.92)
-        badge.hoverFillColor = NSColor.white.withAlphaComponent(0.14)
+        badge.symbolName = Theme.Symbol.more
+        badge.hoverTextColor = Theme.Color.textPrimary
+        badge.hoverFillColor = Theme.Color.fillPressed
         badge.frame = NSRect(
             x: bounds.width - padding - SidebarExpandedMetrics.countChipWidth,
             y: yOffset - 34,
@@ -275,22 +269,35 @@ extension SidebarView {
         expandedViews.append(badge)
         spaceHeaderBadge = badge
 
-        let subtitle = textLabel(
-            "\(profile.workspaceCount) \(profile.workspaceCount == 1 ? "workspace" : "workspaces")",
-            font: .systemFont(ofSize: 12, weight: .medium),
-            color: NSColor.white.withAlphaComponent(0.48)
-        )
-        subtitle.frame = NSRect(x: padding, y: yOffset - 56, width: bounds.width - padding * 2, height: 18)
+        let subtitle = NSTextField.sidebarLine(spaceSubtitle(profile))
+        subtitle.frame = NSRect(x: padding, y: yOffset - 54, width: bounds.width - padding * 2, height: 16)
         addSubviewDoc(subtitle)
         expandedViews.append(subtitle)
 
         let separator = SidebarBackgroundView(frame: NSRect(x: padding, y: headerFrame.minY, width: bounds.width - padding * 2, height: 1))
         separator.wantsLayer = true
-        separator.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.08).cgColor
+        separator.layer?.backgroundColor = Theme.Color.line.cgColor
         addSubviewDoc(separator)
         expandedViews.append(separator)
 
         return yOffset - SidebarExpandedMetrics.spaceHeaderHeight
+    }
+
+    /// "6 workspaces · 2 waiting": the waiting count in amber, when any.
+    private func spaceSubtitle(_ profile: ProfileInfo) -> NSAttributedString {
+        let font = Theme.Font.caption
+        let count = profile.workspaceCount
+        let text = NSMutableAttributedString(string: "\(count) \(count == 1 ? "workspace" : "workspaces")", attributes: [
+            .font: font, .foregroundColor: Theme.Color.textTertiary
+        ])
+        let waiting = lastInfos.filter { $0.cardState == .waiting }.count
+        if waiting > 0 {
+            text.append(NSAttributedString(string: " · ", attributes: [.font: font, .foregroundColor: Theme.Color.textTertiary]))
+            text.append(NSAttributedString(string: "\(waiting) waiting", attributes: [
+                .font: font, .foregroundColor: Theme.Color.waiting
+            ]))
+        }
+        return text
     }
 
     private static func profileColor(hex: String) -> NSColor {
@@ -305,7 +312,7 @@ extension SidebarView {
                 action: .selectProfile(profile.id),
                 colorHex: profile.colorHex,
                 isActive: profile.isActive,
-                hasAttention: profile.hasAttention,
+                attention: profile.attention,
                 label: nil,
                 isEmpty: profile.workspaceCount == 0
             )
@@ -314,7 +321,7 @@ extension SidebarView {
             action: .createProfile,
             colorHex: "#FFFFFF",
             isActive: false,
-            hasAttention: false,
+            attention: nil,
             label: "+"
         ))
         let view = SidebarDotIndicatorView(
@@ -356,11 +363,9 @@ extension SidebarView {
             height: SidebarExpandedMetrics.sectionHeaderHeight
         )
         let heading = isCollapsed.map { "\($0 ? "▸" : "▾") \(title)" } ?? title
-        let label = textLabel(
-            heading.uppercased(),
-            font: .monospacedSystemFont(ofSize: 10, weight: .bold),
-            color: NSColor.white.withAlphaComponent(0.46)
-        )
+        let label = NSTextField.sidebarLine(NSAttributedString(string: heading.uppercased(), attributes: [
+            .font: Theme.Font.label, .kern: Theme.Font.labelKern, .foregroundColor: Theme.Color.textTertiary
+        ]))
         label.frame = headerFrame
         addSubviewDoc(label)
         expandedViews.append(label)
@@ -387,16 +392,17 @@ extension SidebarView {
             expandedViews.append(toggle)
         }
 
-        let countChip = badgeView(
-            "\(count)",
-            color: NSColor.white.withAlphaComponent(0.60),
-            background: NSColor.white.withAlphaComponent(0.07)
+        let countChip = SidebarBadgeView(
+            text: "\(count)", textColor: Theme.Color.textTertiary, fillColor: Theme.Color.fillHover, font: Theme.Font.label
         )
+        countChip.cornerRadius = Theme.Radius.chip
+        let labelWidth = ceil(label.attributedStringValue.size().width)
+        let countWidth = ceil(("\(count)" as NSString).size(withAttributes: [.font: Theme.Font.label]).width)
         countChip.frame = NSRect(
-            x: padding + (isCollapsed == nil ? 62 : 82),
-            y: yOffset - 18,
-            width: 28,
-            height: 18
+            x: padding + labelWidth + 6,
+            y: yOffset - 15,
+            width: max(18, countWidth + 10),
+            height: 14
         )
         countChip.setAccessibilityRole(.staticText)
         countChip.setAccessibilityLabel("\(count)")
@@ -600,8 +606,8 @@ extension SidebarView {
         ))
         dot.wantsLayer = true
         let color: NSColor = style.isHandled
-            ? .white.withAlphaComponent(0.35 * style.dotAlpha)
-            : Self.activityColor(for: entry.category).withAlphaComponent(style.dotAlpha)
+            ? Theme.Color.textTertiary.withAlphaComponent(style.dotAlpha)
+            : Self.activityColor(for: entry).withAlphaComponent(style.dotAlpha)
         dot.layer?.backgroundColor = color.cgColor
         dot.layer?.cornerRadius = 3.5
         addSubviewDoc(dot)
@@ -667,15 +673,17 @@ extension SidebarView {
         expandedViews.append(hit)
     }
 
-    private static func activityColor(for category: ActivityEntry.Category) -> NSColor {
-        switch category {
-        case .attention: return Theme.Color.waiting
-        case .turnComplete: return .systemGreen
+    /// Amber only for what waits on the user; an attention row an older
+    /// build recorded doesn't say, and stays amber.
+    static func activityColor(for entry: ActivityEntry) -> NSColor {
+        switch entry.category {
+        case .attention: return SidebarRenderer.color(for: entry.signal ?? .waiting)
+        case .turnComplete: return SidebarRenderer.color(for: .finished)
         case .sessionStart: return Theme.Color.accent
-        case .sessionEnd: return .white.withAlphaComponent(0.35)
+        case .sessionEnd: return Theme.Color.textTertiary
         case .missionQuestion: return Theme.Color.waiting
-        case .missionCompleted: return .systemGreen
-        case .missionResponse, .missionInstruction: return .systemBlue
+        case .missionCompleted: return Theme.Color.success
+        case .missionResponse, .missionInstruction: return Theme.Color.accent
         }
     }
 
@@ -713,7 +721,6 @@ extension SidebarView {
         let result = SidebarWorkspaceCardRenderer(
             workspace: workspace,
             sidebarWidth: bounds.width,
-            padding: padding,
             yOffset: yOffset
         ).render()
         for view in result.views {
@@ -737,14 +744,4 @@ extension SidebarView {
         label.lineBreakMode = .byTruncatingTail
         return label
     }
-
-    private func badgeView(_ text: String, color: NSColor, background: NSColor) -> SidebarBadgeView {
-        SidebarBadgeView(
-            text: text,
-            textColor: color,
-            fillColor: background,
-            font: .monospacedSystemFont(ofSize: 10, weight: .semibold)
-        )
-    }
-
 }

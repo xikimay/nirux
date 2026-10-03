@@ -55,7 +55,8 @@ extension NiruxShellView {
                 columnIndex: place.columnIndex,
                 workspaceTitle: workspace.title,
                 detail: reason.activitySummary,
-                timestamp: now
+                timestamp: now,
+                signal: reason.signal
             ))
         }
         let stuck = pty.agentStuckState(now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess)

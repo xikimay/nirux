@@ -191,7 +191,7 @@ extension NiruxShellView {
 
     func refreshAfterWorkspaceSelection(animated: Bool, editorTakesKeyboard: Bool = true) {
         guard workspaces.indices.contains(activeWSIndex) else { return }
-        workspaces[activeWSIndex].hasNotification = false
+        workspaces[activeWSIndex].notification = nil
         quickSwitch.focusMoved()
         relayout(animated: animated)
         refreshGitContextNow(for: workspaces[activeWSIndex])

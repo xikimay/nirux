@@ -550,48 +550,30 @@ extension WorkspaceContextTests {
         XCTAssertEqual(WorkspaceState.normalizedContextText("  Ship it  "), "Ship it")
     }
 
-    func testSidebarHeightAddsOnlyPopulatedOptionalContextRows() {
-        let baseline = makeWorkspaceInfo()
-        let populated = makeWorkspaceInfo(
-            purpose: "Explain why this exists",
-            summary: "Persistence is complete"
-        )
-
-        XCTAssertEqual(
-            SidebarExpandedMetrics.workspaceHeight(for: populated)
-                - SidebarExpandedMetrics.workspaceHeight(for: baseline),
-            SidebarExpandedMetrics.purposeAdvance + SidebarExpandedMetrics.summaryAdvance
-        )
+    private func render(_ workspace: WorkspaceInfo) -> SidebarWorkspaceCardRenderResult {
+        SidebarWorkspaceCardRenderer(workspace: workspace, sidebarWidth: 260, yOffset: 400).render()
     }
 
-    func testSidebarRendererIncludesExplicitPhaseAndOptionalText() {
+    private func height(_ workspace: WorkspaceInfo) -> CGFloat {
+        SidebarExpandedMetrics.workspaceHeight(for: workspace, sidebarWidth: 260)
+    }
+
+    /// The card keeps three lines: the phase, the purpose and the last
+    /// summary move to the title's tooltip.
+    func testContextTextGoesToTheTitleTooltip() throws {
         let workspace = makeWorkspaceInfo(
             purpose: "Explain why this exists",
             summary: "Persistence is complete"
         )
-        let result = SidebarWorkspaceCardRenderer(
-            workspace: workspace,
-            sidebarWidth: 260,
-            padding: 20,
-            yOffset: 400
-        ).render()
-        let labels = result.views.compactMap { ($0 as? NSTextField)?.stringValue }
+        XCTAssertEqual(height(workspace), height(makeWorkspaceInfo()))
 
-        XCTAssertTrue(labels.contains("▶ Active"))
-        XCTAssertTrue(labels.contains("Explain why this exists"))
-        XCTAssertTrue(labels.contains("Persistence is complete"))
-    }
-
-    func testSidebarRendererShowsMissingActivityState() {
-        let result = SidebarWorkspaceCardRenderer(
-            workspace: makeWorkspaceInfo(),
-            sidebarWidth: 260,
-            padding: 20,
-            yOffset: 400
-        ).render()
-        let labels = result.views.compactMap { ($0 as? NSTextField)?.stringValue }
-
-        XCTAssertTrue(labels.contains("No activity yet"))
+        let labels = render(workspace).views.compactMap { $0 as? NSTextField }
+        let title = try XCTUnwrap(labels.first { $0.stringValue == "context" })
+        XCTAssertEqual(
+            title.toolTip,
+            "context\nPhase: Active\nPurpose: Explain why this exists\nLast: Persistence is complete\nNo activity yet"
+        )
+        XCTAssertFalse(labels.contains { $0.stringValue == "Explain why this exists" })
     }
 
     func testSidebarContextRowPrioritizesBlocker() throws {
@@ -599,53 +581,44 @@ extension WorkspaceContextTests {
             nextStep: "Retry the deployment",
             blocker: "Waiting for API access"
         )
-        let result = SidebarWorkspaceCardRenderer(
-            workspace: workspace,
-            sidebarWidth: 260,
-            padding: 20,
-            yOffset: 400
-        ).render()
-        let labels = result.views.compactMap { $0 as? NSTextField }
+        let labels = render(workspace).views.compactMap { $0 as? NSTextField }
         let blockerLabel = try XCTUnwrap(labels.first {
             $0.stringValue == "Blocker: Waiting for API access"
         })
 
         XCTAssertEqual(blockerLabel.lineBreakMode, .byTruncatingTail)
-        XCTAssertFalse(labels.contains { $0.stringValue == "Next: Retry the deployment" })
+        XCTAssertFalse(labels.contains { $0.stringValue.hasSuffix("Retry the deployment") })
     }
 
-    func testSidebarContextRowFallsBackToNextStep() {
+    func testSidebarContextRowFallsBackToNextStep() throws {
         let workspace = makeWorkspaceInfo(nextStep: "Retry the deployment")
-        let result = SidebarWorkspaceCardRenderer(
-            workspace: workspace,
-            sidebarWidth: 260,
-            padding: 20,
-            yOffset: 400
-        ).render()
-        let labels = result.views.compactMap { ($0 as? NSTextField)?.stringValue }
+        let labels = render(workspace).views.compactMap { $0 as? NSTextField }
 
-        XCTAssertTrue(labels.contains("Next: Retry the deployment"))
+        let next = try XCTUnwrap(labels.first { $0.stringValue.hasSuffix("Retry the deployment") })
+        XCTAssertTrue(next.stringValue.hasPrefix("Next"))
+        XCTAssertEqual(next.toolTip, "Next: Retry the deployment")
         XCTAssertEqual(
-            SidebarExpandedMetrics.workspaceHeight(for: workspace)
-                - SidebarExpandedMetrics.workspaceHeight(for: makeWorkspaceInfo()),
-            SidebarExpandedMetrics.actionAdvance
+            height(workspace) - height(makeWorkspaceInfo()),
+            SidebarExpandedMetrics.actionBlockHeight([.next("Retry the deployment")])
         )
+    }
+
+    /// The next step is the selected card's; the others keep three lines.
+    func testNextStepShowsOnTheSelectedCardOnly() {
+        let other = WorkspaceInfo(
+            id: "other", index: 1, title: "other", profileID: WorkspaceProfile.defaultID, isInactive: false,
+            columnCount: 0, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false, columns: [],
+            prInfo: nil, diffStats: nil, purpose: nil, nextStep: "Retry the deployment", blocker: nil, phase: .active,
+            lastSummary: nil, lastActivityAt: nil
+        )
+        XCTAssertEqual(other.cardActions, [])
     }
 
     func testSidebarContextRowIsOmittedWhenActionFieldsAreBlank() {
         let workspace = makeWorkspaceInfo(nextStep: "  ", blocker: "\n")
-        let result = SidebarWorkspaceCardRenderer(
-            workspace: workspace,
-            sidebarWidth: 260,
-            padding: 20,
-            yOffset: 400
-        ).render()
-        let labels = result.views.compactMap { ($0 as? NSTextField)?.stringValue }
+        let labels = render(workspace).views.compactMap { ($0 as? NSTextField)?.stringValue }
 
-        XCTAssertFalse(labels.contains { $0.hasPrefix("Blocker:") || $0.hasPrefix("Next:") })
-        XCTAssertEqual(
-            SidebarExpandedMetrics.workspaceHeight(for: workspace),
-            SidebarExpandedMetrics.workspaceHeight(for: makeWorkspaceInfo())
-        )
+        XCTAssertFalse(labels.contains { $0.hasPrefix("Blocker:") || $0.hasPrefix("Next") })
+        XCTAssertEqual(height(workspace), height(makeWorkspaceInfo()))
     }
 }

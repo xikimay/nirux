@@ -177,40 +177,44 @@ final class PRFeedbackTests: XCTestCase {
 
     // MARK: - Card and Address
 
-    func testSummaryPutsHumansFirstAndHidesZeroes() throws {
+    func testCountsSplitPeopleAndBots() throws {
         let both = try feedback(threads: [
             thread(comment("claude", bot: true, at: "2026-09-01T10:00:00Z")),
             thread(comment("alice", at: "2026-09-01T10:00:00Z"))
         ])
-        XCTAssertEqual(both.summary, "💬 1 · 🤖 1")
+        XCTAssertEqual(both.sidebarCounts, SidebarPRFeedback(humans: 1, bots: 1))
         let bots = try feedback(threads: [thread(comment("claude", bot: true, at: "2026-09-01T10:00:00Z"))])
-        XCTAssertEqual(bots.summary, "🤖 1")
-        XCTAssertNil(PRFeedback(items: []).summary)
+        XCTAssertEqual(bots.sidebarCounts, SidebarPRFeedback(humans: 0, bots: 1))
+        XCTAssertNil(PRFeedback(items: []).sidebarCounts)
     }
 
+    /// The counts sit on the card's third line, before the pull request,
+    /// and open the feedback menu.
     @MainActor
-    func testCardShowsTheSummaryRowWithItsMenuActionAndHeight() {
-        func info(summary: String?) -> WorkspaceInfo {
+    func testCardShowsTheCountsWithTheirMenuAction() throws {
+        func info(_ feedback: SidebarPRFeedback?) -> WorkspaceInfo {
             WorkspaceInfo(
                 id: "ws-1", index: 0, title: "t", profileID: WorkspaceProfile.defaultID, isInactive: false,
-                columnCount: 0, focusedColumn: 0, gitBranch: nil, hasNotification: false, isActive: true,
-                columns: [], prInfo: pullRequest, prFeedbackSummary: summary, diffStats: nil, purpose: nil,
+                columnCount: 0, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: true,
+                columns: [], prInfo: pullRequest, prFeedback: feedback, diffStats: nil, purpose: nil,
                 nextStep: nil, blocker: nil, phase: .active, lastSummary: nil, lastActivityAt: nil
             )
         }
-        let workspace = info(summary: "💬 1 · 🤖 2")
-        let result = SidebarWorkspaceCardRenderer(workspace: workspace, sidebarWidth: 260, padding: 20, yOffset: 400).render()
+        let workspace = info(SidebarPRFeedback(humans: 1, bots: 2))
+        let result = SidebarWorkspaceCardRenderer(workspace: workspace, sidebarWidth: 260, yOffset: 400).render()
 
-        let label = result.views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "💬 1 · 🤖 2" }
-        XCTAssertNotNil(label)
-        XCTAssertTrue(result.hitAreas.contains {
-            if case .link(let url, _) = $0.region { return url == "action:pr-feedback:ws-1" }
-            return false
-        })
+        let links = result.hitAreas.compactMap { area -> (String, NSTextField)? in
+            if case .link(let url, let label) = area.region { return (url, label) }
+            return nil
+        }
+        XCTAssertEqual(links.map(\.0).first, "action:pr-feedback:ws-1", "before the pull request")
+        let label = try XCTUnwrap(links.first?.1)
+        XCTAssertEqual(label.stringValue.replacingOccurrences(of: "\u{FFFC}", with: ""), "12")
+        XCTAssertEqual(label.toolTip, "PR feedback nobody dealt with: 1 from people, 2 from bots")
         XCTAssertEqual(
-            SidebarExpandedMetrics.workspaceHeight(for: workspace)
-                - SidebarExpandedMetrics.workspaceHeight(for: info(summary: nil)),
-            SidebarExpandedMetrics.prDetailAdvance
+            SidebarExpandedMetrics.workspaceHeight(for: workspace, sidebarWidth: 260),
+            SidebarExpandedMetrics.workspaceHeight(for: info(nil), sidebarWidth: 260),
+            "no row of its own"
         )
     }
 

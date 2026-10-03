@@ -222,12 +222,13 @@ struct WorkspaceInfo: Hashable {
     let columnCount: Int
     let focusedColumn: Int
     let gitBranch: String?
-    let hasNotification: Bool
+    /// What happened while the user was away (`WorkspaceState.notification`).
+    let notification: AttentionSignal?
     let isActive: Bool
     let columns: [ColumnInfo]
     let prInfo: PRInfo?
-    /// `PRFeedback.summary`: the card shows the counts only.
-    var prFeedbackSummary: String?
+    /// The open PR's feedback: the card shows the counts only.
+    var prFeedback: SidebarPRFeedback?
     let diffStats: String?
     let purpose: String?
     let nextStep: String?
@@ -271,7 +272,8 @@ struct ProfileInfo: Hashable {
     let colorHex: String
     let isActive: Bool
     let workspaceCount: Int
-    let hasAttention: Bool
+    /// What its workspaces ask of the user: the switcher's ring.
+    let attention: AttentionSignal?
 }
 
 struct SidebarHitArea {
@@ -362,7 +364,7 @@ struct SidebarDotIndicatorItem: Equatable {
     let action: SidebarDotIndicatorAction
     let colorHex: String
     let isActive: Bool
-    let hasAttention: Bool
+    let attention: AttentionSignal?
     let label: String?
     /// A space with no workspaces: drawn as a ring rather than a filled dot.
     var isEmpty: Bool = false
