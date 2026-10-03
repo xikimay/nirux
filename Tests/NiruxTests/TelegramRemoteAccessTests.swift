@@ -105,11 +105,12 @@ final class TelegramRemoteAccessTests: XCTestCase {
             tokenLoader: { nil }
         )
         app.telegramRemoteAccessController = controller
+        app.claudeStatusLineStateReader = { .none }
         controller.reloadFromPersistence()
         app.showSettings(nil)
         defer {
-            app.settingsPanel?.orderOut(nil)
-            app.settingsPanel?.close()
+            app.settingsWindow?.orderOut(nil)
+            app.settingsWindow?.close()
             controller.shutdown()
         }
 
@@ -120,7 +121,7 @@ final class TelegramRemoteAccessTests: XCTestCase {
         XCTAssertEqual(app.settingsTelegramPairButton?.isEnabled, false)
         XCTAssertNotNil(app.settingsTelegramTokenField)
 
-        try writeSettingsEvidence(panel: try XCTUnwrap(app.settingsPanel))
+        try writeSettingsEvidence(window: try XCTUnwrap(app.settingsWindow))
     }
 
     @MainActor
@@ -707,9 +708,13 @@ private extension TelegramRemoteAccessTests {
     }
 
     @MainActor
-    private func writeSettingsEvidence(panel: NSPanel) throws {
+    private func writeSettingsEvidence(window: NSWindow) throws {
         guard let directory = ProcessInfo.processInfo.environment["NIRUX_TELEGRAM_EVIDENCE_DIR"],
-              let view = panel.contentView,
+              let tabs = window.contentViewController as? NSTabViewController,
+              let telegram = tabs.tabViewItems.firstIndex(where: { $0.label == "Telegram" })
+        else { return }
+        tabs.selectedTabViewItemIndex = telegram
+        guard let view = window.contentView,
               let representation = view.bitmapImageRepForCachingDisplay(in: view.bounds)
         else { return }
         view.layoutSubtreeIfNeeded()

@@ -44,7 +44,7 @@ extension NiruxShellView {
         let spaceName = workspaceStore.profiles.first { $0.id == profileID }?.name ?? profileID
         do {
             guard let url = try SpaceBrief.ensureBriefFile(spaceID: profileID, spaceName: spaceName) else {
-                NSSound.beep()
+                showToast("Couldn’t find this project’s brief", tone: .error)
                 return
             }
             // A tab in the workspace's usual editor: rooting an editor at the
@@ -52,7 +52,7 @@ extension NiruxShellView {
             openInEditorColumn(path: url.path)
         } catch {
             NiruxDebugLog.log("SpaceBrief: could not create the brief file: \(error)")
-            NSSound.beep()
+            showToast("Couldn’t create the project’s brief", tone: .error)
         }
     }
 

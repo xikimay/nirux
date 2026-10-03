@@ -18,14 +18,17 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         tests: [
             "testTerminalColumnCommands": ["New Terminal", "Resize Column (Cycle Width)"],
             "testEditorCommands": ["Open Editor", "Toggle Editor Diff", "Search Workspace"],
+            "testSearchEverywhere": ["Search Everywhere"],
             "testBrowserCommands": ["Open Browser", "Toggle Web Inspector"],
             "testImportBrowserCookies": ["Import Browser Cookies"],
             "testAgentCommands": ["Open Claude Code", "Open Codex"],
             "testNextWaitingAgentCommand": ["Next Waiting Agent"],
+            "testResumeAllAgentsCommand": ["Resume All Agents"],
             "testWorkspaceCommands": [
                 "New Workspace", "Rename Workspace", "Show/Hide Sidebar", "Show/Hide Inactive Workspaces"
             ],
             "testWorktreeCommands": ["Open Worktree", "New Worktree", "Clean Up Merged Worktrees…"],
+            "testNewTaskCommand": ["New Task…"],
             "testProjectBoardCommand": ["Open Project Board"],
             "testSetupCommands": ["Show Getting Started", "Install Agent Skills", "Open Settings"]
         ],
@@ -38,9 +41,28 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
 
     func testEveryPaletteCommandHasAFlowTest() throws {
         try UIFlowHarness.run { harness in
+            // Import Browser Cookies is offered only with a Chromium browser.
+            harness.cookieBrowsers = [.chrome]
             let titles = harness.paletteCommandTitles()
             XCTAssertEqual(titles.count, Set(titles).count, "two palette commands share a title: \(titles)")
             Self.commandCoverage.checkEveryItemIsCovered(offered: titles, testNames: UIFlowCoverage.testNames(of: Self.self))
+        }
+    }
+
+    /// A symbol newer than the deployment target draws nothing there, and
+    /// CI runs a later macOS: check each against the system's list of when
+    /// symbols shipped.
+    func testPaletteSymbolsShipWithMacOS14() throws {
+        let availability = try SymbolAvailability()
+        try UIFlowHarness.run { harness in
+            harness.cookieBrowsers = [.chrome]
+            var names = ["circle.fill", "command"] + ["claude", "codex"].compactMap(SidebarRenderer.agentSymbol(processName:))
+            for action in harness.paletteCommands() {
+                if case .symbol(let name) = action.icon { names.append(name) }
+            }
+            for name in names {
+                XCTAssertTrue(try availability.ships(name, byMacOS: [14, 0]), name)
+            }
         }
     }
 
@@ -94,6 +116,75 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         }
     }
 
+    /// The match sits far up the scrollback of a terminal in another
+    /// workspace, and more matches are printed after the search: picking it
+    /// brings that column forward, find bar open, and Ghostty scrolls to
+    /// that very match.
+    func testSearchEverywhere() throws {
+        try UIFlowHarness.run { harness in
+            let home = try XCTUnwrap(harness.shell.activeWorkspace)
+            harness.shell.addWorkspace(title: "other", cwd: harness.worktree)
+            let other = try XCTUnwrap(harness.shell.activeWorkspace)
+            let column = try XCTUnwrap(other.columns.first)
+            let session = try XCTUnwrap(column.pty?.terminalSession)
+            harness.waitUntil("the terminal's surface") { session.readViewportText() != nil }
+            let needle = "flow-scrollback-needle"
+            let rows = (1...200).map { [20, 100, 150].contains($0) ? "\(needle) \($0)" : "row \($0)" }
+            session.receive(rows.joined(separator: "\r\n") + "\r\n")
+            harness.waitUntil("the rows on screen") { session.readViewportText()?.contains("row 200") == true }
+            XCTAssertFalse(session.readViewportText()?.contains("\(needle) 100\n") ?? true, "the match starts on screen")
+            harness.shell.focusWorkspace(id: home.id)
+
+            harness.runPaletteCommand("Search Everywhere")
+            let field = try XCTUnwrap(harness.waitForField(placeholder: GlobalSearchPanel.placeholder))
+            harness.type(needle.uppercased(), into: field)
+            let panel = try XCTUnwrap(harness.shell.globalSearchPanel)
+            harness.waitUntil("the search to end") { !panel.isSearching && !panel.rows.isEmpty }
+            XCTAssertEqual(panel.rows.map(\.match.excerpt), ["\(needle) 150", "\(needle) 100", "\(needle) 20"])
+            XCTAssertEqual(panel.rows.map(\.place), Array(repeating: "other › Terminal 1", count: 3))
+            XCTAssertEqual(panel.statusLabel?.stringValue, "3 matches in 1 of 2 terminals")
+
+            session.receive("\(needle) 201\r\n\(needle) 202\r\n")
+            harness.waitUntil("the new matches") { TerminalScreenText.read(session)?.contains("\(needle) 202") == true }
+            harness.press(.down, in: field.window)
+            harness.press(.returnKey, in: field.window)
+            XCTAssertFalse(panel.isVisible)
+            XCTAssertIdentical(harness.shell.activeWorkspace, other)
+            XCTAssertIdentical(other.columns[safe: other.focusedIndex], column)
+            XCTAssertTrue(column.isEditingFind)
+            XCTAssertEqual(column.findBar?.field.stringValue, needle.uppercased())
+            harness.waitUntil("Ghostty to scroll to the picked match") {
+                session.readViewportText()?.contains("\(needle) 100\n") == true
+            }
+        }
+    }
+
+    /// The panel keeps no column alive: closing one it searched, and found
+    /// matches in, ends its shell, even with the panel still open.
+    func testSearchEverywhereLetsClosedColumnsGo() throws {
+        try UIFlowHarness.run { harness in
+            weak var closedShell: PtySession?
+            let needle = "flow-closing-needle"
+            try {
+                harness.shell.addColumn()
+                let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+                let pty = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.pty)
+                closedShell = pty
+                harness.waitUntil("the terminal's surface") { pty.terminalSession.readViewportText() != nil }
+                pty.terminalSession.receive("\(needle)\r\n")
+            }()
+            harness.shell.showGlobalSearch()
+            let panel = try XCTUnwrap(harness.shell.globalSearchPanel)
+            let field = try XCTUnwrap(panel.searchField)
+            harness.type(needle, into: field)
+            harness.waitUntil("the match") { !panel.isSearching && panel.rows.count == 1 }
+
+            harness.shell.closeActiveColumn()
+            harness.waitUntil("the closed column's shell to go") { closedShell == nil }
+            XCTAssertTrue(panel.isVisible)
+        }
+    }
+
     func testBrowserCommands() throws {
         try UIFlowHarness.run { harness in
             let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
@@ -128,8 +219,11 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
 
     func testImportBrowserCookies() throws {
         try UIFlowHarness.run { harness in
+            XCTAssertFalse(harness.paletteCommandTitles().contains("Import Browser Cookies"), "no Chromium browser to import from")
             harness.cookieBrowsers = [.chrome, .arc]
-            XCTAssertEqual(harness.shell.importCookieSubtitle(), "From Chrome, Arc")
+            XCTAssertEqual(
+                harness.paletteCommands().first { $0.title == "Import Browser Cookies" }?.subtitle, "From Chrome, Arc"
+            )
             // The browser choice: Arc, the second button.
             harness.alertResponses = [.alertSecondButtonReturn]
 
@@ -176,6 +270,32 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         }
     }
 
+    /// A restored agent in a workspace off screen waits until asked.
+    func testResumeAllAgentsCommand() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let onScreen = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "restored", cwd: harness.repo)
+            let restored = try XCTUnwrap(shell.activeWorkspace)
+            let session = "5f0c8a52-6a0e-4d7c-9f0e-2b1f6d1c9a11"
+            restored.addColumn(
+                deferredAgent: DeferredAgentLaunch(
+                    agent: .claude(resume: .session(session), mode: .default), title: nil, lastStatus: nil
+                ),
+                agentUUID: UUID().uuidString,
+                cwd: harness.repo
+            )
+            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === onScreen }))
+            XCTAssertEqual(shell.deferredAgentCount, 1)
+            XCTAssertEqual(harness.restoredAgentLaunches, [])
+
+            harness.runPaletteCommand("Resume All Agents")
+            XCTAssertEqual(harness.restoredAgentLaunches, ["command claude --resume '\(session)'"])
+            XCTAssertEqual(shell.deferredAgentCount, 0)
+            XCTAssertIdentical(shell.activeWorkspace, onScreen, "agents resume where they are")
+        }
+    }
+
     // MARK: - Workspaces
 
     func testWorkspaceCommands() throws {
@@ -215,6 +335,17 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
 
+            // Outside a repository, both say so instead of doing nothing.
+            let repoWorkspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "home", cwd: harness.home)
+            for command in ["Open Worktree", "New Worktree"] {
+                shell.dismissToast()
+                harness.waitUntil("no toast") { shell.toast == nil }
+                harness.runPaletteCommand(command)
+                XCTAssertEqual(shell.toast?.message, "Not in a git repository: \(harness.home.abbreviatedPath())", command)
+            }
+            shell.focusWorkspace(id: repoWorkspace.id)
+
             // Lists the worktrees off the main thread, then offers them in
             // the palette.
             harness.runPaletteCommand("Open Worktree")
@@ -241,7 +372,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             }
 
             // Once it is open, it goes back to that workspace...
-            let repoWorkspace = try XCTUnwrap(shell.workspaces.first { $0.cwd == harness.repo })
+            XCTAssertEqual(repoWorkspace.cwd, harness.repo)
             shell.focusWorkspace(id: repoWorkspace.id)
             let workspaceCount = shell.workspaces.count
             XCTAssertTrue(try pickWorktree(harness.worktreeBranch).hasPrefix("Already open · "))
@@ -284,6 +415,61 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             }
             panel.dismiss()
             XCTAssertNil(shell.worktreeCleanupPanel)
+        }
+    }
+
+    /// Reads the project's repository and templates off the main thread,
+    /// then creates the worktree and writes the handover off it too (see
+    /// NewTaskFlowTests for the rest of the form).
+    func testNewTaskCommand() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            harness.runPaletteCommand("New Task…")
+            harness.waitUntil("the new task sheet") { shell.newTaskPanel?.panel?.isSheet == true }
+            let form = try XCTUnwrap(shell.newTaskPanel)
+            XCTAssertIdentical(harness.window.attachedSheet, form.panel)
+            XCTAssertEqual(form.selectedProjectID, shell.activeProfileID)
+            harness.waitUntil("the project's repository") { form.info != nil }
+            XCTAssertEqual(form.info?.target?.repository, harness.repo)
+            XCTAssertEqual(form.info?.templates, TaskTemplates.defaults)
+            // No remote here: the checkout's HEAD.
+            XCTAssertEqual(
+                form.repositoryLabel.stringValue,
+                "\(harness.repo)\nStarts from this checkout’s HEAD (main): origin has no default branch Nirux knows of."
+            )
+
+            // The branch follows the description, then the template.
+            form.descriptionView.string = "Sidebar flickers on resize\n\nSeen with three columns."
+            form.descriptionView.didChangeText()
+            XCTAssertEqual(form.branch, "feat/sidebar-flickers-on-resize")
+            form.templatePopup.selectItem(withTitle: "Bugfix")
+            form.templatePopup.sendAction(form.templatePopup.action, to: form.templatePopup.target)
+            XCTAssertEqual(form.branch, "fix/sidebar-flickers-on-resize")
+
+            form.startButton.performClick(nil)
+            harness.waitUntil("the task's workspace") {
+                shell.workspaces.contains { $0.title == "Sidebar flickers on resize" }
+            }
+            XCTAssertNil(shell.newTaskPanel)
+            XCTAssertNil(harness.window.attachedSheet)
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertEqual(workspace.title, "Sidebar flickers on resize")
+            XCTAssertEqual(workspace.profileID, WorkspaceProfile.defaultID)
+            XCTAssertEqual(
+                NiruxShellView.comparablePath(workspace.cwd),
+                NiruxShellView.comparablePath(harness.root + "/repo.fix-sidebar-flickers-on-resize")
+            )
+            XCTAssertEqual(GitWorktree.currentBranch(at: workspace.cwd), "fix/sidebar-flickers-on-resize")
+            let handover = try String(contentsOfFile: workspace.cwd + "/.claude-handover.md", encoding: .utf8)
+            XCTAssertTrue(handover.contains("## Task\n\nSidebar flickers on resize\n\nSeen with three columns.\n"), handover)
+            XCTAssertTrue(handover.contains("## How to proceed (template “Bugfix”)\n\n1. Reproduce the bug first"), handover)
+            // The repository ignores it: an agent's `git add -A` leaves it out.
+            XCTAssertEqual(try UIFlowHarness.git(["status", "--porcelain"], at: workspace.cwd), "")
+            // Named after the branch (#39), told to read the handover.
+            let launch = try XCTUnwrap(harness.agentLaunches.last)
+            XCTAssertTrue(launch.hasPrefix("command claude"), launch)
+            XCTAssertTrue(launch.contains("'--name=fix/sidebar-flickers-on-resize'"), launch)
+            XCTAssertTrue(launch.contains("Read .claude-handover.md for full context"), launch)
         }
     }
 
@@ -340,14 +526,38 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             let app = NiruxApp()
             app.telegramTokenLoader = { nil }
             app.telegramTokenSaver = { _ in XCTFail("Unexpected Keychain write") }
+            app.claudeStatusLineStateReader = { .none }
             let previousDelegate = NSApp.delegate
             NSApp.delegate = app
             harness.runPaletteCommand("Open Settings")
             NSApp.delegate = previousDelegate
-            let settings = try XCTUnwrap(app.settingsPanel)
+            let settings = try XCTUnwrap(app.settingsWindow)
             XCTAssertTrue(settings.isVisible)
             settings.orderOut(nil)
             settings.close()
         }
+    }
+}
+
+/// When each SF Symbol first shipped, from the system's own table.
+private struct SymbolAvailability {
+    private static let path = "/System/Library/CoreServices/CoreGlyphs.bundle/Contents/Resources/name_availability.plist"
+    private let symbols: [String: String]
+    private let releases: [String: [String: String]]
+
+    init() throws {
+        guard let table = NSDictionary(contentsOfFile: Self.path),
+              let symbols = table["symbols"] as? [String: String],
+              let releases = table["year_to_release"] as? [String: [String: String]]
+        else { throw XCTSkip("no SF Symbols availability table at \(Self.path)") }
+        self.symbols = symbols
+        self.releases = releases
+    }
+
+    func ships(_ name: String, byMacOS target: [Int]) throws -> Bool {
+        let year = try XCTUnwrap(symbols[name], "\(name) is not an SF Symbol")
+        let macOS = try XCTUnwrap(releases[year]?["macOS"], "no macOS release for \(year)")
+        let version = macOS.split(separator: ".").compactMap { Int($0) }
+        return version.lexicographicallyPrecedes(target) || version == target
     }
 }

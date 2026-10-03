@@ -150,12 +150,15 @@ extension NiruxShellView {
         PRDetect.diffPathsAsync(cwd: cwd) { [weak self, weak workspace] paths in
             guard let self, let workspace else { return }
             guard !paths.isEmpty else {
-                NSSound.beep()
+                // An empty list is also what git gives outside a repository.
+                self.showToast(GitWorktree.repoRoot(at: cwd) == nil
+                    ? "Not in a git repository: \(cwd.abbreviatedPath())"
+                    : "No unstaged changes")
                 return
             }
 
             guard let editor = self.editorColumn(in: workspace, cwd: cwd) else {
-                NSSound.beep()
+                self.showToast("Couldn’t open an editor for the changes", tone: .error)
                 return
             }
             editor.showDiffCollection(
@@ -248,7 +251,7 @@ extension NiruxShellView {
         4. **Open the worktree in Nirux** — Nirux handles git worktree creation, moves the handover
            file into the worktree as `.claude-handover.md` or `.codex-handover.md`, and launches
            the same agent. Nirux terminals expose `NIRUX_PROFILE_ID`; preserve it in the URL so
-           the new workspace opens in the same Nirux session/space even if the user has focused a
+           the new workspace opens in the same Nirux project even if the user has focused a
            different one. They also expose `NIRUX_LAUNCH_ID`, which proves the request comes from
            a Nirux terminal; without it Nirux asks the user to confirm before doing anything:
            ```bash
@@ -468,11 +471,6 @@ extension NiruxShellView {
 
     // MARK: - Cookie Import
 
-    func importCookieSubtitle() -> String {
-        let browsers = sideEffects.cookieBrowsers().map(\.rawValue)
-        return browsers.isEmpty ? "No Chromium browsers detected" : "From \(browsers.joined(separator: ", "))"
-    }
-
     func importBrowserCookies() {
         let browsers = sideEffects.cookieBrowsers()
         guard !browsers.isEmpty else { return }
@@ -554,6 +552,7 @@ extension NiruxShellView {
 
         relayout(animated: false)
         updateSidebar()
+        focusActiveTerminal(in: window, editorTakesKeyboard: true)
     }
 
     /// Wires every callback an `EditorColumn` needs back into the shell view.
@@ -598,6 +597,9 @@ extension NiruxShellView {
             .compactMap { $0.editorColumn }
             .first { $0.workspaceCwd == editorRoot }
             ?? (workspaceCwd == nil ? workspace.columns.compactMap { $0.editorColumn }.first : nil)
+        // Opened for the user, the editor takes the keyboard, as a browser
+        // column does (`openWebView`).
+        defer { if takeFocus, workspace === activeWorkspace { focusActiveTerminal(in: window, editorTakesKeyboard: true) } }
 
         // focusedIndex moves even for takeFocus:false opens: the camera
         // only keeps the FOCUSED column visible, so leaving it put could
@@ -637,7 +639,8 @@ extension NiruxShellView {
         if let id = request.workspaceID,
            let index = workspaces.firstIndex(where: { $0.id == id }) {
             target = workspaces[index]
-            switchToWorkspace(index)
+            // Its focused column can be the editor an earlier open focused.
+            if target !== activeWorkspace { switchToWorkspace(index, editorTakesKeyboard: false) }
         }
         openInEditorColumn(
             path: request.file, line: request.line, endLine: request.endLine,
@@ -660,8 +663,9 @@ extension NiruxShellView {
             NiruxDebugLog.log("sendSelectionToAgent: no editor column in workspace")
             return
         }
-        let terminal = (focused?.pty?.hasExited == false ? focused : nil)
-            ?? workspace.columns.first { $0.pty?.hasExited == false }
+        // A restored agent that hasn't resumed has no shell to take it.
+        func isLive(_ column: ColumnState?) -> Bool { column?.pty?.hasExited == false && column?.isAwaitingResume == false }
+        let terminal = (isLive(focused) ? focused : nil) ?? workspace.columns.first { isLive($0) }
         guard let pty = terminal?.pty, !pty.hasExited else {
             NiruxDebugLog.log("sendSelectionToAgent: no live terminal column in workspace")
             return
@@ -745,10 +749,7 @@ extension NiruxShellView {
 
     /// Focus a column by 1-based number (Cmd+1…9). Out-of-range no-ops.
     func focusColumn(number: Int) {
-        guard let workspace = activeWorkspace,
-              workspace.columns.indices.contains(number - 1)
-        else { return }
-        focusColumnByIndex(number - 1)
+        goToColumn(number - 1)
     }
 
     /// Open the workspace-wide search panel scoped to the active workspace

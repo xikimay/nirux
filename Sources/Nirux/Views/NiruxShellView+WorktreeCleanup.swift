@@ -93,9 +93,11 @@ extension NiruxShellView {
                 unsavedEditors.append(workspace.title)
             }
             guard !isMember else { continue }
-            for column in workspace.openColumns where isInside(column.pty?.childCwd) {
+            // A restored agent not resumed yet resumes in its folder.
+            for column in workspace.openColumns where isInside(column.pty?.childCwd ?? column.awaitingResumeDirectory) {
                 if let agent = column.liveAgent(snapshot: snapshot) {
-                    foreignAgents.append("\(agent.displayName) in “\(workspace.title)”")
+                    let name = agent.isPaused ? "\(agent.displayName) (paused)" : agent.displayName
+                    foreignAgents.append("\(name) in “\(workspace.title)”")
                 }
             }
         }
@@ -159,7 +161,9 @@ extension NiruxShellView {
     /// workspace: the Project Board's "Clean Up…".
     func requestWorktreeCleanup(path: String) {
         let key = Self.comparablePath(path)
-        guard worktreeCleanupsInFlight.insert(key).inserted else { return }
+        guard worktreeCleanupsInFlight.insert(key).inserted else {
+            return showToast("A clean-up of this worktree is already in progress")
+        }
         DispatchQueue.global(qos: .userInitiated).async {
             let inspection = WorktreeCleanup.inspect(path: path)
             DispatchQueue.main.async { [weak self] in

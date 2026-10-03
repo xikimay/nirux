@@ -11,14 +11,16 @@ Nirux is alpha software.
 - Agent launchers: start Claude Code or Codex from the command palette with configurable permission and sandbox presets.
 - Attention and Activity: per-column agent status (working / needs attention, with elapsed time) driven by real Claude Code hooks and Codex turn notifications — not output guessing (Gemini CLI and OpenCode, which have no hooks, get output-activity status) — plus a persistent sidebar feed, edge glows for off-screen attention, native macOS notifications that focus the right workspace and column on click, and a Dock badge counting waiting workspaces.
 - Stuck agents: a permission or question left open past a threshold (Settings, 10 minutes by default) shows `waiting 2h05m` on its card and notifies once (Telegram too, and while Nirux is in the background); a Claude turn that ended on an API error shows `API error`, with a Resume button — for transient errors only (overloaded, server error) — that types `continue` only on a click, once Claude is back at an empty prompt; a `claude` that died mid-turn gets an overlay that resumes its conversation in its permission mode.
-- Quick switcher and Next Waiting Agent: type a workspace's name, branch, space or folder in `Cmd+P` and press Return to jump to it — in any space, inactive ones too (listed after active ones that match as well, and left inactive) — each row showing its agents' state (`working`, `waiting 12m`, `API error`); `Cmd+J` goes to the Claude agent blocked on you the longest (a permission, a question, an API error, a mid-turn exit), then on to the next at each press.
+- Quick switcher and Next Waiting Agent: type a workspace's name, branch, project or folder in `Cmd+P` and press Return to jump to it — in any project, inactive ones too (listed after active ones that match as well, and left inactive) — each row showing its agents' state (`working`, `waiting 12m`, `API error`); `Cmd+J` goes to the Claude agent blocked on you the longest (a permission, a question, an API error, a mid-turn exit), then on to the next at each press.
 - Keep Mac awake: while an agent works, Nirux keeps the Mac from idle-sleeping and shows a cup in the title bar; it lets go a minute after the last one stops — see [Keep Mac awake while agents work](#keep-mac-awake-while-agents-work).
 - Claude context usage: a Claude column's title bar shows how full its session's context window is (`ctx 62%`, or `ctx 124k` while the window size is unknown), with the session's token totals in a tooltip — read from the session transcript, see [Claude context usage](#claude-context-usage).
+- Claude plan usage limits (opt-in): the window's title bar shows the 5-hour window and the weekly limit of a Pro or Max plan (`5h 42% · 7d 18%`), with their resets in a tooltip, see [Claude plan usage limits](#claude-plan-usage-limits).
 - Opt-in Telegram Remote Access: pair one private Telegram user to list live agent sessions, inspect status and recent output, receive completion/attention alerts, and continue a selected session without exposing a webhook or general-purpose shell.
 - Worktree flow: create or open Git worktrees as new workspaces, optionally handing context from the current agent session into the new workspace.
 - Built-in editor: open files, keep tabs, search the workspace, browse the file tree with Finder icons, view Git changes, and toggle file diffs. Find/replace, word wrap, font zoom, per-tab scroll restore, and disk-conflict protection included.
 - Browser context: open URLs in app, keep URL history, import cookies from Chrome, Brave, Arc, or Edge into the shared WebKit data store, download files to ~/Downloads, and inspect pages with the Web Inspector.
 - Session restore: workspace layout, editor tabs, browser URLs, sidebar state, detected Claude/Codex launch modes, and verified Claude session / Codex thread IDs are saved under Application Support, with rotating backups for corruption recovery. Each agent column resumes its own conversation by exact ID (`claude --resume <id>`, `codex resume <id>`) in the directory it ran in; a Claude session that was never prompted restarts fresh, and legacy, missing, malformed, or duplicate IDs open the agent's interactive resume picker instead of guessing the last session. A `claude -p` launched by a column's agent, or a `codex exec` launched by a Claude, Gemini CLI or OpenCode column, keeps its own session and doesn't drive that column's status, notifications, or restore.
+- Agents resume on demand: after a restart, a Claude or Codex column comes back without its agent and resumes it once the column has stayed a moment in the workspace on screen (or gets the focus), so moving through workspaces doesn't start the agents on the way. Until then it reads `Not resumed yet` with the session's title and its last status (`last seen working`), its sidebar row reads `paused` with a **Resume** button that starts it without leaving the workspace you're in, and `Resume All Agents` (command palette, **Workspaces** menu) starts every one left. Closing a paused agent's column asks first, as for a running one. Plain terminals start as usual. **Settings → General → Resume agents on launch** → **All at once** restores the previous behavior.
 
 ## Requirements
 
@@ -90,14 +92,17 @@ Typical command palette actions:
 - Show Getting Started
 - Open Claude Code
 - Open Codex
+- New Task…
+- Resume All Agents
 - New Worktree
 - Open Worktree
 - Clean Up Merged Worktrees
 - New Terminal
 - Open Editor
 - Search Workspace
+- Search Everywhere
 - Open Browser
-- Import Browser Cookies
+- Import Browser Cookies (listed when a Chrome, Brave, Arc or Edge profile is found)
 - New Workspace
 - Show/Hide Sidebar
 - Rename Workspace
@@ -115,19 +120,22 @@ Useful shortcuts:
 | `Cmd+B` | Open browser URL flow |
 | `Cmd+W` | Close editor tab, column, or workspace depending on context — asks first when a Claude, Codex, Gemini CLI or OpenCode session is running (Return cancels, ⌘D closes); with Settings or a detached Web Inspector in front, closes that window instead |
 | `Cmd+1…9` | Focus column N |
-| `Cmd+Left` / `Cmd+Right` | Focus previous or next column |
-| `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column |
+| `Cmd+Left` / `Cmd+Right` | Focus previous or next column; while text has the keyboard (the editor, a field of a web page, the address bar, a find field), move to the start or end of the line instead |
+| `Ctrl+Cmd+Left` / `Ctrl+Cmd+Right` | Focus previous or next column, also from text |
+| `Shift+Cmd+Left` / `Shift+Cmd+Right` | Move the focused column; in text, select to the start or end of the line (`Columns > Move Left / Move Right` still moves it) |
 | `Cmd+E` | Cycle focused column width through presets |
 | `Cmd+N` | New workspace |
-| `Cmd+Up` / `Cmd+Down` | Switch workspace |
-| `Alt+Cmd+Left` / `Alt+Cmd+Right` | Switch to the previous or next space (the workspace group named in the sidebar header) |
+| `Cmd+Up` / `Cmd+Down` | Switch workspace; in text, move to the start or end of the document (`Shift` selects) |
+| `Ctrl+Cmd+Up` / `Ctrl+Cmd+Down` | Switch workspace, also from text |
+| `Alt+Cmd+Left` / `Alt+Cmd+Right` | Switch to the previous or next project (the workspace group named in the sidebar header) |
 | `Cmd+J` | Next waiting agent: the Claude agent blocked on you the longest, then the next at each press |
 | `Ctrl+Cmd+S` | Toggle sidebar |
 | `Ctrl+Cmd+F` | Enter or exit full screen |
 | `Cmd+M` | Minimize the window |
-| `Cmd+,` | Settings |
+| `Cmd+,` | Settings (General, Agents, Notifications, Experimental, Telegram); a change applies at once |
 | `Cmd+Z` / `Shift+Cmd+Z` | Undo / redo in the editor and in panel text fields (palette, rename, settings) |
 | `Shift+Cmd+F` | Search workspace |
+| `Alt+Cmd+F` | Search Everywhere: text in the scrollback of every terminal, across workspaces and projects; picking a match opens its terminal's find bar on it. A full-screen program (vim, less, Claude Code in its no-flicker mode) shows no scrollback: only its screen is searched |
 | `Cmd+F` | Find in the focused editor or terminal; a terminal's find bar closes with `Esc` |
 | `Cmd+G` / `Shift+Cmd+G` | Next / previous terminal match (`Return` / `Shift+Return` in the find bar); next moves up to older output, as in Ghostty |
 | `Cmd+S` / `Alt+Cmd+S` | Save the active editor file / save all |
@@ -136,7 +144,7 @@ Useful shortcuts:
 | `Shift+Cmd+M` | Toggle minimap in editor |
 | `Alt+Cmd+Return` | Send the editor selection to the agent terminal |
 | `Cmd+=` / `Cmd+-` / `Cmd+0` | Editor font zoom in / out / reset |
-| `Cmd+L` | Focus browser address bar |
+| `Cmd+L` | Focus browser address bar; in the editor, select the line |
 | `Cmd+[` / `Cmd+]` | Browser back / forward |
 | `Alt+Cmd+I` | Open Web Inspector on the focused browser column |
 
@@ -161,7 +169,7 @@ Both files are global, so every Claude Code and Codex session on the Mac runs th
 
 ### Keep Mac awake while agents work
 
-While at least one agent is working, in any workspace or space, Nirux holds a macOS power assertion named `Nirux: agents working` that prevents idle sleep. An agent waiting for you (a permission dialog, a finished turn) doesn't count, nor does one that has printed nothing and sent no hook event for 10 minutes: a working agent redraws its spinner every second, while a Claude turn interrupted with Esc can stay "working" until the next prompt. Nirux releases it a minute after the last agent stops, so back-to-back turns don't toggle it, and at once when you turn the setting off or quit. A cup at the right end of the title bar shows while it is held; hover it for the number of working agents. The option is **Settings → General → Keep Mac awake while agents work**, on by default.
+While at least one agent is working, in any workspace or project, Nirux holds a macOS power assertion named `Nirux: agents working` that prevents idle sleep. An agent waiting for you (a permission dialog, a finished turn) doesn't count, nor does one that has printed nothing and sent no hook event for 10 minutes: a working agent redraws its spinner every second, while a Claude turn interrupted with Esc can stay "working" until the next prompt. Nirux releases it a minute after the last agent stops, so back-to-back turns don't toggle it, and at once when you turn the setting off or quit. A cup near the right end of the title bar (left of the [plan usage limits](#claude-plan-usage-limits), when they show) shows while it is held; hover it for the number of working agents. The option is **Settings → General → Keep Mac awake while agents work**, on by default.
 
 It prevents idle sleep only: the display still turns off on its own schedule, and closing a MacBook's lid still puts it to sleep, except in clamshell mode (external display and power connected). `pmset -g assertions | grep Nirux` shows whether it is held.
 
@@ -173,6 +181,14 @@ Nirux learns the session's transcript from the `transcript_path` of the [agent s
 
 Claude Code picks a 200k or 1M window depending on the model variant, the account and the provider, and the transcript doesn't record which. Until a response goes past 200k tokens, from which Nirux infers the 1M window, the label shows the token count instead (`ctx 124k`). Switching models starts over (the 200k and 1M variants of one model report the same ID, so a switch between them isn't seen), and models Claude Code may give another window always show the token count: `claude-sonnet-4-6`, and model IDs not in Claude Code's `claude-…` form (Bedrock IDs, non-Claude models). Right after a compaction it shows `ctx —` until the next response. Codex columns show nothing.
 
+### Claude plan usage limits
+
+With **Settings → Agents → Claude Code → Show plan usage limits in the title bar** on (off by default), the right end of the window's title bar shows how much of the Claude plan's 5-hour window and weekly limit is used, as `5h 42% · 7d 18%`, turning orange from 80% of either. Hover it for each reset time and when the numbers were last reported. A window drops out once it resets, until a session reports the next one.
+
+Claude Code hands these numbers to one documented place only: the JSON its status line command receives (`rate_limits`, Claude Code 2.1.80 or later, Pro and Max plans, after a session's first response). Hooks don't carry them, `/usage` has no non-interactive form, and nothing under `~/.claude` stores them; Nirux calls no claude.ai endpoint. So turning the option on makes Nirux Claude Code's status line: `~/.claude/settings.json` gains a `statusLine` running `Nirux --hook claude --statusline`, guarded on `NIRUX_AGENT_UUID` like the [hooks](#agent-status-hooks). In a Nirux terminal it records the limits in `claude-usage-limits.json` in the state directory and prints nothing; elsewhere it stops at the shell test. The status line stays blank either way, but Claude Code hides its `? for shortcuts` hint whenever a status line is set, in every session. Turning the option off takes the entry back.
+
+A status line of your own is left as it is, and the limits don't show (Settings says so), also when you set one later (with Claude Code's `/statusline`, say); a project's `.claude/settings.json` status line wins in that project's sessions, which then don't report. The indicator shows what the latest response of a Claude session in Nirux saw, whichever account that session is signed in to; a status line that runs again without a new response (an idle session, a window that reset, `/clear`, `/resume`) repeats older numbers and is ignored. Usage elsewhere (claude.ai, another Mac) shows up with the next response here. Turning the option off forgets the numbers. Only the installed app writes or takes back the entry: a dev build, or a copy run with `NIRUX_STATE_DIR`, leaves the `statusLine` entry as it is. Turn the option off before removing Nirux, or delete the `statusLine` entry afterwards: left behind, it does nothing but keep the hint hidden.
+
 ### Telegram Remote Access
 
 Telegram Remote Access is disabled by default. It uses outbound Bot API `getUpdates` long polling, so Nirux does not open a listening port and you do not need a public webhook. Nirux and the Mac must remain running and online for the bot to respond.
@@ -180,13 +196,13 @@ Telegram Remote Access is disabled by default. It uses outbound Bot API `getUpda
 Set it up with a dedicated bot:
 
 1. Create a bot with Telegram's `@BotFather` and copy its token.
-2. Open **Nirux → Settings**, enable **Telegram Remote Access**, paste the token, choose the notification preferences, and click **Generate Pairing Code**.
+2. Open **Nirux → Settings → Telegram**, paste the token and press Return (or **Save Token**), enable **Telegram Remote Access**, and click **Generate Pairing Code**. Completion and attention alerts are chosen under **Settings → Notifications**.
 3. Open a private chat with that bot and send `/pair CODE` using the one-time code shown in Settings. Codes expire after 10 minutes.
 4. Send `/sessions`, choose a live agent, then send ordinary text as a prompt. You can also reply directly to a recent completion or attention notification; if its route has expired, use `/sessions` to select the agent again.
 
 Supported commands:
 
-- `/sessions` — list and select live Claude Code and Codex sessions.
+- `/sessions` — list and select live Claude Code and Codex sessions. After Nirux restarts, an agent that hasn't resumed yet (see *Agents resume on demand* above) isn't live and isn't listed until its column shows or you resume it; set **Resume agents on launch** to **All at once** to keep every agent reachable after a restart.
 - `/status` — show the selected session's workspace, column, state, and directory.
 - `/tail` — show a bounded plain-text tail of recent terminal output.
 - `/help` — show the command summary.
@@ -231,9 +247,9 @@ nirux://new-worktree?branch=feat/example&repo=/path/to/repo&agent=codex&handover
 
 `repo` is the top level of any checkout of the repository: the main one or a linked worktree. The new worktree goes next to the main checkout and is named after its folder, as `<main folder>.<branch>` with `/` in the branch replaced by `-`: from `repo.feat-a`, `feat/b` becomes `repo.feat-b`, not `repo.feat-a.feat-b`. When git can't tell where the main checkout is (a bare repository, a separate git dir, a submodule), the worktree goes next to `repo` instead. A branch that doesn't exist yet starts from the HEAD of `repo`; one that only exists on the remote tracks `origin/<branch>`. If the branch is already checked out in another linked worktree, Nirux opens that worktree wherever it is, after checking the folder is still that worktree; a branch checked out in the main checkout or in `repo` itself is refused.
 
-Supported agents are `claude` and `codex`. The optional `profile` query parameter targets the Nirux session/space that should receive the new workspace; Nirux terminals expose it as `NIRUX_PROFILE_ID` for the worktree skill. When a handover file is provided, Nirux moves it into the new worktree as `.claude-handover.md` or `.codex-handover.md`, then launches the selected agent with a prompt to read it. The handover must be the user's own regular file directly in `/tmp` with a name starting with `nirux-handover-` (the skill creates it with `mktemp /tmp/nirux-handover-<agent>-XXXXXX`); any other path is ignored and the worktree opens without it. An agent is only told to read a handover that this request delivered, never one that already exists in the folder.
+Supported agents are `claude` and `codex`. The optional `profile` query parameter targets the Nirux project that should receive the new workspace; Nirux terminals expose it as `NIRUX_PROFILE_ID` for the worktree skill. When a handover file is provided, Nirux moves it into the new worktree as `.claude-handover.md` or `.codex-handover.md`, then launches the selected agent with a prompt to read it. The handover must be the user's own regular file directly in `/tmp` with a name starting with `nirux-handover-` (the skill creates it with `mktemp /tmp/nirux-handover-<agent>-XXXXXX`); any other path is ignored and the worktree opens without it. An agent is only told to read a handover that this request delivered, never one that already exists in the folder.
 
-Any app or web page can open a `nirux://` URL, so every action runs without asking only when it carries `launch=` with the current value of `NIRUX_LAUNCH_ID`. Nirux generates that value at each launch and exports it to its terminals; the bundled skills pass it automatically. Without it, or with a value from before Nirux last restarted (for example from inside tmux), Nirux shows a confirmation that spells out the folder or file, branch, agent, and permission mode before doing anything; a confirmed request opens in the space you are looking at and can't link to a Mission. After updating Nirux, run `Install Agent Skills` again so installed skills pass the launch ID.
+Any app or web page can open a `nirux://` URL, so every action runs without asking only when it carries `launch=` with the current value of `NIRUX_LAUNCH_ID`. Nirux generates that value at each launch and exports it to its terminals; the bundled skills pass it automatically. Without it, or with a value from before Nirux last restarted (for example from inside tmux), Nirux shows a confirmation that spells out the folder or file, branch, agent, and permission mode before doing anything; a confirmed request opens in the project you are looking at and can't link to a Mission. After updating Nirux, run `Install Agent Skills` again so installed skills pass the launch ID.
 
 When Mission handoffs are enabled, the optional `parentWorkspace` and `parentAgent` query parameters identify the delegating Nirux workspace and terminal by UUID. Supplying both creates the parent/child Mission record; the bundled `nirux-worktree` skill adds them automatically. See [Mission handoffs](#mission-handoffs-experimental) for the user workflow.
 
@@ -258,9 +274,26 @@ The command palette action `Install Agent Skills` writes the bundled skills to:
 
 `nirux-worktree` lets supported agents open isolated Nirux workspaces when the user asks to start work on a feature, bug, or separate branch. `nirux-show-code` teaches agents to open code in the editor column via `nirux://open-editor` when the user asks to see code. `nirux-second-opinion` lets Claude, when the user asks for a second opinion, send its answer to a read-only `codex exec` in the same folder and show Codex's reply next to its own verdict.
 
+### Starting a task from Nirux
+
+`New Task…` in the command palette starts an agent on a task without going through another agent session. Describe the task, then pick a template, the agent (Claude Code or Codex) and the project (the current one by default). The first line of the description names the new workspace and suggests the branch: `fix/…` when the template is about a bug or the description starts with a word such as "Fix", "Bug" or "Crash", `feat/…` otherwise. Edit the branch freely. Return adds a line to the description; ⌘Return starts the task from anywhere in the form.
+
+`Start Task` then:
+
+- fetches the branch the task starts from: the project's base branch on `origin` (Board Settings…), else origin's default branch, else its `main` or `master`. The fetch takes at most 10 seconds and never asks for credentials. If it fails, the form says why, and `Start Task` again starts from that branch as last fetched. A repository whose `origin` has none of these starts from its checkout's HEAD; the form shows which, in orange;
+- creates a worktree next to the project's main checkout, on a new branch, without an upstream. A branch that already exists, whatever its case, locally or on a remote, one a worktree has checked out, and one starting with a remote's name (`origin/…`) are refused, and the form stays open with the error. If git fails once the worktree exists (a failing `post-checkout` hook), Nirux opens it and shows git's error; if it fails having made only the branch, Nirux deletes the branch, so the name can be tried again;
+- adds `.claude-handover.md` and `.codex-handover.md` to the repository's `.git/info/exclude` if they aren't there, then writes the handover, private to you, with the description and the template's text, in the folder the agent starts in;
+- opens a workspace named after the task in that project and launches the agent, told to read the handover. The project's brief and the Claude session name apply as for any worktree workspace.
+
+`Close` hides the form while this runs, so a long checkout doesn't hold the window: the workspace opens when it's ready, and the form comes back if it fails.
+
+The project's repository is the one its workspaces are in: the active workspace's folder, then the folder its terminal is in, when it belongs to the project, then each of the project's other workspaces. When the project's workspace sits in a folder of the repository rather than at its top, the task's workspace opens in the same folder of the new worktree.
+
+Templates are kept per project in `<state dir>/projects/<project id>/task-templates.md`, one `## Name` section per template. `Edit Task Templates…` in the project's menu opens that file in the editor, creating it on first use with three templates: Bugfix, Feature (full review cycle) and Investigation (no code). Until it exists, the form offers those three.
+
 ### Cleaning up merged worktrees
 
-`Clean Up Worktree…` in a workspace's `⋯` menu (shown when the workspace is open in a linked worktree, or when its folder is gone) removes the worktree folder and its local branch, then closes the workspaces open in it. When the pull request of a workspace open in a linked worktree is merged, its card in the expanded sidebar reads `#N merged · Clean up`: the click runs the same `Clean Up Worktree…`, and the card reads `Cleaning up…` until it is done. `Clean Up Merged Worktrees…` in the command palette lists every worktree a workspace is open in, in any space, plus the other worktrees of the repositories your workspaces are in. It checks them all and cleans up the checked ones one at a time, reporting on each; Stop ends the run after the current one.
+`Clean Up Worktree…` in a workspace's `⋯` menu (shown when the workspace is open in a linked worktree, or when its folder is gone) removes the worktree folder and its local branch, then closes the workspaces open in it. When the pull request of a workspace open in a linked worktree is merged, its card in the expanded sidebar reads `#N merged · Clean up`: the click runs the same `Clean Up Worktree…`, and the card reads `Cleaning up…` until it is done. `Clean Up Merged Worktrees…` in the command palette lists every worktree a workspace is open in, in any project, plus the other worktrees of the repositories your workspaces are in. It checks them all and cleans up the checked ones one at a time, reporting on each; Stop ends the run after the current one.
 
 Nothing is merged, pushed or fetched, and the remote branch is never touched. A worktree is cleaned up only when all of these hold, checked with `gh` and git:
 

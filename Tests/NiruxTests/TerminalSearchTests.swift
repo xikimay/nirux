@@ -358,6 +358,52 @@ final class TerminalSearchTests: XCTestCase {
         XCTAssertEqual(recorder.sent, [.search("er")])
     }
 
+    /// Search Everywhere's pick: on a bar already searching that needle,
+    /// the search starts over; navigation then waits for Ghostty's
+    /// matches and takes the shorter way, from the newest or the oldest
+    /// match, a mailbox's worth at a time, unless the user navigates first.
+    @MainActor
+    func testAPickedMatchSearchesAgainAndTakesTheShorterWay() throws {
+        let column = ColumnState(cwd: "/tmp")
+        column.showFindBar()
+        let recorder = SearchRecorder()
+        column.terminalSearch = recorder.session
+        let bar = try XCTUnwrap(column.findBar)
+        bar.field.stringValue = "error"
+        bar.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: bar.field))
+        recorder.firePending()
+        column.findNext()
+        recorder.sent = []
+
+        let mark = try XCTUnwrap(column.showFindBar(searching: "error"))
+        column.selectFindMatch(fromBottom: 1, of: 5, after: 0.4, since: mark)
+        XCTAssertEqual(recorder.sent, [.end, .search("error")])
+        XCTAssertEqual(recorder.pending.map(\.delay), [TerminalSearchSession.navigationDelay, 0.4])
+        recorder.firePending()
+        XCTAssertEqual(recorder.sent, [.end, .search("error"), .next, .next])
+        XCTAssertTrue(column.isFindBarOpen)
+
+        recorder.sent = []
+        column.selectFindMatch(fromBottom: 3, of: 5, after: 0.4, since: mark)
+        recorder.firePending()
+        XCTAssertEqual(recorder.sent, [.previous, .previous], "the second oldest of five")
+
+        recorder.sent = []
+        column.selectFindMatch(fromBottom: 120, of: 300, after: 0.4, since: mark)
+        recorder.firePending()
+        XCTAssertEqual(recorder.sent.count, TerminalSearchSession.maxPickSteps)
+        recorder.firePending()
+        recorder.firePending()
+        XCTAssertEqual(recorder.sent, Array(repeating: .next, count: 121))
+
+        // The user navigates while the pick counts the matches again.
+        recorder.sent = []
+        column.findPrevious()
+        column.selectFindMatch(fromBottom: 0, of: 5, after: 0.4, since: mark)
+        recorder.firePending()
+        XCTAssertEqual(recorder.sent, [.previous])
+    }
+
     // MARK: - Key routing
 
     func testKeysInTheFieldEditTheField() {
@@ -375,8 +421,10 @@ final class TerminalSearchTests: XCTestCase {
             XCTAssertEqual(route(arrow, [.command]), .fieldEditor)
             XCTAssertEqual(route(arrow, [.command, .shift]), .fieldEditor)
             XCTAssertEqual(route(arrow, [.command, .numericPad, .function]), .fieldEditor)
-            // Previous/Next Space keep their chord.
+            // Previous/Next Space keep their chord, and Focus Left/Right
+            // and Workspace Up/Down their Control+Cmd one.
             XCTAssertEqual(route(arrow, [.command, .option]), .menuThenField)
+            XCTAssertEqual(route(arrow, [.command, .control]), .menuThenField)
         }
     }
 

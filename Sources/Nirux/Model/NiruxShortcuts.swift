@@ -50,6 +50,7 @@ enum NiruxShortcuts: CaseIterable {
     case cycleWidth
     case webInspector
     case searchWorkspace
+    case searchEverywhere
     case toggleEditorDiff
     case toggleSidebar
     case nextWaitingAgent
@@ -66,6 +67,7 @@ enum NiruxShortcuts: CaseIterable {
         case .cycleWidth: KeyChord("e")
         case .webInspector: KeyChord("i", [.command, .option])
         case .searchWorkspace: KeyChord("f", [.command, .shift])
+        case .searchEverywhere: KeyChord("f", [.command, .option])
         case .toggleEditorDiff: KeyChord("d", [.command, .shift])
         case .toggleSidebar: KeyChord("s", [.command, .control])
         case .nextWaitingAgent: KeyChord("j")

@@ -116,6 +116,25 @@ enum SidebarRenderer {
         return nil
     }()
 
+    /// The desktop app's icon for an agent that has one installed (the
+    /// palette's agent rows show it too).
+    static func agentAppIcon(processName: String) -> NSImage? {
+        switch processName {
+        case "claude": claudeAppIcon
+        case "codex": codexAppIcon
+        default: nil
+        }
+    }
+
+    /// The symbol an agent's row shows without its app icon.
+    static func agentSymbol(processName: String) -> String? {
+        switch processName {
+        case "claude": "sparkles"
+        case "codex": "brain.head.profile"
+        default: nil
+        }
+    }
+
     /// SF symbol configured for a column-row glyph. Used for fallback icons
     /// when an app icon isn't available.
     static func sfSymbol(_ name: String, color: NSColor) -> NSImage? {
@@ -137,14 +156,13 @@ enum SidebarRenderer {
         if column.isWebView {
             return sfSymbol("globe", color: color)
         }
-        guard let processName = column.processName?.lowercased() else {
+        guard let processName = (column.deferredAgent?.processName ?? column.processName)?.lowercased() else {
             return sfSymbol("apple.terminal", color: color)
         }
         switch processName {
-        case "claude":
-            return claudeAppIcon ?? sfSymbol("sparkles", color: color)
-        case "codex":
-            return codexAppIcon ?? sfSymbol("brain.head.profile", color: color)
+        case "claude", "codex":
+            return agentAppIcon(processName: processName)
+                ?? agentSymbol(processName: processName).flatMap { sfSymbol($0, color: color) }
         case "gemini":
             return sfSymbol("sparkle", color: color)
         case "opencode":
@@ -191,7 +209,7 @@ enum SidebarRenderer {
         } else if column.isWebView {
             displayName = column.webTitle?.isEmpty == false ? column.webTitle! : "web"
         } else {
-            displayName = column.stuck?.agentName ?? column.processName ?? "shell"
+            displayName = column.deferredAgent?.processName ?? column.stuck?.agentName ?? column.processName ?? "shell"
         }
         // Unsaved-changes dot — same amber as the editor tab bar's. Before
         // the name: these labels truncate tail-first, and a state indicator
@@ -203,6 +221,15 @@ enum SidebarRenderer {
             ]))
         }
         result.append(NSAttributedString(string: displayName, attributes: [.font: font, .foregroundColor: textColor]))
+        // A restored agent that hasn't resumed has no status to show yet.
+        // Short: the row keeps room for its Resume button.
+        if column.deferredAgent != nil {
+            result.append(NSAttributedString(string: " · paused", attributes: [
+                .font: font,
+                .foregroundColor: NSColor.white.withAlphaComponent(0.3)
+            ]))
+            return result
+        }
 
         // Time in the current turn for working agents — "· 12m" in green
         // next to the name.
@@ -237,6 +264,7 @@ enum SidebarRenderer {
 
     /// Row tooltip: what exactly the agent waits on ("Bash: git push").
     static func attentionTooltip(for column: ColumnInfo) -> String? {
+        if let deferred = column.deferredAgent { return deferred.tooltip }
         if let stuck = column.stuck { return stuck.tooltip }
         guard column.agentStatus == .needsAttention, let reason = column.attentionReason else { return nil }
         let detail = reason.detailLine.flatMap { AgentText.clean($0, maxLength: 300) }

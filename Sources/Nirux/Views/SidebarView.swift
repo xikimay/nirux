@@ -36,6 +36,9 @@ final class SidebarView: NSView {
     var onPermissionDecision: ((Int, Int, String, PermissionApproval.Behavior) -> Void)?
     /// Resume clicked: (workspaceIndex, columnIndex, the failure it was for).
     var onAgentResume: ((Int, Int, TimeInterval) -> Void)?
+    /// Resume on the row of a restored agent that hasn't resumed yet:
+    /// (workspaceIndex, columnIndex, column id).
+    var onDeferredAgentResume: ((Int, Int, UUID) -> Void)?
     var onDiffStatsClicked: ((Int) -> Void)?
     var onWorkspaceAction: ((WorkspaceSidebarAction, Int) -> Void)?
     /// Whether the workspace's menu offers "Clean Up Worktree…" (it's open
@@ -49,6 +52,7 @@ final class SidebarView: NSView {
     var onRenameProfile: ((String) -> Void)?
     var onEditProfileBrief: ((String) -> Void)?
     var onEditBoardSettings: ((String) -> Void)?
+    var onEditTaskTemplates: ((String) -> Void)?
     var onRecolorProfile: ((String, String) -> Void)?
     var onDeleteProfile: ((String) -> Void)?
     /// (workspace id, space id). By id: a close that finishes while the menu
@@ -455,7 +459,8 @@ final class SidebarView: NSView {
             clearHover()
             setHoverTarget(.columnRow(workspaceIndex: workspaceIndex, columnIndex: columnIndex))
             NSCursor.pointingHand.set()
-        case .permissionDecision(let workspaceIndex, _, _, _), .agentResume(let workspaceIndex, _, _):
+        case .permissionDecision(let workspaceIndex, _, _, _), .agentResume(let workspaceIndex, _, _),
+             .deferredAgentResume(let workspaceIndex, _, _):
             clearHover()
             if let key = Self.armedButtonKey(for: area.region) {
                 setHoverTarget(.approvalButton(workspaceIndex: workspaceIndex, key: key))
@@ -495,7 +500,7 @@ final class SidebarView: NSView {
             let point = convert(event.locationInWindow, from: nil)
             workspaceActionMenu(workspaceIndex: workspaceIndex, columnIndex: nil)
                 .popUp(positioning: nil, at: point, in: self)
-        case .permissionDecision, .agentResume, .actionBlock:
+        case .permissionDecision, .agentResume, .deferredAgentResume, .actionBlock:
             break // buttons go through trackApprovalClick; the block is inert
         }
     }
@@ -505,13 +510,13 @@ final class SidebarView: NSView {
     }
 
     /// Space options only — switching spaces lives in the bottom dot
-    /// switcher (and ⌘←/→), so the header menu doesn't duplicate it.
+    /// switcher (and ⌥⌘←/→), so the header menu doesn't duplicate it.
     func spaceOptionsMenu() -> NSMenu {
         let menu = NSMenu()
         if let active = lastProfiles.first(where: { $0.isActive }) {
             addSpaceManagementItems(to: menu, for: active)
         }
-        menu.addClosureItem(title: "New Space") { [weak self] in
+        menu.addClosureItem(title: "New Project") { [weak self] in
             self?.onCreateProfile?()
         }
         return menu
@@ -605,7 +610,8 @@ final class SidebarView: NSView {
                 switch area.region {
                 case .column(let workspaceIndex, let columnIndex),
                      .permissionDecision(let workspaceIndex, let columnIndex, _, _),
-                     .agentResume(let workspaceIndex, let columnIndex, _):
+                     .agentResume(let workspaceIndex, let columnIndex, _),
+                     .deferredAgentResume(let workspaceIndex, let columnIndex, _):
                     return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
                 case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
                      .actionBlock(let workspaceIndex):

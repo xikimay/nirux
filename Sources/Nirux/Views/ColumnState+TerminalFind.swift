@@ -27,6 +27,28 @@ extension ColumnState {
         bar.focusField()
     }
 
+    /// Search Everywhere's pick: the find bar opened on `needle` as a new
+    /// search, even on the needle the bar already shows, so that matches
+    /// count from Ghostty's newest and oldest ones again
+    /// (`selectFindMatch`). Nil when the bar can't open.
+    func showFindBar(searching needle: String) -> TerminalSearchSession.Mark? {
+        guard terminalView != nil, pty?.hasExited != true else { return nil }
+        let bar = findBar ?? makeFindBar()
+        bar.field.stringValue = needle
+        terminalSearch?.end()
+        terminalSearch?.update(needle, immediately: true)
+        showFindBar()
+        return terminalSearch?.mark
+    }
+
+    /// Selects the match `fromBottom` (0 is the newest) of the needle's
+    /// `total` matches, after `delay`, unless the search moved past `mark`
+    /// (TerminalSearchSession.select).
+    func selectFindMatch(fromBottom: Int, of total: Int, after delay: TimeInterval, since mark: TerminalSearchSession.Mark) {
+        guard isFindBarOpen else { return }
+        terminalSearch?.select(fromBottom: fromBottom, of: total, after: delay, since: mark)
+    }
+
     /// ⌘G / Return: next match. Only while the bar is open.
     func findNext() {
         guard isFindBarOpen else { return }

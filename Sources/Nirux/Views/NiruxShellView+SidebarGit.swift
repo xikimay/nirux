@@ -40,7 +40,8 @@ extension NiruxShellView {
                         .map { Date().timeIntervalSince($0) },
                     attentionReason: agentStatus == .needsAttention ? col.pty?.agentAttentionReason : nil,
                     permissionApproval: permissionApproval,
-                    stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now)
+                    stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
+                    deferredAgent: Self.sidebarDeferredAgent(of: col)
                 )
             }
             return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
@@ -269,12 +270,15 @@ extension NiruxShellView {
         }
         guard result == .alertFirstButtonReturn else { return }
 
-        guard let accepted = MissionStore.shared.respond(
-            to: questionID,
-            message: input.stringValue,
-            enabled: Self.currentMissionHandoffsEnabled()
-        ) else {
-            NSSound.beep()
+        let reply = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reply.isEmpty else { return showToast("Type a reply first") }
+        guard reply.count <= MissionEventCLI.maxMessageLength else {
+            return showToast("Replies are limited to \(MissionEventCLI.maxMessageLength) characters")
+        }
+        let enabled = Self.currentMissionHandoffsEnabled()
+        guard enabled else { return showToast("Mission handoffs are off in Settings") }
+        guard let accepted = MissionStore.shared.respond(to: questionID, message: input.stringValue, enabled: enabled) else {
+            showToast("Couldn’t send the reply to the child mission", tone: .error)
             return
         }
         if recordMissionActivity(accepted.mission, event: accepted.event) {
@@ -504,6 +508,9 @@ extension NiruxShellView {
     func refreshMetadata(snapshot: ProcessSnapshot? = nil) {
         isMetadataRefreshScheduled = false
         lastMetadataRefreshAt = ProcessInfo.processInfo.systemUptime
+        // A column that came on screen without a relayout (a dragged
+        // width) resumes from here at the latest.
+        scheduleDeferredAgentsOnScreen(restartingWait: false)
         let snapshot = snapshot ?? ProcessSnapshot()
         refreshTitleBarLabels(snapshot: snapshot)
         updateSidebar(snapshot: snapshot)

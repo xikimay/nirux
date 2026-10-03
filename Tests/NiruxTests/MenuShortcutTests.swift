@@ -124,6 +124,23 @@ final class MenuShortcutTests: XCTestCase {
         XCTAssertEqual(previous.compactMap(chord(of:)), [KeyChord("g", [.command, .shift])])
     }
 
+    /// Cmd+Arrow moves the caret while text has the keyboard;
+    /// Control+Cmd+Arrow navigates from there.
+    @MainActor
+    func testColumnAndWorkspaceNavigationAlsoAnswersControlCommandArrows() {
+        let navigation: [(Selector, String)] = [
+            (#selector(NiruxApp.focusLeft(_:)), "\u{F702}"),
+            (#selector(NiruxApp.focusRight(_:)), "\u{F703}"),
+            (#selector(NiruxApp.workspaceUp(_:)), "\u{F700}"),
+            (#selector(NiruxApp.workspaceDown(_:)), "\u{F701}")
+        ]
+        for (action, arrow) in navigation {
+            let matching = items(withAction: action)
+            XCTAssertEqual(matching.compactMap(chord(of:)), [KeyChord(arrow), KeyChord(arrow, [.command, .control])], "\(action)")
+            XCTAssertEqual(matching.map(\.isAlternate), [false, true], "\(action)")
+        }
+    }
+
     @MainActor
     func testRenameWorkspaceHasNoChord() {
         let rename = items(withAction: #selector(NiruxApp.renameWorkspace(_:)))
