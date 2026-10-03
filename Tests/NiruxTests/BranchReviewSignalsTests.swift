@@ -205,6 +205,7 @@ final class BranchReviewSignalsTests: XCTestCase {
         XCTAssertEqual(labels("let XNIRUX_A = 1"), [])
         XCTAssertEqual(labels("let p = Process(); p.arguments = args"), ["Process arguments"])
         XCTAssertEqual(labels("task.arguments += [path]"), ["Process arguments"])
+        XCTAssertEqual(labels("task.arguments.append(path)"), ["Process arguments"])
         XCTAssertEqual(labels("try workspace.openApplication(at: url, configuration: config)"), ["NSWorkspace"])
         XCTAssertEqual(labels("let mode = CommandLine.arguments[1]"), [], "reading argv launches nothing")
         XCTAssertEqual(labels("let p = BoundedProcessed()"), [])
@@ -216,6 +217,8 @@ final class BranchReviewSignalsTests: XCTestCase {
         XCTAssertEqual(labels("     * then DispatchQueue.main runs it"), [])
         XCTAssertEqual(labels("    /* DispatchQueue.main runs it */"), [])
         XCTAssertEqual(labels("    /* was: */ DispatchQueue.main.async {}"), ["DispatchQueue"])
+        XCTAssertEqual(labels("     */ DispatchQueue.main.async {}"), ["DispatchQueue"])
+        XCTAssertEqual(labels("     */"), [])
         XCTAssertEqual(labels("# Called by bundle.sh"), [])
         XCTAssertEqual(labels("#if canImport(Sparkle)"), ["Sparkle"])
         XCTAssertEqual(labels("let bot = Telegram() // Telegram"), ["Telegram"])
@@ -363,7 +366,7 @@ final class BranchReviewSignalsTests: XCTestCase {
         - run: tools/my-scripts/prune.sh && cat ../outside.sh
         - run: swift build # see .github/actions/setup/action.yml.
         - run: swift test && cp out $RUNNER_TEMP/notes/README.md ${RUNNER_TEMP}/notes/CHANGES.md ~/bin/tool.sh
-        - run: ${{ github.workspace }}/scripts/ws.sh && ./gradlew build
+        - run: ${{ github.workspace }}/scripts/ws.sh && ./gradlew build # Update the Gemfile.
         """
 
         let tokens = BranchReview.pathTokens(in: Data(workflow.utf8))
@@ -379,5 +382,6 @@ final class BranchReviewSignalsTests: XCTestCase {
         XCTAssertFalse(tokens.contains("notes/CHANGES.md"), "another variable's folder")
         XCTAssertFalse(tokens.contains("bin/tool.sh"), "the home folder")
         XCTAssertTrue(tokens.isSuperset(of: ["scripts/ws.sh", "gradlew"]))
+        XCTAssertFalse(tokens.contains("Gemfile"), "a sentence's last word")
     }
 }

@@ -175,8 +175,8 @@ Top to bottom:
    lines and the whitespace around its lines; whitespace inside a line
    changes what the code does (`" "` and `""`), and in Python, YAML, a
    Makefile or a shell script the indentation and blank lines do too. A
-   Swift multi-line string reads as code until the brace tracking of
-   "Tests against code" tells them apart. A folded file's diff loads when
+   multi-line string (Swift, a JavaScript template) reads as code until the
+   brace tracking of "Tests against code" tells them apart. A folded file's diff loads when
    its row opens, and folded files don't count toward the 5 MB of section
    7: a generated bundle or a reformatted repository mustn't send the whole
    page on demand. Listed without its patch (section 7, past 64 MB), a file

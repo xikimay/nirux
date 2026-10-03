@@ -161,23 +161,30 @@ extension BranchReview {
 
         /// A line that is only a comment: `//`, `/*` or `* ` in Swift and C,
         /// `# ` in scripts and YAML. Swift's `#if` has no space, and code
-        /// may follow a `/* … */`.
+        /// may follow a comment's `*/`.
         static func isCommentOnly(_ line: UnsafeRawBufferPointer) -> Bool {
             guard let start = line.firstIndex(where: { $0 != UInt8(ascii: " ") && $0 != UInt8(ascii: "\t") })
             else { return false }
             let next = start + 1 < line.count ? line[start + 1] : nil
             switch line[start] {
-            case UInt8(ascii: "/") where next == UInt8(ascii: "*"):
-                let rest = line[(start + 2)...]
-                guard let close = zip(rest.indices, rest.indices.dropFirst())
-                    .first(where: { line[$0.0] == UInt8(ascii: "*") && line[$0.1] == UInt8(ascii: "/") })?.1
-                else { return true }
-                return line[(close + 1)...].allSatisfy { $0 == UInt8(ascii: " ") || $0 == UInt8(ascii: "\t") }
+            case UInt8(ascii: "/") where next == UInt8(ascii: "*"): return endsAsComment(line, from: start + 2)
+            case UInt8(ascii: "*") where next == UInt8(ascii: "/"): return endsAsComment(line, from: start)
             case UInt8(ascii: "/"): return next == UInt8(ascii: "/")
-            case UInt8(ascii: "*"): return next == nil || next == UInt8(ascii: " ") || next == UInt8(ascii: "/")
+            case UInt8(ascii: "*"): return next == nil || next == UInt8(ascii: " ")
             case UInt8(ascii: "#"): return next == nil || next == UInt8(ascii: " ") || next == UInt8(ascii: "\t")
             default: return false
             }
+        }
+
+        /// Whether nothing but blanks follows the first `*/` from `start`,
+        /// or none closes the comment on this line.
+        private static func endsAsComment(_ line: UnsafeRawBufferPointer, from start: Int) -> Bool {
+            var index = start
+            while index + 1 < line.count, !(line[index] == UInt8(ascii: "*") && line[index + 1] == UInt8(ascii: "/")) {
+                index += 1
+            }
+            guard index + 1 < line.count else { return true }
+            return line[(index + 2)...].allSatisfy { $0 == UInt8(ascii: " ") || $0 == UInt8(ascii: "\t") }
         }
 
         /// ASCII letters, digits and "_", and any byte of a non-ASCII
@@ -357,6 +364,8 @@ extension BranchReview {
         var tokens: Set<String> = []
         for run in text.split(whereSeparator: { !isPathByte($0) }) {
             var token = Substring(Patch.decoded(Data(run)))
+            // "Run make." ends a sentence.
+            while token.hasSuffix(".") { token = token.dropLast() }
             guard token.contains("/") || token.contains(".") else { continue }
             let before = text[text.startIndex..<run.startIndex]
             switch before.last {
@@ -375,7 +384,6 @@ extension BranchReview {
             while let rest = token.hasPrefix("./") ? token.dropFirst(2) : token.hasPrefix("/") ? token.dropFirst() : nil {
                 token = rest
             }
-            while token.hasSuffix(".") { token = token.dropLast() }
             if !token.isEmpty { tokens.insert(String(token)) }
         }
         return tokens

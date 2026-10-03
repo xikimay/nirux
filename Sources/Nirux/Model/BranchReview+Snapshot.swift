@@ -474,7 +474,7 @@ extension BranchReview {
     /// unfolded ones add up to more than `maxInlineDiffBytes`. Parsed
     /// twice: once without keeping a line, to hash, fold and find signals,
     /// then only the sections that keep their hunks: a fold found in the
-    /// lines (whitespace only, minified) mustn't count toward the budget
+    /// lines (whitespace only) mustn't count toward the budget
     /// either. `ignoresAttributes`: see `NoiseRules`.
     static func readDiff(
         root: String, mergeBase: String, pathspec: [String], inline: Bool, ignoresAttributes: Bool = false,
