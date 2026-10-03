@@ -43,6 +43,9 @@ final class TerminalSearchSession {
     /// arrives: a navigation sent right behind it finds none and is lost.
     /// Navigating within this delay of a new needle waits it out.
     nonisolated static let navigationDelay: TimeInterval = 0.1
+    /// Most navigations a pick sends at once: Ghostty's search mailbox
+    /// holds 64 messages, and a full one blocks the sender, the main thread.
+    nonisolated static let maxPickSteps = 50
 
     private let send: (TerminalSearchCommand) -> Void
     private let schedule: Schedule
@@ -59,6 +62,9 @@ final class TerminalSearchSession {
     /// A needle went out less than `navigationDelay` ago.
     private var isNeedleSettling = false
     private var pendingNavigations = 0
+    /// Bumped by every navigation the user asks for, so that a pick waiting
+    /// for Ghostty's matches gives way to it.
+    private var navigations = 0
     /// Navigation scrolled the viewport away from the prompt; cleared by
     /// `returnToPrompt`. Survives `end`: closing the bar keeps the reading
     /// position, as in Ghostty and iTerm.
@@ -98,6 +104,55 @@ final class TerminalSearchSession {
         navigate(.previous)
     }
 
+    /// Where the search stands: a pick prepared at one mark gives way to
+    /// any needle sent or navigation asked for since.
+    struct Mark: Equatable {
+        fileprivate let search: Int
+        fileprivate let navigations: Int
+    }
+
+    var mark: Mark { Mark(search: searchGeneration, navigations: navigations) }
+
+    /// Search Everywhere's pick: selects the match `fromBottom` of the
+    /// needle's `total` matches (0 is the newest) after `delay`. Ghostty's
+    /// first "next match" selects the newest one and each further one the
+    /// match above; its first "previous match" selects the oldest one: the
+    /// pick takes the shorter way. Ghostty's navigation stops at the last
+    /// match its search thread has found, so the delay must cover a search
+    /// of the whole scrollback (`pickDelay`). Dropped if the search moved
+    /// past `mark`.
+    func select(fromBottom: Int, of total: Int, after delay: TimeInterval, since mark: Mark) {
+        guard total > 0 else { return }
+        let fromBottom = min(max(fromBottom, 0), total - 1)
+        let fromTop = total - 1 - fromBottom
+        let (command, steps) = fromBottom <= fromTop
+            ? (TerminalSearchCommand.next, fromBottom + 1)
+            : (TerminalSearchCommand.previous, fromTop + 1)
+        schedule(delay) { [weak self] in
+            self?.sendPick(command, steps: steps, since: mark)
+        }
+    }
+
+    /// At most `maxPickSteps` at a time, the rest a moment later: Ghostty's
+    /// search thread empties its mailbox in between.
+    private func sendPick(_ command: TerminalSearchCommand, steps: Int, since mark: Mark) {
+        guard self.mark == mark, steps > 0 else { return }
+        hasNavigated = true
+        let now = min(steps, Self.maxPickSteps)
+        for _ in 0..<now { send(command) }
+        guard steps > now else { return }
+        schedule(Self.navigationDelay) { [weak self] in
+            self?.sendPick(command, steps: steps - now, since: mark)
+        }
+    }
+
+    /// Long enough for Ghostty to search `textBytes` of scrollback: about
+    /// 4 MB took 50 to 100 ms, so this allows twice that, on top of the
+    /// needle's own settling.
+    nonisolated static func pickDelay(textBytes: Int) -> TimeInterval {
+        min(1, navigationDelay + Double(textBytes) / 20_000_000)
+    }
+
     /// Closes the search: drops a pending needle or navigation and clears
     /// Ghostty's highlights. The viewport stays where navigation left it;
     /// the next `update` starts a new search.
@@ -125,6 +180,7 @@ final class TerminalSearchSession {
     private func navigate(_ command: TerminalSearchCommand) {
         flush()
         guard !sentNeedle.isEmpty else { return }
+        navigations += 1
         hasNavigated = true
         // Queued behind a navigation still waiting, to keep their order.
         guard isNeedleSettling || pendingNavigations > 0 else {

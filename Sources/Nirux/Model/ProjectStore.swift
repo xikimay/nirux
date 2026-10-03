@@ -204,7 +204,7 @@ final class ProjectStore {
                   let text = SpaceBrief.readBrief(at: briefURL),
                   SpaceBrief.body(of: text) != nil
             else { continue }
-            let name = Self.uniqueName(Self.templateSpaceName(in: text) ?? "space", among: names)
+            let name = Self.uniqueName(Self.templateSpaceName(in: text) ?? "project", among: names)
             let color = WorkspaceProfile.palette.first { !used.contains($0.hex.uppercased()) }?.hex
                 ?? WorkspaceProfile.colorHex(for: known.count + adopted.count)
             adopted.append(WorkspaceProfile(id: id, name: name, colorHex: color))
@@ -214,10 +214,13 @@ final class ProjectStore {
         return adopted
     }
 
-    /// The space name in a brief's template comment (`Brief for the space "…"`).
+    /// The space name in a brief's template comment:
+    /// `Brief for the project "…"`, or `Brief for the space "…"` in briefs
+    /// written before the UI called spaces projects. The first one in the
+    /// text wins (the template comment comes first).
     private static func templateSpaceName(in text: String) -> String? {
-        let prefix = "Brief for the space \""
-        guard let start = text.range(of: prefix),
+        let prefixes = ["Brief for the project \"", "Brief for the space \""]
+        guard let start = prefixes.compactMap({ text.range(of: $0) }).min(by: { $0.lowerBound < $1.lowerBound }),
               let end = text[start.upperBound...].range(of: "\":")
         else { return nil }
         let name = text[start.upperBound..<end.lowerBound].trimmingCharacters(in: .whitespaces)
@@ -248,7 +251,7 @@ final class ProjectStore {
                 guard let id = project.id, !id.isEmpty else { return nil }
                 return WorkspaceProfile(
                     id: id,
-                    name: project.name ?? "space",
+                    name: project.name ?? "project",
                     colorHex: project.colorHex ?? WorkspaceProfile.colorHex(for: index)
                 )
             })

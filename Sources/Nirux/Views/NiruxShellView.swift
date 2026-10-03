@@ -49,6 +49,9 @@ final class NiruxShellView: NSView {
     let gitRefresh = GitRefreshCoordinator()
     /// See scheduleMetadataRefresh(): one process-table scan per window.
     var isMetadataRefreshScheduled = false
+    /// Restored agents on screen resume after a wait (see
+    /// NiruxShellView+LazyRestore.swift).
+    var isOnScreenResumeScheduled = false
     var lastMetadataRefreshAt: TimeInterval = 0
 
     /// Dwell timer that marks visible Activity entries as read. The
@@ -75,6 +78,8 @@ final class NiruxShellView: NSView {
     /// A stuck-agent alert went out (Telegram relays it): the reason, the
     /// workspace, the column's index, the column.
     var onStuckAgentAlert: ((AgentAttentionReason, WorkspaceState, Int, ColumnState) -> Void)?
+    /// ⌘P's workspace rows and Next Waiting Agent (⌘J).
+    let quickSwitch = QuickSwitchState()
 
     /// Agent launches, the home folder, cookies and modal alerts; tests
     /// replace them (see ShellSideEffects).
@@ -88,14 +93,23 @@ final class NiruxShellView: NSView {
     var urlPanel: URLInputPanel?
     var filePickerPanel: FilePickerPanel?
     var searchPanel: EditorSearchPanel?
+    var globalSearchPanel: GlobalSearchPanel?
     var worktreeCleanupPanel: WorktreeCleanupPanel?
     /// Worktrees a "Clean Up Worktree…" is checking or confirming, so a
-    /// second click doesn't start another.
-    var worktreeCleanupsInFlight: Set<String> = []
+    /// second click doesn't start another. Their cards say so.
+    var worktreeCleanupsInFlight: Set<String> = [] {
+        didSet { if worktreeCleanupsInFlight != oldValue { updateSidebar() } }
+    }
+    /// The toast on screen (see NiruxShellView+Toast), and a count that
+    /// tells a pending dismissal whether it still applies.
+    var toast: ToastView?
+    var toastGeneration = 0
+    var toastShownAt: TimeInterval = 0
     var boardSettingsPanel: BoardSettingsPanel?
     /// A "Board Settings…" reading board.json and the checkouts, so a
     /// second click doesn't open a second form.
     var isReadingBoardSettings = false
+    var newTaskPanel: NewTaskPanel?
     /// The Project Board's `gh` reads. Tests set a fake before a board opens.
     lazy var projectBoardClient: any ProjectBoardGitHub = GitHubCLIBoardClient.installed
     /// Reloads the boards whose board.json was saved.
@@ -162,6 +176,7 @@ final class NiruxShellView: NSView {
         sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }
         sidebar.onEditProfileBrief = { [weak self] profileID in self?.editSpaceBrief(profileID: profileID) }
         sidebar.onEditBoardSettings = { [weak self] profileID in self?.showBoardSettings(profileID: profileID) }
+        sidebar.onEditTaskTemplates = { [weak self] profileID in self?.editTaskTemplates(profileID: profileID) }
         sidebar.onRecolorProfile = { [weak self] profileID, hex in self?.recolorSpace(profileID: profileID, colorHex: hex) }
         sidebar.onDeleteProfile = { [weak self] profileID in self?.confirmDeleteSpace(profileID: profileID) }
         sidebar.onMoveWorkspaceToProfile = { [weak self] workspaceID, profileID in
@@ -184,14 +199,12 @@ final class NiruxShellView: NSView {
         sidebar.onAgentResume = { [weak self] wsIndex, colIndex, failedAt in
             self?.resumeFailedAgent(workspaceIndex: wsIndex, columnIndex: colIndex, failedAt: failedAt)
         }
+        wireDeferredAgentResume()
         sidebar.onColumnClicked = { [weak self] wsIndex, colIndex in
             guard let self else { return }
             if self.activeWSIndex != wsIndex { self.switchToWorkspace(wsIndex) }
-            guard self.workspaces[wsIndex].focusedIndex != colIndex else { return }
-            self.workspaces[wsIndex].focusedIndex = colIndex
-            self.relayout(animated: true)
-            self.updateSidebar()
-            self.focusActiveTerminal(in: self.window)
+            guard self.activeWSIndex == wsIndex else { return }
+            self.goToColumn(colIndex)
         }
         updateSidebar()
         relayout(animated: false)
@@ -290,6 +303,7 @@ final class NiruxShellView: NSView {
             statusBar: NSRect(x: 0, y: 0, width: bounds.width, height: statusH)
         )
         applyChromeLayout(frames, animated: animated)
+        layoutToast(frames)
 
         // Each workspace fills the viewport; the strip stacks them and is
         // positioned so the active workspace is the one on screen.
@@ -301,6 +315,7 @@ final class NiruxShellView: NSView {
         ))
 
         syncTerminalOcclusion()
+        scheduleDeferredAgentsOnScreen()
     }
 
     // MARK: - Terminal Occlusion
@@ -459,7 +474,7 @@ extension NiruxShellView {
         }
         relayout(animated: true)
         updateSidebar()
-        focusActiveTerminal(in: window)
+        focusActiveTerminal(in: window, editorTakesKeyboard: true)
     }
 
     func cycleActiveColumnWidth() {
@@ -572,7 +587,7 @@ extension NiruxShellView {
             self.updateSidebar()
             self.saveState()
         }
-        nameInputPanel?.show(relativeTo: window, currentValue: profile.name, placeholder: "Space name")
+        nameInputPanel?.show(relativeTo: window, currentValue: profile.name, placeholder: "Project name")
     }
 
     // MARK: - Worktree
@@ -581,7 +596,7 @@ extension NiruxShellView {
         guard let window else { return }
         guard let cwd = activeWorkspace?.focusedWorkingDirectory,
               let repoRoot = GitWorktree.repoRoot(at: cwd)
-        else { return }
+        else { return showToast("Not in a git repository: \(activeWorkspace?.focusedWorkingDirectory.abbreviatedPath() ?? "")") }
 
         if worktreePanel == nil {
             worktreePanel = WorktreePanel()
@@ -641,23 +656,38 @@ extension NiruxShellView {
         guard let window else { return }
         guard let cwd = activeWorkspace?.focusedWorkingDirectory,
               let repoRoot = GitWorktree.repoRoot(at: cwd)
-        else { return }
+        else { return showToast("Not in a git repository: \(activeWorkspace?.focusedWorkingDirectory.abbreviatedPath() ?? "")") }
+        // Not the active one: its folder is where it was opened, not where
+        // its terminal is now, and going back to it would do nothing.
+        let openWorkspaces = workspaces.filter { !$0.isClosing && $0 !== activeWorkspace }.map { (id: $0.id, cwd: $0.cwd) }
 
         // List worktrees on background thread, then show palette
         DispatchQueue.global(qos: .userInitiated).async {
             let worktrees = GitWorktree.list(repoRoot: repoRoot)
+            let current = Self.comparablePath(repoRoot)
+            let comparablePaths = worktrees.map { Self.comparablePath($0.path) }
+            // The worktree each workspace is open in (the main checkout may
+            // hold the others), and whether at its root.
+            let workspaceWorktrees = openWorkspaces.compactMap { workspace in
+                let cwd = Self.comparablePath(workspace.cwd)
+                return ProjectBoard.innermost(of: comparablePaths, holding: cwd).map {
+                    (id: workspace.id, path: comparablePaths[$0], isAtRoot: cwd == comparablePaths[$0])
+                }
+            }
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                // Filter out the main repo (first entry is usually the main worktree)
-                let entries = worktrees.filter { $0.path != repoRoot }
-                guard !entries.isEmpty else { return }
+                // Leave out the checkout the palette was opened from
+                let entries = zip(worktrees, comparablePaths).filter { _, path in path != current }
+                guard !entries.isEmpty else { return self.showToast("No other worktree found in this repository") }
 
                 // Build palette actions from worktree entries
-                let actions = entries.map { entry in
+                let actions = entries.map { entry, comparablePath in
                     let title = entry.branch ?? URL(fileURLWithPath: entry.path).lastPathComponent
-                    let subtitle = entry.path.abbreviatedPath()
-                    return PaletteAction(icon: "🌿", title: title, subtitle: subtitle, shortcut: nil) { [weak self] in
-                        self?.addWorkspace(title: title, cwd: entry.path)
+                    let open = self.preferredWorkspace(among: workspaceWorktrees.filter { $0.path == comparablePath })
+                    let subtitle = (open.map { self.alreadyOpenNote(for: $0) + " · " } ?? "") + entry.path.abbreviatedPath()
+                    let openID = open?.id
+                    return PaletteAction(icon: .symbol("folder"), title: title, subtitle: subtitle, shortcut: nil) { [weak self] in
+                        self?.openWorktree(path: entry.path, title: title, workspaceID: openID)
                     }
                 }
 
@@ -673,6 +703,36 @@ extension NiruxShellView {
                 self.commandPalette?.actions = actions
                 self.commandPalette?.show(relativeTo: window)
             }
+        }
+    }
+
+    /// "Open Worktree" goes back to a workspace already open in the
+    /// worktree instead of opening another: one in the active space first,
+    /// then a live one before a parked one, then one at the worktree's root
+    /// before one in a subfolder; sidebar order last.
+    private func preferredWorkspace(among matches: [(id: String, path: String, isAtRoot: Bool)]) -> WorkspaceState? {
+        let ranked = matches.compactMap { match -> (workspace: WorkspaceState, rank: [Int])? in
+            guard let workspace = workspaces.first(where: { $0.id == match.id && !$0.isClosing }) else { return nil }
+            let rank = [workspace.profileID == activeProfileID, !workspace.isInactive, match.isAtRoot]
+            return (workspace, rank.map { $0 ? 1 : 0 })
+        }
+        return ranked.max { $0.rank.lexicographicallyPrecedes($1.rank) }?.workspace
+    }
+
+    /// Before the path, in the palette row; the row's title is the branch,
+    /// usually the workspace's name too.
+    private func alreadyOpenNote(for workspace: WorkspaceState) -> String {
+        guard workspace.profileID != activeProfileID,
+              let space = profiles.first(where: { $0.id == workspace.profileID })
+        else { return "Already open" }
+        return "Already open in “\(space.name)”"
+    }
+
+    private func openWorktree(path: String, title: String, workspaceID: String?) {
+        if let workspaceID, workspaces.contains(where: { $0.id == workspaceID && !$0.isClosing }) {
+            focusWorkspace(id: workspaceID)
+        } else {
+            addWorkspace(title: title, cwd: path)
         }
     }
 
@@ -697,7 +757,7 @@ extension NiruxShellView {
         }
 
         commandPalette?.actions = columnPaletteActions() + agentPaletteActions() + workspacePaletteActions()
-        commandPalette?.show(relativeTo: window)
+        commandPalette?.show(relativeTo: window, sections: paletteSections())
     }
 
     func showCommandPalette(prefilter: String) {
@@ -718,11 +778,18 @@ extension NiruxShellView {
 
     // MARK: - Focus + helpers
 
-    func focusActiveTerminal(in window: NSWindow?) {
+    /// Gives the keyboard to the focused column of the active workspace.
+    /// An editor column only takes it when the user went to it
+    /// (`editorTakesKeyboard`): an agent's open focuses its column but
+    /// leaves the keyboard where the user types, and closing a panel later
+    /// must not hand that editor the keys.
+    func focusActiveTerminal(in window: NSWindow?, editorTakesKeyboard: Bool = false) {
         guard let col = activeWorkspace?.columns[safe: activeWorkspace?.focusedIndex ?? 0],
               let window else { return }
         if let webView = col.webViewColumn {
             window.makeFirstResponder(webView.webView)
+        } else if let editor = col.editorColumn {
+            if editorTakesKeyboard { editor.takeKeyboard() }
         } else if let board = col.projectBoard {
             window.makeFirstResponder(board.view)
         } else if col.isFindBarOpen {
@@ -739,7 +806,19 @@ extension NiruxShellView {
         workspace.focusedIndex = index
         relayout(animated: true)
         updateSidebar()
-        focusActiveTerminal(in: window)
+        focusActiveTerminal(in: window, editorTakesKeyboard: true)
+    }
+
+    /// Focuses column `index` of the active workspace at the user's request
+    /// (Cmd+1…9, the sidebar). An agent's open focuses its editor column
+    /// without the keyboard: going to it then hands the keyboard over.
+    func goToColumn(_ index: Int) {
+        guard let workspace = activeWorkspace, workspace.columns.indices.contains(index) else { return }
+        if workspace.focusedIndex == index, workspace.columns[index].isEditor {
+            focusActiveTerminal(in: window, editorTakesKeyboard: true)
+        } else {
+            focusColumnByIndex(index)
+        }
     }
 
     var activeWorkspace: WorkspaceState? { workspaceStore.activeWorkspace }

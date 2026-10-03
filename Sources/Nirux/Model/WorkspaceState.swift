@@ -469,7 +469,7 @@ extension WorkspaceState {
 
     // MARK: - Column Management
 
-    private func terminalEnvironment(agentUUID: String) -> [String: String] {
+    func terminalEnvironment(agentUUID: String) -> [String: String] {
         var environment = Self.makeTerminalEnvironment(
             profileID: profileID,
             workspaceID: id,
@@ -591,6 +591,13 @@ extension WorkspaceState {
             command: command,
             environment: terminalEnvironment(agentUUID: agentUUID)
         )
+        setupAllTracking(for: col)
+        insertColumn(col)
+    }
+
+    func addColumn(deferredAgent: DeferredAgentLaunch, agentUUID: String, cwd: String?) {
+        let environment = terminalEnvironment(agentUUID: agentUUID)
+        let col = ColumnState(cwd: cwd ?? focusedWorkingDirectory, deferredAgent: deferredAgent, environment: environment)
         setupAllTracking(for: col)
         insertColumn(col)
     }

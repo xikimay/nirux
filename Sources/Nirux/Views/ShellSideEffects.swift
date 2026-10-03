@@ -18,6 +18,12 @@ struct ShellSideEffects {
         }
     }
 
+    /// Starts a restored agent column's shell with the agent's launch
+    /// command (see `DeferredAgentLaunch`).
+    var startRestoredAgent: @MainActor (_ column: ColumnState, _ command: String) -> Void = { column, command in
+        column.startShell(command: command)
+    }
+
     /// The home folder: agent skills install into it, the Getting Started
     /// checklist reads it, a workspace with no folder of its own opens in it.
     var homeDirectory: @MainActor () -> String = { NSHomeDirectory() }

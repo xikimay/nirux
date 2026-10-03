@@ -36,6 +36,9 @@ final class SidebarView: NSView {
     var onPermissionDecision: ((Int, Int, String, PermissionApproval.Behavior) -> Void)?
     /// Resume clicked: (workspaceIndex, columnIndex, the failure it was for).
     var onAgentResume: ((Int, Int, TimeInterval) -> Void)?
+    /// Resume on the row of a restored agent that hasn't resumed yet:
+    /// (workspaceIndex, columnIndex, column id).
+    var onDeferredAgentResume: ((Int, Int, UUID) -> Void)?
     var onDiffStatsClicked: ((Int) -> Void)?
     /// The menu of the card's PR feedback line, by workspace id; nil when
     /// there's nothing.
@@ -52,6 +55,7 @@ final class SidebarView: NSView {
     var onRenameProfile: ((String) -> Void)?
     var onEditProfileBrief: ((String) -> Void)?
     var onEditBoardSettings: ((String) -> Void)?
+    var onEditTaskTemplates: ((String) -> Void)?
     var onRecolorProfile: ((String, String) -> Void)?
     var onDeleteProfile: ((String) -> Void)?
     /// (workspace id, space id). By id: a close that finishes while the menu
@@ -458,7 +462,8 @@ final class SidebarView: NSView {
             clearHover()
             setHoverTarget(.columnRow(workspaceIndex: workspaceIndex, columnIndex: columnIndex))
             NSCursor.pointingHand.set()
-        case .permissionDecision(let workspaceIndex, _, _, _), .agentResume(let workspaceIndex, _, _):
+        case .permissionDecision(let workspaceIndex, _, _, _), .agentResume(let workspaceIndex, _, _),
+             .deferredAgentResume(let workspaceIndex, _, _):
             clearHover()
             if let key = Self.armedButtonKey(for: area.region) {
                 setHoverTarget(.approvalButton(workspaceIndex: workspaceIndex, key: key))
@@ -483,8 +488,10 @@ final class SidebarView: NSView {
         case .link(let url, _):
             if url == Self.inactiveSectionActionURL {
                 toggleInactiveSection()
-            } else if let workspaceIndex = Self.diffActionWorkspaceIndex(url) {
+            } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.diffActionPrefix) {
                 onDiffStatsClicked?(workspaceIndex)
+            } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.cleanupActionPrefix) {
+                onWorkspaceAction?(.cleanUpWorktree, workspaceIndex)
             } else if let workspaceID = Self.prFeedbackActionWorkspaceID(url) {
                 prFeedbackMenu?(workspaceID)?.popUp(positioning: nil, at: convert(event.locationInWindow, from: nil), in: self)
             } else if let url = URL(string: url) {
@@ -498,7 +505,7 @@ final class SidebarView: NSView {
             let point = convert(event.locationInWindow, from: nil)
             workspaceActionMenu(workspaceIndex: workspaceIndex, columnIndex: nil)
                 .popUp(positioning: nil, at: point, in: self)
-        case .permissionDecision, .agentResume, .actionBlock:
+        case .permissionDecision, .agentResume, .deferredAgentResume, .actionBlock:
             break // buttons go through trackApprovalClick; the block is inert
         }
     }
@@ -508,13 +515,13 @@ final class SidebarView: NSView {
     }
 
     /// Space options only — switching spaces lives in the bottom dot
-    /// switcher (and ⌘←/→), so the header menu doesn't duplicate it.
+    /// switcher (and ⌥⌘←/→), so the header menu doesn't duplicate it.
     func spaceOptionsMenu() -> NSMenu {
         let menu = NSMenu()
         if let active = lastProfiles.first(where: { $0.isActive }) {
             addSpaceManagementItems(to: menu, for: active)
         }
-        menu.addClosureItem(title: "New Space") { [weak self] in
+        menu.addClosureItem(title: "New Project") { [weak self] in
             self?.onCreateProfile?()
         }
         return menu
@@ -608,7 +615,8 @@ final class SidebarView: NSView {
                 switch area.region {
                 case .column(let workspaceIndex, let columnIndex),
                      .permissionDecision(let workspaceIndex, let columnIndex, _, _),
-                     .agentResume(let workspaceIndex, let columnIndex, _):
+                     .agentResume(let workspaceIndex, let columnIndex, _),
+                     .deferredAgentResume(let workspaceIndex, let columnIndex, _):
                     return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
                 case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
                      .actionBlock(let workspaceIndex):
@@ -658,8 +666,16 @@ final class SidebarView: NSView {
         NSCursor.arrow.set()
     }
 
+    private static let diffActionPrefix = "action:diff:"
+    private static let cleanupActionPrefix = "action:cleanup:"
+
     static func diffActionURL(workspaceIndex: Int) -> String {
-        "action:diff:\(workspaceIndex)"
+        diffActionPrefix + String(workspaceIndex)
+    }
+
+    /// The card's "Clean up", shown next to a merged pull request.
+    static func cleanupActionURL(workspaceIndex: Int) -> String {
+        cleanupActionPrefix + String(workspaceIndex)
     }
 
     static func prFeedbackActionURL(workspaceID: String) -> String {
@@ -668,8 +684,7 @@ final class SidebarView: NSView {
 
     static let inactiveSectionActionURL = "action:inactive-section-toggle"
 
-    private static func diffActionWorkspaceIndex(_ value: String) -> Int? {
-        let prefix = "action:diff:"
+    private static func actionWorkspaceIndex(_ value: String, prefix: String) -> Int? {
         guard value.hasPrefix(prefix) else { return nil }
         return Int(value.dropFirst(prefix.count))
     }
