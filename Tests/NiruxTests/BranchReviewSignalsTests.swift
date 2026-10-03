@@ -129,6 +129,12 @@ final class BranchReviewSignalsTests: XCTestCase {
         }
         XCTAssertNil(try indentationKept(" steps:\n-  if: always()\n+if: always()"))
         XCTAssertEqual(try indentationKept(" steps:\n-  if: always()  \n+  if: always()"), .whitespaceOnly)
+        // So do its blank lines: a YAML block, a Python string, a heredoc.
+        XCTAssertNil(try files(
+            nameStatus: "M\0a.swift\0", patch: modified(" text: |\n-\n   line", header: "@@ -1,3 +1,2 @@"),
+            reading: Patch.Reading(whitespace: .keepingIndentation)
+        )[0].fold)
+        XCTAssertEqual(BranchReview.WhitespaceCheck.mode(for: "scripts/bundle.sh"), .keepingIndentation)
         XCTAssertEqual(BranchReview.WhitespaceCheck.mode(for: ".github/workflows/ci.yml"), .keepingIndentation)
         XCTAssertEqual(BranchReview.WhitespaceCheck.mode(for: "tools/Makefile"), .keepingIndentation)
         XCTAssertEqual(BranchReview.WhitespaceCheck.mode(for: "Sources/App.swift"), .ignoringIndentation)
@@ -138,13 +144,6 @@ final class BranchReviewSignalsTests: XCTestCase {
             reading: Patch.Reading(whitespace: nil)
         )
         XCTAssertNil(unchecked[0].fold)
-    }
-
-    func testMinifiedScriptIsFoldedAsGenerated() throws {
-        let long = String(repeating: "a", count: 300)
-        XCTAssertEqual(try files(nameStatus: "M\0web/app.js\0", patch: modified("-x\n+\(long)", header: "@@ -1 +1 @@", path: "web/app.js"))[0].fold, .generated)
-        XCTAssertNil(try files(nameStatus: "M\0a.swift\0", patch: modified("-x\n+\(long)", header: "@@ -1 +1 @@"))[0].fold)
-        XCTAssertNil(try files(nameStatus: "M\0web/app.js\0", patch: modified("-x\n+y", header: "@@ -1 +1 @@", path: "web/app.js"))[0].fold)
     }
 
     func testPureRenameAndBinaryAreFoldedFromTheirPatch() throws {
@@ -205,6 +204,8 @@ final class BranchReviewSignalsTests: XCTestCase {
         XCTAssertEqual(labels("env[\"NIRUX_STATE_DIR\"] = nil"), ["NIRUX_*"])
         XCTAssertEqual(labels("let XNIRUX_A = 1"), [])
         XCTAssertEqual(labels("let p = Process(); p.arguments = args"), ["Process arguments"])
+        XCTAssertEqual(labels("task.arguments += [path]"), ["Process arguments"])
+        XCTAssertEqual(labels("try workspace.openApplication(at: url, configuration: config)"), ["NSWorkspace"])
         XCTAssertEqual(labels("let mode = CommandLine.arguments[1]"), [], "reading argv launches nothing")
         XCTAssertEqual(labels("let p = BoundedProcessed()"), [])
         XCTAssertEqual(labels("try FileManager.default.createDirectory(at: home.appendingPathComponent(\".claude\"))"), ["~/.claude"])
@@ -213,6 +214,8 @@ final class BranchReviewSignalsTests: XCTestCase {
         // A line that is only a comment raises nothing; a trailing comment does.
         XCTAssertEqual(labels("    /// Telegram prompts wait here."), [])
         XCTAssertEqual(labels("     * then DispatchQueue.main runs it"), [])
+        XCTAssertEqual(labels("    /* DispatchQueue.main runs it */"), [])
+        XCTAssertEqual(labels("    /* was: */ DispatchQueue.main.async {}"), ["DispatchQueue"])
         XCTAssertEqual(labels("# Called by bundle.sh"), [])
         XCTAssertEqual(labels("#if canImport(Sparkle)"), ["Sparkle"])
         XCTAssertEqual(labels("let bot = Telegram() // Telegram"), ["Telegram"])
@@ -359,7 +362,8 @@ final class BranchReviewSignalsTests: XCTestCase {
         - run: bash $GITHUB_WORKSPACE/scripts/sign.sh
         - run: tools/my-scripts/prune.sh && cat ../outside.sh
         - run: swift build # see .github/actions/setup/action.yml.
-        - run: swift test && cp out $RUNNER_TEMP/notes/README.md
+        - run: swift test && cp out $RUNNER_TEMP/notes/README.md ${RUNNER_TEMP}/notes/CHANGES.md ~/bin/tool.sh
+        - run: ${{ github.workspace }}/scripts/ws.sh && ./gradlew build
         """
 
         let tokens = BranchReview.pathTokens(in: Data(workflow.utf8))
@@ -372,5 +376,8 @@ final class BranchReviewSignalsTests: XCTestCase {
         XCTAssertFalse(tokens.contains("outside.sh"))
         XCTAssertFalse(tokens.contains("test"), "a word, not a path")
         XCTAssertFalse(tokens.contains("notes/README.md"), "another variable's folder")
+        XCTAssertFalse(tokens.contains("notes/CHANGES.md"), "another variable's folder")
+        XCTAssertFalse(tokens.contains("bin/tool.sh"), "the home folder")
+        XCTAssertTrue(tokens.isSuperset(of: ["scripts/ws.sh", "gradlew"]))
     }
 }

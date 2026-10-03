@@ -37,9 +37,6 @@ extension BranchReview {
         var byteCount = 0
         /// Counted even when parsed without its lines.
         var hunkCount = 0
-        /// The bytes of its `+` and `-` lines: their average length tells
-        /// minified code.
-        var changedLineBytes = 0
         /// Each hunk reads the same before and after but for whitespace
         /// (see `WhitespaceCheck`). False when not checked.
         var isWhitespaceOnly = false
@@ -251,7 +248,6 @@ extension BranchReview {
                 let content = raw.dropFirst()
                 hasher.add(kind, content)
                 whitespace?.add(kind, content)
-                if kind == .added || kind == .removed { section.changedLineBytes += content.count }
                 if reading.findsRisks, kind == .added || kind == .removed {
                     RiskRules.forEachLineRule(matching: content) { section.riskHits.insert(RiskHit(rule: $0, hunk: index)) }
                 }
@@ -449,7 +445,6 @@ extension BranchReview {
             }
             var riskHits: [RiskHit] = []
             var hunkCount = 0
-            var changedLineBytes = 0
             for section in sections {
                 file.oldMode = file.oldMode ?? section.oldMode
                 file.newMode = section.newMode ?? file.newMode
@@ -466,27 +461,21 @@ extension BranchReview {
                 // the first's.
                 riskHits += section.riskHits.map { RiskHit(rule: $0.rule, hunk: hunkCount + $0.hunk) }
                 hunkCount += section.hunkCount
-                changedLineBytes += section.changedLineBytes
             }
             if !file.isBinary {
                 file.oldObjectID = nil
                 file.newObjectID = nil
             }
             file.patchHash = patchHash(of: file, changedLinesDigests: sections.map(\.changedLinesDigest))
-            file.fold = contentFold(
-                of: file, changedLineBytes: changedLineBytes, whitespaceOnly: sections.allSatisfy(\.isWhitespaceOnly)
-            )
+            file.fold = contentFold(of: file, whitespaceOnly: sections.allSatisfy(\.isWhitespaceOnly))
             file.signals = RiskRules.signals(lineHits: riskHits)
             return file
         }
 
         /// The folds a file's patch shows; those its name shows come first
-        /// (`Fold`), and are settled by the snapshot. Minified code, as
-        /// GitHub's Linguist tells it: lines over 110 bytes on average.
-        private static func contentFold(of file: FileChange, changedLineBytes: Int, whitespaceOnly: Bool) -> Fold? {
+        /// (`Fold`), and are settled by the snapshot.
+        private static func contentFold(of file: FileChange, whitespaceOnly: Bool) -> Fold? {
             let lines = file.additions + file.deletions
-            let isScriptOrStyle = [".js", ".mjs", ".cjs", ".css"].contains { file.path.lowercased().hasSuffix($0) }
-            if isScriptOrStyle, lines > 0, changedLineBytes / lines > 110 { return .generated }
             if file.status == .renamed, file.similarity == 100, lines == 0, file.oldMode == file.newMode {
                 return .pureRename
             }
@@ -540,16 +529,18 @@ extension BranchReview.Hunk {
 
 extension BranchReview {
     /// Compares each hunk's old side with its new side, context lines
-    /// included, with blank lines, trailing whitespace and, unless the
-    /// indentation carries meaning, leading whitespace left out. Not git's
-    /// `-w`: whitespace inside a line is kept, since `" "` becoming `""`
-    /// or `a - -b` becoming `a --b` changes what the code does. Hunk by
-    /// hunk, not run by run: a reindent pairs a closing brace with another
-    /// one as context.
+    /// included, with trailing whitespace and, unless the indentation
+    /// carries meaning, leading whitespace and blank lines left out. Not
+    /// git's `-w`: whitespace inside a line is kept, since `" "` becoming
+    /// `""` or `a - -b` becoming `a --b` changes what the code does. Hunk
+    /// by hunk, not run by run: a reindent pairs a closing brace with
+    /// another one as context. A Swift multi-line string can't be told
+    /// apart from code here: its indentation reads as code's.
     struct WhitespaceCheck {
         enum Mode: Equatable {
             case ignoringIndentation
-            /// Python, YAML, Makefiles: a line moved in or out of a block.
+            /// Python, YAML, Makefiles, shell scripts: a line moved in or
+            /// out of a block, a blank line in a string or a heredoc.
             case keepingIndentation
         }
 
@@ -575,13 +566,12 @@ extension BranchReview {
             new = SHA256()
         }
 
-        /// Nil for a blank line.
+        /// Nil for a line left out.
         private func significant(_ content: Data) -> Data.SubSequence? {
             var kept = content[...]
             while let last = kept.last, Self.whitespace.contains(last) { kept = kept.dropLast() }
-            if mode == .ignoringIndentation {
-                while let first = kept.first, Self.whitespace.contains(first) { kept = kept.dropFirst() }
-            }
+            guard mode == .ignoringIndentation else { return kept }
+            while let first = kept.first, Self.whitespace.contains(first) { kept = kept.dropFirst() }
             return kept.isEmpty ? nil : kept
         }
 
@@ -598,8 +588,8 @@ extension BranchReview {
             let name = fileName(path)
             if ["Makefile", "makefile", "GNUmakefile"].contains(name) { return .keepingIndentation }
             let suffixes = [
-                ".py", ".pyi", ".pyw", ".yml", ".yaml", ".mk", ".md", ".markdown", ".haml", ".pug", ".jade", ".sass",
-                ".styl", ".coffee", ".nim", ".fs", ".fsx", ".fsi", ".hs", ".elm"
+                ".py", ".pyi", ".pyw", ".yml", ".yaml", ".mk", ".sh", ".bash", ".zsh", ".md", ".markdown", ".haml",
+                ".pug", ".jade", ".sass", ".styl", ".coffee", ".nim", ".fs", ".fsx", ".fsi", ".hs", ".elm"
             ]
             return suffixes.contains { name.lowercased().hasSuffix($0) } ? .keepingIndentation : .ignoringIndentation
         }

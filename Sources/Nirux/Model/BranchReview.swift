@@ -67,15 +67,15 @@ enum BranchReview {
     enum Fold: String, CaseIterable, Equatable, Sendable {
         case lockfile
         /// By its name (`*.bundle.js`, `*.min.js`), `linguist-generated` in
-        /// `.gitattributes` (unless the branch changes one), a marker in
-        /// its first lines, or minified lines. The last two only when its
-        /// patch is read.
+        /// `.gitattributes` (unless the branch changes one), or a marker in
+        /// its first lines (only when its patch is read).
         case generated
         /// Renamed with no line or mode changed.
         case pureRename
         /// Every hunk reads the same without its blank lines and the
-        /// whitespace around its lines (around, not inside; and only at
-        /// their end where indentation carries meaning: Python, YAML).
+        /// whitespace around its lines: around, not inside; and only at
+        /// their end, blank lines kept, where indentation carries meaning
+        /// (Python, YAML, shell scripts). See `WhitespaceCheck`.
         case whitespaceOnly
         case binary
     }
@@ -143,7 +143,7 @@ enum BranchReview {
         var fold: Fold?
         /// In `RiskKind` order. Lines are read only for a file the diff
         /// read (`omission` isn't `.notRead`): "not read" isn't "no risk".
-        /// A doc raises none; a test only concurrency.
+        /// A doc raises no line signal; a test only concurrency.
         var signals: [RiskSignal] = []
     }
 

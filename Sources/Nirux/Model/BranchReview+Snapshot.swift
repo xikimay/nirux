@@ -188,7 +188,9 @@ extension BranchReview {
         let listed = Set(files.flatMap { [$0.path] + ($0.oldPath.map { [$0] } ?? []) })
         let unread = untracked.filter { !listed.contains($0) }
         let noise = unread.isEmpty ? nil : NoiseRules(
-            root: root, paths: unread, ignoresAttributes: listed.contains(where: changesAttributes), options: options
+            root: root, paths: unread,
+            ignoresAttributes: listed.contains(where: changesAttributes) || unread.contains(where: changesAttributes),
+            options: options
         )
         for path in unread {
             var file = FileChange(path: path, status: .added)
@@ -351,8 +353,7 @@ extension BranchReview {
         case .notRead(let entries):
             return readTooLarge(
                 entries, root: root, mergeBase: mergeBase, head: head, pathspec: pathspec,
-                uncommitted: uncommitted, inline: inline,
-                ignoresAttributes: ignoresAttributes || paths(of: entries).contains(where: changesAttributes), options: reading
+                uncommitted: uncommitted, inline: inline, ignoresAttributes: ignoresAttributes, options: reading
             )
         }
     }
@@ -377,6 +378,10 @@ extension BranchReview {
             entries, root: root, mergeBase: mergeBase, head: head, pathspec: pathspec,
             uncommitted: uncommitted, ignoresAttributes: ignoresAttributes, options: options
         ) else { return .failed("git couldn't count the changes in \(root).") }
+        // The others are read without the largest, which may be a
+        // .gitattributes.
+        let ignoresAttributes = ignoresAttributes
+            || listed.contains { changesAttributes($0.path) || $0.oldPath.map(changesAttributes) == true }
         guard pathspec.isEmpty else { return .read(listed) }
         let largestFirst = listed.sorted { $0.additions + $0.deletions > $1.additions + $1.deletions }
         var leftOut = max(1, listed.count { $0.additions + $0.deletions > options.maxFileDiffBytes / bytesPerChangedLine })
@@ -491,7 +496,13 @@ extension BranchReview {
         let data = patch.stdout
         let ranges = Patch.sectionRanges(of: data)
         let headers = ranges.map { Patch.header(data[$0]) }
-        let noise = NoiseRules(root: root, paths: paths(of: entries), ignoresAttributes: ignoresAttributes, options: options)
+        // What the patch has: --name-status also lists a file whose
+        // timestamp alone changed.
+        let changed = headers.flatMap { [$0?.oldPath, $0?.newPath].compactMap { $0 } }
+        let noise = NoiseRules(
+            root: root, paths: paths(of: entries),
+            ignoresAttributes: ignoresAttributes || changed.contains(where: changesAttributes), options: options
+        )
         // A deleted file's start is in its patch; the others' in the
         // worktree.
         var namedFolds: [String: Fold] = [:]
@@ -562,8 +573,14 @@ extension BranchReview {
         else { return nil }
         let counts = numstat(numbers.stdout)
         let changed = uncommitted.union(committed.stdout.split(separator: 0).map(Patch.decoded))
-        let noise = NoiseRules(root: root, paths: paths(of: entries), ignoresAttributes: ignoresAttributes, options: options)
-        return entries.compactMap { entry -> FileChange? in
+        // An intent-to-add untracked file reads "A"; a touched file stays
+        // "M".
+        let entries = entries.filter { !"ACDRT".contains($0.letter) ? changed.contains($0.path) : true }
+        let noise = NoiseRules(
+            root: root, paths: paths(of: entries),
+            ignoresAttributes: ignoresAttributes || paths(of: entries).contains(where: changesAttributes), options: options
+        )
+        return entries.map { entry -> FileChange in
             var file = FileChange(path: entry.path, status: .modified)
             switch entry.letter {
             case "A", "C": file.status = .added
@@ -573,10 +590,7 @@ extension BranchReview {
                 file.oldPath = entry.oldPath
                 file.similarity = entry.score
             case "T": file.status = .typeChanged
-            default:
-                // An intent-to-add untracked file reads "A"; a touched file
-                // stays "M".
-                guard changed.contains(entry.path) else { return nil }
+            default: break
             }
             switch counts[entry.path] {
             case .lines(let additions, let deletions)?:
@@ -590,8 +604,8 @@ extension BranchReview {
             file.omission = .notRead
             // Never more than its patch would: its start isn't read (a
             // diff this large may list thousands), nor its modes, which a
-            // pure rename keeps.
-            file.fold = noise.fold(path: file.path) ?? (file.isBinary ? .binary : nil)
+            // pure rename or a binary's chmod keeps.
+            file.fold = noise.fold(path: file.path)
             RiskRules.settle(&file)
             return file
         }

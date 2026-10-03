@@ -112,16 +112,14 @@ extension BranchReview {
         let generatedAttribute: [String: Bool]
 
         /// Reads the attribute of `paths`, as the worktree's
-        /// `.gitattributes` set it, unless the branch changes one: among
-        /// `paths`, or as `ignoresAttributes` says for what `paths` don't
-        /// hold. A branch mustn't fold its own files. A failed read leaves
-        /// it out. `check-attr` takes its paths on the command line, which
-        /// `BoundedProcess` keeps under 4,096 arguments: they go
-        /// `pathsPerCheck` at a time.
+        /// `.gitattributes` set it, unless `ignoresAttributes`: the branch
+        /// changes a `.gitattributes`, and mustn't fold its own files. A
+        /// failed read leaves it out. `check-attr` takes its paths on the
+        /// command line, which `BoundedProcess` keeps under 4,096
+        /// arguments: they go `pathsPerCheck` at a time.
         init(root: String, paths: [String], ignoresAttributes: Bool = false, options: Options, pathsPerCheck: Int = 1_000) {
             var attribute: [String: Bool] = [:]
-            let isRead = !ignoresAttributes && !paths.contains(where: changesAttributes)
-            for start in stride(from: 0, to: isRead ? paths.count : 0, by: pathsPerCheck) {
+            for start in stride(from: 0, to: ignoresAttributes ? 0 : paths.count, by: pathsPerCheck) {
                 let batch = paths[start..<min(start + pathsPerCheck, paths.count)]
                 guard let output = git(["check-attr", "-z", "linguist-generated", "--"] + batch, in: root, options: options),
                       output.status == 0

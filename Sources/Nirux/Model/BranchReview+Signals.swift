@@ -86,7 +86,10 @@ extension BranchReview {
             LineRule(.security, "/tmp"),
             LineRule(
                 .security, "Process arguments",
-                ["Process(", "BoundedProcess", "posix_spawn", "executableURL", ".arguments =", ".arguments="]
+                [
+                    "Process(", "BoundedProcess", "posix_spawn", "executableURL", ".arguments =", ".arguments=",
+                    ".arguments +=", ".arguments.append"
+                ]
             ),
 
             LineRule(.concurrency, "@MainActor"),
@@ -111,7 +114,7 @@ extension BranchReview {
             LineRule(.launch, "bundle.sh"),
 
             LineRule(.sideEffects, "IOKit", ["IOKit", "IOPM", "IOService", "IORegistry"], .prefix),
-            LineRule(.sideEffects, "NSWorkspace"),
+            LineRule(.sideEffects, "NSWorkspace", ["NSWorkspace", "openApplication"]),
             LineRule(.sideEffects, "~/.claude", [".claude/", "\".claude\"", "~/.claude"]),
             LineRule(.sideEffects, "~/.codex", [".codex/", "\".codex\"", "~/.codex"]),
             LineRule(.sideEffects, "hooks", ["AgentHookInstaller"], .prefix),
@@ -157,13 +160,20 @@ extension BranchReview {
         }
 
         /// A line that is only a comment: `//`, `/*` or `* ` in Swift and C,
-        /// `# ` in scripts and YAML. Swift's `#if` has no space.
+        /// `# ` in scripts and YAML. Swift's `#if` has no space, and code
+        /// may follow a `/* … */`.
         static func isCommentOnly(_ line: UnsafeRawBufferPointer) -> Bool {
             guard let start = line.firstIndex(where: { $0 != UInt8(ascii: " ") && $0 != UInt8(ascii: "\t") })
             else { return false }
             let next = start + 1 < line.count ? line[start + 1] : nil
             switch line[start] {
-            case UInt8(ascii: "/"): return next == UInt8(ascii: "/") || next == UInt8(ascii: "*")
+            case UInt8(ascii: "/") where next == UInt8(ascii: "*"):
+                let rest = line[(start + 2)...]
+                guard let close = zip(rest.indices, rest.indices.dropFirst())
+                    .first(where: { line[$0.0] == UInt8(ascii: "*") && line[$0.1] == UInt8(ascii: "/") })?.1
+                else { return true }
+                return line[(close + 1)...].allSatisfy { $0 == UInt8(ascii: " ") || $0 == UInt8(ascii: "\t") }
+            case UInt8(ascii: "/"): return next == UInt8(ascii: "/")
             case UInt8(ascii: "*"): return next == nil || next == UInt8(ascii: " ") || next == UInt8(ascii: "/")
             case UInt8(ascii: "#"): return next == nil || next == UInt8(ascii: " ") || next == UInt8(ascii: "\t")
             default: return false
@@ -334,9 +344,11 @@ extension BranchReview {
     }
 
     /// The runs of path characters in `text` that hold a "/" or a ".",
-    /// from the top level: "./scripts/x.sh" and
-    /// "$GITHUB_WORKSPACE/scripts/x.sh" both name "scripts/x.sh",
-    /// "my-scripts/x.sh" doesn't, nor "test" in "swift test".
+    /// from the top level: "./scripts/x.sh",
+    /// "$GITHUB_WORKSPACE/scripts/x.sh" and
+    /// "${{ github.workspace }}/scripts/x.sh" all name "scripts/x.sh";
+    /// "my-scripts/x.sh" doesn't, nor "test" in "swift test", nor a path
+    /// below another variable or the home folder.
     static func pathTokens(in text: Data) -> Set<String> {
         func isPathByte(_ byte: UInt8) -> Bool {
             RiskRules.isIdentifier(byte) || byte == UInt8(ascii: ".") || byte == UInt8(ascii: "-")
@@ -345,16 +357,26 @@ extension BranchReview {
         var tokens: Set<String> = []
         for run in text.split(whereSeparator: { !isPathByte($0) }) {
             var token = Substring(Patch.decoded(Data(run)))
-            // The worktree's top level, as a variable.
-            if run.startIndex > text.startIndex, text[run.startIndex - 1] == UInt8(ascii: "$"),
-               token.hasPrefix("GITHUB_WORKSPACE/") {
+            guard token.contains("/") || token.contains(".") else { continue }
+            let before = text[text.startIndex..<run.startIndex]
+            switch before.last {
+            case UInt8(ascii: "$"):
+                // The worktree's top level, as a variable.
+                guard token.hasPrefix("GITHUB_WORKSPACE/") else { continue }
                 token = token.dropFirst("GITHUB_WORKSPACE".count)
+            case UInt8(ascii: "}"):
+                let workspace = ["{{ github.workspace }}", "{{github.workspace}}", "{GITHUB_WORKSPACE}"].map { Data($0.utf8) }
+                guard workspace.contains(where: { before.suffix($0.count).elementsEqual($0) }) else { continue }
+            case UInt8(ascii: "~"):
+                continue
+            default:
+                break
             }
             while let rest = token.hasPrefix("./") ? token.dropFirst(2) : token.hasPrefix("/") ? token.dropFirst() : nil {
                 token = rest
             }
             while token.hasSuffix(".") { token = token.dropLast() }
-            if token.contains("/") || token.contains(".") { tokens.insert(String(token)) }
+            if !token.isEmpty { tokens.insert(String(token)) }
         }
         return tokens
     }

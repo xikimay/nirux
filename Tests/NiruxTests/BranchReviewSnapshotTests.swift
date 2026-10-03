@@ -965,6 +965,19 @@ final class BranchReviewSnapshotTests: XCTestCase {
         try commitToMain("attributes")
         try write("gen/a.swift", "let a = 1\n")
         try commit("generated")
+        // Touched, not changed: --name-status lists it, the patch doesn't.
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: 60)], ofItemAtPath: repo + "/.gitattributes"
+        )
+        let touched = try snapshot()
+        XCTAssertEqual(touched.files.map(\.path), ["gen/a.swift"])
+        XCTAssertEqual(touched.files.map(\.fold), [.generated])
+        var listing = options()
+        listing.maxDiffBytes = 45
+        let listedOnly = try snapshot(listing)
+        XCTAssertEqual(listedOnly.files.map(\.omission), [.notRead])
+        XCTAssertEqual(listedOnly.files.map(\.fold), [.generated])
+
         // Listed with the patch too large: the large .gitattributes is
         // left out of the patch the others are read from.
         try write(".gitattributes", "gen/** linguist-generated\n" + (1...200).map { "# rule \($0)\n" }.joined())
@@ -1061,7 +1074,7 @@ final class BranchReviewSnapshotTests: XCTestCase {
         XCTAssertEqual(try file("scripts/setup.sh", in: try self.snapshot(options)).signals, [])
     }
 
-    func testFilesListedWithoutTheirPatchAreStillFolded() throws {
+    func testFilesListedWithoutTheirPatchFoldOnlyByName() throws {
         try write("yarn.lock", "a\n")
         try write("Old.swift", (1...20).map { "let line\($0) = \($0)\n" }.joined())
         try commitToMain("base")
@@ -1078,8 +1091,8 @@ final class BranchReviewSnapshotTests: XCTestCase {
 
         XCTAssertEqual(snapshot.files.map(\.path), ["New.swift", "Package.resolved", "logo.bin", "yarn.lock"])
         XCTAssertTrue(snapshot.files.allSatisfy { $0.omission == .notRead })
-        // Its modes aren't read: a rename may hide a mode change.
-        XCTAssertEqual(snapshot.files.map(\.fold), [nil, .lockfile, .binary, .lockfile])
+        // Its modes aren't read: a rename or a binary may only gain +x.
+        XCTAssertEqual(snapshot.files.map(\.fold), [nil, .lockfile, nil, .lockfile])
         XCTAssertEqual(snapshot.files.map { $0.signals.map(\.kind) }, [[], [.dependencies], [], [.dependencies]])
     }
 
