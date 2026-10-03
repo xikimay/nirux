@@ -51,6 +51,8 @@ final class UIFlowHarness {
     private(set) var alerts: [String] = []
     /// Answers to the next alerts, in order; the first button once empty.
     var alertResponses: [NSApplication.ModalResponse] = []
+    /// Links opened in the default browser, in order.
+    private(set) var openedURLs: [URL] = []
     /// Browsers the cookie double reports as installed.
     var cookieBrowsers: [CookieImporter.Browser] = []
     /// Browsers the cookie double was asked to import from.
@@ -171,6 +173,8 @@ final class UIFlowHarness {
             self?.restoredAgentLaunches.append(command)
         }
         shell.sideEffects.homeDirectory = { [home] in home }
+        shell.sideEffects.openURL = { [weak self] url in self?.openedURLs.append(url) }
+        shell.sideEffects.rerunFailedJobs = { run in "Run \(run.id) of \(run.repository): refused by the flow test" }
         shell.sideEffects.cookieBrowsers = { [weak self] in self?.cookieBrowsers ?? [] }
         shell.sideEffects.importCookies = { [weak self] browser in
             self?.cookieImports.append(browser)

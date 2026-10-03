@@ -197,13 +197,18 @@ struct PRInfo: Hashable, Sendable {
     let state: String
     let isDraft: Bool
     let ciStatus: String?
-    let failedCheckUrl: String?
+    /// The latest run of each check (docs/ci-failure-actions.md).
+    let checks: [ProjectBoard.Check]
     let reviewDecision: String?
     let mergeable: String?
     let url: String
     let additions: Int?
     let deletions: Int?
     let changedFiles: Int?
+
+    var failedCheckUrl: String? {
+        checks.lazy.filter { $0.result == .failure }.compactMap(\.url).first
+    }
 }
 
 struct WorkspaceInfo: Hashable {
@@ -221,6 +226,8 @@ struct WorkspaceInfo: Hashable {
     let isActive: Bool
     let columns: [ColumnInfo]
     let prInfo: PRInfo?
+    /// `PRFeedback.summary`: the card shows the counts only.
+    var prFeedbackSummary: String?
     let diffStats: String?
     let purpose: String?
     let nextStep: String?
@@ -228,6 +235,7 @@ struct WorkspaceInfo: Hashable {
     let phase: WorkspacePhase
     let lastSummary: String?
     let lastActivityAt: TimeInterval?
+    var reviewBadges: ReviewBadges? = nil
     /// What the card shows after "#N merged"; nil shows nothing.
     var mergedCleanup: MergedCleanupOffer?
 
@@ -304,6 +312,7 @@ enum WorkspaceSidebarAction {
     case close, rename, editContext, newWorkspace
     case closeColumn(columnIndex: Int)
     case cleanUpWorktree
+    case askWhyCIFailed, rerunFailedCI
 }
 
 /// Hover highlight target in the expanded sidebar. Links have their own

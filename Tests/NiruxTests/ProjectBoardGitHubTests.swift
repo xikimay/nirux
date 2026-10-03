@@ -129,8 +129,8 @@ final class ProjectBoardGitHubTests: XCTestCase {
         XCTAssertFalse(crash.hasPending)
 
         let green = ProjectBoard.checkSummary(
-            [ProjectBoard.Check(name: "test", workflowName: "Tests", result: .success, startedAt: nil),
-             ProjectBoard.Check(name: "lint", workflowName: "Tests", result: .skipped, startedAt: nil)],
+            [ProjectBoard.Check(name: "test", workflowName: "Tests", result: .success, startedAt: nil, url: nil),
+             ProjectBoard.Check(name: "lint", workflowName: "Tests", result: .skipped, startedAt: nil, url: nil)],
             required: ["test"]
         )
         XCTAssertEqual(green.text, "test ✓ · others ✓")
@@ -138,13 +138,13 @@ final class ProjectBoardGitHubTests: XCTestCase {
 
         // A rerun waiting for a runner has gh's zero time: it is the latest.
         let rerun = ProjectBoard.checkSummary([
-            ProjectBoard.Check(name: "test", workflowName: "Tests", result: .failure, startedAt: "2026-09-27T22:55:02Z"),
-            ProjectBoard.Check(name: "test", workflowName: "Tests", result: .pending, startedAt: "0001-01-01T00:00:00Z")
+            ProjectBoard.Check(name: "test", workflowName: "Tests", result: .failure, startedAt: "2026-09-27T22:55:02Z", url: nil),
+            ProjectBoard.Check(name: "test", workflowName: "Tests", result: .pending, startedAt: "0001-01-01T00:00:00Z", url: nil)
         ], required: ["test"])
         XCTAssertEqual(rerun.required, [.init(name: "test", result: .pending)])
         let twoJobs = ProjectBoard.checkSummary([
-            ProjectBoard.Check(name: "test", workflowName: "Tests", result: .success, startedAt: nil),
-            ProjectBoard.Check(name: "test", workflowName: "Lint", result: .skipped, startedAt: nil)
+            ProjectBoard.Check(name: "test", workflowName: "Tests", result: .success, startedAt: nil, url: nil),
+            ProjectBoard.Check(name: "test", workflowName: "Lint", result: .skipped, startedAt: nil, url: nil)
         ], required: ["test"])
         XCTAssertEqual(twoJobs.text, "test ✓")
     }

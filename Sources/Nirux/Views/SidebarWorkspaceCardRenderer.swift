@@ -273,6 +273,12 @@ final class SidebarWorkspaceCardRenderer {
         if let prInfo = workspace.prInfo {
             currentY = buildPRInfoLabels(prInfo: prInfo, padding: contentX, yOffset: currentY)
         }
+        if let badges = workspace.reviewBadges {
+            append(SidebarReviewBadgesRow.label(
+                badges, isActive: workspace.isActive, x: contentX, width: sidebarWidth - contentX * 2, top: currentY
+            ))
+            currentY -= SidebarExpandedMetrics.reviewAdvance
+        }
         return currentY
     }
 
@@ -422,6 +428,7 @@ final class SidebarWorkspaceCardRenderer {
         currentY = buildPRStateLabel(prInfo: prInfo, padding: padding, yOffset: currentY)
         currentY = buildCIStatusLabel(prInfo: prInfo, padding: padding, indent: indent, yOffset: currentY)
         currentY = buildReviewDecisionLabel(prInfo: prInfo, padding: padding, indent: indent, yOffset: currentY)
+        currentY = buildPRFeedbackLabel(padding: padding, indent: indent, yOffset: currentY)
         return currentY
     }
 
@@ -440,7 +447,7 @@ final class SidebarWorkspaceCardRenderer {
             height: SidebarExpandedMetrics.prStateHeight
         )
         append(prLabel)
-        hitAreas.append(SidebarHitArea(frame: prLabel.frame, region: .link(url: prInfo.url, label: prLabel)))
+        hitAreas.append(SidebarHitArea(frame: prLabel.frame, region: .link(url: openURLAction(prInfo.url), label: prLabel)))
         if let offer = workspace.mergedCleanup {
             buildCleanupLink(offer, after: prLabel, color: stateColor, maxX: padding + width)
         }
@@ -495,8 +502,9 @@ final class SidebarWorkspaceCardRenderer {
             height: SidebarExpandedMetrics.prDetailHeight
         )
         append(ciLabel)
-        let ciUrl = (ciStatus == "FAILURE" ? prInfo.failedCheckUrl : nil) ?? prInfo.url
-        hitAreas.append(SidebarHitArea(frame: ciLabel.frame, region: .link(url: ciUrl, label: ciLabel)))
+        // The failed check, else the PR's Checks tab, which lists running and finished runs.
+        let ciUrl = (ciStatus == "FAILURE" ? prInfo.failedCheckUrl : nil) ?? "\(prInfo.url)/checks"
+        hitAreas.append(SidebarHitArea(frame: ciLabel.frame, region: .link(url: openURLAction(ciUrl), label: ciLabel)))
         return yOffset - SidebarExpandedMetrics.prDetailAdvance
     }
 
@@ -527,8 +535,27 @@ final class SidebarWorkspaceCardRenderer {
             height: SidebarExpandedMetrics.prDetailHeight
         )
         append(reviewLabel)
-        hitAreas.append(SidebarHitArea(frame: reviewLabel.frame, region: .link(url: prInfo.url, label: reviewLabel)))
+        hitAreas.append(SidebarHitArea(frame: reviewLabel.frame, region: .link(url: openURLAction(prInfo.url), label: reviewLabel)))
         return yOffset - SidebarExpandedMetrics.prDetailAdvance
+    }
+
+    private func buildPRFeedbackLabel(padding: CGFloat, indent: CGFloat, yOffset: CGFloat) -> CGFloat {
+        guard let summary = workspace.prFeedbackSummary else { return yOffset }
+        let label = textLabel(summary, font: .monospacedSystemFont(ofSize: 9, weight: .regular), color: .secondaryLabelColor)
+        label.frame = NSRect(
+            x: padding + indent,
+            y: yOffset - SidebarExpandedMetrics.prDetailHeight,
+            width: sidebarWidth - padding * 2 - indent,
+            height: SidebarExpandedMetrics.prDetailHeight
+        )
+        append(label)
+        let url = SidebarView.prFeedbackActionURL(workspaceID: workspace.id)
+        hitAreas.append(SidebarHitArea(frame: label.frame, region: .link(url: url, label: label)))
+        return yOffset - SidebarExpandedMetrics.prDetailAdvance
+    }
+
+    private func openURLAction(_ url: String) -> String {
+        SidebarView.openActionURL(workspaceIndex: workspace.index, url: url)
     }
 
     private func cardBackground() -> SidebarBackgroundView {

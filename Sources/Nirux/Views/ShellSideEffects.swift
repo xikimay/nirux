@@ -3,9 +3,10 @@ import AppKit
 /// What shell commands do outside Nirux's own window: type an agent's
 /// launch line into a terminal, write the agent skills into the home
 /// folder, read browser cookies through the Keychain, wait on an app-modal
-/// alert. Tests swap members for doubles, so every palette command can run
-/// in CI without launching an agent, touching the real ~/.claude, asking
-/// for the Keychain or waiting on a click.
+/// alert, open a link, rerun CI jobs on GitHub. Tests swap members for
+/// doubles, so every palette command can run in CI without launching an
+/// agent, touching the real ~/.claude, asking for the Keychain, waiting on
+/// a click or reaching GitHub.
 @MainActor
 struct ShellSideEffects {
     /// Types an agent's launch command into a new terminal column.
@@ -35,6 +36,13 @@ struct ShellSideEffects {
     var importCookies: @MainActor (CookieImporter.Browser) async throws -> CookieImporter.ImportResult = { browser in
         try await CookieImporter.importCookies(from: browser, into: WebViewColumn.sharedDataStore)
     }
+
+    /// Opens a link in the default browser.
+    var openURL: @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) }
+
+    /// Reruns the failed jobs of a GitHub Actions run: nil once GitHub
+    /// accepted it, else why not. Called off the main thread.
+    var rerunFailedJobs: @Sendable (CIFailure.Run) -> String? = { CIFailure.rerun($0) }
 
     /// Shows an app-modal alert and waits for its answer.
     var runModal: @MainActor (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }
