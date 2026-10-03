@@ -35,6 +35,15 @@ extension BranchReview {
         /// Untracked files past this many are listed without being read: a
         /// folder nobody ignored (node_modules) can hold tens of thousands.
         var maxUntrackedFilesRead = 1_000
+        /// A Swift file past this, or past the rest of `maxScannedBytes`,
+        /// isn't scanned for the symbols it declares: they are unknown.
+        var maxScannedFileBytes = 2 << 20
+        var maxScannedBytes = 32 << 20
+        /// Test files past these limits aren't read, or only in part, for
+        /// the symbols they mention: the snapshot counts them.
+        var maxTestFilesRead = 4_000
+        var maxTestFileBytes = 1 << 20
+        var maxTestBytesRead = 32 << 20
     }
 
     /// Reads the branch checked out at `path`, from its merge base with the
@@ -199,10 +208,14 @@ extension BranchReview {
             file.omission = .notRead
             file.fold = noise?.fold(path: path)
             RiskRules.settle(&file)
+            file.symbols = unreadSymbols(of: file)
             files.append(file)
         }
         addWorkflowSignals(to: &files, root: root)
         files.sort { $0.path < $1.path }
+        let testsAgainstCode = testsAgainstCode(
+            of: files, root: root, deleted: Set(statusEntries.filter { $0.code.contains("D") }.map(\.path)), options: options
+        )
 
         guard isStillInPlace() else { return .switched }
         guard git(["rev-parse", "-q", "--verify", "HEAD^{commit}"], in: root, options: options)?
@@ -216,7 +229,7 @@ extension BranchReview {
                 comparePullRequestHead($0, head: head, root: root, options: options)
             },
             hasUncommittedChanges: !uncommitted.isEmpty || !untracked.isEmpty,
-            commits: commits, files: files
+            commits: commits, files: files, testsAgainstCode: testsAgainstCode
         )))
     }
 
@@ -472,10 +485,11 @@ extension BranchReview {
     /// its signals. A file past `maxFileDiffBytes` keeps no hunks; with
     /// `inline`, neither does a folded file, nor any file when the
     /// unfolded ones add up to more than `maxInlineDiffBytes`. Parsed
-    /// twice: once without keeping a line, to hash, fold and find signals,
-    /// then only the sections that keep their hunks: a fold found in the
-    /// lines (whitespace only) mustn't count toward the budget
-    /// either. `ignoresAttributes`: see `NoiseRules`.
+    /// twice: once without keeping a line, to hash, fold, find signals and
+    /// collect a Swift file's added lines, then only the sections that
+    /// keep their hunks: a fold found in the lines (whitespace only)
+    /// mustn't count toward the budget either. `ignoresAttributes`: see
+    /// `NoiseRules`.
     static func readDiff(
         root: String, mergeBase: String, pathspec: [String], inline: Bool, ignoresAttributes: Bool = false,
         options: Options
@@ -522,7 +536,8 @@ extension BranchReview {
             return Patch.Reading(
                 keepsLines: false,
                 whitespace: folded ? nil : key.map(WhitespaceCheck.mode(for:)),
-                findsRisks: !folded && key.map { PathGroup(path: $0) } != .docs
+                findsRisks: !folded && key.map { PathGroup(path: $0) } != .docs,
+                collectsAddedLines: !folded && headers[index]?.newPath.map(isSwiftCode) == true
             )
         }) else {
             return .failed("git printed a diff Nirux can't read in \(root).")
@@ -531,6 +546,18 @@ extension BranchReview {
         for index in files.indices {
             files[index].fold = namedFolds[files[index].path] ?? files[index].fold
             RiskRules.settle(&files[index])
+        }
+        // Whether a line is in a function's body takes the whole file: it
+        // is read from the worktree, and checked against the patch.
+        let addedLines = Dictionary(sections.compactMap { section in
+            section.newPath.flatMap { path in section.addedLines.map { (path, $0) } }
+        }, uniquingKeysWith: { first, _ in first })
+        var budget = options.maxScannedBytes
+        for index in files.indices where mayDeclareSymbols(files[index]) && files[index].additions > 0 {
+            let path = files[index].path
+            files[index].symbols = scanSymbols(
+                at: root + "/" + path, added: addedLines[path], maxFileBytes: options.maxScannedFileBytes, budget: &budget
+            )
         }
         let inlineBytes = files.filter { $0.fold == nil && $0.patchBytes <= maxFileBytes }.map(\.patchBytes).reduce(0, +)
         let onDemand = inline && inlineBytes > options.maxInlineDiffBytes
@@ -607,6 +634,7 @@ extension BranchReview {
             // pure rename or a binary's chmod keeps.
             file.fold = noise.fold(path: file.path)
             RiskRules.settle(&file)
+            file.symbols = unreadSymbols(of: file)
             return file
         }
     }

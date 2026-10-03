@@ -159,9 +159,11 @@ Top to bottom:
 6. **Folded.** Collapsed groups that are counted but never hidden:
    - lockfiles: `Package.resolved`, `package-lock.json`, `yarn.lock`,
      `Cargo.lock`, `Gemfile.lock`, `go.sum`;
-   - generated files: `*.bundle.js`, `*.min.js`, paths marked
+   - generated files: `*.bundle.js`, `*.min.js`, `*.pb.swift`, paths marked
      `linguist-generated` in `.gitattributes`, files whose first lines say
-     `@generated` or "Code generated … DO NOT EDIT";
+     `@generated`, "Code generated … DO NOT EDIT", or the header of SwiftGen,
+     Sourcery or SwiftProtobuf (added by the user on 2026-10-03: their files
+     don't say `@generated`, and would flood "Tests against code");
    - pure renames (similarity 100%) and whitespace-only changes;
    - binaries.
 
@@ -205,7 +207,7 @@ The page is useful before anyone clicks Explain. Nirux groups by path:
 | Group | Paths |
 | --- | --- |
 | Code | everything not below |
-| Tests | `Tests/`, `*Tests.swift`, `*_test.*`, `*.test.*`, `*.spec.*` |
+| Tests | a folder whose name ends in `Tests` (`Tests/`, Xcode's `AppTests/`), `*Tests.swift`, `*_test.*`, `*.test.*`, `*.spec.*` |
 | Config and dependencies | `Package.swift`, `*.plist`, `*.entitlements`, `.swiftlint.yml`, `.gitattributes`, `scripts/`, the rest of `.github/` |
 | CI | `.github/workflows/`, `.github/actions/` |
 | Docs | `*.md`, `docs/` at the top level |
@@ -427,17 +429,80 @@ gives each hunk its enclosing function.
 **Tests against code.** The header shows lines added in tests against lines
 added in code, and lists the symbols the branch declares that no test
 mentions. A symbol is an identifier declared on an added line (`func`, `var`,
-`let`, `class`, `struct`, `enum`, `case`, `protocol`, `typealias`) outside any
-function body, found by tracking braces in the file at the head, and not
-`private` or `fileprivate`: private members are tested through the API that
-uses them, and local variables would only add noise. A test mentions a symbol
-when the identifier appears as a whole word in a file under `Tests/`. On #57,
-578 test lines for 458 code lines, and a script applying this rule found 11
-of 42 names (each counted once per file) that no test mentions, among them
-`setUpKeepAwake` (the launch wiring), `IOKitSleepAssertions` (the real IOKit
-calls; the tests inject a fake) and `mainQueueSchedule`. A mention isn't
-coverage, so the line says
-"mentions", never "tested".
+`let`, `class`, `struct`, `enum`, `case`, `protocol`, `typealias`, `actor`)
+outside any function body, found by tracking braces in the file in the
+worktree, and not `private` or `fileprivate`, nor in a private type or extension:
+private members are tested through the API that uses them, and local
+variables would only add noise. A test mentions a symbol when the identifier
+appears as a whole word in a file of the Tests group. On #57, 578 test lines
+for 458 code lines, and 10 of 44 names (each counted once per type) that no
+test mentions, among them `setUpKeepAwake` (the launch wiring),
+`IOKitSleepAssertions` (the real IOKit calls; the tests inject a fake) and
+`mainQueueSchedule`. A mention isn't coverage, so the line says "mentions",
+never "tested".
+
+Refined by the user on 2026-10-03, after a run on 18 merged pull requests
+where about a quarter of the names listed were noise:
+
+- An `override`, and an `@objc` or `@IBAction` method, aren't listed: the
+  superclass, a selector or an action reaches them, not a test by name.
+  `@objc` properties are.
+- A type counts as mentioned once a test names a member the branch declares,
+  in any file, matched by the type's dotted path (`Outer.Inner`): tests
+  write `.notRead`, not `Omission.notRead`. Only through a member whose name
+  no other type of the branch declares: tests call a protocol's `create` on
+  a fake, which says nothing of the real type's (on #57,
+  `IOKitSleepAssertions`).
+- In a Swift test file, only code counts: a name in a comment or a string
+  isn't a mention; one in an interpolation is.
+- A name a removed line of the same file declares isn't new: a changed
+  value, conformance, signature or visibility (`private` to `private(set)`)
+  re-declares it. This reads each removed line alone, so a local name, or a
+  line of a string or a comment that reads like a declaration, removed
+  elsewhere in the file hides a new name that is the same.
+- Lines added under `scripts/` count as code in the ratio: a script is code
+  its tests test. The page still groups them as Config.
+- Protocol requirements the system calls (`windowShouldClose`,
+  `errorDescription`) stay listed: few, and no rule tells them apart
+  without a list of names that would age.
+
+How it reads:
+
+- **Lines.** The added lines of the Tests and Code groups' files, and of
+  scripts, folded files aside. An untracked file listed by name only counts
+  no line.
+- **Symbols.** Only Swift files of the Code group, not folded. The first pass
+  over the patch keeps the new side's numbers of their `+` lines, as ranges,
+  a digest of those lines, and the names their `-` lines declare. The file
+  is then read from the worktree and lexed whole: strings (multi-line, raw,
+  with interpolations), nested comments and `#/…/#` regexes hold no brace
+  and no declaration. `class func` is a method, `private(set)` doesn't make
+  a property private, `if let` and `guard let` at a file's level declare
+  nothing, `case a, b(Int)` declares two names, a name in backticks counts
+  without them (one with a space can't be a word, and isn't listed), and an
+  extension of a private type declared in the same file, or of a type
+  nested in one, is private. A member's type is kept as a dotted path
+  (`Outer.Inner`). A symlink declares nothing. The symbols are unknown, and
+  the header names the file rather than reading "nothing declared", when
+  its patch wasn't read, when it is past 2 MB or the files read pass 32 MB,
+  when its added lines make more than 100,000 runs, when its lines no
+  longer match the digest (the agent edited it meanwhile, a clean filter),
+  or when a brace, a multi-line string or a comment doesn't close: a bare
+  `/regex/` literal, which reads as code, does that when it holds a brace,
+  and so do `#if` branches that each open a brace (which Swift rejects).
+  A CRLF file whose patch shows LF (`eol=crlf`) still matches. An edit that
+  leaves the added lines in place isn't seen until the next refresh, which
+  the edit itself triggers.
+- **Mentions.** The test files are listed by git (`ls-files --cached --others
+  --exclude-standard`, untracked tests included), Swift files first, and read
+  up to 4,000 files, 1 MB each and 32 MB in all; reading stops once every name
+  is found. A file cut short loses its last word, which may be a longer one.
+  The header says how many test files went unread (past the limits, a
+  symlink, outside a sparse checkout; not one the worktree deleted) while a
+  name was still missing, and when git couldn't list them. A binary file (a
+  NUL in its first 8,000 bytes, as git tells them apart: a snapshot image, a
+  fixture) isn't a test's text: it is read that far only, and counts toward
+  the files read but not as unread. A submodule's folder is skipped.
 
 The rules start built in, for Swift and macOS. Per-project rules
 (`board.json`) can come later.
