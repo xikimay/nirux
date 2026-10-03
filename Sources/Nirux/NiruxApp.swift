@@ -27,6 +27,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var telegramRemoteAccessController: TelegramRemoteAccessController?
     var keepAwakeController: KeepAwakeController?
     var keepAwakeIndicator: KeepAwakeIndicator?
+    var awsSSOMonitor: AWSSSOMonitor?
     var usageLimitsIndicator: ClaudeUsageIndicator?
     var usageLimitsMonitor: ClaudeUsageLimitsMonitor?
     /// What Settings reports about Claude Code's status line, and how it
@@ -120,6 +121,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         shell = shellView
         setUpUsageLimits(window: window)
         setUpKeepAwake(window: window, shell: shellView)
+        awsSSOMonitor = AWSSSOMonitor.start(window: window)
         setupStatusBarNotices()
 
         // Native notifications: click focuses the originating workspace/column.
