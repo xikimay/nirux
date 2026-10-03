@@ -168,12 +168,16 @@ enum SpaceBrief {
     /// its board config (BoardConfigStore). Nil for an id that isn't a
     /// plain name.
     static func directory(spaceID: String, stateDirectory: URL) -> URL? {
-        // Space ids are UUIDs or "default"; refuse anything that could escape
-        // the projects folder.
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
-        guard !spaceID.isEmpty, spaceID.unicodeScalars.allSatisfy(allowed.contains) else { return nil }
+        guard isPlainSpaceID(spaceID) else { return nil }
         return stateDirectory.appendingPathComponent("projects", isDirectory: true)
             .appendingPathComponent(spaceID, isDirectory: true)
+    }
+
+    /// Space ids are UUIDs or "default"; anything else could escape the
+    /// folder it names.
+    static func isPlainSpaceID(_ spaceID: String) -> Bool {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        return !spaceID.isEmpty && spaceID.unicodeScalars.allSatisfy(allowed.contains)
     }
 
     private static func template(spaceName: String) -> String {

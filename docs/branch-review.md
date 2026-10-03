@@ -600,27 +600,45 @@ Rejected:
 
 - One file per reviewed branch:
   `<state dir>/reviews/<space id>/<branch>-<hash>.json`, where `<branch>` is
-  percent-encoded and `<hash>` is a short hash of the exact branch name (APFS
-  is case-insensitive: `Fix/A` and `fix/a` must not share a file).
-  `NIRUX_STATE_DIR` moves it.
+  percent-encoded (cut at 120 bytes) and `<hash>` is a short hash of the
+  repository and the exact branch name. The repository is its common git
+  folder (`git rev-parse --git-common-dir`, symlinks resolved), which every
+  worktree shares: two repositories of a project can each have a `main` or a
+  `feat/x`, and must not archive or delete each other's review. The exact
+  name, because APFS is case-insensitive: `Fix/A` and `fix/a` must not share
+  a file. Moving or renaming the repository's folder starts its reviews
+  fresh; the old files stay. `NIRUX_STATE_DIR` moves them. (Validated by the
+  user on 2026-10-03; this section first hashed the branch name alone.)
 - It holds the comments, drafts, reviewed marks, what was sent, the
   explanation cache, each Explain run's usage, the PR number and the last
   head reviewed. A reused branch name must not inherit old comments: the file
-  is kept only if its PR number matches the branch's PR, or, without a PR, if
-  its last head is still in the branch's reflog (`git reflog
-  refs/heads/<branch>`; `git branch -D` deletes it, a rebase keeps it).
-  Otherwise it is archived and the review starts fresh. Two limits: `git
-  checkout -B` or `git switch -C` reuses a name and keeps its reflog, so only
-  the PR number catches that reuse; and a head a rebase left unreachable leaves
-  the reflog after 30 days (`gc.reflogExpireUnreachable`), which archives a
-  review idle that long.
+  is kept only if its PR number matches the branch's PR, or, when that can't
+  settle it (no PR recorded, none open now, or `gh` missing or failing), if
+  its last head is the branch's head or is still in the branch's reflog (`git
+  reflog refs/heads/<branch>`; `git branch -D` deletes it, a rebase keeps it).
+  Otherwise it is archived (moved to `archive/` beside it, where it stays) and
+  the review starts fresh. A review is never archived for want of `gh`; if git
+  can't read the reflog, the review opens read-only until a Refresh can. Two
+  limits: `git checkout -B` or `git switch -C` reuses a name and keeps its
+  reflog, so only the PR number catches that reuse; and a head a rebase left
+  unreachable leaves the reflog after 30 days (`gc.reflogExpireUnreachable`),
+  which archives a review idle that long. Opening a kept review records the
+  head and the PR it was opened at.
 - Writes take a blocking exclusive `flock` on a sibling `<file>.lock`, held
   across read, merge and write: the installed app and a dev build can share the
   state directory, and a lock on the data file itself would be lost when the
-  file is replaced atomically.
+  file is replaced atomically. A writer that waited checks it locked the file
+  still at that path, since Clean Up deletes it.
 - A `version` field. A file from a newer version opens read-only, so an older
-  build never drops keys it doesn't know.
-- Clean Up of the worktree deletes the file.
+  build never drops keys it doesn't know. Within a version, a build keeps the
+  top-level keys it doesn't know, so a later part (R3 to R5) can add its own
+  without a new version; a key whose meaning changes needs one. A file that
+  isn't JSON is set aside by the first write; a link or a folder in its place
+  is never read or replaced.
+- Clean Up of the worktree deletes the file and its lock, in every project
+  (the Project Board cleans up a folder no workspace is open in), once the
+  branch is deleted. A branch Clean Up keeps keeps its review; archived files
+  stay.
 
 ## 9. Plan
 

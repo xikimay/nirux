@@ -215,9 +215,7 @@ extension BranchReview {
     static func isOwnPullRequest(
         _ pullRequest: PullRequest, branch: String, root: String, options: Options
     ) -> Result<Bool, LookupFailure> {
-        if let reflog = git(["log", "-g", "--format=%H", "refs/heads/\(branch)", "--"], in: root, options: options),
-           reflog.status == 0,
-           reflog.text.split(separator: "\n").contains(where: { $0 == pullRequest.headRefOid }) {
+        if reflog(of: branch, contains: pullRequest.headRefOid, root: root, options: options) == true {
             return .success(true)
         }
         guard let gitHub = options.gitHub,
