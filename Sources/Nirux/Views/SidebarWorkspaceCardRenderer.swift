@@ -306,20 +306,28 @@ final class SidebarWorkspaceCardRenderer {
             append(rowHover)
             columnHoverViews[column.index] = rowHover
 
-            let label = NSTextField(labelWithAttributedString: PilotSidebarRenderer.attributedColumn(column, fontSize: 11))
+            // A restored agent that hasn't resumed shows Resume where the
+            // status dot goes: it has no status yet.
+            let trailingWidth = column.deferredAgent == nil
+                ? 18 : SidebarExpandedMetrics.approvalButtonWidth + 8
+            let label = NSTextField(labelWithAttributedString: SidebarRenderer.attributedColumn(column, fontSize: 11))
             label.lineBreakMode = .byTruncatingTail
-            label.frame = NSRect(x: padding, y: rowY, width: sidebarWidth - padding * 2 - 18, height: rowHeight)
-            label.toolTip = PilotSidebarRenderer.attentionTooltip(for: column)
+            label.frame = NSRect(x: padding, y: rowY, width: sidebarWidth - padding * 2 - trailingWidth, height: rowHeight)
+            label.toolTip = SidebarRenderer.attentionTooltip(for: column)
             append(label)
 
-            let dot = statusDot(for: column)
-            dot.frame = NSRect(
-                x: sidebarWidth - padding - rightDotSize,
-                y: rowY + (rowHeight - rightDotSize) / 2,
-                width: rightDotSize,
-                height: rightDotSize
-            )
-            append(dot)
+            if let deferred = column.deferredAgent {
+                buildDeferredResumeButton(deferred, columnIndex: column.index, rowY: rowY, padding: padding)
+            } else {
+                let dot = statusDot(for: column)
+                dot.frame = NSRect(
+                    x: sidebarWidth - padding - rightDotSize,
+                    y: rowY + (rowHeight - rightDotSize) / 2,
+                    width: rightDotSize,
+                    height: rightDotSize
+                )
+                append(dot)
+            }
 
             let hitRect = NSRect(
                 x: padding - 8,
@@ -359,12 +367,40 @@ final class SidebarWorkspaceCardRenderer {
         return currentY
     }
 
+    /// Resume at the end of a not-resumed agent's row. Its hit area goes
+    /// before the row's: the first area under the pointer takes the click.
+    private func buildDeferredResumeButton(_ deferred: SidebarDeferredAgent, columnIndex: Int, rowY: CGFloat, padding: CGFloat) {
+        let color = NSColor.niruxAccent
+        let label = "Resume \(deferred.processName) here"
+        let button = SidebarBadgeView(
+            text: "Resume",
+            textColor: color.withAlphaComponent(0.95),
+            fillColor: color.withAlphaComponent(0.16),
+            font: .systemFont(ofSize: 10.5, weight: .semibold)
+        )
+        button.hoverTextColor = color
+        button.hoverFillColor = color.withAlphaComponent(0.3)
+        button.toolTip = label
+        button.setAccessibilityRole(.button)
+        button.setAccessibilityLabel(label)
+        let width = SidebarExpandedMetrics.approvalButtonWidth
+        button.frame = NSRect(
+            x: sidebarWidth - padding - width, y: rowY, width: width, height: SidebarExpandedMetrics.columnRowHeight
+        )
+        append(button)
+        approvalButtons[SidebarHoverTarget.deferredResumeButtonKey(columnID: deferred.columnID)] = button
+        hitAreas.append(SidebarHitArea(
+            frame: button.frame.insetBy(dx: -3, dy: -3),
+            region: .deferredAgentResume(workspaceIndex: workspace.index, columnIndex: columnIndex, columnID: deferred.columnID)
+        ))
+    }
+
     private func buildDiffStatsLabel(stats: String, padding: CGFloat, yOffset: CGFloat) -> CGFloat {
-        let compact = PilotSidebarRenderer.formatDiffStats(stats)
+        let compact = SidebarRenderer.formatDiffStats(stats)
         let statsLabel = NSTextField(labelWithString: "")
         statsLabel.allowsEditingTextAttributes = true
         statsLabel.isSelectable = false
-        statsLabel.attributedStringValue = PilotSidebarRenderer.diffStatsAttributedString(compact, fontSize: 10)
+        statsLabel.attributedStringValue = SidebarRenderer.diffStatsAttributedString(compact, fontSize: 10)
         statsLabel.lineBreakMode = .byTruncatingTail
         statsLabel.frame = NSRect(
             x: padding,
@@ -390,26 +426,63 @@ final class SidebarWorkspaceCardRenderer {
     }
 
     private func buildPRStateLabel(prInfo: PRInfo, padding: CGFloat, yOffset: CGFloat) -> CGFloat {
-        let (stateText, stateColor) = PilotSidebarRenderer.prStateDisplay(prInfo)
+        let (stateText, stateColor) = SidebarRenderer.prStateDisplay(prInfo)
         let prLabel = textLabel(
             "#\(prInfo.number) \(stateText)",
             font: .monospacedSystemFont(ofSize: 9, weight: .medium),
             color: stateColor
         )
+        let width = sidebarWidth - padding * 2
         prLabel.frame = NSRect(
             x: padding,
             y: yOffset - SidebarExpandedMetrics.prStateHeight,
-            width: sidebarWidth - padding * 2,
+            width: workspace.mergedCleanup == nil ? width : min(prLabel.fittingSize.width, width),
             height: SidebarExpandedMetrics.prStateHeight
         )
         append(prLabel)
         hitAreas.append(SidebarHitArea(frame: prLabel.frame, region: .link(url: openURLAction(prInfo.url), label: prLabel)))
+        if let offer = workspace.mergedCleanup {
+            buildCleanupLink(offer, after: prLabel, color: stateColor, maxX: padding + width)
+        }
         return yOffset - SidebarExpandedMetrics.prStateAdvance
+    }
+
+    /// "· Clean up" after "#N merged": the ⋯ menu's "Clean Up Worktree…",
+    /// with the same checks and confirmation. "· Cleaning up…" while one
+    /// runs, which does nothing.
+    private func buildCleanupLink(_ offer: MergedCleanupOffer, after prLabel: NSTextField, color: NSColor, maxX: CGFloat) {
+        let font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
+        let separator = textLabel("·", font: font, color: color.withAlphaComponent(0.6))
+        separator.frame = NSRect(
+            x: prLabel.frame.maxX, y: prLabel.frame.minY,
+            width: separator.fittingSize.width, height: prLabel.frame.height
+        )
+        let link: NSTextField
+        switch offer {
+        case .available:
+            link = textLabel("Clean up", font: font, color: color)
+            link.toolTip = "Clean Up Worktree…: checks, then asks before deleting this worktree’s folder and "
+                + "local branch and closing the workspaces open in it. The remote branch is kept."
+        case .inProgress:
+            link = textLabel("Cleaning up…", font: font, color: color.withAlphaComponent(0.6))
+        }
+        link.frame = NSRect(
+            x: separator.frame.maxX, y: prLabel.frame.minY,
+            width: max(0, min(link.fittingSize.width, maxX - separator.frame.maxX)),
+            height: prLabel.frame.height
+        )
+        append(separator)
+        append(link)
+        guard offer == .available else { return }
+        hitAreas.append(SidebarHitArea(
+            frame: link.frame,
+            region: .link(url: SidebarView.cleanupActionURL(workspaceIndex: workspace.index), label: link)
+        ))
     }
 
     private func buildCIStatusLabel(prInfo: PRInfo, padding: CGFloat, indent: CGFloat, yOffset: CGFloat) -> CGFloat {
         guard let ciStatus = prInfo.ciStatus else { return yOffset }
-        let (ciDot, ciColor, ciText) = PilotSidebarRenderer.ciStatusDisplay(ciStatus, style: .short)
+        let (ciDot, ciColor, ciText) = SidebarRenderer.ciStatusDisplay(ciStatus)
         let ciLabel = textLabel(
             "\(ciDot) \(ciText)",
             font: .monospacedSystemFont(ofSize: 9, weight: .regular),
@@ -422,15 +495,14 @@ final class SidebarWorkspaceCardRenderer {
             height: SidebarExpandedMetrics.prDetailHeight
         )
         append(ciLabel)
-        hitAreas.append(SidebarHitArea(
-            frame: ciLabel.frame,
-            region: .link(url: openURLAction(PilotSidebarRenderer.ciURL(prInfo)), label: ciLabel)
-        ))
+        // The failed check, else the PR's Checks tab, which lists running and finished runs.
+        let ciUrl = (ciStatus == "FAILURE" ? prInfo.failedCheckUrl : nil) ?? "\(prInfo.url)/checks"
+        hitAreas.append(SidebarHitArea(frame: ciLabel.frame, region: .link(url: openURLAction(ciUrl), label: ciLabel)))
         return yOffset - SidebarExpandedMetrics.prDetailAdvance
     }
 
     private func buildReviewDecisionLabel(prInfo: PRInfo, padding: CGFloat, indent: CGFloat, yOffset: CGFloat) -> CGFloat {
-        guard let display = PilotSidebarRenderer.reviewDecisionDisplay(
+        guard let display = SidebarRenderer.reviewDecisionDisplay(
             reviewDecision: prInfo.reviewDecision,
             mergeable: prInfo.mergeable
         ) else {

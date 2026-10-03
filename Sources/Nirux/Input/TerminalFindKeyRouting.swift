@@ -20,8 +20,7 @@ enum TerminalFindKeyRouting {
     static func routeInField(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> FieldRoute {
         let modifiers = modifierFlags.intersection([.command, .option, .control, .shift])
         guard modifiers.contains(.command) else { return .field }
-        let arrowKeys: ClosedRange<UInt16> = 0x7B...0x7E
-        if arrowKeys.contains(keyCode), modifiers.isDisjoint(with: [.option, .control]) {
+        if WebContentKeyRouting.movesCaretToTextEdge(keyCode: keyCode, modifierFlags: modifierFlags) {
             return .fieldEditor
         }
         return .menuThenField

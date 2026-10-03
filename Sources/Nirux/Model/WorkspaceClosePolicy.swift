@@ -14,6 +14,9 @@ enum WorkspaceClosePolicy {
         /// nil when the status can't be trusted — the alert then only says
         /// the agent is running.
         var status: AgentStatus?
+        /// A restored agent that hasn't resumed yet: nothing runs, closing
+        /// drops the session from the layout.
+        var isPaused = false
 
         var displayName: String {
             switch processName {
@@ -26,6 +29,7 @@ enum WorkspaceClosePolicy {
         }
 
         var statusDescription: String {
+            if isPaused { return "paused" }
             switch status {
             case .working: return "working"
             case .needsAttention: return "waiting for you"

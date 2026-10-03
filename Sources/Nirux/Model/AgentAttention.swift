@@ -62,7 +62,7 @@ enum AgentAttentionReason: Hashable, Sendable {
         case .apiError: return "API error"
         case .exitedMidTurn: return "exited mid-turn"
         case .stillWaiting(let dialog, let waited):
-            return "waiting \(PilotSidebarRenderer.shortDuration(waited)) · \(dialog.shortLabel)"
+            return "waiting \(SidebarRenderer.shortDuration(waited)) · \(dialog.shortLabel)"
         }
     }
 
@@ -76,7 +76,7 @@ enum AgentAttentionReason: Hashable, Sendable {
         case .apiError: return "stopped on an API error"
         case .exitedMidTurn: return "exited mid-turn"
         case .stillWaiting(let dialog, let waited):
-            return "\(dialog.headline) — waiting \(PilotSidebarRenderer.shortDuration(waited))"
+            return "\(dialog.headline) — waiting \(SidebarRenderer.shortDuration(waited))"
         }
     }
 
@@ -114,7 +114,7 @@ enum AgentAttentionReason: Hashable, Sendable {
             return ["stopped on error: \(kind ?? "unknown")", detail].compactMap { $0 }.joined(separator: " · ")
         case .exitedMidTurn: return "exited mid-turn"
         case .stillWaiting(let dialog, let waited):
-            return "waiting \(PilotSidebarRenderer.shortDuration(waited)) · \(dialog.activitySummary)"
+            return "waiting \(SidebarRenderer.shortDuration(waited)) · \(dialog.activitySummary)"
         }
     }
 }

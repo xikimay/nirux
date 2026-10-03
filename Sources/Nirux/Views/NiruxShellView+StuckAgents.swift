@@ -96,6 +96,7 @@ extension NiruxShellView {
                 )
             }
         }
+        closeEndedAgentSessions(now: now)
     }
 
     /// What the column's row shows of a stuck agent.
@@ -108,7 +109,7 @@ extension NiruxShellView {
         guard let pty = column.pty else { return nil }
         switch pty.agentStuckState(now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess) {
         case .waiting(let reason, let since)?:
-            return .waiting(reason, duration: PilotSidebarRenderer.shortDuration(now - since))
+            return .waiting(reason, duration: SidebarRenderer.shortDuration(now - since))
         case .stoppedOnError(let failure)?:
             let resume = SidebarStuckState.Resume(
                 pty.agentResumeRefusal(foreground: foregroundProcess, snapshot: snapshot, now: now)
@@ -132,11 +133,24 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         defer { updateSidebar(snapshot: snapshot) }
         guard workspaces.indices.contains(workspaceIndex),
-              let pty = workspaces[workspaceIndex].columns[safe: columnIndex]?.pty,
-              pty.agentTurnFailure?.failedAt == failedAt,
-              pty.resumeFailedTurn(snapshot: snapshot, now: Date().timeIntervalSince1970) == nil else {
-            NSSound.beep()
-            return
+              let column = workspaces[workspaceIndex].columns[safe: columnIndex]
+        else { return showToast("That agent’s column was closed") }
+        guard let pty = column.pty else { return showToast("That column has no terminal") }
+        let refusal = pty.agentTurnFailure?.failedAt == failedAt
+            ? pty.resumeFailedTurn(snapshot: snapshot, now: Date().timeIntervalSince1970)
+            : .notStopped
+        if let refusal { showToast(Self.resumeRefusalText(refusal)) }
+    }
+
+    /// Why Resume sent nothing.
+    static func resumeRefusalText(_ refusal: AgentResumeRefusal) -> String {
+        switch refusal {
+        case .notStopped: "The agent is no longer stopped on that error"
+        case .notClaude: "That Claude session is no longer running"
+        case .notAtPrompt: "Claude isn’t back at its prompt yet"
+        case .userTyped: "There’s a draft at Claude’s prompt: send “continue” yourself"
+        case .needsFix: "This error needs your fix first: see the terminal"
+        case .alreadySent: "“continue” was just sent"
         }
     }
 
@@ -147,12 +161,12 @@ extension NiruxShellView {
     func resumeExitedAgent(in workspace: WorkspaceState, column: ColumnState) {
         let snapshot = ProcessSnapshot()
         defer { updateSidebar(snapshot: snapshot) }
-        guard let pty = column.pty, !pty.hasExited,
-              let exit = pty.agentMidTurnExit, exit.processName == "claude",
-              let shellPID = pty.shellPID,
-              pty.foregroundInstance(snapshot: snapshot)?.pid == shellPID else {
-            NSSound.beep()
-            return
+        guard let pty = column.pty, !pty.hasExited else { return showToast("That terminal has closed") }
+        guard let exit = pty.agentMidTurnExit, exit.processName == "claude" else {
+            return showToast("There’s no Claude session to resume there")
+        }
+        guard let shellPID = pty.shellPID, pty.foregroundInstance(snapshot: snapshot)?.pid == shellPID else {
+            return showToast("Something else runs in that terminal now")
         }
         let command = Self.claudeCommand(
             resume: exit.sessionID.map { .session($0) } ?? .picker,

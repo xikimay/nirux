@@ -144,6 +144,19 @@ final class HandoverFileTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination))
     }
 
+    func testComposedHandoverIsPrivateAndNeverWrittenThroughASymlink() throws {
+        let victim = worktree + "/victim.txt"
+        try write("private", to: victim)
+        try FileManager.default.createSymbolicLink(atPath: destination, withDestinationPath: victim)
+
+        XCTAssertNoThrow(try HandoverFile.deliver("# Task", toDirectory: worktree, filename: ".claude-handover.md").get())
+        XCTAssertEqual(try String(contentsOfFile: victim, encoding: .utf8), "private")
+        let attributes = try FileManager.default.attributesOfItem(atPath: destination)
+        XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeRegular)
+        XCTAssertEqual(attributes[.posixPermissions] as? Int, 0o600)
+        XCTAssertEqual(try String(contentsOfFile: destination, encoding: .utf8), "# Task")
+    }
+
     func testReplacesStaleHandover() throws {
         try write("stale", to: destination)
         let source = tmpPath()

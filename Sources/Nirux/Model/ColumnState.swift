@@ -56,6 +56,12 @@ final class ColumnState {
     /// launch command hasn't started the agent yet (see
     /// `NiruxShellView.isLaunchingRestoredAgent`), then dropped.
     var restoredColumn: PersistedColumn?
+    /// The restored agent this column starts when it resumes; no shell runs
+    /// until then (ColumnState+DeferredAgent.swift).
+    private(set) var deferredAgent: DeferredAgentLaunch?
+    /// The user asked the column to resume its agent (its notice).
+    var onResumeDeferredAgent: (() -> Void)?
+    var deferredAgentOverlay: ShellExitedOverlay?
 
     /// Terminal title from OSC 0/2 (agent context, vim filename, etc.)
     var terminalTitle: String? {
@@ -66,6 +72,9 @@ final class ColumnState {
     static let boringTitles: Set<String> = ["zsh", "bash", "fish", "sh", "-zsh", "-bash"]
     private(set) var titleBar: NSView?
     private var titleLabel: NSTextField?
+    /// What the title bar reads ("claude · ~/repo"); empty before its
+    /// first refresh.
+    var titleText: String { titleLabel?.stringValue ?? "" }
     private var titleBorder: NSView?
 
     /// Height reserved for the title bar (always shown for terminal columns)
@@ -75,6 +84,9 @@ final class ColumnState {
 
     /// Spec needed to respawn the shell after it exits.
     private var terminalSpec: (cwd: String, shellArgs: [String], environment: [String: String])?
+    /// The first shell start is on its way (or done): a column restored
+    /// without its agent starts one only when the agent resumes.
+    private var isShellStartScheduled = false
     private var shellExitedOverlay: ShellExitedOverlay?
     /// An agent died mid-turn in the shell that still runs here
     /// (ColumnState+StuckAgent.swift).
@@ -127,6 +139,12 @@ final class ColumnState {
     /// the foreground process name.
     func updateTitleBarLabel(snapshot: @autoclosure () -> ProcessSnapshot) {
         guard let label = titleLabel else { return }
+        if let deferredAgent {
+            let path = launchDirectory?.abbreviatedPath(maxComponents: 2) ?? ""
+            label.stringValue = ["\(deferredAgent.processName) (not resumed)", path].filter { !$0.isEmpty }
+                .joined(separator: " · ")
+            return
+        }
         let name: String
         if let termTitle = terminalTitle, !termTitle.isEmpty, !Self.boringTitles.contains(termTitle) {
             name = termTitle
@@ -154,6 +172,7 @@ final class ColumnState {
             terminal.frame = NSRect(x: 0, y: 0, width: width, height: height - barHeight)
             shellExitedOverlay?.frame = terminal.frame
             agentExitOverlay?.frame = terminal.frame
+            deferredAgentOverlay?.frame = terminal.frame
         }
         layoutFindBar()
     }
@@ -234,20 +253,31 @@ final class ColumnState {
         // Match a normal terminal launch: interactive + login shell. This
         // ensures PATH/bootstrap logic from .zprofile/.zshrc is available
         // when Nirux restores command-backed columns after a Finder relaunch.
-        // The shell path is single-quoted — an unquoted path with spaces or
-        // metacharacters would be word-split by the -c string.
-        let shell = PtySession.defaultShell
-        let quotedShell = "'" + shell.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        self.init(
-            cwd: cwd,
-            shellArgs: ["-i", "-l", "-c", "\(command); exec \(quotedShell) -i -l"],
-            environment: environment
-        )
+        self.init(cwd: cwd, shellArgs: Self.commandShellArgs(command), environment: environment)
     }
 
-    /// Shared terminal init — pass extra shell args for command mode.
-    private init(cwd: String, shellArgs: [String], environment: [String: String]) {
-        terminalSpec = (cwd, shellArgs, environment)
+    /// A restored agent column whose agent waits to resume: the terminal is
+    /// there, its shell starts with the agent's launch command later
+    /// (`startDeferredAgent`).
+    convenience init(cwd: String, deferredAgent: DeferredAgentLaunch, environment: [String: String] = [:]) {
+        self.init(cwd: cwd, shellArgs: nil, environment: environment)
+        self.deferredAgent = deferredAgent
+        showDeferredAgentNotice(deferredAgent)
+    }
+
+    /// The login shell's arguments to run `command`, then stay as a shell.
+    /// The shell path is single-quoted — an unquoted path with spaces or
+    /// metacharacters would be word-split by the -c string.
+    private static func commandShellArgs(_ command: String) -> [String] {
+        let shell = PtySession.defaultShell
+        let quotedShell = "'" + shell.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        return ["-i", "-l", "-c", "\(command); exec \(quotedShell) -i -l"]
+    }
+
+    /// Shared terminal init — pass extra shell args for command mode, nil
+    /// to start no shell yet.
+    private init(cwd: String, shellArgs: [String]?, environment: [String: String]) {
+        terminalSpec = (cwd, shellArgs ?? [], environment)
         agentUUID = environment["NIRUX_AGENT_UUID"]
         let dropView = DropTargetView()
         dropView.wantsLayer = true
@@ -256,7 +286,8 @@ final class ColumnState {
         let ptySession = PtySession()
         pty = ptySession
 
-        // File drop → paste escaped path(s) into PTY
+        // File drop → paste escaped path(s) into PTY, once one runs.
+        dropView.acceptsFileDrops = { [weak self] in self?.isAwaitingResume != true }
         dropView.onFileDrop = { [weak ptySession] urls in
             let paths = urls.map { Self.shellEscape($0.path) }.joined(separator: " ")
             if let data = paths.data(using: .utf8) {
@@ -303,20 +334,52 @@ final class ColumnState {
             self?.showShellExitedOverlay()
         }
 
-        // Delay shell start so the terminal surface is created first. Weak:
-        // a column closed meanwhile forks no shell.
-        let args = shellArgs
-        let env = environment
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak ptySession] in
-            ptySession?.start(
+        if let shellArgs { scheduleShellStart(cwd: cwd, args: shellArgs, environment: environment) }
+    }
+
+    /// Delay shell start so the terminal surface is created first. Weak: a
+    /// column closed meanwhile forks no shell.
+    private func scheduleShellStart(cwd: String, args: [String], environment: [String: String]) {
+        isShellStartScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak pty] in
+            pty?.start(
                 shell: PtySession.defaultShell,
                 args: args,
                 cwd: cwd,
                 cols: 80,
                 rows: 24,
-                environment: env
+                environment: environment
             )
         }
+    }
+
+    /// Take the agent this column waits to start: its notice goes and the
+    /// column no longer waits. Nil when nothing waits.
+    func takeDeferredAgent() -> DeferredAgentLaunch? {
+        guard let deferredAgent else { return nil }
+        self.deferredAgent = nil
+        hideDeferredAgentNotice()
+        return deferredAgent
+    }
+
+    /// Start the shell of a column created without one, running `command`
+    /// like any agent column restored at launch. Once only.
+    func startShell(command: String) {
+        guard !isShellStartScheduled, let spec = terminalSpec else { return }
+        let args = Self.commandShellArgs(command)
+        terminalSpec = (spec.cwd, args, spec.environment)
+        scheduleShellStart(cwd: spec.cwd, args: args, environment: spec.environment)
+    }
+
+    /// Where, and with what environment, the column's shell starts.
+    var launchDirectory: String? { terminalSpec?.cwd }
+    var launchEnvironment: [String: String]? { terminalSpec?.environment }
+
+    /// Where, and with what environment, the shell of a column created
+    /// without one starts. No effect once it started.
+    func setLaunch(directory: String, environment: [String: String]) {
+        guard !isShellStartScheduled, let spec = terminalSpec else { return }
+        terminalSpec = (directory, spec.shellArgs, environment)
     }
 
     /// WebView column
@@ -397,6 +460,11 @@ final class ColumnState {
         codexSessionTracker.sessionID(for: foregroundProcess)
     }
 
+    /// The Codex thread this column's `codex` process proved it runs.
+    func boundCodexSessionID(of process: ProcessInstance) -> String? {
+        codexSessionTracker.boundSessionID(for: process)
+    }
+
     func prepareClaudeResume(sessionID: String) {
         claudeSessionTracker.prepareResume(sessionID: sessionID)
     }
@@ -433,9 +501,11 @@ final class ColumnState {
         return admission
     }
 
-    /// Whether the sidebar may answer this PermissionRequest (#23, #28):
-    /// fired by the column's own `claude` for the session bound to it.
-    func isApprovalEligible(
+    /// Whether the event was fired by the column's own `claude` (or the real
+    /// one under its launcher) for the session it confirmed (#23, #28): the
+    /// sidebar may answer its PermissionRequest, and the session history
+    /// may record it.
+    func isFromOwnClaude(
         _ event: AgentHookEvent,
         foregroundProcess: ForegroundProcess?,
         snapshot: ProcessSnapshot

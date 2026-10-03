@@ -1,12 +1,11 @@
 import AppKit
 
-/// Shared formatting + rendering helpers used by both SidebarView (expanded
-/// mode) and WorkspaceState's pilot panel. Both surfaces render the same
-/// workspace metadata — column rows with icons, agent-status dots, git diff
-/// stats, PR state, CI status, review decision — and this file is the single
-/// source of truth for how any of that looks.
+/// Formatting + rendering helpers for the sidebar's workspace cards (and the
+/// few other surfaces that describe a column or a wait): column rows with
+/// icons, git diff stats, PR state, CI status, review decision — this file
+/// is the single source of truth for how any of that looks.
 @MainActor
-enum PilotSidebarRenderer {
+enum SidebarRenderer {
 
     // MARK: - Diff stats
 
@@ -31,7 +30,6 @@ enum PilotSidebarRenderer {
     }
 
     /// Build a colored "+42 -8" attributed string at the given font size.
-    /// Used by both the sidebar and the pilot panel diff stats row.
     static func diffStatsAttributedString(_ compact: String, fontSize: CGFloat) -> NSAttributedString {
         let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         let attrStr = NSMutableAttributedString()
@@ -71,27 +69,15 @@ enum PilotSidebarRenderer {
         }
     }
 
-    enum CIStatusStyle {
-        /// Compact labels for the sidebar: "passed" / "failed" / "running".
-        case short
-        /// Verbose labels for the pilot panel: "checks passed" / "checks failed".
-        case long
-    }
-
-    /// The failed check, else the PR's Checks tab, which lists running
-    /// and finished runs.
-    static func ciURL(_ pullRequest: PRInfo) -> String {
-        (pullRequest.ciStatus == "FAILURE" ? pullRequest.failedCheckUrl : nil) ?? "\(pullRequest.url)/checks"
-    }
-
-    static func ciStatusDisplay(_ ciStatus: String, style: CIStatusStyle) -> (dot: String, color: NSColor, text: String) {
+    /// Dot, color and label for a CI rollup: "passed" / "failed" / "running".
+    static func ciStatusDisplay(_ ciStatus: String) -> (dot: String, color: NSColor, text: String) {
         switch ciStatus {
         case "SUCCESS":
-            return ("●", .systemGreen, style == .long ? "checks passed" : "passed")
+            return ("●", .systemGreen, "passed")
         case "FAILURE":
-            return ("✗", .systemRed, style == .long ? "checks failed" : "failed")
+            return ("✗", .systemRed, "failed")
         case "PENDING":
-            return ("◐", .systemYellow, style == .long ? "checks running" : "running")
+            return ("◐", .systemYellow, "running")
         default:
             return ("○", NSColor.white.withAlphaComponent(0.3), ciStatus.lowercased())
         }
@@ -130,6 +116,25 @@ enum PilotSidebarRenderer {
         return nil
     }()
 
+    /// The desktop app's icon for an agent that has one installed (the
+    /// palette's agent rows show it too).
+    static func agentAppIcon(processName: String) -> NSImage? {
+        switch processName {
+        case "claude": claudeAppIcon
+        case "codex": codexAppIcon
+        default: nil
+        }
+    }
+
+    /// The symbol an agent's row shows without its app icon.
+    static func agentSymbol(processName: String) -> String? {
+        switch processName {
+        case "claude": "sparkles"
+        case "codex": "brain.head.profile"
+        default: nil
+        }
+    }
+
     /// SF symbol configured for a column-row glyph. Used for fallback icons
     /// when an app icon isn't available.
     static func sfSymbol(_ name: String, color: NSColor) -> NSImage? {
@@ -151,14 +156,13 @@ enum PilotSidebarRenderer {
         if column.isWebView {
             return sfSymbol("globe", color: color)
         }
-        guard let processName = column.processName?.lowercased() else {
+        guard let processName = (column.deferredAgent?.processName ?? column.processName)?.lowercased() else {
             return sfSymbol("apple.terminal", color: color)
         }
         switch processName {
-        case "claude":
-            return claudeAppIcon ?? sfSymbol("sparkles", color: color)
-        case "codex":
-            return codexAppIcon ?? sfSymbol("brain.head.profile", color: color)
+        case "claude", "codex":
+            return agentAppIcon(processName: processName)
+                ?? agentSymbol(processName: processName).flatMap { sfSymbol($0, color: color) }
         case "gemini":
             return sfSymbol("sparkle", color: color)
         case "opencode":
@@ -205,7 +209,7 @@ enum PilotSidebarRenderer {
         } else if column.isWebView {
             displayName = column.webTitle?.isEmpty == false ? column.webTitle! : "web"
         } else {
-            displayName = column.stuck?.agentName ?? column.processName ?? "shell"
+            displayName = column.deferredAgent?.processName ?? column.stuck?.agentName ?? column.processName ?? "shell"
         }
         // Unsaved-changes dot — same amber as the editor tab bar's. Before
         // the name: these labels truncate tail-first, and a state indicator
@@ -217,6 +221,15 @@ enum PilotSidebarRenderer {
             ]))
         }
         result.append(NSAttributedString(string: displayName, attributes: [.font: font, .foregroundColor: textColor]))
+        // A restored agent that hasn't resumed has no status to show yet.
+        // Short: the row keeps room for its Resume button.
+        if column.deferredAgent != nil {
+            result.append(NSAttributedString(string: " · paused", attributes: [
+                .font: font,
+                .foregroundColor: NSColor.white.withAlphaComponent(0.3)
+            ]))
+            return result
+        }
 
         // Time in the current turn for working agents — "· 12m" in green
         // next to the name.
@@ -251,6 +264,7 @@ enum PilotSidebarRenderer {
 
     /// Row tooltip: what exactly the agent waits on ("Bash: git push").
     static func attentionTooltip(for column: ColumnInfo) -> String? {
+        if let deferred = column.deferredAgent { return deferred.tooltip }
         if let stuck = column.stuck { return stuck.tooltip }
         guard column.agentStatus == .needsAttention, let reason = column.attentionReason else { return nil }
         let detail = reason.detailLine.flatMap { AgentText.clean($0, maxLength: 300) }
@@ -271,35 +285,5 @@ enum PilotSidebarRenderer {
         if total < 60 { return "\(total)s" }
         if total < 3600 { return "\(total / 60)m" }
         return "\(total / 3600)h\(String(format: "%02d", (total % 3600) / 60))m"
-    }
-
-    // MARK: - Agent status dot
-
-    /// Create a pulsing agent-status dot view. Returns nil for `.idle` status.
-    /// Caller is responsible for adding the returned view to its parent and
-    /// tracking it for later removal.
-    static func makeAgentDot(
-        status: AgentStatus, x: CGFloat, yOffset: CGFloat, rowHeight: CGFloat, size: CGFloat
-    ) -> NSView? {
-        guard status != .idle else { return nil }
-        let dotColor: NSColor = status == .working ? .systemGreen : .systemOrange
-        let dot = NSView(frame: NSRect(
-            x: x, y: yOffset - rowHeight + (rowHeight - size) / 2,
-            width: size, height: size
-        ))
-        dot.wantsLayer = true
-        dot.layer?.backgroundColor = dotColor.cgColor
-        dot.layer?.cornerRadius = size / 2
-
-        let pulse = CABasicAnimation(keyPath: "opacity")
-        pulse.fromValue = 1.0
-        pulse.toValue = status == .working ? 0.3 : 0.4
-        pulse.duration = status == .working ? 1.0 : 0.5
-        pulse.autoreverses = true
-        pulse.repeatCount = .infinity
-        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        dot.layer?.add(pulse, forKey: "pulse")
-
-        return dot
     }
 }

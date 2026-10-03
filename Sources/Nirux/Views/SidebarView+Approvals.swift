@@ -25,6 +25,13 @@ struct SidebarResumeClick: Equatable {
     let failedAt: TimeInterval
 }
 
+/// Resume clicked on the row of a restored agent that hasn't resumed yet.
+struct SidebarDeferredResumeClick: Equatable {
+    let workspaceIndex: Int
+    let columnIndex: Int
+    let columnID: UUID
+}
+
 extension SidebarView {
     /// A block appears, moves or changes to the next request on its own
     /// (the agent asks, a decision lands, a card above grows): a button
@@ -58,6 +65,8 @@ extension SidebarView {
             return SidebarHoverTarget.approvalButtonKey(requestID: requestID, behavior: behavior)
         case let .agentResume(workspaceIndex, columnIndex, failedAt):
             return SidebarHoverTarget.resumeButtonKey(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt)
+        case let .deferredAgentResume(_, _, columnID):
+            return SidebarHoverTarget.deferredResumeButtonKey(columnID: columnID)
         default:
             return nil
         }
@@ -117,9 +126,25 @@ extension SidebarView {
         return SidebarResumeClick(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: releasedFailure)
     }
 
+    /// The Resume of a not-resumed agent a click makes, if any: the same
+    /// rules, for the same column.
+    static func deferredResumeClick(
+        pressed: SidebarHitRegion,
+        released: SidebarHitRegion?,
+        clickCount: Int,
+        armedAtPress: Bool,
+        armedAtRelease: Bool
+    ) -> SidebarDeferredResumeClick? {
+        guard clickCount == 1, armedAtPress, armedAtRelease,
+              case let .deferredAgentResume(_, _, pressedColumn) = pressed,
+              case let .deferredAgentResume(workspaceIndex, columnIndex, releasedColumn)? = released,
+              releasedColumn == pressedColumn else { return nil }
+        return SidebarDeferredResumeClick(workspaceIndex: workspaceIndex, columnIndex: columnIndex, columnID: releasedColumn)
+    }
+
     /// A press on Allow / Deny / Resume acts only on its release (see
-    /// `approvalClickDecision`, `resumeClick`), never on the press. The
-    /// loop also keeps the press from moving the window.
+    /// `approvalClickDecision`, `resumeClick`, `deferredResumeClick`), never
+    /// on the press. The loop also keeps the press from moving the window.
     func trackApprovalClick(_ region: SidebarHitRegion, event: NSEvent) {
         guard let key = Self.armedButtonKey(for: region) else { return }
         let armedAtPress = isApprovalButtonArmed(key)
@@ -148,6 +173,11 @@ extension SidebarView {
                 armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
             ) {
                 onAgentResume?(resume.workspaceIndex, resume.columnIndex, resume.failedAt)
+            } else if let resume = Self.deferredResumeClick(
+                pressed: region, released: released, clickCount: event.clickCount,
+                armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
+            ) {
+                onDeferredAgentResume?(resume.workspaceIndex, resume.columnIndex, resume.columnID)
             }
             return
         }
