@@ -3,8 +3,19 @@ import AppKit
 /// Cmd-chords that an editor or browser column hands to its WebView instead
 /// of the menu bar. The key interceptor sends every other Cmd-chord in those
 /// columns to the menu first, because WKWebView's performKeyEquivalent would
-/// otherwise swallow menu shortcuts such as Cmd+Arrow.
+/// otherwise swallow menu shortcuts such as Cmd+T.
 enum WebContentKeyRouting {
+    /// Cmd+Arrow and Shift+Cmd+Arrow: the macOS moves (and selections) to
+    /// the line or document edge. While text has the keyboard focus they go
+    /// to it, ahead of the menu items they also name (Focus Left/Right,
+    /// Move Left/Right, Workspace Up/Down); Control+Cmd+Arrow keep those
+    /// reachable from text.
+    static func movesCaretToTextEdge(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> Bool {
+        let modifiers = modifierFlags.intersection([.command, .option, .control, .shift])
+        let arrowKeys: ClosedRange<UInt16> = 0x7B...0x7E
+        return arrowKeys.contains(keyCode) && (modifiers == [.command] || modifiers == [.command, .shift])
+    }
+
     static func passesToWebContent(
         isEditor: Bool,
         characters: String?,
@@ -43,6 +54,11 @@ enum WebContentKeyRouting {
         // Cmd+P: Monaco rebinds it to the workspace file picker. The command
         // palette stays reachable in the editor through Shift+Cmd+P.
         if types("p", ansiKeyCode: 0x23), modifiers == [.command] {
+            return true
+        }
+        // Cmd+L: Monaco selects the current line. Columns > Focus Address
+        // Bar only acts on browser columns.
+        if types("l", ansiKeyCode: 0x25), modifiers == [.command] {
             return true
         }
         // Cmd+Opt+Return: Monaco resolves this chord itself — "Replace All"

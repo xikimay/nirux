@@ -82,9 +82,9 @@ extension NiruxShellView {
         }
         board.view.onRefresh = { [weak board] in board?.reload() }
         board.view.onBoardSettings = { [weak self, weak board] in
-            guard let self, let board, self.profiles.contains(where: { $0.id == board.projectID }) else {
-                NSSound.beep()
-                return
+            guard let self, let board else { return }
+            guard self.profiles.contains(where: { $0.id == board.projectID }) else {
+                return self.showToast("This board’s project was deleted")
             }
             self.showBoardSettings(profileID: board.projectID)
         }
@@ -126,17 +126,14 @@ extension NiruxShellView {
         workspaceStore.visibleWorkspaceIndices(in: projectID).map { workspaces[$0] }.filter { !$0.isClosing }
     }
 
-    /// A board is shown while its workspace is: the selected one, or any of
-    /// the space's in Pilot Mode, in a window that isn't minimized.
+    /// A board is shown while its workspace is the selected one, in a
+    /// window that isn't minimized.
     func isProjectBoardShown(_ board: ProjectBoardController) -> Bool {
         projectBoardLocations.first { $0.board === board }.map(isProjectBoardShown) ?? false
     }
 
     private func isProjectBoardShown(_ location: ProjectBoardLocation) -> Bool {
         guard let window, !window.isMiniaturized, location.workspace.profileID == activeProfileID else { return false }
-        if isPilotMode {
-            return visibleWorkspaceIndices.contains { workspaces[$0] === location.workspace }
-        }
         return location.workspace === activeWorkspace
     }
 
@@ -229,7 +226,7 @@ extension NiruxShellView {
             agentInFront: agentInFront,
             status: pty.cachedAgentState,
             openDialog: pty.agentVisibleDialog(foreground: foreground)?.reason,
-            workingFor: pty.agentTurnStartedAt.map { PilotSidebarRenderer.shortDuration(now - $0.timeIntervalSince1970) }
+            workingFor: pty.agentTurnStartedAt.map { SidebarRenderer.shortDuration(now - $0.timeIntervalSince1970) }
         )
         var failedAt: TimeInterval?
         if case .stoppedOnError(_, _, let at, _)? = stuck { failedAt = at }
@@ -242,14 +239,14 @@ extension NiruxShellView {
         switch action {
         case .focus(let workspaceID, let columnID):
             guard let workspace = workspaces.first(where: { $0.id == workspaceID && !$0.isClosing }) else {
-                return NSSound.beep()
+                return showToast("That workspace was closed")
             }
             let columnIndex = columnID.flatMap { id in workspace.columns.firstIndex { $0.id == id } }
             focusWorkspace(id: workspaceID, column: columnIndex)
         case .open(let path, let title):
             guard FileManager.default.fileExists(atPath: path) else {
                 board.expireWorktrees()
-                return NSSound.beep()
+                return showToast("That worktree’s folder is gone")
             }
             addWorkspace(title: title, cwd: path, profileID: board.projectID)
             saveState()
@@ -260,12 +257,12 @@ extension NiruxShellView {
             // Not into a workspace or a column on its way out.
             guard let workspaceIndex = workspaces.firstIndex(where: { $0.id == workspaceID && !$0.isClosing }),
                   let columnIndex = workspaces[workspaceIndex].columns.firstIndex(where: { $0.id == columnID && !$0.isClosing })
-            else { return NSSound.beep() }
+            else { return showToast("That agent’s column was closed") }
             resumeFailedAgent(workspaceIndex: workspaceIndex, columnIndex: columnIndex, failedAt: failedAt)
         case .resumeExited(let workspaceID, let columnID):
             guard let workspace = workspaces.first(where: { $0.id == workspaceID && !$0.isClosing }),
                   let column = workspace.columns.first(where: { $0.id == columnID && !$0.isClosing })
-            else { return NSSound.beep() }
+            else { return showToast("That agent’s column was closed") }
             resumeExitedAgent(in: workspace, column: column)
         case .addToQueue(let number):
             addToMergeQueue(number, board: board)

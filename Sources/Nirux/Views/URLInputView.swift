@@ -23,7 +23,7 @@ final class URLInputPanel {
         let built = RaycastPanel.build(
             RaycastPanel.Config(
                 width: Self.size.width, height: Self.size.height,
-                icon: "🌐", placeholder: "Enter URL or search..."
+                icon: "globe", placeholder: "Enter URL or search..."
             ),
             fieldTarget: self, fieldAction: #selector(fieldAction)
         )

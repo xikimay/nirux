@@ -299,18 +299,51 @@ final class KeepAwakeControllerTests: XCTestCase {
 
     // MARK: - Indicator
 
+    /// Its view hides: the controller's `isHidden` does nothing for a
+    /// trailing title bar accessory.
     func testIndicatorShowsOnlyWhileActiveAndSaysWhy() {
         let indicator = KeepAwakeIndicator()
-        XCTAssertTrue(indicator.isHidden)
+        XCTAssertTrue(indicator.view.isHidden)
         indicator.update(isActive: true, workingAgentCount: 2)
-        XCTAssertFalse(indicator.isHidden)
+        XCTAssertFalse(indicator.view.isHidden)
         XCTAssertEqual(indicator.view.toolTip, "Keeping your Mac awake while 2 agents work.")
         indicator.update(isActive: true, workingAgentCount: 1)
         XCTAssertEqual(indicator.view.toolTip, "Keeping your Mac awake while 1 agent works.")
         indicator.update(isActive: true, workingAgentCount: 0)
         XCTAssertTrue(indicator.view.toolTip?.contains("no agent is working now") == true)
         indicator.update(isActive: false, workingAgentCount: 0)
-        XCTAssertTrue(indicator.isHidden)
+        XCTAssertTrue(indicator.view.isHidden)
+    }
+
+    /// In a real title bar: hidden, the cup leaves its room to the
+    /// accessory next to it; shown, it takes the trailing edge back.
+    func testIndicatorTakesNoRoomInTheTitleBarWhenHidden() {
+        _ = NSApplication.shared
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 300),
+            styleMask: [.titled, .closable], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        let indicator = KeepAwakeIndicator()
+        let neighbour = NSTitlebarAccessoryViewController()
+        neighbour.layoutAttribute = .trailing
+        neighbour.view = NSView(frame: NSRect(x: 0, y: 0, width: 50, height: 22))
+        window.addTitlebarAccessoryViewController(indicator)
+        window.addTitlebarAccessoryViewController(neighbour)
+        func frameInWindow(_ view: NSView) -> NSRect {
+            window.contentView?.superview?.layoutSubtreeIfNeeded()
+            return view.convert(view.bounds, to: nil)
+        }
+
+        // The cup hidden: the neighbour has the trailing edge.
+        let edge = frameInWindow(neighbour.view).maxX
+        indicator.update(isActive: true, workingAgentCount: 1)
+        XCTAssertEqual(frameInWindow(indicator.view).maxX, edge)
+        XCTAssertEqual(frameInWindow(indicator.view).width, 30)
+        XCTAssertEqual(frameInWindow(neighbour.view).maxX, frameInWindow(indicator.view).minX)
+        indicator.update(isActive: false, workingAgentCount: 0)
+        XCTAssertEqual(frameInWindow(neighbour.view).maxX, edge, "the room is given back")
     }
 
     // MARK: - Setting
@@ -386,6 +419,38 @@ final class KeepAwakeShellTests: XCTestCase {
             shell.lastMetadataRefreshAt = uptime - NiruxShellView.heartbeatStaleAfter - 1
             shell.refreshAgentStatusInBackground()
             XCTAssertEqual(pty.cachedAgentState, .idle, "no claude in that terminal: the turn is over")
+        }
+    }
+
+    /// A Claude turn interrupted with Esc stays "working", with no hook to
+    /// end it. Once it has been silent past the timeout the poll has nothing
+    /// left to re-read, and must still let the controller drop it, or the
+    /// Mac stays awake until Nirux comes back to the front.
+    func testPollReleasesATurnGoneSilentInTheBackground() throws {
+        try withShell { shell in
+            let assertions = FakeSleepAssertions()
+            let clock = ManualSchedule()
+            let controller = KeepAwakeController(enabled: true, assertions: assertions, schedule: clock.schedule)
+            shell.keepAwake = controller
+            let pty = try XCTUnwrap(shell.workspaces.first?.columns.first?.pty)
+            _ = pty.applyAgentHook(
+                AgentHookEvent(
+                    kind: .claude, name: .userPromptSubmit,
+                    timestamp: Date().timeIntervalSince1970 - KeepAwakeController.activityTimeout - 1
+                ),
+                isUserFocused: false
+            )
+            XCTAssertEqual(pty.cachedAgentState, .working)
+            XCTAssertFalse(NiruxShellView.needsBackgroundRefresh(pty))
+            // What the controller saw while the turn still counted.
+            controller.update(workingAgentCount: 1)
+            XCTAssertTrue(controller.isActive)
+
+            shell.lastMetadataRefreshAt = ProcessInfo.processInfo.systemUptime - NiruxShellView.heartbeatStaleAfter - 1
+            shell.refreshAgentStatusInBackground()
+            clock.advance(by: KeepAwakeController.gracePeriod)
+            XCTAssertFalse(controller.isActive)
+            XCTAssertTrue(assertions.held.isEmpty)
         }
     }
 

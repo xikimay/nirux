@@ -76,7 +76,12 @@ extension NiruxShellView {
             activeWSIndex = min(state.activeWorkspaceIndex, max(workspaces.count - 1, 0))
         }
         restoreSidebarState(state.settings)
+        // Lays out the workspace on screen, which resumes the agents it
+        // shows (see NiruxShellView+LazyRestore.swift).
         relayout(animated: false)
+        if (state.settings?.agentResumeOnLaunch ?? .defaultValue) == .allAtOnce {
+            resumeAllDeferredAgents()
+        }
         updateSidebar()
     }
 
@@ -101,50 +106,27 @@ extension NiruxShellView {
         case .webView:
             workspace.addColumn(webViewURL: persistedColumn.webViewURL ?? "about:blank")
         case .claudeCode:
-            let mode = persistedColumn.claudeLaunchMode ?? .default
+            // Claimed now, for the whole layout: whenever each column
+            // resumes (see NiruxShellView+LazyRestore.swift), two never
+            // share a session.
             let resumeTarget = Self.claudeRestoreTarget(
                 sessionID: persistedColumn.claudeSessionID,
                 sessionIsUnprompted: persistedColumn.claudeSessionIsUnprompted == true,
                 claimedSessionIDs: &claimedSessionIDs.claude
             )
-            // The brief goes on restores too: a resumed conversation keeps the
-            // prompt it recorded until it compacts, then rebuilds it from the
-            // flags of this launch.
-            workspace.addColumn(
-                command: NiruxShellView.claudeCommand(
-                    resume: resumeTarget,
-                    mode: mode,
-                    briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile
-                ),
-                agentUUID: persistedColumn.agentUUID ?? UUID().uuidString,
-                cwd: Self.existingDirectory(persistedColumn.cwd)
+            addDeferredAgentColumn(
+                .claude(resume: resumeTarget, mode: persistedColumn.claudeLaunchMode ?? .default),
+                restoring: persistedColumn, in: workspace
             )
-            workspace.columns.last?.restoredColumn = persistedColumn
-            if case .session(let sessionID) = resumeTarget {
-                workspace.columns.last?.prepareClaudeResume(sessionID: sessionID)
-            }
         case .codex:
-            let mode = persistedColumn.codexLaunchMode ?? .default
             let resumeTarget = Self.agentRestoreTarget(
                 sessionID: persistedColumn.codexSessionID,
                 claimedSessionIDs: &claimedSessionIDs.codex
             )
-            workspace.addColumn(
-                command: NiruxShellView.codexCommand(
-                    resume: resumeTarget,
-                    mode: mode,
-                    briefFile: NiruxShellView.codexBriefFile(
-                        from: spaceBriefInjection(for: workspace),
-                        launchDirectory: persistedColumn.cwd ?? workspace.cwd
-                    )
-                ),
-                agentUUID: persistedColumn.agentUUID ?? UUID().uuidString,
-                cwd: Self.existingDirectory(persistedColumn.cwd)
+            addDeferredAgentColumn(
+                .codex(resume: resumeTarget, mode: persistedColumn.codexLaunchMode ?? .default),
+                restoring: persistedColumn, in: workspace
             )
-            workspace.columns.last?.restoredColumn = persistedColumn
-            if case .session(let sessionID) = resumeTarget {
-                workspace.columns.last?.prepareCodexResume(sessionID: sessionID)
-            }
         case .editor:
             let openFiles = persistedColumn.editorOpenFiles ?? []
             // Non-interactive: a binary or huge file in the persisted tab set
@@ -189,6 +171,31 @@ extension NiruxShellView {
             WorkspaceState.maxWidthFraction,
             max(WorkspaceState.minWidthFraction, fraction)
         )
+    }
+
+    /// An agent column back without its agent, which starts later (see
+    /// NiruxShellView+LazyRestore.swift).
+    private func addDeferredAgentColumn(
+        _ agent: DeferredAgentLaunch.Agent,
+        restoring persistedColumn: PersistedColumn,
+        in workspace: WorkspaceState
+    ) {
+        workspace.addColumn(
+            deferredAgent: DeferredAgentLaunch(
+                agent: agent,
+                // Hand-edited state shows like a title Nirux saved.
+                title: DeferredAgentLaunch.sessionTitle(fromTerminalTitle: persistedColumn.lastAgentTitle),
+                lastStatus: persistedColumn.lastAgentStatus
+            ),
+            agentUUID: persistedColumn.agentUUID ?? UUID().uuidString,
+            cwd: Self.existingDirectory(persistedColumn.cwd)
+        )
+        guard let column = workspace.columns.last else { return }
+        column.restoredColumn = persistedColumn
+        column.onResumeDeferredAgent = { [weak self, weak workspace, weak column] in
+            guard let self, let workspace, let column, self.resumeDeferredAgent(column, in: workspace) else { return }
+            self.updateSidebar()
+        }
     }
 
     /// An agent resumes in the directory it ran in — its conversation's
@@ -331,6 +338,8 @@ extension NiruxShellView {
         } else {
             kind = .terminal; webURL = nil
         }
+        // What the column says next launch, until its agent resumes.
+        let isAgent = kind == .claudeCode || kind == .codex
         return PersistedColumn(
             widthPreset: Double(col.widthFraction),
             cwd: col.editorColumn?.workspaceCwd ?? col.pty?.childCwd ?? workspace.cwd,
@@ -345,7 +354,9 @@ extension NiruxShellView {
                 : nil,
             claudeSessionID: claudeRestore?.sessionID,
             claudeSessionIsUnprompted: claudeRestore == .fresh ? true : nil,
-            agentUUID: col.agentUUID
+            agentUUID: col.agentUUID,
+            lastAgentTitle: isAgent ? DeferredAgentLaunch.sessionTitle(fromTerminalTitle: col.terminalTitle) : nil,
+            lastAgentStatus: isAgent ? col.pty.map { PersistedAgentStatus($0.cachedAgentState) } : nil
         )
     }
 

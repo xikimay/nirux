@@ -98,10 +98,7 @@ final class EditorSearchPanel: NSObject {
         fieldRow.wantsLayer = true
         fieldRow.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.03).cgColor
 
-        let icon = NSTextField(labelWithString: "🔎")
-        icon.font = .systemFont(ofSize: 14)
-        icon.frame = NSRect(x: 14, y: 10, width: 24, height: 24)
-        fieldRow.addSubview(icon)
+        fieldRow.addSubview(PaletteIconView(.symbol("magnifyingglass"), frame: NSRect(x: 14, y: 10, width: 24, height: 24)))
 
         let field = NSTextField()
         field.font = .systemFont(ofSize: 15)
@@ -465,7 +462,7 @@ private final class LineBuffer: @unchecked Sendable {
     }
 }
 
-private final class SearchResultRowView: NSTableRowView {
+final class SearchResultRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {
         if selectionHighlightStyle != .none {
             NSColor.niruxAccent.withAlphaComponent(0.18).setFill()

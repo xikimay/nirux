@@ -8,6 +8,7 @@ let package = Package(
         .macOS(.v14)
     ],
     dependencies: [
+        // Exact: TerminalScreenText reaches private parts of this version.
         .package(
             url: "https://github.com/Lakr233/libghostty-spm.git",
             exact: "1.3.1"
@@ -18,6 +19,7 @@ let package = Package(
         .executableTarget(
             name: "Nirux",
             dependencies: [
+                .product(name: "GhosttyKit", package: "libghostty-spm"),
                 .product(name: "GhosttyTerminal", package: "libghostty-spm"),
                 .product(name: "Sparkle", package: "Sparkle")
             ],

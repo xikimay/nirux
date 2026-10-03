@@ -13,14 +13,7 @@ extension NiruxShellView {
             let workspace = workspaces[index]
             let isActive = index == activeWSIndex
             let colInfos = workspace.columns.enumerated().map { colIndex, col in
-                // In pilot mode the user sees every workspace's focused column
-                // through its pilot panel, so treat any focused column as
-                // user-focused — otherwise agents in non-active workspaces get
-                // stuck in .needsAttention even while the user is watching
-                // them, and that state persists incorrectly across mode
-                // switches.
-                let isFocusedCol = colIndex == workspace.focusedIndex
-                let isUserFocused = isFocusedCol && (isActive || isPilotMode)
+                let isUserFocused = colIndex == workspace.focusedIndex && isActive
                 let foregroundProcess = foregroundProcesses[ObjectIdentifier(col)]
                 let editorFile = col.editorColumn?.currentPath.map {
                     ($0 as NSString).lastPathComponent
@@ -34,7 +27,7 @@ extension NiruxShellView {
                     index: colIndex,
                     processName: foregroundProcess?.name,
                     abbreviatedCwd: col.pty?.childCwd?.abbreviatedPath(),
-                    isFocused: isFocusedCol && isActive,
+                    isFocused: isUserFocused,
                     isWebView: col.isWebView,
                     webTitle: col.webViewColumn?.pageTitle,
                     terminalTitle: col.terminalTitle,
@@ -47,7 +40,8 @@ extension NiruxShellView {
                         .map { Date().timeIntervalSince($0) },
                     attentionReason: agentStatus == .needsAttention ? col.pty?.agentAttentionReason : nil,
                     permissionApproval: permissionApproval,
-                    stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now)
+                    stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
+                    deferredAgent: Self.sidebarDeferredAgent(of: col)
                 )
             }
             return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
@@ -59,7 +53,8 @@ extension NiruxShellView {
                           purpose: workspace.purpose, nextStep: workspace.nextStep,
                           blocker: workspace.blocker, phase: workspace.effectivePhase,
                           lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt,
-                          reviewBadges: workspace.reviewBadges)
+                          reviewBadges: workspace.reviewBadges,
+                          mergedCleanup: mergedCleanupOffer(workspaceIndex: index))
         }
         tickHiddenSpaceAgents(visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses)
         let profileInfos = workspaceStore.navigableProfiles.map { profile in
@@ -110,6 +105,7 @@ extension NiruxShellView {
                 )
             }
         }
+        closeEndedAgentSessions(now: now)
         return (foregroundProcesses, invalidatedSessionBinding)
     }
 
@@ -141,13 +137,6 @@ extension NiruxShellView {
         NiruxNotifier.shared.updateDockBadge(attentionCount: attentionCount)
         // Same source, the other way: agents still working.
         updateKeepAwake()
-
-        // Update per-workspace pilot panels
-        if isPilotMode {
-            for info in infos {
-                workspaces[info.index].updatePilotPanel(info: info)
-            }
-        }
 
         if let workspace = activeWorkspace,
            let wsInfo = infos.first(where: { $0.index == activeWSIndex }) {
@@ -282,12 +271,15 @@ extension NiruxShellView {
         }
         guard result == .alertFirstButtonReturn else { return }
 
-        guard let accepted = MissionStore.shared.respond(
-            to: questionID,
-            message: input.stringValue,
-            enabled: Self.currentMissionHandoffsEnabled()
-        ) else {
-            NSSound.beep()
+        let reply = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reply.isEmpty else { return showToast("Type a reply first") }
+        guard reply.count <= MissionEventCLI.maxMessageLength else {
+            return showToast("Replies are limited to \(MissionEventCLI.maxMessageLength) characters")
+        }
+        let enabled = Self.currentMissionHandoffsEnabled()
+        guard enabled else { return showToast("Mission handoffs are off in Settings") }
+        guard let accepted = MissionStore.shared.respond(to: questionID, message: input.stringValue, enabled: enabled) else {
+            showToast("Couldn’t send the reply to the child mission", tone: .error)
             return
         }
         if recordMissionActivity(accepted.mission, event: accepted.event) {
@@ -415,6 +407,7 @@ extension NiruxShellView {
                ) {
                 changed = true
             }
+            recordAgentSession(appliedEvent, snapshot: snapshot)
 
             if appliedEvent.resolution.workspace.recordAgentHookActivity(event) {
                 changed = true
@@ -499,6 +492,7 @@ extension NiruxShellView {
         workspace.onColumnTitleChanged = { $0.updateTitleBarLabel(snapshot: ProcessSnapshot()) }
         workspace.onFocusedColumnChanged = { [weak self, weak workspace] in
             guard let self, let workspace else { return }
+            self.quickSwitch.focusMoved()
             self.refreshGitContextNow(for: workspace)
         }
         workspace.onGitContextChanged = { [weak self, weak workspace] in
@@ -535,6 +529,9 @@ extension NiruxShellView {
     func refreshMetadata(snapshot: ProcessSnapshot? = nil) {
         isMetadataRefreshScheduled = false
         lastMetadataRefreshAt = ProcessInfo.processInfo.systemUptime
+        // A column that came on screen without a relayout (a dragged
+        // width) resumes from here at the latest.
+        scheduleDeferredAgentsOnScreen(restartingWait: false)
         let snapshot = snapshot ?? ProcessSnapshot()
         refreshTitleBarLabels(snapshot: snapshot)
         updateSidebar(snapshot: snapshot)
@@ -547,7 +544,6 @@ extension NiruxShellView {
     func gitRefreshTier(for workspace: WorkspaceState) -> GitRefreshTier {
         if workspace === activeWorkspace { return .focused }
         if workspace.isInactive { return .archived }
-        if isPilotMode, workspace.profileID == activeProfileID { return .focused }
         return .background
     }
 
@@ -610,11 +606,14 @@ extension NiruxShellView {
                         workspace.finishPullRequestObservation(observation)
                         return
                     }
-                    guard workspace.applyPullRequestInfo(
+                    let changed = workspace.applyPullRequestInfo(
                         info,
                         for: queriedContext,
                         observation: observation
-                    ) else { return }
+                    )
+                    // Even unchanged: the history may have loaded since.
+                    self?.noteSessionPullRequest(of: workspace)
+                    guard changed else { return }
                     self?.scheduleMetadataRefresh()
                 }
             }
@@ -651,7 +650,7 @@ extension NiruxShellView {
     private static let shells: Set<String> = ["zsh", "bash", "fish", "sh", "-zsh", "-bash"]
     /// Recognized agents redraw correctly from SIGWINCH alone — Ctrl+L clears their session/screen.
     /// Claude Code rebinds Ctrl+L to `/clear` and Gemini CLI's clears its history, so
-    /// broadcasting it on every layout change (e.g. Cmd+E width cycle, pilot-mode toggle)
+    /// broadcasting it on every layout change (e.g. Cmd+E width cycle)
     /// wiped active sessions.
     private static func redrawsFromSigwinchAlone(_ name: String) -> Bool {
         AgentStatusMachine.isRecognizedAgentProcess(name)

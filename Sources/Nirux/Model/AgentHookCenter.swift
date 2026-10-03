@@ -24,8 +24,8 @@ final class AgentHookCenter {
         let workspace: WorkspaceState
         let column: ColumnState
         let columnIndex: Int
-        /// App active AND focused column of the active workspace (or any
-        /// focused column in pilot mode) — see resolveAgentColumn.
+        /// App active AND focused column of the active workspace — see
+        /// resolveAgentColumn.
         let isUserFocused: Bool
         /// Whether the sidebar may hold the column's permission requests.
         let approvalHold: PermissionApprovalHold
@@ -37,6 +37,9 @@ final class AgentHookCenter {
         /// What the column's Claude would restore to changed (another
         /// session, or its first prompt) — the state file must learn it.
         var claudeRestoreChanged = false
+        /// The column's `claude`, when it confirmed it runs the event's
+        /// session: the session history may record it.
+        var claudeSessionAgent: ForegroundProcess?
     }
 
     /// Given NIRUX_AGENT_UUID, locate the owning column. Set by the shell.
@@ -184,6 +187,7 @@ final class AgentHookCenter {
         var event = event
         let resolution = event.agentUUID.flatMap { resolver?($0) }
         var claudeRestoreChanged = false
+        var claudeSessionAgent: ForegroundProcess?
         var isApprovalEligible = false
         if let resolution, let pty = resolution.column.pty {
             let processes = snapshot ?? ProcessSnapshot()
@@ -208,9 +212,16 @@ final class AgentHookCenter {
                 case .restoreChanged:
                     claudeRestoreChanged = true
                 }
+                let isFromOwnClaude = resolution.column.isFromOwnClaude(
+                    event, foregroundProcess: foregroundProcess, snapshot: processes
+                )
+                // `claude -p` has no conversation to come back to.
+                if isFromOwnClaude, !Self.isHeadlessClaude(foregroundProcess) {
+                    claudeSessionAgent = foregroundProcess
+                }
                 isApprovalEligible = event.name == .permissionRequest && event.approvalRequestID != nil
                     && PermissionApproval.isDisplayable(toolName: event.toolName, text: event.approvalText)
-                    && resolution.column.isApprovalEligible(event, foregroundProcess: foregroundProcess, snapshot: processes)
+                    && isFromOwnClaude
             case .codex:
                 if Self.isNestedCodexHook(foregroundName: foregroundProcess?.name) { return nil }
             }
@@ -239,7 +250,10 @@ final class AgentHookCenter {
             resolution.column.notifyAgentAttention(reason: outcome.attention)
         }
         return resolution.map {
-            AppliedEvent(event: event, resolution: $0, claudeRestoreChanged: claudeRestoreChanged)
+            AppliedEvent(
+                event: event, resolution: $0, claudeRestoreChanged: claudeRestoreChanged,
+                claudeSessionAgent: claudeSessionAgent
+            )
         }
     }
 
@@ -300,6 +314,30 @@ final class AgentHookCenter {
         guard let process, process.name == "claude" else { return false }
         return process.hasFlag("-p") || process.hasFlag("--print")
     }
+
+    /// `codex exec` (alias `e`): a run, not a conversation to come back to.
+    /// The subcommand follows Codex's global options, and `codex` itself may
+    /// be a script its runtime runs (`node …/bin/codex`, from npm or bun).
+    nonisolated static func isHeadlessCodex(_ process: ForegroundProcess?) -> Bool {
+        guard let process, process.name == "codex",
+              let codex = process.arguments.firstIndex(where: {
+                  (($0 as NSString).lastPathComponent as NSString).deletingPathExtension == "codex"
+              })
+        else { return false }
+        var index = codex + 1
+        while let argument = process.arguments[safe: index], argument != "--" {
+            guard argument.hasPrefix("-") else { return argument == "exec" || argument == "e" }
+            index += codexOptionsWithValue.contains(argument) ? 2 : 1
+        }
+        return false
+    }
+
+    /// Codex's global options whose value is the next argument.
+    private nonisolated static let codexOptionsWithValue: Set<String> = [
+        "-c", "--config", "--enable", "--disable", "--remote", "--remote-auth-token-env", "-i", "--image",
+        "-m", "--model", "--local-provider", "-p", "--profile", "-s", "--sandbox", "-C", "--cd", "--add-dir",
+        "-a", "--ask-for-approval"
+    ]
 
     /// A Codex hook while another agent owns the terminal came from a
     /// `codex exec` that agent launched.
