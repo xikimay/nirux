@@ -149,6 +149,12 @@ enum BranchReview {
         /// "Tests against code"). Nil for the other files, a folded one, a
         /// symlink, a deletion, or a change that adds no line.
         var symbols: SymbolScan?
+        /// Why a Swift file with changed lines couldn't be read in context
+        /// (`readSwift`): its line signals and fold are then the first
+        /// pass's, comments counted and a multi-line string read as code.
+        /// A row `filePatch` loads again may be read where the snapshot
+        /// couldn't (`.changedSincePatch`, or past `maxScannedBytes`).
+        var unreadContext: SymbolScan.Reason?
     }
 
     struct Commit: Equatable, Sendable {

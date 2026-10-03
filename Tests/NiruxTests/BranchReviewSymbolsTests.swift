@@ -223,6 +223,7 @@ final class BranchReviewSymbolsTests: XCTestCase {
 
     func testEachLineSaysWhereItStartsAndWhatItsCodeIs() {
         let source = """
+        @main
         struct App {
             static func main() {
                 let help = \"\"\"
@@ -240,21 +241,22 @@ final class BranchReviewSymbolsTests: XCTestCase {
         var scanner = BranchReview.SwiftScanner()
         var lines: [(inString: Bool, functions: [String], code: String)] = []
         for line in source.split(separator: "\n", omittingEmptySubsequences: false) {
-            let inString = scanner.startsInStringText
-            let functions = scanner.enclosingFunctions.map { ($0.isStatic ? "static " : "") + $0.name }
+            let inString = scanner.stringText != nil
+            let functions = scanner.enclosingFunctions.map { $0.name + ($0.isEntryPoint ? " (entry point)" : "") }
             Array(line.utf8).withUnsafeBytes { scanner.feed($0, collecting: false, capturingCode: true) }
             lines.append((inString, functions, String(decoding: scanner.code, as: UTF8.self)))
         }
 
-        XCTAssertEqual(lines.map(\.inString), [false, false, false, true, true, false, false, false, false, false, false, false, false])
+        let main = "main (entry point)"
+        XCTAssertEqual(lines.map(\.inString), [false, false, false, false, true, true, false, false, false, false, false, false, false, false])
         XCTAssertEqual(lines.map(\.functions), [
-            [], [], ["static main"], ["static main"], ["static main"], ["static main"], ["static main"], ["static main"],
-            ["static main"], [], ["handle"], ["handle"], []
+            [], [], [], [main], [main], [main], [main], [main], [main], [main], [], ["handle"], ["handle"], []
         ])
-        XCTAssertEqual(lines[3].code, "            usage: app // not a comment")
-        XCTAssertEqual(lines[5].code, "        run() " + String(repeating: " ", count: "// Telegram".count))
-        XCTAssertEqual(lines[6].code, "        " + String(repeating: " ", count: 8))
-        XCTAssertEqual(lines[7].code, String(repeating: " ", count: 22) + " go()")
+        XCTAssertEqual(lines[4].code, "            usage: app // not a comment")
+        XCTAssertEqual(lines[6].code, "        run() " + String(repeating: " ", count: "// Telegram".count))
+        XCTAssertEqual(lines[7].code, "        " + String(repeating: " ", count: 8))
+        XCTAssertEqual(lines[8].code, String(repeating: " ", count: 22) + " go()")
+        XCTAssertEqual(scanner.stringIndents, [1: Data(String(repeating: " ", count: 12).utf8)], "the closing delimiter's")
     }
 
     func testByteOrderMarkIsNotAnIdentifier() {

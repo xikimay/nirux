@@ -193,10 +193,12 @@ Top to bottom:
    lines and the whitespace around its lines; whitespace inside a line
    changes what the code does (`" "` and `""`), and in Python, YAML, a
    Makefile or a shell script the indentation and blank lines do too. In
-   Swift, a multi-line string's text counts whole, indentation, blank lines
-   and trailing spaces included: they are the string's (each side of the
-   patch is read in context, as "Swift files read in context" in section 5
-   says). A JavaScript template still reads as code. A folded file's diff loads when
+   Swift, a multi-line string's text counts as Swift reads it: past its
+   closing delimiter's indentation, with its blank lines and trailing
+   spaces, a line of blanks read as empty and line endings as newlines. A
+   reindent that moves a string with its closing delimiter still folds; one
+   that moves its text alone doesn't ("Swift files read in context",
+   section 5). A JavaScript template still reads as code. A folded file's diff loads when
    its row opens, and folded files don't count toward the 5 MB of section
    7: a generated bundle or a reformatted repository mustn't send the whole
    page on demand. Listed without its patch (section 7, past 64 MB), a file
@@ -444,11 +446,14 @@ whose path a workflow (`.github/workflows/*.yml`) or an action
 even when it doesn't name it ("inside applicationDidFinishLaunching"): the
 app delegate's `applicationWillFinishLaunching`,
 `applicationDidFinishLaunching`, `applicationShouldTerminate` and
-`applicationWillTerminate`, and an `@main` type's `static func main`, where
-the `--hook` and `--check-release-signature` modes live (decided by the user
-on 2026-10-03). On #57, `setUpKeepAwake(...)` and
-`keepAwakeController?.shutdown()`; on #65, the release check at launch and
-in `main`.
+`applicationWillTerminate`, and an `@main` type's `static func main` (or
+`class func main`), where the `--hook` and `--check-release-signature`
+modes live (decided by the user on 2026-10-03); not another type's `main`,
+such as a subcommand's. A signature may wrap before its body (`-> T`,
+`where`, `{` on its own line); a line of comments or blanks changes
+nothing. On #57 (`setUpKeepAwake(...)`, `keepAwakeController?.shutdown()`)
+and #65 (the release check at launch and in `main`), `NiruxApp.swift`
+already raised "launch" by its path: this names the reasons and the hunks.
 
 **Swift files read in context.** A Swift file's patch is read a second
 time, its two sides through the lexer of "Tests against code": the old side
@@ -458,9 +463,15 @@ lines. That tells, for each changed line, whether it is in a multi-line
 string's text, which comments it holds, and which function it is in: its
 line rules, its whitespace fold, its symbols and the lifecycle functions
 above come from that reading. An addition or a deletion reads from its patch
-alone. A file that can't be read so (past the scan limits, changed since its
-patch, unbalanced, a folded one) keeps the first pass's line rules and fold,
-and its symbols are unknown.
+alone; a type change (a symlink that became the file) only gives its
+symbols. The files that may declare symbols are read first, within the scan
+limits of "Tests against code" (2 MB for the file, and for its patch: a huge
+removal isn't read again line by line; 32 MB in all). A file that can't be
+read so (past those limits, changed since its patch, unbalanced) keeps the
+first pass's line rules and fold, its symbols are unknown, and it says why
+(`unreadContext`): a row reloaded on its own may then read differently,
+since the edit that made it differ triggers a refresh, and alone it is
+within the limits.
 
 **Tests against code.** The header shows lines added in tests against lines
 added in code, and lists the symbols the branch declares that no test

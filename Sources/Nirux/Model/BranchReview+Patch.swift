@@ -535,8 +535,7 @@ extension BranchReview {
     /// `""` or `a - -b` becoming `a --b` changes what the code does. Hunk
     /// by hunk, not run by run: a reindent pairs a closing brace with
     /// another one as context. A line can be kept whole on its side: a
-    /// Swift multi-line string's text, whose indentation, blank lines and
-    /// trailing spaces are the string's (see `readSwift`).
+    /// Swift multi-line string's text as Swift reads it (see `readSwift`).
     struct WhitespaceCheck {
         enum Mode: Equatable {
             case ignoringIndentation
@@ -554,10 +553,21 @@ extension BranchReview {
             self.mode = mode
         }
 
-        mutating func add(_ kind: Line.Kind, _ content: Data, keepingOld: Bool = false, keepingNew: Bool = false) {
-            guard isWhitespaceOnly, kind != .noNewlineMarker else { return }
-            if kind != .added, let kept = keepingOld ? content[...] : significant(content) { Self.feed(kept, into: &old) }
-            if kind != .removed, let kept = keepingNew ? content[...] : significant(content) { Self.feed(kept, into: &new) }
+        mutating func add(_ kind: Line.Kind, _ content: Data) {
+            guard kind != .noNewlineMarker else { return }
+            add(before: kind == .added ? nil : (content, false), after: kind == .removed ? nil : (content, false))
+        }
+
+        /// A line as each side reads it, nil on a side it isn't on;
+        /// `whole` compares it as it is rather than its significant part.
+        mutating func add(before: (content: Data, whole: Bool)?, after: (content: Data, whole: Bool)?) {
+            guard isWhitespaceOnly else { return }
+            if let before, let kept = before.whole ? before.content[...] : significant(before.content) {
+                Self.feed(kept, into: &old)
+            }
+            if let after, let kept = after.whole ? after.content[...] : significant(after.content) {
+                Self.feed(kept, into: &new)
+            }
         }
 
         mutating func endHunk() {

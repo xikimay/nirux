@@ -127,10 +127,12 @@ extension BranchReview {
             LineRule(.sideEffects, "launchctl")
         ]
 
-        /// Calls `body` with the index of each line rule `content` matches.
-        static func forEachLineRule(matching content: Data, _ body: (Int) -> Void) {
+        /// Calls `body` with the index of each line rule `content` matches,
+        /// unless it is only a comment; `skippingCommentLines` false when
+        /// its comments are blanked already.
+        static func forEachLineRule(matching content: Data, skippingCommentLines: Bool = true, _ body: (Int) -> Void) {
             content.withUnsafeBytes { line in
-                guard !isCommentOnly(line) else { return }
+                guard !skippingCommentLines || !isCommentOnly(line) else { return }
                 let present = ByteSet(line)
                 for (index, rule) in lineRules.enumerated() where rule.patterns.contains(where: {
                     $0.set.isSubset(of: present) && find($0.bytes, in: line, boundary: rule.boundary)

@@ -13,10 +13,12 @@ extension BranchReview {
         /// The line rules its `+` and `-` lines match outside comments, by
         /// hunk index.
         var riskHits: Set<RiskHit> = []
-        /// The `lifecycleFunctions` its changed lines are in, by hunk index.
+        /// The lifecycle functions (`isLifecycle`) its changed lines are
+        /// in, by hunk index. A line of comments or blanks changes nothing.
         var lifecycleHunks: [String: Set<Int>] = [:]
         /// Each hunk reads the same before and after but for whitespace, a
-        /// multi-line string's text kept whole (see `WhitespaceCheck`).
+        /// multi-line string's text read as Swift reads it (see
+        /// `stringLine`).
         var isWhitespaceOnly = false
         /// What its added lines declare outside function bodies, but the
         /// names its removed lines declared: a changed value, conformance,
@@ -26,15 +28,15 @@ extension BranchReview {
     }
 
     /// A change inside one of these raises "launch" without naming it: the
-    /// app delegate's launch and quit, and an `@main` type's entry point,
-    /// `static func main` (decided by the user on 2026-10-03).
+    /// app delegate's launch and quit, and an `@main` type's entry point
+    /// (decided by the user on 2026-10-03).
     static let lifecycleFunctions: Set<String> = [
         "applicationWillFinishLaunching", "applicationDidFinishLaunching", "applicationShouldTerminate",
         "applicationWillTerminate"
     ]
 
     static func isLifecycle(_ function: SwiftScanner.Function) -> Bool {
-        lifecycleFunctions.contains(function.name) || (function.name == "main" && function.isStatic)
+        lifecycleFunctions.contains(function.name) || function.isEntryPoint
     }
 
     /// Reads `section`, one file's patch, against `head`, the file in the
@@ -52,15 +54,15 @@ extension BranchReview {
             guard walk.share(upTo: hunk.newCount == 0 ? hunk.newStart : hunk.newStart - 1) else {
                 return .failure(.changedSincePatch)
             }
+            walk.seen.append([])
             for line in hunk.lines where line.kind != .noNewlineMarker {
                 guard walk.take(line, in: index) else { return .failure(.changedSincePatch) }
             }
-            walk.whitespace.endHunk()
         }
         _ = walk.share(upTo: walk.shared?.count ?? 0)
         guard walk.old.isBalanced, walk.new.isBalanced else { return .failure(.unbalanced) }
         var reading = walk.reading
-        reading.isWhitespaceOnly = parsed.hunkCount > 0 && walk.whitespace.isWhitespaceOnly
+        reading.isWhitespaceOnly = parsed.hunkCount > 0 && walk.isWhitespaceOnly
         let removed = Set(walk.old.declarations.filter(\.isCollected).map(\.symbol.name))
         var seen: Set<String> = []
         reading.symbols = walk.new.symbols.filter { symbol in
@@ -71,10 +73,20 @@ extension BranchReview {
 
     /// A patch's two sides, each through its scanner, line by line.
     private struct SideBySide {
+        /// A hunk's line, and the multi-line string whose text it is on
+        /// each side, if any.
+        struct Seen {
+            let kind: Line.Kind
+            let content: Data
+            let oldText: Int?
+            let newText: Int?
+        }
+
         var old = SwiftScanner()
         var new = SwiftScanner()
         var reading = SwiftReading()
-        var whitespace = WhitespaceCheck(mode: .ignoringIndentation)
+        /// By hunk: compared once every string's indentation is known.
+        var seen: [[Seen]] = []
         /// The file in the worktree, by line; nil when the patch holds it
         /// whole.
         let shared: [Data.SubSequence]?
@@ -107,24 +119,29 @@ extension BranchReview {
         /// One of the hunk's lines; false when the file no longer has it.
         mutating func take(_ line: Line, in hunk: Int) -> Bool {
             let content = line.bytes ?? Data(line.text.utf8)
+            let (oldText, newText) = (old.stringText, new.stringText)
             switch line.kind {
             case .context:
                 guard matches(content) else { return false }
-                whitespace.add(.context, content, keepingOld: old.startsInStringText, keepingNew: new.startsInStringText)
                 content.withUnsafeBytes { bytes in
                     old.feed(bytes, collecting: false)
                     new.feed(bytes, collecting: false)
                 }
             case .added:
                 guard matches(content) else { return false }
-                whitespace.add(.added, content, keepingNew: new.startsInStringText)
                 BranchReview.read(content, as: hunk, by: &new, into: &reading)
             case .removed:
-                whitespace.add(.removed, content, keepingOld: old.startsInStringText)
                 BranchReview.read(content, as: hunk, by: &old, into: &reading)
             case .noNewlineMarker:
-                break
+                return true
             }
+            // Text: the string goes on past the line (the closing line is
+            // code).
+            seen[seen.count - 1].append(Seen(
+                kind: line.kind, content: content,
+                oldText: oldText.flatMap { old.stringText == $0 ? $0 : nil },
+                newText: newText.flatMap { new.stringText == $0 ? $0 : nil }
+            ))
             return true
         }
 
@@ -136,16 +153,48 @@ extension BranchReview {
             defer { next += 1 }
             return BranchReview.withoutCarriageReturn(shared[next]).elementsEqual(BranchReview.withoutCarriageReturn(content))
         }
+
+        /// Each hunk reads the same before and after but for whitespace:
+        /// a string's text as Swift reads it, the rest as code.
+        var isWhitespaceOnly: Bool {
+            var check = WhitespaceCheck(mode: .ignoringIndentation)
+            for hunk in seen {
+                for line in hunk {
+                    let oldText = line.oldText.map { BranchReview.stringLine(line.content, indent: old.stringIndents[$0]) }
+                    let newText = line.newText.map { BranchReview.stringLine(line.content, indent: new.stringIndents[$0]) }
+                    let before: (content: Data, whole: Bool)? = line.kind == .added ? nil : (oldText ?? line.content, oldText != nil)
+                    let after: (content: Data, whole: Bool)? = line.kind == .removed ? nil : (newText ?? line.content, newText != nil)
+                    check.add(before: before, after: after)
+                }
+                check.endHunk()
+            }
+            return check.isWhitespaceOnly
+        }
     }
 
-    /// A changed line, read by its side's scanner: the functions it is
-    /// in, then the line rules its code matches.
+    /// A multi-line string's line as Swift reads it: past its closing
+    /// delimiter's indentation, a line of blanks empty, and its line
+    /// ending a newline. Trailing spaces stay: they are the string's.
+    static func stringLine(_ content: Data, indent: Data?) -> Data {
+        let line = withoutCarriageReturn(content)
+        if let indent, line.starts(with: indent) { return line.dropFirst(indent.count) }
+        return line.allSatisfy { $0 == 0x20 || $0 == 0x09 } ? Data() : line
+    }
+
+    /// A changed line, read by its side's scanner: the functions it is in,
+    /// unless it holds only comments and blanks, and the line rules its
+    /// code matches. Its comments are blanked already: a string's line
+    /// that reads like one still counts.
     private static func read(_ content: Data, as hunk: Int, by scanner: inout SwiftScanner, into reading: inout SwiftReading) {
-        for function in scanner.enclosingFunctions where isLifecycle(function) {
-            reading.lifecycleHunks[function.name, default: []].insert(hunk)
-        }
+        let functions = scanner.enclosingFunctions.filter(isLifecycle)
+        let isText = scanner.stringText != nil
         content.withUnsafeBytes { scanner.feed($0, collecting: true, capturingCode: true) }
-        RiskRules.forEachLineRule(matching: scanner.code) { reading.riskHits.insert(RiskHit(rule: $0, hunk: hunk)) }
+        if isText || scanner.code.contains(where: { ![0x20, 0x09, 0x0D].contains($0) }) {
+            for function in functions { reading.lifecycleHunks[function.name, default: []].insert(hunk) }
+        }
+        RiskRules.forEachLineRule(matching: scanner.code, skippingCommentLines: false) {
+            reading.riskHits.insert(RiskHit(rule: $0, hunk: hunk))
+        }
     }
 
     private static func withoutCarriageReturn(_ line: some DataProtocol) -> Data {
@@ -154,68 +203,72 @@ extension BranchReview {
         return kept
     }
 
-    /// Reads each Swift file of `files` in context (`readSwift`): its line
-    /// signals, whitespace fold and symbols then come from that reading.
-    /// A file it can't read keeps the first pass's, and its symbols are
-    /// unknown. `sections` are the file's in the patch; `namedFolds`, the
+    /// Reads each Swift file of `files` in context (`readSwift`), those
+    /// that may declare symbols first, within `Options.maxScannedBytes`:
+    /// its line signals, whitespace fold and symbols then come from that
+    /// reading. A file it can't read keeps the first pass's, and its
+    /// symbols are unknown. A type change (a symlink became the file) only
+    /// gives its symbols: the reading doesn't number its first section's
+    /// hunks. `sections` are each file's in the patch; `namedFolds`, the
     /// files folded by name, which aren't read.
     static func readSwiftFiles(
         _ files: inout [FileChange], sections: [String: [Data]], namedFolds: [String: Fold], root: String, options: Options
     ) {
+        func wantsSymbols(_ file: FileChange) -> Bool { mayDeclareSymbols(file) && file.additions > 0 }
         var budget = options.maxScannedBytes
-        for index in files.indices {
+        let order = files.indices.filter { wantsSymbols(files[$0]) } + files.indices.filter { !wantsSymbols(files[$0]) }
+        for index in order {
             let file = files[index]
-            let wantsSymbols = mayDeclareSymbols(file) && file.additions > 0
+            let isLink = file.newMode == "120000" || (file.status == .deleted && file.oldMode == "120000")
             guard file.path.hasSuffix(".swift"), namedFolds[file.path] == nil, file.additions + file.deletions > 0,
-                  let parts = sections[file.path], file.newMode != "120000"
+                  !isLink, let parts = sections[file.path], let section = parts.last
             else { continue }
-            // A type change: the added side holds the new file whole.
             let whole = parts.count > 1 || file.status == .added || file.status == .deleted
-            guard let section = parts.last else { continue }
-            let outcome: Result<SwiftReading, SymbolScan.Reason>
-            switch whole ? .success(nil) : head(at: root + "/" + file.path, options: options, budget: &budget) {
-            case .success(let head):
-                if head == nil, section.count > min(options.maxScannedFileBytes, budget) {
-                    outcome = .failure(.tooLarge)
-                } else {
-                    if head == nil { budget -= section.count }
-                    outcome = readSwift(section, head: head)
+            switch read(file, section: section, whole: whole, root: root, options: options, budget: &budget) {
+            case .success(let reading):
+                if parts.count == 1 {
+                    if PathGroup(path: file.path) != .docs {
+                        files[index].signals = merged(RiskRules.signals(lineHits: Array(reading.riskHits)) + reading.lifecycleHunks.map {
+                            RiskSignal(kind: .launch, reasons: ["inside \($0.key)"], hunks: $0.value.sorted(), byPath: false)
+                        })
+                    }
+                    if file.fold == .whitespaceOnly, !reading.isWhitespaceOnly { files[index].fold = nil }
                 }
+                if wantsSymbols(files[index]) { files[index].symbols = .read(reading.symbols) }
             case .failure(.symlink):
                 // A link declares nothing.
                 continue
             case .failure(.unread(let reason)):
-                outcome = .failure(reason)
-            }
-            switch outcome {
-            case .success(let reading):
-                if PathGroup(path: file.path) != .docs {
-                    files[index].signals = merged(RiskRules.signals(lineHits: Array(reading.riskHits)) + reading.lifecycleHunks.map {
-                        RiskSignal(kind: .launch, reasons: ["inside \($0.key)"], hunks: $0.value.sorted(), byPath: false)
-                    })
-                }
-                if file.fold == .whitespaceOnly, !reading.isWhitespaceOnly { files[index].fold = nil }
-                if wantsSymbols { files[index].symbols = .read(reading.symbols) }
-            case .failure(let reason):
-                if wantsSymbols { files[index].symbols = .unread(reason) }
+                files[index].unreadContext = reason
+                if wantsSymbols(file) { files[index].symbols = .unread(reason) }
             }
         }
     }
 
-    private enum HeadFailure: Error {
+    private enum ReadFailure: Error {
         case symlink
         case unread(SymbolScan.Reason)
     }
 
-    /// The file in the worktree, within `Options.maxScannedFileBytes` and
-    /// the rest of `budget`.
-    private static func head(at path: String, options: Options, budget: inout Int) -> Result<Data?, HeadFailure> {
+    /// One file's `readSwift`: its patch within `Options.maxScannedFileBytes`
+    /// (a huge removal is never read again line by line), and the file in
+    /// the worktree, unless the patch holds it `whole`; what is read counts
+    /// toward `budget`.
+    private static func read(
+        _ file: FileChange, section: Data, whole: Bool, root: String, options: Options, budget: inout Int
+    ) -> Result<SwiftReading, ReadFailure> {
+        let limit = min(options.maxScannedFileBytes, budget)
+        guard section.count <= (whole ? limit : options.maxScannedFileBytes) else { return .failure(.unread(.tooLarge)) }
+        guard !whole else {
+            budget -= section.count
+            return readSwift(section, head: nil).mapError { .unread($0) }
+        }
+        let path = root + "/" + file.path
         var info = stat()
         if lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFLNK { return .failure(.symlink) }
-        let limit = min(options.maxScannedFileBytes, budget)
         guard let head = readPrefix(of: path, maxBytes: limit + 1) else { return .failure(.unread(.changedSincePatch)) }
         guard head.count <= limit else { return .failure(.unread(.tooLarge)) }
         budget -= head.count
-        return .success(head)
+        return readSwift(section, head: head).mapError { .unread($0) }
     }
 }

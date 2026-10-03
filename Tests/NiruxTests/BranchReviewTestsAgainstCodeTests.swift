@@ -162,16 +162,23 @@ final class BranchReviewTestsAgainstCodeTests: BranchReviewRepositoryTestCase {
     func testSymbolsAreUnknownPastTheLimitsOnceTheFileChangedOrWhenItDoesntBalance() throws {
         try write("Sources/Gauge.swift", "struct Gauge {\n    var level = 0\n}\n")
         try write("Sources/Lever.swift", "struct Lever {\n    var level = 0\n}\n")
+        try write("Sources/Long.swift", (1...100).map { "let line\($0) = \($0)\n" }.joined())
         try commitToMain("gauges")
+        try write("Sources/Long.swift", "let line1 = 1\n")
         let gauge = "struct Gauge {\n    var level = 0\n    var limit = 0\n}\n"
         try write("Sources/Gauge.swift", gauge)
         try write("Sources/Lever.swift", "struct Lever {\n    var level = 0\n    var limit = 0\n}\n")
         // A bare regex reads as code: its brace never closes.
         try write("Sources/Pattern.swift", "struct Pattern {\n    let opening = /\\{/\n}\n")
+        // Read in context too, but declares nothing listed: after the
+        // files that may.
+        try write("AppTests/FirstTests.swift", "let first = 1\n")
         let snapshot = try snapshot()
         let read = try file("Sources/Gauge.swift", in: snapshot).symbols
         XCTAssertEqual(read, .read([symbol("limit", 3, in: "Gauge")]))
+        XCTAssertNil(try file("Sources/Gauge.swift", in: snapshot).unreadContext)
         XCTAssertEqual(try file("Sources/Pattern.swift", in: snapshot).symbols, .unread(.unbalanced))
+        XCTAssertEqual(try file("Sources/Pattern.swift", in: snapshot).unreadContext, .unbalanced)
 
         let section = Data(try git(["diff", "--no-color", "-U3", "HEAD", "--", "Sources/Gauge.swift"]).utf8)
         XCTAssertEqual(try BranchReview.readSwift(section, head: Data(gauge.utf8)).get().symbols, [symbol("limit", 3, in: "Gauge")])
@@ -185,10 +192,13 @@ final class BranchReviewTestsAgainstCodeTests: BranchReviewRepositoryTestCase {
         let budgeted = try self.snapshot(limited)
         XCTAssertEqual(try file("Sources/Gauge.swift", in: budgeted).symbols, read)
         XCTAssertEqual(try file("Sources/Lever.swift", in: budgeted).symbols, .unread(.tooLarge), "past the files' budget")
+        XCTAssertEqual(try file("AppTests/FirstTests.swift", in: budgeted).unreadContext, .tooLarge)
         limited.maxScannedFileBytes = 20
         let small = try self.snapshot(limited)
         XCTAssertEqual(try file("Sources/Gauge.swift", in: small).symbols, .unread(.tooLarge))
         XCTAssertEqual(try file("Sources/Pattern.swift", in: small).symbols, .unread(.tooLarge), "its patch is past the limit")
+        limited.maxScannedFileBytes = 300
+        XCTAssertEqual(try file("Sources/Long.swift", in: try self.snapshot(limited)).unreadContext, .tooLarge, "its removals")
     }
 
     func testMentionsAreLookedForInTheTestGroupsFilesOnly() throws {
