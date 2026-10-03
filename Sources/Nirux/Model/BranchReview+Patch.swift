@@ -242,6 +242,7 @@ extension BranchReview {
                         kind = .added
                     case UInt8(ascii: "-"):
                         guard oldRemaining > 0 else { return nil }
+                        added?.addRemoved(raw.dropFirst())
                         oldRemaining -= 1
                         section.deletions += 1
                         kind = .removed

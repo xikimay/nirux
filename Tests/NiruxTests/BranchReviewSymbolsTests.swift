@@ -2,16 +2,21 @@ import XCTest
 @testable import Nirux
 
 /// The Swift scanner, the added lines and the mentions of "Tests against
-/// code" on handwritten sources; `BranchReviewSnapshotTests` runs them on
-/// real repositories.
+/// code" on handwritten sources; `BranchReviewTestsAgainstCodeTests` runs
+/// them on real repositories.
 final class BranchReviewSymbolsTests: XCTestCase {
-    /// The names `source` declares on `added` lines (all by default).
-    private func declared(_ source: String, added: Set<Int>? = nil) -> [String] {
-        var scanner = BranchReview.SwiftScanner()
+    private func scanned(_ source: String, added: Set<Int>? = nil, words: Set<String>? = nil) -> BranchReview.SwiftScanner {
+        var scanner = BranchReview.SwiftScanner(parsesDeclarations: words == nil)
+        scanner.words = words.map(BranchReview.WordSet.init)
         for (index, line) in source.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
             Array(line.utf8).withUnsafeBytes { scanner.feed($0, collecting: added?.contains(index + 1) ?? true) }
         }
-        return scanner.symbols.map(\.name)
+        return scanner
+    }
+
+    /// The names `source` declares on `added` lines (all by default).
+    private func declared(_ source: String, added: Set<Int>? = nil) -> [String] {
+        scanned(source, added: added).symbols.map(\.name)
     }
 
     // MARK: - Scanner
@@ -46,48 +51,66 @@ final class BranchReviewSymbolsTests: XCTestCase {
         public struct Widget {
             private var cache = 0
             fileprivate func helper() {}
+            override func layout() {}
             private(set) var count = 0
             public private(set) var total = 0
             @MainActor private static func reset() {}
             private
             func split() {}
             private struct Secret { var key = 0 }
-            override func layout() {}
+            nonisolated(unsafe) static var shared = 0
         }
         private extension Widget {
             func hidden() {}
+            struct Hidden { let deep = 0 }
         }
         fileprivate enum Keys { case first }
         extension Widget {
             func shown() {}
+            @objc func handle() {}
+            @IBAction func tap(_ sender: Any) {}
+            @objc dynamic var level = 0
         }
+        extension Secret {
+            func leak() {}
+        }
+        fileprivate struct Secret {}
         """
-        XCTAssertEqual(declared(source), ["Widget", "count", "total", "shown"])
+        XCTAssertEqual(declared(source), ["Widget", "count", "total", "shared", "shown", "level"])
     }
 
     func testEachNameOfADeclaration() {
         let source = """
-        final class Box<T>: NSObject where T: Equatable {
+        @MainActor final class Box<T>: NSObject where T: Equatable {
             class func make() -> Box { Box() }
             class override var kind: String { "box" }
             static func == (lhs: Box, rhs: Box) -> Bool { true }
+            @available(*, deprecated) @Argument(help: .init("size")) var size = 0
             let (width, (height, depth)): (Int, (Int, Int)) = (1, (2, 3))
-            let first = 1, second: Int = 2
+            let first = 1, second = 2
             var map: Dictionary<String, Int> = [:], third, fourth: Int
             let pair = f(a, b: 1)
+            let handler = make({ $0 }, label: "x")
+            let made = { 1 }(), after = 2
+            @SwiftUI.State var count = 0
+            @Clamped<Int> var limit = 0
+            func `does something`() {}
             typealias ID = String
             func `default`() {}
         }
         enum Style: Int {
             case plain = 0, bold
             indirect case nested(Style, depth: Int), `default`
+            case withHandler(run: () -> Void = {}), last
         }
         actor Worker {}
+        actor `open` {}
         protocol Drawing: AnyObject { func draw() }
         """
         XCTAssertEqual(declared(source), [
-            "Box", "make", "width", "height", "depth", "first", "second", "map", "third", "fourth", "pair",
-            "ID", "default", "Style", "plain", "bold", "nested", "default", "Worker", "Drawing", "draw"
+            "Box", "make", "size", "width", "height", "depth", "first", "second", "map", "third", "fourth", "pair",
+            "handler", "made", "after", "count", "limit", "ID", "default", "Style", "plain", "bold", "nested", "default",
+            "withHandler", "last", "Worker", "open", "Drawing", "draw"
         ])
     }
 
@@ -125,6 +148,9 @@ final class BranchReviewSymbolsTests: XCTestCase {
         guard let home = environment["HOME"],
               let user = environment["USER"] else { fatalError() }
         for case let item? in items {}
+        guard
+            let directory = environment["PWD"]
+        else { fatalError() }
         var counter = 0
         actor.run()
         @available(macOS 13, *)
@@ -146,6 +172,46 @@ final class BranchReviewSymbolsTests: XCTestCase {
         XCTAssertEqual(declared(source, added: [2, 4, 5]), ["name", "height", "first"])
     }
 
+    func testSymbolsSayWhatTheyAreAndWhereTheyAre() {
+        let source = """
+        struct Outer {
+            enum Inner { case deep }
+            typealias ID = Int
+        }
+        extension Outer.Inner {
+            func describe() {}
+        }
+        let top = 1
+        """
+        let symbols = scanned(source).symbols
+        XCTAssertEqual(symbols, [
+            .init(name: "Outer", line: 1, kind: .type, container: nil),
+            .init(name: "Inner", line: 2, kind: .type, container: "Outer"),
+            .init(name: "deep", line: 2, kind: .enumCase, container: "Inner"),
+            .init(name: "ID", line: 3, kind: .typeAlias, container: "Outer"),
+            .init(name: "describe", line: 6, kind: .function, container: "Inner"),
+            .init(name: "top", line: 8, kind: .variable, container: nil)
+        ])
+    }
+
+    func testByteOrderMarkIsNotAnIdentifier() {
+        XCTAssertEqual(declared("\u{FEFF}struct Marked {\n    var level = 0\n}"), ["Marked", "level"])
+    }
+
+    func testSourceThatLeavesABraceStringOrCommentOpenIsUnbalanced() {
+        XCTAssertTrue(scanned("struct A {\n    let s = \"{\"\n}").isBalanced)
+        XCTAssertFalse(scanned("struct A {\n}\n}").isBalanced, "a brace closed with none open")
+        XCTAssertFalse(scanned("struct A {\n    let s = 1").isBalanced)
+        XCTAssertFalse(scanned("let s = \"\"\"\n    text").isBalanced)
+        XCTAssertFalse(scanned("/* open\nlet s = 1").isBalanced)
+    }
+
+    func testWordsAreFoundInCodeAndInterpolationsOnly() {
+        let source = "// alpha\nlet text = \"beta \\(gamma) `delta`\"\n/* epsilon */ zeta(`eta`)"
+        let words = scanned(source, words: ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta"]).words
+        XCTAssertEqual(words?.names, ["alpha", "beta", "delta", "epsilon"])
+    }
+
     // MARK: - Added lines
 
     func testAddedLinesAreCollectedAsRangesOfTheNewSide() throws {
@@ -160,7 +226,7 @@ final class BranchReviewSymbolsTests: XCTestCase {
         +let c = 3
         @@ -10,3 +11,3 @@
          x
-        -y
+        -    private var y = 1
         +z
          w
 
@@ -170,7 +236,10 @@ final class BranchReviewSymbolsTests: XCTestCase {
 
         var digest = BranchReview.LineDigest()
         for line in ["let b = 2", "let c = 3", "z"] { Array(line.utf8).withUnsafeBytes { digest.add($0) } }
-        XCTAssertEqual(section.addedLines, BranchReview.AddedLines(ranges: [2..<4, 12..<13], digest: digest.finalize()))
+        XCTAssertEqual(
+            section.addedLines,
+            BranchReview.AddedLines(ranges: [2..<4, 12..<13], digest: digest.finalize(), removedNames: ["y"])
+        )
         XCTAssertNil(try XCTUnwrap(BranchReview.Patch.section(Data(patch.utf8))).addedLines)
 
         var collector = BranchReview.AddedLineCollector(maxRanges: 1)

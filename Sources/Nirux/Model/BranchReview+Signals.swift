@@ -397,18 +397,21 @@ extension BranchReview {
         defer { close(descriptor) }
         var info = stat()
         guard fstat(descriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return nil }
-        var data = Data(count: maxBytes)
-        let count = data.withUnsafeMutableBytes { buffer in
-            var total = 0
-            while total < maxBytes {
-                let read = Darwin.read(descriptor, buffer.baseAddress! + total, maxBytes - total)
-                guard read > 0 else { return read < 0 && total == 0 ? -1 : total }
-                total += read
+        // Sized by the file rather than the limit: thousands of small test
+        // files are read in a row. One that grows meanwhile is read on.
+        var data = Data(count: min(maxBytes, Int(clamping: info.st_size) + 1))
+        var total = 0
+        while total < maxBytes {
+            if total == data.count { data.count = min(maxBytes, data.count * 2) }
+            let capacity = data.count
+            let read = data.withUnsafeMutableBytes { Darwin.read(descriptor, $0.baseAddress! + total, capacity - total) }
+            guard read > 0 else {
+                if read < 0, total == 0 { return nil }
+                break
             }
-            return total
+            total += read
         }
-        guard count >= 0 else { return nil }
-        data.count = count
+        data.count = total
         return data
     }
 }

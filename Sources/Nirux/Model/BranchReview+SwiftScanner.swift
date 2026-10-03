@@ -3,23 +3,59 @@ import Foundation
 // MARK: - Swift scanner
 
 extension BranchReview {
+    /// A name a Swift file declares outside any function body, as
+    /// `SwiftScanner` reads it.
+    struct Declaration: Equatable {
+        let symbol: Symbol
+        /// Private or fileprivate (by its own modifier or its type's), an
+        /// `override`, or an `@objc` or `@IBAction` method: tests reach it
+        /// through the API, the superclass or the runtime that calls it.
+        let isHidden: Bool
+        /// The type its extension at the file's level extends, as
+        /// written (`Outer.Inner`): a private type's extension is private
+        /// too.
+        let extended: String?
+        /// On a line fed with `collecting`.
+        let isCollected: Bool
+    }
+
     /// Reads Swift source a line at a time and collects what it declares
     /// outside any function body: a name after `func`, `var`, `let`,
     /// `class`, `struct`, `enum`, `case`, `protocol`, `typealias` or
     /// `actor`, at the file's level or in a type's or an extension's
     /// body. Strings (multi-line and raw ones, interpolations included)
     /// and comments (nested ones included) are skipped; braces tell the
-    /// bodies apart. Not `private` or `fileprivate` ones, nor those of a
-    /// private type or extension: private members are tested through the
-    /// API that uses them. Nor an `override`, whose name is its
-    /// superclass's: tests reach it through the API that calls it. Known
-    /// limits: a bare `/regex/` literal reads as code, and `#if` branches
-    /// that open a brace each read as two.
+    /// bodies apart. Known limit: a bare `/regex/` literal reads as code,
+    /// and the file then reads unbalanced when it holds a brace.
     struct SwiftScanner {
-        /// Declared on the lines fed with `collecting`, in order.
-        private(set) var symbols: [Symbol] = []
+        private(set) var declarations: [Declaration] = []
+        /// Types declared private or fileprivate at the file's level.
+        private(set) var privateTypes: Set<String> = []
+        /// Names looked for in the code, interpolations included, but not
+        /// in comments or strings: each one found is removed.
+        var words: WordSet?
+        private let parsesDeclarations: Bool
         private var lineNumber = 0
         private var collecting = false
+        /// A brace closed with none open.
+        private var closedUnopened = false
+
+        init(parsesDeclarations: Bool = true) {
+            self.parsesDeclarations = parsesDeclarations
+        }
+
+        /// Whether every brace, string and comment the source opened is
+        /// closed: what follows a stray one may have read wrong.
+        var isBalanced: Bool { !closedUnopened && scopes.isEmpty && modes.isEmpty }
+
+        /// What the review lists: declared on collected lines, not hidden,
+        /// nor in an extension of a private type (declared before or after
+        /// it).
+        var symbols: [Symbol] {
+            declarations
+                .filter { $0.isCollected && !$0.isHidden && !($0.extended.map(privateTypes.contains) ?? false) }
+                .map(\.symbol)
+        }
 
         // Lexer: what the code is nested in, innermost last.
         private enum Mode {
@@ -41,15 +77,6 @@ extension BranchReview {
             case newline
         }
 
-        private struct Scope {
-            /// In a function's, a closure's or an accessor's body, at any
-            /// depth: nothing declared there is listed.
-            let isLocal: Bool
-            let isPrivate: Bool
-            /// The parentheses and brackets open where it starts.
-            let outerDepth: Int
-        }
-
         /// A name waiting for what follows it: `, b: Int` declares `b`,
         /// `Dictionary<A, B>` doesn't.
         private struct Candidate {
@@ -61,10 +88,12 @@ extension BranchReview {
         private enum Expect {
             case nothing
             /// After `func`, `struct`, `enum`, `protocol`, `typealias`.
-            case name
+            case name(Symbol.Kind)
             /// After `class` or `actor` at a statement's start: a type's
             /// name, unless a keyword follows (`class func`).
             case typeName
+            /// After `extension`: the type, dotted names included.
+            case extended(path: String, needsName: Bool)
             /// After `let` or `var`: a name or a tuple pattern.
             case binding
             /// In `let (a, (b, c))`, opened at `depth`.
@@ -78,27 +107,59 @@ extension BranchReview {
             case caseRest
         }
 
+        /// What the statement under way has said so far.
+        private struct Statement {
+            /// Parentheses and brackets open in it.
+            var depth = 0
+            /// Only modifiers and attributes so far.
+            var atStart = true
+            /// The last token is a comma, or a condition's keyword: the
+            /// line after it goes on with it (`guard let a = x,` then
+            /// `let b = y`).
+            var continues = false
+            var isPrivate = false
+            var isOverride = false
+            var isObjC = false
+            var expect = Expect.nothing
+        }
+
+        private struct Scope {
+            /// In a function's, a closure's or an accessor's body, at any
+            /// depth: nothing declared there is listed.
+            let isLocal: Bool
+            let isPrivate: Bool
+            /// The type whose body it is, or that its extension extends,
+            /// by its last name.
+            let container: String?
+            /// An extension's type at the file's level, as written.
+            let extended: String?
+            /// The statement the brace opened in, which goes on once it
+            /// closes: `let a = { 1 }(), b = 2`.
+            let outer: Statement
+        }
+
+        /// In an attribute: after `@` or a `.` (`@SwiftUI.State`), after
+        /// its name, or in its generic arguments (`@Clamped<Int>`).
+        private enum Attribute {
+            case name
+            case afterName
+            case generic(depth: Int)
+        }
+
         private var scopes: [Scope] = []
-        /// Parentheses and brackets open in the current scope.
-        private var depth = 0
-        /// Only modifiers and attributes since the last statement ended.
-        private var atStatementStart = true
-        /// The last token can't end a statement: a newline after it
-        /// doesn't either.
-        private var previousContinues = false
-        private var isPrivate = false
-        private var isOverride = false
+        private var statement = Statement()
         /// `private` just read: unless `(set)` follows.
         private var pendingPrivate = false
-        /// A modifier or an attribute just read: a parenthesis is its
-        /// arguments.
+        /// A modifier just read: a parenthesis is its arguments.
         private var mayTakeArguments = false
         private var argumentDepth = 0
-        private var afterAt = false
-        /// What the next `{` opens: a type's body, or a function's.
+        private var attribute: Attribute?
+        /// What the next `{` opens: a type's body (or an extension's), or
+        /// a function's. Set by the type's name, cleared by the brace.
         private var introducesType = false
         private var typeIsPrivate = false
-        private var expect = Expect.nothing
+        private var pendingContainer: String?
+        private var pendingExtended: String?
 
         private static let modifiers: Set<String> = [
             "public", "internal", "open", "package", "static", "final", "override", "required", "convenience",
@@ -109,8 +170,7 @@ extension BranchReview {
             "private", "fileprivate", "func", "var", "let", "class", "struct", "enum", "case", "protocol", "typealias",
             "actor", "extension", "init", "deinit", "subscript"
         ])
-        /// Tokens a statement can't end with.
-        private static let continuing: Set<UInt8> = Set(",([=:.&|+-*/%^<~".utf8)
+        private static let conditions: Set<String> = ["if", "guard", "while"]
 
         // MARK: Lexer
 
@@ -118,6 +178,11 @@ extension BranchReview {
         mutating func feed(_ line: UnsafeRawBufferPointer, collecting: Bool) {
             lineNumber += 1
             self.collecting = collecting
+            var line = line
+            // A byte order mark would read as the start of an identifier.
+            if lineNumber == 1, line.starts(with: [0xEF, 0xBB, 0xBF]) {
+                line = UnsafeRawBufferPointer(rebasing: line.dropFirst(3))
+            }
             var index = 0
             while index < line.count {
                 switch modes.last {
@@ -150,30 +215,15 @@ extension BranchReview {
                 modes.append(.blockComment(depth: 1))
                 return start + 2
             case UInt8(ascii: "\""), UInt8(ascii: "#"):
-                var end = start
-                while end < line.count, line[end] == UInt8(ascii: "#") { end += 1 }
-                let hashes = end - start
-                if end < line.count, line[end] == UInt8(ascii: "\"") {
-                    let isMultiline = end + 2 < line.count
-                        && line[end + 1] == UInt8(ascii: "\"") && line[end + 2] == UInt8(ascii: "\"")
-                    take(.literal)
-                    modes.append(.string(hashes: hashes, isMultiline: isMultiline))
-                    return end + (isMultiline ? 3 : 1)
-                }
-                if hashes > 0, end < line.count, line[end] == UInt8(ascii: "/") {
-                    take(.literal)
-                    modes.append(.regex(hashes: hashes))
-                    return end + 1
-                }
-                // `#if`, `#selector`: the name follows.
-                take(.punctuation(byte))
-                return start + 1
+                return scanDelimiter(line, from: start)
             case UInt8(ascii: "`"):
                 guard let close = line[(start + 1)...].firstIndex(of: UInt8(ascii: "`")) else {
                     take(.punctuation(byte))
                     return start + 1
                 }
-                take(.identifier(UnsafeRawBufferPointer(rebasing: line[(start + 1)..<close]), isEscaped: true))
+                let name = UnsafeRawBufferPointer(rebasing: line[(start + 1)..<close])
+                words?.remove(name)
+                take(.identifier(name, isEscaped: true))
                 return close + 1
             case UInt8(ascii: "("), UInt8(ascii: ")"):
                 if case .interpolation(let open)? = modes.last {
@@ -191,10 +241,37 @@ extension BranchReview {
                 }
                 var end = start + 1
                 while end < line.count, RiskRules.isIdentifier(line[end]) || line[end] == UInt8(ascii: "$") { end += 1 }
-                let isNumber = (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(byte)
-                take(isNumber ? .literal : .identifier(UnsafeRawBufferPointer(rebasing: line[start..<end]), isEscaped: false))
+                guard !(UInt8(ascii: "0")...UInt8(ascii: "9")).contains(byte) else {
+                    take(.literal)
+                    return end
+                }
+                let name = UnsafeRawBufferPointer(rebasing: line[start..<end])
+                words?.remove(name)
+                take(.identifier(name, isEscaped: false))
                 return end
             }
+        }
+
+        /// A string's or a regex's opening delimiter, with its `#`s, or a
+        /// `#` that starts `#if` or `#selector`.
+        private mutating func scanDelimiter(_ line: UnsafeRawBufferPointer, from start: Int) -> Int {
+            var end = start
+            while end < line.count, line[end] == UInt8(ascii: "#") { end += 1 }
+            let hashes = end - start
+            if end < line.count, line[end] == UInt8(ascii: "\"") {
+                let isMultiline = end + 2 < line.count
+                    && line[end + 1] == UInt8(ascii: "\"") && line[end + 2] == UInt8(ascii: "\"")
+                take(.literal)
+                modes.append(.string(hashes: hashes, isMultiline: isMultiline))
+                return end + (isMultiline ? 3 : 1)
+            }
+            if hashes > 0, end < line.count, line[end] == UInt8(ascii: "/") {
+                take(.literal)
+                modes.append(.regex(hashes: hashes))
+                return end + 1
+            }
+            take(.punctuation(line[start]))
+            return start + 1
         }
 
         /// `\` then as many `#` as the string's delimiter escapes a
@@ -273,256 +350,307 @@ extension BranchReview {
             start + count <= line.count && line[start..<(start + count)].allSatisfy { $0 == UInt8(ascii: "#") }
         }
 
-        // MARK: Parser
+    }
+}
 
-        /// Code inside a string's interpolation is an expression: only
-        /// the code around strings is parsed.
-        private mutating func take(_ token: Token) {
-            guard modes.isEmpty else { return }
-            if scopes.last?.isLocal == true {
-                if case .punctuation(let byte) = token {
-                    if byte == UInt8(ascii: "{") { open(local: true) }
-                    if byte == UInt8(ascii: "}") { close() }
-                }
-                return
+// MARK: - Parser
+
+extension BranchReview.SwiftScanner {
+    /// Code inside a string's interpolation is an expression: only
+    /// the code around strings is parsed.
+    private mutating func take(_ token: Token) {
+        guard parsesDeclarations, modes.isEmpty else { return }
+        if scopes.last?.isLocal == true {
+            if case .punctuation(let byte) = token {
+                if byte == UInt8(ascii: "{") { open(local: true) }
+                if byte == UInt8(ascii: "}") { close() }
             }
-            if takesAttribute(token) { return }
-            if pendingPrivate {
-                pendingPrivate = false
-                isPrivate = true
-            }
-            switch token {
-            case .newline:
-                if depth == 0, !previousContinues, !atStatementStart { startStatement() }
-            case .identifier(let bytes, let isEscaped):
-                identifier(String(decoding: bytes, as: UTF8.self), isEscaped: isEscaped)
-            case .punctuation(let byte):
-                punctuation(byte)
-            case .literal:
-                other()
-            }
+            return
         }
-
-        /// Whether `token` is part of an attribute (`@objc(name:)`) or of a
-        /// modifier's arguments (`private(set)`).
-        private mutating func takesAttribute(_ token: Token) -> Bool {
-            if argumentDepth > 0 {
-                if case .punctuation(let byte) = token {
-                    if byte == UInt8(ascii: "(") { argumentDepth += 1 }
-                    if byte == UInt8(ascii: ")") { argumentDepth -= 1 }
-                }
-                return true
-            }
-            if afterAt {
-                afterAt = false
-                if case .identifier = token {
-                    mayTakeArguments = true
-                    return true
-                }
-            }
-            if mayTakeArguments {
-                mayTakeArguments = false
-                if case .punctuation(UInt8(ascii: "(")) = token {
-                    // `private(set)` restricts the setter only.
-                    pendingPrivate = false
-                    argumentDepth = 1
-                    return true
-                }
-            }
-            return false
+        if takesAttribute(token) || takesExtendedType(token) { return }
+        if pendingPrivate {
+            pendingPrivate = false
+            statement.isPrivate = true
         }
-
-        private mutating func identifier(_ name: String, isEscaped: Bool) {
-            if case .typeName = expect {
-                expect = .nothing
-                guard !isEscaped, Self.keywords.contains(name) else {
-                    record(name)
-                    introduceType()
-                    other()
-                    return
-                }
-                // `class func`, `class override var`: a modifier.
-            }
-            if !isEscaped, atStatementStart, depth == 0, keyword(name) { return }
-            let candidate = Candidate(name: name, line: lineNumber, collecting: collecting)
-            switch expect {
-            case .name:
-                record(name)
-                expect = .nothing
-            case .binding:
-                record(name)
-                expect = .moreBindings
-            case .tuple(let open, _):
-                expect = .tuple(depth: open, candidate: candidate)
-                atStatementStart = false
-                previousContinues = false
-                return
-            case .nextBinding(let waiting):
-                expect = .candidates(waiting + [candidate])
-                atStatementStart = false
-                previousContinues = false
-                return
-            case .caseName:
-                record(name)
-                expect = .caseRest
-            default:
-                break
-            }
+        switch token {
+        case .newline:
+            if statement.depth == 0, !statement.continues, !statement.atStart { startStatement() }
+        case .identifier(let bytes, let isEscaped):
+            identifier(String(decoding: bytes, as: UTF8.self), isEscaped: isEscaped)
+        case .punctuation(let byte):
+            punctuation(byte)
+        case .literal:
             other()
         }
+    }
 
-        /// Whether `name` is a modifier or starts a declaration.
-        private mutating func keyword(_ name: String) -> Bool {
-            switch name {
-            case "private", "fileprivate":
-                pendingPrivate = true
-                mayTakeArguments = true
-                return true
-            case "override":
-                isOverride = true
-                return true
-            case "class", "actor":
-                // Still at the statement's start: `class func`.
-                expect = .typeName
-                return true
-            case "func", "typealias":
-                begin(.name)
-            case "struct", "enum", "protocol":
-                begin(.name)
-                introduceType()
-            case "extension":
-                begin(.nothing)
-                introduceType()
-            case "var", "let":
-                begin(.binding)
-            case "case":
-                begin(.caseName)
-            case "init", "deinit", "subscript":
-                begin(.nothing)
-            default:
-                guard Self.modifiers.contains(name) else { return false }
-                mayTakeArguments = true
-                return true
+    /// Whether `token` is part of an attribute (`@objc(name:)`) or of a
+    /// modifier's arguments (`private(set)`).
+    private mutating func takesAttribute(_ token: Token) -> Bool {
+        if argumentDepth > 0 {
+            if case .punctuation(let byte) = token {
+                if byte == UInt8(ascii: "(") { argumentDepth += 1 }
+                if byte == UInt8(ascii: ")") { argumentDepth -= 1 }
             }
             return true
         }
-
-        private mutating func begin(_ expecting: Expect) {
-            expect = expecting
-            introducesType = false
-            atStatementStart = false
-            previousContinues = false
+        switch (attribute, token) {
+        case (.name?, .identifier(let bytes, _)):
+            // Methods the runtime calls, through a selector or an action.
+            if ["objc", "IBAction"].contains(String(decoding: bytes, as: UTF8.self)) { statement.isObjC = true }
+            attribute = .afterName
+            return true
+        case (.afterName?, .punctuation(UInt8(ascii: "."))):
+            attribute = .name
+            return true
+        case (.afterName?, .punctuation(UInt8(ascii: "<"))):
+            attribute = .generic(depth: 1)
+            return true
+        case (.afterName?, .punctuation(UInt8(ascii: "("))):
+            attribute = nil
+            argumentDepth = 1
+            return true
+        case (.generic(let depth)?, .punctuation(UInt8(ascii: "<"))):
+            attribute = .generic(depth: depth + 1)
+            return true
+        case (.generic(let depth)?, .punctuation(UInt8(ascii: ">"))):
+            attribute = depth == 1 ? .afterName : .generic(depth: depth - 1)
+            return true
+        case (.generic?, _):
+            return true
+        default:
+            attribute = nil
         }
-
-        private mutating func introduceType() {
-            introducesType = true
-            typeIsPrivate = isPrivate
-        }
-
-        private mutating func punctuation(_ byte: UInt8) {
-            switch byte {
-            case UInt8(ascii: "{"):
-                open(local: depth > 0 || !introducesType)
-                return
-            case UInt8(ascii: "}"):
-                close()
-                return
-            case UInt8(ascii: ";"):
-                introducesType = false
-                startStatement()
-                return
-            case UInt8(ascii: "@"):
-                afterAt = true
-                return
-            case UInt8(ascii: "("), UInt8(ascii: "["):
-                depth += 1
-            case UInt8(ascii: ")"), UInt8(ascii: "]"):
-                depth = max(0, depth - 1)
-            default:
-                break
-            }
-            advance(after: byte)
-            atStatementStart = false
-            previousContinues = Self.continuing.contains(byte)
-        }
-
-        /// Where a punctuation leaves the names a declaration lists.
-        private mutating func advance(after byte: UInt8) {
-            switch expect {
-            case .binding where byte == UInt8(ascii: "("):
-                expect = .tuple(depth: depth, candidate: nil)
-            case .tuple(let open, let candidate):
-                if byte == UInt8(ascii: ",") || byte == UInt8(ascii: ")"), let candidate { record(candidate) }
-                expect = depth < open ? .moreBindings : .tuple(depth: open, candidate: nil)
-            case .moreBindings where byte == UInt8(ascii: ",") && depth == 0:
-                expect = .nextBinding([])
-            case .candidates(let waiting) where depth == 0 && byte == UInt8(ascii: ","):
-                expect = .nextBinding(waiting)
-            case .candidates(let waiting):
-                if byte == UInt8(ascii: ":") || byte == UInt8(ascii: "=") {
-                    for candidate in waiting { record(candidate) }
-                }
-                expect = .moreBindings
-            case .caseRest where byte == UInt8(ascii: ",") && depth == 0:
-                expect = .caseName
-            case .name, .typeName, .binding, .nextBinding, .caseName:
-                expect = .nothing
-            default:
-                break
-            }
-        }
-
-        /// Any other token: a statement under way.
-        private mutating func other() {
-            switch expect {
-            case .tuple(let open, _): expect = .tuple(depth: open, candidate: nil)
-            case .nextBinding, .candidates: expect = .moreBindings
-            case .name, .typeName, .binding, .caseName: expect = .nothing
-            default: break
-            }
-            atStatementStart = false
-            previousContinues = false
-        }
-
-        private mutating func startStatement() {
-            atStatementStart = true
-            previousContinues = false
-            isPrivate = false
-            isOverride = false
-            pendingPrivate = false
+        if mayTakeArguments {
             mayTakeArguments = false
-            afterAt = false
-            expect = .nothing
+            if case .punctuation(UInt8(ascii: "(")) = token {
+                // `private(set)` restricts the setter only.
+                pendingPrivate = false
+                argumentDepth = 1
+                return true
+            }
         }
+        return false
+    }
 
-        private mutating func open(local: Bool) {
-            let parent = scopes.last
-            scopes.append(Scope(
-                isLocal: local || parent?.isLocal == true,
-                isPrivate: parent?.isPrivate == true || (!local && typeIsPrivate),
-                outerDepth: depth
-            ))
-            depth = 0
-            introducesType = false
+    /// Whether `token` is part of an extension's type; the first token
+    /// that isn't settles it (`:`, `where`, `{`, a newline).
+    private mutating func takesExtendedType(_ token: Token) -> Bool {
+        guard case .extended(let path, let needsName) = statement.expect else { return false }
+        switch token {
+        case .identifier(let bytes, _) where needsName:
+            statement.expect = .extended(path: path + String(decoding: bytes, as: UTF8.self), needsName: false)
+            return true
+        case .punctuation(UInt8(ascii: ".")) where !needsName:
+            statement.expect = .extended(path: path + ".", needsName: true)
+            return true
+        default:
+            statement.expect = .nothing
+            introduceType(container: path.split(separator: ".").last.map(String.init), extended: path)
+            return false
+        }
+    }
+
+    private mutating func identifier(_ name: String, isEscaped: Bool) {
+        if case .typeName = statement.expect {
+            statement.expect = .nothing
+            guard !isEscaped, Self.keywords.contains(name) else {
+                declareType(name)
+                other()
+                return
+            }
+            // `class func`, `class override var`: a modifier.
+        }
+        if !isEscaped, statement.atStart, keyword(name) { return }
+        let candidate = Candidate(name: name, line: lineNumber, collecting: collecting)
+        switch statement.expect {
+        case .name(.type):
+            declareType(name)
+            statement.expect = .nothing
+        case .name(let kind):
+            record(candidate, kind)
+            statement.expect = .nothing
+        case .binding:
+            record(candidate, .variable)
+            statement.expect = .moreBindings
+        case .tuple(let open, _):
+            statement.expect = .tuple(depth: open, candidate: candidate)
+            statement.atStart = false
+            statement.continues = false
+            return
+        case .nextBinding(let waiting):
+            statement.expect = .candidates(waiting + [candidate])
+            statement.atStart = false
+            statement.continues = false
+            return
+        case .caseName:
+            record(candidate, .enumCase)
+            statement.expect = .caseRest
+        default:
+            break
+        }
+        other()
+        // `guard`, then `let` on the next line: one statement.
+        statement.continues = !isEscaped && Self.conditions.contains(name)
+    }
+
+    /// Whether `name` is a modifier or starts a declaration.
+    private mutating func keyword(_ name: String) -> Bool {
+        switch name {
+        case "private", "fileprivate":
+            pendingPrivate = true
+            mayTakeArguments = true
+            return true
+        case "override":
+            statement.isOverride = true
+            return true
+        case "class", "actor":
+            // Still at the statement's start: `class func`.
+            statement.expect = .typeName
+            return true
+        case "func":
+            begin(.name(.function))
+        case "typealias":
+            begin(.name(.typeAlias))
+        case "struct", "enum", "protocol":
+            begin(.name(.type))
+        case "extension":
+            begin(.extended(path: "", needsName: true))
+        case "var", "let":
+            begin(.binding)
+        case "case":
+            begin(.caseName)
+        default:
+            guard Self.modifiers.contains(name) else { return false }
+            mayTakeArguments = true
+            return true
+        }
+        return true
+    }
+
+    private mutating func begin(_ expecting: Expect) {
+        statement.expect = expecting
+        statement.atStart = false
+        statement.continues = false
+    }
+
+    private mutating func declareType(_ name: String) {
+        record(Candidate(name: name, line: lineNumber, collecting: collecting), .type)
+        if statement.isPrivate, scopes.isEmpty { privateTypes.insert(name) }
+        introduceType(container: name, extended: nil)
+    }
+
+    private mutating func introduceType(container: String?, extended: String?) {
+        introducesType = true
+        typeIsPrivate = statement.isPrivate
+        pendingContainer = container
+        pendingExtended = scopes.isEmpty ? extended : nil
+    }
+
+    private mutating func punctuation(_ byte: UInt8) {
+        switch byte {
+        case UInt8(ascii: "{"):
+            open(local: !introducesType)
+            return
+        case UInt8(ascii: "}"):
+            close()
+            return
+        case UInt8(ascii: ";"):
             startStatement()
+            return
+        case UInt8(ascii: "@"):
+            attribute = .name
+            return
+        case UInt8(ascii: "("), UInt8(ascii: "["):
+            statement.depth += 1
+        case UInt8(ascii: ")"), UInt8(ascii: "]"):
+            statement.depth = max(0, statement.depth - 1)
+        default:
+            break
         }
+        advance(after: byte)
+        statement.atStart = false
+        statement.continues = byte == UInt8(ascii: ",")
+    }
 
-        private mutating func close() {
-            guard let scope = scopes.popLast() else { return }
-            depth = scope.outerDepth
-            introducesType = false
-            startStatement()
-            atStatementStart = false
+    /// Where a punctuation leaves the names a declaration lists.
+    private mutating func advance(after byte: UInt8) {
+        let depth = statement.depth
+        switch statement.expect {
+        case .binding where byte == UInt8(ascii: "("):
+            statement.expect = .tuple(depth: depth, candidate: nil)
+        case .tuple(let open, let candidate):
+            if byte == UInt8(ascii: ",") || byte == UInt8(ascii: ")"), let candidate { record(candidate, .variable) }
+            statement.expect = depth < open ? .moreBindings : .tuple(depth: open, candidate: nil)
+        case .moreBindings where byte == UInt8(ascii: ",") && depth == 0:
+            statement.expect = .nextBinding([])
+        case .candidates(let waiting) where depth == 0 && byte == UInt8(ascii: ","):
+            statement.expect = .nextBinding(waiting)
+        case .candidates(let waiting):
+            if byte == UInt8(ascii: ":") || byte == UInt8(ascii: "=") {
+                for candidate in waiting { record(candidate, .variable) }
+            }
+            statement.expect = .moreBindings
+        case .caseRest where byte == UInt8(ascii: ",") && depth == 0:
+            statement.expect = .caseName
+        case .name, .typeName, .binding, .nextBinding, .caseName:
+            statement.expect = .nothing
+        default:
+            break
         }
+    }
 
-        private mutating func record(_ name: String) {
-            record(Candidate(name: name, line: lineNumber, collecting: collecting))
+    /// Any other token: a statement under way.
+    private mutating func other() {
+        switch statement.expect {
+        case .tuple(let open, _): statement.expect = .tuple(depth: open, candidate: nil)
+        case .nextBinding, .candidates: statement.expect = .moreBindings
+        case .name, .typeName, .binding, .caseName: statement.expect = .nothing
+        default: break
         }
+        statement.atStart = false
+        statement.continues = false
+    }
 
-        private mutating func record(_ candidate: Candidate) {
-            guard candidate.collecting, candidate.name != "_", !isPrivate, !isOverride, scopes.last?.isPrivate != true
-            else { return }
-            symbols.append(Symbol(name: candidate.name, line: candidate.line))
+    private mutating func startStatement() {
+        statement = Statement()
+        pendingPrivate = false
+        mayTakeArguments = false
+        attribute = nil
+    }
+
+    private mutating func open(local: Bool) {
+        let parent = scopes.last
+        scopes.append(Scope(
+            isLocal: local || parent?.isLocal == true,
+            isPrivate: parent?.isPrivate == true || (!local && typeIsPrivate),
+            container: local ? nil : pendingContainer,
+            extended: local ? nil : pendingExtended,
+            outer: statement
+        ))
+        introducesType = false
+        startStatement()
+    }
+
+    private mutating func close() {
+        guard let scope = scopes.popLast() else {
+            closedUnopened = true
+            return
         }
+        statement = scope.outer
+        statement.atStart = false
+        statement.continues = false
+    }
+
+    private mutating func record(_ candidate: Candidate, _ kind: BranchReview.Symbol.Kind) {
+        // A name with other characters (`` `does something` ``) can't be
+        // found as a word.
+        guard candidate.name != "_", candidate.name.utf8.allSatisfy(BranchReview.RiskRules.isIdentifier) else { return }
+        let isHidden = statement.isPrivate || statement.isOverride || (kind == .function && statement.isObjC)
+            || scopes.last?.isPrivate == true
+        declarations.append(BranchReview.Declaration(
+            symbol: BranchReview.Symbol(name: candidate.name, line: candidate.line, kind: kind, container: scopes.last?.container),
+            isHidden: isHidden, extended: scopes.first?.extended, isCollected: candidate.collecting
+        ))
     }
 }
