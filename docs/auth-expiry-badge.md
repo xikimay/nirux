@@ -1,6 +1,7 @@
 # Auth Expiry Badge
 
-Status: validated by the user on 2026-10-02, implemented.
+Status: design, validated by the user, `aws sts get-caller-identity` probe
+included. Implemented.
 
 In three weeks the user typed `aws sso login` by hand 7 times, each time after
 an agent hit an expired AWS SSO session mid-task. Nirux can say so before the
