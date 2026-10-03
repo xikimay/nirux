@@ -48,7 +48,7 @@ final class SidebarRailTests: XCTestCase {
         let window = NSWindow(contentRect: host.bounds, styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
-        sidebar.railTooltipNeedsKeyWindow = false
+        sidebar.railHoverNeedsLivePointer = false
         sidebar.update(profiles: profiles, workspaces: workspaces)
         host.layoutSubtreeIfNeeded()
         return (sidebar, window)
@@ -97,23 +97,24 @@ final class SidebarRailTests: XCTestCase {
         )
     }
 
-    /// The project, the active workspaces, the INACTIVE toggle (folded: only
-    /// the inactive workspace on screen), then "+".
+    /// The project, the active workspaces, the INACTIVE toggle (folded:
+    /// only the inactive workspace on screen, and an amber one), then "+".
     func testRailListsTheProjectTheWorkspacesTheToggleAndPlus() throws {
         let (sidebar, window) = rail([
             workspace("a", index: 0),
             workspace("b", index: 1),
             workspace("on-screen", index: 2, isInactive: true, isActive: true),
-            workspace("parked", index: 3, isInactive: true)
+            workspace("parked", index: 3, isInactive: true),
+            workspace("child asked", index: 4, isInactive: true, notification: .waiting)
         ], profiles: [profile("p", isActive: true)])
         defer { window.close() }
 
-        XCTAssertEqual(regions(sidebar), ["project", "0", "1", "inactiveSection", "2", "newWorkspace"])
+        XCTAssertEqual(regions(sidebar), ["project", "0", "1", "inactiveSection", "2", "4", "newWorkspace"])
 
         try click("inactiveSection", in: sidebar, window: window)
 
         XCTAssertFalse(sidebar.isInactiveSectionCollapsed)
-        XCTAssertEqual(regions(sidebar), ["project", "0", "1", "inactiveSection", "2", "3", "newWorkspace"])
+        XCTAssertEqual(regions(sidebar), ["project", "0", "1", "inactiveSection", "2", "3", "4", "newWorkspace"])
     }
 
     func testTileClickSelectsItsWorkspaceAndPlusAsksForANewOne() throws {
@@ -273,6 +274,26 @@ final class SidebarRailTests: XCTestCase {
         XCTAssertEqual(sidebar.railTooltip(for: .workspaceCard(3))?.detailColor, Theme.Color.waiting)
         // A finished turn isn't a wait.
         XCTAssertEqual(sidebar.railTooltip(for: .railButton(.project))?.detail, "2 waiting")
+    }
+
+    /// A heredoc or a plan to approve stays one line in the tooltip.
+    func testMultilineRequestKeepsTheTooltipOneLine() throws {
+        var request = AgentPermissionRequest(
+            toolName: "Bash", summary: "git commit", key: "k", agentID: nil, sessionID: "lead", requestedAt: 0
+        )
+        request.approval = PermissionApprovalTicket(requestID: "r", deadline: 100, text: "git commit -F - <<'EOF'\nfix\n\nbody\nEOF")
+        var asking = permission
+        asking.permissionApproval = try XCTUnwrap(SidebarPermissionApproval(request, now: 1))
+        let (sidebar, window) = rail([workspace("asking", index: 0, columns: [asking])])
+        defer { window.close() }
+
+        let tooltip = try XCTUnwrap(sidebar.railTooltip(for: .workspaceCard(0)))
+        XCTAssertEqual(tooltip.note, "Bash: git commit -F - <<'EOF' fix body EOF")
+        let oneLine = SidebarRailTooltipView()
+        oneLine.show(SidebarRailTooltip(title: "t", detail: "d", note: "n"))
+        let manyLines = SidebarRailTooltipView()
+        manyLines.show(SidebarRailTooltip(title: "t", detail: "d", note: "1\n2\n3\n4"))
+        XCTAssertEqual(manyLines.frame.height, oneLine.frame.height)
     }
 
     /// VoiceOver presses do what clicks do.

@@ -245,8 +245,15 @@ final class SidebarRailTileView: NSView {
                 x: rect.midX - size.width / 2, y: rect.midY - size.height / 2, width: size.width, height: size.height
             ))
         } else if let text {
-            let attributes: [NSAttributedString.Key: Any] = [.font: style.font, .foregroundColor: color, .kern: 0.2]
-            let size = (text as NSString).size(withAttributes: attributes)
+            var attributes: [NSAttributedString.Key: Any] = [.font: style.font, .foregroundColor: color, .kern: 0.2]
+            var size = (text as NSString).size(withAttributes: attributes)
+            // "MQ12", "I1232": smaller rather than past the border.
+            let room = SidebarRailMetrics.tileSize - Theme.Space.sm
+            if size.width > room {
+                attributes[.font] = NSFont(descriptor: style.font.fontDescriptor, size: style.font.pointSize * room / size.width)
+                    ?? style.font
+                size = (text as NSString).size(withAttributes: attributes)
+            }
             (text as NSString).draw(
                 at: NSPoint(x: Self.tileRect.midX - size.width / 2, y: Self.tileRect.midY - size.height / 2),
                 withAttributes: attributes
@@ -340,6 +347,8 @@ final class SidebarRailTooltipView: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let detailLabel = NSTextField(labelWithString: "")
     private let noteLabel = NSTextField(labelWithString: "")
+    /// What it shows, not to lay it out again on every pointer move.
+    private var shown: SidebarRailTooltip?
     private static let paddingX: CGFloat = 10
     private static let paddingY: CGFloat = 7
     private static let lineGap: CGFloat = 2
@@ -377,6 +386,8 @@ final class SidebarRailTooltipView: NSView {
 
     /// Fills the tooltip and sizes it to its text, up to the maximum width.
     func show(_ tooltip: SidebarRailTooltip) {
+        guard tooltip != shown else { return }
+        shown = tooltip
         titleLabel.stringValue = tooltip.title
         detailLabel.stringValue = tooltip.detail ?? ""
         detailLabel.textColor = tooltip.detailColor
@@ -384,7 +395,16 @@ final class SidebarRailTooltipView: NSView {
         let lines = [(titleLabel, tooltip.title), (detailLabel, tooltip.detail), (noteLabel, tooltip.note)]
             .compactMap { label, text in text == nil ? nil : label }
         for label in [titleLabel, detailLabel, noteLabel] { label.isHidden = !lines.contains(label) }
-        let sizes = lines.map { $0.cell?.cellSize ?? .zero }
+        // One line each, whatever the text holds: the height of its first
+        // line (fallback fonts included: CJK, emoji), never less than the
+        // font's.
+        let layout = NSLayoutManager()
+        let sizes = lines.map { label in
+            guard let font = label.font else { return NSSize.zero }
+            let firstLine = label.stringValue.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+            let measured = NSAttributedString(string: firstLine, attributes: [.font: font]).size().height
+            return NSSize(width: label.cell?.cellSize.width ?? 0, height: ceil(max(layout.defaultLineHeight(for: font), measured)))
+        }
         let textWidth = ceil(min(sizes.map(\.width).max() ?? 0, SidebarRailMetrics.tooltipMaxWidth - Self.paddingX * 2))
         let textHeight = sizes.map(\.height).reduce(0, +) + Self.lineGap * CGFloat(max(0, lines.count - 1))
         setFrameSize(NSSize(width: textWidth + Self.paddingX * 2, height: ceil(textHeight + Self.paddingY * 2)))

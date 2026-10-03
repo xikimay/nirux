@@ -152,8 +152,10 @@ final class SidebarView: NSView {
     /// A click hid the tooltip: it stays hidden until the pointer moves,
     /// not to cover the terminal the click brought up.
     var isRailTooltipSuppressed = false
-    /// Tests turn it off: xctest never makes the app active.
-    var railTooltipNeedsKeyWindow = true
+    /// The rail lights tiles and shows tooltips only for a live pointer:
+    /// Nirux active, its window key. Tests turn it off: xctest never makes
+    /// the app active, and the real pointer is anywhere.
+    var railHoverNeedsLivePointer = true
     /// The rail faded out for an expansion: rebuilds leave it empty until
     /// the cards come in.
     var isRailHidden = false
@@ -286,9 +288,12 @@ final class SidebarView: NSView {
         lastInfos.filter { !$0.isInactive } + lastInfos.filter { $0.isInactive }
     }
 
-    /// The workspaces the rail shows a tile for, top to bottom.
+    /// The workspaces the rail shows a tile for, top to bottom: the cards'
+    /// and, in the folded section, an amber one (`railState`).
     var railWorkspaceInfos: [WorkspaceInfo] {
-        displayedWorkspaceInfos.filter(listsWorkspace)
+        displayedWorkspaceInfos.filter {
+            listsWorkspace(isInactive: $0.isInactive, isActive: $0.isActive, asksUser: $0.asksUser || $0.railState == .waiting)
+        }
     }
 
     // MARK: - Click handling

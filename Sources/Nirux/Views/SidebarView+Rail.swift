@@ -96,7 +96,9 @@ extension SidebarView {
     private func projectTile(_ profile: ProfileInfo) -> SidebarRailTileView {
         let tile = SidebarRailTileView(style: .project, text: profile.name.first.map(String.init) ?? "?")
         tile.role = .menuButton
-        if let tooltip = railTooltip(for: .railButton(.project)) { describe(tile, as: tooltip) }
+        if let tooltip = railTooltip(for: .railButton(.project)) {
+            describe(tile, as: SidebarRailTooltip(title: "Project \(tooltip.title)", detail: tooltip.detail, note: tooltip.note))
+        }
         tile.onPress = { [weak self, weak tile] in
             guard let self, let tile else { return }
             projectMenu().popUp(positioning: nil, at: NSPoint(x: tile.frame.maxX, y: tile.frame.maxY), in: contentDocumentView)
@@ -179,7 +181,11 @@ extension SidebarView {
     /// would take it down.
     private var isRailTooltipAllowed: Bool {
         guard !isRailTooltipSuppressed, RunLoop.current.currentMode != .eventTracking else { return false }
-        return !railTooltipNeedsKeyWindow || (NSApp.isActive && window?.isKeyWindow == true)
+        guard railHoverNeedsLivePointer else { return true }
+        guard NSApp.isActive, let window, window.isKeyWindow else { return false }
+        // Past the tiles' left edge: a pointer pushed against the screen's
+        // edge (a full-screen window) rests there without pointing at one.
+        return convert(window.mouseLocationOutsideOfEventStream, from: nil).x >= Metrics.tileX - Metrics.badgeOverhang
     }
 
     /// Shows the hovered tile's tooltip beside the rail, over the columns,

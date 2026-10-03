@@ -66,7 +66,8 @@ extension ColumnInfo {
                 signal: .waiting, label: isPlan ? "plan" : "permission",
                 toolTip: "needs permission — \(approval.toolName): \(approval.text)",
                 headline: isPlan ? "needs plan approval" : "needs permission",
-                detail: isPlan ? approval.text : "\(approval.toolName): \(approval.text)"
+                // A heredoc, a plan: one line.
+                detail: AgentText.clean(isPlan ? approval.text : "\(approval.toolName): \(approval.text)", maxLength: 300)
             ))
         }
         if let openDialog {

@@ -54,6 +54,8 @@ extension SidebarView {
     /// may have shifted under a stationary pointer.
     func refreshHoverTargetFromMouse() {
         guard let window else { return }
+        // Inactive, the window doesn't hear the pointer leave.
+        if !isExpanded, railHoverNeedsLivePointer, !(NSApp.isActive && window.isKeyWindow) { return }
         let windowPoint = window.mouseLocationOutsideOfEventStream
         // Over the status bar or the title bar, document points still fall
         // on rows scrolled out of view.
