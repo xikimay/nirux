@@ -167,6 +167,24 @@ final class ProcessSnapshot {
         return nil
     }
 
+    /// The arguments of `rootPID`'s descendants whose name is in `names`,
+    /// breadth-first, like `firstDescendantName`.
+    func descendantArguments(of rootPID: pid_t, named names: Set<String>, limit: Int = 256) -> [[String]] {
+        var pending = childrenMap[rootPID] ?? []
+        var visited = Set<pid_t>()
+        var next = 0
+        var found: [[String]] = []
+        while next < pending.count, visited.count < limit {
+            let pid = pending[next]
+            next += 1
+            guard visited.insert(pid).inserted else { continue }
+            let arguments = capturedArguments.map { $0[pid] ?? [] } ?? Self.arguments(of: pid, maxArgs: 32)
+            if let name = Self.execName(from: arguments) ?? commMap[pid], names.contains(name) { found.append(arguments) }
+            pending.append(contentsOf: childrenMap[pid] ?? [])
+        }
+        return found
+    }
+
     func isProcess(_ process: ProcessInstance, childOf parentPID: pid_t) -> Bool {
         instanceMap[process.pid] == process && childrenMap[parentPID]?.contains(process.pid) == true
     }
@@ -358,6 +376,11 @@ final class PtySession: @unchecked Sendable {
         state.machine.takeStuckAlert(now: now, waitThreshold: waitThreshold, foreground: foreground)
     }
 
+    /// What blocks the agent on the user now (see `AgentWait`).
+    func agentBlockedWait(now: TimeInterval, foreground: ForegroundProcess?) -> AgentWait? {
+        state.machine.blockedWait(now: now, foreground: foreground)
+    }
+
     var agentMidTurnExit: AgentMidTurnExit? { state.machine.midTurnExit }
 
     var agentTurnFailure: AgentTurnFailure? { state.machine.turnFailure }
@@ -526,15 +549,27 @@ final class PtySession: @unchecked Sendable {
         state.isProcessInForegroundJob(process, snapshot: snapshot)
     }
 
-    /// Returns the cwd of the child process (follows cd).
+    /// Returns the cwd of the child process (follows cd), nil until the
+    /// shell has exec'd.
     /// Uses `proc_pidinfo(PROC_PIDVNODEPATHINFO)` — `/proc` isn't available
     /// on macOS and `proc_pidpath` gives the executable path, not the cwd.
     var childCwd: String? {
         guard state.childPid > 0 else { return nil }
-        return cwdFromPid(state.childPid)
+        return Self.cwd(ofExecedProcess: state.childPid)
     }
 
-    private func cwdFromPid(_ pid: pid_t) -> String? {
+    /// Nil until `pid` has exec'd. Before that, the child `start` forked
+    /// may not have reached its `chdir` yet and still sits in Nirux's own
+    /// working directory (`/` for the app, the checkout under `swift test`):
+    /// an editor, a save or a file picker reading it would root itself
+    /// there. The flag is read first: a fork starts without it, it never
+    /// clears, and the `chdir` comes before the exec, so the cwd read after
+    /// it is the shell's.
+    static func cwd(ofExecedProcess pid: pid_t) -> String? {
+        var bsdInfo = proc_bsdshortinfo()
+        let bsdSize = Int32(MemoryLayout<proc_bsdshortinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 0, &bsdInfo, bsdSize) == bsdSize,
+              bsdInfo.pbsi_flags & UInt32(PROC_FLAG_EXEC) != 0 else { return nil }
         // Use proc_pidinfo with PROC_PIDVNODEPATHINFO to get cwd
         var info = proc_vnodepathinfo()
         let size = MemoryLayout<proc_vnodepathinfo>.size

@@ -43,7 +43,7 @@ extension NiruxShellView {
                 if let handoverPath, handoverError == .cannotOpen(ENOENT),
                    let previousID = DeliveredHandovers.workspaceID(for: handoverPath),
                    self.workspaces.contains(where: { $0.id == previousID }) {
-                    self.focusWorkspace(id: previousID)
+                    self.focusWorkspace(id: previousID, editorTakesKeyboard: false)
                     return
                 }
                 if let handoverPath, let handoverError {

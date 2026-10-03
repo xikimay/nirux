@@ -21,7 +21,7 @@ extension NiruxShellView {
         let now = Date().timeIntervalSince1970
         // Still open: not closed, expired or decided since the sidebar drew it.
         guard let request = pty.markApprovalSent(requestID: requestID, behavior: behavior, now: now) else {
-            NSSound.beep()
+            showToast("This request was already answered, or it expired")
             return
         }
         // The column's `claude` must still run the session that asked.
@@ -41,7 +41,7 @@ extension NiruxShellView {
             if let dropped = pty.dropApproval(requestID: requestID) {
                 hooks.release(dropped, agentUUID: agentUUID)
             }
-            NSSound.beep()
+            showToast("Couldn’t send the answer: answer it in the terminal", tone: .error)
             return
         }
         NSLog("[Approvals] %@ sent for %@ request %@", behavior.rawValue, request.toolName ?? "?", requestID)
@@ -49,15 +49,15 @@ extension NiruxShellView {
 
     /// Whether the sidebar may hold the requests of a column: its card is
     /// drawn with the buttons, for a column the user is not looking at
-    /// (its terminal dialog answers). Not in pilot mode, a collapsed
-    /// sidebar, another space (`listed` holds the listed workspaces), a
-    /// workspace the folded inactive section hides, or under VoiceOver,
-    /// which the buttons don't serve.
+    /// (its terminal dialog answers). Not in a collapsed sidebar, another
+    /// space (`listed` holds the listed workspaces), a workspace the folded
+    /// inactive section hides, or under VoiceOver, which the buttons don't
+    /// serve.
     func approvalHold(workspaceIndex: Int, columnIndex: Int, listed: Set<Int>) -> PermissionApprovalHold {
         guard workspaces.indices.contains(workspaceIndex) else { return .never }
         let workspace = workspaces[workspaceIndex]
-        let isOnScreen = columnIndex == workspace.focusedIndex && (workspaceIndex == activeWSIndex || isPilotMode)
-        let cardShown = isSidebarExpanded && !isPilotMode && !isOnScreen
+        let isOnScreen = columnIndex == workspace.focusedIndex && workspaceIndex == activeWSIndex
+        let cardShown = isSidebarExpanded && !isOnScreen
             && listed.contains(workspaceIndex)
             && sidebar.listsWorkspace(isInactive: workspace.isInactive, isActive: workspaceIndex == activeWSIndex)
             && !NSWorkspace.shared.isVoiceOverEnabled

@@ -51,7 +51,7 @@ final class StuckAgentSidebarTests: XCTestCase {
 
     /// The row's text, without the process icon.
     private func rowText(_ column: ColumnInfo) -> String {
-        PilotSidebarRenderer.attributedColumn(column, fontSize: 11).string.replacingOccurrences(of: "\u{FFFC} ", with: "")
+        SidebarRenderer.attributedColumn(column, fontSize: 11).string.replacingOccurrences(of: "\u{FFFC} ", with: "")
     }
 
     func testRowSaysWhyTheAgentIsStuckWhateverItsStatus() {
@@ -60,7 +60,7 @@ final class StuckAgentSidebarTests: XCTestCase {
             rowText(waiting), "  claude · waiting 2h05m",
             "focused or seen, the wait still shows"
         )
-        XCTAssertEqual(PilotSidebarRenderer.attentionTooltip(for: waiting), "needs permission — waiting 2h05m — Bash: git push")
+        XCTAssertEqual(SidebarRenderer.attentionTooltip(for: waiting), "needs permission — waiting 2h05m — Bash: git push")
 
         let stopped = column(failed(.offered), status: .needsAttention)
         XCTAssertEqual(
@@ -68,7 +68,7 @@ final class StuckAgentSidebarTests: XCTestCase {
             "the failure outranks the attention label"
         )
         XCTAssertEqual(
-            PilotSidebarRenderer.attentionTooltip(for: stopped), "Stopped on an API error — rate_limit: API Error: 429"
+            SidebarRenderer.attentionTooltip(for: stopped), "Stopped on an API error — rate_limit: API Error: 429"
         )
         XCTAssertEqual(
             rowText(column(.exitedMidTurn(processName: "claude"), process: "zsh")), "  claude · exited mid-turn",

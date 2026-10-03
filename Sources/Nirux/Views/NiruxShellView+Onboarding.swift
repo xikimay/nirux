@@ -53,8 +53,6 @@ extension NiruxShellView {
     func showOnboardingChecklist() {
         onboardingState = .pending
         saveState()
-        // Pilot mode hides the sidebar and toggleSidebar() ignores it there.
-        if isPilotMode { togglePilotMode() }
         refreshOnboardingChecklist()
         if !isSidebarExpanded { toggleSidebar() }
         sidebar.revealOnboardingCard()

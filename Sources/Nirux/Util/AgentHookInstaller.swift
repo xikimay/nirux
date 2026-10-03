@@ -48,18 +48,25 @@ enum AgentHookInstaller {
     }
 
     /// `claudeVersion` is read only when the hooks are installed.
+    /// `claudeStatusLine`: whether the usage limits indicator is on (see
+    /// `installClaudeStatusLine`); nil leaves the status line as it is, and
+    /// so does a copy on a state of its own (see `managesClaudeStatusLine`).
     static func installAll(
         executablePath: String = defaultExecutablePath,
         home: URL = URL(fileURLWithPath: NSHomeDirectory()),
         environment: [String: String] = ProcessInfo.processInfo.environment,
         bundleURL: URL = Bundle.main.bundleURL,
-        claudeVersion: @autoclosure () -> ClaudeCodeVersion? = ClaudeCodeVersion.detect()
+        claudeVersion: @autoclosure () -> ClaudeCodeVersion? = ClaudeCodeVersion.detect(),
+        claudeStatusLine: Bool? = nil
     ) {
         guard shouldInstall(environment: environment, bundleURL: bundleURL) else {
             NSLog("[AgentHooks] dev build or NIRUX_SKIP_HOOK_INSTALL — leaving agent configs untouched")
             return
         }
         installClaudeHooks(executablePath: executablePath, home: home, claudeVersion: claudeVersion())
+        if let claudeStatusLine, Persistence.stateDirectoryOverride(in: environment) == nil {
+            installClaudeStatusLine(enabled: claudeStatusLine, executablePath: executablePath, home: home)
+        }
         installCodexNotify(executablePath: executablePath, home: home)
     }
 
@@ -130,25 +137,23 @@ enum AgentHookInstaller {
         home: URL = URL(fileURLWithPath: NSHomeDirectory()),
         claudeVersion: ClaudeCodeVersion? = nil
     ) {
-        let dir = home.appendingPathComponent(".claude")
-        guard let url = resolvingSymlinks(dir.appendingPathComponent("settings.json")) else {
-            NSLog("[AgentHooks] ~/.claude/settings.json: symlink loop or chain too long — skipping hook install")
-            return
-        }
         let command = claudeHookCommand(executablePath: executablePath)
         let events = claudeHookEvents(for: claudeVersion)
 
+        let url: URL
         var root: [String: Any] = [:]
         var existing: [String: Any]?
-        if FileManager.default.fileExists(atPath: url.path) {
-            guard let data = try? Data(contentsOf: url),
-                  let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-                // Don't clobber a settings file we can't read or parse
-                // (permissions, JSON5-ish user edits, corruption). Hook
-                // status just stays off.
-                NSLog("[AgentHooks] ~/.claude/settings.json unreadable or unparsable — skipping hook install")
-                return
-            }
+        switch readClaudeSettings(home: home) {
+        case .unreadable(let reason):
+            // Don't clobber a settings file we can't read or parse
+            // (permissions, JSON5-ish user edits, corruption). Hook
+            // status just stays off.
+            NSLog("[AgentHooks] ~/.claude/settings.json: %@ — skipping hook install", reason)
+            return
+        case .missing(let path):
+            url = path
+        case .parsed(let parsed, let path):
+            url = path
             root = parsed
             existing = parsed
         }
@@ -179,18 +184,48 @@ enum AgentHookInstaller {
         if let existing, NSDictionary(dictionary: existing).isEqual(to: root) {
             return
         }
+        writeClaudeSettings(root, to: url, home: home)
+    }
 
+    enum ClaudeSettingsRead {
+        /// No file yet at the (resolved) path.
+        case missing(URL)
+        case parsed([String: Any], URL)
+        /// Why it can't be used; Nirux then leaves it alone.
+        case unreadable(String)
+    }
+
+    /// ~/.claude/settings.json, through symlinks.
+    static func readClaudeSettings(home: URL) -> ClaudeSettingsRead {
+        guard let url = resolvingSymlinks(home.appendingPathComponent(".claude/settings.json")) else {
+            return .unreadable("symlink loop or chain too long")
+        }
+        guard FileManager.default.fileExists(atPath: url.path) else { return .missing(url) }
+        guard let data = try? Data(contentsOf: url),
+              let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return .unreadable("unreadable or unparsable")
+        }
+        return .parsed(parsed, url)
+    }
+
+    /// Writes `root` to `url`, the path `readClaudeSettings` resolved.
+    @discardableResult
+    static func writeClaudeSettings(_ root: [String: Any], to url: URL, home: URL) -> Bool {
         do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            // Sorted keys keep the output deterministic (the check above
-            // already skips rewriting an unchanged file).
+            try FileManager.default.createDirectory(
+                at: home.appendingPathComponent(".claude"), withIntermediateDirectories: true
+            )
+            // Sorted keys keep the output deterministic (callers skip
+            // rewriting an unchanged file).
             let data = try JSONSerialization.data(
                 withJSONObject: root,
                 options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
             )
             try data.write(to: url, options: .atomic)
+            return true
         } catch {
             NSLog("[AgentHooks] failed to write %@: %@", url.path, error.localizedDescription)
+            return false
         }
     }
 
@@ -338,9 +373,7 @@ enum AgentHookInstaller {
     /// Every event Nirux listens to has a Nirux entry, whichever app path it
     /// runs (the next launch of the app bundle refreshes the path).
     static func hasClaudeHooks(home: URL) -> Bool {
-        guard let url = resolvingSymlinks(home.appendingPathComponent(".claude/settings.json")),
-              let data = try? Data(contentsOf: url),
-              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+        guard case .parsed(let root, _) = readClaudeSettings(home: home),
               let hooks = root["hooks"] as? [String: Any] else { return false }
         return claudeHookEvents.allSatisfy { event in
             let groups = hooks[event] as? [[String: Any]] ?? []

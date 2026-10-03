@@ -2,8 +2,7 @@ import Foundation
 
 /// How closely a workspace's git and pull-request state is followed.
 enum GitRefreshTier: Equatable, Sendable {
-    /// On screen: the active workspace, or every workspace of the active
-    /// profile in pilot mode.
+    /// On screen: the active workspace.
     case focused
     /// Listed but not on screen: followed, with slower throttles.
     case background

@@ -210,7 +210,7 @@ final class MergeQueueShellTests: XCTestCase {
         let queue = start(shell, projectID: space.id)
 
         shell.confirmDeleteSpace(profileID: space.id)
-        XCTAssertEqual(alerts, ["This space’s merge queue is running"])
+        XCTAssertEqual(alerts, ["This project’s merge queue is running"])
         shell.deleteSpace(profileID: space.id)
         XCTAssertTrue(shell.profiles.contains { $0.id == space.id }, "its folders would leave the queue's local checks")
         queue.stop()
