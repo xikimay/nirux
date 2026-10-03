@@ -162,7 +162,9 @@ Top to bottom:
    evidence. Matching claims are only counted, in neutral text: nothing from
    the model reads as approval.
 4. **Risk signals.** One chip per signal with its count (section 5). Clicking a
-   chip filters the list to the hunks that raised it.
+   chip filters the list to the hunks that raised it. R2 works by file: the
+   files that don't raise it are dimmed, and the groups that hold those that
+   do open.
 5. **Groups.** Files grouped by intent (feature, behavior change, refactor,
    tests, config, docs, CI), most important group first, and files by
    importance inside a group. Each file row: status (added, modified, deleted,
@@ -674,6 +676,10 @@ Rejected:
 - **Size.** Files over 400 KB get a placeholder, as in the editor's stacked
   diff (`EditorColumn.maxDiffCollectionFileBytes`). Above 5 MB of diff in
   total, the page lists the files and loads a diff when its row is opened.
+  The page asks for every file's diff when its row opens: the snapshot keeps
+  the hunks of the files within these limits, so they come at once, and
+  only the others are read then. The page's data is the files' list, not
+  their diffs.
 
 ## 8. Storage
 
@@ -756,7 +762,9 @@ used.
    source, its `package.json` and lock, and a build script that records the
    hashes of the sources and the bundle; a test fails when the bundle no longer
    matches them, since CI doesn't build JavaScript. The editor's diff tab must
-   render as before.
+   render as before. It ships in three pull requests: the wrapper (#103), the
+   column and its page, then the watcher, the stale state, Reload, the pause
+   and the editor's banner.
 3. **R3, Explain.** `BoundedProcess`'s extensions, the run of section 4.3, the
    copy, the account check, the settings (model, effort), the first-use
    notice, the cache, the checks on the output, the claims, the usage line.

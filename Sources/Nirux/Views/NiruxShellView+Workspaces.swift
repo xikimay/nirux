@@ -304,6 +304,9 @@ extension NiruxShellView {
         case .editContext:
             showWorkspaceContextPanel(workspaceIndex: workspaceIndex)
             return
+        case .reviewBranch:
+            openBranchReview(in: workspaces[workspaceIndex])
+            return
         case .newWorkspace:
             addWorkspace()
             return

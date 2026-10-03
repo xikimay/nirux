@@ -117,6 +117,7 @@ enum Theme {
         static let editor = "chevron.left.forwardslash.chevron.right"
         static let browser = "globe"
         static let projectBoard = "tablecells"
+        static let branchReview = "checklist.checked"
         static let newWorkspace = "plus.rectangle.on.rectangle"
         static let rename = "pencil"
         static let search = "magnifyingglass"

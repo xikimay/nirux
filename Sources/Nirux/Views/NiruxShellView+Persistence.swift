@@ -161,6 +161,17 @@ extension NiruxShellView {
                 workspace.addProjectBoardColumn(board)
                 board.reload()
             }
+        case .branchReview:
+            // One review per worktree: a second one (a hand-edited state)
+            // comes back as a terminal, as in an older build.
+            if branchReviewLocation(worktree: persistedColumn.cwd) != nil
+                || workspace.columns.contains(where: { $0.branchReview.map { Self.isSameFolder($0.worktree, persistedColumn.cwd) } == true }) {
+                workspace.addColumn(agentUUID: persistedColumn.agentUUID ?? UUID().uuidString)
+            } else {
+                // It loads its page and reads the branch once its
+                // workspace shows (`scheduleBranchReviewsOnScreen`).
+                workspace.addBranchReviewColumn(makeBranchReview(worktree: persistedColumn.cwd, branch: persistedColumn.reviewBranch))
+            }
         case .terminal:
             workspace.addColumn(agentUUID: persistedColumn.agentUUID ?? UUID().uuidString)
         }
@@ -290,6 +301,13 @@ extension NiruxShellView {
             return PersistedColumn(
                 widthPreset: Double(col.widthFraction), cwd: workspace.cwd, columnType: .projectBoard,
                 webViewURL: nil, claudeLaunchMode: nil, codexLaunchMode: nil, boardProjectID: board.projectID
+            )
+        }
+        if let review = col.branchReview {
+            // The reviewed worktree: an older build opens a terminal there.
+            return PersistedColumn(
+                widthPreset: Double(col.widthFraction), cwd: review.worktree, columnType: .branchReview,
+                webViewURL: nil, claudeLaunchMode: nil, codexLaunchMode: nil, reviewBranch: review.branch
             )
         }
         let foregroundProcess = col.pty?.foregroundProcess(snapshot: snapshot)

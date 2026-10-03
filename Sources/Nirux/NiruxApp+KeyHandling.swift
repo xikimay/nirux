@@ -38,9 +38,9 @@ extension NiruxApp {
             guard let workspace = shell.activeWorkspaceForKeyIntercept,
                   let col = workspace.columns[safe: workspace.focusedIndex]
             else { return event }
-            // Don't consume modifiers for WebView or editor columns, or while
-            // a terminal's find field is typing.
-            if col.isWebView || col.isEditor || workspace.findFieldColumn != nil { return event }
+            // Don't consume modifiers for web content columns, or while a
+            // terminal's find field is typing.
+            if Self.takesWebContentKeys(col) || workspace.findFieldColumn != nil { return event }
             return nil
         }
     }
@@ -105,6 +105,13 @@ extension NiruxApp {
             return true
         }
         return false
+    }
+
+    /// A column whose keyboard is a web view's: browser, editor, Branch
+    /// Review. Returned to AppKit, a Cmd-chord would go to its page before
+    /// the menu (Cmd+Down would scroll instead of switching workspace).
+    static func takesWebContentKeys(_ column: ColumnState) -> Bool {
+        column.isWebView || column.isEditor || column.isBranchReview
     }
 
     /// WebView and Editor (Monaco) columns handle their own keyboard
@@ -202,7 +209,7 @@ extension NiruxApp {
                 return Self.routeFindFieldKey(event, in: findColumn)
             }
 
-            if col.isWebView || col.isEditor {
+            if Self.takesWebContentKeys(col) {
                 return Self.routeWebContentKey(event, in: col)
             }
 

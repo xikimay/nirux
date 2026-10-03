@@ -48,6 +48,12 @@ extension NiruxShellView {
                 self?.openProjectBoard()
             },
             PaletteAction(
+                icon: .symbol(Theme.Symbol.branchReview), title: "Review Branch",
+                subtitle: "Read the current workspace’s branch on one page", shortcut: nil
+            ) { [weak self] in
+                self?.openBranchReview(in: self?.activeWorkspace)
+            },
+            PaletteAction(
                 icon: .symbol("magnifyingglass"), title: "Search Workspace", subtitle: "Find text across files in the current workspace",
                 shortcut: .searchWorkspace
             ) { [weak self] in

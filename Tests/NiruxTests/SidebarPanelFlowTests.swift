@@ -21,6 +21,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 "Rename Workspace", "New Workspace", "Move Up", "Move Down", "Move to Inactive", "Move to Active"
             ],
             "testCIFailureMenuItems": ["Ask Agent Why CI Failed", "Rerun Failed CI Jobs…"],
+            "testReviewBranchMenuItem": ["Review Branch"],
             "testSpaceMenuItems": [
                 "New Project", "Rename Project…", "Project Color", "Edit Project Brief…", "Edit Task Templates…",
                 "Board Settings…", "Move to Project", "Delete Project…"
@@ -58,6 +59,28 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             Self.menuCoverage.checkEveryItemIsCovered(
                 offered: Array(Set(titles)), testNames: UIFlowCoverage.testNames(of: Self.self)
             )
+        }
+    }
+
+    /// From the menu of a workspace in the background: that workspace
+    /// comes to the front, with the review of its folder.
+    func testReviewBranchMenuItem() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.branchReviewReader = BranchReviewPageTests.reader
+            let first = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "in worktree", cwd: harness.worktree)
+            let worktreeWorkspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.focusWorkspace(id: first.id)
+            XCTAssertIdentical(shell.activeWorkspace, first)
+
+            let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === worktreeWorkspace })
+            harness.perform(["Review Branch"], in: shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil))
+            XCTAssertIdentical(shell.activeWorkspace, worktreeWorkspace)
+            let review = try XCTUnwrap(worktreeWorkspace.columns[safe: worktreeWorkspace.focusedIndex]?.branchReview)
+            XCTAssertEqual(review.worktree, harness.worktree)
+            XCTAssertFalse(first.columns.contains(where: \.isBranchReview))
+            harness.waitUntil("the review to read its branch") { review.snapshot != nil }
         }
     }
 
