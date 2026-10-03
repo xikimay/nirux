@@ -267,12 +267,14 @@ The command palette action `Install Agent Skills` writes the bundled skills to:
 ~/.agents/skills/nirux-worktree/SKILL.md
 ~/.agents/skills/nirux-show-code/SKILL.md
 ~/.agents/skills/nirux-draft/SKILL.md
+~/.agents/skills/nirux-second-opinion/SKILL.md
 ~/.claude/skills/nirux-worktree/SKILL.md
 ~/.claude/skills/nirux-show-code/SKILL.md
 ~/.claude/skills/nirux-draft/SKILL.md
+~/.claude/skills/nirux-second-opinion/SKILL.md
 ```
 
-`nirux-worktree` lets supported agents open isolated Nirux workspaces when the user asks to start work on a feature, bug, or separate branch. `nirux-show-code` teaches agents to open code in the editor column via `nirux://open-editor` when the user asks to see code. `nirux-draft` has agents write text the user will paste elsewhere (a Slack message, a PR description, a Linear ticket, a SQL query) to a file under `$TMPDIR` and open it in the editor column; click into it, then `Cmd+A` `Cmd+C` copies it verbatim.
+`nirux-worktree` lets supported agents open isolated Nirux workspaces when the user asks to start work on a feature, bug, or separate branch. `nirux-show-code` teaches agents to open code in the editor column via `nirux://open-editor` when the user asks to see code. `nirux-draft` has agents write text the user will paste elsewhere (a Slack message, a PR description, a Linear ticket, a SQL query) to a file under `$TMPDIR` and open it in the editor column; click into it, then `Cmd+A` `Cmd+C` copies it verbatim. `nirux-second-opinion` lets Claude, when the user asks for a second opinion, send its answer to a read-only `codex exec` in the same folder and show Codex's reply next to its own verdict.
 
 ### Starting a task from Nirux
 
