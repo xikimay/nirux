@@ -49,7 +49,8 @@ extension NiruxShellView {
                           columnCount: workspace.columns.count,
                           focusedColumn: workspace.focusedIndex,
                           gitBranch: workspace.gitBranch, hasNotification: workspace.hasNotification, isActive: index == activeWSIndex,
-                          columns: colInfos, prInfo: workspace.prInfo, diffStats: workspace.diffStats,
+                          columns: colInfos, prInfo: workspace.prInfo, prFeedbackSummary: workspace.prFeedback?.summary,
+                          diffStats: workspace.diffStats,
                           purpose: workspace.purpose, nextStep: workspace.nextStep,
                           blocker: workspace.blocker, phase: workspace.effectivePhase,
                           lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt,
@@ -605,6 +606,9 @@ extension NiruxShellView {
                     // and the first read after launch records what is
                     // already red.
                     self?.noteSessionPullRequest(of: workspace)
+                    // Every read of an open PR, changed or not: feedback
+                    // moves without the PR's own fields moving.
+                    if workspace.prInfo == info { self?.refreshPRFeedback(for: workspace) }
                     self?.reportNewRedChecks(in: workspace)
                     guard changed else { return }
                     self?.scheduleMetadataRefresh()

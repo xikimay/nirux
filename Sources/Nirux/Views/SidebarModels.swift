@@ -226,6 +226,8 @@ struct WorkspaceInfo: Hashable {
     let isActive: Bool
     let columns: [ColumnInfo]
     let prInfo: PRInfo?
+    /// `PRFeedback.summary`: the card shows the counts only.
+    var prFeedbackSummary: String?
     let diffStats: String?
     let purpose: String?
     let nextStep: String?

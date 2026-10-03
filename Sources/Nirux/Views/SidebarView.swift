@@ -40,6 +40,9 @@ final class SidebarView: NSView {
     /// (workspaceIndex, columnIndex, column id).
     var onDeferredAgentResume: ((Int, Int, UUID) -> Void)?
     var onDiffStatsClicked: ((Int) -> Void)?
+    /// The menu of the card's PR feedback line, by workspace id; nil when
+    /// there's nothing.
+    var prFeedbackMenu: ((String) -> NSMenu?)?
     /// A card's PR link clicked: (workspaceIndex, url).
     var onWorkspaceURLClicked: ((Int, String) -> Void)?
     var onWorkspaceAction: ((WorkspaceSidebarAction, Int) -> Void)?
@@ -491,6 +494,8 @@ final class SidebarView: NSView {
                 onDiffStatsClicked?(workspaceIndex)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.cleanupActionPrefix) {
                 onWorkspaceAction?(.cleanUpWorktree, workspaceIndex)
+            } else if let workspaceID = Self.prFeedbackActionWorkspaceID(url) {
+                prFeedbackMenu?(workspaceID)?.popUp(positioning: nil, at: convert(event.locationInWindow, from: nil), in: self)
             } else if let (workspaceIndex, url) = Self.openActionTarget(url),
                       case .web = TerminalLinkTarget.parse(url) {
                 onWorkspaceURLClicked?(workspaceIndex, url)
@@ -677,6 +682,10 @@ final class SidebarView: NSView {
         cleanupActionPrefix + String(workspaceIndex)
     }
 
+    static func prFeedbackActionURL(workspaceID: String) -> String {
+        "action:pr-feedback:\(workspaceID)"
+    }
+
     /// Opens `url` in a browser column of the card's workspace.
     static func openActionURL(workspaceIndex: Int, url: String) -> String {
         "action:open:\(workspaceIndex):\(url)"
@@ -687,6 +696,12 @@ final class SidebarView: NSView {
     private static func actionWorkspaceIndex(_ value: String, prefix: String) -> Int? {
         guard value.hasPrefix(prefix) else { return nil }
         return Int(value.dropFirst(prefix.count))
+    }
+
+    private static func prFeedbackActionWorkspaceID(_ value: String) -> String? {
+        let prefix = "action:pr-feedback:"
+        guard value.hasPrefix(prefix) else { return nil }
+        return String(value.dropFirst(prefix.count))
     }
 
     private static func openActionTarget(_ value: String) -> (Int, String)? {

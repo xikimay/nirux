@@ -422,6 +422,7 @@ final class SidebarWorkspaceCardRenderer {
         currentY = buildPRStateLabel(prInfo: prInfo, padding: padding, yOffset: currentY)
         currentY = buildCIStatusLabel(prInfo: prInfo, padding: padding, indent: indent, yOffset: currentY)
         currentY = buildReviewDecisionLabel(prInfo: prInfo, padding: padding, indent: indent, yOffset: currentY)
+        currentY = buildPRFeedbackLabel(padding: padding, indent: indent, yOffset: currentY)
         return currentY
     }
 
@@ -529,6 +530,21 @@ final class SidebarWorkspaceCardRenderer {
         )
         append(reviewLabel)
         hitAreas.append(SidebarHitArea(frame: reviewLabel.frame, region: .link(url: openURLAction(prInfo.url), label: reviewLabel)))
+        return yOffset - SidebarExpandedMetrics.prDetailAdvance
+    }
+
+    private func buildPRFeedbackLabel(padding: CGFloat, indent: CGFloat, yOffset: CGFloat) -> CGFloat {
+        guard let summary = workspace.prFeedbackSummary else { return yOffset }
+        let label = textLabel(summary, font: .monospacedSystemFont(ofSize: 9, weight: .regular), color: .secondaryLabelColor)
+        label.frame = NSRect(
+            x: padding + indent,
+            y: yOffset - SidebarExpandedMetrics.prDetailHeight,
+            width: sidebarWidth - padding * 2 - indent,
+            height: SidebarExpandedMetrics.prDetailHeight
+        )
+        append(label)
+        let url = SidebarView.prFeedbackActionURL(workspaceID: workspace.id)
+        hitAreas.append(SidebarHitArea(frame: label.frame, region: .link(url: url, label: label)))
         return yOffset - SidebarExpandedMetrics.prDetailAdvance
     }
 

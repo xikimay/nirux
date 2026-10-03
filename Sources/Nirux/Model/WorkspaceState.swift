@@ -71,7 +71,14 @@ final class WorkspaceState {
         )
     }
     var hasNotification: Bool = false
-    var prInfo: PRInfo?
+    var prInfo: PRInfo? {
+        didSet { if prInfo?.url != oldValue?.url || prInfo?.state != "OPEN" { prFeedback = nil } }
+    }
+    /// The open PR's feedback (docs/pr-feedback-inbox.md), read after each
+    /// PR refresh. Cleared when the PR changes or stops being open.
+    var prFeedback: PRFeedback?
+    /// Bumped at each feedback read: only the latest one applies.
+    var prFeedbackGeneration = 0
     /// The red checks already reported (`CIFailure.reportKey`), and on
     /// which branch. The first call, at launch or on another branch, only
     /// records: a pull request that was already red isn't news.
