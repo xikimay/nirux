@@ -616,21 +616,24 @@ Rejected:
   head the review was opened or written at. A reused branch name must not
   inherit old comments. The file is kept when its last head is the branch's
   head, or one of the branch's own commits (in HEAD's history and not in the
-  base's: the branch moved on from it); else when its PR number matches the
-  branch's PR; else when its last head is in the branch's reflog (`git reflog
+  base's: the branch moved on from it). Otherwise, when both the file and the
+  branch have a PR, it is kept only if the numbers match. Otherwise it is kept
+  when its last head is in the branch's reflog (`git reflog
   refs/heads/<branch>`, the head before the oldest entry included: a
   worktree's branch created from a bare repository doesn't log its creation).
-  `git branch -D` deletes the reflog, a rebase keeps it. Otherwise the file
-  is archived (moved to `reviews/archive/`, where it stays) and the review
-  starts fresh. So a new PR for the same commits keeps the review, and a
-  review is never archived for want of `gh`; if git can't answer, the review
-  opens read-only until a Refresh can. Two limits: `git checkout -B` or `git
+  `git branch -D` deletes the reflog, a rebase keeps it. A file not kept is
+  archived (moved to `reviews/archive/`, where it stays) and the review starts
+  fresh. So a new PR for the same commits keeps the review, and a review is
+  never archived for want of `gh`; if git can't answer, the review opens
+  read-only until a Refresh can. Three limits: `git checkout -B` or `git
   switch -C` from another commit reuses a name and keeps its reflog, so only
-  the PR number catches that reuse; and a reflog entry expires 30 days after
-  the branch moved to it once a rebase left it unreachable
-  (`gc.reflogExpireUnreachable`), so a review last opened at a head that old,
-  then rebased with no PR to match, is archived. Opening a kept review records
-  the head and the PR it was opened at.
+  the PR number catches that reuse; a name reused at the very commit last
+  reviewed (merged by a local fast-forward, deleted outside Clean Up, made
+  again from the base) keeps the review until a different PR appears; and a
+  reflog entry expires 30 days after the branch moved to it once a rebase
+  left it unreachable (`gc.reflogExpireUnreachable`), so a review last opened
+  at a head that old, then rebased with no PR to match, is archived. Opening
+  a kept review records the head and the PR it was opened at.
 - Writes take an exclusive `flock` on a sibling `<file>.lock`, held across
   read, merge and write: the installed app and a dev build can share the
   state directory, and a lock on the data file itself would be lost when the
@@ -639,15 +642,18 @@ Rejected:
   while it is held. A writer that waited checks it locked the file still at
   that path, since Clean Up deletes it.
 - Only a review opened with the checks above can be written: a write fails
-  if the file was deleted (Clean Up), archived or opened at another head
-  since, and the page opens it again.
+  if the review it opened was deleted (Clean Up), archived or opened at
+  another head since, and the page opens it again. A page that opened a
+  branch never reviewed must stop writing once its branch is gone, or its
+  first write creates the review again.
 - A `version` field. A file from a newer version opens read-only, so an older
   build never drops keys it doesn't know. Within a version, a build keeps the
   top-level keys it doesn't know, so a later part (R3 to R5) can add its own
   without a new version; a key whose meaning changes needs one. A file that
-  isn't JSON is set aside by the first write. A file that can't be read right
-  now, a link or a folder in its place, or a file over 8 MB is never set
-  aside or replaced.
+  isn't a review (not a JSON object, or a `version` that isn't a number) is
+  set aside by the first write. A file that can't be read right now, a link
+  or a folder in its place, or a file over 8 MB is never set aside or
+  replaced.
 - Clean Up of the worktree deletes the file and its lock once the branch is
   deleted. A branch Clean Up keeps keeps its review; archived files stay.
 

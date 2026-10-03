@@ -162,11 +162,12 @@ extension BranchReview {
     }
 
     /// Kept when its last head is the branch's head or one of its own
-    /// commits (the branch moved on from what was reviewed); else when its
-    /// pull request is the branch's; else when its last head is in the
-    /// branch's reflog (`git branch -D` deletes the reflog, a rebase keeps
-    /// it). A new pull request for the same commits doesn't archive it, and
-    /// a review is never archived for want of gh.
+    /// commits (the branch moved on from what was reviewed). Else, when
+    /// both have a pull request, kept only if it is the same one; else
+    /// kept when its last head is in the branch's reflog (`git branch -D`
+    /// deletes the reflog, a rebase keeps it). A new pull request for the
+    /// same commits doesn't archive it, a review is never archived for want
+    /// of gh, and never when git couldn't answer.
     static func disposition(
         of record: Record, branch: String, repository: String, head: String,
         pullRequest: PullRequestLookup, history: History
@@ -177,7 +178,8 @@ extension BranchReview {
         let isOwnCommit = history.isOwnCommit(lastHead)
         if isOwnCommit == true { return .keep }
         if let current = pullRequest.pullRequest?.number, let stored = record.pullRequest {
-            return stored == current ? .keep : .archive
+            guard stored != current else { return .keep }
+            return isOwnCommit == nil ? .unverified : .archive
         }
         switch history.isInReflog(lastHead) {
         case true?: return .keep
@@ -240,12 +242,11 @@ extension BranchReview {
         else { return nil }
         let entries = reflog.text.split(separator: "\n")
         if entries.contains(where: { $0 == commit }) { return true }
+        guard !entries.isEmpty else { return false }
+        guard let before = git(["rev-parse", "-q", "--verify", "refs/heads/\(branch)@{\(entries.count)}"], in: root, options: options)
+        else { return nil }
         // Fails when the oldest entry is the branch's creation.
-        guard !entries.isEmpty,
-              let before = git(["rev-parse", "-q", "--verify", "refs/heads/\(branch)@{\(entries.count)}"], in: root, options: options),
-              before.status == 0
-        else { return false }
-        return before.text.trimmingCharacters(in: .whitespacesAndNewlines) == commit
+        return before.status == 0 && before.text.trimmingCharacters(in: .whitespacesAndNewlines) == commit
     }
 
     /// The repository a review belongs to: its common git folder
@@ -275,8 +276,10 @@ extension BranchReview {
     ///   write's change blocks until the timeout. Call writes, and `open`,
     ///   off the main thread.
     /// - Only what `open` returns can write (`Access`): a write never takes
-    ///   over a reused name's review, and never brings back one deleted
-    ///   since it was opened.
+    ///   over a reused name's review, and never brings back a review
+    ///   deleted since it was opened. A page that opened a branch never
+    ///   reviewed must stop writing once its branch is gone: its first
+    ///   write would create the review again.
     /// - A file from a newer `version`, anything but a regular file, or a
     ///   file over `maxFileBytes` is never written; one that can't be read
     ///   right now is read-only. One that isn't a review (not JSON, a
@@ -353,7 +356,7 @@ extension BranchReview {
             /// at another head, since.
             fileprivate let lastHeads: Set<String>
             /// The review was on disk: a write never recreates it once
-            /// deleted (Clean Up).
+            /// deleted (Clean Up). Without one, the first write creates it.
             fileprivate let existed: Bool
         }
 
@@ -457,7 +460,8 @@ extension BranchReview {
                 )
             }
             for _ in 0..<3 {
-                var (found, bytes) = read()
+                let (loaded, bytes) = read()
+                var found = loaded
                 switch found.status {
                 case .missing, .unreadable:
                     found.access = access(lastHeads: [head], existed: false)
@@ -511,7 +515,8 @@ extension BranchReview {
                         return Loaded(record: stamped, status: .loaded, access: access(lastHeads: lastHeads, existed: true))
                     }
                 } catch {
-                    return Loaded(record: Record(), status: .readOnly(.unverified(
+                    // A reused name's review is never shown.
+                    return Loaded(record: disposition == .keep ? found.record : Record(), status: .readOnly(.unverified(
                         "Nirux couldn’t lock the review of \(branch): \(error.localizedDescription)"
                     )))
                 }
@@ -569,7 +574,11 @@ extension BranchReview {
                     case .readOnly(let reason):
                         return .failure(.readOnly(reason))
                     case .missing:
-                        guard !access.existed else { return .failure(.changedSinceOpened) }
+                        guard !access.existed else {
+                            // Deleted since (Clean Up): nor its lock file.
+                            unlink(lockURL.path)
+                            return .failure(.changedSinceOpened)
+                        }
                         record = Record()
                     case .unreadable:
                         do {
@@ -610,7 +619,7 @@ extension BranchReview {
             guard data.count <= Self.maxFileBytes else { return .failure(.tooLarge) }
             do {
                 try data.write(to: fileURL, options: .atomic)
-                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
                 return .success(())
             } catch {
                 NiruxDebugLog.log("BranchReview.Store: could not write \(fileURL.path): \(error)")

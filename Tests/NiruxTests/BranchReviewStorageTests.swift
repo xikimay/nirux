@@ -298,6 +298,9 @@ final class BranchReviewStorageTests: XCTestCase {
         let noReflog = BranchReview.History(isOwnCommit: { _ in false }, isInReflog: { _ in XCTFail("reflog asked"); return nil })
         XCTAssertEqual(disposition(rebased, pullRequest: pullRequest(57), history: noReflog), .keep)
         XCTAssertEqual(disposition(rebased, pullRequest: pullRequest(60), history: noReflog), .archive)
+        // Unless git couldn't say whether the branch moved on from it.
+        let unknown = BranchReview.History(isOwnCommit: { _ in nil }, isInReflog: { _ in XCTFail("reflog asked"); return nil })
+        XCTAssertEqual(disposition(rebased, pullRequest: pullRequest(60), history: unknown), .unverified)
     }
 
     func testReflogDecidesWithoutAPullRequestToCompare() {
@@ -437,6 +440,7 @@ final class BranchReviewStorageTests: XCTestCase {
         XCTAssertTrue(store.delete())
         XCTAssertEqual(store.update(reopened) { _ in }, .failure(.changedSinceOpened))
         XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.lockURL.path))
 
         // Another branch's access.
         XCTAssertEqual(try self.store("feat/y").update(first) { _ in }, .failure(.changedSinceOpened))
@@ -501,11 +505,12 @@ final class BranchReviewStorageTests: XCTestCase {
         XCTAssertEqual(written.wait(timeout: .now() + 10), .success)
     }
 
-    func testWriteGivesUpOnALockHeldTooLong() throws {
+    func testWritingOrOpeningGivesUpOnALockHeldTooLong() throws {
         var store = try store()
         store.lockTimeout = 0.2
         let access = try access(store)
-        try FileManager.default.createDirectory(at: store.folder, withIntermediateDirectories: true)
+        _ = try store.update(access) { $0.markReviewed(self.file("a.swift", hash: "h1"), head: "a1", at: self.date) }.get()
+        let before = try Data(contentsOf: store.fileURL)
         let held = try holdLock(store.lockURL)
         defer { close(held) }
         let impatient = store
@@ -515,7 +520,16 @@ final class BranchReviewStorageTests: XCTestCase {
             if case .failure(.couldNotLock) = impatient.update(access, { _ in }) { gaveUp.signal() }
         }
         XCTAssertEqual(gaveUp.wait(timeout: .now() + 5), .success)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
+
+        // Opened at a new head, it is still shown, read-only; a reused
+        // name's isn't.
+        let kept = store.open(head: "b2", pullRequest: .notFound, history: history(own: true, reflog: nil))
+        guard case .readOnly(.unverified) = kept.status else { return XCTFail("\(kept.status)") }
+        XCTAssertEqual(kept.record.reviewedMarks["a.swift"]?.patchHash, "h1")
+        let reused = store.open(head: "b2", pullRequest: .notFound, history: history(own: false, reflog: false))
+        guard case .readOnly(.unverified) = reused.status else { return XCTFail("\(reused.status)") }
+        XCTAssertEqual(reused.record, Record())
+        XCTAssertEqual(try Data(contentsOf: store.fileURL), before)
     }
 
     func testConcurrentWritersKeepEachOthersChanges() throws {
@@ -694,6 +708,23 @@ final class BranchReviewStorageGitTests: XCTestCase {
         // file isn't a commit: "HEAD" would always pass for one.
         XCTAssertEqual(isOwnCommit(moved.base.mergeBase, in: moved), false)
         XCTAssertEqual(isOwnCommit("HEAD", in: moved), false)
+    }
+
+    func testReflogThatGitStopsAnsweringIsUnknown() throws {
+        try commit("first", file: "a.swift")
+        try commit("second", file: "b.swift")
+        // A git whose rev-parse hangs: the second question times out.
+        let slowGit = root + "/slow-git"
+        try """
+        #!/bin/sh
+        case "$1" in rev-parse) exec /bin/sleep 10 ;; *) exec /usr/bin/git "$@" ;; esac
+        """.write(toFile: slowGit, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: slowGit)
+        var slow = options
+        slow.gitPath = slowGit
+        slow.timeout = 0.5
+
+        XCTAssertNil(BranchReview.reflog(of: "feat/x", contains: String(repeating: "0", count: 40), root: repo, options: slow))
     }
 
     func testBareRepositorysWorktreeKeepsAReviewStartedBeforeItsFirstCommit() throws {
