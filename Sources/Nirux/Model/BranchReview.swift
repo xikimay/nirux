@@ -146,8 +146,8 @@ enum BranchReview {
         /// A doc raises no line signal; a test only concurrency.
         var signals: [RiskSignal] = []
         /// What a Swift code file declares on its added lines (section 5,
-        /// "Tests against code"). Nil for the other files, a folded one,
-        /// a deletion, or a change that adds no line.
+        /// "Tests against code"). Nil for the other files, a folded one, a
+        /// symlink, a deletion, or a change that adds no line.
         var symbols: SymbolScan?
     }
 

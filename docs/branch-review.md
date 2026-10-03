@@ -430,8 +430,8 @@ gives each hunk its enclosing function.
 added in code, and lists the symbols the branch declares that no test
 mentions. A symbol is an identifier declared on an added line (`func`, `var`,
 `let`, `class`, `struct`, `enum`, `case`, `protocol`, `typealias`, `actor`)
-outside any function body, found by tracking braces in the file at the head,
-and not `private` or `fileprivate`, nor in a private type or extension:
+outside any function body, found by tracking braces in the file in the
+worktree, and not `private` or `fileprivate`, nor in a private type or extension:
 private members are tested through the API that uses them, and local
 variables would only add noise. A test mentions a symbol when the identifier
 appears as a whole word in a file of the Tests group. On #57, 578 test lines
@@ -453,8 +453,9 @@ where about a quarter of the names listed were noise:
   isn't a mention; one in an interpolation is.
 - A name a removed line of the same file declares isn't new: a changed
   value, conformance, signature or visibility (`private` to `private(set)`)
-  re-declares it. This reads each removed line alone, so a local name
-  removed elsewhere in the file hides a new one with the same name.
+  re-declares it. This reads each removed line alone, so a local name, or a
+  line of a string or a comment that reads like a declaration, removed
+  elsewhere in the file hides a new name that is the same.
 - Lines added under `scripts/` count as code in the ratio: a script is code
   its tests test. The page still groups them as Config.
 - Protocol requirements the system calls (`windowShouldClose`,
@@ -475,10 +476,12 @@ How it reads:
   a property private, `if let` and `guard let` at a file's level declare
   nothing, `case a, b(Int)` declares two names, a name in backticks counts
   without them (one with a space can't be a word, and isn't listed), and an
-  extension of a private type declared in the same file is private. A
-  symlink declares nothing. The symbols are unknown, and the header names
-  the file rather than reading "nothing declared", when its patch wasn't
-  read, when it is past 2 MB or the files read pass 32 MB, when its lines no
+  extension of a private type declared in the same file, or of a type
+  nested in one, is private. A member's type is kept as a dotted path
+  (`Outer.Inner`). A symlink declares nothing. The symbols are unknown, and
+  the header names the file rather than reading "nothing declared", when
+  its patch wasn't read, when it is past 2 MB or the files read pass 32 MB,
+  when its added lines make more than 100,000 runs, when its lines no
   longer match the digest (the agent edited it meanwhile, a clean filter),
   or when a brace, a multi-line string or a comment doesn't close: a bare
   `/regex/` literal, which reads as code, does that when it holds a brace,
@@ -492,7 +495,10 @@ How it reads:
   is found. A file cut short loses its last word, which may be a longer one.
   The header says how many test files went unread (past the limits, a
   symlink, outside a sparse checkout; not one the worktree deleted) while a
-  name was still missing, and when git couldn't list them.
+  name was still missing, and when git couldn't list them. A binary file (a
+  NUL in its first 8,000 bytes, as git tells them apart: a snapshot image, a
+  fixture) and a submodule's folder aren't a test's text: they are skipped,
+  not counted.
 
 The rules start built in, for Swift and macOS. Per-project rules
 (`board.json`) can come later.

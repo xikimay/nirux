@@ -78,8 +78,12 @@ final class BranchReviewSymbolsTests: XCTestCase {
             func deeperLeak() {}
         }
         fileprivate struct Secret { struct Inner {} }
+        struct Holder { private struct Kept {} }
+        extension Holder.Kept {
+            func keptLeak() {}
+        }
         """
-        XCTAssertEqual(declared(source), ["Widget", "count", "total", "shared", "shown", "level"])
+        XCTAssertEqual(declared(source), ["Widget", "count", "total", "shared", "shown", "level", "Holder"])
     }
 
     func testEachNameOfADeclaration() {
@@ -133,7 +137,7 @@ final class BranchReviewSymbolsTests: XCTestCase {
             let rawBrace = #" "x{ "#
             let rawTemplate = #"""
                 } \#(count("}")) func alsoFake() {
-                \( {
+                \a( {
                 """#
             let label = "\(items.map { "\($0) {" }.joined())"
             let nested = "\(f(g(1), "{"))"
@@ -203,9 +207,9 @@ final class BranchReviewSymbolsTests: XCTestCase {
         XCTAssertEqual(symbols, [
             .init(name: "Outer", line: 1, kind: .type, container: nil),
             .init(name: "Inner", line: 2, kind: .type, container: "Outer"),
-            .init(name: "deep", line: 2, kind: .enumCase, container: "Inner"),
+            .init(name: "deep", line: 2, kind: .enumCase, container: "Outer.Inner"),
             .init(name: "ID", line: 3, kind: .typeAlias, container: "Outer"),
-            .init(name: "describe", line: 6, kind: .function, container: "Inner"),
+            .init(name: "describe", line: 6, kind: .function, container: "Outer.Inner"),
             .init(name: "top", line: 8, kind: .variable, container: nil)
         ])
     }

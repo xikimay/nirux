@@ -102,13 +102,20 @@ final class BranchReviewTestsAgainstCodeTests: BranchReviewRepositoryTestCase {
         try commitToMain("tests")
         try FileManager.default.removeItem(atPath: repo + "/Tests/GoneTests.swift")
         try FileManager.default.createSymbolicLink(atPath: repo + "/Tests/LinkTests.swift", withDestinationPath: "../README.md")
+        // Not a test's text, and not read: a snapshot image, a nested
+        // repository. The one file read is the last.
+        try write("Tests/__Snapshots__/shot.png", Data([0x89, 0x50, 0x4E, 0x47, 0x00, 0x01]))
+        try git(["init", "-q", "--template=", "Tests/Nested"])
+        try write("Tests/zz.txt", "nothing\n")
         try write("Sources/Gauge.swift", "let gauge = 1\n")
         // A link declares nothing.
         try FileManager.default.createSymbolicLink(atPath: repo + "/Sources/Alias.swift", withDestinationPath: "Gauge.swift")
 
-        let snapshot = try snapshot()
+        var oneFile = options()
+        oneFile.maxTestFilesRead = 1
+        let snapshot = try snapshot(oneFile)
 
-        XCTAssertEqual(snapshot.testsAgainstCode.unreadTestFiles, 1)
+        XCTAssertEqual(snapshot.testsAgainstCode.unreadTestFiles, 1, "the link")
         XCTAssertNil(try file("Sources/Alias.swift", in: snapshot).symbols)
         XCTAssertEqual(snapshot.testsAgainstCode.unscannedFiles, [])
     }
@@ -178,14 +185,30 @@ final class BranchReviewTestsAgainstCodeTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(try file("Sources/Gauge.swift", in: try self.snapshot(limited)).symbols, .unread(.tooLarge))
     }
 
+    func testMentionsAreLookedForInTheTestGroupsFilesOnly() throws {
+        let tests = [
+            "Tests/README.md", "Packages/Core/Tests/Fixture.json", "Sources/Nirux/WidgetTests.swift", "web/app.test.ts",
+            "web/app.spec.js", "cmd/main_test.go", "AppTests/Helpers/Mock.swift", "App/AppUITests/Flow.swift"
+        ]
+        let others = ["Sources/Contests/Score.swift", "Sources/Contests.swift", "scripts/README.md", "docs/Tests.md"]
+        for (index, path) in (tests + others).enumerated() { try write(path, "word\(index)\n") }
+
+        let found = BranchReview.mentions(of: Set((tests + others).indices.map { "word\($0)" }), root: repo, options: options())
+
+        XCTAssertEqual(found?.found, Set(tests.indices.map { "word\($0)" }))
+        XCTAssertTrue(tests.allSatisfy { BranchReview.PathGroup(path: $0) == .tests })
+        XCTAssertTrue(others.allSatisfy { BranchReview.PathGroup(path: $0) != .tests })
+    }
+
     func testMentionsReadSwiftTestsFirstWithinTheLimits() throws {
         try write("Tests/A.json", "render, more\n")
         try write("Tests/BTests.swift", "measure\n")
         try write("Tests/CTests.swift", "1; gaugeX\n")
         try write("Sources/Other.swift", "gauge\n")
         let names: Set<String> = ["measure", "render", "gauge"]
-        func mentions(maxFiles: Int = 100, maxFileBytes: Int = 100, maxBytes: Int = 1_000, of names: Set<String> = names)
-            -> (found: Set<String>, unread: Int)? {
+        func mentions(
+            maxFiles: Int = 100, maxFileBytes: Int = 100, maxBytes: Int = 1_000, of names: Set<String> = names
+        ) -> BranchReview.Mentions? {
             var limited = options()
             limited.maxTestFilesRead = maxFiles
             limited.maxTestFileBytes = maxFileBytes
@@ -220,7 +243,8 @@ final class BranchReviewTestsAgainstCodeTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(tests.unmentioned, [.init(path: "Sources/Gauge.swift", symbol: symbol("Gauge", 1, .type))])
     }
 
-    /// #57 as merged, when the clone has its commits (CI's has depth 1).
+    /// #57 as merged, when the clone has its commits (a shallow one hasn't;
+    /// CI's checkouts fetch the whole history).
     func testPullRequest57ListsTheSymbolsItsTestsDontMention() throws {
         let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().path

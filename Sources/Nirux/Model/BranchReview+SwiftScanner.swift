@@ -30,7 +30,7 @@ extension BranchReview {
     /// read as two: the file then reads unbalanced.
     struct SwiftScanner {
         private(set) var declarations: [Declaration] = []
-        /// Types declared private or fileprivate at the file's level.
+        /// Types declared private or fileprivate, by their dotted path.
         private(set) var privateTypes: Set<String> = []
         /// Names looked for in the code, interpolations included, but not
         /// in comments or strings: each one found is removed.
@@ -49,9 +49,18 @@ extension BranchReview {
         /// (declared before or after it).
         var symbols: [Symbol] {
             declarations.filter { declaration in
-                let extended = declaration.extended?.split(separator: ".").first.map(String.init)
-                return declaration.isCollected && !declaration.isHidden && !(extended.map(privateTypes.contains) ?? false)
+                declaration.isCollected && !declaration.isHidden && !(declaration.extended.map(isPrivatePath) ?? false)
             }.map(\.symbol)
+        }
+
+        /// `Outer.Inner` is private when `Outer` or `Outer.Inner` is.
+        private func isPrivatePath(_ path: String) -> Bool {
+            var prefix = ""
+            for part in path.split(separator: ".") {
+                prefix += (prefix.isEmpty ? "" : ".") + part
+                if privateTypes.contains(prefix) { return true }
+            }
+            return false
         }
 
         // Lexer: what the code is nested in, innermost last.
@@ -126,7 +135,7 @@ extension BranchReview {
             let isLocal: Bool
             let isPrivate: Bool
             /// The type whose body it is, or that its extension extends,
-            /// by its last name.
+            /// as a dotted path.
             let container: String?
             /// An extension's type at the file's level, as written.
             let extended: String?
@@ -446,7 +455,7 @@ extension BranchReview.SwiftScanner {
             return true
         default:
             statement.expect = .nothing
-            introduceType(container: path.split(separator: ".").last.map(String.init), extended: path)
+            introduceType(container: path, extended: path)
             return false
         }
     }
@@ -536,8 +545,9 @@ extension BranchReview.SwiftScanner {
 
     private mutating func declareType(_ name: String) {
         record(Candidate(name: name, line: lineNumber, collecting: collecting), .type)
-        if statement.isPrivate, scopes.isEmpty { privateTypes.insert(name) }
-        introduceType(container: name, extended: nil)
+        let path = scopes.last?.container.map { $0 + "." + name } ?? name
+        if statement.isPrivate { privateTypes.insert(path) }
+        introduceType(container: path, extended: nil)
     }
 
     private mutating func introduceType(container: String?, extended: String?) {

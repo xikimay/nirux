@@ -17,11 +17,11 @@ extension BranchReview {
         }
 
         let name: String
-        /// 1-based, in the file at the head.
+        /// 1-based, in the file as the worktree has it.
         let line: Int
         let kind: Kind
-        /// The type it is a member of, or that its extension extends, by
-        /// its last name; nil at the file's level.
+        /// The type it is a member of, or that its extension extends, as a
+        /// dotted path (`Outer.Inner`); nil at the file's level.
         let container: String?
     }
 
@@ -31,7 +31,7 @@ extension BranchReview {
             /// Its patch wasn't read (`Omission.notRead`).
             case patchNotRead
             /// Past `Options.maxScannedFileBytes`, or the rest of
-            /// `maxScannedBytes`, or too many runs of added lines.
+            /// `maxScannedBytes`, or past 100,000 runs of added lines.
             case tooLarge
             /// The file no longer matches its patch: the agent edited it
             /// meanwhile. The next refresh reads it again.
@@ -71,7 +71,8 @@ extension BranchReview {
         var unscannedFiles: [String] = []
         /// Test files left out, cut short or unreadable (a symlink, outside
         /// a sparse checkout) while a symbol was still unmentioned: it may
-        /// be mentioned there.
+        /// be mentioned there. A binary fixture or a submodule isn't a
+        /// test's text, and isn't counted.
         var unreadTestFiles = 0
         /// git couldn't list the test files: every symbol reads as
         /// unmentioned.
@@ -167,8 +168,7 @@ extension BranchReview {
         var mentioned = declared.map { mentions?.found.contains($0.symbol.name) == true }
         // Tests name a type through its members: `.notRead` rather than
         // `Omission.notRead`. A type counts once a member the branch
-        // declares in the same file does, nested types included: by name
-        // in the file, since `Kind` or `Item` are nested in many types.
+        // declares in the same file does, nested types included.
         func key(_ path: String, _ type: String) -> String { path + "\0" + type }
         var mentionedContainers = Set(declared.indices.filter { mentioned[$0] }.compactMap { member in
             declared[member].symbol.container.map { key(declared[member].path, $0) }
@@ -176,8 +176,10 @@ extension BranchReview {
         var grew = true
         while grew {
             grew = false
-            for index in declared.indices where !mentioned[index]
-                && mentionedContainers.contains(key(declared[index].path, declared[index].symbol.name)) {
+            for index in declared.indices where !mentioned[index] {
+                let symbol = declared[index].symbol
+                let typePath = (symbol.container.map { $0 + "." } ?? "") + symbol.name
+                guard mentionedContainers.contains(key(declared[index].path, typePath)) else { continue }
                 mentioned[index] = true
                 grew = true
                 if let container = declared[index].symbol.container {
@@ -196,15 +198,18 @@ extension BranchReview {
         ":(glob)**/*Tests/**", ":(glob)**/*Tests.swift", ":(glob)**/*_test.*", ":(glob)**/*.test.*", ":(glob)**/*.spec.*"
     ]
 
-    /// The `names` some test file holds as a whole word, and how many test
-    /// files the limits (`Options`) left out, cut short or couldn't read
-    /// while a name was still missing. The test files are those of the
-    /// worktree, untracked ones included, Swift files first; in those,
-    /// only code counts: a name in a comment or a string isn't a mention.
-    /// Nil when git can't list them.
-    static func mentions(
-        of names: Set<String>, root: String, deleted: Set<String> = [], options: Options
-    ) -> (found: Set<String>, unread: Int)? {
+    struct Mentions: Equatable {
+        /// The names some test file holds as a whole word.
+        var found: Set<String>
+        /// Test files the limits (`Options`) left out, cut short or
+        /// couldn't read while a name was still missing.
+        var unread: Int
+    }
+
+    /// The mentions of `names` in the worktree's test files, untracked ones
+    /// included, Swift files first; in those, only code counts: a name in
+    /// a comment or a string isn't a mention. Nil when git can't list them.
+    static func mentions(of names: Set<String>, root: String, deleted: Set<String> = [], options: Options) -> Mentions? {
         guard let listed = git(
             ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"] + testPathspecs,
             in: root, options: options, environment: ["GIT_LITERAL_PATHSPECS": "0"], maxOutputBytes: 16 << 20
@@ -222,9 +227,15 @@ extension BranchReview {
                 unread += 1
                 continue
             }
+            var info = stat()
+            let isFolder = lstat(root + "/" + path, &info) == 0 && info.st_mode & S_IFMT == S_IFDIR
+            // Git's test for binary: a NUL in the first 8,000 bytes. A
+            // snapshot image or a fixture isn't a test's text, nor is a
+            // submodule's folder.
+            if isFolder || readPrefix(of: root + "/" + path, maxBytes: 8_000)?.contains(0) == true { continue }
             guard var data = readPrefix(of: root + "/" + path, maxBytes: limit + 1) else {
-                // A symlink, a submodule, a file outside a sparse checkout;
-                // one the worktree deleted is no test.
+                // A symlink, a file outside a sparse checkout; one the
+                // worktree deleted is no test.
                 if !deleted.contains(path) { unread += 1 }
                 continue
             }
@@ -245,7 +256,7 @@ extension BranchReview {
                 missing.removeWords(in: data)
             }
         }
-        return (names.subtracting(missing.names), unread)
+        return Mentions(found: names.subtracting(missing.names), unread: unread)
     }
 
     /// Names looked for as whole words, by a hash of their bytes: a word
