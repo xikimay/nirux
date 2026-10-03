@@ -141,16 +141,6 @@ enum SidebarStuckState: Hashable {
         }
     }
 
-    /// " · <label>" after the process name: short enough for the row, the
-    /// rest in the tooltip (and the Resume block).
-    var label: String {
-        switch self {
-        case .waiting(_, let duration): return "waiting \(duration)"
-        case .stoppedOnError: return AgentAttentionReason.apiError(kind: nil, detail: nil).shortLabel
-        case .exitedMidTurn: return "exited mid-turn"
-        }
-    }
-
     /// The name the row shows: the agent that died, not the shell that
     /// took its place in front.
     var agentName: String? {

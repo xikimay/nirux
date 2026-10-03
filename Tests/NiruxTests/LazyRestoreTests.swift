@@ -417,7 +417,7 @@ final class LazyRestoreTests: XCTestCase {
         XCTAssertEqual(title(String(repeating: "a", count: 200))?.count, DeferredAgentLaunch.maxTitleLength)
     }
 
-    func testRowAndNoticeSayWhatTheColumnHolds() {
+    func testRowAndNoticeSayWhatTheColumnHolds() throws {
         let agent = SidebarDeferredAgent(processName: "claude", summary: "claude session", columnID: UUID())
         let info = ColumnInfo(
             index: 1, processName: nil, abbreviatedCwd: nil, isFocused: false, isWebView: false, webTitle: nil,
@@ -441,7 +441,8 @@ final class LazyRestoreTests: XCTestCase {
             if case .workspace(2) = $0 { return true }
             return false
         }
-        XCTAssertFalse(regions.contains { if case .column(2, 1) = $0 { return true }; return false }, "its chip is Resume")
+        let icon = try XCTUnwrap(card.hitAreas.first { if case .column(2, 1) = $0.region { return true }; return false })
+        XCTAssertFalse(icon.frame.intersects(card.hitAreas[try XCTUnwrap(resume)].frame), "its icon focuses the column")
         XCTAssertLessThan(try XCTUnwrap(resume), try XCTUnwrap(cardHit), "the button takes the click before its card")
         XCTAssertEqual(Array(card.approvalButtons.keys), [SidebarHoverTarget.deferredResumeButtonKey(columnID: agent.columnID)])
 

@@ -23,30 +23,58 @@ extension ColumnInfo {
 
     /// The word a chip says for `attention`: "permission", "stopped",
     /// "done"…
-    var attentionLabel: String? {
+    var attentionLabel: String? { winningCause?.label }
+
+    /// What exactly the column waits on ("needs permission — Bash: git
+    /// push"), for the cause the chip shows.
+    var attentionToolTip: String? { winningCause?.toolTip }
+
+    private var winningCause: AttentionCause? {
         guard let attention else { return nil }
-        return attentionCauses.first { $0.signal == attention }?.label
+        return attentionCauses.first { $0.signal == attention }
+    }
+
+    private struct AttentionCause {
+        let signal: AttentionSignal
+        let label: String
+        let toolTip: String?
     }
 
     /// A stuck agent says so whatever its status, and so do an approval the
     /// card offers and a dialog on screen: focusing the column, or the app,
     /// clears the attention, not the dialog.
-    private var attentionCauses: [(signal: AttentionSignal, label: String)] {
-        var causes: [(signal: AttentionSignal, label: String)] = []
-        if let stuck { causes.append((stuck.isFailure ? .error : .waiting, stuck.chipLabel)) }
-        if let permissionApproval {
-            causes.append((.waiting, permissionApproval.toolName == "ExitPlanMode" ? "plan" : "permission"))
+    private var attentionCauses: [AttentionCause] {
+        var causes: [AttentionCause] = []
+        if let stuck {
+            causes.append(AttentionCause(signal: stuck.isFailure ? .error : .waiting, label: stuck.chipLabel, toolTip: stuck.tooltip))
         }
-        if let openDialog { causes.append((openDialog.signal, openDialog.chipLabel)) }
+        if let approval = permissionApproval {
+            causes.append(AttentionCause(
+                signal: .waiting, label: approval.toolName == "ExitPlanMode" ? "plan" : "permission",
+                toolTip: "needs permission — \(approval.toolName): \(approval.text)"
+            ))
+        }
+        if let openDialog {
+            causes.append(AttentionCause(signal: openDialog.signal, label: openDialog.chipLabel, toolTip: openDialog.toolTip))
+        }
         if agentStatus == .needsAttention {
             let signal = AttentionSignal.of(attentionReason)
-            causes.append((signal, attentionReason?.chipLabel ?? (signal == .waiting ? "needs you" : "done")))
+            causes.append(AttentionCause(
+                signal: signal, label: attentionReason?.chipLabel ?? (signal == .waiting ? "needs you" : "done"),
+                toolTip: attentionReason?.toolTip
+            ))
         }
         return causes
     }
 }
 
 extension AgentAttentionReason {
+    /// "needs permission — Bash: git push": a chip's tooltip.
+    var toolTip: String {
+        let detail = detailLine.flatMap { AgentText.clean($0, maxLength: 300) }
+        return [headline, detail].compactMap { $0 }.joined(separator: " — ")
+    }
+
     /// One word for a column chip.
     var chipLabel: String {
         switch self {
@@ -62,9 +90,11 @@ extension AgentAttentionReason {
 }
 
 extension SidebarStuckState {
+    /// Short enough for a chip, the rest in the tooltip (and the Resume
+    /// block).
     var chipLabel: String {
         switch self {
-        case .waiting: return label
+        case .waiting(_, let duration): return "waiting \(duration)"
         case .stoppedOnError: return "stopped"
         case .exitedMidTurn: return "exited"
         }
@@ -77,8 +107,7 @@ extension WorkspaceInfo {
     /// check only once no agent works (it may be fixing it).
     var cardState: SidebarCardState {
         let signals = columns.compactMap(\.attention)
-        // A child agent's question (`nirux ask`): its column just works.
-        if signals.contains(.waiting) || notification == .waiting { return .waiting }
+        if signals.contains(.waiting) { return .waiting }
         if signals.contains(.error) { return .error }
         if columns.contains(where: { $0.agentStatus == .working }) { return .working }
         if prInfo?.state == "OPEN", prInfo?.ciStatus == "FAILURE" { return .error }
@@ -87,18 +116,18 @@ extension WorkspaceInfo {
     }
 
     /// The collapsed sidebar's dot and the project switcher's ring: what
-    /// the card says, then what happened while the user looked elsewhere.
+    /// the columns ask, then what happened while the user looked elsewhere
+    /// (a child agent's question, a red check: a pulse for as long as a
+    /// check stays red would be noise).
     var attention: AttentionSignal? {
-        var signals = columns.compactMap(\.attention)
-        if cardState == .error { signals.append(.error) }
-        if !isActive, let notification { signals.append(notification) }
-        return signals.max()
+        let away = isActive ? nil : notification
+        return (columns.compactMap(\.attention) + [away].compactMap { $0 }).max()
     }
 
-    /// An agent waits on the user or broke, or a child agent asks: the
-    /// folded INACTIVE section lists the workspace anyway.
+    /// An agent waits on the user or broke: the folded INACTIVE section
+    /// lists the workspace anyway.
     var asksUser: Bool {
-        columns.contains { $0.attention == .waiting || $0.attention == .error } || notification == .waiting
+        columns.contains { $0.attention == .waiting || $0.attention == .error }
     }
 
     /// One line in the INACTIVE section: parked work that asks nothing and

@@ -212,11 +212,7 @@ enum SidebarRenderer {
 
     /// Chip tooltip: what exactly the agent waits on ("Bash: git push").
     static func attentionTooltip(for column: ColumnInfo) -> String? {
-        if let deferred = column.deferredAgent { return deferred.tooltip }
-        if let stuck = column.stuck { return stuck.tooltip }
-        guard column.agentStatus == .needsAttention, let reason = column.attentionReason else { return nil }
-        let detail = reason.detailLine.flatMap { AgentText.clean($0, maxLength: 300) }
-        return [reason.headline, detail].compactMap { $0 }.joined(separator: " — ")
+        column.deferredAgent?.tooltip ?? column.attentionToolTip
     }
 
     /// A filled circle, for the dots inside chips. Drawn now, at 2×: no

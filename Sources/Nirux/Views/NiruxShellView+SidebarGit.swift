@@ -154,8 +154,8 @@ extension NiruxShellView {
 
     /// `WorkspaceInfo.attention` for a workspace of another space, which
     /// has no card: what blocks its agents (a dialog on screen, a failed
-    /// turn, an exit mid-turn), their attention, a red check once no agent
-    /// works, and what happened while the user was away.
+    /// turn, an exit mid-turn), their attention, and what happened while
+    /// the user was away.
     private static func attention(
         of workspace: WorkspaceState,
         foregroundProcesses: [ObjectIdentifier: ForegroundProcess],
@@ -171,8 +171,6 @@ extension NiruxShellView {
             }
             if status == .needsAttention { signals.append(AttentionSignal.of(pty.agentAttentionReason)) }
         }
-        let working = workspace.columns.contains { $0.pty?.cachedAgentState == .working }
-        if !working, workspace.prInfo?.state == "OPEN", workspace.prInfo?.ciStatus == "FAILURE" { signals.append(.error) }
         if let notification = workspace.notification { signals.append(notification) }
         return signals.max()
     }

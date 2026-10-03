@@ -272,7 +272,7 @@ final class SidebarWorkspaceCardRenderer {
             label.setAccessibilityLabel(chip.accessibilityLabel)
             append(label)
             if let deferred = chip.column.deferredAgent {
-                areas.append(buildResumeChip(deferred, columnIndex: chip.column.index, frame: frame))
+                areas += buildResumeChip(deferred, columnIndex: chip.column.index, frame: frame)
                 continue
             }
             // A focused column that waits or broke keeps a sign of focus.
@@ -288,11 +288,14 @@ final class SidebarWorkspaceCardRenderer {
         return areas
     }
 
-    /// A restored agent that hasn't resumed: its chip is Resume, which
-    /// starts it here, and is armed and hovered like Allow / Deny.
-    private func buildResumeChip(_ deferred: SidebarDeferredAgent, columnIndex: Int, frame: NSRect) -> SidebarHitArea {
+    /// A restored agent that hasn't resumed: "Resume" starts it here,
+    /// armed and hovered like Allow / Deny; its icon focuses the column, as
+    /// the row did around the button.
+    private func buildResumeChip(_ deferred: SidebarDeferredAgent, columnIndex: Int, frame: NSRect) -> [SidebarHitArea] {
+        let iconWidth = Metrics.chipPaddingX + 12 + Theme.Space.xs / 2
+        let (icon, resume) = frame.divided(atDistance: iconWidth, from: .minXEdge)
         let button = SidebarBadgeView(text: "", textColor: .clear, fillColor: .clear, font: Theme.Font.caption)
-        button.frame = frame
+        button.frame = resume
         button.cornerRadius = Theme.Radius.chip
         button.hoverFillColor = Theme.Color.accent.withAlphaComponent(0.14)
         button.toolTip = deferred.tooltip
@@ -301,10 +304,16 @@ final class SidebarWorkspaceCardRenderer {
         views.last?.setAccessibilityElement(false)
         append(button)
         approvalButtons[SidebarHoverTarget.deferredResumeButtonKey(columnID: deferred.columnID)] = button
-        return SidebarHitArea(
-            frame: frame.insetBy(dx: -Metrics.chipGap / 2, dy: -2),
-            region: .deferredAgentResume(workspaceIndex: workspace.index, columnIndex: columnIndex, columnID: deferred.columnID)
-        )
+        return [
+            SidebarHitArea(
+                frame: NSRect(x: resume.minX, y: resume.minY - 2, width: resume.width + Metrics.chipGap / 2, height: resume.height + 4),
+                region: .deferredAgentResume(workspaceIndex: workspace.index, columnIndex: columnIndex, columnID: deferred.columnID)
+            ),
+            SidebarHitArea(
+                frame: NSRect(x: icon.minX - Metrics.chipGap / 2, y: icon.minY - 2, width: icon.width + Metrics.chipGap / 2, height: icon.height + 4),
+                region: .column(workspaceIndex: workspace.index, columnIndex: columnIndex)
+            )
+        ]
     }
 
     // MARK: - Action block
@@ -484,7 +493,8 @@ final class SidebarWorkspaceCardRenderer {
         badge.setAccessibilityLabel("Workspace actions")
         menuBadge = badge
         append(badge)
-        hitAreas.append(SidebarHitArea(frame: frame.insetBy(dx: -4, dy: -3), region: .workspaceMenu(workspace.index)))
+        // Down to the diff's area, not into it.
+        hitAreas.append(SidebarHitArea(frame: frame.insetBy(dx: -4, dy: -2), region: .workspaceMenu(workspace.index)))
         return badge
     }
 

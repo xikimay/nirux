@@ -230,7 +230,7 @@ final class ActivityStore {
         }
         return feed[..<index].contains { newer in
             // The idle reminder after a failed turn doesn't handle it.
-            if newer.category == .attention, newer.signal == .finished, entry.signal != .finished { return false }
+            if newer.category == .attention, newer.signal == .finished, entry.signal == .error { return false }
             if let uuid = entry.agentUUID { return newer.agentUUID == uuid }
             // Positional fallback needs SOME identity: events from hooks
             // running outside Nirux have nil workspace, column and uuid,

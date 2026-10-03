@@ -41,7 +41,7 @@ enum SidebarReviewBadgesRow {
         return text
     }
 
-    static func toolTip(_ badges: ReviewBadges, now: Date = Date()) -> String {
+    private static func toolTip(_ badges: ReviewBadges, now: Date = Date()) -> String {
         ReviewPass.allCases.map { pass in
             guard let run = badges.runs[pass] else { return "\(pass.displayName): not run" }
             let ran = "\(pass.displayName): ran \(SidebarView.relativeAge(since: run.at, now: now)) ago"

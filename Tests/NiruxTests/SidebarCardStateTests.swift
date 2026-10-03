@@ -71,6 +71,7 @@ final class SidebarCardStateTests: XCTestCase {
         dialog.openDialog = .permission(tool: "Bash", summary: "git push")
         XCTAssertEqual(dialog.attention, .waiting)
         XCTAssertEqual(dialog.attentionLabel, "permission")
+        XCTAssertEqual(SidebarRenderer.attentionTooltip(for: dialog), "needs permission — Bash: git push")
         XCTAssertEqual(workspace([dialog]).cardState, .waiting)
         XCTAssertEqual(dialog.offScreenAttention, .waiting, "the column border, glow and indicator too")
     }
@@ -82,15 +83,17 @@ final class SidebarCardStateTests: XCTestCase {
         both.openDialog = .question("Which?")
         XCTAssertEqual(both.attention, .waiting)
         XCTAssertEqual(both.attentionLabel, "question")
+        XCTAssertEqual(SidebarRenderer.attentionTooltip(for: both), "has a question — Which?", "the tooltip follows the chip")
     }
 
-    /// A child agent's question (`nirux ask`) waits on the user while its
-    /// column works.
-    func testChildAgentQuestionWaits() {
+    /// A child agent's question (`nirux ask`) is something that happened
+    /// while the user was away: the dot and the ring say it, the card says
+    /// what its column does, the activity feed keeps the question.
+    func testChildAgentQuestionLightsTheDotNotTheCard() {
         let asking = workspace([column(status: .working)], isInactive: true, notification: .waiting)
-        XCTAssertEqual(asking.cardState, .waiting)
-        XCTAssertTrue(asking.asksUser)
-        XCTAssertFalse(asking.showsCompactRow)
+        XCTAssertEqual(asking.attention, .waiting)
+        XCTAssertEqual(asking.cardState, .working)
+        XCTAssertFalse(asking.asksUser)
     }
 
     func testFocusedColumnShowsItsOwnAttention() {
@@ -210,6 +213,8 @@ final class SidebarCardStateTests: XCTestCase {
         })
         let button = try XCTUnwrap(result.approvalButtons[SidebarHoverTarget.deferredResumeButtonKey(columnID: deferred.columnID)])
         XCTAssertTrue(resume.frame.contains(NSPoint(x: button.frame.midX, y: button.frame.midY)))
+        let icon = try XCTUnwrap(result.hitAreas.first { if case .column(1, 2) = $0.region { return true }; return false })
+        XCTAssertFalse(icon.frame.intersects(resume.frame), "the icon focuses the column, as the row did")
         XCTAssertEqual(
             500 - result.bottomY,
             SidebarExpandedMetrics.workspaceHeight(for: workspace([column(0), column(2)]), sidebarWidth: 260)
@@ -364,6 +369,14 @@ final class SidebarCardStateTests: XCTestCase {
         let feed = store.feedEntries
         XCTAssertEqual(feed.map(\.signal), [.finished, .error])
         XCTAssertFalse(ActivityStore.isAttentionSuperseded(at: 1, in: feed))
+
+        // A dialog's row: the reminder says the agent is back at its
+        // prompt, the dialog closed.
+        let asked = ActivityEntry(
+            category: .attention, agentKind: "claude", agentUUID: "agent", workspaceID: "ws", columnIndex: 0,
+            workspaceTitle: "t", detail: "permission: Bash", timestamp: 5, signal: .waiting
+        )
+        XCTAssertTrue(ActivityStore.isAttentionSuperseded(at: 1, in: [reminder, asked]))
     }
 
     func testIdlePromptRowIsAFinishedTurnNotAWait() throws {
