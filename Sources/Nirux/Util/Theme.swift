@@ -5,7 +5,8 @@ import AppKit
 /// by hue. ThemeGuardTests rejects literal colors outside this file.
 ///
 /// Nirux is dark-only: windows and views set `appearance` rather than
-/// naming `.darkAqua`.
+/// naming `.darkAqua`. The web editor (EditorAssets) keeps its own CSS
+/// palette, which the guard doesn't see.
 enum Theme {
     static var appearance: NSAppearance? { NSAppearance(named: .darkAqua) }
 

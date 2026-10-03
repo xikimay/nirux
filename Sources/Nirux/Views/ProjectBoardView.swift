@@ -163,6 +163,9 @@ final class ProjectBoardView: NSView {
     private static let waitingColor = Theme.Color.waiting
     private static let failureColor = Theme.Color.error
     private static let workingColor = Theme.Color.working
+    private static let successColor = Theme.Color.success
+    /// Checks still running: not a wait on the user, so not `waiting`.
+    private static let pendingColor = NSColor.systemOrange
     private static let dryRunColor = NSColor.systemOrange
 
     nonisolated static let dryRunTooltip = "This build can’t change GitHub: its queue reads GitHub, then stops before its first "
@@ -692,7 +695,7 @@ final class ProjectBoardView: NSView {
         switch tone {
         case .normal: return secondaryText
         case .active: return primaryText
-        case .success: return workingColor
+        case .success: return successColor
         case .failure: return failureColor
         }
     }
@@ -700,8 +703,8 @@ final class ProjectBoardView: NSView {
     private static func color(for result: ProjectBoard.CheckResult?) -> NSColor {
         switch result {
         case .failure?: return failureColor
-        case .pending?: return waitingColor
-        case .success?: return workingColor
+        case .pending?: return pendingColor
+        case .success?: return successColor
         case .neutral?, .skipped?, nil: return secondaryText
         }
     }

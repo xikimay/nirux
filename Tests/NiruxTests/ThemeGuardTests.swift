@@ -1,12 +1,16 @@
 import XCTest
 
-/// Colors and the dark appearance come from `Theme`: a literal color or a
-/// forced `.darkAqua` anywhere else in the app fails this test.
+/// Colors and the dark appearance come from `Theme`: outside it, a color
+/// initializer with number components, a hex literal, `niruxAccent` or a
+/// forced `.darkAqua` fails this test. Named system colors and white
+/// alphas are left to the redesign PRs.
 final class ThemeGuardTests: XCTestCase {
     private static let advice = """
-        use Theme instead of literal colors: window or board → Theme.Color.canvas; sidebar, panel, sheet → .base; \
-        bar, card, tab → .surface; floating → .raised; text → .textPrimary/.textSecondary/.textTertiary; \
-        agent states → .working/.waiting/.error/.done; NSAppearance(named: .darkAqua) → Theme.appearance
+        use Theme instead of literal colors: window or board → Theme.Color.canvas; sidebar, panel, palette, sheet → .base; \
+        bar, card, tab → .surface; menu, popover, toast, hint → .raised; text → .textPrimary/.textSecondary/.textTertiary; \
+        agent states → .working/.waiting/.error/.idle (.waiting only when something waits for the user's answer); \
+        merged PR → .done; checks passed → .success; a warning → NSColor.systemOrange, never .waiting; \
+        NSColor.niruxAccent → .accent; NSAppearance(named: .darkAqua) → Theme.appearance
         """
 
     private let sources = URL(fileURLWithPath: #filePath)
@@ -25,12 +29,15 @@ final class ThemeGuardTests: XCTestCase {
         XCTAssertEqual(offenders, [], Self.advice)
     }
 
-    /// 1-based lines of `path` with a literal color or `.darkAqua`.
+    /// 1-based lines of `path` with a literal color, `.darkAqua` or `niruxAccent`.
     private func offendingLines(in path: String) throws -> [Int] {
         // `\s*` spans newlines: the codebase splits long initializers over lines.
         let literalColor = try NSRegularExpression(pattern: #"""
-            (NSColor\(\s*(red|calibratedRed|deviceRed|srgbRed|displayP3Red|white|calibratedWhite|deviceWhite|hue|calibratedHue|deviceHue|hex)
-            |CGColor\(\s*(red|srgbRed|gray|genericGrayGamma2_2Gray)):\s*[0-9.]
+            ( (NSColor|CGColor) (\.init)? \( \s* (red|calibratedRed|deviceRed|srgbRed|displayP3Red|white|calibratedWhite|deviceWhite
+                |genericGamma22White|hue|calibratedHue|deviceHue|hex|gray|genericGrayGamma2_2Gray)
+            | (?<![\w)\]]) \.init \( \s* (red|calibratedRed|deviceRed|srgbRed|displayP3Red|white|calibratedWhite|deviceWhite|hue|gray)
+            ) \s*:\s* (CGFloat\(\s*)? [0-9.]
+            | niruxColor\(\s*hex:\s*"
             """#, options: .allowCommentsAndWhitespace)
         let text = try String(contentsOf: sources.appendingPathComponent(path), encoding: .utf8)
         var lines: [Int] = []
@@ -38,7 +45,10 @@ final class ThemeGuardTests: XCTestCase {
             guard let range = Range(match.range, in: text) else { continue }
             lines.append(text[..<range.lowerBound].components(separatedBy: "\n").count)
         }
-        for (index, line) in text.components(separatedBy: "\n").enumerated() where line.contains(".darkAqua") {
+        // The deprecated alias keeps old branches building; the guard names the token.
+        let checksAlias = path != "Util/Extensions.swift"
+        for (index, line) in text.components(separatedBy: "\n").enumerated()
+        where line.contains(".darkAqua") || (checksAlias && line.contains("niruxAccent")) {
             lines.append(index + 1)
         }
         return lines.sorted()
