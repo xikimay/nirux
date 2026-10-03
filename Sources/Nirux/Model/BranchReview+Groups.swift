@@ -12,19 +12,25 @@ extension BranchReview {
         case docs
 
         /// The rules apply top to bottom, the first that matches wins, and
-        /// Code is tried last: `Tests/README.md` is a test file.
+        /// Code is tried last: `Tests/README.md` is a test file. Besides
+        /// the design's table, Config takes `.gitattributes`, which decides
+        /// what is generated, and what `.github/` holds besides the
+        /// workflows and actions (Dependabot, templates).
         init(path: String) {
             let name = fileName(path)
             let lowercased = name.lowercased()
+            let isWorkflow = path.hasPrefix(".github/workflows/") || path.hasPrefix(".github/actions/")
             if Self.isInFolder("Tests", path) || name.hasSuffix("Tests.swift")
                 || ["_test.", ".test.", ".spec."].contains(where: name.contains) {
                 self = .tests
             } else if name == "Package.swift" || lowercased.hasSuffix(".plist") || name.hasSuffix(".entitlements")
-                || name == ".swiftlint.yml" || Self.isInFolder("scripts", path) {
+                || name == ".swiftlint.yml" || name == ".gitattributes" || Self.isInFolder("scripts", path)
+                || (path.hasPrefix(".github/") && !isWorkflow) {
                 self = .config
-            } else if path.hasPrefix(".github/workflows/") || path.hasPrefix(".github/actions/") {
+            } else if isWorkflow {
                 self = .ci
-            } else if lowercased.hasSuffix(".md") || Self.isInFolder("docs", path) {
+            } else if lowercased.hasSuffix(".md") || path.hasPrefix("docs/") {
+                // A "docs" folder deeper down may hold code.
                 self = .docs
             } else {
                 self = .code
@@ -48,7 +54,10 @@ extension BranchReview {
         }
 
         let kind: Kind
-        /// Added files first, then by lines changed, most first.
+        /// Added files first, then by lines changed, most first. What
+        /// isn't committed refreshes while the agent works: added files
+        /// first, then by path, so that a row doesn't move under the
+        /// pointer.
         let paths: [String]
     }
 
@@ -64,14 +73,17 @@ extension BranchReview {
         }
         let order: [FileGroup.Kind] = [.uncommitted] + PathGroup.allCases.map { .path($0) } + Fold.allCases.map { .folded($0) }
         return order.compactMap { kind in
-            members[kind].map { FileGroup(kind: kind, paths: $0.sorted(by: isListedBefore).map(\.path)) }
+            members[kind].map { files in
+                let sorted = files.sorted { isListedBefore($0, $1, byLines: kind != .uncommitted) }
+                return FileGroup(kind: kind, paths: sorted.map(\.path))
+            }
         }
     }
 
-    private static func isListedBefore(_ first: FileChange, _ second: FileChange) -> Bool {
+    private static func isListedBefore(_ first: FileChange, _ second: FileChange, byLines: Bool) -> Bool {
         if (first.status == .added) != (second.status == .added) { return first.status == .added }
         let (firstLines, secondLines) = (first.additions + first.deletions, second.additions + second.deletions)
-        if firstLines != secondLines { return firstLines > secondLines }
+        if byLines, firstLines != secondLines { return firstLines > secondLines }
         return first.path < second.path
     }
 }
@@ -100,13 +112,16 @@ extension BranchReview {
         let generatedAttribute: [String: Bool]
 
         /// Reads the attribute of `paths`, as the worktree's
-        /// `.gitattributes` set it. A failed read leaves it out.
-        /// `check-attr` takes its paths on the command line, which
+        /// `.gitattributes` set it, unless the branch changes one: among
+        /// `paths`, or as `ignoresAttributes` says for what `paths` don't
+        /// hold. A branch mustn't fold its own files. A failed read leaves
+        /// it out. `check-attr` takes its paths on the command line, which
         /// `BoundedProcess` keeps under 4,096 arguments: they go
         /// `pathsPerCheck` at a time.
-        init(root: String, paths: [String], options: Options, pathsPerCheck: Int = 1_000) {
+        init(root: String, paths: [String], ignoresAttributes: Bool = false, options: Options, pathsPerCheck: Int = 1_000) {
             var attribute: [String: Bool] = [:]
-            for start in stride(from: 0, to: paths.count, by: pathsPerCheck) {
+            let isRead = !ignoresAttributes && !paths.contains(where: changesAttributes)
+            for start in stride(from: 0, to: isRead ? paths.count : 0, by: pathsPerCheck) {
                 let batch = paths[start..<min(start + pathsPerCheck, paths.count)]
                 guard let output = git(["check-attr", "-z", "linguist-generated", "--"] + batch, in: root, options: options),
                       output.status == 0
@@ -135,19 +150,29 @@ extension BranchReview {
         }
     }
 
-    /// "@generated", or Go's "Code generated … DO NOT EDIT", in the first
-    /// five lines.
+    /// Whether a change to `path` changes what `.gitattributes` says.
+    static func changesAttributes(_ path: String) -> Bool {
+        fileName(path) == ".gitattributes"
+    }
+
+    /// "@generated" outside quotes ("This file is automatically @generated
+    /// by Cargo"), or Go's "Code generated … DO NOT EDIT" opening a line
+    /// or its comment, in the first five lines. A script that writes the marker
+    /// quotes it.
     static func hasGeneratedMarker(_ start: Data) -> Bool {
         let lines = start.split(separator: UInt8(ascii: "\n"), maxSplits: 5, omittingEmptySubsequences: false).prefix(5)
         return lines.contains { line in
             let bytes = Array(line)
             if let range = firstRange(of: Array("@generated".utf8), in: bytes),
+               !bytes[..<range.lowerBound].contains(where: { [UInt8(ascii: "\""), UInt8(ascii: "'"), UInt8(ascii: "`")].contains($0) }),
                !(range.lowerBound > 0 && RiskRules.isIdentifier(bytes[range.lowerBound - 1])),
                !(range.upperBound < bytes.count && RiskRules.isIdentifier(bytes[range.upperBound])) {
                 return true
             }
-            guard let code = firstRange(of: Array("Code generated ".utf8), in: bytes) else { return false }
-            return firstRange(of: Array("DO NOT EDIT".utf8), in: Array(bytes[code.upperBound...])) != nil
+            let comment = bytes.drop { [UInt8(ascii: " "), UInt8(ascii: "\t"), UInt8(ascii: "/"), UInt8(ascii: "#"),
+                                        UInt8(ascii: "*"), UInt8(ascii: "-"), UInt8(ascii: ";")].contains($0) }
+            guard comment.starts(with: Array("Code generated ".utf8)) else { return false }
+            return firstRange(of: Array("DO NOT EDIT".utf8), in: Array(comment)) != nil
         }
     }
 

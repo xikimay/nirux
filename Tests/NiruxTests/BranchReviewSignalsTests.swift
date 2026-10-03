@@ -45,13 +45,15 @@ final class BranchReviewSignalsTests: XCTestCase {
             ("Resources/Info.plist", .config),
             ("Nirux.entitlements", .config),
             (".swiftlint.yml", .config),
+            ("Sources/.gitattributes", .config),
+            (".github/dependabot.yml", .config),
             ("scripts/README.md", .config),
             (".github/workflows/README.md", .ci),
             (".github/actions/setup/action.yml", .ci),
             ("docs/diagram.png", .docs),
             ("CHANGELOG.MD", .docs),
             ("Sources/Nirux/App.swift", .code),
-            (".github/dependabot.yml", .code),
+            ("Sources/Guide/docs/Page.swift", .code),
             ("Sources/Contests.swift", .code)
         ]
         for (path, group) in expected {
@@ -68,6 +70,10 @@ final class BranchReviewSignalsTests: XCTestCase {
         var lockfile = file("Package.resolved", lines: 40)
         lockfile.fold = .lockfile
         lockfile.isUncommitted = true
+        var edited = file("Sources/Zed.swift", lines: 90)
+        edited.isUncommitted = true
+        var draft = file("Sources/Draft.swift", .added)
+        draft.isUncommitted = true
         var committedLockfile = file("web/yarn.lock")
         committedLockfile.fold = .lockfile
         var image = file("logo.png", lines: 0)
@@ -75,7 +81,7 @@ final class BranchReviewSignalsTests: XCTestCase {
         let files = [
             file("Sources/Small.swift", lines: 2), file("Sources/Large.swift", lines: 90), file("Sources/New.swift", .added),
             file("Sources/Same.swift", lines: 2), file("README.md"), image, committedLockfile, lockfile,
-            file("Tests/AppTests.swift", .added, lines: 300)
+            file("Tests/AppTests.swift", .added, lines: 300), edited, draft
         ]
 
         let groups = BranchReview.groups(of: files)
@@ -83,7 +89,8 @@ final class BranchReviewSignalsTests: XCTestCase {
         XCTAssertEqual(groups.map(\.kind), [
             .uncommitted, .path(.code), .path(.tests), .path(.docs), .folded(.lockfile), .folded(.binary)
         ])
-        XCTAssertEqual(groups[0].paths, ["Package.resolved"])
+        // Refreshed while the agent works: by path, so rows stay put.
+        XCTAssertEqual(groups[0].paths, ["Sources/Draft.swift", "Package.resolved", "Sources/Zed.swift"])
         XCTAssertEqual(
             groups[1].paths, ["Sources/New.swift", "Sources/Large.swift", "Sources/Same.swift", "Sources/Small.swift"]
         )
@@ -93,26 +100,51 @@ final class BranchReviewSignalsTests: XCTestCase {
     // MARK: - Folds read from the patch
 
     func testWhitespaceOnlyChangesAreFoldedAndOtherChangesAreNot() throws {
-        // Reindented, a blank line added, a CRLF ending dropped.
-        XCTAssertEqual(try fold("-if a {\n-b()\r\n+if a {\n+\n+    b()\n }", header: "@@ -1,3 +1,4 @@"), .whitespaceOnly)
-        // A line moved within one hunk: each run of changes differs.
+        // Reindented, a blank line added, a CRLF ending and trailing spaces dropped.
+        XCTAssertEqual(try fold("-if a {\n-b()\r\n+if a {\n+\n+    b()  \n }", header: "@@ -1,3 +1,4 @@"), .whitespaceOnly)
+        // git pairs an old closing brace with a new one as context: the
+        // two sides of the hunk still read the same.
+        XCTAssertEqual(
+            try fold(" func a() {\n-if x {\n-y()\n+    if x {\n+        y()\n+    }\n }\n-}", header: "@@ -1,5 +1,5 @@"),
+            .whitespaceOnly
+        )
+        // Whitespace inside a line changes what the code does.
+        XCTAssertNil(try fold("-let s = \"a b\"\n+let s = \"ab\"\n c", header: "@@ -1,2 +1,2 @@"))
+        XCTAssertNil(try fold("-x = a - -b\n+x = a --b\n c", header: "@@ -1,2 +1,2 @@"))
+        // A line moved within one hunk.
         XCTAssertNil(try fold("-x\n y\n+x", header: "@@ -1,2 +1,2 @@"))
-        // Whitespace that splits a word is still whitespace for git's -w,
-        // but a changed character isn't.
-        XCTAssertNil(try fold("-let a = 1\n+let a = 2\n c", header: "@@ -1,2 +1,2 @@"))
-        // The last run of a hunk at the end of the file is compared too.
+        // The last hunk is compared too.
         XCTAssertNil(try fold(" a\n-b\n+c", header: "@@ -1,2 +1,2 @@"))
         // Each hunk on its own: a pure addition hunk doesn't make up for
         // the line the previous one removed.
         XCTAssertNil(try fold("-a\n-b\n+a\n@@ -9,0 +8 @@\n+b", header: "@@ -1,2 +1 @@"))
         // A mode change is never folded.
         XCTAssertNil(try fold("- a\n+a\n b\n c", modes: "old mode 100644\nnew mode 100755\n"))
+        // Where indentation carries meaning, only trailing whitespace goes.
+        func indentationKept(_ body: String) throws -> BranchReview.Fold? {
+            try files(
+                nameStatus: "M\0a.swift\0", patch: modified(body, header: "@@ -1,2 +1,2 @@"),
+                reading: Patch.Reading(whitespace: .keepingIndentation)
+            )[0].fold
+        }
+        XCTAssertNil(try indentationKept(" steps:\n-  if: always()\n+if: always()"))
+        XCTAssertEqual(try indentationKept(" steps:\n-  if: always()  \n+  if: always()"), .whitespaceOnly)
+        XCTAssertEqual(BranchReview.WhitespaceCheck.mode(for: ".github/workflows/ci.yml"), .keepingIndentation)
+        XCTAssertEqual(BranchReview.WhitespaceCheck.mode(for: "tools/Makefile"), .keepingIndentation)
+        XCTAssertEqual(BranchReview.WhitespaceCheck.mode(for: "Sources/App.swift"), .ignoringIndentation)
         // Not checked: not folded.
         let unchecked = try files(
             nameStatus: "M\0a.swift\0", patch: modified("- a\n+a\n b\n c", header: "@@ -1,3 +1,3 @@"),
-            reading: Patch.Reading(checksWhitespace: false)
+            reading: Patch.Reading(whitespace: nil)
         )
         XCTAssertNil(unchecked[0].fold)
+    }
+
+    func testMinifiedScriptIsFoldedAsGenerated() throws {
+        let long = String(repeating: "a", count: 300)
+        XCTAssertEqual(try files(nameStatus: "M\0web/app.js\0", patch: modified("-x\n+\(long)", header: "@@ -1 +1 @@", path: "web/app.js"))[0].fold, .generated)
+        XCTAssertNil(try files(nameStatus: "M\0a.swift\0", patch: modified("-x\n+\(long)", header: "@@ -1 +1 @@"))[0].fold)
+        XCTAssertNil(try files(nameStatus: "M\0web/app.js\0", patch: modified("-x\n+y", header: "@@ -1 +1 @@", path: "web/app.js"))[0].fold)
     }
 
     func testPureRenameAndBinaryAreFoldedFromTheirPatch() throws {
@@ -172,10 +204,18 @@ final class BranchReviewSignalsTests: XCTestCase {
         XCTAssertEqual(labels("args[1] == \"--hook\""), ["--hook"])
         XCTAssertEqual(labels("env[\"NIRUX_STATE_DIR\"] = nil"), ["NIRUX_*"])
         XCTAssertEqual(labels("let XNIRUX_A = 1"), [])
-        XCTAssertEqual(labels("let p = Process(); p.arguments = args"), ["Process arguments", "process launch"])
+        XCTAssertEqual(labels("let p = Process(); p.arguments = args"), ["Process arguments"])
+        XCTAssertEqual(labels("let mode = CommandLine.arguments[1]"), [], "reading argv launches nothing")
         XCTAssertEqual(labels("let p = BoundedProcessed()"), [])
         XCTAssertEqual(labels("try FileManager.default.createDirectory(at: home.appendingPathComponent(\".claude\"))"), ["~/.claude"])
         XCTAssertEqual(labels("let ÜCodable = 1"), [], "a non-ASCII letter is part of an identifier")
+        XCTAssertEqual(labels("let config = home + \"/.codex/config.toml\""), ["~/.codex"])
+        // A line that is only a comment raises nothing; a trailing comment does.
+        XCTAssertEqual(labels("    /// Telegram prompts wait here."), [])
+        XCTAssertEqual(labels("     * then DispatchQueue.main runs it"), [])
+        XCTAssertEqual(labels("# Called by bundle.sh"), [])
+        XCTAssertEqual(labels("#if canImport(Sparkle)"), ["Sparkle"])
+        XCTAssertEqual(labels("let bot = Telegram() // Telegram"), ["Telegram"])
     }
 
     func testSignalsPointAtTheirHunksAcrossATypeChangeEvenWithoutLines() throws {
@@ -246,7 +286,29 @@ final class BranchReviewSignalsTests: XCTestCase {
         XCTAssertEqual(settled("Resources/Info.plist", fold: .whitespaceOnly).map(\.kind), [.launch])
         XCTAssertEqual(settled("Nirux.entitlements").map(\.kind), [.security, .concurrency])
         XCTAssertEqual(settled(".github/workflows/nightly.yml").map(\.kind), [.concurrency, .ci])
-        XCTAssertEqual(settled("Sources/Model/Persistence+Recovery.swift").map(\.kind), [.persistence, .concurrency])
+        XCTAssertEqual(settled("Sources/Views/Shell+Persistence.swift").map(\.kind), [.persistence, .concurrency])
+        XCTAssertEqual(settled("Sources/Nirux/NiruxApp.swift").map(\.kind), [.concurrency, .launch])
+        XCTAssertEqual(settled("Sources/Util/HandoverFile.swift").map(\.kind), [.security, .concurrency])
+        XCTAssertEqual(settled("Sources/Util/AgentHookInstaller+StatusLine.swift").map(\.kind), [.concurrency, .sideEffects])
+        // Merged in any order.
+        let byPath = BranchReview.RiskSignal(kind: .launch, reasons: ["app delegate"], hunks: [], byPath: true)
+        let byLine = BranchReview.RiskSignal(kind: .launch, reasons: ["--hook"], hunks: [3], byPath: false)
+        XCTAssertEqual(
+            BranchReview.merged([byPath, byLine]),
+            [BranchReview.RiskSignal(kind: .launch, reasons: ["--hook", "app delegate"], hunks: [3], byPath: true)]
+        )
+    }
+
+    func testTestsKeepOnlyConcurrency() {
+        var file = FileChange(path: "Tests/NiruxTests/PersistenceTests.swift", status: .modified)
+        file.signals = [
+            BranchReview.RiskSignal(kind: .security, reasons: ["/tmp"], hunks: [0], byPath: false),
+            BranchReview.RiskSignal(kind: .concurrency, reasons: ["@MainActor"], hunks: [1], byPath: false)
+        ]
+
+        BranchReview.RiskRules.settle(&file)
+
+        XCTAssertEqual(file.signals, [BranchReview.RiskSignal(kind: .concurrency, reasons: ["@MainActor"], hunks: [1], byPath: false)])
     }
 
     // MARK: - Generated files
@@ -255,6 +317,9 @@ final class BranchReviewSignalsTests: XCTestCase {
         func marked(_ text: String) -> Bool { BranchReview.hasGeneratedMarker(Data(text.utf8)) }
         XCTAssertTrue(marked("// Code generated by protoc-gen-go. DO NOT EDIT.\npackage x\n"))
         XCTAssertTrue(marked("/**\n * This file is @generated by Relay.\n */\n"))
+        XCTAssertTrue(marked("# Code generated by sqlc; DO NOT EDIT.\n"))
+        XCTAssertFalse(marked("# Prepends \"// @generated\" to each output file.\n"))
+        XCTAssertFalse(marked("// Files that say Code generated … DO NOT EDIT are skipped.\n"))
         XCTAssertTrue(marked("1\n2\n3\n4\n// @generated\n"))
         XCTAssertFalse(marked("1\n2\n3\n4\n5\n// @generated\n"))
         XCTAssertFalse(marked("// Mail me at me@generated.example\n"))
@@ -282,6 +347,8 @@ final class BranchReviewSignalsTests: XCTestCase {
         """
         let start = try XCTUnwrap(Patch.deletedFileStart(Data(patch.utf8)))
         XCTAssertEqual(String(decoding: start, as: UTF8.self), "// Code generated by stringer. DO NOT EDIT.\npackage x\n1\n2\n3\n")
+        let oneLine = patch.replacingOccurrences(of: "-package x", with: "-" + String(repeating: "x", count: 5_000))
+        XCTAssertEqual(try XCTUnwrap(Patch.deletedFileStart(Data(oneLine.utf8))).count, 2_049, "a minified file's one line")
     }
 
     // MARK: - Workflows
@@ -292,6 +359,7 @@ final class BranchReviewSignalsTests: XCTestCase {
         - run: bash $GITHUB_WORKSPACE/scripts/sign.sh
         - run: tools/my-scripts/prune.sh && cat ../outside.sh
         - run: swift build # see .github/actions/setup/action.yml.
+        - run: swift test && cp out $RUNNER_TEMP/notes/README.md
         """
 
         let tokens = BranchReview.pathTokens(in: Data(workflow.utf8))
@@ -302,5 +370,7 @@ final class BranchReviewSignalsTests: XCTestCase {
         XCTAssertFalse(tokens.contains("scripts/prune.sh"))
         XCTAssertFalse(tokens.contains("my-scripts/prune.sh"))
         XCTAssertFalse(tokens.contains("outside.sh"))
+        XCTAssertFalse(tokens.contains("test"), "a word, not a path")
+        XCTAssertFalse(tokens.contains("notes/README.md"), "another variable's folder")
     }
 }

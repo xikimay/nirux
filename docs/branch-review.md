@@ -161,21 +161,32 @@ Top to bottom:
      `Cargo.lock`, `Gemfile.lock`, `go.sum`;
    - generated files: `*.bundle.js`, `*.min.js`, paths marked
      `linguist-generated` in `.gitattributes`, files whose first lines say
-     `@generated` or "Code generated … DO NOT EDIT";
+     `@generated` or "Code generated … DO NOT EDIT", minified scripts and
+     styles (changed lines over 110 bytes on average, as GitHub's Linguist
+     tells them);
    - pure renames (similarity 100%) and whitespace-only changes;
    - binaries.
 
-   `-linguist-generated` (or `=false`) in `.gitattributes` unfolds a file
-   whatever its name. A folded file's diff loads when its row opens, and
-   folded files don't count toward the 5 MB of section 7: a generated
-   bundle mustn't send the whole page on demand.
+   `-linguist-generated` (or `=false`) keeps a file out of the generated
+   group whatever its name. When the branch changes a `.gitattributes`, its
+   `linguist-generated` marks are ignored: a branch mustn't fold its own
+   files. A marker counts outside quotes, or opening a comment: a script
+   that writes the marker isn't generated. Whitespace only means each hunk
+   reads the same without its blank lines and the whitespace around its
+   lines; whitespace inside a line changes what the code does (`" "` and
+   `""`), and in Python, YAML or a Makefile the indentation does too. A
+   folded file's diff loads when its row opens, and folded files don't
+   count toward the 5 MB of section 7: a generated bundle or a reformatted
+   repository mustn't send the whole page on demand.
 
 **Uncommitted changes** are part of what the agent did, but not of the PR yet:
 they form their own group at the top, marked "not committed". A file changed
 both in commits and in the working tree is listed there once, with its whole
 patch from the merge base to the working tree. A folded file that isn't
 committed stays in that group, collapsed: a build-rewritten
-`Package.resolved` must be seen before it is committed. The files
+`Package.resolved` must be seen before it is committed. The group refreshes
+while the agent works, so it lists added files first, then by path: a row
+doesn't move under the pointer. The files
 Nirux's worktree cleanup already treats as disposable
 (`WorktreeCleanup.disposablePaths`: the handovers,
 `.claude/settings.local.json`) are left out.
@@ -192,9 +203,9 @@ The page is useful before anyone clicks Explain. Nirux groups by path:
 | --- | --- |
 | Code | everything not below |
 | Tests | `Tests/`, `*Tests.swift`, `*_test.*`, `*.test.*`, `*.spec.*` |
-| Config and dependencies | `Package.swift`, `*.plist`, `*.entitlements`, `.swiftlint.yml`, `scripts/` |
+| Config and dependencies | `Package.swift`, `*.plist`, `*.entitlements`, `.swiftlint.yml`, `.gitattributes`, `scripts/`, the rest of `.github/` |
 | CI | `.github/workflows/`, `.github/actions/` |
-| Docs | `*.md`, `docs/` |
+| Docs | `*.md`, `docs/` at the top level |
 
 The rules apply top to bottom, and the first that matches wins: the table
 lists "Code" first for reading, but it is the fallback, tried last
@@ -392,15 +403,20 @@ notes are shown apart and never change these signals.
 | Side effects outside Nirux | IOKit, `NSWorkspace`, writes to `~/.claude` or the hooks, notifications, process launches | They outlive the app or change the Mac |
 | Dependencies | `Package.swift`, `Package.resolved` | A build-rewritten `Package.resolved` must not be committed |
 
-A line rule matches anywhere in a `+` or `-` line, comments and strings
-included, in every file but docs and folded files; tests raise them too, since
-CI compiles them with the same strictness. A folded file raises only its path
-rules: a generated file can say anything, and a reindented line changes
-nothing. "Scripts the workflows call" are the changed files whose path a file
-under `.github/workflows` or `.github/actions` names (`./scripts/bundle.sh`).
-A change inside `applicationDidFinishLaunching` that doesn't name it is
-raised once the brace tracking of "Tests against code" gives each hunk its
-enclosing function.
+A line rule matches anywhere in a `+` or `-` line, strings and trailing
+comments included, but not in a line that is only a comment, nor in a doc or
+a folded file: a generated file can say anything, and a reindented line
+changes nothing. A folded file raises only its path rules. A test ships
+nothing: it raises only the concurrency rules, which CI checks more strictly.
+Path rules also cover the files whose changes may name no rule: a name with
+`Persistence`, `HandoverFile`, `NiruxURLRequest`, `+URLScheme`, `Telegram`,
+the app delegate (`NiruxApp.swift`), the hook and skill installers.
+"Scripts the workflows call" are the changed files, docs and tests aside,
+whose path a workflow (`.github/workflows/*.yml`) or an action
+(`action.yml` under `.github/actions`, outside its `node_modules`) names:
+`./scripts/bundle.sh`. A change inside `applicationDidFinishLaunching` that
+doesn't name it is raised once the brace tracking of "Tests against code"
+gives each hunk its enclosing function.
 
 **Tests against code.** The header shows lines added in tests against lines
 added in code, and lists the symbols the branch declares that no test

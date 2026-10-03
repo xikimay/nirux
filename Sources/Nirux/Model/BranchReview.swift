@@ -67,13 +67,15 @@ enum BranchReview {
     enum Fold: String, CaseIterable, Equatable, Sendable {
         case lockfile
         /// By its name (`*.bundle.js`, `*.min.js`), `linguist-generated` in
-        /// `.gitattributes`, or a marker in its first lines (looked for
-        /// only when its patch is read).
+        /// `.gitattributes` (unless the branch changes one), a marker in
+        /// its first lines, or minified lines. The last two only when its
+        /// patch is read.
         case generated
         /// Renamed with no line or mode changed.
         case pureRename
-        /// Every hunk reads the same with whitespace and blank lines left
-        /// out.
+        /// Every hunk reads the same without its blank lines and the
+        /// whitespace around its lines (around, not inside; and only at
+        /// their end where indentation carries meaning: Python, YAML).
         case whitespaceOnly
         case binary
     }
@@ -97,7 +99,8 @@ enum BranchReview {
         var reasons: [String]
         /// The hunks whose `+` or `-` lines raised it, by index in the
         /// file's patch (as `filePatch` reads it), even when the snapshot
-        /// left the hunks out.
+        /// left the hunks out. A `.tooLarge` file's are never shown: the
+        /// signal stands for the file.
         var hunks: [Int]
         /// Raised by the file's path: the whole file.
         var byPath: Bool
@@ -139,7 +142,8 @@ enum BranchReview {
         /// its lines.
         var fold: Fold?
         /// In `RiskKind` order. Lines are read only for a file the diff
-        /// read (`omission` isn't `.notRead`); a doc raises none.
+        /// read (`omission` isn't `.notRead`): "not read" isn't "no risk".
+        /// A doc raises none; a test only concurrency.
         var signals: [RiskSignal] = []
     }
 

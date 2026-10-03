@@ -170,7 +170,7 @@ extension BranchReview {
         var files: [FileChange]
         switch readChanges(
             repository, mergeBase: base.mergeBase, head: head, untracked: toRead, uncommitted: uncommitted,
-            canRetry: !isLastAttempt, options: options
+            ignoresAttributes: untracked.contains(where: changesAttributes), canRetry: !isLastAttempt, options: options
         ) {
         case .read(let read): files = read
         case .vanished: return .moved
@@ -187,7 +187,9 @@ extension BranchReview {
         // `git add` landed meanwhile) isn't listed twice.
         let listed = Set(files.flatMap { [$0.path] + ($0.oldPath.map { [$0] } ?? []) })
         let unread = untracked.filter { !listed.contains($0) }
-        let noise = unread.isEmpty ? nil : NoiseRules(root: root, paths: unread, options: options)
+        let noise = unread.isEmpty ? nil : NoiseRules(
+            root: root, paths: unread, ignoresAttributes: listed.contains(where: changesAttributes), options: options
+        )
         for path in unread {
             var file = FileChange(path: path, status: .added)
             file.isUntracked = true
@@ -271,7 +273,9 @@ extension BranchReview {
             mergeBase: snapshot.base.mergeBase, head: snapshot.head,
             untracked: file.isUntracked ? [file.path] : [],
             uncommitted: file.isUncommitted ? Set([file.oldPath, file.path].compactMap { $0 }) : [],
-            pathspec: [file.oldPath, file.path].compactMap { $0 }, inline: false, canRetry: false, options: literal
+            pathspec: [file.oldPath, file.path].compactMap { $0 }, inline: false,
+            ignoresAttributes: snapshot.files.contains { changesAttributes($0.path) || $0.oldPath.map(changesAttributes) == true },
+            canRetry: false, options: literal
         ), var found = files.first(where: { $0.path == file.path })
         else { return nil }
         found.isUntracked = file.isUntracked
@@ -314,7 +318,7 @@ extension BranchReview {
     /// a rename) and nothing is written to the repository.
     static func readChanges(
         _ repository: Repository, mergeBase: String, head: String, untracked: [String], uncommitted: Set<String>,
-        pathspec: [String] = [], inline: Bool = true, canRetry: Bool, options: Options
+        pathspec: [String] = [], inline: Bool = true, ignoresAttributes: Bool = false, canRetry: Bool, options: Options
     ) -> Changes {
         let scratch = FileManager.default.temporaryDirectory
             .appendingPathComponent("nirux-review-\(UUID().uuidString)", isDirectory: true)
@@ -328,7 +332,10 @@ extension BranchReview {
             }
         }
         let root = repository.root
-        switch readDiff(root: root, mergeBase: mergeBase, pathspec: pathspec, inline: inline, options: reading) {
+        switch readDiff(
+            root: root, mergeBase: mergeBase, pathspec: pathspec, inline: inline, ignoresAttributes: ignoresAttributes,
+            options: reading
+        ) {
         case .files(let files): return .read(files)
         case .inconsistent:
             if canRetry { return .vanished }
@@ -339,12 +346,13 @@ extension BranchReview {
             guard reading.environment != options.environment else { return .failed(reason) }
             return readChanges(
                 repository, mergeBase: mergeBase, head: head, untracked: [], uncommitted: uncommitted,
-                pathspec: pathspec, inline: inline, canRetry: canRetry, options: options
+                pathspec: pathspec, inline: inline, ignoresAttributes: ignoresAttributes, canRetry: canRetry, options: options
             )
         case .notRead(let entries):
             return readTooLarge(
                 entries, root: root, mergeBase: mergeBase, head: head, pathspec: pathspec,
-                uncommitted: uncommitted, inline: inline, options: reading
+                uncommitted: uncommitted, inline: inline,
+                ignoresAttributes: ignoresAttributes || paths(of: entries).contains(where: changesAttributes), options: reading
             )
         }
     }
@@ -363,11 +371,11 @@ extension BranchReview {
     /// line counts only.
     private static func readTooLarge(
         _ entries: [NameStatusEntry], root: String, mergeBase: String, head: String, pathspec: [String],
-        uncommitted: Set<String>, inline: Bool, options: Options
+        uncommitted: Set<String>, inline: Bool, ignoresAttributes: Bool, options: Options
     ) -> Changes {
         guard let listed = listOnly(
             entries, root: root, mergeBase: mergeBase, head: head, pathspec: pathspec,
-            uncommitted: uncommitted, options: options
+            uncommitted: uncommitted, ignoresAttributes: ignoresAttributes, options: options
         ) else { return .failed("git couldn't count the changes in \(root).") }
         guard pathspec.isEmpty else { return .read(listed) }
         let largestFirst = listed.sorted { $0.additions + $0.deletions > $1.additions + $1.deletions }
@@ -380,7 +388,10 @@ extension BranchReview {
             // Exclusions alone stand for "everything else".
             let excluded = giant.flatMap { [$0.oldPath, $0.path].compactMap { $0 } }.map { ":(exclude,literal,top)\($0)" }
             guard excluded.count <= maxExcludedPaths else { break }
-            switch readDiff(root: root, mergeBase: mergeBase, pathspec: excluded, inline: inline, options: options) {
+            switch readDiff(
+                root: root, mergeBase: mergeBase, pathspec: excluded, inline: inline, ignoresAttributes: ignoresAttributes,
+                options: options
+            ) {
             case .files(let rest): return .read(rest + giant)
             case .notRead: leftOut *= 2
             case .inconsistent, .failed: return .read(listed)
@@ -454,9 +465,16 @@ extension BranchReview {
     /// The patch from `mergeBase` to the working tree, matched with the
     /// paths of `--name-status -z`, each file hashed, folded or not, with
     /// its signals. A file past `maxFileDiffBytes` keeps no hunks; with
-    /// `inline`, neither does a folded file, nor any file when the unfolded
-    /// ones left add up to more than `maxInlineDiffBytes`.
-    static func readDiff(root: String, mergeBase: String, pathspec: [String], inline: Bool, options: Options) -> DiffRead {
+    /// `inline`, neither does a folded file, nor any file when the
+    /// unfolded ones add up to more than `maxInlineDiffBytes`. Parsed
+    /// twice: once without keeping a line, to hash, fold and find signals,
+    /// then only the sections that keep their hunks: a fold found in the
+    /// lines (whitespace only, minified) mustn't count toward the budget
+    /// either. `ignoresAttributes`: see `NoiseRules`.
+    static func readDiff(
+        root: String, mergeBase: String, pathspec: [String], inline: Bool, ignoresAttributes: Bool = false,
+        options: Options
+    ) -> DiffRead {
         let diff = diffConfig + ["diff"] + diffSelection
         let names = git(
             diff + ["--name-status", "-z", mergeBase, "--"] + pathspec,
@@ -473,27 +491,27 @@ extension BranchReview {
         let data = patch.stdout
         let ranges = Patch.sectionRanges(of: data)
         let headers = ranges.map { Patch.header(data[$0]) }
-        let noise = NoiseRules(root: root, paths: entries.map(\.path), options: options)
+        let noise = NoiseRules(root: root, paths: paths(of: entries), ignoresAttributes: ignoresAttributes, options: options)
         // A deleted file's start is in its patch; the others' in the
         // worktree.
         var namedFolds: [String: Fold] = [:]
+        var rangesByKey: [String: [Range<Data.Index>]] = [:]
         for (range, header) in zip(ranges, headers) {
-            guard let header, let key = header.key, namedFolds[key] == nil else { continue }
+            guard let header, let key = header.key else { continue }
+            rangesByKey[key, default: []].append(range)
+            guard namedFolds[key] == nil else { continue }
             namedFolds[key] = noise.fold(path: key) {
                 header.newPath == nil
                     ? Patch.deletedFileStart(data[range]) : readPrefix(of: root + "/" + key, maxBytes: 2_048)
             }
         }
-        func isNamedFold(_ index: Int) -> Bool { headers[index]?.key.flatMap { namedFolds[$0] } != nil }
-        let inlineBytes = ranges.indices.filter { !isNamedFold($0) && ranges[$0].count <= maxFileBytes }
-            .map { ranges[$0].count }.reduce(0, +)
-        let onDemand = inline && inlineBytes > options.maxInlineDiffBytes
         guard let sections = Patch.sections(of: data, in: ranges, reading: { index in
-            let folded = isNamedFold(index)
+            let key = headers[index]?.key
+            let folded = key.flatMap { namedFolds[$0] } != nil
             return Patch.Reading(
-                keepsLines: !onDemand && !(inline && folded) && ranges[index].count <= maxFileBytes,
-                checksWhitespace: !folded,
-                findsRisks: !folded && headers[index]?.key.map { PathGroup(path: $0) } != .docs
+                keepsLines: false,
+                whitespace: folded ? nil : key.map(WhitespaceCheck.mode(for:)),
+                findsRisks: !folded && key.map { PathGroup(path: $0) } != .docs
             )
         }) else {
             return .failed("git printed a diff Nirux can't read in \(root).")
@@ -502,14 +520,27 @@ extension BranchReview {
         for index in files.indices {
             files[index].fold = namedFolds[files[index].path] ?? files[index].fold
             RiskRules.settle(&files[index])
-            let tooLarge = files[index].patchBytes > maxFileBytes
-            // A binary or a pure rename has no line to load.
-            let folded = inline && files[index].fold != nil && files[index].additions + files[index].deletions > 0
-            guard tooLarge || onDemand || folded else { continue }
-            files[index].hunks = []
-            files[index].omission = tooLarge ? .tooLarge : .onDemand
+        }
+        let inlineBytes = files.filter { $0.fold == nil && $0.patchBytes <= maxFileBytes }.map(\.patchBytes).reduce(0, +)
+        let onDemand = inline && inlineBytes > options.maxInlineDiffBytes
+        let linesOnly = Patch.Reading(keepsLines: true, whitespace: nil, findsRisks: false)
+        // A binary, a pure rename or a mode change has no line to show.
+        for index in files.indices where files[index].additions + files[index].deletions > 0 {
+            if files[index].patchBytes > maxFileBytes {
+                files[index].omission = .tooLarge
+            } else if inline, onDemand || files[index].fold != nil {
+                files[index].omission = .onDemand
+            } else {
+                let read = (rangesByKey[files[index].path] ?? []).compactMap { Patch.section(data[$0], reading: linesOnly) }
+                files[index].hunks = read.flatMap(\.hunks)
+            }
         }
         return .files(files)
+    }
+
+    /// Each entry's path, and its path before a rename.
+    static func paths(of entries: [NameStatusEntry]) -> [String] {
+        entries.flatMap { [$0.path] + ($0.oldPath.map { [$0] } ?? []) }
     }
 
     /// Paths and line counts only, for a diff too large to read: no hunks,
@@ -517,7 +548,7 @@ extension BranchReview {
     /// out: it is neither in the commits nor in what `git status` lists.
     static func listOnly(
         _ entries: [NameStatusEntry], root: String, mergeBase: String, head: String, pathspec: [String],
-        uncommitted: Set<String>, options: Options
+        uncommitted: Set<String>, ignoresAttributes: Bool = false, options: Options
     ) -> [FileChange]? {
         let diff = diffConfig + ["diff"] + diffSelection
         guard let numbers = git(
@@ -531,7 +562,7 @@ extension BranchReview {
         else { return nil }
         let counts = numstat(numbers.stdout)
         let changed = uncommitted.union(committed.stdout.split(separator: 0).map(Patch.decoded))
-        let noise = NoiseRules(root: root, paths: entries.map(\.path), options: options)
+        let noise = NoiseRules(root: root, paths: paths(of: entries), ignoresAttributes: ignoresAttributes, options: options)
         return entries.compactMap { entry -> FileChange? in
             var file = FileChange(path: entry.path, status: .modified)
             switch entry.letter {
@@ -557,9 +588,10 @@ extension BranchReview {
                 break
             }
             file.omission = .notRead
-            let isPureRename = file.status == .renamed && entry.score == 100 && counts[entry.path] == .lines(additions: 0, deletions: 0)
-            // Its start isn't read: a diff this large may list thousands.
-            file.fold = noise.fold(path: file.path) ?? (isPureRename ? .pureRename : file.isBinary ? .binary : nil)
+            // Never more than its patch would: its start isn't read (a
+            // diff this large may list thousands), nor its modes, which a
+            // pure rename keeps.
+            file.fold = noise.fold(path: file.path) ?? (file.isBinary ? .binary : nil)
             RiskRules.settle(&file)
             return file
         }

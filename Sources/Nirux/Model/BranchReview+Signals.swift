@@ -12,8 +12,9 @@ extension BranchReview {
     }
 
     /// Deterministic rules on the paths and on the `+` and `-` lines, built
-    /// in for Swift and macOS. A line rule matches anywhere in the line,
-    /// comments and strings included.
+    /// in for Swift and macOS. A line rule matches anywhere in a line,
+    /// strings and trailing comments included, but not in a line that is
+    /// only a comment.
     enum RiskRules {
         struct LineRule {
             let kind: RiskKind
@@ -83,7 +84,10 @@ extension BranchReview {
             LineRule(.security, "HandoverFile"),
             LineRule(.security, "Telegram", nil, .prefix),
             LineRule(.security, "/tmp"),
-            LineRule(.security, "Process arguments", ["Process(", "BoundedProcess", "posix_spawn", "executableURL", ".arguments"]),
+            LineRule(
+                .security, "Process arguments",
+                ["Process(", "BoundedProcess", "posix_spawn", "executableURL", ".arguments =", ".arguments="]
+            ),
 
             LineRule(.concurrency, "@MainActor"),
             LineRule(.concurrency, "nonisolated"),
@@ -109,18 +113,20 @@ extension BranchReview {
             LineRule(.sideEffects, "IOKit", ["IOKit", "IOPM", "IOService", "IORegistry"], .prefix),
             LineRule(.sideEffects, "NSWorkspace"),
             LineRule(.sideEffects, "~/.claude", [".claude/", "\".claude\"", "~/.claude"]),
+            LineRule(.sideEffects, "~/.codex", [".codex/", "\".codex\"", "~/.codex"]),
             LineRule(.sideEffects, "hooks", ["AgentHookInstaller"], .prefix),
             LineRule(
                 .sideEffects, "notifications",
                 ["UNUserNotificationCenter", "NSUserNotification", "DistributedNotificationCenter", "NiruxNotifier"],
                 .prefix
             ),
-            LineRule(.sideEffects, "process launch", ["Process(", "BoundedProcess", "posix_spawn", "openApplication", "launchctl"])
+            LineRule(.sideEffects, "launchctl")
         ]
 
         /// Calls `body` with the index of each line rule `content` matches.
         static func forEachLineRule(matching content: Data, _ body: (Int) -> Void) {
             content.withUnsafeBytes { line in
+                guard !isCommentOnly(line) else { return }
                 let present = ByteSet(line)
                 for (index, rule) in lineRules.enumerated() where rule.patterns.contains(where: {
                     $0.set.isSubset(of: present) && find($0.bytes, in: line, boundary: rule.boundary)
@@ -150,6 +156,20 @@ extension BranchReview {
             }
         }
 
+        /// A line that is only a comment: `//`, `/*` or `* ` in Swift and C,
+        /// `# ` in scripts and YAML. Swift's `#if` has no space.
+        static func isCommentOnly(_ line: UnsafeRawBufferPointer) -> Bool {
+            guard let start = line.firstIndex(where: { $0 != UInt8(ascii: " ") && $0 != UInt8(ascii: "\t") })
+            else { return false }
+            let next = start + 1 < line.count ? line[start + 1] : nil
+            switch line[start] {
+            case UInt8(ascii: "/"): return next == UInt8(ascii: "/") || next == UInt8(ascii: "*")
+            case UInt8(ascii: "*"): return next == nil || next == UInt8(ascii: " ") || next == UInt8(ascii: "/")
+            case UInt8(ascii: "#"): return next == nil || next == UInt8(ascii: " ") || next == UInt8(ascii: "\t")
+            default: return false
+            }
+        }
+
         /// ASCII letters, digits and "_", and any byte of a non-ASCII
         /// character: Swift identifiers may hold them.
         static func isIdentifier(_ byte: UInt8) -> Bool {
@@ -164,12 +184,9 @@ extension BranchReview {
 
         /// One signal per kind the line rules raised, with its hunks.
         static func signals(lineHits: [RiskHit]) -> [RiskSignal] {
-            var signals: [RiskSignal] = []
-            for hit in lineHits {
-                let rule = lineRules[hit.rule]
-                signals.add(RiskSignal(kind: rule.kind, reasons: [rule.label], hunks: [hit.hunk], byPath: false))
-            }
-            return signals
+            merged(lineHits.map {
+                RiskSignal(kind: lineRules[$0.rule].kind, reasons: [lineRules[$0.rule].label], hunks: [$0.hunk], byPath: false)
+            })
         }
 
         struct PathRule: Sendable {
@@ -184,39 +201,65 @@ extension BranchReview {
             "pnpm-lock.yaml", "yarn.lock", "Cargo.toml", "Cargo.lock", "Gemfile", "Gemfile.lock", "go.mod", "go.sum"
         ]
 
+        /// A change to these files' bodies may name none of the line
+        /// rules: `NiruxShellView+Persistence.swift` restores the state,
+        /// `HandoverFile.swift` writes files.
         static let pathRules: [PathRule] = [
-            PathRule(kind: .persistence, label: "Persistence*.swift") { _, name in
-                name.hasPrefix("Persistence") && name.hasSuffix(".swift")
-            },
+            PathRule(kind: .persistence, label: "*Persistence*") { _, name in name.contains("Persistence") },
             PathRule(kind: .persistence, label: "*Store.swift") { _, name in name.hasSuffix("Store.swift") },
             PathRule(kind: .security, label: "*.entitlements") { _, name in name.hasSuffix(".entitlements") },
+            PathRule(kind: .security, label: "HandoverFile*") { _, name in name.hasPrefix("HandoverFile") },
+            PathRule(kind: .security, label: "NiruxURLRequest*") { _, name in name.hasPrefix("NiruxURLRequest") },
+            PathRule(kind: .security, label: "*+URLScheme*") { _, name in name.contains("+URLScheme") },
+            PathRule(kind: .security, label: "Telegram*") { _, name in name.hasPrefix("Telegram") },
+            PathRule(kind: .launch, label: "app delegate") { _, name in name == "NiruxApp.swift" || name == "AppDelegate.swift" },
             PathRule(kind: .launch, label: "Info.plist") { _, name in name == "Info.plist" },
             PathRule(kind: .launch, label: "bundle.sh") { _, name in name == "bundle.sh" },
             PathRule(kind: .ci, label: ".github/") { path, _ in path.hasPrefix(".github/") },
+            PathRule(kind: .sideEffects, label: "hooks") { _, name in
+                name.hasPrefix("AgentHookInstaller") || name.hasPrefix("AgentSkillsInstaller")
+            },
             PathRule(kind: .dependencies, label: "dependencies") { _, name in dependencyFiles.contains(name) }
         ]
 
         /// The path rules a file's path, or its path before a rename,
         /// matches; the reason is the file's name for dependencies.
         static func pathSignals(path: String, oldPath: String?) -> [RiskSignal] {
-            var signals: [RiskSignal] = []
-            for candidate in [path] + (oldPath.map { [$0] } ?? []) {
+            merged(([path] + (oldPath.map { [$0] } ?? [])).flatMap { candidate in
                 let name = fileName(candidate)
-                for rule in pathRules where rule.matches(candidate, name) {
-                    let reason = rule.kind == .dependencies ? name : rule.label
-                    signals.add(RiskSignal(kind: rule.kind, reasons: [reason], hunks: [], byPath: true))
+                return pathRules.filter { $0.matches(candidate, name) }.map { rule in
+                    RiskSignal(kind: rule.kind, reasons: [rule.kind == .dependencies ? name : rule.label], hunks: [], byPath: true)
                 }
-            }
-            return signals
+            })
         }
 
-        /// The path rules, then what the workflows name, added to signals
-        /// read from the lines. A folded file keeps no line signal: a
-        /// generated file can say anything, and a reindented line changes
-        /// nothing.
+        /// The path rules added to the signals read from the lines. A
+        /// folded file keeps no line signal: a generated file can say
+        /// anything, and a reindented line changes nothing. A test ships
+        /// nothing: it keeps only concurrency, which CI's Swift 6.1 checks
+        /// more strictly than a local build.
         static func settle(_ file: inout FileChange) {
-            if file.fold != nil { file.signals = [] }
-            for signal in pathSignals(path: file.path, oldPath: file.oldPath) { file.signals.add(signal) }
+            let isTest = PathGroup(path: file.path) == .tests
+            let fromLines = file.fold != nil ? [] : file.signals.filter { !isTest || $0.kind == .concurrency }
+            file.signals = merged(fromLines + (isTest ? [] : pathSignals(path: file.path, oldPath: file.oldPath)))
+        }
+    }
+
+    /// One signal per kind, in `RiskKind` order, with the reasons and
+    /// hunks of `parts` sorted, each once.
+    static func merged(_ parts: [RiskSignal]) -> [RiskSignal] {
+        var reasons: [RiskKind: Set<String>] = [:]
+        var hunks: [RiskKind: Set<Int>] = [:]
+        var byPath: [RiskKind: Bool] = [:]
+        for part in parts {
+            reasons[part.kind, default: []].formUnion(part.reasons)
+            hunks[part.kind, default: []].formUnion(part.hunks)
+            byPath[part.kind] = byPath[part.kind] == true || part.byPath
+        }
+        return RiskKind.allCases.compactMap { kind in
+            byPath[kind].map {
+                RiskSignal(kind: kind, reasons: (reasons[kind] ?? []).sorted(), hunks: (hunks[kind] ?? []).sorted(), byPath: $0)
+            }
         }
     }
 
@@ -225,72 +268,75 @@ extension BranchReview {
     }
 }
 
-extension [BranchReview.RiskSignal] {
-    /// Merges `signal` into the one of its kind, keeping kinds in
-    /// `RiskKind` order and reasons and hunks sorted, each once.
-    mutating func add(_ signal: BranchReview.RiskSignal) {
-        guard let index = firstIndex(where: { $0.kind == signal.kind }) else {
-            let order = BranchReview.RiskKind.allCases
-            let position = firstIndex { order.firstIndex(of: $0.kind)! > order.firstIndex(of: signal.kind)! } ?? endIndex
-            insert(
-                BranchReview.RiskSignal(
-                    kind: signal.kind, reasons: Set(signal.reasons).sorted(),
-                    hunks: Set(signal.hunks).sorted(), byPath: signal.byPath
-                ),
-                at: position
-            )
-            return
-        }
-        self[index].reasons = Set(self[index].reasons + signal.reasons).sorted()
-        self[index].hunks = Set(self[index].hunks + signal.hunks).sorted()
-        self[index].byPath = self[index].byPath || signal.byPath
-    }
-}
-
 // MARK: - Scripts the workflows call
 
 extension BranchReview {
     /// Raises CI on a file a workflow or an action names by its path
-    /// (`./scripts/bundle.sh`), as the worktree has them.
+    /// (`./scripts/bundle.sh`), as the worktree has them. Not on a doc,
+    /// which a release-notes step may quote, nor a test.
     static func addWorkflowSignals(to files: inout [FileChange], root: String) {
-        let named = workflowPaths(root: root)
-        guard !named.isEmpty else { return }
-        for index in files.indices {
-            for path in [files[index].path] + (files[index].oldPath.map { [$0] } ?? []) {
-                for workflow in (named[path] ?? []).sorted() {
-                    files[index].signals.add(RiskSignal(kind: .ci, reasons: ["named in \(workflow)"], hunks: [], byPath: true))
-                }
-            }
+        func paths(_ file: FileChange) -> [String] { [file.path] + (file.oldPath.map { [$0] } ?? []) }
+        let candidates = files.indices.filter { ![.docs, .tests].contains(PathGroup(path: files[$0].path)) }
+        guard !candidates.isEmpty else { return }
+        let named = workflowNames(of: Set(candidates.flatMap { paths(files[$0]) }), root: root)
+        for index in candidates {
+            let workflows = Set(paths(files[index]).flatMap { named[$0] ?? [] })
+            guard !workflows.isEmpty else { continue }
+            files[index].signals = merged(files[index].signals + workflows.map {
+                RiskSignal(kind: .ci, reasons: ["named in \($0)"], hunks: [], byPath: true)
+            })
         }
     }
 
-    /// Reading is bounded: a repository's `.github` holds a handful of
-    /// small files, but an action may vendor its node_modules.
-    private static let maxWorkflowEntries = 2_000
+    private static let maxActionEntries = 2_000
     private static let maxWorkflowFiles = 200
     private static let maxWorkflowFileBytes = 256 << 10
 
-    /// Each path the regular files under `.github/workflows` and
-    /// `.github/actions` name, with the files that name it.
-    static func workflowPaths(root: String) -> [String: Set<String>] {
+    /// Each of `paths` a workflow or an action names, with the files that
+    /// name it.
+    static func workflowNames(of paths: Set<String>, root: String) -> [String: Set<String>] {
         var named: [String: Set<String>] = [:]
-        var filesRead = 0
-        for folder in [".github/workflows", ".github/actions"] {
-            guard let walk = FileManager.default.enumerator(atPath: root + "/" + folder) else { continue }
-            for case let relative as String in walk.prefix(maxWorkflowEntries) where filesRead < maxWorkflowFiles {
-                // Not a regular file (a folder, a symlink): nil.
-                guard let data = readPrefix(of: root + "/" + folder + "/" + relative, maxBytes: maxWorkflowFileBytes)
-                else { continue }
-                filesRead += 1
-                for path in pathTokens(in: data) { named[path, default: []].insert(folder + "/" + relative) }
-            }
+        for file in workflowFiles(root: root) {
+            guard let data = readPrefix(of: root + "/" + file, maxBytes: maxWorkflowFileBytes) else { continue }
+            for path in pathTokens(in: data) where paths.contains(path) { named[path, default: []].insert(file) }
         }
         return named
     }
 
-    /// The runs of path characters in `text`, from the top level:
-    /// "./scripts/x.sh" and "$GITHUB_WORKSPACE/scripts/x.sh" both name
-    /// "scripts/x.sh", "my-scripts/x.sh" doesn't.
+    /// What GitHub reads: the YAML files at the top of `.github/workflows`,
+    /// and the `action.yml` files below `.github/actions`, out of any
+    /// `node_modules` an action vendors. A folder that is a symlink isn't
+    /// followed.
+    private static func workflowFiles(root: String) -> [String] {
+        func isFolder(_ path: String) -> Bool {
+            var info = stat()
+            return lstat(root + "/" + path, &info) == 0 && info.st_mode & S_IFMT == S_IFDIR
+        }
+        guard isFolder(".github") else { return [] }
+        var files: [String] = []
+        if isFolder(".github/workflows"),
+           let names = try? FileManager.default.contentsOfDirectory(atPath: root + "/.github/workflows") {
+            files += names.filter { $0.hasSuffix(".yml") || $0.hasSuffix(".yaml") }.sorted().map { ".github/workflows/" + $0 }
+        }
+        if isFolder(".github/actions"), let walk = FileManager.default.enumerator(atPath: root + "/.github/actions") {
+            var entries = 0
+            for case let relative as String in walk {
+                entries += 1
+                guard entries <= maxActionEntries else { break }
+                switch fileName(relative) {
+                case "node_modules": walk.skipDescendants()
+                case "action.yml", "action.yaml": files.append(".github/actions/" + relative)
+                default: break
+                }
+            }
+        }
+        return Array(files.prefix(maxWorkflowFiles))
+    }
+
+    /// The runs of path characters in `text` that hold a "/" or a ".",
+    /// from the top level: "./scripts/x.sh" and
+    /// "$GITHUB_WORKSPACE/scripts/x.sh" both name "scripts/x.sh",
+    /// "my-scripts/x.sh" doesn't, nor "test" in "swift test".
     static func pathTokens(in text: Data) -> Set<String> {
         func isPathByte(_ byte: UInt8) -> Bool {
             RiskRules.isIdentifier(byte) || byte == UInt8(ascii: ".") || byte == UInt8(ascii: "-")
@@ -299,16 +345,16 @@ extension BranchReview {
         var tokens: Set<String> = []
         for run in text.split(whereSeparator: { !isPathByte($0) }) {
             var token = Substring(Patch.decoded(Data(run)))
-            // "$GITHUB_WORKSPACE/scripts": the variable is the folder.
+            // The worktree's top level, as a variable.
             if run.startIndex > text.startIndex, text[run.startIndex - 1] == UInt8(ascii: "$"),
-               let slash = token.firstIndex(of: "/") {
-                token = token[slash...]
+               token.hasPrefix("GITHUB_WORKSPACE/") {
+                token = token.dropFirst("GITHUB_WORKSPACE".count)
             }
             while let rest = token.hasPrefix("./") ? token.dropFirst(2) : token.hasPrefix("/") ? token.dropFirst() : nil {
                 token = rest
             }
             while token.hasSuffix(".") { token = token.dropLast() }
-            if !token.isEmpty { tokens.insert(String(token)) }
+            if token.contains("/") || token.contains(".") { tokens.insert(String(token)) }
         }
         return tokens
     }
