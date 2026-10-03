@@ -102,7 +102,7 @@ Typical command palette actions:
 - Search Workspace
 - Search Everywhere
 - Open Browser
-- Import Browser Cookies
+- Import Browser Cookies (listed when a Chrome, Brave, Arc or Edge profile is found)
 - New Workspace
 - Show/Hide Sidebar
 - Rename Workspace

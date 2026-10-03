@@ -421,11 +421,6 @@ extension NiruxShellView {
 
     // MARK: - Cookie Import
 
-    func importCookieSubtitle() -> String {
-        let browsers = sideEffects.cookieBrowsers().map(\.rawValue)
-        return browsers.isEmpty ? "No Chromium browsers detected" : "From \(browsers.joined(separator: ", "))"
-    }
-
     func importBrowserCookies() {
         let browsers = sideEffects.cookieBrowsers()
         guard !browsers.isEmpty else { return }

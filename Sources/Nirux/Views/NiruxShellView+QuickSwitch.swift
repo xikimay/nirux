@@ -67,14 +67,13 @@ extension NiruxShellView {
     func workspacePaletteSection(snapshot: ProcessSnapshot, now: TimeInterval) -> PaletteSection {
         let rows = quickSwitchWorkspaces(snapshot: snapshot, now: now).map { workspace in
             PaletteAction(
-                icon: "●",
+                icon: .dot(NSColor.niruxColor(hex: workspace.spaceColorHex) ?? .niruxAccent),
                 title: workspace.title,
                 subtitle: workspace.subtitle(folderDisplay: workspace.folder.abbreviatedPath()),
                 shortcut: nil,
                 ranking: workspace.candidate,
                 badge: workspace.agent.map { PaletteBadge($0, now: now) },
-                isDimmed: workspace.isInactive,
-                iconColor: NSColor.niruxColor(hex: workspace.spaceColorHex) ?? .niruxAccent
+                isDimmed: workspace.isInactive
             ) { [weak self] in
                 self?.openWorkspace(id: workspace.id)
             }

@@ -116,6 +116,25 @@ enum SidebarRenderer {
         return nil
     }()
 
+    /// The desktop app's icon for an agent that has one installed (the
+    /// palette's agent rows show it too).
+    static func agentAppIcon(processName: String) -> NSImage? {
+        switch processName {
+        case "claude": claudeAppIcon
+        case "codex": codexAppIcon
+        default: nil
+        }
+    }
+
+    /// The symbol an agent's row shows without its app icon.
+    static func agentSymbol(processName: String) -> String? {
+        switch processName {
+        case "claude": "sparkles"
+        case "codex": "brain.head.profile"
+        default: nil
+        }
+    }
+
     /// SF symbol configured for a column-row glyph. Used for fallback icons
     /// when an app icon isn't available.
     static func sfSymbol(_ name: String, color: NSColor) -> NSImage? {
@@ -141,10 +160,9 @@ enum SidebarRenderer {
             return sfSymbol("apple.terminal", color: color)
         }
         switch processName {
-        case "claude":
-            return claudeAppIcon ?? sfSymbol("sparkles", color: color)
-        case "codex":
-            return codexAppIcon ?? sfSymbol("brain.head.profile", color: color)
+        case "claude", "codex":
+            return agentAppIcon(processName: processName)
+                ?? agentSymbol(processName: processName).flatMap { sfSymbol($0, color: color) }
         case "gemini":
             return sfSymbol("sparkle", color: color)
         case "opencode":

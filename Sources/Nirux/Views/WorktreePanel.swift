@@ -37,7 +37,7 @@ final class WorktreePanel {
         let built = RaycastPanel.build(
             RaycastPanel.Config(
                 width: Self.size.width, height: Self.size.height,
-                icon: "\u{1F333}",
+                icon: "arrow.triangle.branch",
                 placeholder: "Branch name (e.g. feat/my-feature)",
                 iconY: Self.size.height - 36,
                 fieldY: Self.size.height - 38

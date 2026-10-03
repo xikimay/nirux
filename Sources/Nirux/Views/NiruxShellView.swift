@@ -685,7 +685,7 @@ extension NiruxShellView {
                     let open = self.preferredWorkspace(among: workspaceWorktrees.filter { $0.path == comparablePath })
                     let subtitle = (open.map { self.alreadyOpenNote(for: $0) + " · " } ?? "") + entry.path.abbreviatedPath()
                     let openID = open?.id
-                    return PaletteAction(icon: "🌿", title: title, subtitle: subtitle, shortcut: nil) { [weak self] in
+                    return PaletteAction(icon: .symbol("folder"), title: title, subtitle: subtitle, shortcut: nil) { [weak self] in
                         self?.openWorktree(path: entry.path, title: title, workspaceID: openID)
                     }
                 }
