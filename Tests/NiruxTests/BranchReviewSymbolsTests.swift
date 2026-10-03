@@ -259,6 +259,30 @@ final class BranchReviewSymbolsTests: XCTestCase {
         XCTAssertEqual(scanner.stringIndents, [1: Data(String(repeating: " ", count: 12).utf8)], "the closing delimiter's")
     }
 
+    func testMainOfAnAtMainTypeIsTheEntryPointWhereverItIsDeclared() {
+        func functions(at line: Int, of source: [String]) -> [BranchReview.SwiftScanner.Function] {
+            var scanner = BranchReview.SwiftScanner()
+            for text in source.prefix(line) { Array(text.utf8).withUnsafeBytes { scanner.feed($0, collecting: false) } }
+            return scanner.enclosingFunctions
+        }
+        let main = [BranchReview.SwiftScanner.Function(name: "main", isEntryPoint: true)]
+        XCTAssertEqual(functions(at: 3, of: ["@main", "final class App {", "    class func main() {", "        go()"]), main)
+        XCTAssertEqual(functions(at: 4, of: ["@main", "struct App {}", "extension App {", "    static func main() {", "        go()"]), main)
+        // Its generic parameters wrap.
+        XCTAssertEqual(
+            functions(at: 2, of: ["func applicationShouldTerminate<", "    T>(_ sender: T) -> Bool {", "    go()"]),
+            [BranchReview.SwiftScanner.Function(name: "applicationShouldTerminate", isEntryPoint: false)]
+        )
+    }
+
+    func testAStringTheLineEndCutsLeavesNoCommentOpen() {
+        var scanner = BranchReview.SwiftScanner()
+        for line in ["let s = \"\\( /* x", "let queue = DispatchQueue.main"] {
+            Array(line.utf8).withUnsafeBytes { scanner.feed($0, collecting: false, capturingCode: true) }
+        }
+        XCTAssertEqual(String(decoding: scanner.code, as: UTF8.self), "let queue = DispatchQueue.main")
+    }
+
     func testByteOrderMarkIsNotAnIdentifier() {
         XCTAssertEqual(declared("\u{FEFF}struct Marked {\n    var level = 0\n}"), ["Marked", "level"])
     }

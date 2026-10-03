@@ -43,6 +43,10 @@ extension BranchReview {
         /// The line rules its `+` and `-` lines match, by hunk index in
         /// the section. Empty when not looked for.
         var riskHits: Set<RiskHit> = []
+        /// The mode the `index` line states when both sides share it (a
+        /// modified symlink's "120000"). Left out of the patch hash, which
+        /// takes the modes above.
+        var indexMode: String?
 
         /// The path its name-status entry lists last: the new path, or the
         /// old one for a deletion.
@@ -174,11 +178,7 @@ extension BranchReview {
                 } else if let value = line.dropPrefix("rename to ") {
                     renamedTo = unquoted(value)
                 } else if let value = line.dropPrefix("index ") {
-                    let ids = value.split(separator: " ").first?.components(separatedBy: "..") ?? []
-                    if ids.count == 2 {
-                        section.oldObjectID = ids[0]
-                        section.newObjectID = ids[1]
-                    }
+                    readIndexLine(value, into: &section)
                 } else if let value = line.dropPrefix("--- ") {
                     oldName = headerPath(value, prefix: "a/")
                 } else if let value = line.dropPrefix("+++ ") {
@@ -197,6 +197,17 @@ extension BranchReview {
             section.newPath = renamedTo ?? newFromHeaders
             guard section.key != nil else { return nil }
             return (section, pendingHunk)
+        }
+
+        /// "abc..def 100644": the object ids, and the mode both sides share.
+        private static func readIndexLine(_ value: Substring, into section: inout PatchSection) {
+            let fields = value.split(separator: " ")
+            let ids = fields.first?.components(separatedBy: "..") ?? []
+            if ids.count == 2 {
+                section.oldObjectID = ids[0]
+                section.newObjectID = ids[1]
+            }
+            if fields.count == 2 { section.indexMode = String(fields[1]) }
         }
 
         /// Reads one hunk after its `@@` line. Returns it, and the next

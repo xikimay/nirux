@@ -195,7 +195,8 @@ Top to bottom:
    Makefile or a shell script the indentation and blank lines do too. In
    Swift, a multi-line string's text counts as Swift reads it: past its
    closing delimiter's indentation, with its blank lines and trailing
-   spaces, a line of blanks read as empty and line endings as newlines. A
+   spaces, a line of blanks read as empty and line endings as newlines,
+   around an interpolation that spans lines too. A
    reindent that moves a string with its closing delimiter still folds; one
    that moves its text alone doesn't ("Swift files read in context",
    section 5). A JavaScript template still reads as code. A folded file's diff loads when
@@ -447,11 +448,12 @@ even when it doesn't name it ("inside applicationDidFinishLaunching"): the
 app delegate's `applicationWillFinishLaunching`,
 `applicationDidFinishLaunching`, `applicationShouldTerminate` and
 `applicationWillTerminate`, and an `@main` type's `static func main` (or
-`class func main`), where the `--hook` and `--check-release-signature`
+`class func main`, in the type or in an extension of it declared after it
+in the same file), where the `--hook` and `--check-release-signature`
 modes live (decided by the user on 2026-10-03); not another type's `main`,
 such as a subcommand's. A signature may wrap before its body (`-> T`,
-`where`, `{` on its own line); a line of comments or blanks changes
-nothing. On #57 (`setUpKeepAwake(...)`, `keepAwakeController?.shutdown()`)
+`where`, `async`, `throws`, generic parameters, `{` on its own line); a
+line of comments or blanks changes nothing. On #57 (`setUpKeepAwake(...)`, `keepAwakeController?.shutdown()`)
 and #65 (the release check at launch and in `main`), `NiruxApp.swift`
 already raised "launch" by its path: this names the reasons and the hunks.
 
@@ -464,10 +466,12 @@ string's text, which comments it holds, and which function it is in: its
 line rules, its whitespace fold, its symbols and the lifecycle functions
 above come from that reading. An addition or a deletion reads from its patch
 alone; a type change (a symlink that became the file) only gives its
-symbols. The files that may declare symbols are read first, within the scan
+symbols, and a symlink (added, or modified as its `index` line says)
+nothing. The files that may declare symbols are read first, within the scan
 limits of "Tests against code" (2 MB for the file, and for its patch: a huge
 removal isn't read again line by line; 32 MB in all). A file that can't be
-read so (past those limits, changed since its patch, unbalanced) keeps the
+read so (past those limits, changed since its patch or a link where the
+patch shows a file, unbalanced) keeps the
 first pass's line rules and fold, its symbols are unknown, and it says why
 (`unreadContext`): a row reloaded on its own may then read differently,
 since the edit that made it differ triggers a refresh, and alone it is

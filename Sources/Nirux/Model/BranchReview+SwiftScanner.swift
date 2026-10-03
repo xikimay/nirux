@@ -200,6 +200,9 @@ extension BranchReview {
         private var introducesType = false
         private var typeIsPrivate = false
         private var typeIsMain = false
+        /// `@main` types declared so far, by their dotted path: an
+        /// extension of one may hold `main`.
+        private var mainTypes: Set<String> = []
         /// A function whose signature ended a line: its body's `{` may
         /// open the next (`-> T`, `where`, `{` alone).
         private var carriedFunction: Function?
@@ -364,9 +367,7 @@ extension BranchReview {
                         continue
                     }
                     modes.removeLast()
-                    if isMultiline, line[..<index].allSatisfy({ $0 == 0x20 || $0 == 0x09 }) {
-                        stringIndents[id] = Data(line[..<index])
-                    }
+                    if isMultiline { stringIndents[id] = Data(line[..<index]) }
                     return index + quotes + hashes
                 default:
                     index += 1
@@ -568,7 +569,7 @@ extension BranchReview.SwiftScanner {
             statement.expect = .nothing
         case .name(let kind):
             record(candidate, kind)
-            if kind == .function, statement.depth == 0 {
+            if kind == .function {
                 let isEntryPoint = name == "main" && statement.isStatic && scopes.last?.isMainType == true
                 statement.function = Function(name: name, isEntryPoint: isEntryPoint)
             }
@@ -643,13 +644,14 @@ extension BranchReview.SwiftScanner {
         let path = scopes.last?.container.map { $0 + "." + name } ?? name
         // Its own modifier, or a private type's or extension's body.
         if statement.isPrivate || scopes.last?.isPrivate == true { privateTypes.insert(path) }
+        if statement.isMainType { mainTypes.insert(path) }
         introduceType(container: path, extended: nil)
     }
 
     private mutating func introduceType(container: String?, extended: String?) {
         introducesType = true
         typeIsPrivate = statement.isPrivate
-        typeIsMain = statement.isMainType
+        typeIsMain = statement.isMainType || extended.map(mainTypes.contains) == true
         pendingContainer = container
         pendingExtended = scopes.isEmpty ? extended : nil
     }
@@ -677,7 +679,8 @@ extension BranchReview.SwiftScanner {
         }
         advance(after: byte)
         statement.atStart = false
-        statement.continues = byte == UInt8(ascii: ",")
+        // A function's generic parameters may wrap too.
+        statement.continues = byte == UInt8(ascii: ",") || (byte == UInt8(ascii: "<") && statement.function != nil)
     }
 
     /// Where a punctuation leaves the names a declaration lists.
@@ -715,7 +718,6 @@ extension BranchReview.SwiftScanner {
 
     private mutating func startStatement() {
         statement = Statement()
-        carriedFunction = nil
         pendingPrivate = false
         mayTakeArguments = false
         attribute = nil
@@ -742,8 +744,6 @@ extension BranchReview.SwiftScanner {
             return
         }
         statement = scope.outer
-        // A function's body is done; a closure in its signature isn't it.
-        if scope.function != nil { statement.function = nil }
     }
 
     private mutating func record(_ candidate: Candidate, _ kind: BranchReview.Symbol.Kind) {

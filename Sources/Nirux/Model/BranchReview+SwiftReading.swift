@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 // MARK: - Swift files read in context (sections 2 and 5)
@@ -62,7 +61,7 @@ extension BranchReview {
         _ = walk.share(upTo: walk.shared?.count ?? 0)
         guard walk.old.isBalanced, walk.new.isBalanced else { return .failure(.unbalanced) }
         var reading = walk.reading
-        reading.isWhitespaceOnly = parsed.hunkCount > 0 && walk.isWhitespaceOnly
+        reading.isWhitespaceOnly = walk.isWhitespaceOnly
         let removed = Set(walk.old.declarations.filter(\.isCollected).map(\.symbol.name))
         var seen: Set<String> = []
         reading.symbols = walk.new.symbols.filter { symbol in
@@ -73,13 +72,22 @@ extension BranchReview {
 
     /// A patch's two sides, each through its scanner, line by line.
     private struct SideBySide {
-        /// A hunk's line, and the multi-line string whose text it is on
-        /// each side, if any.
+        /// A hunk's line, and where it is in a multi-line string on each
+        /// side.
         struct Seen {
             let kind: Line.Kind
             let content: Data
-            let oldText: Int?
-            let newText: Int?
+            let old: Text
+            let new: Text
+        }
+
+        /// The string whose text a line starts in, and whether it ends in a
+        /// string's text (an interpolation may span lines between).
+        struct Text {
+            var startsIn: Int?
+            var endsInText = false
+
+            var isCode: Bool { startsIn == nil && !endsInText }
         }
 
         var old = SwiftScanner()
@@ -105,7 +113,7 @@ extension BranchReview {
         /// false when the file is too short for it.
         mutating func share(upTo end: Int) -> Bool {
             guard let shared else { return true }
-            guard end >= next, end <= shared.count else { return false }
+            guard end <= shared.count else { return false }
             while next < end {
                 Array(shared[next]).withUnsafeBytes { bytes in
                     old.feed(bytes, collecting: false)
@@ -119,7 +127,7 @@ extension BranchReview {
         /// One of the hunk's lines; false when the file no longer has it.
         mutating func take(_ line: Line, in hunk: Int) -> Bool {
             let content = line.bytes ?? Data(line.text.utf8)
-            let (oldText, newText) = (old.stringText, new.stringText)
+            var (oldText, newText) = (Text(startsIn: old.stringText), Text(startsIn: new.stringText))
             switch line.kind {
             case .context:
                 guard matches(content) else { return false }
@@ -135,13 +143,9 @@ extension BranchReview {
             case .noNewlineMarker:
                 return true
             }
-            // Text: the string goes on past the line (the closing line is
-            // code).
-            seen[seen.count - 1].append(Seen(
-                kind: line.kind, content: content,
-                oldText: oldText.flatMap { old.stringText == $0 ? $0 : nil },
-                newText: newText.flatMap { new.stringText == $0 ? $0 : nil }
-            ))
+            oldText.endsInText = old.stringText != nil
+            newText.endsInText = new.stringText != nil
+            seen[seen.count - 1].append(Seen(kind: line.kind, content: content, old: oldText, new: newText))
             return true
         }
 
@@ -160,10 +164,8 @@ extension BranchReview {
             var check = WhitespaceCheck(mode: .ignoringIndentation)
             for hunk in seen {
                 for line in hunk {
-                    let oldText = line.oldText.map { BranchReview.stringLine(line.content, indent: old.stringIndents[$0]) }
-                    let newText = line.newText.map { BranchReview.stringLine(line.content, indent: new.stringIndents[$0]) }
-                    let before: (content: Data, whole: Bool)? = line.kind == .added ? nil : (oldText ?? line.content, oldText != nil)
-                    let after: (content: Data, whole: Bool)? = line.kind == .removed ? nil : (newText ?? line.content, newText != nil)
+                    let before = line.kind == .added ? nil : BranchReview.side(line.content, line.old, indents: old.stringIndents)
+                    let after = line.kind == .removed ? nil : BranchReview.side(line.content, line.new, indents: new.stringIndents)
                     check.add(before: before, after: after)
                 }
                 check.endHunk()
@@ -172,13 +174,27 @@ extension BranchReview {
         }
     }
 
-    /// A multi-line string's line as Swift reads it: past its closing
-    /// delimiter's indentation, a line of blanks empty, and its line
-    /// ending a newline. Trailing spaces stay: they are the string's.
-    static func stringLine(_ content: Data, indent: Data?) -> Data {
-        let line = withoutCarriageReturn(content)
-        if let indent, line.starts(with: indent) { return line.dropFirst(indent.count) }
-        return line.allSatisfy { $0 == 0x20 || $0 == 0x09 } ? Data() : line
+    /// A line as one side compares it: code by its significant part, a
+    /// line in a multi-line string as Swift reads it. Text a line starts
+    /// in loses only the closing delimiter's indentation (a line of
+    /// blanks reads as empty); text it ends in keeps its trailing spaces;
+    /// its line ending is a newline.
+    private static func side(_ content: Data, _ text: SideBySide.Text, indents: [Int: Data]) -> (content: Data, whole: Bool) {
+        guard !text.isCode else { return (content, false) }
+        var line = withoutCarriageReturn(content)
+        if let id = text.startsIn {
+            if let indent = indents[id], line.starts(with: indent) {
+                line = line.dropFirst(indent.count)
+            } else if line.allSatisfy({ $0 == 0x20 || $0 == 0x09 }) {
+                line = Data()
+            }
+        } else {
+            line = Data(line.drop { $0 == 0x20 || $0 == 0x09 })
+        }
+        if !text.endsInText {
+            while let last = line.last, [0x20, 0x09, 0x0B, 0x0C].contains(last) { line.removeLast() }
+        }
+        return (line, true)
     }
 
     /// A changed line, read by its side's scanner: the functions it is in,
@@ -219,11 +235,13 @@ extension BranchReview {
         let order = files.indices.filter { wantsSymbols(files[$0]) } + files.indices.filter { !wantsSymbols(files[$0]) }
         for index in order {
             let file = files[index]
-            let isLink = file.newMode == "120000" || (file.status == .deleted && file.oldMode == "120000")
+            // A link (added, or modified as its `index` line says) declares
+            // nothing.
             guard file.path.hasSuffix(".swift"), namedFolds[file.path] == nil, file.additions + file.deletions > 0,
-                  !isLink, let parts = sections[file.path], let section = parts.last
+                  file.newMode != "120000", let parts = sections[file.path], let section = parts.last,
+                  Patch.header(section)?.indexMode != "120000"
             else { continue }
-            let whole = parts.count > 1 || file.status == .added || file.status == .deleted
+            let whole = file.status == .added || file.status == .deleted
             switch read(file, section: section, whole: whole, root: root, options: options, budget: &budget) {
             case .success(let reading):
                 if parts.count == 1 {
@@ -232,22 +250,15 @@ extension BranchReview {
                             RiskSignal(kind: .launch, reasons: ["inside \($0.key)"], hunks: $0.value.sorted(), byPath: false)
                         })
                     }
-                    if file.fold == .whitespaceOnly, !reading.isWhitespaceOnly { files[index].fold = nil }
+                    // Stricter than the first pass's: it may only unfold.
+                    if !reading.isWhitespaceOnly { files[index].fold = nil }
                 }
                 if wantsSymbols(files[index]) { files[index].symbols = .read(reading.symbols) }
-            case .failure(.symlink):
-                // A link declares nothing.
-                continue
-            case .failure(.unread(let reason)):
+            case .failure(let reason):
                 files[index].unreadContext = reason
                 if wantsSymbols(file) { files[index].symbols = .unread(reason) }
             }
         }
-    }
-
-    private enum ReadFailure: Error {
-        case symlink
-        case unread(SymbolScan.Reason)
     }
 
     /// One file's `readSwift`: its patch within `Options.maxScannedFileBytes`
@@ -256,19 +267,17 @@ extension BranchReview {
     /// toward `budget`.
     private static func read(
         _ file: FileChange, section: Data, whole: Bool, root: String, options: Options, budget: inout Int
-    ) -> Result<SwiftReading, ReadFailure> {
+    ) -> Result<SwiftReading, SymbolScan.Reason> {
         let limit = min(options.maxScannedFileBytes, budget)
-        guard section.count <= (whole ? limit : options.maxScannedFileBytes) else { return .failure(.unread(.tooLarge)) }
+        guard section.count <= (whole ? limit : options.maxScannedFileBytes) else { return .failure(.tooLarge) }
         guard !whole else {
             budget -= section.count
-            return readSwift(section, head: nil).mapError { .unread($0) }
+            return readSwift(section, head: nil)
         }
-        let path = root + "/" + file.path
-        var info = stat()
-        if lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFLNK { return .failure(.symlink) }
-        guard let head = readPrefix(of: path, maxBytes: limit + 1) else { return .failure(.unread(.changedSincePatch)) }
-        guard head.count <= limit else { return .failure(.unread(.tooLarge)) }
+        // Not read through a link: the patch shows a file.
+        guard let head = readPrefix(of: root + "/" + file.path, maxBytes: limit + 1) else { return .failure(.changedSincePatch) }
+        guard head.count <= limit else { return .failure(.tooLarge) }
         budget -= head.count
-        return readSwift(section, head: head).mapError { .unread($0) }
+        return readSwift(section, head: head)
     }
 }
