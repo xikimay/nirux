@@ -301,15 +301,13 @@ extension ProjectBoard {
     private static func assign(_ workspaces: [Workspace], to places: [Place]) -> ([Int: [Member]], [Member]) {
         var members: [Int: [Member]] = [:]
         var outside: [Member] = []
+        let paths = places.map(\.path)
         for (order, workspace) in workspaces.enumerated() {
             guard !workspace.folderIsGone else {
                 outside.append((order, workspace))
                 continue
             }
-            let holding = places.indices
-                .filter { contains(places[$0].path, workspace.folder) }
-                .max { places[$0].path.count < places[$1].path.count }
-            if let holding {
+            if let holding = innermost(of: paths, holding: workspace.folder) {
                 members[holding, default: []].append((order, workspace))
             } else {
                 outside.append((order, workspace))
@@ -350,6 +348,12 @@ extension ProjectBoard {
     /// Whether `path` is `root` or inside it. Both comparable.
     static func contains(_ root: String, _ path: String) -> Bool {
         path == root || path.hasPrefix(root.hasSuffix("/") ? root : root + "/")
+    }
+
+    /// The index of the root holding `path`, the innermost one when they
+    /// nest (a worktree inside the main checkout).
+    static func innermost(of roots: [String], holding path: String) -> Int? {
+        roots.indices.filter { contains(roots[$0], path) }.max { roots[$0].count < roots[$1].count }
     }
 
     /// The newest pull request of each head branch.

@@ -45,6 +45,8 @@ final class UIFlowHarness {
 
     /// Launch lines typed into terminals, in order.
     private(set) var agentLaunches: [String] = []
+    /// Launch lines of restored agents resuming, in order.
+    private(set) var restoredAgentLaunches: [String] = []
     /// `messageText` of every app-modal alert, in order.
     private(set) var alerts: [String] = []
     /// Answers to the next alerts, in order; the first button once empty.
@@ -147,9 +149,11 @@ final class UIFlowHarness {
         shell.stopHeartbeat()
         shell.commandPalette?.dismiss()
         shell.searchPanel?.dismiss()
+        shell.globalSearchPanel?.dismiss()
         shell.filePickerPanel?.dismiss()
         shell.worktreeCleanupPanel?.dismiss()
         shell.boardSettingsPanel?.dismiss()
+        shell.newTaskPanel?.dismiss()
         for other in NSApp.windows where other !== window && !windowsBefore.contains(ObjectIdentifier(other)) {
             if let sheet = other.attachedSheet { other.endSheet(sheet) }
             other.orderOut(nil)
@@ -162,6 +166,9 @@ final class UIFlowHarness {
     private func installDoubles() {
         shell.sideEffects.launchAgent = { [weak self] _, command in
             self?.agentLaunches.append(command)
+        }
+        shell.sideEffects.startRestoredAgent = { [weak self] _, command in
+            self?.restoredAgentLaunches.append(command)
         }
         shell.sideEffects.homeDirectory = { [home] in home }
         shell.sideEffects.cookieBrowsers = { [weak self] in self?.cookieBrowsers ?? [] }
@@ -225,10 +232,14 @@ final class UIFlowHarness {
 
     /// Every command the palette lists now.
     func paletteCommandTitles() -> [String] {
+        paletteCommands().map(\.title)
+    }
+
+    func paletteCommands() -> [PaletteAction] {
         if shell.commandPalette?.isVisible == true { shell.commandPalette?.dismiss() }
         shell.showCommandPalette()
         defer { shell.commandPalette?.dismiss() }
-        return shell.commandPalette?.actions.map(\.title) ?? []
+        return shell.commandPalette?.actions ?? []
     }
 
     // MARK: - Keyboard and fields

@@ -382,6 +382,10 @@ struct PersistedSettings: Codable {
     var sidebarApprovalsEnabled: Bool = false
     /// See `KeepAwakeController`. On by default: missing decodes to true.
     var keepMacAwakeWhileAgentsWork: Bool = true
+    /// The Claude plan usage limits in the title bar (see
+    /// `ClaudeUsageLimits`). Opt-in: it makes Nirux Claude Code's status
+    /// line. Missing decodes to false.
+    var showClaudeUsageLimits: Bool = false
     /// Master gate. Secrets never live here; the bot token is in Keychain.
     var telegramRemoteAccessEnabled: Bool = false
     var telegramPairedUserID: Int64?
@@ -398,6 +402,10 @@ struct PersistedSettings: Codable {
     var onboardingChecklist: OnboardingChecklistState?
     /// A value a newer build wrote, kept so saving doesn't erase it.
     private var unknownOnboardingChecklistRawValue: String?
+    /// When restored agents start; nil means `AgentResumeOnLaunch.defaultValue`.
+    var agentResumeOnLaunch: AgentResumeOnLaunch?
+    /// A value a newer build wrote, kept so saving doesn't erase it.
+    private var unknownAgentResumeOnLaunchRawValue: String?
 
     init(
         claudeLaunchMode: ClaudeLaunchMode? = nil,
@@ -437,6 +445,7 @@ struct PersistedSettings: Codable {
         case missionHandoffsEnabled
         case sidebarApprovalsEnabled
         case keepMacAwakeWhileAgentsWork
+        case showClaudeUsageLimits
         case telegramRemoteAccessEnabled
         case telegramPairedUserID
         case telegramPairedChatID
@@ -445,6 +454,7 @@ struct PersistedSettings: Codable {
         case telegramLastUpdateID
         case stuckAgentMinutes
         case onboardingChecklist
+        case agentResumeOnLaunch
         case claudeBypassPermissions // legacy
     }
 
@@ -465,6 +475,7 @@ struct PersistedSettings: Codable {
         missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? false
         sidebarApprovalsEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarApprovalsEnabled) ?? false
         keepMacAwakeWhileAgentsWork = try container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileAgentsWork) ?? true
+        showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
         telegramRemoteAccessEnabled = try container.decodeIfPresent(
             Bool.self, forKey: .telegramRemoteAccessEnabled
         ) ?? false
@@ -484,6 +495,10 @@ struct PersistedSettings: Codable {
             onboardingChecklist = OnboardingChecklistState(rawValue: raw)
             if onboardingChecklist == nil { unknownOnboardingChecklistRawValue = raw }
         }
+        if let raw = try? container.decodeIfPresent(String.self, forKey: .agentResumeOnLaunch) {
+            agentResumeOnLaunch = AgentResumeOnLaunch(rawValue: raw)
+            if agentResumeOnLaunch == nil { unknownAgentResumeOnLaunchRawValue = raw }
+        }
     }
 
     /// Custom encoder is required because `CodingKeys` carries the legacy
@@ -498,6 +513,7 @@ struct PersistedSettings: Codable {
         try container.encode(missionHandoffsEnabled, forKey: .missionHandoffsEnabled)
         try container.encode(sidebarApprovalsEnabled, forKey: .sidebarApprovalsEnabled)
         try container.encode(keepMacAwakeWhileAgentsWork, forKey: .keepMacAwakeWhileAgentsWork)
+        try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
         try container.encode(telegramRemoteAccessEnabled, forKey: .telegramRemoteAccessEnabled)
         try container.encodeIfPresent(telegramPairedUserID, forKey: .telegramPairedUserID)
         try container.encodeIfPresent(telegramPairedChatID, forKey: .telegramPairedChatID)
@@ -507,6 +523,9 @@ struct PersistedSettings: Codable {
         try container.encodeIfPresent(stuckAgentMinutes, forKey: .stuckAgentMinutes)
         try container.encodeIfPresent(
             onboardingChecklist?.rawValue ?? unknownOnboardingChecklistRawValue, forKey: .onboardingChecklist
+        )
+        try container.encodeIfPresent(
+            agentResumeOnLaunch?.rawValue ?? unknownAgentResumeOnLaunchRawValue, forKey: .agentResumeOnLaunch
         )
     }
 }
@@ -644,6 +663,10 @@ struct PersistedColumn: Codable {
     /// The project (space id) a Project Board column shows. An older build
     /// ignores it and restores the column as a terminal in `cwd`.
     var boardProjectID: String?
+    /// An agent column's session title and status when last saved with its
+    /// agent running: what the column says until its agent resumes.
+    var lastAgentTitle: String?
+    var lastAgentStatus: PersistedAgentStatus?
 
     /// Non-optional accessor — missing or unknown `columnType` means terminal.
     var resolvedType: ColumnKind { columnType ?? .terminal }
@@ -659,7 +682,9 @@ struct PersistedColumn: Codable {
         claudeSessionID: String? = nil,
         claudeSessionIsUnprompted: Bool? = nil,
         agentUUID: String? = nil,
-        boardProjectID: String? = nil
+        boardProjectID: String? = nil,
+        lastAgentTitle: String? = nil,
+        lastAgentStatus: PersistedAgentStatus? = nil
     ) {
         self.widthPreset = widthPreset
         self.cwd = cwd
@@ -674,6 +699,8 @@ struct PersistedColumn: Codable {
         self.claudeSessionIsUnprompted = claudeSessionIsUnprompted
         self.agentUUID = agentUUID
         self.boardProjectID = boardProjectID
+        self.lastAgentTitle = lastAgentTitle
+        self.lastAgentStatus = lastAgentStatus
     }
 
     enum CodingKeys: String, CodingKey {
@@ -687,6 +714,8 @@ struct PersistedColumn: Codable {
         case claudeSessionIsUnprompted
         case agentUUID
         case boardProjectID
+        case lastAgentTitle
+        case lastAgentStatus
         case claudeBypassPermissions // legacy
     }
 
@@ -727,6 +756,8 @@ struct PersistedColumn: Codable {
         claudeSessionIsUnprompted = try? container.decodeIfPresent(Bool.self, forKey: .claudeSessionIsUnprompted)
         agentUUID = try? container.decodeIfPresent(String.self, forKey: .agentUUID)
         boardProjectID = try? container.decodeIfPresent(String.self, forKey: .boardProjectID)
+        lastAgentTitle = try? container.decodeIfPresent(String.self, forKey: .lastAgentTitle)
+        lastAgentStatus = try? container.decodeIfPresent(PersistedAgentStatus.self, forKey: .lastAgentStatus)
     }
 
     /// Custom encoder is required because `CodingKeys` carries the legacy
@@ -747,6 +778,8 @@ struct PersistedColumn: Codable {
         try container.encodeIfPresent(claudeSessionIsUnprompted, forKey: .claudeSessionIsUnprompted)
         try container.encodeIfPresent(agentUUID, forKey: .agentUUID)
         try container.encodeIfPresent(boardProjectID, forKey: .boardProjectID)
+        try container.encodeIfPresent(lastAgentTitle, forKey: .lastAgentTitle)
+        try container.encodeIfPresent(lastAgentStatus, forKey: .lastAgentStatus)
     }
 }
 
