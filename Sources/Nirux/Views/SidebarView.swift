@@ -510,13 +510,13 @@ final class SidebarView: NSView {
     }
 
     /// Space options only — switching spaces lives in the bottom dot
-    /// switcher (and ⌘←/→), so the header menu doesn't duplicate it.
+    /// switcher (and ⌥⌘←/→), so the header menu doesn't duplicate it.
     func spaceOptionsMenu() -> NSMenu {
         let menu = NSMenu()
         if let active = lastProfiles.first(where: { $0.isActive }) {
             addSpaceManagementItems(to: menu, for: active)
         }
-        menu.addClosureItem(title: "New Space") { [weak self] in
+        menu.addClosureItem(title: "New Project") { [weak self] in
             self?.onCreateProfile?()
         }
         return menu

@@ -84,7 +84,7 @@ extension NiruxShellView {
         board.view.onBoardSettings = { [weak self, weak board] in
             guard let self, let board else { return }
             guard self.profiles.contains(where: { $0.id == board.projectID }) else {
-                return self.showToast("This board’s space was deleted")
+                return self.showToast("This board’s project was deleted")
             }
             self.showBoardSettings(profileID: board.projectID)
         }

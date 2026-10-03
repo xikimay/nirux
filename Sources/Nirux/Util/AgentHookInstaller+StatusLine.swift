@@ -95,8 +95,9 @@ extension AgentHookInstaller {
             && Persistence.stateDirectoryOverride(in: environment) == nil
     }
 
-    /// At Save in Settings: the same as at launch. Nil when this Nirux
-    /// leaves the status line alone (see `managesClaudeStatusLine`).
+    /// When Settings turns the option on or off: the same as at launch. Nil
+    /// when this Nirux leaves the status line alone (see
+    /// `managesClaudeStatusLine`).
     @discardableResult
     static func applyClaudeStatusLine(
         enabled: Bool,

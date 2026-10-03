@@ -232,10 +232,14 @@ final class UIFlowHarness {
 
     /// Every command the palette lists now.
     func paletteCommandTitles() -> [String] {
+        paletteCommands().map(\.title)
+    }
+
+    func paletteCommands() -> [PaletteAction] {
         if shell.commandPalette?.isVisible == true { shell.commandPalette?.dismiss() }
         shell.showCommandPalette()
         defer { shell.commandPalette?.dismiss() }
-        return shell.commandPalette?.actions.map(\.title) ?? []
+        return shell.commandPalette?.actions ?? []
     }
 
     // MARK: - Keyboard and fields

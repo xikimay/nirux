@@ -166,7 +166,7 @@ extension NiruxShellView {
     /// opened the alert may be an accident mid-prompt, and the keys that
     /// come next — Return to send, ⌘⌫ to clear the line — must not confirm
     /// the kill. Plain ⌘D is unbound in Nirux, so no reflex reaches it.
-    /// Also used for other destructive confirmations (Delete Space, worktree
+    /// Also used for other destructive confirmations (Delete Project, worktree
     /// clean-up). Past a dozen lines (or as much text), the details scroll
     /// instead of growing the alert.
     func confirmDestructiveClose(message: String, details: [String], confirmTitle: String) -> Bool {

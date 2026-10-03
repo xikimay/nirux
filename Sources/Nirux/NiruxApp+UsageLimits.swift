@@ -28,9 +28,9 @@ extension NiruxApp {
         monitor.setEnabled(Self.currentShowClaudeUsageLimits())
     }
 
-    /// Settings saved the option: install or take back the status line,
-    /// then show or hide the indicator. Off, what was reported is
-    /// forgotten: turned on again days later, the indicator waits for a
+    /// Settings turned the option on or off: install or take back the
+    /// status line, then show or hide the indicator. Off, what was reported
+    /// is forgotten: turned on again days later, the indicator waits for a
     /// new report rather than show an old one.
     func applyUsageLimits(enabled: Bool) {
         claudeStatusLineInstaller(enabled)
