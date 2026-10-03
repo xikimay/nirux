@@ -93,9 +93,11 @@ extension NiruxShellView {
                 unsavedEditors.append(workspace.title)
             }
             guard !isMember else { continue }
-            for column in workspace.openColumns where isInside(column.pty?.childCwd) {
+            // A restored agent not resumed yet resumes in its folder.
+            for column in workspace.openColumns where isInside(column.pty?.childCwd ?? column.awaitingResumeDirectory) {
                 if let agent = column.liveAgent(snapshot: snapshot) {
-                    foreignAgents.append("\(agent.displayName) in “\(workspace.title)”")
+                    let name = agent.isPaused ? "\(agent.displayName) (paused)" : agent.displayName
+                    foreignAgents.append("\(name) in “\(workspace.title)”")
                 }
             }
         }

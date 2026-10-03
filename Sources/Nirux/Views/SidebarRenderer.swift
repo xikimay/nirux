@@ -137,7 +137,7 @@ enum SidebarRenderer {
         if column.isWebView {
             return sfSymbol("globe", color: color)
         }
-        guard let processName = column.processName?.lowercased() else {
+        guard let processName = (column.deferredAgent?.processName ?? column.processName)?.lowercased() else {
             return sfSymbol("apple.terminal", color: color)
         }
         switch processName {
@@ -191,7 +191,7 @@ enum SidebarRenderer {
         } else if column.isWebView {
             displayName = column.webTitle?.isEmpty == false ? column.webTitle! : "web"
         } else {
-            displayName = column.stuck?.agentName ?? column.processName ?? "shell"
+            displayName = column.deferredAgent?.processName ?? column.stuck?.agentName ?? column.processName ?? "shell"
         }
         // Unsaved-changes dot — same amber as the editor tab bar's. Before
         // the name: these labels truncate tail-first, and a state indicator
@@ -203,6 +203,15 @@ enum SidebarRenderer {
             ]))
         }
         result.append(NSAttributedString(string: displayName, attributes: [.font: font, .foregroundColor: textColor]))
+        // A restored agent that hasn't resumed has no status to show yet.
+        // Short: the row keeps room for its Resume button.
+        if column.deferredAgent != nil {
+            result.append(NSAttributedString(string: " · paused", attributes: [
+                .font: font,
+                .foregroundColor: NSColor.white.withAlphaComponent(0.3)
+            ]))
+            return result
+        }
 
         // Time in the current turn for working agents — "· 12m" in green
         // next to the name.
@@ -237,6 +246,7 @@ enum SidebarRenderer {
 
     /// Row tooltip: what exactly the agent waits on ("Bash: git push").
     static func attentionTooltip(for column: ColumnInfo) -> String? {
+        if let deferred = column.deferredAgent { return deferred.tooltip }
         if let stuck = column.stuck { return stuck.tooltip }
         guard column.agentStatus == .needsAttention, let reason = column.attentionReason else { return nil }
         let detail = reason.detailLine.flatMap { AgentText.clean($0, maxLength: 300) }

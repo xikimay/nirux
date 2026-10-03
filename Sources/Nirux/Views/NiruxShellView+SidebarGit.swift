@@ -40,7 +40,8 @@ extension NiruxShellView {
                         .map { Date().timeIntervalSince($0) },
                     attentionReason: agentStatus == .needsAttention ? col.pty?.agentAttentionReason : nil,
                     permissionApproval: permissionApproval,
-                    stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now)
+                    stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
+                    deferredAgent: Self.sidebarDeferredAgent(of: col)
                 )
             }
             return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
@@ -507,6 +508,9 @@ extension NiruxShellView {
     func refreshMetadata(snapshot: ProcessSnapshot? = nil) {
         isMetadataRefreshScheduled = false
         lastMetadataRefreshAt = ProcessInfo.processInfo.systemUptime
+        // A column that came on screen without a relayout (a dragged
+        // width) resumes from here at the latest.
+        scheduleDeferredAgentsOnScreen(restartingWait: false)
         let snapshot = snapshot ?? ProcessSnapshot()
         refreshTitleBarLabels(snapshot: snapshot)
         updateSidebar(snapshot: snapshot)

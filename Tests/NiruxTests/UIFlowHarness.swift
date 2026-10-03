@@ -45,6 +45,8 @@ final class UIFlowHarness {
 
     /// Launch lines typed into terminals, in order.
     private(set) var agentLaunches: [String] = []
+    /// Launch lines of restored agents resuming, in order.
+    private(set) var restoredAgentLaunches: [String] = []
     /// `messageText` of every app-modal alert, in order.
     private(set) var alerts: [String] = []
     /// Answers to the next alerts, in order; the first button once empty.
@@ -164,6 +166,9 @@ final class UIFlowHarness {
     private func installDoubles() {
         shell.sideEffects.launchAgent = { [weak self] _, command in
             self?.agentLaunches.append(command)
+        }
+        shell.sideEffects.startRestoredAgent = { [weak self] _, command in
+            self?.restoredAgentLaunches.append(command)
         }
         shell.sideEffects.homeDirectory = { [home] in home }
         shell.sideEffects.cookieBrowsers = { [weak self] in self?.cookieBrowsers ?? [] }
