@@ -109,6 +109,11 @@ struct CodexSessionTracker {
         session.sessionID(for: foregroundProcess)
     }
 
+    /// Thread bound to this `codex` process, if any.
+    func boundSessionID(for process: ProcessInstance) -> String? {
+        session.sessionID(boundTo: process)
+    }
+
     @discardableResult
     mutating func invalidateBinding(ifProcessChangedTo foregroundProcess: ForegroundProcess?) -> Bool {
         session.invalidateBinding(ifProcessChangedTo: foregroundProcess)

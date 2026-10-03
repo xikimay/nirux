@@ -136,6 +136,46 @@ final class BoundedProcessTests: XCTestCase {
         XCTAssertNotEqual(kill(pid, 0), 0, "runaway descendant is still alive")
     }
 
+    func testStandardOutputPastTheLimitStopsTheProcess() throws {
+        let script = try makeScript("""
+        head -c \(Self.largeOutputSize) /dev/zero | tr '\\0' o
+        sleep 20
+        """)
+
+        let startedAt = Date()
+        let limited = BoundedProcess.run(
+            executableURL: script,
+            arguments: [],
+            currentDirectoryURL: directory,
+            timeout: 20,
+            maxStandardOutputBytes: Self.largeOutputSize - 1
+        )
+
+        XCTAssertNil(limited)
+        XCTAssertLessThan(Date().timeIntervalSince(startedAt), 5)
+        let exact = try XCTUnwrap(BoundedProcess.run(
+            executableURL: try makeScript("head -c \(Self.largeOutputSize) /dev/zero | tr '\\0' o"),
+            arguments: [],
+            currentDirectoryURL: directory,
+            timeout: 20,
+            maxStandardOutputBytes: Self.largeOutputSize
+        ))
+        XCTAssertEqual(exact.standardOutput.count, Self.largeOutputSize)
+    }
+
+    func testTooManyArgumentsFailInsteadOfRaising() throws {
+        // Process.run() raises an Objective-C exception past 4,096
+        // arguments, which would crash the app.
+        let result = BoundedProcess.run(
+            executableURL: URL(fileURLWithPath: "/bin/echo"),
+            arguments: Array(repeating: "x", count: 5_000),
+            currentDirectoryURL: directory,
+            timeout: 10
+        )
+
+        XCTAssertNil(result)
+    }
+
     func testHungProcessWithCapturedStandardErrorTimesOut() throws {
         let script = try makeScript("""
         [ "$1" = warm ] && exit 0

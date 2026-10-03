@@ -119,6 +119,16 @@ enum HandoverFile {
         return .success(())
     }
 
+    /// Writes a handover Nirux composed itself (New Task…) to
+    /// `directory/filename`, as `transfer` writes a moved one: a new private
+    /// file, never written through a symlink.
+    static func deliver(_ text: String, toDirectory directory: String, filename: String) -> Result<Void, TransferError> {
+        let content = Data(text.utf8)
+        guard !content.isEmpty else { return .failure(.empty) }
+        guard content.count <= maxBytes else { return .failure(.tooLarge) }
+        return writeNew(content, to: (directory as NSString).appendingPathComponent(filename))
+    }
+
     private static func readAll(_ descriptor: Int32) -> Result<Data, TransferError> {
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
