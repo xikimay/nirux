@@ -56,6 +56,10 @@ extension BranchReview {
         /// outermost first: closures and accessors have no name.
         var enclosingFunctions: [Function] { scopes.compactMap(\.function) }
 
+        /// The named functions whose bodies the last line opened: `{ … }`
+        /// on one line.
+        private(set) var functionsOpened: [Function] = []
+
         /// The multi-line string whose text the next line starts in, by
         /// the order strings open: its indentation past the closing
         /// delimiter's, its blank lines and its trailing spaces are the
@@ -238,6 +242,7 @@ extension BranchReview {
             }
             commentRanges = []
             commentStart = nil
+            functionsOpened = []
             if case .blockComment? = modes.last { commentStart = 0 }
             var index = 0
             while index < line.count {
@@ -734,6 +739,7 @@ extension BranchReview.SwiftScanner {
             isMainType: !local && typeIsMain,
             outer: statement
         ))
+        if let function = scopes.last?.function { functionsOpened.append(function) }
         introducesType = false
         startStatement()
     }

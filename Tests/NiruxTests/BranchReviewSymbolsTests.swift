@@ -1,9 +1,9 @@
 import XCTest
 @testable import Nirux
 
-/// The Swift scanner, the added lines and the mentions of "Tests against
-/// code" on handwritten sources; `BranchReviewTestsAgainstCodeTests` runs
-/// them on real repositories.
+/// The Swift scanner and the mentions of "Tests against code" on
+/// handwritten sources; `BranchReviewTestsAgainstCodeTests` and
+/// `BranchReviewSwiftReadingTests` run them on real repositories.
 final class BranchReviewSymbolsTests: XCTestCase {
     private func scanned(_ source: String, added: Set<Int>? = nil, words: Set<String>? = nil) -> BranchReview.SwiftScanner {
         var scanner = BranchReview.SwiftScanner()

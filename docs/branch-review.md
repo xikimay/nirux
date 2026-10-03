@@ -195,8 +195,8 @@ Top to bottom:
    Makefile or a shell script the indentation and blank lines do too. In
    Swift, a multi-line string's text counts as Swift reads it: past its
    closing delimiter's indentation, with its blank lines and trailing
-   spaces, a line of blanks read as empty and line endings as newlines,
-   around an interpolation that spans lines too. A
+   spaces, and line endings as newlines, around an interpolation that
+   spans lines too. A
    reindent that moves a string with its closing delimiter still folds; one
    that moves its text alone doesn't ("Swift files read in context",
    section 5). A JavaScript template still reads as code. A folded file's diff loads when
@@ -465,15 +465,15 @@ lines. That tells, for each changed line, whether it is in a multi-line
 string's text, which comments it holds, and which function it is in: its
 line rules, its whitespace fold, its symbols and the lifecycle functions
 above come from that reading. An addition or a deletion reads from its patch
-alone; a type change (a symlink that became the file) only gives its
-symbols, and a symlink (added, or modified as its `index` line says)
-nothing. The files that may declare symbols are read first, within the scan
-limits of "Tests against code" (2 MB for the file, and for its patch: a huge
-removal isn't read again line by line; 32 MB in all). A file that can't be
-read so (past those limits, changed since its patch or a link where the
-patch shows a file, unbalanced) keeps the
+alone; a type change (a symlink that became the file) reads its new file,
+its hunks numbered after the link's; a symlink (added, or modified as its
+`index` line says) declares nothing. The files that may declare symbols are
+read first, within the scan limits of "Tests against code" (2 MB for the
+file, and for its patch: a huge removal isn't read again line by line; 32
+MB in all). A file that can't be read so (past those limits, changed since
+its patch or a link where the patch shows a file, unbalanced) keeps the
 first pass's line rules and fold, its symbols are unknown, and it says why
-(`unreadContext`): a row reloaded on its own may then read differently,
+(`swiftContext`): a row reloaded on its own may then read differently,
 since the edit that made it differ triggers a refresh, and alone it is
 within the limits.
 
@@ -532,7 +532,7 @@ How it reads:
   nested in one, is private. A member's type is kept as a dotted path
   (`Outer.Inner`). A symlink declares nothing. The symbols are unknown, and
   the header names the file rather than reading "nothing declared", when
-  its patch wasn't read, when it (or, for an addition, its patch) is past
+  its patch wasn't read, when it or its patch is past
   2 MB or the files read pass 32 MB, when the file in the worktree no
   longer matches the patch's context and added lines (the agent edited it
   meanwhile, a clean filter), or when a brace, a multi-line string or a

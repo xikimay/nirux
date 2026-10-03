@@ -115,7 +115,7 @@ extension BranchReview {
             guard let shared else { return true }
             guard end <= shared.count else { return false }
             while next < end {
-                Array(shared[next]).withUnsafeBytes { bytes in
+                shared[next].withUnsafeBytes { bytes in
                     old.feed(bytes, collecting: false)
                     new.feed(bytes, collecting: false)
                 }
@@ -155,7 +155,8 @@ extension BranchReview {
             guard let shared else { return true }
             guard next < shared.count else { return false }
             defer { next += 1 }
-            return BranchReview.withoutCarriageReturn(shared[next]).elementsEqual(BranchReview.withoutCarriageReturn(content))
+            let line = shared[next]
+            return (line.last == 0x0D ? line.dropLast() : line).elementsEqual(content.last == 0x0D ? content.dropLast() : content)
         }
 
         /// Each hunk reads the same before and after but for whitespace:
@@ -176,18 +177,14 @@ extension BranchReview {
 
     /// A line as one side compares it: code by its significant part, a
     /// line in a multi-line string as Swift reads it. Text a line starts
-    /// in loses only the closing delimiter's indentation (a line of
-    /// blanks reads as empty); text it ends in keeps its trailing spaces;
-    /// its line ending is a newline.
+    /// in loses only the closing delimiter's indentation, which Swift
+    /// requires but of an empty line; text it ends in keeps its trailing
+    /// spaces; its line ending is a newline.
     private static func side(_ content: Data, _ text: SideBySide.Text, indents: [Int: Data]) -> (content: Data, whole: Bool) {
         guard !text.isCode else { return (content, false) }
         var line = withoutCarriageReturn(content)
         if let id = text.startsIn {
-            if let indent = indents[id], line.starts(with: indent) {
-                line = line.dropFirst(indent.count)
-            } else if line.allSatisfy({ $0 == 0x20 || $0 == 0x09 }) {
-                line = Data()
-            }
+            if let indent = indents[id], line.starts(with: indent) { line = line.dropFirst(indent.count) }
         } else {
             line = Data(line.drop { $0 == 0x20 || $0 == 0x09 })
         }
@@ -197,16 +194,18 @@ extension BranchReview {
         return (line, true)
     }
 
-    /// A changed line, read by its side's scanner: the functions it is in,
-    /// unless it holds only comments and blanks, and the line rules its
-    /// code matches. Its comments are blanked already: a string's line
-    /// that reads like one still counts.
+    /// A changed line, read by its side's scanner: the functions it is in
+    /// or opens a body of, unless it holds only comments and blanks, and
+    /// the line rules its code matches. Its comments are blanked already:
+    /// a string's line that reads like one still counts.
     private static func read(_ content: Data, as hunk: Int, by scanner: inout SwiftScanner, into reading: inout SwiftReading) {
-        let functions = scanner.enclosingFunctions.filter(isLifecycle)
+        let enclosing = scanner.enclosingFunctions
         let isText = scanner.stringText != nil
         content.withUnsafeBytes { scanner.feed($0, collecting: true, capturingCode: true) }
         if isText || scanner.code.contains(where: { ![0x20, 0x09, 0x0D].contains($0) }) {
-            for function in functions { reading.lifecycleHunks[function.name, default: []].insert(hunk) }
+            for function in (enclosing + scanner.functionsOpened).filter(isLifecycle) {
+                reading.lifecycleHunks[function.name, default: []].insert(hunk)
+            }
         }
         RiskRules.forEachLineRule(matching: scanner.code, skippingCommentLines: false) {
             reading.riskHits.insert(RiskHit(rule: $0, hunk: hunk))
@@ -223,9 +222,9 @@ extension BranchReview {
     /// that may declare symbols first, within `Options.maxScannedBytes`:
     /// its line signals, whitespace fold and symbols then come from that
     /// reading. A file it can't read keeps the first pass's, and its
-    /// symbols are unknown. A type change (a symlink became the file) only
-    /// gives its symbols: the reading doesn't number its first section's
-    /// hunks. `sections` are each file's in the patch; `namedFolds`, the
+    /// symbols are unknown. A type change (a symlink became the file) reads
+    /// its last section, the new file, its hunks numbered after the
+    /// link's. `sections` are each file's in the patch; `namedFolds`, the
     /// files folded by name, which aren't read.
     static func readSwiftFiles(
         _ files: inout [FileChange], sections: [String: [Data]], namedFolds: [String: Fold], root: String, options: Options
@@ -241,21 +240,23 @@ extension BranchReview {
                   file.newMode != "120000", let parts = sections[file.path], let section = parts.last,
                   Patch.header(section)?.indexMode != "120000"
             else { continue }
-            let whole = file.status == .added || file.status == .deleted
-            switch read(file, section: section, whole: whole, root: root, options: options, budget: &budget) {
+            switch read(file, section: section, root: root, options: options, budget: &budget) {
             case .success(let reading):
-                if parts.count == 1 {
-                    if PathGroup(path: file.path) != .docs {
-                        files[index].signals = merged(RiskRules.signals(lineHits: Array(reading.riskHits)) + reading.lifecycleHunks.map {
-                            RiskSignal(kind: .launch, reasons: ["inside \($0.key)"], hunks: $0.value.sorted(), byPath: false)
-                        })
-                    }
-                    // Stricter than the first pass's: it may only unfold.
-                    if !reading.isWhitespaceOnly { files[index].fold = nil }
+                let offset = parts.dropLast().compactMap {
+                    Patch.section($0, reading: Patch.Reading(keepsLines: false, whitespace: nil, findsRisks: false))?.hunkCount
+                }.reduce(0, +)
+                if PathGroup(path: file.path) != .docs {
+                    let lineHits = reading.riskHits.map { RiskHit(rule: $0.rule, hunk: offset + $0.hunk) }
+                    files[index].signals = merged(RiskRules.signals(lineHits: lineHits) + reading.lifecycleHunks.map {
+                        RiskSignal(kind: .launch, reasons: ["inside \($0.key)"], hunks: $0.value.map { offset + $0 }.sorted(), byPath: false)
+                    })
                 }
+                // Stricter than the first pass's: it may only unfold.
+                if !reading.isWhitespaceOnly { files[index].fold = nil }
+                files[index].swiftContext = .read
                 if wantsSymbols(files[index]) { files[index].symbols = .read(reading.symbols) }
             case .failure(let reason):
-                files[index].unreadContext = reason
+                files[index].swiftContext = .firstPass(reason)
                 if wantsSymbols(file) { files[index].symbols = .unread(reason) }
             }
         }
@@ -263,11 +264,12 @@ extension BranchReview {
 
     /// One file's `readSwift`: its patch within `Options.maxScannedFileBytes`
     /// (a huge removal is never read again line by line), and the file in
-    /// the worktree, unless the patch holds it `whole`; what is read counts
-    /// toward `budget`.
+    /// the worktree, unless the patch holds it whole (an addition or a
+    /// deletion); what is read counts toward `budget`.
     private static func read(
-        _ file: FileChange, section: Data, whole: Bool, root: String, options: Options, budget: inout Int
+        _ file: FileChange, section: Data, root: String, options: Options, budget: inout Int
     ) -> Result<SwiftReading, SymbolScan.Reason> {
+        let whole = file.status == .added || file.status == .deleted
         let limit = min(options.maxScannedFileBytes, budget)
         guard section.count <= (whole ? limit : options.maxScannedFileBytes) else { return .failure(.tooLarge) }
         guard !whole else {

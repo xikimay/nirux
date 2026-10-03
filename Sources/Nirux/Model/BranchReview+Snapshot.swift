@@ -485,11 +485,11 @@ extension BranchReview {
     /// its signals. A file past `maxFileDiffBytes` keeps no hunks; with
     /// `inline`, neither does a folded file, nor any file when the
     /// unfolded ones add up to more than `maxInlineDiffBytes`. Parsed
-    /// twice: once without keeping a line, to hash, fold, find signals and
-    /// collect a Swift file's added lines, then only the sections that
-    /// keep their hunks: a fold found in the lines (whitespace only)
-    /// mustn't count toward the budget either. `ignoresAttributes`: see
-    /// `NoiseRules`.
+    /// once without keeping a line, to hash, fold and find signals; a
+    /// Swift file once more, read in context (`readSwiftFiles`); then only
+    /// the sections that keep their hunks: a fold found in the lines
+    /// (whitespace only) mustn't count toward the budget either.
+    /// `ignoresAttributes`: see `NoiseRules`.
     static func readDiff(
         root: String, mergeBase: String, pathspec: [String], inline: Bool, ignoresAttributes: Bool = false,
         options: Options

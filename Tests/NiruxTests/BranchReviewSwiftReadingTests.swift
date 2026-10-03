@@ -116,7 +116,7 @@ final class BranchReviewSwiftReadingTests: BranchReviewRepositoryTestCase {
         try write("Sources/Blank.swift", "let text = \"\"\"\n    a\n    b\n    \"\"\"\n")
         try write("Sources/Worker.swift", "func run() {\nwork()\n}\n")
         try write("Sources/Moved.swift", "struct A {\n  let s = \"\"\"\n    x\n    \"\"\"\n}\n")
-        try write("Sources/Trimmed.swift", "let s = \"\"\"\n    a\n  \n    b\n    \"\"\"\n")
+        try write("Sources/Trimmed.swift", "let s = \"\"\"\n    a\n    \n    b\n    \"\"\"\n")
         try write("Sources/Closing.swift", "let s = \"\"\"\n    a\n    \"\"\"\n")
         try write("Sources/Ends.swift", "let s = \"\"\"\n    a\n    \"\"\"\n")
         let interpolated = "let s = \"\"\"\n    Hello \\(\n        name\n    )!\n    \"\"\"\n"
@@ -161,6 +161,16 @@ final class BranchReviewSwiftReadingTests: BranchReviewRepositoryTestCase {
         ])
     }
 
+    func testChangeOnTheLineThatOpensTheBodyIsInside() throws {
+        try write("Sources/Entry.swift", "@main\nenum Entry {\n    static func main() { run() }\n}\n")
+        try commitToMain("entry")
+        try write("Sources/Entry.swift", "@main\nenum Entry {\n    static func main() { run(); hook() }\n}\n")
+
+        XCTAssertEqual(try file("Sources/Entry.swift", in: try snapshot()).signals, [
+            BranchReview.RiskSignal(kind: .launch, reasons: ["inside main"], hunks: [0], byPath: false)
+        ])
+    }
+
     func testOldSideIsReadInContextToo() throws {
         // Unbalanced before: a bare regex holds a brace.
         try write("Sources/Pattern.swift", "struct Pattern {\n    let opening = /\\{/\n}\n")
@@ -176,7 +186,7 @@ final class BranchReviewSwiftReadingTests: BranchReviewRepositoryTestCase {
 
         let snapshot = try snapshot()
 
-        XCTAssertEqual(try file("Sources/Pattern.swift", in: snapshot).unreadContext, .unbalanced)
+        XCTAssertEqual(try file("Sources/Pattern.swift", in: snapshot).swiftContext, .firstPass(.unbalanced))
         XCTAssertEqual(try file("Sources/Names.swift", in: snapshot).symbols, .read([
             BranchReview.Symbol(name: "B", line: 4, kind: .type, container: nil),
             BranchReview.Symbol(name: "name", line: 5, kind: .variable, container: "B")
@@ -184,7 +194,7 @@ final class BranchReviewSwiftReadingTests: BranchReviewRepositoryTestCase {
         let alias = try file("Sources/Alias.swift", in: snapshot)
         XCTAssertEqual(alias.status, .modified)
         XCTAssertNil(alias.symbols, "a link declares nothing")
-        XCTAssertNil(alias.unreadContext)
+        XCTAssertNil(alias.swiftContext)
     }
 
     func testModifiedFileCheckedOutWithCRLFIsRead() throws {
@@ -195,7 +205,7 @@ final class BranchReviewSwiftReadingTests: BranchReviewRepositoryTestCase {
 
         let gauge = try file("Sources/Gauge.swift", in: try snapshot())
 
-        XCTAssertNil(gauge.unreadContext)
+        XCTAssertEqual(gauge.swiftContext, .read)
         XCTAssertEqual(gauge.symbols, .read([BranchReview.Symbol(name: "limit", line: 3, kind: .variable, container: "Gauge")]))
     }
 
@@ -213,6 +223,7 @@ final class BranchReviewSwiftReadingTests: BranchReviewRepositoryTestCase {
             BranchReview.RiskSignal(kind: .concurrency, reasons: ["DispatchQueue"], hunks: [1], byPath: false)
         ])
         XCTAssertEqual(link.symbols, .read([BranchReview.Symbol(name: "queue", line: 1, kind: .variable, container: nil)]))
+        XCTAssertEqual(link.swiftContext, .read)
     }
 
     /// #57 wires keep-awake into launch and quit; #65 checks the release
