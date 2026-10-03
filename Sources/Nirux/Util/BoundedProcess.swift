@@ -21,6 +21,9 @@ enum BoundedProcess {
         guard FileManager.default.isExecutableFile(atPath: executableURL.path) else {
             return nil
         }
+        // Past 4,096 arguments `Process.run()` raises an Objective-C
+        // exception, which Swift can't catch: the app would crash.
+        guard arguments.count < maxArguments else { return nil }
 
         let process = Process()
         process.executableURL = executableURL
@@ -72,6 +75,8 @@ enum BoundedProcess {
             terminationStatus: process.terminationStatus
         )
     }
+
+    static let maxArguments = 4_096
 
     /// Darwin's FIONREAD, `_IOR('f', 127, int)`; Swift does not import it.
     private static let bytesBufferedRequest: UInt = 0x4004_667F

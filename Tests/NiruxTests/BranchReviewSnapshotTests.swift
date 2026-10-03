@@ -498,11 +498,19 @@ final class BranchReviewSnapshotTests: XCTestCase {
         try commit("develop moves", at: other)
         try git(["push", "-q", "origin", "develop"], at: other)
         var known = options(gitHub: failingGitHub(status: 1, error: "gh must not run"))
-        known.knownPullRequest = .found(Self.pullRequest(base: "develop", head: try head()))
+        known.knownPullRequest = .init(branch: "feat/x", lookup: .found(Self.pullRequest(base: "develop", head: try head())))
 
         let snapshot = try snapshot(known)
         XCTAssertEqual(snapshot.base.name, "develop")
         XCTAssertEqual(snapshot.pullRequest.pullRequest?.number, 7)
+        XCTAssertEqual(snapshot.knownPullRequest, known.knownPullRequest)
+
+        // Another branch's pull request is never reused.
+        var stale = known
+        stale.knownPullRequest = .init(branch: "other", lookup: .found(Self.pullRequest(base: "develop", head: try head())))
+        let looked = try self.snapshot(stale)
+        XCTAssertNil(looked.pullRequest.pullRequest)
+        XCTAssertEqual(looked.base.name, "main")
 
         // Refresh still fetches its base.
         known.fetchBase = true
@@ -595,6 +603,72 @@ final class BranchReviewSnapshotTests: XCTestCase {
             _ = try? Self.git(["merge", "-q", "main"], at: repo, environment: environment)
         }
         XCTAssertEqual(BranchReview.snapshot(at: repo, options: options(gitHub: merging.cli)), .paused(.merge))
+    }
+
+    /// A git that misbehaves on cue: it fails a diff run with the
+    /// temporary index, or every name-status listing, or switches the
+    /// worktree to `other` when `git status` runs, as its environment says.
+    private func misbehavingGit() throws -> String {
+        let path = root + "/git"
+        try """
+        #!/bin/sh
+        case " $* " in
+          *" status "*)
+            if [ -n "$PROBE_SWITCH" ] && [ -f "$PROBE_SWITCH" ]; then
+              rm -f "$PROBE_SWITCH"; /usr/bin/git checkout -q other
+            fi ;;
+          *" --name-status "*)
+            if [ -n "$PROBE_FAIL_NAME_STATUS" ]; then echo "fatal: probe failure" >&2; exit 128; fi
+            if [ -n "$PROBE_FAIL_INDEXED_DIFF" ] && [ -n "$GIT_INDEX_FILE" ]; then echo "fatal: probe" >&2; exit 128; fi ;;
+        esac
+        exec /usr/bin/git "$@"
+
+        """.write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+        return path
+    }
+
+    func testDiffFailingWithTheTemporaryIndexIsReadWithoutIt() throws {
+        try write("Sources/App.swift", "let a = 2\nlet b = 2\nlet c = 3\n")
+        try write("draft.txt", "draft\n")
+        var probing = options()
+        probing.gitPath = try misbehavingGit()
+        probing.environment["PROBE_FAIL_INDEXED_DIFF"] = "1"
+
+        let snapshot = try snapshot(probing)
+
+        XCTAssertEqual(snapshot.files.map(\.path), ["Sources/App.swift", "draft.txt"])
+        XCTAssertNotNil(try file("Sources/App.swift", in: snapshot).patchHash)
+        XCTAssertEqual(try file("draft.txt", in: snapshot).omission, .notRead)
+    }
+
+    func testGitFailureSaysWhy() throws {
+        try write("Sources/App.swift", "let a = 2\nlet b = 2\nlet c = 3\n")
+        var probing = options()
+        probing.gitPath = try misbehavingGit()
+        probing.environment["PROBE_FAIL_NAME_STATUS"] = "1"
+
+        XCTAssertEqual(
+            BranchReview.snapshot(at: repo, options: probing),
+            .unavailable("git couldn't list the changes in \(repo!): fatal: probe failure")
+        )
+    }
+
+    func testBranchSwitchDuringTheReadStartsOver() throws {
+        try write("Sources/App.swift", "let a = 2\nlet b = 2\nlet c = 3\n")
+        try commit("work")
+        // The same commit: only the branch name tells them apart.
+        try git(["branch", "other"])
+        let trigger = root + "/switch"
+        FileManager.default.createFile(atPath: trigger, contents: nil)
+        var probing = options()
+        probing.gitPath = try misbehavingGit()
+        probing.environment["PROBE_SWITCH"] = trigger
+
+        let snapshot = try snapshot(probing)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: trigger), "the switch never happened")
+        XCTAssertEqual(snapshot.branch, "other")
     }
 
     @MainActor

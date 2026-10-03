@@ -12,10 +12,12 @@ extension BranchReview {
         /// Refresh fetches the pull request's base branch; opening the page
         /// doesn't.
         var fetchBase = false
-        /// An earlier snapshot's pull request, used as is instead of asking
-        /// gh again: for a refresh the worktree's watcher triggers, since
-        /// the page never polls gh. The merge base is still read again.
-        var knownPullRequest: PullRequestLookup?
+        /// An earlier snapshot's pull request (`Snapshot.knownPullRequest`),
+        /// used as is instead of asking gh again while the worktree is on
+        /// the same branch: for a refresh the worktree's watcher triggers,
+        /// since the page never polls gh. The merge base is still read
+        /// again.
+        var knownPullRequest: KnownPullRequest?
         /// Added to every git run's environment.
         var environment: [String: String] = [:]
         var timeout: TimeInterval = 60
@@ -161,7 +163,8 @@ extension BranchReview {
         // stays out of the temporary index and reads as deleted. One the
         // branch added reads as added, like any untracked file.
         let stagedDeletions = Set(statusEntries.filter { $0.code.hasPrefix("D") }.map(\.path))
-        let deletedFromBase = paths(untracked.filter(stagedDeletions.contains), in: base.mergeBase, root: root, options: options)
+        let deletedFromBase = untracked.contains(where: stagedDeletions.contains)
+            ? deletedFromIndex(since: base.mergeBase, root: root, options: options) : []
 
         let toRead = Array(readingOrder(untracked.filter { !deletedFromBase.contains($0) }).prefix(options.maxUntrackedFilesRead))
         var files: [FileChange]
@@ -208,13 +211,14 @@ extension BranchReview {
         )))
     }
 
-    /// Which of `paths` the tree has.
-    private static func paths(_ paths: [String], in tree: String, root: String, options: Options) -> Set<String> {
-        guard !paths.isEmpty,
-              let listed = git(
-                  ["ls-tree", "-r", "-z", "--name-only", tree, "--"] + paths,
-                  in: root, options: options, environment: ["GIT_LITERAL_PATHSPECS": "1"]
-              ), listed.status == 0
+    /// The paths `tree` has and the index doesn't: what a commit would
+    /// delete. Listed by git rather than asked about one by one: a
+    /// `git rm -r --cached .` leaves thousands of them.
+    private static func deletedFromIndex(since tree: String, root: String, options: Options) -> Set<String> {
+        guard let listed = git(
+            diffConfig + ["diff", "--cached", "--name-only", "-z", "--no-renames", "--diff-filter=D", tree, "--"],
+            in: root, options: options, maxOutputBytes: options.maxDiffBytes
+        ), listed.status == 0
         else { return [] }
         return Set(listed.stdout.split(separator: 0).map(Patch.decoded))
     }
@@ -342,6 +346,10 @@ extension BranchReview {
     /// a placeholder would replace anyway.
     private static let bytesPerChangedLine = 40
 
+    /// Exclusions go on git's command line, which `BoundedProcess` keeps
+    /// under 4,096 arguments.
+    private static let maxExcludedPaths = 2_000
+
     /// A diff too large to read whole: the files with the most changed
     /// lines are left out, more at each try (those past the per-file limit
     /// all go at the first), and the rest is read. Failing that, paths and
@@ -357,10 +365,14 @@ extension BranchReview {
         guard pathspec.isEmpty else { return .read(listed) }
         let largestFirst = listed.sorted { $0.additions + $0.deletions > $1.additions + $1.deletions }
         var leftOut = max(1, listed.count { $0.additions + $0.deletions > options.maxFileDiffBytes / bytesPerChangedLine })
-        for _ in 0..<4 where leftOut < largestFirst.count {
+        // A diff that timed out reads as too large too: the tries share one
+        // timeout.
+        let deadline = ProcessInfo.processInfo.systemUptime + options.timeout
+        for _ in 0..<4 where leftOut < largestFirst.count && ProcessInfo.processInfo.systemUptime < deadline {
             let giant = Array(largestFirst.prefix(leftOut))
             // Exclusions alone stand for "everything else".
             let excluded = giant.flatMap { [$0.oldPath, $0.path].compactMap { $0 } }.map { ":(exclude,literal,top)\($0)" }
+            guard excluded.count <= maxExcludedPaths else { break }
             switch readDiff(root: root, mergeBase: mergeBase, pathspec: excluded, inline: inline, options: options) {
             case .files(let rest): return .read(rest + giant)
             case .notRead: leftOut *= 2

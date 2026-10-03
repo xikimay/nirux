@@ -133,6 +133,13 @@ enum BranchReview {
         let isDraft: Bool
     }
 
+    /// What a snapshot found for its branch, for the next one to reuse
+    /// (`Options.knownPullRequest`).
+    struct KnownPullRequest: Equatable, Sendable {
+        let branch: String
+        let lookup: PullRequestLookup
+    }
+
     enum PullRequestLookup: Equatable, Sendable {
         case found(PullRequest)
         /// No open pull request for the branch, or none that is its own.
@@ -168,6 +175,8 @@ enum BranchReview {
         let commits: [Commit]
         /// Sorted by path, one entry per path.
         let files: [FileChange]
+
+        var knownPullRequest: KnownPullRequest { KnownPullRequest(branch: branch, lookup: pullRequest) }
 
         /// Whether the base is the pull request's base branch. False when
         /// it couldn't be used (never fetched, say): the merge base is then

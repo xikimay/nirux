@@ -61,9 +61,9 @@ extension BranchReview {
     static func selectBase(root: String, branch: String, options: Options) -> BaseSelection {
         var fetchProblem: String?
         let lookup: PullRequestLookup
-        if let known = options.knownPullRequest {
-            lookup = known
-            if options.fetchBase, let pullRequest = known.pullRequest {
+        if let known = options.knownPullRequest, known.branch == branch {
+            lookup = known.lookup
+            if options.fetchBase, let pullRequest = known.lookup.pullRequest {
                 fetchProblem = fetch(baseBranch: pullRequest.baseRefName, root: root, options: options)
             }
         } else {

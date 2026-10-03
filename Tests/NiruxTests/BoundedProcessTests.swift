@@ -163,6 +163,19 @@ final class BoundedProcessTests: XCTestCase {
         XCTAssertEqual(exact.standardOutput.count, Self.largeOutputSize)
     }
 
+    func testTooManyArgumentsFailInsteadOfRaising() throws {
+        // Process.run() raises an Objective-C exception past 4,096
+        // arguments, which would crash the app.
+        let result = BoundedProcess.run(
+            executableURL: URL(fileURLWithPath: "/bin/echo"),
+            arguments: Array(repeating: "x", count: 5_000),
+            currentDirectoryURL: directory,
+            timeout: 10
+        )
+
+        XCTAssertNil(result)
+    }
+
     func testHungProcessWithCapturedStandardErrorTimesOut() throws {
         let script = try makeScript("""
         [ "$1" = warm ] && exit 0
