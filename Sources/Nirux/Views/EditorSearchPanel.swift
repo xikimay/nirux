@@ -26,6 +26,9 @@ final class EditorSearchPanel: NSObject {
 
     private var currentProcess: Process?
     private var searchDebounce: DispatchWorkItem?
+    /// Bumped by every cancel: lines a superseded search still has in
+    /// flight are dropped instead of joining the next one's results.
+    private var searchGeneration = 0
 
     private static let panelSize = NSSize(width: 720, height: 480)
     private static let maxResults = 500
@@ -38,6 +41,8 @@ final class EditorSearchPanel: NSObject {
         workspaceCwd: String,
         onPick: @escaping (String, Int) -> Void
     ) {
+        // Shown again while open: the search under way belongs to the old query.
+        cancelSearch()
         self.workspaceCwd = workspaceCwd
         self.onPick = onPick
 
@@ -226,6 +231,7 @@ final class EditorSearchPanel: NSObject {
     }
 
     private func cancelSearch() {
+        searchGeneration += 1
         searchDebounce?.cancel()
         searchDebounce = nil
         if let p = currentProcess, p.isRunning {
@@ -242,8 +248,6 @@ final class EditorSearchPanel: NSObject {
         guard query.count >= Self.minQueryLength else { return }
 
         let process = Process()
-        let pipe = Pipe()
-        process.standardOutput = pipe
         // Never a pipe nobody reads: a search printing enough warnings
         // (unreadable directories, say) would fill it and stall.
         process.standardError = FileHandle.nullDevice
@@ -269,34 +273,51 @@ final class EditorSearchPanel: NSObject {
             ]
         }
 
-        // FileHandle.readabilityHandler is invoked serially on a private
-        // dispatch queue; wrap the line buffer in a class so Swift 6 sees a
-        // shared reference instead of treating the var capture as a data race.
-        let buffer = LineBuffer()
-        let handle = pipe.fileHandleForReading
-        handle.readabilityHandler = { [weak self] reader in
-            let chunk = reader.availableData
-            if chunk.isEmpty { return }
-            buffer.drainLines(adding: chunk) { line in
+        let generation = searchGeneration
+        do {
+            try Self.run(process) { [weak self] line in
                 let result = usesRipgrepJSON
                     ? Self.parseRipgrepJSONLine(line)
                     : Self.parseLine(line)
                 guard let result else { return }
                 DispatchQueue.main.async { [weak self] in
-                    self?.append(result)
+                    guard let self, self.searchGeneration == generation else { return }
+                    self.append(result)
                 }
             }
-        }
-
-        process.terminationHandler = { _ in
-            handle.readabilityHandler = nil
-        }
-
-        do {
-            try process.run()
             currentProcess = process
         } catch {
             NSLog("[EditorSearchPanel] failed to launch search: %@", error.localizedDescription)
+        }
+    }
+
+    /// Runs `process` and calls `onLine` with each full line it prints, on a
+    /// background queue, until its output closes. Not until it exits: a
+    /// search can exit before its output is read, and stopping then lost
+    /// every result now and then (an empty table on a slow CI runner).
+    nonisolated static func run(_ process: Process, onLine: @escaping @Sendable (String) -> Void) throws {
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        // FileHandle.readabilityHandler is invoked serially on a private
+        // dispatch queue; wrap the line buffer in a class so Swift 6 sees a
+        // shared reference instead of treating the var capture as a data race.
+        let buffer = LineBuffer()
+        let handle = pipe.fileHandleForReading
+        handle.readabilityHandler = { reader in
+            let chunk = reader.availableData
+            guard !chunk.isEmpty else {
+                // End of output. Capturing `handle` kept the read end open
+                // once the process and its pipe were released; this ends it.
+                handle.readabilityHandler = nil
+                return
+            }
+            buffer.drainLines(adding: chunk, onLine)
+        }
+        do {
+            try process.run()
+        } catch {
+            handle.readabilityHandler = nil
+            throw error
         }
     }
 
