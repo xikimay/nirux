@@ -44,7 +44,7 @@ final class PaletteIconView: NSImageView {
 
     func setSelected(_ selected: Bool) {
         guard followsSelection else { return }
-        contentTintColor = selected ? .niruxAccent : Self.restTint
+        contentTintColor = selected ? Theme.Color.accent : Self.restTint
     }
 
     private func setSymbol(_ name: String, pointSize: CGFloat) {

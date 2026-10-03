@@ -3,14 +3,6 @@ import XCTest
 /// Colors and the dark appearance come from `Theme`: a literal color or a
 /// forced `.darkAqua` anywhere else in the app fails this test.
 final class ThemeGuardTests: XCTestCase {
-    /// Files not migrated yet, each with the change that will migrate it.
-    /// Don't add to it: use the tokens instead.
-    private static let pending: Set<String> = [
-        "NiruxApp+Settings.swift", // rewritten as a tabbed window by chore/ui-cleanup
-        "Views/PilotSidebarRenderer.swift", // Pilot Mode removal (#69)
-        "Views/WorkspaceState+PilotPanel.swift" // Pilot Mode removal (#69)
-    ]
-
     private static let advice = """
         use Theme instead of literal colors: window or board → Theme.Color.canvas; sidebar, panel, sheet → .base; \
         bar, card, tab → .surface; floating → .raised; text → .textPrimary/.textSecondary/.textTertiary; \
@@ -24,23 +16,13 @@ final class ThemeGuardTests: XCTestCase {
     func testColorsAndAppearanceComeFromTheme() throws {
         // Paths relative to Sources/Nirux, whatever symlinks lead there.
         let paths = try FileManager.default.subpathsOfDirectory(atPath: sources.path)
-            .filter { $0.hasSuffix(".swift") && $0 != "Util/Theme.swift" && !Self.pending.contains($0) }
+            .filter { $0.hasSuffix(".swift") && $0 != "Util/Theme.swift" }
         var offenders: [String] = []
         for path in paths {
             offenders += try offendingLines(in: path).map { "\(path):\($0)" }
         }
         XCTAssertGreaterThan(paths.count, 100, "found too few sources under \(sources.path)")
         XCTAssertEqual(offenders, [], Self.advice)
-    }
-
-    func testPendingFilesStillNeedMigrating() throws {
-        for path in Self.pending.sorted() {
-            guard FileManager.default.fileExists(atPath: sources.appendingPathComponent(path).path) else {
-                XCTFail("\(path) is gone: remove it from ThemeGuardTests.pending")
-                continue
-            }
-            XCTAssertNotEqual(try offendingLines(in: path), [], "\(path) uses Theme now: remove it from ThemeGuardTests.pending")
-        }
     }
 
     /// 1-based lines of `path` with a literal color or `.darkAqua`.

@@ -12,7 +12,6 @@ import AppKit
 /// it never reach a terminal (isOverlayActive), and Edit > Undo works in its
 /// text field (PanelTextUndo).
 extension NiruxApp {
-    private static let settingsBackground = NSColor(red: 0.11, green: 0.11, blue: 0.15, alpha: 1)
     private static let settingsWriteFailure = "Could not write the settings file. Check the disk and try again."
     private static let storedTokenPlaceholder = "Stored in Keychain — paste one to replace it"
     private static let missingTokenPlaceholder = "Paste the token from @BotFather"
@@ -38,8 +37,8 @@ extension NiruxApp {
         window.hidesOnDeactivate = false
         window.collectionBehavior.insert(.fullScreenAuxiliary)
         window.toolbarStyle = .preference
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.backgroundColor = Self.settingsBackground
+        window.appearance = Theme.appearance
+        window.backgroundColor = Theme.Color.base
         window.isReleasedWhenClosed = false
         window.delegate = self
         settingsWindow = window

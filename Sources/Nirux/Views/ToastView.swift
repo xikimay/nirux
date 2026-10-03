@@ -12,27 +12,9 @@ final class ToastView: NSView {
         case error
     }
 
-    /// The visual system's values (design/visual-system) in one place,
-    /// named after its Theme tokens, until they land.
-    @MainActor
+    /// Sizes the Theme has no token for.
     private enum Style {
-        /// Theme.Color.raised
-        static let raised = NSColor(srgbRed: 0x29 / 255, green: 0x29 / 255, blue: 0x33 / 255, alpha: 1)
-        /// Theme.Color.lineStrong
-        static let lineStrong = NSColor.white.withAlphaComponent(0.12)
-        /// Theme.Color.textPrimary
-        static let textPrimary = NSColor(srgbRed: 0xEC / 255, green: 0xEC / 255, blue: 0xF1 / 255, alpha: 1)
-        /// Theme.Color.textSecondary
-        static let textSecondary = NSColor(srgbRed: 0xA0 / 255, green: 0xA0 / 255, blue: 0xAD / 255, alpha: 1)
-        /// Theme.Color.error
-        static let error = NSColor(srgbRed: 0xF0 / 255, green: 0x65 / 255, blue: 0x6B / 255, alpha: 1)
-        /// Theme.Font.body
-        static let font = NSFont.systemFont(ofSize: 12)
         static let height: CGFloat = 28
-        /// Theme.Space.m
-        static let paddingX: CGFloat = 12
-        /// Theme.Space.s
-        static let iconGap: CGFloat = 8
         static let iconPointSize: CGFloat = 12
     }
 
@@ -51,14 +33,14 @@ final class ToastView: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: 0, height: Style.height))
         wantsLayer = true
         layer?.cornerRadius = Style.height / 2
-        layer?.backgroundColor = Style.raised.cgColor
+        layer?.backgroundColor = Theme.Color.raised.cgColor
         layer?.borderWidth = 1
         layer?.shadowColor = NSColor.black.cgColor
         layer?.shadowOpacity = 0.5
         layer?.shadowOffset = CGSize(width: 0, height: -8)
         layer?.shadowRadius = 12
-        label.font = Style.font
-        label.textColor = Style.textPrimary
+        label.font = Theme.Font.body
+        label.textColor = Theme.Color.textPrimary
         label.lineBreakMode = .byTruncatingTail
         label.setAccessibilityElement(false)
         icon.imageScaling = .scaleProportionallyDown
@@ -83,16 +65,16 @@ final class ToastView: NSView {
         let symbol = tone == .error ? "exclamationmark.triangle.fill" : "info.circle"
         icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(.init(pointSize: Style.iconPointSize, weight: .regular))
-        icon.contentTintColor = tone == .error ? Style.error : Style.textSecondary
-        layer?.borderColor = (tone == .error ? Style.error.withAlphaComponent(0.45) : Style.lineStrong).cgColor
+        icon.contentTintColor = tone == .error ? Theme.Color.error : Theme.Color.textSecondary
+        layer?.borderColor = (tone == .error ? Theme.Color.error.withAlphaComponent(0.45) : Theme.Color.lineStrong).cgColor
     }
 
     /// Its frame, centered on `area`'s bottom edge plus `bottomGap`, never
     /// wider than `area` minus a margin.
     func frame(centeredIn area: NSRect) -> NSRect {
         let iconWidth = icon.image?.size.width ?? 0
-        let content = iconWidth + Style.iconGap + ceil(label.fittingSize.width)
-        let width = min(content + Style.paddingX * 2, max(0, area.width - Style.paddingX * 4))
+        let content = iconWidth + Theme.Space.sm + ceil(label.fittingSize.width)
+        let width = min(content + Theme.Space.md * 2, max(0, area.width - Theme.Space.md * 4))
         return NSRect(
             x: (area.midX - width / 2).rounded(), y: area.minY + Self.bottomGap,
             width: width, height: Style.height
@@ -103,14 +85,14 @@ final class ToastView: NSView {
         super.layout()
         let iconSize = icon.image?.size ?? .zero
         icon.frame = NSRect(
-            x: Style.paddingX, y: ((bounds.height - iconSize.height) / 2).rounded(),
+            x: Theme.Space.md, y: ((bounds.height - iconSize.height) / 2).rounded(),
             width: iconSize.width, height: iconSize.height
         )
         let labelHeight = label.fittingSize.height
-        let labelX = icon.frame.maxX + Style.iconGap
+        let labelX = icon.frame.maxX + Theme.Space.sm
         label.frame = NSRect(
             x: labelX, y: ((bounds.height - labelHeight) / 2).rounded(),
-            width: max(0, bounds.width - labelX - Style.paddingX), height: labelHeight
+            width: max(0, bounds.width - labelX - Theme.Space.md), height: labelHeight
         )
         let radius = min(bounds.width, bounds.height) / 2
         layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)

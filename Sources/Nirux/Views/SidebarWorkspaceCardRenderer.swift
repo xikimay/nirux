@@ -376,7 +376,7 @@ final class SidebarWorkspaceCardRenderer {
     /// Resume at the end of a not-resumed agent's row. Its hit area goes
     /// before the row's: the first area under the pointer takes the click.
     private func buildDeferredResumeButton(_ deferred: SidebarDeferredAgent, columnIndex: Int, rowY: CGFloat, padding: CGFloat) {
-        let color = NSColor.niruxAccent
+        let color = Theme.Color.accent
         let label = "Resume \(deferred.processName) here"
         let button = SidebarBadgeView(
             text: "Resume",

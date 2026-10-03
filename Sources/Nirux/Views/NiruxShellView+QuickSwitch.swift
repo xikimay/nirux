@@ -67,7 +67,7 @@ extension NiruxShellView {
     func workspacePaletteSection(snapshot: ProcessSnapshot, now: TimeInterval) -> PaletteSection {
         let rows = quickSwitchWorkspaces(snapshot: snapshot, now: now).map { workspace in
             PaletteAction(
-                icon: .dot(NSColor.niruxColor(hex: workspace.spaceColorHex) ?? .niruxAccent),
+                icon: .dot(NSColor.niruxColor(hex: workspace.spaceColorHex) ?? Theme.Color.accent),
                 title: workspace.title,
                 subtitle: workspace.subtitle(folderDisplay: workspace.folder.abbreviatedPath()),
                 shortcut: nil,

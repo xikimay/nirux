@@ -61,11 +61,11 @@ enum SidebarRenderer {
         }
         switch pullRequest.state {
         case "MERGED":
-            return ("merged", NSColor(red: 0.64, green: 0.47, blue: 0.97, alpha: 1))
+            return ("merged", Theme.Color.done)
         case "CLOSED":
             return ("closed", NSColor.systemRed.withAlphaComponent(0.6))
         default:
-            return ("open", .niruxAccent)
+            return ("open", Theme.Color.accent)
         }
     }
 
@@ -211,13 +211,13 @@ enum SidebarRenderer {
         } else {
             displayName = column.deferredAgent?.processName ?? column.stuck?.agentName ?? column.processName ?? "shell"
         }
-        // Unsaved-changes dot — same amber as the editor tab bar's. Before
+        // Unsaved-changes dot — same color as the editor tab bar's. Before
         // the name: these labels truncate tail-first, and a state indicator
         // must survive long file names.
         if column.isEditor, column.editorIsDirty {
             result.append(NSAttributedString(string: "● ", attributes: [
                 .font: NSFont.monospacedSystemFont(ofSize: fontSize - 3, weight: .regular),
-                .foregroundColor: NSColor(red: 0.95, green: 0.7, blue: 0.3, alpha: 1)
+                .foregroundColor: Theme.Color.textPrimary
             ]))
         }
         result.append(NSAttributedString(string: displayName, attributes: [.font: font, .foregroundColor: textColor]))
@@ -246,11 +246,11 @@ enum SidebarRenderer {
                 .font: font,
                 .foregroundColor: stuck.isFailure
                     ? NSColor.systemRed.withAlphaComponent(0.9)
-                    : NSColor.systemOrange.withAlphaComponent(0.8)
+                    : Theme.Color.waiting.withAlphaComponent(0.8)
             ]))
             return result
         }
-        // Why a waiting agent waits — "· permission · Bash" in orange when
+        // Why a waiting agent waits — "· permission · Bash" in amber when
         // it is blocked on the user, a muted "· done" when its turn ended.
         if column.agentStatus == .needsAttention, let reason = column.attentionReason {
             result.append(NSAttributedString(string: " · \(reason.shortLabel)", attributes: [
@@ -275,7 +275,7 @@ enum SidebarRenderer {
         if reason.isFailure { return NSColor.systemRed.withAlphaComponent(0.9) }
         return reason == .turnFinished
             ? NSColor.white.withAlphaComponent(0.45)
-            : NSColor.systemOrange.withAlphaComponent(0.8)
+            : Theme.Color.waiting.withAlphaComponent(0.8)
     }
 
     /// Compact duration for sidebar rows: 42s, 12m, 1h05m. Pure —

@@ -31,7 +31,7 @@ struct PaletteBadge: Equatable {
     var color: NSColor {
         switch tone {
         case .working: return .systemGreen
-        case .waiting: return .systemOrange
+        case .waiting: return Theme.Color.waiting
         case .failure: return .systemRed
         }
     }
