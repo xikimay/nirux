@@ -1,6 +1,6 @@
 import AppKit
 
-/// Directional edge glow that pulses orange to indicate attention is needed off-screen
+/// Directional edge glow that pulses amber to indicate attention is needed off-screen
 final class EdgeGlowView: NSView {
     enum Edge { case left, right, top, bottom }
 

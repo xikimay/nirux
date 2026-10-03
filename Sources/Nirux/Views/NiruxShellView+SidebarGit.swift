@@ -169,9 +169,9 @@ extension NiruxShellView {
         updateAttentionBorders(infos: infos)
     }
 
-    /// Pulsing orange border on columns with agent needing attention.
+    /// Pulsing amber border on columns with agent needing attention.
     private func updateAttentionBorders(infos: [WorkspaceInfo]) {
-        let orangeBorder = Theme.Color.waiting.cgColor
+        let attentionBorder = Theme.Color.waiting.cgColor
         let infoByIndex = Dictionary(uniqueKeysWithValues: infos.map { ($0.index, $0) })
         for (wsIndex, workspace) in workspaces.enumerated() {
             for (colIndex, col) in workspace.columns.enumerated() {
@@ -180,10 +180,10 @@ extension NiruxShellView {
                 if needsAttention {
                     colLayer?.cornerRadius = 6
                     colLayer?.borderWidth = 2
-                    colLayer?.borderColor = orangeBorder
+                    colLayer?.borderColor = attentionBorder
                     if colLayer?.animation(forKey: "attentionPulse") == nil {
                         let pulse = CABasicAnimation(keyPath: "borderColor")
-                        pulse.fromValue = orangeBorder
+                        pulse.fromValue = attentionBorder
                         pulse.toValue = Theme.Color.waiting.withAlphaComponent(0.15).cgColor
                         pulse.duration = 0.6
                         pulse.autoreverses = true

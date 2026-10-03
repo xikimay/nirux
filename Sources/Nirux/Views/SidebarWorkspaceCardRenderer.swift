@@ -589,7 +589,7 @@ final class SidebarWorkspaceCardRenderer {
     }
 
     /// A stuck agent's dot says so whatever its status: red when it broke,
-    /// orange while its dialog waits.
+    /// amber while its dialog waits.
     private func statusDot(for column: ColumnInfo) -> NSView {
         let dot = SidebarBackgroundView()
         dot.wantsLayer = true
