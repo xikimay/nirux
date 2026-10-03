@@ -344,12 +344,13 @@ Two side effects in the worktree creation code:
   folder, so a worktree created from a worktree nested names
   (`nirux-public.feat-projects.feat-x`). It now places and names them after
   the main checkout, found through the common dir.
-- Handover files stay untracked in every worktree. They block
-  `git worktree remove` and can be committed by a `git add -A`. Adding their
-  names to `<common dir>/info/exclude` covers every worktree, without touching
-  the repository. Verified: ignored files don't block `git worktree remove`,
+- Fixed: handover files stayed untracked in every worktree, where a
+  `git add -A` committed them. `GitWorktree.create` now adds their names to
+  `<common dir>/info/exclude` (`ensureExcluded`, once, keeping what's there),
+  which covers every worktree without touching the repository. A failed write
+  leaves them visible and the worktree is still created. Ignored files don't block `git worktree remove`,
   which deletes them with the folder (the worktree cleanup lists them in its
-  confirmation).
+  confirmation and moves them to the Trash).
 
 ## 4. Brief
 
@@ -674,7 +675,7 @@ Mode has since been removed).
   - The checks and the git side exist: `WorktreeCleanup`, behind the sidebar's
     "Clean Up Worktree…" and the palette's "Clean Up Merged Worktrees…". It
     moves handover files and other ignored leftovers to the Trash before
-    `git worktree remove`, so adding them to `info/exclude` loses nothing.
+    `git worktree remove`, so handover files in `info/exclude` lose nothing.
 
 The data sources already exist (`GitDetect`, `PRDetect`, `GitWorktree.list`,
 workspace context). Sections backed by later PRs (brief, pinned URLs, sessions)
@@ -695,7 +696,7 @@ branches also change; those wait for them to merge.
 | 6 | Per-project defaults | 2, 4 | settings, terminal env, `nirux://` request handling |
 | 7 | Session ledger and resume. The ledger and the resume plan shipped; the list and Resume wait for the Project Board | 4, 5 | hook events, restore |
 | 8 | Project view column. Replaced by the [Project Board](project-board.md) plan | 4, 5 | git and PR polling |
-| 9 | "Finish" (PR merged, then remove worktree), with handover files added to `info/exclude`. The cleanup shipped in #46; New Task… adds the handover files to `info/exclude`, other worktree flows don't yet | 8 | worktree creation |
+| 9 | "Finish" (PR merged, then remove worktree), with handover files added to `info/exclude`. The cleanup shipped in #46; worktree creation adds handover files to `info/exclude` | 8 | worktree creation |
 
 PRs 1, 2 and 4 are the core: names, brief, and projects that persist. PRs 5 to
 9 start only if projects get used.
