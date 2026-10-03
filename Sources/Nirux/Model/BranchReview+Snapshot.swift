@@ -536,28 +536,22 @@ extension BranchReview {
             return Patch.Reading(
                 keepsLines: false,
                 whitespace: folded ? nil : key.map(WhitespaceCheck.mode(for:)),
-                findsRisks: !folded && key.map { PathGroup(path: $0) } != .docs,
-                collectsAddedLines: !folded && headers[index]?.newPath.map(isSwiftCode) == true
+                findsRisks: !folded && key.map { PathGroup(path: $0) } != .docs
             )
         }) else {
             return .failed("git printed a diff Nirux can't read in \(root).")
         }
         guard var files = Patch.files(entries: entries, sections: sections) else { return .inconsistent }
+        // Whether a line is in a string, a comment or a function takes the
+        // whole file: it is read from the worktree, and checked against
+        // the patch.
+        readSwiftFiles(
+            &files, sections: rangesByKey.mapValues { $0.map { data[$0] } }, namedFolds: namedFolds, root: root,
+            options: options
+        )
         for index in files.indices {
             files[index].fold = namedFolds[files[index].path] ?? files[index].fold
             RiskRules.settle(&files[index])
-        }
-        // Whether a line is in a function's body takes the whole file: it
-        // is read from the worktree, and checked against the patch.
-        let addedLines = Dictionary(sections.compactMap { section in
-            section.newPath.flatMap { path in section.addedLines.map { (path, $0) } }
-        }, uniquingKeysWith: { first, _ in first })
-        var budget = options.maxScannedBytes
-        for index in files.indices where mayDeclareSymbols(files[index]) && files[index].additions > 0 {
-            let path = files[index].path
-            files[index].symbols = scanSymbols(
-                at: root + "/" + path, added: addedLines[path], maxFileBytes: options.maxScannedFileBytes, budget: &budget
-            )
         }
         let inlineBytes = files.filter { $0.fold == nil && $0.patchBytes <= maxFileBytes }.map(\.patchBytes).reduce(0, +)
         let onDemand = inline && inlineBytes > options.maxInlineDiffBytes

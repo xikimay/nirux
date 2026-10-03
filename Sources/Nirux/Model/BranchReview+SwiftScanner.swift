@@ -44,6 +44,27 @@ extension BranchReview {
         /// closed: what follows a stray one may have read wrong.
         var isBalanced: Bool { !closedUnopened && scopes.isEmpty && modes.isEmpty }
 
+        /// A function whose body a line is in.
+        struct Function: Equatable {
+            let name: String
+            let isStatic: Bool
+        }
+
+        /// The named functions whose bodies the next line starts in,
+        /// outermost first: closures and accessors have no name.
+        var enclosingFunctions: [Function] { scopes.compactMap(\.function) }
+
+        /// Whether the next line starts in a multi-line string's text,
+        /// where its indentation and its blank lines are the string's.
+        var startsInStringText: Bool {
+            if case .string(_, true)? = modes.last { return true }
+            return false
+        }
+
+        /// The last line fed with `capturingCode`, its comments blanked:
+        /// what the code says, strings included.
+        private(set) var code = Data()
+
         /// What the review lists: declared on collected lines, not hidden,
         /// nor in an extension of a private type or of a type nested in one
         /// (declared before or after it).
@@ -121,6 +142,10 @@ extension BranchReview {
             var isPrivate = false
             var isOverride = false
             var isObjC = false
+            var isStatic = false
+            /// A function declared at its depth: the `{` that opens its
+            /// body, not a closure in its signature.
+            var function: Function?
             var expect = Expect.nothing
         }
 
@@ -134,6 +159,8 @@ extension BranchReview {
             let container: String?
             /// An extension's type at the file's level, as written.
             let extended: String?
+            /// The function whose body it is.
+            let function: Function?
             /// The statement the brace opened in, which goes on once it
             /// closes: `let a = { 1 }(), b = 2`.
             let outer: Statement
@@ -162,6 +189,10 @@ extension BranchReview {
         private var typeIsPrivate = false
         private var pendingContainer: String?
         private var pendingExtended: String?
+        /// Where the current line's comments are, and where one that is
+        /// still open started on it.
+        private var commentRanges: [Range<Int>] = []
+        private var commentStart: Int?
 
         private static let modifiers: Set<String> = [
             "public", "internal", "open", "package", "static", "final", "override", "required", "convenience",
@@ -176,8 +207,9 @@ extension BranchReview {
 
         // MARK: Lexer
 
-        /// Reads one line, without its newline.
-        mutating func feed(_ line: UnsafeRawBufferPointer, collecting: Bool) {
+        /// Reads one line, without its newline. `capturingCode` keeps its
+        /// code in `code`.
+        mutating func feed(_ line: UnsafeRawBufferPointer, collecting: Bool, capturingCode: Bool = false) {
             lineNumber += 1
             self.collecting = collecting
             var line = line
@@ -185,6 +217,9 @@ extension BranchReview {
             if lineNumber == 1, line.starts(with: [0xEF, 0xBB, 0xBF]) {
                 line = UnsafeRawBufferPointer(rebasing: line.dropFirst(3))
             }
+            commentRanges = []
+            commentStart = nil
+            if case .blockComment? = modes.last { commentStart = 0 }
             var index = 0
             while index < line.count {
                 switch modes.last {
@@ -202,6 +237,12 @@ extension BranchReview {
             if let open = modes.firstIndex(where: { if case .string(_, false) = $0 { return true } else { return false } }) {
                 modes.removeSubrange(open...)
             }
+            if let start = commentStart { commentRanges.append(start..<line.count) }
+            if capturingCode {
+                var kept = Data(line)
+                for range in commentRanges { kept.replaceSubrange(range, with: repeatElement(UInt8(ascii: " "), count: range.count)) }
+                code = kept
+            }
             take(.newline)
         }
 
@@ -212,9 +253,11 @@ extension BranchReview {
             case 0x20, 0x09, 0x0D, 0x0B, 0x0C:
                 return start + 1
             case UInt8(ascii: "/") where next == UInt8(ascii: "/"):
+                commentRanges.append(start..<line.count)
                 return line.count
             case UInt8(ascii: "/") where next == UInt8(ascii: "*"):
                 modes.append(.blockComment(depth: 1))
+                commentStart = start
                 return start + 2
             case UInt8(ascii: "\""), UInt8(ascii: "#"):
                 return scanDelimiter(line, from: start)
@@ -320,6 +363,8 @@ extension BranchReview {
                     depth -= 1
                     if depth == 0 {
                         modes.removeLast()
+                        commentRanges.append((commentStart ?? 0)..<(index + 2))
+                        commentStart = nil
                         return index + 2
                     }
                 } else {
@@ -475,6 +520,9 @@ extension BranchReview.SwiftScanner {
             statement.expect = .nothing
         case .name(let kind):
             record(candidate, kind)
+            if kind == .function, statement.depth == 0 {
+                statement.function = Function(name: name, isStatic: statement.isStatic)
+            }
             statement.expect = .nothing
         case .binding:
             record(candidate, .variable)
@@ -528,6 +576,7 @@ extension BranchReview.SwiftScanner {
             begin(.caseName)
         default:
             guard Self.modifiers.contains(name) else { return false }
+            if name == "static" { statement.isStatic = true }
             mayTakeArguments = true
             return true
         }
@@ -628,6 +677,7 @@ extension BranchReview.SwiftScanner {
             isPrivate: parent?.isPrivate == true || (!local && typeIsPrivate),
             container: local ? nil : pendingContainer,
             extended: local ? nil : pendingExtended,
+            function: local && statement.depth == 0 ? statement.function : nil,
             outer: statement
         ))
         introducesType = false

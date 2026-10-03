@@ -14,7 +14,8 @@ extension BranchReview {
     /// Deterministic rules on the paths and on the `+` and `-` lines, built
     /// in for Swift and macOS. A line rule matches anywhere in a line,
     /// strings and trailing comments included, but not in a line that is
-    /// only a comment.
+    /// only a comment; a Swift file read in context (`readSwift`) leaves
+    /// out every comment.
     enum RiskRules {
         struct LineRule {
             let kind: RiskKind
