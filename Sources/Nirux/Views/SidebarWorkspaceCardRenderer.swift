@@ -9,18 +9,22 @@ struct SidebarWorkspaceCardRenderResult {
     let cardHoverView: NSView
     /// The "⋯" action badge — brightens while directly hovered.
     let menuBadge: SidebarBadgeView?
-    /// Initially-clear backing view per column row (keyed by column index)
-    /// for the row hover highlight.
+    /// Initially-clear backing view per column chip (keyed by column index)
+    /// for the chip hover highlight.
     let columnHoverViews: [Int: NSView]
-    /// Allow / Deny buttons, keyed by `SidebarHoverTarget.approvalButtonKey`.
+    /// Allow / Deny and Resume buttons, keyed like `SidebarHoverTarget`'s
+    /// button keys.
     let approvalButtons: [String: SidebarBadgeView]
 }
 
+/// A workspace card (`SidebarCardLayout`): state, title and age / branch
+/// and diff / column chips and the pull request, then the action block.
+/// An inactive workspace that asks nothing is one line.
 @MainActor
 final class SidebarWorkspaceCardRenderer {
-    private let workspace: WorkspaceInfo
-    private let sidebarWidth: CGFloat
-    private let padding: CGFloat
+    typealias Metrics = SidebarExpandedMetrics
+
+    private let layout: SidebarCardLayout
     private let yOffset: CGFloat
 
     private var views: [NSView] = []
@@ -29,58 +33,35 @@ final class SidebarWorkspaceCardRenderer {
     private var columnHoverViews: [Int: NSView] = [:]
     private var approvalButtons: [String: SidebarBadgeView] = [:]
 
-    init(workspace: WorkspaceInfo, sidebarWidth: CGFloat, padding: CGFloat, yOffset: CGFloat) {
-        self.workspace = workspace
-        self.sidebarWidth = sidebarWidth
-        self.padding = padding
+    private var workspace: WorkspaceInfo { layout.workspace }
+
+    init(workspace: WorkspaceInfo, sidebarWidth: CGFloat, yOffset: CGFloat) {
+        layout = SidebarCardLayout(workspace: workspace, sidebarWidth: sidebarWidth)
         self.yOffset = yOffset
     }
 
     func render() -> SidebarWorkspaceCardRenderResult {
-        var currentY = yOffset
-        let rowTopY = currentY
-        let rowX = SidebarExpandedMetrics.workspaceInsetX
-        let rowW = sidebarWidth - SidebarExpandedMetrics.workspaceInsetX * 2
-        let contentX = padding
-        let contentW = sidebarWidth - padding * 2
-
-        let background = cardBackground()
-        append(background)
-
-        // Hover tint sits above the card background but below all content.
-        let cardHover = SidebarBackgroundView()
+        let frame = NSRect(
+            x: layout.cardX, y: yOffset - layout.height, width: layout.cardWidth, height: layout.height
+        )
+        let cardHover = SidebarBackgroundView(frame: frame)
         cardHover.wantsLayer = true
-        cardHover.layer?.cornerRadius = 8
-        append(cardHover)
-
-        let accentBar = SidebarBackgroundView()
-        if workspace.isActive {
-            accentBar.wantsLayer = true
-            accentBar.layer?.backgroundColor = SidebarView.accentColor.cgColor
-            accentBar.layer?.cornerRadius = 1.5
-            append(accentBar)
+        if layout.isCompact {
+            cardHover.layer?.cornerRadius = Theme.Radius.control
+            append(cardHover)
+            buildCompactRow(frame: frame)
+        } else {
+            append(cardBackground(frame: frame))
+            // Above the card background, below all content.
+            cardHover.layer?.cornerRadius = Theme.Radius.card
+            append(cardHover)
+            buildCard(frame: frame)
         }
-
-        currentY -= SidebarExpandedMetrics.workspacePaddingY
-        currentY = buildTitleRow(contentX: contentX, contentW: contentW, yOffset: currentY)
-        currentY = buildContextRows(contentX: contentX, contentW: contentW, yOffset: currentY)
-        currentY = buildBranchRowIfNeeded(contentX: contentX, contentW: contentW, yOffset: currentY)
-        currentY = buildMetadataRows(contentX: contentX, yOffset: currentY)
-        currentY -= SidebarExpandedMetrics.columnGap
-        currentY = buildColumnEntries(columns: workspace.columns, yOffset: currentY, padding: contentX)
-        currentY -= SidebarExpandedMetrics.workspacePaddingY
-
-        let rowHeight = rowTopY - currentY
-        let rowFrame = NSRect(x: rowX, y: currentY, width: rowW, height: rowHeight)
-        background.frame = rowFrame
-        cardHover.frame = rowFrame
-        if workspace.isActive {
-            accentBar.frame = NSRect(x: rowX, y: currentY, width: 3, height: rowHeight)
-        }
-        hitAreas.append(SidebarHitArea(frame: rowFrame, region: .workspace(workspace.index)))
+        // Last: the first area under the pointer takes the click.
+        hitAreas.append(SidebarHitArea(frame: frame, region: .workspace(workspace.index)))
 
         return SidebarWorkspaceCardRenderResult(
-            bottomY: currentY,
+            bottomY: frame.minY,
             views: views,
             hitAreas: hitAreas,
             cardHoverView: cardHover,
@@ -90,486 +71,457 @@ final class SidebarWorkspaceCardRenderer {
         )
     }
 
-    private func buildContextRows(contentX: CGFloat, contentW: CGFloat, yOffset: CGFloat) -> CGFloat {
-        var currentY = yOffset
-        if let purpose = workspace.purpose {
-            let label = textLabel(
-                purpose,
-                font: .systemFont(ofSize: 11, weight: .medium),
-                color: NSColor.white.withAlphaComponent(workspace.isActive ? 0.72 : 0.52)
-            )
-            label.toolTip = purpose
-            label.frame = NSRect(
-                x: contentX,
-                y: currentY - SidebarExpandedMetrics.purposeHeight,
-                width: contentW,
-                height: SidebarExpandedMetrics.purposeHeight
-            )
-            append(label)
-            currentY -= SidebarExpandedMetrics.purposeAdvance
+    // MARK: - Card
+
+    private func buildCard(frame: NSRect) {
+        var top = frame.maxY - Metrics.cardPaddingY
+        buildTitleRow(top: top)
+        top -= Metrics.titleRowHeight
+        if layout.showsBranchRow {
+            top -= Metrics.cardRowGap
+            buildBranchRow(top: top)
+            top -= Metrics.branchRowHeight
         }
-
-        currentY = buildPhaseRow(contentX: contentX, contentW: contentW, yOffset: currentY)
-        currentY = buildActionRowIfNeeded(contentX: contentX, contentW: contentW, yOffset: currentY)
-
-        if let summary = workspace.lastSummary {
-            let label = textLabel(
-                summary,
-                font: .systemFont(ofSize: 10.5, weight: .regular),
-                color: NSColor.white.withAlphaComponent(workspace.isActive ? 0.52 : 0.38)
-            )
-            label.toolTip = summary
-            label.frame = NSRect(
-                x: contentX,
-                y: currentY - SidebarExpandedMetrics.summaryHeight,
-                width: contentW,
-                height: SidebarExpandedMetrics.summaryHeight
-            )
-            append(label)
-            currentY -= SidebarExpandedMetrics.summaryAdvance
+        let lineCount = max(layout.chipRows.count, layout.links.isEmpty ? 0 : 1)
+        var chipAreas: [SidebarHitArea] = []
+        if lineCount > 0 { top -= Metrics.cardRowGap + Metrics.chipRowTopGap }
+        for line in 0..<lineCount {
+            if line == 0 { buildLinks(top: top) }
+            if line < layout.chipRows.count {
+                chipAreas += buildChips(layout.chipRows[line], top: top)
+            }
+            top -= Metrics.chipHeight + (line < lineCount - 1 ? Metrics.chipGap : 0)
         }
-        return currentY
+        buildActionBlock(top: top)
+        hitAreas += chipAreas
     }
 
-    private func buildActionRowIfNeeded(
-        contentX: CGFloat,
-        contentW: CGFloat,
-        yOffset: CGFloat
-    ) -> CGFloat {
-        guard let action = workspace.sidebarAction else { return yOffset }
-        let label = textLabel(
-            action.text,
-            font: .systemFont(ofSize: 10.5, weight: .medium),
-            color: action.isBlocker
-                ? NSColor.systemRed.withAlphaComponent(workspace.isActive ? 0.82 : 0.58)
-                : NSColor.white.withAlphaComponent(workspace.isActive ? 0.58 : 0.42)
-        )
-        label.toolTip = action.text
-        label.frame = NSRect(
-            x: contentX,
-            y: yOffset - SidebarExpandedMetrics.actionHeight,
-            width: contentW,
-            height: SidebarExpandedMetrics.actionHeight
-        )
-        append(label)
-        return yOffset - SidebarExpandedMetrics.actionAdvance
-    }
+    private func buildTitleRow(top: CGFloat) {
+        let rowY = top - Metrics.titleRowHeight
+        buildStateIndicator(centerY: rowY + Metrics.titleRowHeight / 2, x: layout.contentX)
 
-    private func buildPhaseRow(contentX: CGFloat, contentW: CGFloat, yOffset: CGFloat) -> CGFloat {
-        let phase = workspace.phase
-        let phaseLabel = textLabel(
-            "\(phase.symbol) \(phase.displayName)",
-            font: .monospacedSystemFont(ofSize: 10, weight: .semibold),
-            color: phaseColor(phase)
-        )
-        phaseLabel.setAccessibilityLabel("\(phase.displayName) phase")
-        let hasActivity = workspace.lastActivityAt != nil
-        let ageWidth: CGFloat = hasActivity ? 54 : 82
-        phaseLabel.frame = NSRect(
-            x: contentX,
-            y: yOffset - SidebarExpandedMetrics.phaseHeight,
-            width: contentW - ageWidth - 2,
-            height: SidebarExpandedMetrics.phaseHeight
-        )
-        append(phaseLabel)
-
-        let ageText = workspace.lastActivityAt.map {
-            SidebarView.relativeAge(since: $0)
-        } ?? "No activity yet"
-        let ageDescription = hasActivity ? "Last activity \(ageText) ago" : ageText
-        let ageLabel = textLabel(
-            ageText,
-            font: .monospacedSystemFont(ofSize: 9.5, weight: .regular),
-            color: NSColor.white.withAlphaComponent(0.34)
-        )
-        ageLabel.alignment = .right
-        ageLabel.toolTip = ageDescription
-        ageLabel.setAccessibilityLabel(ageDescription)
-        ageLabel.frame = NSRect(
-            x: contentX + contentW - ageWidth,
-            y: yOffset - SidebarExpandedMetrics.phaseHeight,
-            width: ageWidth,
-            height: SidebarExpandedMetrics.phaseHeight
-        )
-        append(ageLabel)
-        return yOffset - SidebarExpandedMetrics.phaseAdvance
-    }
-
-    private func phaseColor(_ phase: WorkspacePhase) -> NSColor {
-        switch phase {
-        case .active: return .systemGreen
-        case .waiting: return Theme.Color.waiting
-        case .blocked: return .systemRed
-        case .review: return .systemPurple
-        case .parked: return NSColor.white.withAlphaComponent(0.38)
-        case .done: return .systemTeal
+        var maxX = layout.contentMaxX
+        if let age = ageLabel() {
+            age.frame = NSRect(x: maxX - age.fittingSize.width, y: rowY, width: age.fittingSize.width, height: Metrics.titleRowHeight)
+            append(age)
+            maxX = age.frame.minX - Theme.Space.sm
         }
-    }
-
-    private func buildTitleRow(contentX: CGFloat, contentW: CGFloat, yOffset: CGFloat) -> CGFloat {
-        let title = textLabel(
-            workspace.title,
-            font: .monospacedSystemFont(ofSize: 14, weight: .bold),
-            color: workspace.isActive ? NSColor.white.withAlphaComponent(0.92) : NSColor.white.withAlphaComponent(0.68)
-        )
-        title.frame = NSRect(
-            x: contentX,
-            y: yOffset - SidebarExpandedMetrics.titleHeight,
-            width: contentW - 38,
-            height: SidebarExpandedMetrics.titleHeight
-        )
-        append(title)
-
-        // "⋯" workspace-actions button — always visible so the menu is
-        // discoverable. Replaces the old column-count chip: the columns are
-        // already listed right below in the card.
-        let badge = badgeView(
-            "⋯",
-            color: NSColor.white.withAlphaComponent(0.58),
-            background: NSColor.white.withAlphaComponent(0.045)
-        )
-        badge.hoverTextColor = NSColor.white.withAlphaComponent(0.92)
-        badge.hoverFillColor = NSColor.white.withAlphaComponent(0.14)
-        badge.frame = NSRect(
-            x: sidebarWidth - padding - SidebarExpandedMetrics.countChipWidth,
-            y: yOffset - SidebarExpandedMetrics.titleHeight
-                + (SidebarExpandedMetrics.titleHeight - SidebarExpandedMetrics.countChipHeight) / 2,
-            width: SidebarExpandedMetrics.countChipWidth,
-            height: SidebarExpandedMetrics.countChipHeight
-        )
-        badge.toolTip = "Workspace actions"
-        append(badge)
-        menuBadge = badge
-        hitAreas.append(SidebarHitArea(
-            frame: badge.frame.insetBy(dx: -4, dy: -3),
-            region: .workspaceMenu(workspace.index)
+        let badge = menuButton(revealed: workspace.isActive, frame: NSRect(
+            x: maxX - Metrics.menuButtonWidth, y: rowY + (Metrics.titleRowHeight - Metrics.menuButtonHeight) / 2,
+            width: Metrics.menuButtonWidth, height: Metrics.menuButtonHeight
         ))
 
-        return yOffset - SidebarExpandedMetrics.titleAdvance
+        let titleX = layout.contentX + Metrics.stateDotSize + Theme.Space.sm
+        let isQuiet = !workspace.isActive && [.idle, .done].contains(layout.state)
+        let title = textLabel(
+            workspace.title, font: Theme.Font.title,
+            color: isQuiet ? Theme.Color.textSecondary : Theme.Color.textPrimary
+        )
+        title.toolTip = titleToolTip()
+        title.frame = NSRect(x: titleX, y: rowY, width: max(0, badge.frame.minX - Theme.Space.sm - titleX), height: Metrics.titleRowHeight + 1)
+        append(title)
     }
 
-    private func buildBranchRowIfNeeded(contentX: CGFloat, contentW: CGFloat, yOffset: CGFloat) -> CGFloat {
-        guard let branch = workspace.gitBranch, branch != workspace.title else { return yOffset }
-        let branchLabel = textLabel(
-            branch,
-            font: .monospacedSystemFont(ofSize: 11, weight: .regular),
-            color: NSColor.white.withAlphaComponent(workspace.isActive ? 0.48 : 0.34)
+    /// Time since the last activity; amber while the workspace waits on
+    /// the user, since that's how long it has.
+    private func ageLabel() -> NSTextField? {
+        guard let lastActivityAt = workspace.lastActivityAt else { return nil }
+        let age = SidebarView.cardAge(since: lastActivityAt)
+        let label = textLabel(
+            age, font: Theme.Font.caption,
+            color: layout.state == .waiting ? Theme.Color.waiting : Theme.Color.textTertiary
         )
-        branchLabel.frame = NSRect(
-            x: contentX,
-            y: yOffset - SidebarExpandedMetrics.branchHeight,
-            width: contentW,
-            height: SidebarExpandedMetrics.branchHeight
-        )
-        append(branchLabel)
-        return yOffset - SidebarExpandedMetrics.branchAdvance
+        label.alignment = .right
+        let description = age == "now" ? "Last activity less than a minute ago" : "Last activity \(age) ago"
+        label.toolTip = description
+        label.setAccessibilityLabel(description)
+        return label
     }
 
-    private func buildMetadataRows(contentX: CGFloat, yOffset: CGFloat) -> CGFloat {
-        var currentY = yOffset
+    /// The title's tooltip: what the card doesn't print — the phase, the
+    /// purpose, the last summary, another card's next step.
+    private func titleToolTip() -> String {
+        var lines = [workspace.title, "Phase: \(workspace.phase.displayName)"]
+        if let purpose = workspace.purpose { lines.append("Purpose: \(purpose)") }
+        if let summary = workspace.lastSummary { lines.append("Last: \(summary)") }
+        // The selected card prints the next step, every card its blocker.
+        if let action = workspace.sidebarAction, !workspace.isActive, !action.isBlocker { lines.append(action.text) }
+        if workspace.lastActivityAt == nil { lines.append("No activity yet") }
+        return lines.joined(separator: "\n")
+    }
+
+    private func buildStateIndicator(centerY: CGFloat, x: CGFloat) {
+        let size = Metrics.stateDotSize
+        let color: NSColor
+        switch layout.state {
+        case .done:
+            let icon = SidebarImageView(image: SidebarRenderer.symbol(Theme.Symbol.merged, color: Theme.Color.done))
+            icon.frame = NSRect(x: x - 2, y: centerY - 6, width: 12, height: 12)
+            icon.setAccessibilityLabel("Pull request merged")
+            append(icon)
+            return
+        case .working: color = Theme.Color.working
+        case .waiting: color = Theme.Color.waiting
+        case .error: color = Theme.Color.error
+        case .idle: color = Theme.Color.idle
+        }
+        if layout.state == .waiting {
+            let halo = SidebarBackgroundView(frame: NSRect(x: x - 3, y: centerY - size / 2 - 3, width: size + 6, height: size + 6))
+            halo.wantsLayer = true
+            halo.layer?.cornerRadius = (size + 6) / 2
+            halo.layer?.backgroundColor = Theme.Color.waiting.withAlphaComponent(0.22).cgColor
+            append(halo)
+        }
+        let dot = SidebarBackgroundView(frame: NSRect(x: x, y: centerY - size / 2, width: size, height: size))
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = size / 2
+        dot.layer?.backgroundColor = color.cgColor
+        if layout.state == .working { Self.breathe(dot.layer) }
+        append(dot)
+    }
+
+    /// The working dot breathes, in phase with every other one: a rebuild
+    /// doesn't restart it.
+    private static func breathe(_ layer: CALayer?) {
+        guard let layer, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        let animation = CABasicAnimation(keyPath: "opacity")
+        animation.fromValue = 1.0
+        animation.toValue = 0.35
+        animation.duration = 0.9
+        animation.autoreverses = true
+        animation.repeatCount = .infinity
+        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        animation.timeOffset = CACurrentMediaTime().truncatingRemainder(dividingBy: animation.duration * 2)
+        // A slow fade all day long: no need for 120 frames a second.
+        animation.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)
+        layer.add(animation, forKey: "breathe")
+    }
+
+    private func buildBranchRow(top: CGFloat) {
+        let rowY = top - Metrics.branchRowHeight
+        var maxX = layout.contentMaxX
         if let stats = workspace.diffStats {
-            currentY = buildDiffStatsLabel(stats: stats, padding: contentX, yOffset: currentY)
-        }
-        if let prInfo = workspace.prInfo {
-            currentY = buildPRInfoLabels(prInfo: prInfo, padding: contentX, yOffset: currentY)
-        }
-        if let badges = workspace.reviewBadges {
-            append(SidebarReviewBadgesRow.label(
-                badges, isActive: workspace.isActive, x: contentX, width: sidebarWidth - contentX * 2, top: currentY
-            ))
-            currentY -= SidebarExpandedMetrics.reviewAdvance
-        }
-        return currentY
-    }
-
-    private func buildColumnEntries(columns: [ColumnInfo], yOffset: CGFloat, padding: CGFloat) -> CGFloat {
-        var currentY = yOffset
-        let rightDotSize: CGFloat = 8
-
-        for column in columns {
-            let rowHeight = SidebarExpandedMetrics.columnRowHeight
-            let rowY = currentY - rowHeight
-
-            let rowBackingFrame = NSRect(
-                x: padding - 7,
-                y: rowY - 3,
-                width: sidebarWidth - padding * 2 + 14,
-                height: rowHeight + 6
-            )
-            if column.isFocused {
-                let selected = SidebarBackgroundView(frame: rowBackingFrame)
-                selected.wantsLayer = true
-                selected.layer?.cornerRadius = 6
-                selected.layer?.backgroundColor = Theme.Color.accent.withAlphaComponent(0.10).cgColor
-                append(selected)
-            }
-
-            // Initially-clear hover backing, tinted by SidebarView while the
-            // pointer is over this row.
-            let rowHover = SidebarBackgroundView(frame: rowBackingFrame)
-            rowHover.wantsLayer = true
-            rowHover.layer?.cornerRadius = 6
-            append(rowHover)
-            columnHoverViews[column.index] = rowHover
-
-            // A restored agent that hasn't resumed shows Resume where the
-            // status dot goes: it has no status yet.
-            let trailingWidth = column.deferredAgent == nil
-                ? 18 : SidebarExpandedMetrics.approvalButtonWidth + 8
-            let label = NSTextField(labelWithAttributedString: SidebarRenderer.attributedColumn(column, fontSize: 11))
-            label.lineBreakMode = .byTruncatingTail
-            label.frame = NSRect(x: padding, y: rowY, width: sidebarWidth - padding * 2 - trailingWidth, height: rowHeight)
-            label.toolTip = SidebarRenderer.attentionTooltip(for: column)
-            append(label)
-
-            if let deferred = column.deferredAgent {
-                buildDeferredResumeButton(deferred, columnIndex: column.index, rowY: rowY, padding: padding)
-            } else {
-                let dot = statusDot(for: column)
-                dot.frame = NSRect(
-                    x: sidebarWidth - padding - rightDotSize,
-                    y: rowY + (rowHeight - rightDotSize) / 2,
-                    width: rightDotSize,
-                    height: rightDotSize
-                )
-                append(dot)
-            }
-
-            let hitRect = NSRect(
-                x: padding - 8,
-                y: currentY - SidebarExpandedMetrics.columnRowAdvance,
-                width: sidebarWidth - padding * 2 + 16,
-                height: SidebarExpandedMetrics.columnRowAdvance
-            )
+            let diff = NSTextField.sidebarLine(SidebarRenderer.diffAttributedString(stats), lineBreakMode: .byClipping)
+            let width = ceil(diff.fittingSize.width)
+            diff.frame = NSRect(x: maxX - width, y: rowY, width: width, height: Metrics.branchRowHeight)
+            diff.toolTip = "\(SidebarRenderer.formatDiffStats(stats)) — show the diff"
+            append(diff)
             hitAreas.append(SidebarHitArea(
-                frame: hitRect,
-                region: .column(workspaceIndex: workspace.index, columnIndex: column.index)
+                frame: diff.frame.insetBy(dx: -2, dy: -2),
+                region: .link(url: SidebarView.diffActionURL(workspaceIndex: workspace.index), label: diff)
             ))
-
-            currentY -= SidebarExpandedMetrics.columnRowAdvance
-            if let approval = column.permissionApproval {
-                let block = SidebarApprovalBlockRenderer(
-                    approval: approval, workspaceIndex: workspace.index, columnIndex: column.index,
-                    x: padding, width: sidebarWidth - padding * 2, top: currentY
-                ).render()
-                views += block.views
-                hitAreas += block.hitAreas
-                approvalButtons.merge(block.buttons) { _, new in new }
-                currentY = block.bottomY
-            }
-            if case let .stoppedOnError(kind, detail, failedAt, resume)? = column.stuck {
-                let block = SidebarResumeBlockRenderer(
-                    kind: kind, detail: detail, failedAt: failedAt, resume: resume,
-                    workspaceIndex: workspace.index, columnIndex: column.index,
-                    x: padding, width: sidebarWidth - padding * 2, top: currentY
-                ).render()
-                views += block.views
-                hitAreas += block.hitAreas
-                approvalButtons.merge(block.buttons) { _, new in new }
-                currentY = block.bottomY
-            }
+            maxX = diff.frame.minX - Theme.Space.sm
         }
-
-        return currentY
+        if let branchName = workspace.gitBranch {
+            let branch = textLabel(branchName, font: Theme.Font.mono, color: Theme.Color.textSecondary)
+            branch.toolTip = branchName
+            branch.frame = NSRect(x: layout.indentX, y: rowY, width: max(0, maxX - layout.indentX), height: Metrics.branchRowHeight)
+            append(branch)
+        }
     }
 
-    /// Resume at the end of a not-resumed agent's row. Its hit area goes
-    /// before the row's: the first area under the pointer takes the click.
-    private func buildDeferredResumeButton(_ deferred: SidebarDeferredAgent, columnIndex: Int, rowY: CGFloat, padding: CGFloat) {
-        let color = Theme.Color.accent
-        let label = "Resume \(deferred.processName) here"
-        let button = SidebarBadgeView(
-            text: "Resume",
-            textColor: color.withAlphaComponent(0.95),
-            fillColor: color.withAlphaComponent(0.16),
-            font: .systemFont(ofSize: 10.5, weight: .semibold)
-        )
-        button.hoverTextColor = color
-        button.hoverFillColor = color.withAlphaComponent(0.3)
-        button.toolTip = label
+    /// The pull request's links, right-aligned on the first chip line.
+    private func buildLinks(top: CGFloat) {
+        let rowY = top - Metrics.chipHeight
+        var x = layout.contentMaxX - layout.links.reduce(CGFloat(0)) { $0 + $1.width }
+            - SidebarCardLayout.linkGaps(layout.links)
+        for link in layout.links {
+            let label = NSTextField.sidebarLine(link.text, lineBreakMode: .byClipping)
+            let height = ceil(label.fittingSize.height)
+            label.frame = NSRect(x: x - 2, y: rowY + (Metrics.chipHeight - height) / 2, width: link.width + 4, height: height)
+            label.toolTip = link.toolTip
+            append(label)
+            hitAreas.append(SidebarHitArea(
+                frame: NSRect(x: x - 2, y: rowY, width: link.width + 4, height: Metrics.chipHeight),
+                region: .link(url: link.url, label: label)
+            ))
+            x += link.width + Theme.Space.xs
+        }
+    }
+
+    private func buildChips(_ row: [SidebarCardLayout.ChipPlacement], top: CGFloat) -> [SidebarHitArea] {
+        let rowY = top - Metrics.chipHeight
+        var areas: [SidebarHitArea] = []
+        let maxWidth = layout.contentMaxX - layout.indentX
+        for placement in row {
+            let chip = placement.chip
+            let frame = NSRect(
+                x: layout.indentX + placement.x, y: rowY,
+                width: min(chip.width, maxWidth - placement.x), height: Metrics.chipHeight
+            )
+            let background = SidebarBackgroundView(frame: frame)
+            background.wantsLayer = true
+            background.layer?.cornerRadius = Theme.Radius.chip
+            background.layer?.backgroundColor = chip.fillColor.cgColor
+            append(background)
+            // Initially clear, tinted by SidebarView while the pointer is
+            // over this chip.
+            let hover = SidebarBackgroundView(frame: frame)
+            hover.wantsLayer = true
+            hover.layer?.cornerRadius = Theme.Radius.chip
+            append(hover)
+            columnHoverViews[chip.column.index] = hover
+
+            let label = NSTextField.sidebarLine(chip.text, lineBreakMode: .byClipping)
+            let height = ceil(label.fittingSize.height)
+            label.frame = NSRect(
+                x: frame.minX + Metrics.chipPaddingX - 2, y: rowY + (Metrics.chipHeight - height) / 2,
+                width: max(0, frame.width - Metrics.chipPaddingX * 2) + 4, height: height
+            )
+            label.toolTip = chip.toolTip
+            label.setAccessibilityLabel(chip.accessibilityLabel)
+            append(label)
+            if let deferred = chip.column.deferredAgent {
+                areas += buildResumeChip(deferred, columnIndex: chip.column.index, frame: frame)
+                continue
+            }
+            // A focused column that waits or broke keeps a sign of focus.
+            if chip.column.isFocused, [.waiting, .error].contains(chip.style) {
+                background.layer?.borderWidth = 1
+                background.layer?.borderColor = Theme.Color.accent.withAlphaComponent(0.6).cgColor
+            }
+            areas.append(SidebarHitArea(
+                frame: frame.insetBy(dx: -Metrics.chipGap / 2, dy: -2),
+                region: .column(workspaceIndex: workspace.index, columnIndex: chip.column.index)
+            ))
+        }
+        return areas
+    }
+
+    /// A restored agent that hasn't resumed: "Resume" starts it here,
+    /// armed and hovered like Allow / Deny; its icon focuses the column, as
+    /// the row did around the button.
+    private func buildResumeChip(_ deferred: SidebarDeferredAgent, columnIndex: Int, frame: NSRect) -> [SidebarHitArea] {
+        let iconWidth = Metrics.chipPaddingX + 12 + Theme.Space.xs / 2
+        let (icon, resume) = frame.divided(atDistance: iconWidth, from: .minXEdge)
+        let button = SidebarBadgeView(text: "", textColor: .clear, fillColor: .clear, font: Theme.Font.caption)
+        button.frame = resume
+        button.cornerRadius = Theme.Radius.chip
+        button.hoverFillColor = Theme.Color.accent.withAlphaComponent(0.14)
+        button.toolTip = deferred.tooltip
         button.setAccessibilityRole(.button)
-        button.setAccessibilityLabel(label)
-        let width = SidebarExpandedMetrics.approvalButtonWidth
-        button.frame = NSRect(
-            x: sidebarWidth - padding - width, y: rowY, width: width, height: SidebarExpandedMetrics.columnRowHeight
-        )
+        button.setAccessibilityLabel("Resume \(deferred.processName) here")
+        views.last?.setAccessibilityElement(false)
         append(button)
         approvalButtons[SidebarHoverTarget.deferredResumeButtonKey(columnID: deferred.columnID)] = button
-        hitAreas.append(SidebarHitArea(
-            frame: button.frame.insetBy(dx: -3, dy: -3),
-            region: .deferredAgentResume(workspaceIndex: workspace.index, columnIndex: columnIndex, columnID: deferred.columnID)
-        ))
+        return [
+            SidebarHitArea(
+                frame: NSRect(x: resume.minX, y: resume.minY - 2, width: resume.width + Metrics.chipGap / 2, height: resume.height + 4),
+                region: .deferredAgentResume(workspaceIndex: workspace.index, columnIndex: columnIndex, columnID: deferred.columnID)
+            ),
+            SidebarHitArea(
+                frame: NSRect(x: icon.minX - Metrics.chipGap / 2, y: icon.minY - 2, width: icon.width + Metrics.chipGap / 2, height: icon.height + 4),
+                region: .column(workspaceIndex: workspace.index, columnIndex: columnIndex)
+            )
+        ]
     }
 
-    private func buildDiffStatsLabel(stats: String, padding: CGFloat, yOffset: CGFloat) -> CGFloat {
-        let compact = SidebarRenderer.formatDiffStats(stats)
-        let statsLabel = NSTextField(labelWithString: "")
-        statsLabel.allowsEditingTextAttributes = true
-        statsLabel.isSelectable = false
-        statsLabel.attributedStringValue = SidebarRenderer.diffStatsAttributedString(compact, fontSize: 10)
-        statsLabel.lineBreakMode = .byTruncatingTail
-        statsLabel.frame = NSRect(
-            x: padding,
-            y: yOffset - SidebarExpandedMetrics.diffHeight,
-            width: sidebarWidth - padding * 2,
-            height: SidebarExpandedMetrics.diffHeight
-        )
-        append(statsLabel)
-        hitAreas.append(SidebarHitArea(
-            frame: statsLabel.frame,
-            region: .link(url: SidebarView.diffActionURL(workspaceIndex: workspace.index), label: statsLabel)
-        ))
-        return yOffset - SidebarExpandedMetrics.diffAdvance
-    }
+    // MARK: - Action block
 
-    private func buildPRInfoLabels(prInfo: PRInfo, padding: CGFloat, yOffset: CGFloat) -> CGFloat {
-        var currentY = yOffset
-        let indent: CGFloat = 8
-        currentY = buildPRStateLabel(prInfo: prInfo, padding: padding, yOffset: currentY)
-        currentY = buildCIStatusLabel(prInfo: prInfo, padding: padding, indent: indent, yOffset: currentY)
-        currentY = buildReviewDecisionLabel(prInfo: prInfo, padding: padding, indent: indent, yOffset: currentY)
-        currentY = buildPRFeedbackLabel(padding: padding, indent: indent, yOffset: currentY)
-        return currentY
-    }
-
-    private func buildPRStateLabel(prInfo: PRInfo, padding: CGFloat, yOffset: CGFloat) -> CGFloat {
-        let (stateText, stateColor) = SidebarRenderer.prStateDisplay(prInfo)
-        let prLabel = textLabel(
-            "#\(prInfo.number) \(stateText)",
-            font: .monospacedSystemFont(ofSize: 9, weight: .medium),
-            color: stateColor
-        )
-        let width = sidebarWidth - padding * 2
-        prLabel.frame = NSRect(
-            x: padding,
-            y: yOffset - SidebarExpandedMetrics.prStateHeight,
-            width: workspace.mergedCleanup == nil ? width : min(prLabel.fittingSize.width, width),
-            height: SidebarExpandedMetrics.prStateHeight
-        )
-        append(prLabel)
-        hitAreas.append(SidebarHitArea(frame: prLabel.frame, region: .link(url: openURLAction(prInfo.url), label: prLabel)))
-        if let offer = workspace.mergedCleanup {
-            buildCleanupLink(offer, after: prLabel, color: stateColor, maxX: padding + width)
+    /// Approvals, Resume, the blocker, Clean up, then what's next: under
+    /// line 3, after a separator unless it only says something.
+    private func buildActionBlock(top: CGFloat) {
+        let actions = layout.actions
+        guard !actions.isEmpty else { return }
+        var top = top
+        if actions.allSatisfy(\.isQuiet) {
+            top -= Metrics.quietBlockGap
+        } else {
+            top -= Metrics.actionBlockGap
+            let separator = SidebarBackgroundView(frame: NSRect(
+                x: layout.contentX, y: top - 1, width: layout.contentMaxX - layout.contentX, height: 1
+            ))
+            separator.wantsLayer = true
+            separator.layer?.backgroundColor = Theme.Color.line.cgColor
+            append(separator)
+            top -= 1 + Metrics.actionBlockGap
         }
-        return yOffset - SidebarExpandedMetrics.prStateAdvance
+        for (position, action) in actions.enumerated() {
+            if position > 0 { top -= Metrics.actionRowGap }
+            buildAction(action, top: top)
+            top -= Metrics.height(of: action)
+        }
     }
 
-    /// "· Clean up" after "#N merged": the ⋯ menu's "Clean Up Worktree…",
-    /// with the same checks and confirmation. "· Cleaning up…" while one
+    private func buildAction(_ action: SidebarCardAction, top: CGFloat) {
+        let x = layout.contentX
+        let width = layout.contentMaxX - layout.contentX
+        switch action {
+        case let .approval(columnIndex, agent, approval):
+            add(SidebarApprovalBlockRenderer(
+                approval: approval, agent: agent, workspaceIndex: workspace.index, columnIndex: columnIndex,
+                x: x, width: width, top: top
+            ).render())
+        case let .resume(columnIndex, kind, detail, failedAt, resume):
+            add(SidebarResumeBlockRenderer(
+                kind: kind, detail: detail, failedAt: failedAt, resume: resume,
+                workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top
+            ).render())
+        case .blocker(let text):
+            let label = textLabel(text, font: Theme.Font.caption, color: Theme.Color.error)
+            label.toolTip = text
+            label.frame = NSRect(x: x, y: top - Metrics.actionLineHeight, width: width, height: Metrics.actionLineHeight)
+            append(label)
+        case let .cleanup(offer, number):
+            buildCleanup(offer, pullRequest: number, top: top)
+        case .reviewBadges(let badges):
+            let indent = layout.indentX
+            let prefix = textLabel("Reviews", font: Theme.Font.caption, color: Theme.Color.textTertiary)
+            prefix.frame = NSRect(x: indent, y: top - Metrics.actionLineHeight, width: prefix.fittingSize.width, height: Metrics.actionLineHeight)
+            append(prefix)
+            let badgesX = prefix.frame.maxX + Theme.Space.sm
+            append(SidebarReviewBadgesRow.label(
+                badges, x: badgesX, width: layout.contentMaxX - badgesX, top: top
+            ))
+        case .next(let text):
+            let label = NSTextField.sidebarLine(Self.nextText(text))
+            label.toolTip = "Next: \(text)"
+            label.frame = NSRect(
+                x: layout.indentX, y: top - Metrics.actionLineHeight,
+                width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight
+            )
+            append(label)
+        }
+    }
+
+    private static func nextText(_ text: String) -> NSAttributedString {
+        let font = Theme.Font.caption
+        let result = NSMutableAttributedString(string: "Next", attributes: [
+            .font: font, .foregroundColor: Theme.Color.textTertiary
+        ])
+        result.append(SidebarColumnChip.spacer(6))
+        result.append(NSAttributedString(string: text, attributes: [
+            .font: font, .foregroundColor: Theme.Color.textSecondary
+        ]))
+        return result
+    }
+
+    private func add(_ block: SidebarApprovalBlockRenderer.Result) {
+        views += block.views
+        hitAreas += block.hitAreas
+        approvalButtons.merge(block.buttons) { _, new in new }
+    }
+
+    /// "PR merged", then "Clean up": the ⋯ menu's "Clean Up Worktree…",
+    /// with the same checks and confirmation. "Cleaning up…" while one
     /// runs, which does nothing.
-    private func buildCleanupLink(_ offer: MergedCleanupOffer, after prLabel: NSTextField, color: NSColor, maxX: CGFloat) {
-        let font = NSFont.monospacedSystemFont(ofSize: 9, weight: .medium)
-        let separator = textLabel("·", font: font, color: color.withAlphaComponent(0.6))
-        separator.frame = NSRect(
-            x: prLabel.frame.maxX, y: prLabel.frame.minY,
-            width: separator.fittingSize.width, height: prLabel.frame.height
-        )
+    private func buildCleanup(_ offer: MergedCleanupOffer, pullRequest number: Int, top: CGFloat) {
+        let rowY = top - Metrics.actionLineHeight
+        let merged = textLabel("PR merged", font: Theme.Font.caption, color: Theme.Color.done)
+        merged.toolTip = "Pull request #\(number) merged"
+        merged.frame = NSRect(x: layout.contentX, y: rowY, width: merged.fittingSize.width, height: Metrics.actionLineHeight)
+        append(merged)
         let link: NSTextField
         switch offer {
         case .available:
-            link = textLabel("Clean up", font: font, color: color)
+            link = textLabel("Clean up", font: Theme.Font.caption, color: Theme.Color.accent)
             link.toolTip = "Clean Up Worktree…: checks, then asks before deleting this worktree’s folder and "
                 + "local branch and closing the workspaces open in it. The remote branch is kept."
         case .inProgress:
-            link = textLabel("Cleaning up…", font: font, color: color.withAlphaComponent(0.6))
+            link = textLabel("Cleaning up…", font: Theme.Font.caption, color: Theme.Color.textTertiary)
         }
-        link.frame = NSRect(
-            x: separator.frame.maxX, y: prLabel.frame.minY,
-            width: max(0, min(link.fittingSize.width, maxX - separator.frame.maxX)),
-            height: prLabel.frame.height
-        )
-        append(separator)
+        let width = link.fittingSize.width
+        link.alignment = .right
+        link.frame = NSRect(x: layout.contentMaxX - width, y: rowY, width: width, height: Metrics.actionLineHeight)
         append(link)
         guard offer == .available else { return }
         hitAreas.append(SidebarHitArea(
-            frame: link.frame,
+            frame: link.frame.insetBy(dx: -2, dy: -2),
             region: .link(url: SidebarView.cleanupActionURL(workspaceIndex: workspace.index), label: link)
         ))
     }
 
-    private func buildCIStatusLabel(prInfo: PRInfo, padding: CGFloat, indent: CGFloat, yOffset: CGFloat) -> CGFloat {
-        guard let ciStatus = prInfo.ciStatus else { return yOffset }
-        let (ciDot, ciColor, ciText) = SidebarRenderer.ciStatusDisplay(ciStatus)
-        let ciLabel = textLabel(
-            "\(ciDot) \(ciText)",
-            font: .monospacedSystemFont(ofSize: 9, weight: .regular),
-            color: ciColor
-        )
-        ciLabel.frame = NSRect(
-            x: padding + indent,
-            y: yOffset - SidebarExpandedMetrics.prDetailHeight,
-            width: sidebarWidth - padding * 2 - indent,
-            height: SidebarExpandedMetrics.prDetailHeight
-        )
-        append(ciLabel)
-        // The failed check, else the PR's Checks tab, which lists running and finished runs.
-        let ciUrl = (ciStatus == "FAILURE" ? prInfo.failedCheckUrl : nil) ?? "\(prInfo.url)/checks"
-        hitAreas.append(SidebarHitArea(frame: ciLabel.frame, region: .link(url: openURLAction(ciUrl), label: ciLabel)))
-        return yOffset - SidebarExpandedMetrics.prDetailAdvance
-    }
+    // MARK: - Compact row
 
-    private func buildReviewDecisionLabel(prInfo: PRInfo, padding: CGFloat, indent: CGFloat, yOffset: CGFloat) -> CGFloat {
-        guard let display = SidebarRenderer.reviewDecisionDisplay(
-            reviewDecision: prInfo.reviewDecision,
-            mergeable: prInfo.mergeable
-        ) else {
-            return yOffset
+    /// An inactive workspace: its state, its title, its merged PR or age.
+    private func buildCompactRow(frame: NSRect) {
+        let midY = frame.midY
+        let x = layout.contentX
+        if layout.state == .done {
+            let icon = SidebarImageView(image: SidebarRenderer.symbol(Theme.Symbol.merged, color: Theme.Color.done))
+            icon.frame = NSRect(x: x, y: midY - 6, width: 12, height: 12)
+            icon.setAccessibilityLabel("Pull request merged")
+            append(icon)
+        } else {
+            let dot = SidebarBackgroundView(frame: NSRect(x: x + 3, y: midY - 3, width: 6, height: 6))
+            dot.wantsLayer = true
+            dot.layer?.cornerRadius = 3
+            dot.layer?.backgroundColor = Theme.Color.idle.cgColor
+            append(dot)
         }
 
-        let shortText: String
-        switch display.text {
-        case "changes requested": shortText = "changes"
-        case "review requested": shortText = "review"
-        default: shortText = display.text
+        var maxX = layout.contentMaxX
+        let trailing: NSTextField?
+        if layout.state == .done, let number = workspace.prInfo?.number {
+            trailing = textLabel("#\(number)", font: Theme.Font.mono, color: Theme.Color.done)
+        } else {
+            trailing = ageLabel()
         }
+        if let trailing {
+            let width = trailing.fittingSize.width
+            let height = ceil(trailing.fittingSize.height)
+            trailing.frame = NSRect(x: maxX - width, y: midY - height / 2, width: width, height: height)
+            append(trailing)
+            maxX = trailing.frame.minX - Theme.Space.sm
+        }
+        let badge = menuButton(revealed: false, frame: NSRect(
+            x: maxX - Metrics.menuButtonWidth, y: midY - Metrics.menuButtonHeight / 2,
+            width: Metrics.menuButtonWidth, height: Metrics.menuButtonHeight
+        ))
 
-        let reviewLabel = textLabel(
-            "\(display.dot) \(shortText)",
-            font: .monospacedSystemFont(ofSize: 9, weight: .regular),
-            color: display.color
-        )
-        reviewLabel.frame = NSRect(
-            x: padding + indent,
-            y: yOffset - SidebarExpandedMetrics.prDetailHeight,
-            width: sidebarWidth - padding * 2 - indent,
-            height: SidebarExpandedMetrics.prDetailHeight
-        )
-        append(reviewLabel)
-        hitAreas.append(SidebarHitArea(frame: reviewLabel.frame, region: .link(url: openURLAction(prInfo.url), label: reviewLabel)))
-        return yOffset - SidebarExpandedMetrics.prDetailAdvance
+        let titleX = x + 12 + Theme.Space.sm
+        let title = textLabel(workspace.title, font: Theme.Font.body, color: Theme.Color.textSecondary)
+        title.toolTip = titleToolTip()
+        let height = ceil(title.fittingSize.height)
+        title.frame = NSRect(x: titleX, y: midY - height / 2, width: max(0, badge.frame.minX - Theme.Space.sm - titleX), height: height)
+        append(title)
     }
 
-    private func buildPRFeedbackLabel(padding: CGFloat, indent: CGFloat, yOffset: CGFloat) -> CGFloat {
-        guard let summary = workspace.prFeedbackSummary else { return yOffset }
-        let label = textLabel(summary, font: .monospacedSystemFont(ofSize: 9, weight: .regular), color: .secondaryLabelColor)
-        label.frame = NSRect(
-            x: padding + indent,
-            y: yOffset - SidebarExpandedMetrics.prDetailHeight,
-            width: sidebarWidth - padding * 2 - indent,
-            height: SidebarExpandedMetrics.prDetailHeight
-        )
-        append(label)
-        let url = SidebarView.prFeedbackActionURL(workspaceID: workspace.id)
-        hitAreas.append(SidebarHitArea(frame: label.frame, region: .link(url: url, label: label)))
-        return yOffset - SidebarExpandedMetrics.prDetailAdvance
+    // MARK: - Pieces
+
+    /// "⋯": the workspace menu. Shown on the selected card, and on the
+    /// others while the pointer is over them; it answers clicks either way.
+    private func menuButton(revealed: Bool, frame: NSRect) -> SidebarBadgeView {
+        let badge = SidebarBadgeView(text: "", textColor: Theme.Color.textSecondary, fillColor: .clear, font: Theme.Font.caption)
+        badge.frame = frame
+        badge.symbolName = Theme.Symbol.more
+        badge.hoverTextColor = Theme.Color.textPrimary
+        badge.hoverFillColor = Theme.Color.fillPressed
+        badge.hidesUntilHover = !revealed
+        badge.toolTip = "Workspace actions"
+        badge.setAccessibilityRole(.button)
+        badge.setAccessibilityLabel("Workspace actions")
+        menuBadge = badge
+        append(badge)
+        // Down to the diff's area, not into it.
+        hitAreas.append(SidebarHitArea(frame: frame.insetBy(dx: -4, dy: -2), region: .workspaceMenu(workspace.index)))
+        return badge
     }
 
-    private func openURLAction(_ url: String) -> String {
-        SidebarView.openActionURL(workspaceIndex: workspace.index, url: url)
-    }
-
-    private func cardBackground() -> SidebarBackgroundView {
-        let background = SidebarBackgroundView()
+    private func cardBackground(frame: NSRect) -> SidebarBackgroundView {
+        let background = SidebarBackgroundView(frame: frame)
         background.wantsLayer = true
-        background.layer?.cornerRadius = 8
-        background.layer?.backgroundColor = (workspace.isActive
-            ? NSColor.white.withAlphaComponent(0.050)
-            : NSColor.white.withAlphaComponent(0.020)
-        ).cgColor
+        background.layer?.cornerRadius = Theme.Radius.card
         background.layer?.borderWidth = 1
-        background.layer?.borderColor = NSColor.white.withAlphaComponent(workspace.isActive ? 0.09 : 0.045).cgColor
+        let surface = Theme.Color.surface
+        switch (layout.state, workspace.isActive) {
+        case (.waiting, let isSelected):
+            background.layer?.backgroundColor = Theme.Color.tint(Theme.Color.waiting, 0.08, over: surface).cgColor
+            background.layer?.borderColor = (isSelected ? Self.selectedBorder : Theme.Color.waiting.withAlphaComponent(0.5)).cgColor
+        case (_, true):
+            background.layer?.backgroundColor = Theme.Color.tint(Theme.Color.accent, 0.03, over: surface).cgColor
+            background.layer?.borderColor = Self.selectedBorder.cgColor
+        case (.error, false):
+            background.layer?.backgroundColor = surface.cgColor
+            background.layer?.borderColor = Theme.Color.error.withAlphaComponent(0.45).cgColor
+        default:
+            background.layer?.backgroundColor = surface.cgColor
+            background.layer?.borderColor = Theme.Color.line.cgColor
+        }
         return background
     }
+
+    private static var selectedBorder: NSColor { Theme.Color.accent.withAlphaComponent(0.6) }
 
     private func textLabel(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
         let label = NSTextField(labelWithString: text)
@@ -579,37 +531,66 @@ final class SidebarWorkspaceCardRenderer {
         return label
     }
 
-    private func badgeView(_ text: String, color: NSColor, background: NSColor) -> SidebarBadgeView {
-        SidebarBadgeView(
-            text: text,
-            textColor: color,
-            fillColor: background,
-            font: .monospacedSystemFont(ofSize: 10, weight: .semibold)
-        )
-    }
-
-    /// A stuck agent's dot says so whatever its status: red when it broke,
-    /// amber while its dialog waits.
-    private func statusDot(for column: ColumnInfo) -> NSView {
-        let dot = SidebarBackgroundView()
-        dot.wantsLayer = true
-        dot.layer?.cornerRadius = 4
-        let color: NSColor
-        switch (column.stuck, column.agentStatus) {
-        case let (stuck?, _):
-            color = stuck.isFailure ? .systemRed : Theme.Color.waiting
-        case (nil, .working):
-            color = .systemGreen
-        case (nil, .needsAttention):
-            color = Theme.Color.waiting
-        case (nil, .idle):
-            color = NSColor.white.withAlphaComponent(0.22)
-        }
-        dot.layer?.backgroundColor = color.cgColor
-        return dot
-    }
-
     private func append(_ view: NSView) {
         views.append(view)
+    }
+}
+
+/// An image drawn in its frame, aspect kept; clicks go through to the
+/// sidebar's hit areas.
+final class SidebarImageView: NSView {
+    private let image: NSImage?
+
+    init(image: NSImage?) {
+        self.image = image
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .image }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let image, image.size.width > 0, image.size.height > 0 else { return }
+        let scale = min(bounds.width / image.size.width, bounds.height / image.size.height, 1)
+        let size = NSSize(width: image.size.width * scale, height: image.size.height * scale)
+        image.draw(in: NSRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
+                              width: size.width, height: size.height))
+    }
+}
+
+/// The action block's buttons.
+@MainActor
+enum SidebarActionButton {
+    /// Allow: the one action the block recommends.
+    static func primary(_ title: String, label: String) -> SidebarBadgeView {
+        let button = SidebarBadgeView(
+            text: title, textColor: Theme.Color.canvas, fillColor: Theme.Color.accent,
+            font: NSFont.systemFont(ofSize: Theme.Font.caption.pointSize, weight: .semibold)
+        )
+        button.hoverFillColor = Theme.Color.tint(Theme.Color.textPrimary, 0.18, over: Theme.Color.accent)
+        return configured(button, label: label)
+    }
+
+    static func secondary(_ title: String, symbol: String? = nil, label: String) -> SidebarBadgeView {
+        let button = SidebarBadgeView(
+            text: title, textColor: Theme.Color.textPrimary, fillColor: Theme.Color.fillHover,
+            font: NSFont.systemFont(ofSize: Theme.Font.caption.pointSize, weight: .medium)
+        )
+        button.symbolName = symbol
+        button.borderColor = Theme.Color.lineStrong
+        button.hoverFillColor = Theme.Color.fillPressed
+        return configured(button, label: label)
+    }
+
+    private static func configured(_ button: SidebarBadgeView, label: String) -> SidebarBadgeView {
+        button.cornerRadius = Theme.Radius.control
+        button.toolTip = label
+        button.setAccessibilityRole(.button)
+        button.setAccessibilityLabel(label)
+        return button
     }
 }

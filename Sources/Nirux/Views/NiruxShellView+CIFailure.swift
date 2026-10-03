@@ -10,7 +10,7 @@ extension NiruxShellView {
         let red = workspace.takeNewRedChecks()
         guard !red.isEmpty, let pullRequest = workspace.prInfo,
               !(NSApp.isActive && workspace === activeWorkspace) else { return }
-        workspace.hasNotification = true
+        workspace.raiseNotification(.error)
         guard !NSApp.isActive else { return }
         NSApp.requestUserAttention(.informationalRequest)
         NiruxNotifier.shared.postCIFailure(

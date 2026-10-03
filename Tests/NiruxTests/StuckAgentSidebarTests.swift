@@ -20,7 +20,7 @@ final class StuckAgentSidebarTests: XCTestCase {
     private func workspace(_ columns: [ColumnInfo]) -> WorkspaceInfo {
         WorkspaceInfo(
             id: "ws", index: 2, title: "fix-login", profileID: WorkspaceProfile.defaultID, isInactive: false,
-            columnCount: columns.count, focusedColumn: 0, gitBranch: nil, hasNotification: false, isActive: false,
+            columnCount: columns.count, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false,
             columns: columns, prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
             phase: .active, lastSummary: nil, lastActivityAt: nil
         )
@@ -49,49 +49,56 @@ final class StuckAgentSidebarTests: XCTestCase {
         }
     }
 
-    /// The row's text, without the process icon.
-    private func rowText(_ column: ColumnInfo) -> String {
-        SidebarRenderer.attributedColumn(column, fontSize: 11).string.replacingOccurrences(of: "\u{FFFC} ", with: "")
+    /// The chip's words, without its icon.
+    private func chipText(_ column: ColumnInfo) -> String {
+        SidebarColumnChip(column).text.string.replacingOccurrences(of: "\u{FFFC}", with: "")
     }
 
-    func testRowSaysWhyTheAgentIsStuckWhateverItsStatus() {
+    private func height(_ info: WorkspaceInfo) -> CGFloat {
+        SidebarExpandedMetrics.workspaceHeight(for: info, sidebarWidth: 260)
+    }
+
+    func testChipSaysWhyTheAgentIsStuckWhateverItsStatus() {
         let waiting = column(.waiting(.permission(tool: "Bash", summary: "git push"), duration: "2h05m"))
-        XCTAssertEqual(
-            rowText(waiting), "  claude · waiting 2h05m",
-            "focused or seen, the wait still shows"
-        )
+        XCTAssertEqual(chipText(waiting), "waiting 2h05m", "focused or seen, the wait still shows")
+        XCTAssertEqual(SidebarColumnChip(waiting).style, .waiting)
         XCTAssertEqual(SidebarRenderer.attentionTooltip(for: waiting), "needs permission — waiting 2h05m — Bash: git push")
 
-        let stopped = column(failed(.offered), status: .needsAttention)
-        XCTAssertEqual(
-            rowText(stopped), "  claude · API error",
-            "the failure outranks the attention label"
-        )
+        var stopped = column(failed(.offered), status: .needsAttention)
+        stopped.attentionReason = .apiError(kind: "rate_limit", detail: nil)
+        XCTAssertEqual(chipText(stopped), "stopped", "the failure's own word, not the attention's")
+        XCTAssertEqual(SidebarColumnChip(stopped).style, .error)
         XCTAssertEqual(
             SidebarRenderer.attentionTooltip(for: stopped), "Stopped on an API error — rate_limit: API Error: 429"
         )
-        XCTAssertEqual(
-            rowText(column(.exitedMidTurn(processName: "claude"), process: "zsh")), "  claude · exited mid-turn",
+        let exited = column(.exitedMidTurn(processName: "claude"), process: "zsh")
+        XCTAssertEqual(chipText(exited), "exited")
+        XCTAssertTrue(
+            SidebarColumnChip(exited).toolTip.hasPrefix("claude · exited"),
             "the agent that died, not the shell back in front"
         )
     }
 
     func testCardGrowsByTheResumeBlockOnly() {
-        let plain = SidebarExpandedMetrics.workspaceHeight(for: workspace([column(nil)]))
-        let stopped = SidebarExpandedMetrics.workspaceHeight(for: workspace([column(failed(.offered))]))
+        let plain = height(workspace([column(nil)]))
+        let stopped = height(workspace([column(failed(.offered))]))
         XCTAssertEqual(
-            stopped - plain, SidebarExpandedMetrics.resumeBlockHeight + SidebarExpandedMetrics.approvalBottomGap
+            stopped - plain,
+            SidebarExpandedMetrics.actionBlockHeight([
+                .resume(columnIndex: 1, kind: "rate_limit", detail: nil, failedAt: 1_005, resume: .offered)
+            ])
         )
         let waiting = column(.waiting(.question(nil), duration: "12m"))
-        XCTAssertEqual(SidebarExpandedMetrics.workspaceHeight(for: workspace([waiting])), plain)
+        XCTAssertEqual(height(workspace([waiting])), plain)
     }
 
     func testFailedTurnOffersResume() throws {
         let info = workspace([column(failed(.offered))])
-        let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, padding: 20, yOffset: 800).render()
+        let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 800).render()
 
         XCTAssertEqual(resumeRegions(result.hitAreas), [ResumeRegion(workspace: 2, column: 1, failedAt: 1_005)])
-        XCTAssertTrue(labels(result.views).contains("rate_limit — API Error: 429"))
+        let error = try XCTUnwrap(result.views.compactMap { $0 as? NSTextField }.first { $0.stringValue.hasSuffix("rate_limit") })
+        XCTAssertEqual(error.toolTip, "rate_limit — API Error: 429", "the whole error, as the terminal showed it")
         XCTAssertEqual(
             Array(result.approvalButtons.keys),
             [SidebarHoverTarget.resumeButtonKey(workspaceIndex: 2, columnIndex: 1, failedAt: 1_005)],
@@ -112,7 +119,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         XCTAssertLessThan(resumeHit, blockHit)
         XCTAssertLessThan(blockHit, workspaceHit, "the block swallows clicks meant for what was there")
         XCTAssertEqual(
-            800 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: info), accuracy: 0.5,
+            800 - result.bottomY, height(info), accuracy: 0.5,
             "layout matches the metrics the scroll view is sized with"
         )
     }
@@ -125,7 +132,7 @@ final class StuckAgentSidebarTests: XCTestCase {
             (.unavailable, "Resume once claude is back at its prompt")
         ] {
             let result = SidebarWorkspaceCardRenderer(
-                workspace: workspace([column(failed(resume))]), sidebarWidth: 260, padding: 20, yOffset: 800
+                workspace: workspace([column(failed(resume))]), sidebarWidth: 260, yOffset: 800
             ).render()
             XCTAssertTrue(resumeRegions(result.hitAreas).isEmpty, text)
             XCTAssertTrue(result.approvalButtons.isEmpty, text)

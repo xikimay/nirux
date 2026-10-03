@@ -158,7 +158,7 @@ enum SidebarTestData {
         WorkspaceInfo(
             id: "ws-1", index: 0, title: title, profileID: WorkspaceProfile.defaultID,
             isInactive: false, columnCount: 1, focusedColumn: 0, gitBranch: nil,
-            hasNotification: false, isActive: true,
+            notification: nil, isActive: true,
             columns: [
                 ColumnInfo(
                     index: 0, processName: "zsh", abbreviatedCwd: "~", isFocused: true,

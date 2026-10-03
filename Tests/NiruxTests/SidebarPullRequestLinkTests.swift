@@ -14,7 +14,7 @@ final class SidebarPullRequestLinkTests: XCTestCase {
             columnCount: 0,
             focusedColumn: 0,
             gitBranch: "feat/\(index)",
-            hasNotification: false,
+            notification: nil,
             isActive: index == 0,
             columns: [],
             prInfo: prInfo,
@@ -84,11 +84,10 @@ final class SidebarPullRequestLinkTests: XCTestCase {
     func testPullRequestLinksOpenInTheirCardsWorkspace() throws {
         let opened = try clickLinks(of: pullRequest(ciStatus: "PENDING"))
 
-        XCTAssertEqual(opened.map(\.workspaceIndex), [1, 1, 1])
+        XCTAssertEqual(opened.map(\.workspaceIndex), [1, 1])
         XCTAssertEqual(opened.map(\.url), [
             "https://github.com/owner/repo/pull/42",
-            "https://github.com/owner/repo/pull/42/checks",
-            "https://github.com/owner/repo/pull/42"
+            "https://github.com/owner/repo/pull/42/checks"
         ])
     }
 
@@ -96,11 +95,7 @@ final class SidebarPullRequestLinkTests: XCTestCase {
         let failed = "https://github.com/owner/repo/actions/runs/7/job/8"
         let opened = try clickLinks(of: pullRequest(ciStatus: "FAILURE", failedCheckUrl: failed))
 
-        XCTAssertEqual(opened.map(\.url), [
-            "https://github.com/owner/repo/pull/42",
-            failed,
-            "https://github.com/owner/repo/pull/42"
-        ])
+        XCTAssertEqual(opened.map(\.url), ["https://github.com/owner/repo/pull/42", failed])
     }
 
     /// A check's details URL is set by whoever reports the check: only a
@@ -108,9 +103,6 @@ final class SidebarPullRequestLinkTests: XCTestCase {
     func testNonWebCheckURLOpensNothing() throws {
         let opened = try clickLinks(of: pullRequest(ciStatus: "FAILURE", failedCheckUrl: "file:///etc/passwd"))
 
-        XCTAssertEqual(opened.map(\.url), [
-            "https://github.com/owner/repo/pull/42",
-            "https://github.com/owner/repo/pull/42"
-        ])
+        XCTAssertEqual(opened.map(\.url), ["https://github.com/owner/repo/pull/42"])
     }
 }

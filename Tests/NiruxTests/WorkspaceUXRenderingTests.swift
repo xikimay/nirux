@@ -34,7 +34,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
             columnCount: 1,
             focusedColumn: 0,
             gitBranch: "fix/\(id)",
-            hasNotification: false,
+            notification: nil,
             isActive: isActive,
             columns: [
                 ColumnInfo(
@@ -85,7 +85,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
                     colorHex: "#7AA2F7",
                     isActive: true,
                     workspaceCount: 4,
-                    hasAttention: false
+                    attention: nil
                 )
             ],
             workspaces: [

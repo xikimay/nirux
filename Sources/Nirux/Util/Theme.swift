@@ -141,6 +141,8 @@ enum Theme {
         static let keepAwake = "cup.and.saucer.fill"
         static let permission = "hand.raised"
         static let question = "bubble.left"
+        static let prFeedback = "bubble.left"
+        static let botFeedback = "cpu"
         static let agentError = "exclamationmark.triangle.fill"
         static let resume = "play.fill"
         static let more = "ellipsis"

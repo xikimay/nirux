@@ -116,8 +116,8 @@ final class SidebarDotIndicatorView: NSView {
                 }
             }
 
-            if item.hasAttention {
-                ctx.setStrokeColor(Theme.Color.waiting.cgColor)
+            if let attention = item.attention {
+                ctx.setStrokeColor(SidebarRenderer.color(for: attention).cgColor)
                 ctx.setLineWidth(1.5)
                 ctx.strokeEllipse(in: rect.insetBy(dx: -3, dy: -3))
             }

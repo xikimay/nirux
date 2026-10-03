@@ -142,6 +142,13 @@ extension SidebarView {
         return SidebarDeferredResumeClick(workspaceIndex: workspaceIndex, columnIndex: columnIndex, columnID: releasedColumn)
     }
 
+    /// The second press of a double-click whose first click made a button
+    /// act: the rebuild may have put anything there (a deferred agent's
+    /// Resume row goes away, the card below moves up). It does nothing.
+    static func isLeftoverPress(clickCount: Int, at time: TimeInterval, after action: TimeInterval) -> Bool {
+        clickCount > 1 && time - action < NSEvent.doubleClickInterval
+    }
+
     /// A press on Allow / Deny / Resume acts only on its release (see
     /// `approvalClickDecision`, `resumeClick`, `deferredResumeClick`), never
     /// on the press. The loop also keeps the press from moving the window.
@@ -167,16 +174,19 @@ extension SidebarView {
                 pressed: region, released: released, clickCount: event.clickCount,
                 armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
             ) {
+                lastButtonActionAt = next.timestamp
                 onPermissionDecision?(decision.workspaceIndex, decision.columnIndex, decision.requestID, decision.behavior)
             } else if let resume = Self.resumeClick(
                 pressed: region, released: released, clickCount: event.clickCount,
                 armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
             ) {
+                lastButtonActionAt = next.timestamp
                 onAgentResume?(resume.workspaceIndex, resume.columnIndex, resume.failedAt)
             } else if let resume = Self.deferredResumeClick(
                 pressed: region, released: released, clickCount: event.clickCount,
                 armedAtPress: armedAtPress, armedAtRelease: armedAtRelease
             ) {
+                lastButtonActionAt = next.timestamp
                 onDeferredAgentResume?(resume.workspaceIndex, resume.columnIndex, resume.columnID)
             }
             return

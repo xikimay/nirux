@@ -17,7 +17,8 @@ extension SidebarView {
         guard let target else { return }
         if let workspaceIndex = target.workspaceIndex {
             cardHoverViews[workspaceIndex]?.layer?.backgroundColor =
-                on ? NSColor.white.withAlphaComponent(0.035).cgColor : NSColor.clear.cgColor
+                on ? Theme.Color.fillHover.cgColor : NSColor.clear.cgColor
+            menuBadgeViews[workspaceIndex]?.isCardHovered = on
         }
         switch target {
         case .workspaceCard:
@@ -26,16 +27,24 @@ extension SidebarView {
             // The whole header is one menu trigger, so its "⋯" brightens
             // together with the background tint.
             spaceHeaderHoverView?.layer?.backgroundColor =
-                on ? NSColor.white.withAlphaComponent(0.05).cgColor : NSColor.clear.cgColor
+                on ? Theme.Color.fillHover.cgColor : NSColor.clear.cgColor
             spaceHeaderBadge?.isHovered = on
         case .menuBadge(let workspaceIndex):
             menuBadgeViews[workspaceIndex]?.isHovered = on
         case .columnRow(let workspaceIndex, let columnIndex):
             columnHoverViews[workspaceIndex]?[columnIndex]?.layer?.backgroundColor =
-                on ? NSColor.white.withAlphaComponent(0.06).cgColor : NSColor.clear.cgColor
+                on ? Theme.Color.fillHover.cgColor : NSColor.clear.cgColor
         case .approvalButton(_, let key):
             approvalButtonViews[key]?.isHovered = on
         }
+    }
+
+    /// The card under `point`, whatever region of it is on top.
+    func cardIndex(at point: NSPoint) -> Int? {
+        for area in hitAreas where area.frame.contains(point) {
+            if case .workspace(let index) = area.region { return index }
+        }
+        return nil
     }
 
     /// Re-derive the hover highlight from the live mouse position. Called
@@ -62,7 +71,7 @@ extension SidebarView {
         case .actionBlock(let workspaceIndex):
             setHoverTarget(.workspaceCard(workspaceIndex))
         case .link:
-            break
+            if let card = cardIndex(at: point) { setHoverTarget(.workspaceCard(card)) }
         }
     }
 }
