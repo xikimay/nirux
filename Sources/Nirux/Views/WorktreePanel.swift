@@ -37,7 +37,7 @@ final class WorktreePanel {
         let built = RaycastPanel.build(
             RaycastPanel.Config(
                 width: Self.size.width, height: Self.size.height,
-                icon: "\u{1F333}",
+                icon: "arrow.triangle.branch",
                 placeholder: "Branch name (e.g. feat/my-feature)",
                 iconY: Self.size.height - 36,
                 fieldY: Self.size.height - 38
@@ -95,12 +95,29 @@ enum GitWorktree {
     /// `repoRoot` may be a linked worktree: the new one still goes next to
     /// the main checkout (see `mainWorktreeRoot(of:)`), but git runs in
     /// `repoRoot`, so a new branch starts from its HEAD.
-    static func create(branch: String, repoRoot: String) -> (path: String?, error: String?) {
+    ///
+    /// With `newBranchFrom` (New Task…), `branch` must be new (see
+    /// `newBranchProblem`), so an agent is never handed work that already
+    /// exists. It starts from that start point (a full ref name, or `HEAD`)
+    /// without tracking it: the agent pushes it under its own name. When git
+    /// fails after creating the worktree (a failing post-checkout hook), the
+    /// worktree is returned along with git's error; when it fails after
+    /// creating only the branch, the branch is deleted, so a retry can use
+    /// the name. The other modes never return both a path and an error.
+    static func create(
+        branch: String, repoRoot: String, newBranchFrom startPoint: String? = nil
+    ) -> (path: String?, error: String?) {
         if let problem = repositoryTopLevelProblem(repoRoot) {
             return (nil, problem)
         }
         guard isValidBranchName(branch, repoRoot: repoRoot) else {
             return (nil, "Invalid branch name: \(branch)")
+        }
+        var startCommit: String?
+        if let startPoint {
+            let start = newBranchStart(branch, from: startPoint, repoRoot: repoRoot)
+            guard let commit = start.commit else { return (nil, start.problem) }
+            startCommit = commit
         }
 
         // Sanitize branch name for directory path
@@ -127,7 +144,7 @@ enum GitWorktree {
             }
             let existing = worktrees[index].path
             if let reusable = reusableWorktree(existing, branch: branch, requester: repoRoot, worktrees: worktrees) {
-                excludeHandoverFiles(repoRoot: repoRoot)
+                ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repoRoot)
                 return (reusable, nil)
             }
             if FileManager.default.fileExists(atPath: existing) {
@@ -156,7 +173,9 @@ enum GitWorktree {
         // --quiet: no "Preparing worktree" line ahead of an error, which the
         // panel's one-line status would show instead of the error.
         let args: [String]
-        if branchExists {
+        if let startCommit {
+            args = ["worktree", "add", "--quiet", "--no-track", "-b", branch, worktreePath, startCommit]
+        } else if branchExists {
             args = ["worktree", "add", "--quiet", worktreePath, branch]
         } else if remoteBranchExists {
             args = ["worktree", "add", "--quiet", "--track", "-b", branch, worktreePath, "origin/\(branch)"]
@@ -166,52 +185,14 @@ enum GitWorktree {
 
         let result = gitRunFull(args, cwd: repoRoot)
         if result.status == 0 {
-            excludeHandoverFiles(repoRoot: repoRoot)
+            ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repoRoot)
             return (worktreePath, nil)
-        } else {
-            let msg = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            return (nil, msg.isEmpty ? "git worktree add failed" : msg)
         }
-    }
-
-    /// Handover files stay untracked in every worktree, where a `git add -A`
-    /// would commit them. `info/exclude` sits in the common dir, so one
-    /// write covers every worktree of the repository without changing it.
-    /// A failure only means they stay visible: the worktree is still usable.
-    private static func excludeHandoverFiles(repoRoot: String) {
-        // Anchored: Nirux only writes them at the top level.
-        let names = ["/.claude-handover.md", "/.codex-handover.md"]
-        guard let commonDir = absoluteGitPaths(["--git-common-dir"], in: repoRoot)?.first else {
-            NSLog("[Worktree] Couldn't find the git common dir of \(repoRoot)")
-            return
-        }
-        // Appended in place, never through a symlink: the repository may
-        // have been planted, and its exclude file may hold bytes other
-        // than UTF-8 that a rewrite would lose.
-        let info = commonDir + "/info"
-        try? FileManager.default.createDirectory(atPath: info, withIntermediateDirectories: false)
-        guard (try? FileManager.default.attributesOfItem(atPath: info)[.type]) as? FileAttributeType == .typeDirectory else {
-            NSLog("[Worktree] \(info) isn't a folder: handover files not excluded")
-            return
-        }
-        let exclude = info + "/exclude"
-        let descriptor = open(exclude, O_RDWR | O_APPEND | O_CREAT | O_NOFOLLOW, 0o644)
-        guard descriptor >= 0 else {
-            NSLog("[Worktree] Couldn't open \(exclude): \(String(cString: strerror(errno)))")
-            return
-        }
-        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
-        do {
-            // Latin-1 decodes any bytes; the names compared are ASCII.
-            let existing = String(bytes: try handle.readToEnd() ?? Data(), encoding: .isoLatin1) ?? ""
-            let lines = Set(existing.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) })
-            let missing = names.filter { !lines.contains($0) }
-            guard !missing.isEmpty else { return }
-            let separator = existing.isEmpty || existing.last?.isNewline == true ? "" : "\n"
-            try handle.write(contentsOf: Data((separator + missing.joined(separator: "\n") + "\n").utf8))
-        } catch {
-            NSLog("[Worktree] Couldn't add handover files to \(exclude): \(error.localizedDescription)")
-        }
+        let msg = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        let error = msg.isEmpty ? "git worktree add failed" : msg
+        return startCommit.map {
+            afterFailedNewBranch(branch, at: worktreePath, from: $0, repoRoot: repoRoot, error: error)
+        } ?? (nil, error)
     }
 
     struct WorktreeEntry {
@@ -372,13 +353,13 @@ enum GitWorktree {
         return firstID.isEqual(secondID)
     }
 
-    private static func gitRun(_ args: [String], cwd: String) -> String {
+    static func gitRun(_ args: [String], cwd: String) -> String {
         return gitRunFull(args, cwd: cwd).stdout
     }
 
     /// `git rev-parse --path-format=absolute <queries>`: one absolute path
     /// per query, or nil (including for a path containing a newline).
-    private static func absoluteGitPaths(_ queries: [String], in directory: String) -> [String]? {
+    static func absoluteGitPaths(_ queries: [String], in directory: String) -> [String]? {
         let result = gitRunFull(["rev-parse", "--path-format=absolute"] + queries, cwd: directory)
         let lines = result.stdout.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         guard result.status == 0, lines.last == "" else { return nil }
@@ -403,7 +384,8 @@ enum GitWorktree {
         _ args: [String],
         cwd: String,
         gitPath: String = "/usr/bin/git",
-        timeout: TimeInterval = defaultTimeout
+        timeout: TimeInterval = defaultTimeout,
+        environment: [String: String] = [:]
     ) -> GitResult {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: cwd, isDirectory: &isDirectory),
@@ -415,6 +397,7 @@ enum GitWorktree {
             executableURL: URL(fileURLWithPath: gitPath),
             arguments: args,
             currentDirectoryURL: URL(fileURLWithPath: cwd),
+            environment: environment,
             timeout: timeout,
             captureStandardError: true
         ) else {

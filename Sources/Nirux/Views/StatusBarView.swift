@@ -1,8 +1,8 @@
 import AppKit
 
 /// Global status bar at the bottom of the window.
-/// Shows app-level info (a merge queue, updates, crashes, pilot shortcuts) —
-/// not workspace-specific.
+/// Shows app-level info (a merge queue, updates, crashes) — not
+/// workspace-specific.
 ///
 /// A merge queue comes first, with its Stop: it must stay in reach while
 /// it runs. Then one notice at a time: a crash of the previous session
@@ -36,7 +36,6 @@ final class StatusBarView: NSView {
     private static let copiedFlashDuration: TimeInterval = 1.5
 
     private var label: NSTextField?
-    private var hintsLabel: NSTextField?
     private var versionLabel: NSTextField?
     private var installButton: NSButton?
     private var copySummaryButton: NSButton?
@@ -149,15 +148,6 @@ final class StatusBarView: NSView {
         // narrow bar, the buttons take the clicks.
         addSubview(ver, positioned: .above, relativeTo: border)
         versionLabel = ver
-
-        // Right hints label (pilot shortcuts)
-        let hints = NSTextField(labelWithString: "")
-        hints.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-        hints.textColor = NSColor.white.withAlphaComponent(0.25)
-        hints.alignment = .right
-        hints.lineBreakMode = .byTruncatingTail
-        addSubview(hints)
-        hintsLabel = hints
     }
 
     @available(*, unavailable)
@@ -183,14 +173,7 @@ final class StatusBarView: NSView {
             border.frame = NSRect(x: 0, y: height - 1, width: bounds.width, height: 1)
         }
 
-        // The notice (label, then its buttons) takes the left half, and more
-        // when the right-aligned pilot hints leave room; when both don't
-        // fit, the hints are cut.
         let verW: CGFloat = 120
-        let hintsMaxX = bounds.width - verW - pad * 2
-        let hintsText = hintsLabel?.stringValue.isEmpty == false ? hintsLabel?.attributedStringValue.size().width ?? 0 : 0
-        let noticeMaxX = hintsMaxX - (hintsText > 0 ? ceil(hintsText) + 4 + pad : 0)
-
         let versionMinX = bounds.width - verW - pad
         let noticeButtons = [installButton, copySummaryButton, openReportButton].compactMap { $0 }.filter { !$0.isHidden }
         noticeButtons.forEach { $0.sizeToFit() }
@@ -224,10 +207,11 @@ final class StatusBarView: NSView {
         let buttonsW = noticeButtonsW
         let dismissW: CGFloat = dismissButton?.isHidden == false ? 22 : 0
         let labelSize = label?.attributedStringValue.size() ?? .zero
-        // At least the left half, as before the hints moved aside; never so
-        // wide that ✕ goes under the version label, which would take its clicks.
+        // The notice (label, then its buttons and ✕) takes at least the left
+        // half, and up to a pad before the version label; never so wide that
+        // ✕ reaches the version label. Its text shrinks first.
         let labelMaxW = min(
-            max(80, bounds.width / 2 - start, noticeMaxX - start - buttonsW - dismissW),
+            max(80, bounds.width / 2 - start, versionMinX - pad - start - buttonsW - dismissW),
             max(40, versionMinX - 4 - start - buttonsW - dismissW)
         )
         let labelW = hasNotice ? min(ceil(labelSize.width) + 4, labelMaxW) : 0
@@ -240,12 +224,8 @@ final class StatusBarView: NSView {
             x += button.frame.width
         }
         dismissButton?.frame = NSRect(x: x + 4, y: (height - 18) / 2, width: 18, height: 18)
-        let noticeEndX = hasNotice ? x + 4 + dismissW : (queueNotice != nil ? start : 0)
 
         versionLabel?.frame = NSRect(x: versionMinX, y: (height - 14) / 2, width: verW, height: 14)
-        // Starts after the notice: a label on top of a button takes its clicks.
-        let hintsX = max(bounds.width / 2, noticeEndX + 8)
-        hintsLabel?.frame = NSRect(x: hintsX, y: (height - 14) / 2, width: max(0, hintsMaxX - hintsX), height: 14)
     }
 
     override func updateTrackingAreas() {
@@ -292,16 +272,6 @@ final class StatusBarView: NSView {
         guard let lbl = label, let btn = installButton, !btn.isHidden else { return .zero }
         return NSRect(x: lbl.frame.minX, y: 0,
                       width: btn.frame.maxX - lbl.frame.minX, height: bounds.height)
-    }
-
-    func setPilotHints(_ text: String) {
-        hintsLabel?.stringValue = text
-        needsLayout = true
-    }
-
-    func clearPilotHints() {
-        hintsLabel?.stringValue = ""
-        needsLayout = true
     }
 
     func showUpdate(version: String) {

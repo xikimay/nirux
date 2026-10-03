@@ -497,18 +497,18 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     static func repositoryHint(_ suggestions: BoardConfigSuggestions) -> String {
         switch suggestions.source {
         case .shared:
-            return "This space’s workspaces push to \(suggestions.repository ?? "it")."
+            return "This project’s workspaces push to \(suggestions.repository ?? "it")."
         case .differing(let repositories):
-            return "This space’s workspaces push to different places (\(repositories.joined(separator: ", "))): "
+            return "This project’s workspaces push to different places (\(repositories.joined(separator: ", "))): "
                 + "type the repository whose pull requests the board shows."
         case .noRepository:
-            return "No workspace of this space is in a git repository: type owner/name."
+            return "No workspace of this project is in a git repository: type owner/name."
         }
     }
 
     static func baseBranchHint(_ suggestions: BoardConfigSuggestions) -> String {
         guard let checkout = suggestions.checkout else {
-            return "No local checkout of this repository is open in the space: type the branch pull requests merge into."
+            return "No local checkout of this repository is open in the project: type the branch pull requests merge into."
         }
         let path = (checkout as NSString).abbreviatingWithTildeInPath
         guard suggestions.baseBranch != nil else {

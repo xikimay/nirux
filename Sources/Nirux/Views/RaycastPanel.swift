@@ -12,7 +12,7 @@ enum RaycastPanel {
         /// Outer panel size (matches the container).
         let width: CGFloat
         let height: CGFloat
-        /// Emoji or SF-symbol-style glyph rendered in the left-hand icon slot.
+        /// SF Symbol in the left-hand icon slot.
         let icon: String
         /// Placeholder shown in the text field when empty.
         let placeholder: String
@@ -67,11 +67,8 @@ enum RaycastPanel {
         container.layer?.borderWidth = 1
         container.layer?.borderColor = NSColor.white.withAlphaComponent(0.1).cgColor
 
-        let icon = NSTextField(labelWithString: config.icon)
-        icon.font = .systemFont(ofSize: 16)
         let iconY = config.iconY ?? (config.height - 24) / 2
-        icon.frame = NSRect(x: 12, y: iconY, width: 24, height: 24)
-        container.addSubview(icon)
+        container.addSubview(PaletteIconView(.symbol(config.icon), frame: NSRect(x: 12, y: iconY, width: 24, height: 24)))
 
         let textField = NSTextField()
         textField.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
