@@ -55,12 +55,7 @@ extension BranchReview {
 
         /// `Outer.Inner` is private when `Outer` or `Outer.Inner` is.
         private func isPrivatePath(_ path: String) -> Bool {
-            var prefix = ""
-            for part in path.split(separator: ".") {
-                prefix += (prefix.isEmpty ? "" : ".") + part
-                if privateTypes.contains(prefix) { return true }
-            }
-            return false
+            BranchReview.dottedPrefixes(of: path).contains(where: privateTypes.contains)
         }
 
         // Lexer: what the code is nested in, innermost last.
@@ -243,12 +238,14 @@ extension BranchReview {
                 return start + 1
             default:
                 // A number reads as an identifier: no declaration takes one.
+                // `$` goes on one (`x$y`), but doesn't start one: `$value`
+                // names `value`.
                 guard RiskRules.isIdentifier(byte) else {
                     take(.punctuation(byte))
                     return start + 1
                 }
                 var end = start + 1
-                while end < line.count, RiskRules.isIdentifier(line[end]) { end += 1 }
+                while end < line.count, RiskRules.isIdentifier(line[end]) || line[end] == UInt8(ascii: "$") { end += 1 }
                 let name = UnsafeRawBufferPointer(rebasing: line[start..<end])
                 words?.remove(name)
                 take(.identifier(name, isEscaped: false))
@@ -470,7 +467,7 @@ extension BranchReview.SwiftScanner {
             }
             // `class func`, `class override var`: a modifier.
         }
-        if statement.atStart, keyword(name) { return }
+        if !isEscaped, statement.atStart, keyword(name) { return }
         let candidate = Candidate(name: name, line: lineNumber, collecting: collecting)
         switch statement.expect {
         case .name(.type):
@@ -546,7 +543,8 @@ extension BranchReview.SwiftScanner {
     private mutating func declareType(_ name: String) {
         record(Candidate(name: name, line: lineNumber, collecting: collecting), .type)
         let path = scopes.last?.container.map { $0 + "." + name } ?? name
-        if statement.isPrivate { privateTypes.insert(path) }
+        // Its own modifier, or a private type's or extension's body.
+        if statement.isPrivate || scopes.last?.isPrivate == true { privateTypes.insert(path) }
         introduceType(container: path, extended: nil)
     }
 

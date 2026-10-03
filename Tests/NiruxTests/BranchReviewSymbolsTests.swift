@@ -82,6 +82,10 @@ final class BranchReviewSymbolsTests: XCTestCase {
         extension Holder.Kept {
             func keptLeak() {}
         }
+        private extension Holder { struct Nested {} }
+        extension Holder.Nested {
+            func nestedLeak() {}
+        }
         """
         XCTAssertEqual(declared(source), ["Widget", "count", "total", "shared", "shown", "level", "Holder"])
     }
@@ -172,6 +176,9 @@ final class BranchReviewSymbolsTests: XCTestCase {
         else { fatalError() }
         var counter = 0
         let _ = load()
+        var x$y = 1
+        `extension`.run()
+        if ready { let inner = 1 }
         actor.run()
         @available(macOS 13, *)
         func modern() {}
@@ -227,9 +234,9 @@ final class BranchReviewSymbolsTests: XCTestCase {
     }
 
     func testWordsAreFoundInCodeAndInterpolationsOnly() {
-        let source = "// alpha\nlet text = \"beta \\(gamma) `delta`\"\n/* epsilon */ zeta(`eta`, model.$theta)"
-        let words = scanned(source, words: ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]).words
-        XCTAssertEqual(words?.names, ["alpha", "beta", "delta", "epsilon"])
+        let source = "// alpha\nlet text = \"beta \\(gamma) `delta`\"\n/* epsilon */ zeta(`eta`, model.$theta, kappa$lambda)"
+        let names: Set<String> = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "kappa", "lambda"]
+        XCTAssertEqual(scanned(source, words: names).words?.names, ["alpha", "beta", "delta", "epsilon", "kappa", "lambda"])
     }
 
     // MARK: - Added lines

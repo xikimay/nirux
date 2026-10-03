@@ -83,17 +83,25 @@ final class BranchReviewTestsAgainstCodeTests: BranchReviewRepositoryTestCase {
         }
 
         """)
+        // An extension in another file declares a member too.
+        try write("Sources/PhaseExtras.swift", "extension Lonely {\n    static let together = 1\n}\n")
+        // A requirement's name says nothing of the real type: tests call it
+        // on a fake.
+        try write("Sources/Making.swift", "protocol Maker {\n    func make()\n}\nstruct RealMaker: Maker {\n    func make() {}\n}\n")
+        try write("Tests/FakeMaker.swift", "struct FakeMaker: Maker { func make() {} }\n")
         // `Kind` is nested in two types: each counts by its own members.
-        try write("Sources/Shapes.swift", "enum Circle {\n    enum Kind { case round }\n}\n")
-        try write("Sources/Squares.swift", "enum Square {\n    enum Kind { case sharp }\n}\n")
-        try write("Tests/PhaseTests.swift", "assert(phase == .busy)\nassert(depth == .deep)\nassert(kind == .round)\n")
+        try write("Sources/Shapes.swift", "enum Circle {\n    enum Kind { case round }\n}\nenum Square {\n    enum Kind { case sharp }\n}\n")
+        try write(
+            "Tests/PhaseTests.swift",
+            "assert(phase == .busy)\nassert(depth == .deep)\nassert(kind == .sharp)\nassert(value == .together)\n"
+        )
 
         let tests = try snapshot().testsAgainstCode
 
         XCTAssertEqual(
             tests.unmentioned.map { "\(BranchReview.fileName($0.path)):\($0.symbol.name)" },
-            ["Phase.swift:idle", "Phase.swift:Lonely", "Phase.swift:alone", "Phase.swift:initial",
-             "Squares.swift:Square", "Squares.swift:Kind", "Squares.swift:sharp"]
+            ["Making.swift:RealMaker", "Phase.swift:idle", "Phase.swift:alone", "Phase.swift:initial",
+             "Shapes.swift:Circle", "Shapes.swift:Kind", "Shapes.swift:round"]
         )
     }
 
@@ -102,9 +110,9 @@ final class BranchReviewTestsAgainstCodeTests: BranchReviewRepositoryTestCase {
         try commitToMain("tests")
         try FileManager.default.removeItem(atPath: repo + "/Tests/GoneTests.swift")
         try FileManager.default.createSymbolicLink(atPath: repo + "/Tests/LinkTests.swift", withDestinationPath: "../README.md")
-        // Not a test's text, and not read: a snapshot image, a nested
-        // repository. The one file read is the last.
-        try write("Tests/__Snapshots__/shot.png", Data([0x89, 0x50, 0x4E, 0x47, 0x00, 0x01]))
+        // Not a test's text: a snapshot image (the one file read), a nested
+        // repository (none).
+        try write("Tests/__Snapshots__/shot.png", Data([0x89, 0x50, 0x4E, 0x47, 0x00]) + Data(" gauge ".utf8))
         try git(["init", "-q", "--template=", "Tests/Nested"])
         try write("Tests/zz.txt", "nothing\n")
         try write("Sources/Gauge.swift", "let gauge = 1\n")
@@ -115,7 +123,8 @@ final class BranchReviewTestsAgainstCodeTests: BranchReviewRepositoryTestCase {
         oneFile.maxTestFilesRead = 1
         let snapshot = try snapshot(oneFile)
 
-        XCTAssertEqual(snapshot.testsAgainstCode.unreadTestFiles, 1, "the link")
+        XCTAssertEqual(snapshot.testsAgainstCode.unreadTestFiles, 2, "the link, and the text past the one file read")
+        XCTAssertEqual(snapshot.testsAgainstCode.unmentioned.map(\.symbol.name), ["gauge"], "an image says nothing")
         XCTAssertNil(try file("Sources/Alias.swift", in: snapshot).symbols)
         XCTAssertEqual(snapshot.testsAgainstCode.unscannedFiles, [])
     }
@@ -261,7 +270,7 @@ final class BranchReviewTestsAgainstCodeTests: BranchReviewRepositoryTestCase {
 
         XCTAssertEqual(tests.testLines, 578)
         XCTAssertEqual(tests.codeLines, 458)
-        XCTAssertEqual(tests.declared, 41)
+        XCTAssertEqual(tests.declared, 44)
         // The launch wiring, the real IOKit calls (the tests inject a fake)
         // and the main queue's schedule among them.
         XCTAssertEqual(tests.unmentioned.map { "\(BranchReview.fileName($0.path)):\($0.symbol.name)" }, [

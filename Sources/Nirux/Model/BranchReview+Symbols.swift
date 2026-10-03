@@ -41,7 +41,7 @@ extension BranchReview {
             case unbalanced
         }
 
-        /// Each name once, at its first line.
+        /// Each name once per type, at its first line.
         case read([Symbol])
         /// Unknown, and why.
         case unread(Reason)
@@ -62,7 +62,7 @@ extension BranchReview {
         /// Config group holds, folded files aside.
         var codeLines = 0
         /// The symbols the Swift code files declare, each name once per
-        /// file.
+        /// type and file.
         var declared = 0
         /// Those no test mentions, in the files' order, then by line.
         var unmentioned: [Unmentioned] = []
@@ -122,8 +122,19 @@ extension BranchReview {
         }
         guard digest.finalize() == added.digest else { return .unread(.changedSincePatch) }
         guard scanner.isBalanced else { return .unread(.unbalanced) }
-        var seen = added.removedNames
-        return .read(scanner.symbols.filter { seen.insert($0.name).inserted })
+        var seen: Set<String> = []
+        return .read(scanner.symbols.filter { symbol in
+            !added.removedNames.contains(symbol.name) && seen.insert((symbol.container ?? "") + "\0" + symbol.name).inserted
+        })
+    }
+
+    /// "Outer", "Outer.Inner" for "Outer.Inner".
+    static func dottedPrefixes(of path: String) -> [String] {
+        var prefix = ""
+        return path.split(separator: ".").map { part in
+            prefix += (prefix.isEmpty ? "" : ".") + part
+            return prefix
+        }
     }
 
     /// Calls `body` with each line of `text`, without its newline.
@@ -165,33 +176,28 @@ extension BranchReview {
         let mentions = mentions(of: Set(declared.map(\.symbol.name)), root: root, deleted: deleted, options: options)
         result.testFilesUnlisted = mentions == nil
         result.unreadTestFiles = mentions?.unread ?? 0
-        var mentioned = declared.map { mentions?.found.contains($0.symbol.name) == true }
         // Tests name a type through its members: `.notRead` rather than
         // `Omission.notRead`. A type counts once a member the branch
-        // declares in the same file does, nested types included.
-        func key(_ path: String, _ type: String) -> String { path + "\0" + type }
-        var mentionedContainers = Set(declared.indices.filter { mentioned[$0] }.compactMap { member in
-            declared[member].symbol.container.map { key(declared[member].path, $0) }
-        })
-        var grew = true
-        while grew {
-            grew = false
-            for index in declared.indices where !mentioned[index] {
-                let symbol = declared[index].symbol
-                let typePath = (symbol.container.map { $0 + "." } ?? "") + symbol.name
-                guard mentionedContainers.contains(key(declared[index].path, typePath)) else { continue }
-                mentioned[index] = true
-                grew = true
-                if let container = declared[index].symbol.container {
-                    mentionedContainers.insert(key(declared[index].path, container))
-                }
-            }
+        // declares does, in any file and at any depth: a mention makes
+        // each type around it count, by its dotted path. Not a name other
+        // types declare too: tests call a protocol's `create` on a fake,
+        // which says nothing of the real type's.
+        let typesByName = Dictionary(grouping: declared.compactMap { member in
+            member.symbol.container.map { (name: member.symbol.name, type: $0) }
+        }, by: \.name).mapValues { Set($0.map(\.type)) }
+        let found = declared.filter { mentions?.found.contains($0.symbol.name) == true && typesByName[$0.symbol.name]?.count == 1 }
+        let mentionedTypes = Set(found.flatMap { $0.symbol.container.map(dottedPrefixes(of:)) ?? [] })
+        result.unmentioned = declared.filter { declared in
+            let symbol = declared.symbol
+            return mentions?.found.contains(symbol.name) != true
+                && !mentionedTypes.contains((symbol.container.map { $0 + "." } ?? "") + symbol.name)
         }
-        result.unmentioned = declared.indices.filter { !mentioned[$0] }.map { declared[$0] }
         return result
     }
 
     // MARK: Mentions
+
+    private static let binaryProbeBytes = 8_000
 
     /// `PathGroup`'s rules for a test, as pathspecs.
     private static let testPathspecs = [
@@ -221,25 +227,36 @@ extension BranchReview {
         var read = 0
         var budget = options.maxTestBytesRead
         for path in paths where !missing.isEmpty {
+            let file = root + "/" + path
+            var info = stat()
+            // A submodule's or a nested repository's folder holds no test
+            // of this one.
+            if lstat(file, &info) == 0, info.st_mode & S_IFMT == S_IFDIR { continue }
             let limit = min(options.maxTestFileBytes, budget)
             // Past the budget, no file is opened at all.
             guard read < options.maxTestFilesRead, limit > 0 else {
                 unread += 1
                 continue
             }
-            var info = stat()
-            let isFolder = lstat(root + "/" + path, &info) == 0 && info.st_mode & S_IFMT == S_IFDIR
             // Git's test for binary: a NUL in the first 8,000 bytes. A
-            // snapshot image or a fixture isn't a test's text, nor is a
-            // submodule's folder.
-            if isFolder || readPrefix(of: root + "/" + path, maxBytes: 8_000)?.contains(0) == true { continue }
-            guard var data = readPrefix(of: root + "/" + path, maxBytes: limit + 1) else {
+            // snapshot image or a fixture isn't a test's text: it is read
+            // that far only, and counts toward the files read.
+            guard let start = readPrefix(of: file, maxBytes: binaryProbeBytes) else {
                 // A symlink, a file outside a sparse checkout; one the
                 // worktree deleted is no test.
                 if !deleted.contains(path) { unread += 1 }
                 continue
             }
             read += 1
+            guard !start.contains(0) else {
+                budget -= start.count
+                continue
+            }
+            // Read whole when it may go on, or vanished meanwhile.
+            guard var data = start.count < binaryProbeBytes ? start : readPrefix(of: file, maxBytes: limit + 1) else {
+                unread += 1
+                continue
+            }
             if data.count > limit {
                 unread += 1
                 // The word the limit cuts would read as a shorter one.

@@ -435,7 +435,7 @@ worktree, and not `private` or `fileprivate`, nor in a private type or extension
 private members are tested through the API that uses them, and local
 variables would only add noise. A test mentions a symbol when the identifier
 appears as a whole word in a file of the Tests group. On #57, 578 test lines
-for 458 code lines, and 10 of 41 names (each counted once per file) that no
+for 458 code lines, and 10 of 44 names (each counted once per type) that no
 test mentions, among them `setUpKeepAwake` (the launch wiring),
 `IOKitSleepAssertions` (the real IOKit calls; the tests inject a fake) and
 `mainQueueSchedule`. A mention isn't coverage, so the line says "mentions",
@@ -447,8 +447,12 @@ where about a quarter of the names listed were noise:
 - An `override`, and an `@objc` or `@IBAction` method, aren't listed: the
   superclass, a selector or an action reaches them, not a test by name.
   `@objc` properties are.
-- A type counts as mentioned once a test names a member the branch declares
-  in the same file: tests write `.notRead`, not `Omission.notRead`.
+- A type counts as mentioned once a test names a member the branch declares,
+  in any file, matched by the type's dotted path (`Outer.Inner`): tests
+  write `.notRead`, not `Omission.notRead`. Only through a member whose name
+  no other type of the branch declares: tests call a protocol's `create` on
+  a fake, which says nothing of the real type's (on #57,
+  `IOKitSleepAssertions`).
 - In a Swift test file, only code counts: a name in a comment or a string
   isn't a mention; one in an interpolation is.
 - A name a removed line of the same file declares isn't new: a changed
@@ -497,8 +501,8 @@ How it reads:
   symlink, outside a sparse checkout; not one the worktree deleted) while a
   name was still missing, and when git couldn't list them. A binary file (a
   NUL in its first 8,000 bytes, as git tells them apart: a snapshot image, a
-  fixture) and a submodule's folder aren't a test's text: they are skipped,
-  not counted.
+  fixture) isn't a test's text: it is read that far only, and counts toward
+  the files read but not as unread. A submodule's folder is skipped.
 
 The rules start built in, for Swift and macOS. Per-project rules
 (`board.json`) can come later.
