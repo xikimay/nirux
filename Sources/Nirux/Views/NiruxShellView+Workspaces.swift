@@ -147,18 +147,18 @@ extension NiruxShellView {
         refreshAfterWorkspaceSelection(animated: true)
     }
 
-    func switchToWorkspace(_ index: Int) {
+    func switchToWorkspace(_ index: Int, editorTakesKeyboard: Bool = true) {
         guard workspaceStore.selectWorkspace(at: index) else { return }
-        refreshAfterWorkspaceSelection(animated: true)
+        refreshAfterWorkspaceSelection(animated: true, editorTakesKeyboard: editorTakesKeyboard)
     }
 
     /// Focus a workspace by ID (notification click-through), optionally
     /// jumping straight to a specific column. Always flashes the target
     /// column's border: when the target is already focused, switching is
     /// a visual no-op and the click would otherwise feel dead.
-    func focusWorkspace(id: String, column columnIndex: Int? = nil) {
+    func focusWorkspace(id: String, column columnIndex: Int? = nil, editorTakesKeyboard: Bool = true) {
         guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
-        switchToWorkspace(index)
+        switchToWorkspace(index, editorTakesKeyboard: editorTakesKeyboard)
         if let columnIndex, workspaces.indices.contains(index) {
             focusColumnByIndex(columnIndex)
         }
@@ -189,16 +189,17 @@ extension NiruxShellView {
         return nil
     }
 
-    func refreshAfterWorkspaceSelection(animated: Bool) {
+    func refreshAfterWorkspaceSelection(animated: Bool, editorTakesKeyboard: Bool = true) {
         guard workspaces.indices.contains(activeWSIndex) else { return }
         workspaces[activeWSIndex].hasNotification = false
+        quickSwitch.focusMoved()
         relayout(animated: animated)
         refreshGitContextNow(for: workspaces[activeWSIndex])
         // Title bars of a workspace off screen weren't refreshed: bring
         // them (and their agent usage) up to date now, not on the next
         // heartbeat. Also refreshes the sidebar.
         refreshMetadata()
-        focusActiveTerminal(in: window)
+        focusActiveTerminal(in: window, editorTakesKeyboard: editorTakesKeyboard)
     }
 
     func selectProfile(_ profileID: String) {
@@ -266,7 +267,7 @@ extension NiruxShellView {
 
     func createProfileFromActiveContext() {
         let sourceWorkspace = activeWorkspace
-        let baseName = sourceWorkspace.flatMap { profileName(for: $0) } ?? "profile"
+        let baseName = sourceWorkspace.flatMap { profileName(for: $0) } ?? "project"
         let cwd = sourceWorkspace?.focusedWorkingDirectory ?? sideEffects.homeDirectory()
         // Spaces persist: reuse an empty one of that name rather than pile up
         // "name 2", "name 3"…

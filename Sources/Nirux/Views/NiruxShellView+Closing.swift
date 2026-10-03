@@ -36,6 +36,10 @@ extension NiruxShellView {
                     closingView.alphaValue = 1
                     return
                 }
+                // Still focused: the user lands on its neighbour. An
+                // agent's open during the animation focused its editor
+                // without the keyboard instead.
+                let landsOnNeighbour = workspace.columns[safe: workspace.focusedIndex] === closingColumn
                 workspace.closeColumn(at: closingIndex)
                 self.relayout(animated: false)
                 // Animate remaining columns sliding into place
@@ -45,7 +49,9 @@ extension NiruxShellView {
                     animated: true
                 )
                 self.updateSidebar()
-                self.focusActiveTerminal(in: self.window)
+                self.focusActiveTerminal(
+                    in: self.window, editorTakesKeyboard: landsOnNeighbour && self.activeWorkspace === workspace
+                )
             }
         })
     }
@@ -93,7 +99,7 @@ extension NiruxShellView {
         let agent = column.pty == nil ? nil : column.liveAgent(snapshot: ProcessSnapshot())
         guard let details = WorkspaceClosePolicy.columnConfirmation(for: agent), let agent else { return true }
         guard confirmDestructiveClose(
-            message: "Close column running \(agent.displayName)?",
+            message: agent.isPaused ? "Close paused \(agent.displayName) column?" : "Close column running \(agent.displayName)?",
             details: details,
             confirmTitle: "Close Column"
         ) else { return false }
@@ -160,7 +166,7 @@ extension NiruxShellView {
     /// opened the alert may be an accident mid-prompt, and the keys that
     /// come next — Return to send, ⌘⌫ to clear the line — must not confirm
     /// the kill. Plain ⌘D is unbound in Nirux, so no reflex reaches it.
-    /// Also used for other destructive confirmations (Delete Space, worktree
+    /// Also used for other destructive confirmations (Delete Project, worktree
     /// clean-up). Past a dozen lines (or as much text), the details scroll
     /// instead of growing the alert.
     func confirmDestructiveClose(message: String, details: [String], confirmTitle: String) -> Bool {
@@ -217,8 +223,12 @@ extension WorkspaceState {
 
 extension ColumnState {
     /// The recognized agent closing this column would kill, with the
-    /// status its machine last computed.
+    /// status its machine last computed, or the restored one it holds
+    /// until it resumes (nothing runs: idle).
     func liveAgent(snapshot: ProcessSnapshot) -> WorkspaceClosePolicy.LiveAgent? {
+        if let deferredAgent {
+            return WorkspaceClosePolicy.LiveAgent(processName: deferredAgent.processName, status: .idle, isPaused: true)
+        }
         guard let pty, let name = pty.agentProcessName(snapshot: snapshot) else { return nil }
         return WorkspaceClosePolicy.LiveAgent(
             processName: name,

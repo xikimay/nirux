@@ -24,6 +24,8 @@ struct ColumnInfo: Hashable {
     var permissionApproval: SidebarPermissionApproval?
     /// An agent that won't go on by itself, whatever the status says.
     var stuck: SidebarStuckState?
+    /// A restored agent that hasn't resumed yet.
+    var deferredAgent: SidebarDeferredAgent?
 
     /// Hashable is hand-written to compare `agentElapsedSeconds` at the
     /// granularity it's *displayed* ("12m" via shortDuration), not raw
@@ -51,6 +53,7 @@ struct ColumnInfo: Hashable {
             && lhs.attentionReason == rhs.attentionReason
             && lhs.permissionApproval == rhs.permissionApproval
             && lhs.stuck == rhs.stuck
+            && lhs.deferredAgent == rhs.deferredAgent
     }
 
     func hash(into hasher: inout Hasher) {
@@ -70,6 +73,20 @@ struct ColumnInfo: Hashable {
         hasher.combine(attentionReason)
         hasher.combine(permissionApproval)
         hasher.combine(stuck)
+        hasher.combine(deferredAgent)
+    }
+}
+
+/// What a column row shows of a restored agent that hasn't resumed yet
+/// (see `DeferredAgentLaunch`). `columnID` tells a Resume click aimed at
+/// it from one that lands on another column after a rebuild.
+struct SidebarDeferredAgent: Hashable {
+    let processName: String
+    let summary: String
+    let columnID: UUID
+
+    var tooltip: String {
+        "Not resumed yet: \(summary). Resume starts it here; showing its column does too."
     }
 }
 
@@ -216,6 +233,8 @@ struct WorkspaceInfo: Hashable {
     let phase: WorkspacePhase
     let lastSummary: String?
     let lastActivityAt: TimeInterval?
+    /// What the card shows after "#N merged"; nil shows nothing.
+    var mergedCleanup: MergedCleanupOffer?
 
     var sidebarAction: (text: String, isBlocker: Bool)? {
         if let blocker = normalizedContextText(blocker) {
@@ -232,6 +251,15 @@ struct WorkspaceInfo: Hashable {
               !value.isEmpty else { return nil }
         return value
     }
+}
+
+/// A merged pull request's worktree, offered for clean-up on its card.
+enum MergedCleanupOffer: Hashable {
+    /// "Clean up": runs "Clean Up Worktree…".
+    case available
+    /// A clean-up of the worktree is being checked, confirmed or run:
+    /// "Cleaning up…", which does nothing.
+    case inProgress
 }
 
 struct ProfileInfo: Hashable {
@@ -261,6 +289,8 @@ enum SidebarHitRegion {
     )
     /// Resume under a column whose turn failed on an API error.
     case agentResume(workspaceIndex: Int, columnIndex: Int, failedAt: TimeInterval)
+    /// Resume on the row of a restored agent that hasn't resumed yet.
+    case deferredAgentResume(workspaceIndex: Int, columnIndex: Int, columnID: UUID)
     /// The rest of an Allow / Deny or Resume block: clicks there do nothing
     /// (a press meant for a button that just moved must not reach the card
     /// below).
@@ -311,6 +341,12 @@ enum SidebarHoverTarget: Equatable {
     /// for another failure at the same place arms again.
     static func resumeButtonKey(workspaceIndex: Int, columnIndex: Int, failedAt: TimeInterval) -> String {
         "resume|\(workspaceIndex)|\(columnIndex)|\(failedAt)"
+    }
+
+    /// Key of a not-resumed agent's Resume button: its column, wherever
+    /// the row moves.
+    static func deferredResumeButtonKey(columnID: UUID) -> String {
+        "deferred-resume|\(columnID.uuidString)"
     }
 }
 

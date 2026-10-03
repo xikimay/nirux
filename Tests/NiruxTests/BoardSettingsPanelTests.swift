@@ -33,7 +33,7 @@ final class BoardSettingsPanelTests: XCTestCase {
             shell.addWorkspace(title: "widgets", cwd: repo, profileID: space.id)
 
             let titles = try spaceMenu(shell, space).items.map(\.title)
-            let briefIndex = try XCTUnwrap(titles.firstIndex(of: "Edit Space Brief…"))
+            let briefIndex = try XCTUnwrap(titles.firstIndex(of: "Edit Project Brief…"))
             XCTAssertEqual(titles[briefIndex + 1], "Board Settings…")
 
             let form = try open(shell, space)

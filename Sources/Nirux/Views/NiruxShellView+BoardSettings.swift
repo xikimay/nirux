@@ -8,15 +8,19 @@ extension NiruxShellView {
     func showBoardSettings(profileID: String) {
         guard window != nil else { return }
         guard !isReadingBoardSettings else {
-            NSSound.beep()
+            showToast("Board settings are still loading")
             return
         }
         if let panel = boardSettingsPanel {
-            if panel.spaceID == profileID { panel.focus() } else { NSSound.beep() }
+            if panel.spaceID == profileID {
+                panel.focus()
+            } else {
+                showToast("Another project’s board settings are open: close them first")
+            }
             return
         }
         guard let store = BoardConfigStore(spaceID: profileID) else {
-            NSSound.beep()
+            showToast("Couldn’t find this project’s board settings", tone: .error)
             return
         }
         // Inactive workspaces belong to the project too.

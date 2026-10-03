@@ -8,8 +8,10 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var shell: NiruxShellView?
     var updaterController: SPUStandardUpdaterController?
     var updateDot: NSView?
-    var settingsPanel: NSPanel?
+    var settingsWindow: NSWindow?
     weak var settingsKeepAwakeCheckbox: NSButton?
+    weak var settingsUsageLimitsCheckbox: NSButton?
+    weak var settingsAgentResumePopup: NSPopUpButton?
     weak var settingsLaunchModePopup: NSPopUpButton?
     weak var settingsNoFlickerCheckbox: NSButton?
     weak var settingsCodexLaunchModePopup: NSPopUpButton?
@@ -25,11 +27,19 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     var telegramRemoteAccessController: TelegramRemoteAccessController?
     var keepAwakeController: KeepAwakeController?
     var keepAwakeIndicator: KeepAwakeIndicator?
-    /// Keychain access used by the Settings panel; tests stub it.
+    var usageLimitsIndicator: ClaudeUsageIndicator?
+    var usageLimitsMonitor: ClaudeUsageLimitsMonitor?
+    /// What Settings reports about Claude Code's status line, and how it
+    /// installs Nirux's; Settings tests stub both, so they never write to
+    /// ~/.claude.
+    var claudeStatusLineStateReader: () -> AgentHookInstaller.ClaudeStatusLineState = {
+        AgentHookInstaller.claudeStatusLineState()
+    }
+    var claudeStatusLineInstaller: (Bool) -> Void = { AgentHookInstaller.applyClaudeStatusLine(enabled: $0) }
+    /// Keychain access used by the Settings window; tests stub it.
     var telegramTokenLoader: () throws -> String? = { try TelegramTokenStore.load() }
     var telegramTokenSaver: (String) throws -> Void = { try TelegramTokenStore.save($0) }
-    /// Screen height the Settings panel may take; tests stub it.
-    var settingsVisibleHeight: @MainActor () -> CGFloat? = { NSScreen.main?.visibleFrame.height }
+    var telegramTokenDeleter: () throws -> Void = { try TelegramTokenStore.delete() }
     var isManualUpdateCheck = false
     var updaterReady = false
     var urlConfirmations = URLConfirmationQueue()
@@ -44,6 +54,14 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // this way (see AgentHookInstaller); the process appends one event
         // line and exits — it must never launch the app UI.
         let args = CommandLine.arguments
+        // Status line mode: Claude Code runs `Nirux --hook claude
+        // --statusline` with the session's state on stdin while the usage
+        // limits indicator is on. Spelled as a hook so that an older build at
+        // the same path (a rollback) reads a hook payload without an event
+        // and exits, instead of launching its UI on every response.
+        if args.count >= 4, args[1] == "--hook", args[2] == "claude", args[3] == "--statusline" {
+            exit(ClaudeStatusLineCLI.run())
+        }
         if args.count >= 3, args[1] == "--hook", let kind = AgentHookEvent.Kind(rawValue: args[2]) {
             let payload = args.count > 3 ? args.last : nil
             exit(AgentHookCLI.run(kind: kind, payload: payload))
@@ -100,6 +118,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         shellView.autoresizingMask = [.width, .height]
         window.contentView = shellView
         shell = shellView
+        setUpUsageLimits(window: window)
         setUpKeepAwake(window: window, shell: shellView)
         setupStatusBarNotices()
 
@@ -204,7 +223,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     /// The Getting Started checklist refreshes after the install, so it
     /// reports the hooks as written.
     private func installAgentHooks(reportingTo shellView: NiruxShellView) {
-        AgentHookInstaller.installAll()
+        AgentHookInstaller.installAll(claudeStatusLine: Self.savedClaudeStatusLineOption())
         shellView.refreshOnboardingChecklist()
     }
 
@@ -243,13 +262,16 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
 
     // MARK: - URL Scheme
 
-    enum WorkspaceAgent: String {
+    enum WorkspaceAgent: String, CaseIterable {
         case claude, codex
     }
 
     // MARK: - NSMenuItemValidation
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(resumeAllAgents(_:)) {
+            return (shell?.deferredAgentCount ?? 0) > 0
+        }
         if menuItem.action == #selector(toggleInactiveWorkspaces(_:)) {
             guard let shell else { return false }
             menuItem.state = shell.sidebar.isInactiveSectionCollapsed ? .off : .on

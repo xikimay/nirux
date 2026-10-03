@@ -39,7 +39,13 @@ extension NiruxShellView {
         guard sinceRefresh > Self.heartbeatStaleAfter else { return }
         let now = Date()
         let ptys = workspaces.flatMap { $0.columns.compactMap(\.pty) }
-        guard ptys.contains(where: { Self.needsBackgroundRefresh($0, now: now) }) else { return }
+        guard ptys.contains(where: { Self.needsBackgroundRefresh($0, now: now) }) else {
+            // Nothing to re-read, but a turn may have gone silent since the
+            // last count (a Claude interrupted with Esc stays "working" with
+            // no hook to end it): the controller must drop it.
+            updateKeepAwake()
+            return
+        }
         updateSidebar()
     }
 
