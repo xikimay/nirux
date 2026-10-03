@@ -88,8 +88,12 @@ that does the work.
   its lock, built by `build.sh`) gives the page `createReview`: a file's
   diff from its hunks, unified, without pierre's file header, rendered only
   near the viewport (`VirtualizedFileDiff`). A line break inside a line
-  (CR, U+2028, U+2029) is shown as a symbol: in the patch text pierre parses,
-  it would end the line, and the rest could read as a hunk.
+  (CR, U+2028, U+2029) is shown as its code point, `⟨U+2028⟩`: in the patch
+  text pierre parses, it would end the line, and the rest could read as a
+  hunk. So are bidi controls, which reorder what follows ("Trojan Source"),
+  and invisible characters (zero-width, Hangul fillers, tag characters), as
+  the send sheet shows them (section 6.2; decided by the user on
+  2026-10-03).
 - Persistence: `ColumnKind` gains `branchReview`. An older nightly decodes the
   unknown kind as a terminal, as for the board: a rollback turns the column
   into a shell in the worktree. Reopen it after updating.
@@ -110,8 +114,9 @@ The page has a bridge to Swift, so:
 - The page's own code sets every untrusted string with `textContent` and
   never uses `innerHTML`. Markdown in a PR body is rendered without raw HTML.
   `@pierre/diffs` writes the diff through `innerHTML`
-  (`renderPartialHTML`) after escaping it; a test covers that escaping on a
-  crafted line and path (section 9.1).
+  (`renderPartialHTML`) after escaping it; a test covers that escaping on
+  crafted lines (section 9.1). With its file header off, pierre writes no
+  path: the page's own row shows it.
 - Bridge messages carry ids, never text to type: Swift builds the message to
   send to the agent from its own stored comments, and the sheet that confirms
   it is native.

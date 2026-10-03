@@ -32,15 +32,18 @@ final class PierreDiffRenderTests: XCTestCase {
         XCTAssertTrue(lines[1].contains("More."), "\(lines[1])")
     }
 
-    /// The review page's path and lines are a branch's: HTML in them is
-    /// text, and nothing they hold runs.
+    /// The review page's lines are a branch's: HTML in them is text, and
+    /// nothing they hold runs. pierre's file header is off, so the path only
+    /// picks the language today; it stays crafted in case the header comes
+    /// back.
     @MainActor
     func testReviewDiffShowsCraftedPathAndLinesAsText() throws {
         let lines = [
             ("context", #"let markup = "<b>bold</b>""#),
             ("removed", #"let old = "</span><img src=x onerror=\"window.pwned = 'line'\">""#),
             ("added", "let new = \"<script>window.pwned = 'script'</script>\""),
-            ("added", "let escape = \"\u{1B}[201~\u{202E}evil\u{202C}\"")
+            ("added", "let escape = \"\u{1B}[201~\""),
+            ("context", "}")
         ]
         let rendered = try renderReview(
             path: #"Sources/<img src=x onerror="window.pwned = 'path'">/A.swift"#,
@@ -59,13 +62,96 @@ final class PierreDiffRenderTests: XCTestCase {
             ("added", "let a = 1\u{2028}@@ -1,1 +1,1 @@\r+let b = 2\u{2029}c\nd"),
             ("added", "let crlf = 3\r")
         ])])
-        XCTAssertEqual(rendered.lines, ["let a = 1\u{2424}@@ -1,1 +1,1 @@\u{240D}+let b = 2\u{2424}c\u{2424}d", "let crlf = 3"])
+        XCTAssertEqual(
+            rendered.lines,
+            ["let a = 1⟨U+2028⟩@@ -1,1 +1,1 @@⟨U+000D⟩+let b = 2⟨U+2029⟩c⟨U+000A⟩d", "let crlf = 3"]
+        )
         XCTAssertEqual(rendered.lineNumbers, ["4", "5"])
+    }
+
+    /// A bidi control reorders what follows it ("Trojan Source"), an
+    /// invisible character changes a name unseen: the line shows them.
+    @MainActor
+    func testBidiAndInvisibleCharactersShowTheirCodePoint() throws {
+        let rendered = try renderReview(path: "A.swift", hunks: [(oldStart: 1, newStart: 1, lines: [
+            ("added", "let isAdmin = false /*\u{202E} } \u{2066}if (isAdmin)\u{2069} \u{2066} begin admins only */"),
+            ("added", "let user\u{200B}Name = \"\u{FEFF}\u{E0041}\u{3164}\"")
+        ])])
+        XCTAssertEqual(rendered.lines, [
+            "let isAdmin = false /*⟨U+202E⟩ } ⟨U+2066⟩if (isAdmin)⟨U+2069⟩ ⟨U+2066⟩ begin admins only */",
+            "let user⟨U+200B⟩Name = \"⟨U+FEFF⟩⟨U+E0041⟩⟨U+3164⟩\""
+        ])
+    }
+
+    /// pierre's own lookup of the extension finds `Object.prototype`'s
+    /// members (a function for `.constructor`): the file never rendered.
+    @MainActor
+    func testPathNamedLikeAnObjectMemberStillRenders() throws {
+        for path in ["lib/init.constructor", "toString", "lib/x.__proto__"] {
+            let rendered = try renderReview(
+                path: path, highlighted: false, hunks: [(oldStart: 1, newStart: 1, lines: [("added", "module.exports = 1")])]
+            )
+            XCTAssertEqual(rendered.lines, ["module.exports = 1"], path)
+        }
+    }
+
+    /// git marks an unchanged last line without a newline on both sides;
+    /// unified view drew the marker twice in one row, and lines overlapped.
+    @MainActor
+    func testUnchangedLastLineWithoutNewlineShowsOneMarker() throws {
+        let rendered = try renderReview(path: "A.swift", hunks: [(oldStart: 1, newStart: 1, lines: [
+            ("removed", "let a = 1"), ("added", "let a = 2"), ("context", "}"), ("noNewlineMarker", "")
+        ])])
+        XCTAssertEqual(rendered.lines, ["let a = 1", "let a = 2", "}"])
+        XCTAssertEqual(rendered.noNewlineMarkers, 1)
+    }
+
+    /// Off screen, a file is a placeholder; it must take the height the
+    /// file renders at, or the page jumps as the user scrolls. The window
+    /// is never shown, so animation frames don't fire: timers stand in.
+    @MainActor
+    func testFilesOffScreenKeepTheirHeightWhenTheyRender() throws {
+        let page = try BundlePage()
+        defer { page.close() }
+        let result = try page.run("""
+            window.requestAnimationFrame = (callback) => setTimeout(() => callback(performance.now()), 0);
+            const root = document.getElementById("root");
+            const review = window.NiruxPierreDiff.createReview(document);
+            const containers = [];
+            for (let index = 0; index < 30; index++) {
+              const container = document.createElement("div");
+              root.append(container);
+              containers.push(container);
+              const lines = Array.from({ length: 60 }, (_, line) => ({
+                kind: line % 9 === 0 ? "added" : line % 13 === 0 ? "removed" : "context", text: `let v${line} = ${index}`
+              }));
+              review.renderFile(container, { path: `F${index}.swift`, hunks: [
+                { oldStart: 5, newStart: 5, section: "", lines },
+                { oldStart: 200, newStart: 210, section: "", lines: lines.slice(0, 8).concat([{ kind: "noNewlineMarker", text: "" }]) }
+              ] });
+            }
+            const rendered = (container) => container.querySelector("diffs-container").shadowRoot?.querySelectorAll("[data-line]").length > 0;
+            const heights = () => containers.map((container) => container.getBoundingClientRect().height);
+            const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
+            await settle();
+            const before = heights();
+            const placeholders = containers.filter((container) => !rendered(container)).length;
+            window.scrollTo(0, document.documentElement.scrollHeight);
+            await settle();
+            return JSON.stringify({ before, after: heights(), placeholders, lastRendered: rendered(containers.at(-1)) });
+            """)
+        let rendered = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(result.utf8)) as? [String: Any])
+        let before = try XCTUnwrap(rendered["before"] as? [Double])
+        XCTAssertGreaterThan(rendered["placeholders"] as? Int ?? 0, 10, "files far down render as placeholders")
+        XCTAssertEqual(rendered["lastRendered"] as? Bool, true, "scrolling renders the last file")
+        XCTAssertEqual(rendered["after"] as? [Double], before)
+        XCTAssertEqual(Set(before).count, 1, "\(before)")
     }
 
     private struct ReviewRender {
         let lines: [String]
         let lineNumbers: [String]
+        let noNewlineMarkers: Int
         /// Elements whose tag a crafted string names.
         let elements: Int
         let pwned: String?
@@ -73,7 +159,7 @@ final class PierreDiffRenderTests: XCTestCase {
 
     @MainActor
     private func renderReview(
-        path: String, hunks: [(oldStart: Int, newStart: Int, lines: [(String, String)])]
+        path: String, highlighted: Bool = true, hunks: [(oldStart: Int, newStart: Int, lines: [(String, String)])]
     ) throws -> ReviewRender {
         let page = try BundlePage()
         defer { page.close() }
@@ -93,13 +179,15 @@ final class PierreDiffRenderTests: XCTestCase {
             review.renderFile(root, \(json));
             const shadow = () => root.querySelector("diffs-container")?.shadowRoot;
             const lines = () => [...(shadow()?.querySelectorAll("[data-line]") ?? [])];
-            // Highlighted: the tokens came back from the highlighter.
-            while (lines().length === 0 || !shadow().querySelector("[data-line] span[style]")) {
-              await new Promise((resolve) => setTimeout(resolve, 20));
-            }
+            // Highlighted, unless plain text: the tokens came back from the
+            // highlighter. After 10 s, what rendered.
+            const deadline = Date.now() + 10000;
+            const done = () => lines().length > 0 && (\(highlighted) ? !!shadow().querySelector("[data-line] span[style]") : true);
+            while (!done() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
             return JSON.stringify({
-              lines: lines().map((line) => line.querySelector("[data-column-content]")?.textContent ?? line.textContent),
+              lines: lines().map((line) => line.textContent),
               lineNumbers: [...shadow().querySelectorAll("[data-column-number]")].map((cell) => cell.textContent),
+              noNewlineMarkers: shadow().querySelectorAll("[data-no-newline]").length,
               elements: shadow().querySelectorAll("b, img, script").length + document.querySelectorAll("b, img, script").length,
               pwned: window.pwned ?? null
             });
@@ -108,6 +196,7 @@ final class PierreDiffRenderTests: XCTestCase {
         return ReviewRender(
             lines: rendered["lines"] as? [String] ?? [],
             lineNumbers: rendered["lineNumbers"] as? [String] ?? [],
+            noNewlineMarkers: rendered["noNewlineMarkers"] as? Int ?? -1,
             elements: rendered["elements"] as? Int ?? -1,
             pwned: rendered["pwned"] as? String
         )
@@ -146,15 +235,22 @@ private final class BundlePage {
 
     /// Runs `body` as an async function in the page; it returns a string.
     func run(_ body: String, timeout: TimeInterval = 30) throws -> String {
-        var outcome: Result<Any, Error>?
-        webView.callAsyncJavaScript(body, arguments: [:], in: nil, in: .page) { outcome = $0 }
+        // The handler is @Sendable in recent SDKs: it fills a box rather
+        // than a captured variable.
+        let outcome = Outcome()
+        webView.callAsyncJavaScript(body, arguments: [:], in: nil, in: .page) { outcome.result = $0 }
         let deadline = Date().addingTimeInterval(timeout)
-        while outcome == nil {
+        while outcome.result == nil {
             guard Date() < deadline else { throw PageError("the script didn't finish in \(Int(timeout)) s") }
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         }
-        guard let value = try outcome?.get() as? String else { throw PageError("the script returned no string") }
+        guard let value = try outcome.result?.get() as? String else { throw PageError("the script returned no string") }
         return value
+    }
+
+    /// Set on the main thread, where WebKit calls back.
+    private final class Outcome: @unchecked Sendable {
+        var result: Result<Any, Error>?
     }
 
     func close() {

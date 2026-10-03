@@ -36,7 +36,9 @@ final class PierreDiffBundleTests: XCTestCase {
                 XCTFail("malformed SHA256SUMS line: \(line)")
                 continue
             }
-            hashes[String(parts[1].dropFirst())] = String(parts[0])
+            let path = String(parts[1].dropFirst())
+            XCTAssertNil(hashes[path], "\(path) is listed twice in SHA256SUMS")
+            hashes[path] = String(parts[0])
         }
         return hashes
     }

@@ -25,12 +25,21 @@ case "${1:-}" in
     *) echo "usage: $0 [--check]" >&2; exit 2 ;;
 esac
 
-npm ci --no-audit --no-fund --loglevel=error
+# esbuild is a devDependency: --include=dev installs it even under
+# NODE_ENV=production or omit=dev, and the build runs the locked one, never
+# one found elsewhere on the PATH.
+npm ci --include=dev --no-audit --no-fund --loglevel=error
+esbuild="./node_modules/.bin/esbuild"
+locked="$(node -p 'require("./package-lock.json").packages["node_modules/esbuild"].version')"
+if [ "$("$esbuild" --version)" != "$locked" ]; then
+    echo "$esbuild isn't esbuild $locked, the version package-lock.json pins" >&2
+    exit 1
+fi
 
 build() {
     # These flags are part of the bundle's hash: change them only with a
     # rebuild.
-    npx --no-install esbuild pierre-diff-entry.js \
+    "$esbuild" pierre-diff-entry.js \
         --bundle --format=iife --target=safari17 --minify --log-level=warning \
         --outfile="$1"
 }
