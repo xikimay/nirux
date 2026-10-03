@@ -88,15 +88,19 @@ that does the work.
   its lock, built by `build.sh`) gives the page `createReview`: a file's
   diff from its hunks, unified, without pierre's file header, rendered only
   near the viewport (`VirtualizedFileDiff`). A line break inside a line
-  (LF, CR, U+2028, U+2029; not the CR that ends a CRLF file's line) is
-  shown as its code point, `⟨U+2028⟩`: in the patch text pierre parses, it
-  would end the line, and the rest could read as a hunk. So are bidi
-  controls, which reorder what follows ("Trojan Source"), and invisible
-  characters: zero-width ones, Hangul fillers, tag characters, and
-  variation selectors, which can carry a hidden payload (decided by the
-  user on 2026-10-03). A file past 1,500 lines or 100,000 characters is
-  plain text: pierre colors a whole file at once, on the page's main
-  thread, which takes seconds for a few hundred KB.
+  (LF, CR, U+2028, U+2029) is shown as its code point, `⟨U+2028⟩`: in the
+  patch text pierre parses, it would end the line, and the rest could read
+  as a hunk. The CR that ends a CRLF file's line stays hidden, unless the
+  hunk's lines don't all end with one: a change of line ending would read
+  as no change. Bidi controls, which reorder what follows ("Trojan
+  Source"), and invisible characters are shown the same way: zero-width
+  ones, Hangul fillers, tag characters, and variation selectors, which can
+  carry a hidden payload; U+FE0E and U+FE0F only stay right after an
+  emoji, whose look they pick (decided by the user on 2026-10-03). A diff
+  past 1,500 lines or 100,000 characters, both sides counted, is plain
+  text, and its element says so (`data-uncolored="large"`): pierre colors
+  a whole file at once, on the page's main thread, which takes seconds for
+  a few hundred KB.
 - Persistence: `ColumnKind` gains `branchReview`. An older nightly decodes the
   unknown kind as a terminal, as for the board: a rollback turns the column
   into a shell in the worktree. Reopen it after updating.

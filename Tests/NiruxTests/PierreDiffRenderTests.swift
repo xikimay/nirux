@@ -75,10 +75,41 @@ final class PierreDiffRenderTests: XCTestCase {
     /// same.
     @MainActor
     func testLineEndingChangeShowsTheCarriageReturn() throws {
-        let rendered = try renderReview(path: "A.swift", hunks: [(oldStart: 1, newStart: 1, lines: [
-            ("removed", "let a = 1\r"), ("added", "let a = 1")
+        let rendered = try renderReview(path: "A.swift", hunks: [
+            (oldStart: 1, newStart: 1, lines: [("removed", "let a = 1\r"), ("added", "let a = 1")]),
+            // CRLF lines added to an LF file.
+            (oldStart: 10, newStart: 10, lines: [("context", "let b = 2"), ("added", "let c = 3\r")]),
+            // A CRLF file whose last line, without a newline, has no CR.
+            (oldStart: 20, newStart: 20, lines: [
+                ("context", "foo();\r"), ("removed", "}"), ("noNewlineMarker", ""),
+                ("added", "bar();\r"), ("added", "}"), ("noNewlineMarker", "")
+            ])
+        ])
+        XCTAssertEqual(rendered.lines, [
+            "let a = 1⟨U+000D⟩", "let a = 1", "let b = 2", "let c = 3⟨U+000D⟩", "foo();", "}", "bar();", "}"
+        ])
+    }
+
+    /// The editor highlights `Dockerfile` by its name; so does the review,
+    /// whatever folder it is in.
+    @MainActor
+    func testLanguageComesFromTheFileName() throws {
+        let rendered = try renderReview(path: "docker/Dockerfile", hunks: [(oldStart: 1, newStart: 1, lines: [
+            ("added", "FROM alpine:3.20"), ("added", "RUN apk add git")
         ])])
-        XCTAssertEqual(rendered.lines, ["let a = 1⟨U+000D⟩", "let a = 1"])
+        XCTAssertEqual(rendered.lines, ["FROM alpine:3.20", "RUN apk add git"])
+        XCTAssertTrue(rendered.colored)
+    }
+
+    /// A kind the wrapper doesn't know, even one named like an `Object`
+    /// member, is left out, and the hunk's numbers ignore it.
+    @MainActor
+    func testUnknownLineKindIsLeftOut() throws {
+        let rendered = try renderReview(path: "A.swift", hunks: [(oldStart: 1, newStart: 1, lines: [
+            ("added", "let a = 1"), ("toString", "let b = 2"), ("added", "let c = 3")
+        ])])
+        XCTAssertEqual(rendered.lines, ["let a = 1", "let c = 3"])
+        XCTAssertEqual(rendered.lineNumbers, ["1", "2"])
     }
 
     /// pierre colors a whole file at once, on the page's main thread: past
@@ -117,12 +148,18 @@ final class PierreDiffRenderTests: XCTestCase {
         let rendered = try renderReview(path: "A.swift", hunks: [(oldStart: 1, newStart: 1, lines: [
             ("added", "let isAdmin = false /*\u{202E} } \u{2066}if (isAdmin)\u{2069} \u{2066} begin admins only */"),
             ("added", "let user\u{200B}Name = \"\u{FEFF}\u{E0041}\u{3164}\""),
-            ("added", "eval(decode(\"\u{E0158}\u{E0159}\u{FE01}\"))")
+            ("added", "eval(decode(\"\u{E0158}\u{E0159}\u{FE01}\"))"),
+            // Two selectors are enough to encode a payload; after an emoji,
+            // one picks its look.
+            ("added", "eval(decode(\"\u{FE0E}\u{FE0F}\u{FE0E}\")) // x\u{FE0F}"),
+            ("added", "let heart = \"❤\u{FE0F}\", one = \"1\u{FE0F}\u{20E3}\"")
         ])])
         XCTAssertEqual(rendered.lines, [
             "let isAdmin = false /*⟨U+202E⟩ } ⟨U+2066⟩if (isAdmin)⟨U+2069⟩ ⟨U+2066⟩ begin admins only */",
             "let user⟨U+200B⟩Name = \"⟨U+FEFF⟩⟨U+E0041⟩⟨U+3164⟩\"",
-            "eval(decode(\"⟨U+E0158⟩⟨U+E0159⟩⟨U+FE01⟩\"))"
+            "eval(decode(\"⟨U+E0158⟩⟨U+E0159⟩⟨U+FE01⟩\"))",
+            "eval(decode(\"⟨U+FE0E⟩⟨U+FE0F⟩⟨U+FE0E⟩\")) // x⟨U+FE0F⟩",
+            "let heart = \"❤\u{FE0F}\", one = \"1\u{FE0F}\u{20E3}\""
         ])
     }
 
@@ -159,7 +196,9 @@ final class PierreDiffRenderTests: XCTestCase {
         let result = try page.run("""
             window.requestAnimationFrame = (callback) => setTimeout(() => callback(performance.now()), 0);
             const root = document.getElementById("root");
-            const review = window.NiruxPierreDiff.createReview(document);
+            // A line height off WebKit's 1/64 pt grid, which the review
+            // rounds onto it.
+            const review = window.NiruxPierreDiff.createReview(document, { lineHeight: 18.3 });
             const containers = [];
             for (let index = 0; index < 30; index++) {
               const container = document.createElement("div");
@@ -202,6 +241,8 @@ final class PierreDiffRenderTests: XCTestCase {
         let noNewlineMarkers: Int
         /// The host's `data-uncolored`.
         let uncolored: String?
+        /// The highlighter colored its tokens.
+        let colored: Bool
         /// Elements whose tag a crafted string names.
         let elements: Int
         let pwned: String?
@@ -239,6 +280,7 @@ final class PierreDiffRenderTests: XCTestCase {
               lineNumbers: [...shadow().querySelectorAll("[data-column-number]")].map((cell) => cell.textContent),
               noNewlineMarkers: shadow().querySelectorAll("[data-no-newline]").length,
               uncolored: root.querySelector("diffs-container").dataset.uncolored ?? null,
+              colored: !!shadow().querySelector("[data-line] span[style]"),
               elements: shadow().querySelectorAll("b, img, script").length + document.querySelectorAll("b, img, script").length,
               pwned: window.pwned ?? null
             });
@@ -249,6 +291,7 @@ final class PierreDiffRenderTests: XCTestCase {
             lineNumbers: rendered["lineNumbers"] as? [String] ?? [],
             noNewlineMarkers: rendered["noNewlineMarkers"] as? Int ?? -1,
             uncolored: rendered["uncolored"] as? String,
+            colored: rendered["colored"] as? Bool ?? false,
             elements: rendered["elements"] as? Int ?? -1,
             pwned: rendered["pwned"] as? String
         )

@@ -168,12 +168,14 @@ function destroy(root) {
 //   default ignorable ones): bidi controls, which reorder what follows
 //   ("Trojan Source"), zero-width and other invisible characters, Hangul
 //   fillers, tag characters, and variation selectors, which can carry a
-//   whole hidden payload. U+FE0E and U+FE0F, which pick an emoji's look,
-//   stay.
+//   whole hidden payload. U+FE0E and U+FE0F stay right after an emoji,
+//   whose look they pick; anywhere else, two of them are enough to encode
+//   a payload.
 // A carriage return that ends the line is a CRLF file's, and stays hidden,
-// unless the hunk's changed lines don't all end with one: a change of line
-// ending would read as no change.
-const hiddenCharacters = /(?![\uFE0E\uFE0F])[\p{Default_Ignorable_Code_Point}\n\r\u2028\u2029\uFFF9-\uFFFB]/gu;
+// unless the hunk's lines don't all end with one: a change of line ending
+// would read as no change. A last line without a newline has none.
+const hiddenCharacters =
+  /(?<!\p{Emoji})[\uFE0E\uFE0F]|(?![\uFE0E\uFE0F])[\p{Default_Ignorable_Code_Point}\n\r\u2028\u2029\uFFF9-\uFFFB]/gu;
 
 function codePoint(character) {
   return `\u27E8U+${character.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")}\u27E9`;
@@ -211,9 +213,9 @@ function patchText(hunks) {
       onlyAddedFrom[index] = onlyAddedFrom[index + 1] && (lines[index].kind === "added" || lines[index].kind === "noNewlineMarker");
     }
     const lastLine = lines.findLastIndex((line) => line.kind !== "noNewlineMarker");
-    const changed = lines.filter((line) => line.kind === "added" || line.kind === "removed");
     const endsWithCR = (line) => String(line.text ?? "").endsWith("\r");
-    const showsLineEnding = changed.some(endsWithCR) && !changed.every(endsWithCR);
+    const ended = lines.filter((line, index) => line.kind !== "noNewlineMarker" && lines[index + 1]?.kind !== "noNewlineMarker");
+    const showsLineEnding = ended.some(endsWithCR) && !ended.every(endsWithCR);
     const body = [];
     let previous;
     let oldCount = 0;
