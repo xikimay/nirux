@@ -104,7 +104,7 @@ extension BranchReview {
         var info = stat()
         if lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFLNK { return nil }
         let limit = min(maxFileBytes, budget)
-        guard let added, limit > 0 else { return .unread(.tooLarge) }
+        guard let added else { return .unread(.tooLarge) }
         guard let head = readPrefix(of: path, maxBytes: limit + 1) else { return .unread(.changedSincePatch) }
         guard head.count <= limit else { return .unread(.tooLarge) }
         budget -= head.count
@@ -167,7 +167,8 @@ extension BranchReview {
         var mentioned = declared.map { mentions?.found.contains($0.symbol.name) == true }
         // Tests name a type through its members: `.notRead` rather than
         // `Omission.notRead`. A type counts once a member the branch
-        // declares in the same file does, nested types included.
+        // declares in the same file does, nested types included: by name
+        // in the file, since `Kind` or `Item` are nested in many types.
         func key(_ path: String, _ type: String) -> String { path + "\0" + type }
         var mentionedContainers = Set(declared.indices.filter { mentioned[$0] }.compactMap { member in
             declared[member].symbol.container.map { key(declared[member].path, $0) }
@@ -175,7 +176,7 @@ extension BranchReview {
         var grew = true
         while grew {
             grew = false
-            for index in declared.indices where !mentioned[index] && declared[index].symbol.kind == .type
+            for index in declared.indices where !mentioned[index]
                 && mentionedContainers.contains(key(declared[index].path, declared[index].symbol.name)) {
                 mentioned[index] = true
                 grew = true
@@ -190,8 +191,7 @@ extension BranchReview {
 
     // MARK: Mentions
 
-    /// What `PathGroup` takes for a test, as pathspecs: the listing is
-    /// then checked against `PathGroup` itself.
+    /// `PathGroup`'s rules for a test, as pathspecs.
     private static let testPathspecs = [
         ":(glob)**/*Tests/**", ":(glob)**/*Tests.swift", ":(glob)**/*_test.*", ":(glob)**/*.test.*", ":(glob)**/*.spec.*"
     ]
@@ -210,7 +210,6 @@ extension BranchReview {
             in: root, options: options, environment: ["GIT_LITERAL_PATHSPECS": "0"], maxOutputBytes: 16 << 20
         ), listed.status == 0 else { return nil }
         let paths = listed.stdout.split(separator: 0).map(Patch.decoded)
-            .filter { PathGroup(path: $0) == .tests }
             .sorted { ($0.hasSuffix(".swift") ? 0 : 1, $0) < ($1.hasSuffix(".swift") ? 0 : 1, $1) }
         var missing = WordSet(names)
         var unread = 0
@@ -218,6 +217,7 @@ extension BranchReview {
         var budget = options.maxTestBytesRead
         for path in paths where !missing.isEmpty {
             let limit = min(options.maxTestFileBytes, budget)
+            // Past the budget, no file is opened at all.
             guard read < options.maxTestFilesRead, limit > 0 else {
                 unread += 1
                 continue
@@ -237,7 +237,7 @@ extension BranchReview {
             }
             budget -= data.count
             if path.hasSuffix(".swift") {
-                var lexer = SwiftScanner(parsesDeclarations: false)
+                var lexer = SwiftScanner()
                 lexer.words = missing
                 forEachLine(of: data) { lexer.feed($0, collecting: false) }
                 missing = lexer.words ?? missing
@@ -339,7 +339,6 @@ extension BranchReview {
         /// A removed line, read alone: whatever it declares, at any depth
         /// and whatever its visibility, was there before the branch.
         mutating func addRemoved(_ content: Data) {
-            guard !overflowed else { return }
             var scanner = SwiftScanner()
             content.withUnsafeBytes { scanner.feed($0, collecting: true) }
             removedNames.formUnion(scanner.declarations.map(\.symbol.name))

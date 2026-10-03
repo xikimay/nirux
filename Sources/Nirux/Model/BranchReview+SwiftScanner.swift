@@ -25,8 +25,9 @@ extension BranchReview {
     /// `actor`, at the file's level or in a type's or an extension's
     /// body. Strings (multi-line and raw ones, interpolations included)
     /// and comments (nested ones included) are skipped; braces tell the
-    /// bodies apart. Known limit: a bare `/regex/` literal reads as code,
-    /// and the file then reads unbalanced when it holds a brace.
+    /// bodies apart. Known limits: a bare `/regex/` literal reads as code,
+    /// and `#if` branches that each open a brace (which Swift rejects)
+    /// read as two: the file then reads unbalanced.
     struct SwiftScanner {
         private(set) var declarations: [Declaration] = []
         /// Types declared private or fileprivate at the file's level.
@@ -34,27 +35,23 @@ extension BranchReview {
         /// Names looked for in the code, interpolations included, but not
         /// in comments or strings: each one found is removed.
         var words: WordSet?
-        private let parsesDeclarations: Bool
         private var lineNumber = 0
         private var collecting = false
         /// A brace closed with none open.
         private var closedUnopened = false
-
-        init(parsesDeclarations: Bool = true) {
-            self.parsesDeclarations = parsesDeclarations
-        }
 
         /// Whether every brace, string and comment the source opened is
         /// closed: what follows a stray one may have read wrong.
         var isBalanced: Bool { !closedUnopened && scopes.isEmpty && modes.isEmpty }
 
         /// What the review lists: declared on collected lines, not hidden,
-        /// nor in an extension of a private type (declared before or after
-        /// it).
+        /// nor in an extension of a private type or of a type nested in one
+        /// (declared before or after it).
         var symbols: [Symbol] {
-            declarations
-                .filter { $0.isCollected && !$0.isHidden && !($0.extended.map(privateTypes.contains) ?? false) }
-                .map(\.symbol)
+            declarations.filter { declaration in
+                let extended = declaration.extended?.split(separator: ".").first.map(String.init)
+                return declaration.isCollected && !declaration.isHidden && !(extended.map(privateTypes.contains) ?? false)
+            }.map(\.symbol)
         }
 
         // Lexer: what the code is nested in, innermost last.
@@ -139,11 +136,12 @@ extension BranchReview {
         }
 
         /// In an attribute: after `@` or a `.` (`@SwiftUI.State`), after
-        /// its name, or in its generic arguments (`@Clamped<Int>`).
+        /// its name, or in its generic arguments (`@Clamped<Int>`), right
+        /// after a `-` there: `->` closes nothing.
         private enum Attribute {
             case name
             case afterName
-            case generic(depth: Int)
+            case generic(depth: Int, afterDash: Bool)
         }
 
         private var scopes: [Scope] = []
@@ -235,16 +233,13 @@ extension BranchReview {
                 take(.punctuation(byte))
                 return start + 1
             default:
-                guard RiskRules.isIdentifier(byte) || byte == UInt8(ascii: "$") else {
+                // A number reads as an identifier: no declaration takes one.
+                guard RiskRules.isIdentifier(byte) else {
                     take(.punctuation(byte))
                     return start + 1
                 }
                 var end = start + 1
-                while end < line.count, RiskRules.isIdentifier(line[end]) || line[end] == UInt8(ascii: "$") { end += 1 }
-                guard !(UInt8(ascii: "0")...UInt8(ascii: "9")).contains(byte) else {
-                    take(.literal)
-                    return end
-                }
+                while end < line.count, RiskRules.isIdentifier(line[end]) { end += 1 }
                 let name = UnsafeRawBufferPointer(rebasing: line[start..<end])
                 words?.remove(name)
                 take(.identifier(name, isEscaped: false))
@@ -359,7 +354,7 @@ extension BranchReview.SwiftScanner {
     /// Code inside a string's interpolation is an expression: only
     /// the code around strings is parsed.
     private mutating func take(_ token: Token) {
-        guard parsesDeclarations, modes.isEmpty else { return }
+        guard modes.isEmpty else { return }
         if scopes.last?.isLocal == true {
             if case .punctuation(let byte) = token {
                 if byte == UInt8(ascii: "{") { open(local: true) }
@@ -404,19 +399,14 @@ extension BranchReview.SwiftScanner {
             attribute = .name
             return true
         case (.afterName?, .punctuation(UInt8(ascii: "<"))):
-            attribute = .generic(depth: 1)
+            attribute = .generic(depth: 1, afterDash: false)
             return true
         case (.afterName?, .punctuation(UInt8(ascii: "("))):
             attribute = nil
             argumentDepth = 1
             return true
-        case (.generic(let depth)?, .punctuation(UInt8(ascii: "<"))):
-            attribute = .generic(depth: depth + 1)
-            return true
-        case (.generic(let depth)?, .punctuation(UInt8(ascii: ">"))):
-            attribute = depth == 1 ? .afterName : .generic(depth: depth - 1)
-            return true
-        case (.generic?, _):
+        case (.generic(let depth, let afterDash)?, _):
+            attribute = Self.generic(after: token, depth: depth, afterDash: afterDash)
             return true
         default:
             attribute = nil
@@ -431,6 +421,16 @@ extension BranchReview.SwiftScanner {
             }
         }
         return false
+    }
+
+    /// Where a token leaves an attribute's generic arguments.
+    private static func generic(after token: Token, depth: Int, afterDash: Bool) -> Attribute {
+        guard case .punctuation(let byte) = token else { return .generic(depth: depth, afterDash: false) }
+        switch byte {
+        case UInt8(ascii: "<"): return .generic(depth: depth + 1, afterDash: false)
+        case UInt8(ascii: ">") where !afterDash: return depth == 1 ? .afterName : .generic(depth: depth - 1, afterDash: false)
+        default: return .generic(depth: depth, afterDash: byte == UInt8(ascii: "-"))
+        }
     }
 
     /// Whether `token` is part of an extension's type; the first token
@@ -461,7 +461,7 @@ extension BranchReview.SwiftScanner {
             }
             // `class func`, `class override var`: a modifier.
         }
-        if !isEscaped, statement.atStart, keyword(name) { return }
+        if statement.atStart, keyword(name) { return }
         let candidate = Candidate(name: name, line: lineNumber, collecting: collecting)
         switch statement.expect {
         case .name(.type):
@@ -602,12 +602,6 @@ extension BranchReview.SwiftScanner {
 
     /// Any other token: a statement under way.
     private mutating func other() {
-        switch statement.expect {
-        case .tuple(let open, _): statement.expect = .tuple(depth: open, candidate: nil)
-        case .nextBinding, .candidates: statement.expect = .moreBindings
-        case .name, .typeName, .binding, .caseName: statement.expect = .nothing
-        default: break
-        }
         statement.atStart = false
         statement.continues = false
     }
@@ -622,7 +616,7 @@ extension BranchReview.SwiftScanner {
     private mutating func open(local: Bool) {
         let parent = scopes.last
         scopes.append(Scope(
-            isLocal: local || parent?.isLocal == true,
+            isLocal: local,
             isPrivate: parent?.isPrivate == true || (!local && typeIsPrivate),
             container: local ? nil : pendingContainer,
             extended: local ? nil : pendingExtended,
@@ -638,8 +632,6 @@ extension BranchReview.SwiftScanner {
             return
         }
         statement = scope.outer
-        statement.atStart = false
-        statement.continues = false
     }
 
     private mutating func record(_ candidate: Candidate, _ kind: BranchReview.Symbol.Kind) {

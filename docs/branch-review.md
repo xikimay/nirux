@@ -481,7 +481,8 @@ How it reads:
   read, when it is past 2 MB or the files read pass 32 MB, when its lines no
   longer match the digest (the agent edited it meanwhile, a clean filter),
   or when a brace, a multi-line string or a comment doesn't close: a bare
-  `/regex/` literal, which reads as code, does that when it holds a brace.
+  `/regex/` literal, which reads as code, does that when it holds a brace,
+  and so do `#if` branches that each open a brace (which Swift rejects).
   A CRLF file whose patch shows LF (`eol=crlf`) still matches. An edit that
   leaves the added lines in place isn't seen until the next refresh, which
   the edit itself triggers.

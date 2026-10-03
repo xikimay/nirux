@@ -6,7 +6,7 @@ import XCTest
 /// them on real repositories.
 final class BranchReviewSymbolsTests: XCTestCase {
     private func scanned(_ source: String, added: Set<Int>? = nil, words: Set<String>? = nil) -> BranchReview.SwiftScanner {
-        var scanner = BranchReview.SwiftScanner(parsesDeclarations: words == nil)
+        var scanner = BranchReview.SwiftScanner()
         scanner.words = words.map(BranchReview.WordSet.init)
         for (index, line) in source.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
             Array(line.utf8).withUnsafeBytes { scanner.feed($0, collecting: added?.contains(index + 1) ?? true) }
@@ -74,7 +74,10 @@ final class BranchReviewSymbolsTests: XCTestCase {
         extension Secret {
             func leak() {}
         }
-        fileprivate struct Secret {}
+        extension Secret.Inner {
+            func deeperLeak() {}
+        }
+        fileprivate struct Secret { struct Inner {} }
         """
         XCTAssertEqual(declared(source), ["Widget", "count", "total", "shared", "shown", "level"])
     }
@@ -92,8 +95,12 @@ final class BranchReviewSymbolsTests: XCTestCase {
             let pair = f(a, b: 1)
             let handler = make({ $0 }, label: "x")
             let made = { 1 }(), after = 2
+            let wrapped = f(
+                1
+            ), alsoWrapped = 2
             @SwiftUI.State var count = 0
-            @Clamped<Int> var limit = 0
+            @Clamped<Array<Int>> var limit = 0
+            @Mapped<(Int) -> Int> var mapping = 0
             func `does something`() {}
             typealias ID = String
             func `default`() {}
@@ -109,8 +116,8 @@ final class BranchReviewSymbolsTests: XCTestCase {
         """
         XCTAssertEqual(declared(source), [
             "Box", "make", "size", "width", "height", "depth", "first", "second", "map", "third", "fourth", "pair",
-            "handler", "made", "after", "count", "limit", "ID", "default", "Style", "plain", "bold", "nested", "default",
-            "withHandler", "last", "Worker", "open", "Drawing", "draw"
+            "handler", "made", "after", "wrapped", "alsoWrapped", "count", "limit", "mapping", "ID", "default", "Style",
+            "plain", "bold", "nested", "default", "withHandler", "last", "Worker", "open", "Drawing", "draw"
         ])
     }
 
@@ -123,20 +130,28 @@ final class BranchReviewSymbolsTests: XCTestCase {
                 \(value) } "" \"""
                 """
             let raw = #"\(not) "{" "#
+            let rawBrace = #" "x{ "#
             let rawTemplate = #"""
                 } \#(count("}")) func alsoFake() {
+                \( {
                 """#
             let label = "\(items.map { "\($0) {" }.joined())"
-            /* func commented() { /* nested } */ } */
+            let nested = "\(f(g(1), "{"))"
+            let joined = "\(join(1, with: 2))"
+            /* func commented() /* nested */ { */
             // func lineComment() {
             let regex = #/[{]/#
+            let escaped = #/\/#{/#
             let unterminated = "{
             func real() {}
         }
         let after = 1
         """##
         XCTAssertEqual(
-            declared(source), ["Parser", "open", "template", "raw", "rawTemplate", "label", "regex", "unterminated", "real", "after"]
+            declared(source), [
+                "Parser", "open", "template", "raw", "rawBrace", "rawTemplate", "label", "nested", "joined", "regex", "escaped",
+                "unterminated", "real", "after"
+            ]
         )
     }
 
@@ -152,6 +167,7 @@ final class BranchReviewSymbolsTests: XCTestCase {
             let directory = environment["PWD"]
         else { fatalError() }
         var counter = 0
+        let _ = load()
         actor.run()
         @available(macOS 13, *)
         func modern() {}
@@ -207,8 +223,8 @@ final class BranchReviewSymbolsTests: XCTestCase {
     }
 
     func testWordsAreFoundInCodeAndInterpolationsOnly() {
-        let source = "// alpha\nlet text = \"beta \\(gamma) `delta`\"\n/* epsilon */ zeta(`eta`)"
-        let words = scanned(source, words: ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta"]).words
+        let source = "// alpha\nlet text = \"beta \\(gamma) `delta`\"\n/* epsilon */ zeta(`eta`, model.$theta)"
+        let words = scanned(source, words: ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]).words
         XCTAssertEqual(words?.names, ["alpha", "beta", "delta", "epsilon"])
     }
 

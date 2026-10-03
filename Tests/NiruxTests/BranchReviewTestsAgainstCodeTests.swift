@@ -58,6 +58,7 @@ final class BranchReviewTestsAgainstCodeTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(tests.unreadTestFiles, 0)
         XCTAssertFalse(tests.testFilesUnlisted)
         XCTAssertNil(try file("Sources/App.swift", in: snapshot).symbols, "it adds no line")
+        XCTAssertNil(try file("Sources/Generated.swift", in: snapshot).symbols, "it is folded")
 
         var limited = options()
         limited.maxTestFilesRead = 0
@@ -82,11 +83,18 @@ final class BranchReviewTestsAgainstCodeTests: BranchReviewRepositoryTestCase {
         }
 
         """)
-        try write("Tests/PhaseTests.swift", "assert(phase == .busy)\nassert(depth == .deep)\n")
+        // `Kind` is nested in two types: each counts by its own members.
+        try write("Sources/Shapes.swift", "enum Circle {\n    enum Kind { case round }\n}\n")
+        try write("Sources/Squares.swift", "enum Square {\n    enum Kind { case sharp }\n}\n")
+        try write("Tests/PhaseTests.swift", "assert(phase == .busy)\nassert(depth == .deep)\nassert(kind == .round)\n")
 
         let tests = try snapshot().testsAgainstCode
 
-        XCTAssertEqual(tests.unmentioned.map(\.symbol.name), ["idle", "Lonely", "alone", "initial"])
+        XCTAssertEqual(
+            tests.unmentioned.map { "\(BranchReview.fileName($0.path)):\($0.symbol.name)" },
+            ["Phase.swift:idle", "Phase.swift:Lonely", "Phase.swift:alone", "Phase.swift:initial",
+             "Squares.swift:Square", "Squares.swift:Kind", "Squares.swift:sharp"]
+        )
     }
 
     func testTestFilesThatCantBeReadCountAsUnreadButDeletedOnesDont() throws {
@@ -158,12 +166,22 @@ final class BranchReviewTestsAgainstCodeTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(scan(budget: 20), .unread(.tooLarge))
         try write("Sources/Gauge.swift", "struct Gauge {\n    var lever = 0\n}\n")
         XCTAssertEqual(scan(), .unread(.changedSincePatch))
+
+        var limited = options()
+        limited.maxScannedBytes = 60
+        try write("Sources/Gauge.swift", "struct Gauge {\n    var level = 0\n}\n")
+        try write("Sources/Lever.swift", "struct Lever {\n    var level = 0\n}\n")
+        let budgeted = try self.snapshot(limited)
+        XCTAssertEqual(try file("Sources/Gauge.swift", in: budgeted).symbols, read)
+        XCTAssertEqual(try file("Sources/Lever.swift", in: budgeted).symbols, .unread(.tooLarge), "past the files' budget")
+        limited.maxScannedFileBytes = 20
+        XCTAssertEqual(try file("Sources/Gauge.swift", in: try self.snapshot(limited)).symbols, .unread(.tooLarge))
     }
 
     func testMentionsReadSwiftTestsFirstWithinTheLimits() throws {
-        try write("Tests/a.json", "render, more\n")
+        try write("Tests/A.json", "render, more\n")
         try write("Tests/BTests.swift", "measure\n")
-        try write("Tests/CTests.swift", "gaugeMeter\n")
+        try write("Tests/CTests.swift", "1; gaugeX\n")
         try write("Sources/Other.swift", "gauge\n")
         let names: Set<String> = ["measure", "render", "gauge"]
         func mentions(maxFiles: Int = 100, maxFileBytes: Int = 100, maxBytes: Int = 1_000, of names: Set<String> = names)
@@ -184,7 +202,7 @@ final class BranchReviewTestsAgainstCodeTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(mentions(maxFiles: 1)?.unread, 2)
         XCTAssertEqual(mentions(maxBytes: 8)?.found, ["measure"])
         XCTAssertEqual(mentions(maxBytes: 8)?.unread, 2)
-        // "gaugeMeter" cut after "gauge" doesn't mention it.
+        // "gaugeX" cut after "gauge" doesn't mention it.
         XCTAssertEqual(mentions(maxFileBytes: 8)?.found, ["measure", "render"])
         XCTAssertEqual(mentions(maxFileBytes: 8)?.unread, 2)
         XCTAssertEqual(mentions(maxFiles: 1, of: ["measure"])?.unread, 0, "nothing left to look for")
