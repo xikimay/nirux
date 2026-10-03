@@ -50,7 +50,7 @@ final class PRFeedbackTests: XCTestCase {
     }
 
     private let pullRequest = PRInfo(
-        number: 52, state: "OPEN", isDraft: true, ciStatus: nil, failedCheckUrl: nil, reviewDecision: nil,
+        number: 52, state: "OPEN", isDraft: true, ciStatus: nil, checks: [], reviewDecision: nil,
         mergeable: nil, url: "https://github.com/o/r/pull/52", additions: nil, deletions: nil, changedFiles: nil
     )
 
@@ -225,7 +225,7 @@ final class PRFeedbackTests: XCTestCase {
         XCTAssertEqual(workspace.prFeedback, feedback, "the same open PR read again keeps it")
 
         workspace.prInfo = PRInfo(
-            number: 52, state: "MERGED", isDraft: false, ciStatus: nil, failedCheckUrl: nil, reviewDecision: nil,
+            number: 52, state: "MERGED", isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
             mergeable: nil, url: pullRequest.url, additions: nil, deletions: nil, changedFiles: nil
         )
         XCTAssertNil(workspace.prFeedback)
