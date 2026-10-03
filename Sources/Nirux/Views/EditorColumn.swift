@@ -440,6 +440,12 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         startFileWatch()
     }
 
+    /// Gives Monaco the keyboard, as a click in it would: its column got
+    /// the focus. The page refocuses what Monaco had focused.
+    func takeKeyboard() {
+        window?.makeFirstResponder(webView)
+    }
+
     /// Switch the active tab. The model already exists on the JS side; we
     /// only ask Monaco to swap to it.
     func switchTo(path: String, takeFocus: Bool = true) {
@@ -562,7 +568,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
             .filter { seen.insert($0).inserted }
 
         guard !absolutePaths.isEmpty else {
-            NSSound.beep()
+            showToast("No files to compare")
             return
         }
 
@@ -588,7 +594,9 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                 guard self.diffLoadGeneration == generation else { return }
                 guard self.diffGroupTabs[groupPath] != nil else { return }
                 guard !files.isEmpty else {
-                    NSSound.beep()
+                    // Not left loading.
+                    self.close(path: groupPath)
+                    self.showToast("Couldn’t read the changes of these files", tone: .error)
                     return
                 }
                 let group = DiffGroupTab(title: title, mode: mode, files: files, isLoading: false)
@@ -660,10 +668,12 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                 switch original {
                 case nil:
                     NSLog("%@", "[EditorColumn] no git \(mode.rawValue) content for \(path) — file untracked, git missing, or branch base unavailable")
-                    NSSound.beep()
+                    self.forgetFailedDiffMode(path: path)
+                    self.showToast(Self.noDiffOriginalText(path: path, cwd: cwd, mode: mode))
                 case .tooLarge(let byteCount):
                     NSLog("%@", "[EditorColumn] git \(mode.rawValue) original of \(path) too large to diff (\(byteCount) bytes)")
-                    NSSound.beep()
+                    self.forgetFailedDiffMode(path: path)
+                    self.showToast("This file is too large to compare")
                 case .text(let original):
                     self.diffActivePath = path
                     self.diffActiveMode = mode
@@ -671,6 +681,18 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
                     self.sendBridge(["type": "enterDiff", "path": path, "original": original])
                 }
             }
+        }
+    }
+
+    /// A diff that failed isn't asked again each time its tab comes back;
+    /// the one still on screen, if any, is.
+    private func forgetFailedDiffMode(path: String) {
+        if diffActivePath == path, let shown = diffActiveMode {
+            diffModeByPath[path] = shown
+            selectedDiffMode = shown
+            refreshTabBar()
+        } else {
+            diffModeByPath.removeValue(forKey: path)
         }
     }
 
@@ -1049,6 +1071,12 @@ extension EditorColumn {
             // empty original gives Monaco the expected "whole file added" diff.
             return gitContent(relativePath: rel, ref: base, cwd: cwd, maxBytes: maxBytes) ?? .text("")
         }
+    }
+
+    /// Why `gitOriginalContent` found nothing to compare with.
+    private nonisolated static func noDiffOriginalText(path: String, cwd: String, mode: EditorDiffMode) -> String {
+        if relativeGitPath(of: path, cwd: cwd) == nil { return "This file is outside the workspace’s folder" }
+        return mode == .branch ? "No base branch to compare with" : "This file is no longer on disk"
     }
 
     private nonisolated static func relativeGitPath(of absPath: String, cwd: String) -> String? {

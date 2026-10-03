@@ -87,9 +87,7 @@ extension ColumnState {
         if let usage, let text = usage.titleBarText {
             let label = usageLabel ?? makeUsageLabel()
             label.stringValue = text
-            label.textColor = usage.isNearlyFull
-                ? NSColor.systemOrange.withAlphaComponent(0.9)
-                : NSColor.white.withAlphaComponent(0.45)
+            label.textColor = usage.isNearlyFull ? .niruxNearLimit : NSColor.white.withAlphaComponent(0.45)
             label.toolTip = usage.tooltip
         }
         layoutTitleBarContents()

@@ -34,6 +34,10 @@ extension NiruxApp {
         shell?.showNewWorkspacePanel()
     }
 
+    @objc func resumeAllAgents(_ sender: Any?) {
+        shell?.resumeAllDeferredAgents()
+    }
+
     @objc func renameWorkspace(_ sender: Any?) {
         shell?.showRenamePanel()
     }
@@ -44,6 +48,12 @@ extension NiruxApp {
 
     @objc func workspaceDown(_ sender: Any?) {
         shell?.focusWorkspace(.down)
+    }
+
+    /// One jump per press: a held ⌘J would spin through the queue.
+    @objc func jumpToNextWaitingAgent(_ sender: Any?) {
+        if let event = NSApp.currentEvent, event.type == .keyDown, event.isARepeat { return }
+        shell?.jumpToNextWaitingAgent()
     }
 
     @objc func previousSpace(_ sender: Any?) {
@@ -72,6 +82,10 @@ extension NiruxApp {
 
     @objc func showWorkspaceSearch(_ sender: Any?) {
         shell?.showWorkspaceSearch()
+    }
+
+    @objc func showGlobalSearch(_ sender: Any?) {
+        shell?.showGlobalSearch()
     }
 
     // The find items act on the main window's focused terminal column only:
@@ -122,10 +136,6 @@ extension NiruxApp {
 
     @objc func focusColumnByNumber(_ sender: NSMenuItem) {
         shell?.focusColumn(number: sender.tag)
-    }
-
-    @objc func togglePilotMode(_ sender: Any?) {
-        shell?.togglePilotMode()
     }
 
     /// Same toggle as the sidebar's INACTIVE header (also in the ⌘P
@@ -215,6 +225,11 @@ extension NiruxApp {
             action: #selector(showWorkspaceSearch(_:)),
             shortcut: .searchWorkspace
         )
+        editMenu.addItem(
+            withTitle: "Search Everywhere…",
+            action: #selector(showGlobalSearch(_:)),
+            shortcut: .searchEverywhere
+        )
 
         let sendSelectionItem = NSMenuItem(
             title: "Send Selection to Agent",
@@ -240,7 +255,6 @@ extension NiruxApp {
     private func viewMenuItem() -> NSMenuItem {
         let viewMenu = NSMenu(title: "View")
         viewMenu.addItem(withTitle: "Toggle Sidebar", action: #selector(toggleWorkspaceSidebar(_:)), shortcut: .toggleSidebar)
-        viewMenu.addItem(withTitle: "Pilot Mode", action: #selector(togglePilotMode(_:)), shortcut: .pilotMode)
         viewMenu.addItem(
             withTitle: "Show Inactive Workspaces",
             action: #selector(toggleInactiveWorkspaces(_:)),
@@ -321,11 +335,13 @@ extension NiruxApp {
         let focusLeftItem = NSMenuItem(title: "Focus Left", action: #selector(focusLeft(_:)), keyEquivalent: "\u{F702}")
         focusLeftItem.keyEquivalentModifierMask = .command
         colMenu.addItem(focusLeftItem)
+        colMenu.addItem(Self.controlAlternate(of: focusLeftItem))
 
         let focusRightItem = NSMenuItem(title: "Focus Right", action: #selector(focusRight(_:)), keyEquivalent: "")
         focusRightItem.keyEquivalent = "\u{F703}"
         focusRightItem.keyEquivalentModifierMask = .command
         colMenu.addItem(focusRightItem)
+        colMenu.addItem(Self.controlAlternate(of: focusRightItem))
 
         colMenu.addItem(NSMenuItem.separator())
 
@@ -352,32 +368,55 @@ extension NiruxApp {
         workspacesMenu.addItem(withTitle: "New Workspace", action: #selector(newWorkspace(_:)), shortcut: .newWorkspace)
         workspacesMenu.addItem(withTitle: "Rename Workspace", action: #selector(renameWorkspace(_:)), keyEquivalent: "")
         workspacesMenu.addItem(NSMenuItem.separator())
+        workspacesMenu.addItem(withTitle: "Resume All Agents", action: #selector(resumeAllAgents(_:)), keyEquivalent: "")
+        workspacesMenu.addItem(NSMenuItem.separator())
 
         let workspaceUpItem = NSMenuItem(title: "Workspace Up", action: #selector(workspaceUp(_:)), keyEquivalent: "")
         workspaceUpItem.keyEquivalent = "\u{F700}"
         workspaceUpItem.keyEquivalentModifierMask = .command
         workspacesMenu.addItem(workspaceUpItem)
+        workspacesMenu.addItem(Self.controlAlternate(of: workspaceUpItem))
 
         let workspaceDownItem = NSMenuItem(title: "Workspace Down", action: #selector(workspaceDown(_:)), keyEquivalent: "")
         workspaceDownItem.keyEquivalent = "\u{F701}"
         workspaceDownItem.keyEquivalentModifierMask = .command
         workspacesMenu.addItem(workspaceDownItem)
+        workspacesMenu.addItem(Self.controlAlternate(of: workspaceDownItem))
 
         workspacesMenu.addItem(NSMenuItem.separator())
 
-        let previousSpaceItem = NSMenuItem(title: "Previous Space", action: #selector(previousSpace(_:)), keyEquivalent: "")
+        let previousSpaceItem = NSMenuItem(title: "Previous Project", action: #selector(previousSpace(_:)), keyEquivalent: "")
         previousSpaceItem.keyEquivalent = "\u{F702}"
         previousSpaceItem.keyEquivalentModifierMask = NSEvent.ModifierFlags([.command, .option])
         workspacesMenu.addItem(previousSpaceItem)
 
-        let nextSpaceItem = NSMenuItem(title: "Next Space", action: #selector(nextSpace(_:)), keyEquivalent: "")
+        let nextSpaceItem = NSMenuItem(title: "Next Project", action: #selector(nextSpace(_:)), keyEquivalent: "")
         nextSpaceItem.keyEquivalent = "\u{F703}"
         nextSpaceItem.keyEquivalentModifierMask = NSEvent.ModifierFlags([.command, .option])
         workspacesMenu.addItem(nextSpaceItem)
 
+        workspacesMenu.addItem(NSMenuItem.separator())
+        workspacesMenu.addItem(
+            withTitle: "Next Waiting Agent",
+            action: #selector(jumpToNextWaitingAgent(_:)),
+            shortcut: .nextWaitingAgent
+        )
+
         let workspacesItem = NSMenuItem()
         workspacesItem.submenu = workspacesMenu
         return workspacesItem
+    }
+
+    /// `item` on Control+Cmd+Arrow, shown in its place while Control is
+    /// held. Cmd+Arrow moves the caret while text has the keyboard (see
+    /// WebContentKeyRouting.movesCaretToTextEdge); this chord navigates from
+    /// anywhere.
+    @MainActor
+    private static func controlAlternate(of item: NSMenuItem) -> NSMenuItem {
+        let alternate = NSMenuItem(title: item.title, action: item.action, keyEquivalent: item.keyEquivalent)
+        alternate.keyEquivalentModifierMask = item.keyEquivalentModifierMask.union(.control)
+        alternate.isAlternate = true
+        return alternate
     }
 
     static let windowMenuTag = 1
