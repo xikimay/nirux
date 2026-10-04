@@ -159,6 +159,33 @@ final class AgentSessionRecordTests: XCTestCase {
         XCTAssertNil(onB.pullRequest)
     }
 
+    /// A Resume brings a cleaned-up session back detached, or in the main
+    /// checkout: it keeps its branch, pull request and worktree.
+    func testAResumedSessionKeepsItsBranchPullRequestAndWorktree() throws {
+        let worktree = AgentSessionRecord.Checkout(branch: "feat/x", worktreeRoot: "/wt", mainCheckout: "/repo", head: "1")
+        let pullRequest = AgentSessionRecord.PullRequest(number: 7, url: "u", state: "MERGED")
+        let record = try XCTUnwrap(apply([observation(.stop, at: 10, checkout: worktree, pullRequest: pullRequest)], to: apply([
+            observation(.sessionStart, at: 9, source: "startup")
+        ])))
+
+        var detached = worktree
+        detached.branch = "HEAD"
+        detached.head = "2"
+        let back = try XCTUnwrap(apply([observation(.stop, at: 11, checkout: detached)], to: record))
+        XCTAssertEqual(back.checkout?.branch, "feat/x")
+        XCTAssertEqual(back.checkout?.head, "2")
+        XCTAssertEqual(back.pullRequest, pullRequest)
+
+        let main = AgentSessionRecord.Checkout(branch: "main", worktreeRoot: "/repo", mainCheckout: "/repo", head: "3")
+        let inMain = try XCTUnwrap(apply([observation(.stop, at: 12, checkout: main)], to: record))
+        XCTAssertEqual(inMain.checkout, worktree)
+        XCTAssertEqual(inMain.pullRequest, pullRequest)
+
+        // Another worktree is another checkout.
+        let other = AgentSessionRecord.Checkout(branch: "HEAD", worktreeRoot: "/wt2", mainCheckout: "/repo", head: "4")
+        XCTAssertEqual(apply([observation(.stop, at: 13, checkout: other)], to: record)?.checkout, other)
+    }
+
     func testLaunchName() {
         XCTAssertEqual(AgentSessionObservation.launchName(arguments: ["claude", "--name=feat/x · nirux"]), "feat/x · nirux")
         XCTAssertEqual(AgentSessionObservation.launchName(arguments: ["claude", "--model", "opus", "--name", "a"]), "a")

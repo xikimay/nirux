@@ -235,17 +235,32 @@ extension AgentSessionRecord {
             self.transcriptPath = transcriptPath
         }
         if let checkout = observation.checkout {
-            // Another branch or checkout: its pull request, if known yet.
-            if checkout.branch != self.checkout?.branch || checkout.worktreeRoot != self.checkout?.worktreeRoot {
-                pullRequest = observation.pullRequest
+            if let current = self.checkout, Self.isResumed(current, at: checkout) {
+                if checkout.worktreeRoot == current.worktreeRoot { self.checkout?.head = checkout.head ?? current.head }
+            } else {
+                // Another branch or checkout: its pull request, if known yet.
+                if checkout.branch != self.checkout?.branch || checkout.worktreeRoot != self.checkout?.worktreeRoot {
+                    pullRequest = observation.pullRequest
+                }
+                self.checkout = checkout
+                if let pullRequest = observation.pullRequest { self.pullRequest = pullRequest }
             }
-            self.checkout = checkout
         }
-        if let pullRequest = observation.pullRequest { self.pullRequest = pullRequest }
         if let workspaceID = observation.workspaceID { self.workspaceID = workspaceID }
         if let workspaceTitle = observation.workspaceTitle { self.workspaceTitle = workspaceTitle }
         if let agentUUID = observation.agentUUID { self.agentUUID = agentUUID }
         if let columnIndex = observation.columnIndex { self.columnIndex = columnIndex }
+    }
+
+    /// Where a Resume brings a session whose worktree was cleaned up (see
+    /// AgentSessionResume): its worktree back at its last commit, detached
+    /// ("HEAD"), or the repository's main checkout. It keeps its branch and
+    /// pull request, and a later Resume still knows its worktree.
+    private static func isResumed(_ current: Checkout, at checkout: Checkout) -> Bool {
+        let detachedInPlace = checkout.worktreeRoot == current.worktreeRoot
+            && checkout.branchName == nil && current.branchName != nil
+        let inMainCheckout = current.mainCheckout != current.worktreeRoot && checkout.worktreeRoot == current.mainCheckout
+        return detachedInPlace || inMainCheckout
     }
 
     /// A session resumed from another folder reports, at its start, a

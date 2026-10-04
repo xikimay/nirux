@@ -502,7 +502,7 @@ final class CommandPalette: NSObject {
     // MARK: - Filtering
 
     var actionsPlaceholder: String {
-        sections.isEmpty ? "Type a command..." : "Type a command or a workspace..."
+        sections.isEmpty ? "Type a command..." : "Type a command, a workspace or a session..."
     }
 
     /// Lists what `query` matches (see `PaletteRanking.rank`), the first

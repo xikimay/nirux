@@ -174,7 +174,10 @@ extension NiruxShellView {
             mode: ClaudeLaunchMode.detect(arguments: exit.arguments) ?? .default,
             briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile
         )
-        if let sessionID = exit.sessionID { column.prepareClaudeResume(sessionID: sessionID) }
+        if let sessionID = exit.sessionID {
+            column.prepareClaudeResume(sessionID: sessionID)
+            sessionResume.noteLaunch(of: sessionID, in: column, now: ProcessInfo.processInfo.systemUptime)
+        }
         column.dismissAgentExit()
         pty.sendRaw("\(command)\n")
     }

@@ -47,17 +47,13 @@ struct DeferredAgentLaunch: Equatable {
         /// transcript corrupt it.
         func openingElsewhere(_ liveText: [String]) -> Agent {
             switch self {
-            case .claude(.session(let sessionID)?, let mode) where Self.mentions(sessionID, in: liveText):
+            case .claude(.session(let sessionID)?, let mode) where AgentSessionHolder.mentions(sessionID, in: liveText):
                 return .claude(resume: .picker, mode: mode)
-            case .codex(.session(let sessionID), let mode) where Self.mentions(sessionID, in: liveText):
+            case .codex(.session(let sessionID), let mode) where AgentSessionHolder.mentions(sessionID, in: liveText):
                 return .codex(resume: .picker, mode: mode)
             default:
                 return self
             }
-        }
-
-        private static func mentions(_ sessionID: String, in liveText: [String]) -> Bool {
-            liveText.contains { $0.localizedCaseInsensitiveContains(sessionID) }
         }
     }
 

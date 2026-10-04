@@ -208,7 +208,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             // After a URL, the palette opens on the commands again.
             harness.shell.showCommandPalette()
             XCTAssertEqual(palette.mode, .actions)
-            XCTAssertEqual(palette.searchField?.placeholderString, "Type a command or a workspace...")
+            XCTAssertEqual(palette.searchField?.placeholderString, "Type a command, a workspace or a session...")
             palette.dismiss()
 
             // Reaches the focused browser column; the inspector itself

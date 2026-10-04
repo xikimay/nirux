@@ -168,8 +168,16 @@ final class ProcessSnapshot {
     }
 
     /// The arguments of `rootPID`'s descendants whose name is in `names`,
-    /// breadth-first, like `firstDescendantName`.
-    func descendantArguments(of rootPID: pid_t, named names: Set<String>, limit: Int = 256) -> [[String]] {
+    /// breadth-first, like `firstDescendantName`. `outsideForegroundJob`
+    /// leaves out the job in front of the shell `rootPID` (its process
+    /// group, a wrapper's agent child included); a job stopped with ^Z has
+    /// a group of its own.
+    func descendantArguments(
+        of rootPID: pid_t, named names: Set<String>, outsideForegroundJob: Bool = false, limit: Int = 256
+    ) -> [[String]] {
+        let skipped = outsideForegroundJob
+            ? Set(terminalForegroundProcessGroupMap[rootPID].flatMap { processGroupMap[$0] } ?? [])
+            : []
         var pending = childrenMap[rootPID] ?? []
         var visited = Set<pid_t>()
         var next = 0
@@ -179,7 +187,9 @@ final class ProcessSnapshot {
             next += 1
             guard visited.insert(pid).inserted else { continue }
             let arguments = capturedArguments.map { $0[pid] ?? [] } ?? Self.arguments(of: pid, maxArgs: 32)
-            if let name = Self.execName(from: arguments) ?? commMap[pid], names.contains(name) { found.append(arguments) }
+            if !skipped.contains(pid), let name = Self.execName(from: arguments) ?? commMap[pid], names.contains(name) {
+                found.append(arguments)
+            }
             pending.append(contentsOf: childrenMap[pid] ?? [])
         }
         return found
