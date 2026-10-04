@@ -25,17 +25,19 @@ extension NiruxShellView {
         branchReviewLocations.first { Self.isSameFolder($0.review.worktree, worktree) }
     }
 
-    /// "Review Branch": the branch checked out in the workspace's folder,
-    /// next to its focused column, at two-thirds of the width so the
-    /// agent's terminal stays in view. A worktree has one review: if it has
-    /// one already, that one comes to the front.
-    func openBranchReview(in workspace: WorkspaceState?) {
+    /// "Review Branch": the branch checked out in the workspace's folder
+    /// (or `folder`, the editor's), next to its focused column, at
+    /// two-thirds of the width so the agent's terminal stays in view. A
+    /// worktree has one review: if it has one already, that one comes to
+    /// the front.
+    func openBranchReview(in workspace: WorkspaceState?, folder: String? = nil) {
         guard let workspace, !workspace.isClosing else { return }
-        if let existing = branchReviewLocation(worktree: workspace.cwd) {
+        let worktree = folder ?? workspace.cwd
+        if let existing = branchReviewLocation(worktree: worktree) {
             focusBranchReview(existing)
             return
         }
-        let review = makeBranchReview(worktree: workspace.cwd, branch: nil)
+        let review = makeBranchReview(worktree: worktree, branch: nil)
         workspace.addBranchReviewColumn(review)
         workspace.columns[safe: workspace.focusedIndex]?.widthFraction = ColumnWidth.twoThirds.fraction
         if workspace === activeWorkspace {
@@ -72,7 +74,33 @@ extension NiruxShellView {
     /// A review for a new column or a restored one. It reads nothing before
     /// `start`.
     func makeBranchReview(worktree: String, branch: String?) -> BranchReviewController {
-        BranchReviewController(worktree: worktree, branch: branch, reader: branchReviewReader)
+        let review = BranchReviewController(worktree: worktree, branch: branch, reader: branchReviewReader)
+        review.isOnScreen = { [weak self, weak review] in
+            guard let self, let review else { return false }
+            return self.isBranchReviewOnScreen(review)
+        }
+        return review
+    }
+
+    /// Its column shows: in the workspace in front, inside the viewport
+    /// (as restored agents count it), in a window the user can see. Off
+    /// screen, a review only marks itself stale.
+    func isBranchReviewOnScreen(_ review: BranchReviewController) -> Bool {
+        guard let window, window.occlusionState.contains(.visible), let workspace = activeWorkspace,
+              let index = workspace.columns.firstIndex(where: { $0.branchReview === review && !$0.isClosing })
+        else { return false }
+        let frame = workspace.columns[index].view.frame
+        return index == workspace.focusedIndex || Self.showsColumn(
+            left: frame.minX, width: frame.width, cameraX: workspace.attentionCameraX,
+            viewportWidth: workspace.containerView.frame.width
+        )
+    }
+
+    /// The started reviews on screen read their branch again if it changed
+    /// while they were hidden. Cheap when nothing is stale: the metadata
+    /// refresh, several times a second, calls it too.
+    func refreshStaleBranchReviewsOnScreen() {
+        activeWorkspace?.columns.forEach { $0.branchReview?.becameVisible() }
     }
 
     /// The same folder, whatever symlinks, case (APFS) or trailing slash

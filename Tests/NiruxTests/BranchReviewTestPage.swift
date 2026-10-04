@@ -7,7 +7,9 @@ import XCTest
 @MainActor
 final class ReviewPage {
     let controller: BranchReviewController
-    private let window: NSWindow
+    /// The roots the column asked to watch, in turn: no real watcher runs.
+    let watchers = BranchReviewControllerTests.Recorder<String>()
+    let window: NSWindow
     private let webView: WKWebView
 
     convenience init(
@@ -25,10 +27,20 @@ final class ReviewPage {
     init(
         reader: @escaping BranchReviewController.Reader,
         patchReader: @escaping BranchReviewController.PatchReader = { _, _ in nil },
-        openLink: @escaping (URL) -> Void = { _ in }, waitsForPage: Bool = true
+        openLink: @escaping (URL) -> Void = { _ in }, waitsForPage: Bool = true,
+        makeWatcher: BranchReviewController.WatcherFactory? = nil, worktree: String = "/repo"
     ) throws {
-        controller = BranchReviewController(worktree: "/repo", branch: nil, reader: reader, patchReader: patchReader)
+        let watchers = watchers
+        controller = BranchReviewController(
+            worktree: worktree, branch: nil, reader: reader, patchReader: patchReader,
+            makeWatcher: makeWatcher ?? { layout, _, _ in
+                _ = watchers.append(layout.worktreeRoot)
+                return nil
+            }
+        )
         controller.view.openLink = openLink
+        // Tests wait seconds, not the app's.
+        controller.watchTiming = .init(settle: 0.2, metadataSettle: 0.1, maxWait: 0.8, quietMaxWait: 3.2)
         let frame = NSRect(x: 0, y: 0, width: 900, height: 800)
         window = NSWindow(contentRect: frame, styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
@@ -65,7 +77,9 @@ final class ReviewPage {
         return try XCTUnwrap(try outcome.result?.get() as? String)
     }
 
+    /// The column leaves its window as when it closes: its watcher stops.
     func close() {
+        window.contentView = nil
         window.close()
     }
 

@@ -36,9 +36,18 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
     /// that data's generation.
     var onLoadFile: ((_ id: Int, _ generation: Int) -> Void)?
     var onRefresh: (() -> Void)?
+    /// The Reload banner's button: show the branch as it is now.
+    var onReload: (() -> Void)?
+    /// The button a status offers (`showStatus(_:action:)`).
+    var onStatusAction: (() -> Void)?
     /// The page is ready for data: after its first load, and after its
     /// process crashed and it loaded again.
     var onPageReady: (() -> Void)?
+    /// The view entered a window (true) or left it (false): the column
+    /// closed, or its workspace moved.
+    var onWindowChange: ((Bool) -> Void)?
+    /// The page's text selection came (true) or went (false).
+    var onSelection: ((Bool) -> Void)?
     /// A web link to open, http or https only.
     var openLink: (URL) -> Void = { NSWorkspace.shared.open($0) }
 
@@ -76,6 +85,11 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
         let menu = NSMenu()
         ColumnHeaderView.columnMenuItems().forEach(menu.addItem)
         return menu
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onWindowChange?(window != nil)
     }
 
     /// The page scrolls with the keyboard once the column has the focus.
@@ -144,9 +158,25 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
         call("NiruxReview.showDiff(json)", ["json": json])
     }
 
-    /// A message in place of the page.
-    func showStatus(_ message: String) {
-        call("NiruxReview.showStatus(message)", ["message": message])
+    /// A message in place of the page, with a button titled `action` when
+    /// there is something to do (`onStatusAction`).
+    func showStatus(_ message: String, action: String? = nil) {
+        call("NiruxReview.showStatus(message, action)", ["message": message, "action": action ?? NSNull()])
+    }
+
+    /// Something changed under the page (a new head, a pause, another
+    /// branch): the page stays as it is, under a banner whose button
+    /// (`action`, Reload by default) calls `onReload`. Dropped while the
+    /// page loads: the column sends it again once it is ready.
+    func showReload(_ message: String, action: String? = nil) {
+        guard isPageReady else { return }
+        call("NiruxReview.showReload(message, action)", ["message": message, "action": action ?? NSNull()])
+    }
+
+    /// What the banner said waits no more.
+    func hideReload() {
+        guard isPageReady else { return }
+        call("NiruxReview.hideReload()", [:])
     }
 
     private func call(_ body: String, _ arguments: [String: Any]) {
@@ -187,17 +217,26 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
         switch type {
         case "ready":
             isPageReady = true
-            if let pending = pendingCall {
+            if let onPageReady {
+                // The column sends what the page shows, banner included,
+                // rather than the last call alone: after the page's process
+                // died, a banner may have been dropped while it loaded.
+                pendingCall = nil
+                onPageReady()
+            } else if let pending = pendingCall {
                 pendingCall = nil
                 call(pending.body, pending.arguments)
-            } else {
-                // A page that loaded again (its process died) has lost what
-                // it showed: the column sends it again.
-                onPageReady?()
             }
         case "loadFile":
             guard let id = body["id"] as? Int, let generation = body["generation"] as? Int else { return }
             onLoadFile?(id, generation)
+        case "reload":
+            onReload?()
+        case "statusAction":
+            onStatusAction?()
+        case "selection":
+            guard let active = body["active"] as? Bool else { return }
+            onSelection?(active)
         case "openLink":
             guard let text = body["url"] as? String, let url = Self.webLink(text) else { return }
             openLink(url)

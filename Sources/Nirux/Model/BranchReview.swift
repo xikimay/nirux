@@ -218,7 +218,7 @@ enum BranchReview {
         let base: Base
         let pullRequest: PullRequestLookup
         /// Why fetching the base branch failed, when it was asked for.
-        let fetchProblem: String?
+        var fetchProblem: String?
         /// HEAD against its upstream; nil without one.
         let upstream: HeadComparison?
         /// HEAD against the pull request's head on GitHub; nil without a

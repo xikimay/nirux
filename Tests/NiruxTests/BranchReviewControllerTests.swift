@@ -104,27 +104,24 @@ final class BranchReviewControllerTests: XCTestCase {
         ])
         let page = try ReviewPage(reader: { _, _, _ in reads.next() })
         defer { page.close() }
-        func shown() throws -> String {
-            try page.run("""
-                return JSON.stringify({
-                  page: !document.getElementById("page").hidden && getComputedStyle(document.getElementById("page")).display !== "none",
-                  status: document.getElementById("status").classList.contains("shown") ? document.getElementById("status").textContent : null
-                });
-                """)
-        }
         page.controller.reload()
         page.waitUntil("the pause") { page.controller.snapshot == nil && !page.controller.isReading }
-        XCTAssertEqual(try shown(), #"{"page":false,"status":"A rebase is in progress in this worktree. Refresh once it’s over."}"#)
+        XCTAssertEqual(try Self.shown(page), #"{"page":false,"status":"A rebase is in progress in this worktree. The review comes back once it’s over.","action":null}"#)
 
         page.controller.reload()
         try page.waitForPage()
-        XCTAssertEqual(try shown(), #"{"page":true,"status":null}"#)
+        XCTAssertEqual(try Self.shown(page), #"{"page":true,"status":null,"action":null}"#)
 
+        // Another branch: the column offers to review it instead.
         page.controller.reload()
         page.waitUntil("the switch") { page.controller.snapshot == nil && !page.controller.isReading }
-        XCTAssertEqual(try shown(), #"{"page":false,"status":"The worktree is on other now, not feat/keep-awake. "#
-            + #"Close this review, and review other from the workspace’s menu."}"#)
+        XCTAssertEqual(try Self.shown(page), #"{"page":false,"status":"The worktree is on other now, not feat/keep-awake.","action":"Review other"}"#)
         XCTAssertEqual(page.controller.branch, "feat/keep-awake")
+        _ = try page.run("document.querySelector('#status .action').click(); return '';")
+        page.waitUntil("the other branch") { page.controller.snapshot?.branch == "other" }
+        try page.waitForPage()
+        XCTAssertEqual(page.controller.branch, "other")
+        XCTAssertEqual(try Self.shown(page), #"{"page":true,"status":null,"action":null}"#)
     }
 
     @MainActor
@@ -215,6 +212,19 @@ final class BranchReviewControllerTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// Whether the page shows, and the status and its button otherwise.
+    @MainActor
+    static func shown(_ page: ReviewPage) throws -> String {
+        try page.run("""
+            const status = document.getElementById("status");
+            return JSON.stringify({
+              page: !document.getElementById("page").hidden && getComputedStyle(document.getElementById("page")).display !== "none",
+              status: status.classList.contains("shown") ? status.firstChild.textContent : null,
+              action: status.classList.contains("shown") ? (status.querySelector(".action")?.textContent ?? null) : null
+            });
+            """)
+    }
 
     static func snapshot(
         _ base: BranchReview.Snapshot, branch: String? = nil, files: [BranchReview.FileChange]? = nil

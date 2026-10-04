@@ -663,16 +663,32 @@ Rejected:
   so.
 - **Refresh.** The column watches its own worktree with a
   `GitRepositoryWatcher` (the workspace's watcher follows the focused
-  column's folder and is suspended in the background). A `.metadata` event
-  compares `rev-parse HEAD` and the branch: a new head shows the Reload banner;
-  an unchanged head refreshes the "not committed" group, since a batch of
-  events reports only `.metadata`. A `.worktree` event refreshes that group
-  too, debounced. Off
-  screen, the column only marks itself stale. Refresh re-reads everything. No
-  polling of `gh` in the background.
-- **Rebase or switch.** During a rebase or a merge, the page pauses and says
-  so. If the worktree is now on another branch, the page says so and offers to
-  review it.
+  column's folder and is suspended in the background), from the moment it
+  starts. A change reads the branch again once changes stop for a moment
+  (2 s for files, 0.5 s for git's own), at 8 s at the latest during a burst
+  that never stops (a build), and never sooner after the last read than
+  that read took. Each read in a row that finds nothing new doubles that
+  8 s, up to 64 s: a build writing in an ignored folder. Watched reads run
+  at utility priority. The read asks gh only after the remote branch moved
+  (a push); otherwise it reuses the pull request found before. A new head
+  shows the Reload banner, and the page stays as it was. The same head
+  updates the page:
+  - the row or group the reader is at keeps its place on screen;
+  - open diffs whose patch and merge base didn't change stay as they were;
+    a changed one stays, dimmed, until its new diff comes;
+  - while the user has text selected in the page, the update waits for the
+    selection to go.
+
+  A read that changes nothing leaves the page alone, and clears a banner
+  whose cause went away. A read that fails keeps the page, under a banner.
+  A failed fetch stays noted until the next Refresh. Off screen, the column
+  only marks itself stale, and reads once it shows. Refresh re-reads
+  everything, the pull request included. No polling of `gh` in the
+  background.
+- **Rebase or switch.** During a rebase or a merge, a page already shown
+  stays, under a banner; a column without one says so instead. If the
+  worktree is now on another branch, a banner offers to review it in this
+  column; its button reads the worktree again first, in case it came back.
 - **Size.** Files over 400 KB get a placeholder, as in the editor's stacked
   diff (`EditorColumn.maxDiffCollectionFileBytes`). Above 5 MB of diff in
   total, the page lists the files and loads a diff when its row is opened.

@@ -662,6 +662,13 @@ extension NiruxShellView {
         editor.onPathChanged = { [weak self] in self?.updateSidebar() }
         editor.onDirtyChanged = { [weak self] in self?.updateSidebar() }
         editor.onSendSelectionShortcut = { [weak self] in self?.sendEditorSelectionToAgent() }
+        editor.onOpenBranchReview = { [weak self, weak editor] in
+            guard let self, let editor else { return }
+            // The editor's folder: its Full Branch Diff is that branch's.
+            self.openBranchReview(
+                in: self.workspaces.first { $0.columns.contains { $0.editorColumn === editor } }, folder: editor.workspaceCwd
+            )
+        }
     }
 
     /// Show the workspace file picker, opening the chosen file in `editor`.

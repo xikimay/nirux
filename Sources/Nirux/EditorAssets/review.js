@@ -8,11 +8,25 @@
   const P = window.ReviewPage;
   const pageElement = document.getElementById("page");
   const statusElement = document.getElementById("status");
+  const bannerElement = document.getElementById("banner");
   const svgNS = "http://www.w3.org/2000/svg";
 
   // What the user opened and filtered, kept across a new page for the same
   // branch.
-  const state = { page: null, risk: null, openGroups: new Map(), openFiles: new Set(), openAccounts: new Set() };
+  // `diffs`: the diffs drawn, by path, with what they were drawn from (the
+  // file's `diffKey` and the merge base, which fix lines, context and
+  // numbers): a new page of the same branch keeps those that didn't change.
+  // `holders`: every diff drawn, to let go of those a new page drops.
+  // `openCommits` and `rowsShown`, by commit and group: what the user
+  // opened stays open across pages.
+  const state = {
+    page: null, risk: null, openGroups: new Map(), openFiles: new Set(), openAccounts: new Set(), diffs: new Map(),
+    holders: new Set(), openCommits: new Set(), rowsShown: new Map()
+  };
+
+  function diffKey(file) {
+    return file.diffKey ? `${file.diffKey}@${state.page.header.mergeBase}` : null;
+  }
   let review = null;
 
   function post(message) {
@@ -223,6 +237,11 @@
       item.append(element("span", "oid mono", commit.oid.slice(0, 7)));
       if (commit.body.trim().length > 0) {
         const details = element("details");
+        details.open = state.openCommits.has(commit.oid);
+        details.addEventListener("toggle", () => {
+          if (details.open) state.openCommits.add(commit.oid);
+          else state.openCommits.delete(commit.oid);
+        });
         details.append(element("summary", null, commit.subject));
         details.append(element("pre", null, commit.body.trim()));
         item.append(details);
@@ -318,10 +337,16 @@
         more.hidden = shown >= members.length;
         more.textContent = `Show ${P.count(Math.min(rowsPerStep, members.length - shown), "more file")}`;
       };
-      more.addEventListener("click", showMore);
+      more.addEventListener("click", () => {
+        showMore();
+        state.rowsShown.set(group.key, shown);
+      });
       body.append(more);
       const setOpen = (open) => {
-        if (open && shown === 0) showMore();
+        if (open && shown === 0) {
+          // As many rows as the user had shown on the page before.
+          do showMore(); while (shown < members.length && shown < (state.rowsShown.get(group.key) ?? 0));
+        }
         body.hidden = !open;
         button.setAttribute("aria-expanded", String(open));
       };
@@ -347,6 +372,7 @@
   function fileRow(file) {
     const box = element("div", "file");
     box.dataset.id = String(file.id);
+    box.dataset.path = file.path;
     const row = element("button", "file-row");
     row.type = "button";
     const chevron = icon("chevron");
@@ -391,7 +417,20 @@
     if (open) {
       state.openFiles.add(file.path);
       if (!diff.hasChildNodes()) {
-        diff.append(element("div", "diff-message", "Loading\u2026"));
+        const shown = state.diffs.get(file.path);
+        if (shown && diffKey(file) && shown.key === diffKey(file)) {
+          shown.node.classList.remove("stale");
+          diff.append(shown.node);
+          return;
+        }
+        if (shown) {
+          // The file changed: its diff stays, dimmed, until the new one
+          // replaces it, rather than blink to "Loading".
+          shown.node.classList.add("stale");
+          diff.append(shown.node);
+        } else {
+          diff.append(element("div", "diff-message", "Loading\u2026"));
+        }
         post({ type: "loadFile", id: file.id, generation: state.page.generation });
       }
     } else {
@@ -413,6 +452,53 @@
     }
   }
 
+  // Where the reader is: the first group header or row still in view, by
+  // what it shows (ids change from page to page), and how far down the
+  // viewport it starts. Rows added above it don't move it.
+  function anchorKey(node) {
+    return node.classList.contains("file") ? `file:${node.dataset.path}` : `group:${node.parentElement.dataset.key}`;
+  }
+
+  function readingAnchor() {
+    if (pageElement.hidden || window.scrollY === 0) return null;
+    for (const node of pageElement.querySelectorAll(".group-header, .file")) {
+      const box = node.getBoundingClientRect();
+      if (box.height > 0 && box.bottom > 0) return { key: anchorKey(node), top: box.top };
+    }
+    return null;
+  }
+
+  function restoreAnchor(anchor) {
+    if (!anchor) return false;
+    for (const node of pageElement.querySelectorAll(".group-header, .file")) {
+      if (anchorKey(node) !== anchor.key) continue;
+      window.scrollBy(0, node.getBoundingClientRect().top - anchor.top);
+      return true;
+    }
+    return false;
+  }
+
+  // A text selection in the page: Swift holds back a new page of the same
+  // head, which would drop it, until it goes. Diffs draw in shadow roots.
+  function inPage(node) {
+    while (node) {
+      if (pageElement.contains(node)) return true;
+      node = node.getRootNode().host ?? null;
+    }
+    return false;
+  }
+
+  let selecting = false;
+  document.addEventListener("selectionchange", () => {
+    const selection = document.getSelection();
+    // In a shadow root, WebKit reports the selection collapsed, anchored
+    // at the host's parent: its text says it's there.
+    const active = Boolean(selection && selection.rangeCount > 0 && selection.toString() !== "" && inPage(selection.anchorNode));
+    if (active === selecting) return;
+    selecting = active;
+    post({ type: "selection", active });
+  });
+
   function render(page) {
     const samebranch = state.page && state.page.header.branch === page.header.branch;
     if (!samebranch) {
@@ -420,19 +506,36 @@
       state.openGroups.clear();
       state.openFiles.clear();
       state.openAccounts.clear();
+      state.openCommits.clear();
+      state.rowsShown.clear();
     }
     state.page = page;
     if (state.risk && !page.risks.some((risk) => risk.kind === state.risk && risk.files > 0)) state.risk = null;
-    const sections = [header(page), accounts(page), risks(page), groups(page)];
-    review = window.NiruxPierreDiff.createReview(document);
-    // A refresh keeps the reader where they were, as far as the new page
-    // goes.
+    // A refresh keeps the reader where they were, read before the diffs
+    // kept move to the new page and shorten the old one.
     const scrolled = pageElement.hidden ? 0 : window.scrollY;
+    const anchor = samebranch ? readingAnchor() : null;
+    if (!samebranch || !review) {
+      review = window.NiruxPierreDiff.createReview(document);
+      state.diffs.clear();
+      state.holders.clear();
+    }
+    const sections = [header(page), accounts(page), risks(page), groups(page)];
     statusElement.classList.remove("shown");
+    bannerElement.hidden = true;
     pageElement.replaceChildren(...sections);
     pageElement.hidden = false;
+    for (const holder of state.holders) {
+      if (holder.isConnected) continue;
+      review.removeFile(holder);
+      state.holders.delete(holder);
+    }
+    for (const [path, shown] of state.diffs) {
+      if (!shown.node.isConnected) state.diffs.delete(path);
+    }
     applyRiskFilter(false);
     window.scrollTo(0, scrolled);
+    restoreAnchor(anchor);
   }
 
   function showDiff(json) {
@@ -443,9 +546,15 @@
     // A diff read for another page of the review, whose row this isn't.
     if (!box || !review || diff.generation !== state.page.generation || (diff.path && file && diff.path !== file.path)) return;
     const previous = box.querySelector(".diff-box");
-    if (previous) review.removeFile(previous);
+    if (previous) {
+      review.removeFile(previous);
+      state.holders.delete(previous);
+    }
+    // The diff drawn before is gone: a later page mustn't reuse it.
+    if (file) state.diffs.delete(file.path);
     box.replaceChildren();
     if (diff.message || diff.hunks.length === 0) {
+      // Not kept: a failed read must be read again by the next page.
       box.append(element("div", "diff-message", diff.message || "No line changed."));
       return;
     }
@@ -454,18 +563,44 @@
     try {
       review.renderFile(holder, { path: file ? file.path : "", hunks: diff.hunks });
     } catch (error) {
+      review.removeFile(holder);
       box.replaceChildren(element("div", "diff-message", `Couldn’t show this diff: ${error.message}`));
+      return;
     }
+    state.holders.add(holder);
+    if (file && diffKey(file)) state.diffs.set(file.path, { key: diffKey(file), node: holder });
   }
 
-  // A message in place of the page: loading, or why there is no review.
-  // What the user opened stays, for the page that comes back.
-  function showStatus(message) {
-    statusElement.textContent = String(message ?? "");
+  // The branch moved since the page was read: it stays as it is, and a
+  // banner offers the new one.
+  function showReload(message, action) {
+    const button = element("button", "action", action ? String(action) : "Reload");
+    button.type = "button";
+    button.addEventListener("click", () => post({ type: "reload" }));
+    bannerElement.replaceChildren(element("span", null, String(message ?? "")), button);
+    bannerElement.hidden = false;
+  }
+
+  function hideReload() {
+    bannerElement.hidden = true;
+  }
+
+  // A message in place of the page: loading, or why there is no review,
+  // with a button when Swift offers something to do. What the user opened
+  // stays, for the page that comes back.
+  function showStatus(message, action) {
+    statusElement.replaceChildren(element("div", null, String(message ?? "")));
+    if (action) {
+      const button = element("button", "action", String(action));
+      button.type = "button";
+      button.addEventListener("click", () => post({ type: "statusAction" }));
+      statusElement.append(button);
+    }
     statusElement.classList.add("shown");
+    bannerElement.hidden = true;
     pageElement.hidden = true;
   }
 
-  window.NiruxReview = Object.freeze({ show, showDiff, showStatus });
+  window.NiruxReview = Object.freeze({ show, showDiff, showStatus, showReload, hideReload });
   post({ type: "ready" });
 })();
