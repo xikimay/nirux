@@ -343,10 +343,15 @@ enum TerminalAppearance {
     /// opening terminals doesn't re-validate an unchanged config.
     private static var lastSanitized: (input: [TerminalConfigBuilder.UserLine], contents: String)?
 
+    /// Lines added at the end of each new terminal's config: none in the
+    /// app. The tests turn vsync off (see their TestBootstrap).
+    static var appendedLines: [String] = []
+
     static func makeController() -> TerminalController {
+        let appended = appendedLines.map { $0 + "\n" }.joined()
         // An empty theme: libghostty-spm's default one would be appended
         // after the user's colors and override them.
-        let controller = TerminalController(configSource: .generated(currentConfig()), theme: TerminalTheme())
+        let controller = TerminalController(configSource: .generated(currentConfig() + appended), theme: TerminalTheme())
         guard let issue = controller.lastConfigurationIssue else { return controller }
         NSLog("[GhosttyConfig] terminal config rejected: %@", issue)
         // A failure that isn't the config's (e.g. writing libghostty-spm's
@@ -355,7 +360,7 @@ enum TerminalAppearance {
         // libghostty-spm fell back to its own defaults: use Nirux's look
         // instead, and validate the config again for the next terminal.
         lastSanitized = nil
-        return TerminalController(configSource: .generated(TerminalConfigBuilder.render([])), theme: TerminalTheme())
+        return TerminalController(configSource: .generated(TerminalConfigBuilder.render([]) + appended), theme: TerminalTheme())
     }
 
     static func currentConfig(
