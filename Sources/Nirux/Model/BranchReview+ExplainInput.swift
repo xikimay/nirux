@@ -18,6 +18,9 @@ extension BranchReview {
         /// Every file of the snapshot, by id ("f3"): ids are the same in
         /// every part.
         let files: [String: String]
+        /// The ids the text lists, in its order: the ones the model can
+        /// answer with.
+        let listedFiles: [String]
         /// The hunks it sends, by id, to map the model's notes back. A
         /// withheld hunk isn't one: a note on it is dropped.
         let hunks: [String: HunkReference]
@@ -146,7 +149,8 @@ extension BranchReview {
         return parts.enumerated().map { number, part in
             var text = explainHeader(snapshot, part: parts.count > 1 ? (number + 1, parts.count, part.titles) : nil)
             text += authorText
-            text += explainFileLists(snapshot, ids: ids, notSent: notSent, notInCopy: notInCopy, sent: Set(part.paths))
+            let lists = explainFileLists(snapshot, ids: ids, notSent: notSent, notInCopy: notInCopy, sent: Set(part.paths))
+            text += lists.text
             var diffText = ""
             var hunks: [String: HunkReference] = [:]
             var sentPatches: [String: String] = [:]
@@ -158,7 +162,8 @@ extension BranchReview {
             }
             text += "\n# Diff\n" + diffText
             return ExplainInput(
-                text: text, files: fileIDs, hunks: hunks, sentPatches: sentPatches, diffBytes: diffText.utf8.count
+                text: text, files: fileIDs, listedFiles: lists.listed, hunks: hunks, sentPatches: sentPatches,
+                diffBytes: diffText.utf8.count
             )
         }
     }
@@ -314,7 +319,7 @@ extension BranchReview {
     private static func explainFileLists(
         _ snapshot: Snapshot, ids: [String: String], notSent: [String: NotSent], notInCopy: [ExplainCopy.Omitted],
         sent: Set<String>
-    ) -> String {
+    ) -> (text: String, listed: [String]) {
         let room = max(0, maxExplainListedFiles - sent.count)
         var others = 0
         var listed = Set<String>()
@@ -327,6 +332,7 @@ extension BranchReview {
         var files = "\n# Files\n"
         var notSentText = ""
         var rest: [String: Int] = [:]
+        var listedIDs: [String] = []
         for file in snapshot.files {
             guard listed.contains(file.path) else {
                 let folder = file.path.split(separator: "/", maxSplits: 1).count > 1
@@ -335,6 +341,7 @@ extension BranchReview {
                 continue
             }
             let id = ids[file.path] ?? ""
+            listedIDs.append(id)
             var line = "\(id) \(visible(file.path)) · \(file.status.rawValue)"
             if let oldPath = file.oldPath { line += " from \(visible(oldPath))" }
             line += " · +\(file.additions) −\(file.deletions)"
@@ -360,7 +367,7 @@ extension BranchReview {
             text += "\n# Not in the folder you can read\n"
             text += unreadable.map { "\(ids[$0.path] ?? "") \(visible($0.path)) · \($0.reason.label)\n" }.joined()
         }
-        return text
+        return (text, listedIDs)
     }
 
     /// Cut past `limit` bytes, on a scalar: never inside a UTF-8
