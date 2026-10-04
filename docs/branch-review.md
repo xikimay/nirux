@@ -192,9 +192,14 @@ Top to bottom:
    script. Whitespace only means each hunk reads the same without its blank
    lines and the whitespace around its lines; whitespace inside a line
    changes what the code does (`" "` and `""`), and in Python, YAML, a
-   Makefile or a shell script the indentation and blank lines do too. A
-   multi-line string (Swift, a JavaScript template) reads as code until the
-   brace tracking of "Tests against code" tells them apart. A folded file's diff loads when
+   Makefile or a shell script the indentation and blank lines do too. In
+   Swift, a multi-line string's text counts as Swift reads it: past its
+   closing delimiter's indentation, with its blank lines and trailing
+   spaces, and line endings as newlines, around an interpolation that
+   spans lines too. A
+   reindent that moves a string with its closing delimiter still folds; one
+   that moves its text alone doesn't ("Swift files read in context",
+   section 5). A JavaScript template still reads as code. A folded file's diff loads when
    its row opens, and folded files don't count toward the 5 MB of section
    7: a generated bundle or a reformatted repository mustn't send the whole
    page on demand. Listed without its patch (section 7, past 64 MB), a file
@@ -427,10 +432,10 @@ notes are shown apart and never change these signals.
 `Process` arguments are a launched process's (`Process(`, `BoundedProcess`,
 `.arguments =`), not `CommandLine.arguments`; launching one is a security
 signal, not a side effect, so that every git run doesn't raise two chips. A
-line rule matches anywhere in a `+` or `-` line, strings and trailing
-comments included, but not in a line that is only a comment, nor in a doc or
-a folded file: a generated file can say anything, and a reindented line
-changes nothing. A folded file raises only its path rules. A test ships
+line rule matches anywhere in a `+` or `-` line, strings included, but not
+in a line that is only a comment, nor in a doc or a folded file: a generated
+file can say anything, and a reindented line changes nothing. In Swift, no
+comment counts, trailing or spanning lines (`code // Telegram`). A folded file raises only its path rules. A test ships
 nothing: it raises only the concurrency rules, which CI checks more strictly.
 Path rules also cover the files whose changes may name no rule: a name with
 `Persistence`, `HandoverFile`, `NiruxURLRequest`, `+URLScheme`, `Telegram`,
@@ -438,9 +443,40 @@ the app delegate (`NiruxApp.swift`), the hook and skill installers.
 "Scripts the workflows call" are the changed files, docs and tests aside,
 whose path a workflow (`.github/workflows/*.yml`) or an action
 (`action.yml` under `.github/actions`, outside its `node_modules`) names:
-`./scripts/bundle.sh`. A change inside `applicationDidFinishLaunching` that
-doesn't name it is raised once the brace tracking of "Tests against code"
-gives each hunk its enclosing function.
+`./scripts/bundle.sh`. A change inside a lifecycle function raises "launch"
+even when it doesn't name it ("inside applicationDidFinishLaunching"): the
+app delegate's `applicationWillFinishLaunching`,
+`applicationDidFinishLaunching`, `applicationShouldTerminate` and
+`applicationWillTerminate`, and an `@main` type's `static func main` (or
+`class func main`, in the type or in an extension of it declared after it
+in the same file), where the `--hook` and `--check-release-signature`
+modes live (decided by the user on 2026-10-03); not another type's `main`,
+such as a subcommand's. A signature may wrap before its body (`-> T`,
+`where`, `async`, `throws`, generic parameters, `{` on its own line); the
+line that opens the body, and a closure in the signature, count as inside;
+a line of comments or blanks changes nothing. On #57 (`setUpKeepAwake(...)`, `keepAwakeController?.shutdown()`)
+and #65 (the release check at launch and in `main`), `NiruxApp.swift`
+already raised "launch" by its path: this names the reasons and the hunks.
+
+**Swift files read in context.** A Swift file's patch is read a second
+time, its two sides through the lexer of "Tests against code": the old side
+from the lines both share (taken from the worktree) and the removed lines,
+the new side from the file in the worktree, checked against the patch's
+lines. That tells, for each changed line, whether it is in a multi-line
+string's text, which comments it holds, and which function it is in: its
+line rules, its whitespace fold, its symbols and the lifecycle functions
+above come from that reading. An addition or a deletion reads from its patch
+alone; a type change (a symlink that became the file) reads its new file,
+its hunks numbered after the link's; a symlink (added, or modified as its
+`index` line says) declares nothing. The files that may declare symbols are
+read first, within the scan limits of "Tests against code" (2 MB for the
+file, and for its patch: a huge removal isn't read again line by line; 32
+MB in all). A file that can't be read so (past those limits, changed since
+its patch or a link where the patch shows a file, unbalanced) keeps the
+first pass's line rules and fold, its symbols are unknown, and it says why
+(`swiftContext`): a row reloaded on its own may then read differently,
+since the edit that made it differ triggers a refresh, and alone it is
+within the limits.
 
 **Tests against code.** The header shows lines added in tests against lines
 added in code, and lists the symbols the branch declares that no test
@@ -473,9 +509,8 @@ where about a quarter of the names listed were noise:
   isn't a mention; one in an interpolation is.
 - A name a removed line of the same file declares isn't new: a changed
   value, conformance, signature or visibility (`private` to `private(set)`)
-  re-declares it. This reads each removed line alone, so a local name, or a
-  line of a string or a comment that reads like a declaration, removed
-  elsewhere in the file hides a new name that is the same.
+  re-declares it. Removed lines are read in context (below), so only a
+  declaration outside any function body counts.
 - Lines added under `scripts/` count as code in the ratio: a script is code
   its tests test. The page still groups them as Config.
 - Protocol requirements the system calls (`windowShouldClose`,
@@ -487,10 +522,8 @@ How it reads:
 - **Lines.** The added lines of the Tests and Code groups' files, and of
   scripts, folded files aside. An untracked file listed by name only counts
   no line.
-- **Symbols.** Only Swift files of the Code group, not folded. The first pass
-  over the patch keeps the new side's numbers of their `+` lines, as ranges,
-  a digest of those lines, and the names their `-` lines declare. The file
-  is then read from the worktree and lexed whole: strings (multi-line, raw,
+- **Symbols.** Only Swift files of the Code group, not folded, read in
+  context (section 5, "Swift files read in context"), and lexed whole: strings (multi-line, raw,
   with interpolations), nested comments and `#/…/#` regexes hold no brace
   and no declaration. `class func` is a method, `private(set)` doesn't make
   a property private, `if let` and `guard let` at a file's level declare
@@ -500,15 +533,15 @@ How it reads:
   nested in one, is private. A member's type is kept as a dotted path
   (`Outer.Inner`). A symlink declares nothing. The symbols are unknown, and
   the header names the file rather than reading "nothing declared", when
-  its patch wasn't read, when it is past 2 MB or the files read pass 32 MB,
-  when its added lines make more than 100,000 runs, when its lines no
-  longer match the digest (the agent edited it meanwhile, a clean filter),
-  or when a brace, a multi-line string or a comment doesn't close: a bare
-  `/regex/` literal, which reads as code, does that when it holds a brace,
-  and so do `#if` branches that each open a brace (which Swift rejects).
-  A CRLF file whose patch shows LF (`eol=crlf`) still matches. An edit that
-  leaves the added lines in place isn't seen until the next refresh, which
-  the edit itself triggers.
+  its patch wasn't read, when it or its patch is past
+  2 MB or the files read pass 32 MB, when the file in the worktree no
+  longer matches the patch's context and added lines (the agent edited it
+  meanwhile, a clean filter), or when a brace, a multi-line string or a
+  comment doesn't close on either side: a bare `/regex/` literal, which
+  reads as code, does that when it holds a brace, and so do `#if` branches
+  that each open a brace (which Swift rejects). A CRLF file whose patch
+  shows LF (`eol=crlf`) still matches. An edit to a line the patch doesn't
+  show isn't seen until the next refresh, which the edit itself triggers.
 - **Mentions.** The test files are listed by git (`ls-files --cached --others
   --exclude-standard`, untracked tests included), Swift files first, and read
   up to 4,000 files, 1 MB each and 32 MB in all; reading stops once every name

@@ -44,6 +44,40 @@ extension BranchReview {
         /// closed: what follows a stray one may have read wrong.
         var isBalanced: Bool { !closedUnopened && scopes.isEmpty && modes.isEmpty }
 
+        /// A function whose body a line is in.
+        struct Function: Equatable {
+            let name: String
+            /// `static func main` (or `class func main`) of an `@main`
+            /// type: where the program starts.
+            let isEntryPoint: Bool
+        }
+
+        /// The named functions whose bodies the next line starts in,
+        /// outermost first: closures and accessors have no name.
+        var enclosingFunctions: [Function] { scopes.compactMap(\.function) }
+
+        /// The named functions whose bodies the last line opened: `{ … }`
+        /// on one line.
+        private(set) var functionsOpened: [Function] = []
+
+        /// The multi-line string whose text the next line starts in, by
+        /// the order strings open: its indentation past the closing
+        /// delimiter's, its blank lines and its trailing spaces are the
+        /// string's.
+        var stringText: Int? {
+            if case .string(_, true, let id)? = modes.last { return id }
+            return nil
+        }
+
+        /// Each closed multi-line string's indentation, its closing
+        /// delimiter's, which Swift strips from its lines.
+        private(set) var stringIndents: [Int: Data] = [:]
+        private var stringCount = 0
+
+        /// The last line fed with `capturingCode`, its comments blanked:
+        /// what the code says, strings included.
+        private(set) var code = Data()
+
         /// What the review lists: declared on collected lines, not hidden,
         /// nor in an extension of a private type or of a type nested in one
         /// (declared before or after it).
@@ -60,7 +94,7 @@ extension BranchReview {
 
         // Lexer: what the code is nested in, innermost last.
         private enum Mode {
-            case string(hashes: Int, isMultiline: Bool)
+            case string(hashes: Int, isMultiline: Bool, id: Int)
             /// `\(…)` in a string: code, with the parentheses open in it.
             case interpolation(parentheses: Int)
             case blockComment(depth: Int)
@@ -92,7 +126,7 @@ extension BranchReview {
             case name(Symbol.Kind)
             /// After `class` or `actor` at a statement's start: a type's
             /// name, unless a keyword follows (`class func`).
-            case typeName
+            case typeName(isClass: Bool)
             /// After `extension`: the type, dotted names included.
             case extended(path: String, needsName: Bool)
             /// After `let` or `var`: a name or a tuple pattern.
@@ -121,6 +155,11 @@ extension BranchReview {
             var isPrivate = false
             var isOverride = false
             var isObjC = false
+            var isStatic = false
+            var isMainType = false
+            /// A function declared at its depth: the `{` that opens its
+            /// body, not a closure in its signature.
+            var function: Function?
             var expect = Expect.nothing
         }
 
@@ -134,6 +173,10 @@ extension BranchReview {
             let container: String?
             /// An extension's type at the file's level, as written.
             let extended: String?
+            /// The function whose body it is.
+            let function: Function?
+            /// An `@main` type's body.
+            let isMainType: Bool
             /// The statement the brace opened in, which goes on once it
             /// closes: `let a = { 1 }(), b = 2`.
             let outer: Statement
@@ -160,8 +203,19 @@ extension BranchReview {
         /// a function's. Set by the type's name, cleared by the brace.
         private var introducesType = false
         private var typeIsPrivate = false
+        private var typeIsMain = false
+        /// `@main` types declared so far, by their dotted path: an
+        /// extension of one may hold `main`.
+        private var mainTypes: Set<String> = []
+        /// A function whose signature ended a line: its body's `{` may
+        /// open the next (`-> T`, `where`, `{` alone).
+        private var carriedFunction: Function?
         private var pendingContainer: String?
         private var pendingExtended: String?
+        /// Where the current line's comments are, and where one that is
+        /// still open started on it.
+        private var commentRanges: [Range<Int>] = []
+        private var commentStart: Int?
 
         private static let modifiers: Set<String> = [
             "public", "internal", "open", "package", "static", "final", "override", "required", "convenience",
@@ -176,8 +230,9 @@ extension BranchReview {
 
         // MARK: Lexer
 
-        /// Reads one line, without its newline.
-        mutating func feed(_ line: UnsafeRawBufferPointer, collecting: Bool) {
+        /// Reads one line, without its newline. `capturingCode` keeps its
+        /// code in `code`.
+        mutating func feed(_ line: UnsafeRawBufferPointer, collecting: Bool, capturingCode: Bool = false) {
             lineNumber += 1
             self.collecting = collecting
             var line = line
@@ -185,11 +240,15 @@ extension BranchReview {
             if lineNumber == 1, line.starts(with: [0xEF, 0xBB, 0xBF]) {
                 line = UnsafeRawBufferPointer(rebasing: line.dropFirst(3))
             }
+            commentRanges = []
+            commentStart = nil
+            functionsOpened = []
+            if case .blockComment? = modes.last { commentStart = 0 }
             var index = 0
             while index < line.count {
                 switch modes.last {
-                case .string(let hashes, let isMultiline)?:
-                    index = scanString(line, from: index, hashes: hashes, isMultiline: isMultiline)
+                case .string(let hashes, let isMultiline, let id)?:
+                    index = scanString(line, from: index, hashes: hashes, isMultiline: isMultiline, id: id)
                 case .blockComment?:
                     index = scanBlockComment(line, from: index)
                 case .regex(let hashes)?:
@@ -199,8 +258,14 @@ extension BranchReview {
                 }
             }
             // A single-line string ends with its line, and what it holds.
-            if let open = modes.firstIndex(where: { if case .string(_, false) = $0 { return true } else { return false } }) {
+            if let open = modes.firstIndex(where: { if case .string(_, false, _) = $0 { return true } else { return false } }) {
                 modes.removeSubrange(open...)
+            }
+            if let start = commentStart { commentRanges.append(start..<line.count) }
+            if capturingCode {
+                var kept = Data(line)
+                for range in commentRanges { kept.replaceSubrange(range, with: repeatElement(UInt8(ascii: " "), count: range.count)) }
+                code = kept
             }
             take(.newline)
         }
@@ -212,9 +277,11 @@ extension BranchReview {
             case 0x20, 0x09, 0x0D, 0x0B, 0x0C:
                 return start + 1
             case UInt8(ascii: "/") where next == UInt8(ascii: "/"):
+                commentRanges.append(start..<line.count)
                 return line.count
             case UInt8(ascii: "/") where next == UInt8(ascii: "*"):
                 modes.append(.blockComment(depth: 1))
+                commentStart = start
                 return start + 2
             case UInt8(ascii: "\""), UInt8(ascii: "#"):
                 return scanDelimiter(line, from: start)
@@ -263,7 +330,8 @@ extension BranchReview {
                 let isMultiline = end + 2 < line.count
                     && line[end + 1] == UInt8(ascii: "\"") && line[end + 2] == UInt8(ascii: "\"")
                 take(.literal)
-                modes.append(.string(hashes: hashes, isMultiline: isMultiline))
+                stringCount += 1
+                modes.append(.string(hashes: hashes, isMultiline: isMultiline, id: stringCount))
                 return end + (isMultiline ? 3 : 1)
             }
             if hashes > 0, end < line.count, line[end] == UInt8(ascii: "/") {
@@ -277,7 +345,9 @@ extension BranchReview {
 
         /// `\` then as many `#` as the string's delimiter escapes a
         /// character, or opens an interpolation with `(`.
-        private mutating func scanString(_ line: UnsafeRawBufferPointer, from start: Int, hashes: Int, isMultiline: Bool) -> Int {
+        private mutating func scanString(
+            _ line: UnsafeRawBufferPointer, from start: Int, hashes: Int, isMultiline: Bool, id: Int
+        ) -> Int {
             var index = start
             while index < line.count {
                 switch line[index] {
@@ -302,6 +372,7 @@ extension BranchReview {
                         continue
                     }
                     modes.removeLast()
+                    if isMultiline { stringIndents[id] = Data(line[..<index]) }
                     return index + quotes + hashes
                 default:
                     index += 1
@@ -320,6 +391,8 @@ extension BranchReview {
                     depth -= 1
                     if depth == 0 {
                         modes.removeLast()
+                        commentRanges.append((commentStart ?? 0)..<(index + 2))
+                        commentStart = nil
                         return index + 2
                     }
                 } else {
@@ -368,6 +441,7 @@ extension BranchReview.SwiftScanner {
             }
             return
         }
+        resumeSignature(before: token)
         if takesAttribute(token) || takesExtendedType(token) { return }
         if pendingPrivate {
             pendingPrivate = false
@@ -375,7 +449,11 @@ extension BranchReview.SwiftScanner {
         }
         switch token {
         case .newline:
-            if statement.depth == 0, !statement.continues, !statement.atStart { startStatement() }
+            if statement.depth == 0, !statement.continues, !statement.atStart {
+                let function = statement.function
+                startStatement()
+                carriedFunction = function
+            }
         case .identifier(let bytes, let isEscaped):
             identifier(String(decoding: bytes, as: UTF8.self), isEscaped: isEscaped)
         case .punctuation(let byte):
@@ -383,6 +461,24 @@ extension BranchReview.SwiftScanner {
         case .literal:
             other()
         }
+    }
+
+    /// A signature that ended a line goes on when the next starts with
+    /// `->`, `where`, `async`, `throws`, `rethrows` or the body's `{`.
+    private mutating func resumeSignature(before token: Token) {
+        guard let carried = carriedFunction else { return }
+        let resumes: Bool
+        switch token {
+        case .newline: return
+        case .punctuation(let byte): resumes = byte == UInt8(ascii: "{") || byte == UInt8(ascii: "-")
+        case .identifier(let bytes, _):
+            resumes = ["where", "async", "throws", "rethrows"].contains(String(decoding: bytes, as: UTF8.self))
+        case .literal: resumes = false
+        }
+        carriedFunction = nil
+        guard resumes else { return }
+        statement.function = carried
+        statement.atStart = false
     }
 
     /// Whether `token` is part of an attribute (`@objc(name:)`) or of a
@@ -398,7 +494,9 @@ extension BranchReview.SwiftScanner {
         switch (attribute, token) {
         case (.name?, .identifier(let bytes, _)):
             // Methods the runtime calls, through a selector or an action.
-            if ["objc", "IBAction"].contains(String(decoding: bytes, as: UTF8.self)) { statement.isObjC = true }
+            let attributeName = String(decoding: bytes, as: UTF8.self)
+            if ["objc", "IBAction"].contains(attributeName) { statement.isObjC = true }
+            if attributeName == "main" { statement.isMainType = true }
             attribute = .afterName
             return true
         case (.afterName?, .punctuation(UInt8(ascii: "."))):
@@ -458,7 +556,7 @@ extension BranchReview.SwiftScanner {
     }
 
     private mutating func identifier(_ name: String, isEscaped: Bool) {
-        if case .typeName = statement.expect {
+        if case .typeName(let isClass) = statement.expect {
             statement.expect = .nothing
             guard !isEscaped, Self.keywords.contains(name) else {
                 declareType(name)
@@ -466,6 +564,7 @@ extension BranchReview.SwiftScanner {
                 return
             }
             // `class func`, `class override var`: a modifier.
+            statement.isStatic = statement.isStatic || isClass
         }
         if !isEscaped, statement.atStart, keyword(name) { return }
         let candidate = Candidate(name: name, line: lineNumber, collecting: collecting)
@@ -475,6 +574,10 @@ extension BranchReview.SwiftScanner {
             statement.expect = .nothing
         case .name(let kind):
             record(candidate, kind)
+            if kind == .function {
+                let isEntryPoint = name == "main" && statement.isStatic && scopes.last?.isMainType == true
+                statement.function = Function(name: name, isEntryPoint: isEntryPoint)
+            }
             statement.expect = .nothing
         case .binding:
             record(candidate, .variable)
@@ -512,7 +615,7 @@ extension BranchReview.SwiftScanner {
             return true
         case "class", "actor":
             // Still at the statement's start: `class func`.
-            statement.expect = .typeName
+            statement.expect = .typeName(isClass: name == "class")
             return true
         case "func":
             begin(.name(.function))
@@ -528,6 +631,7 @@ extension BranchReview.SwiftScanner {
             begin(.caseName)
         default:
             guard Self.modifiers.contains(name) else { return false }
+            if name == "static" { statement.isStatic = true }
             mayTakeArguments = true
             return true
         }
@@ -545,12 +649,14 @@ extension BranchReview.SwiftScanner {
         let path = scopes.last?.container.map { $0 + "." + name } ?? name
         // Its own modifier, or a private type's or extension's body.
         if statement.isPrivate || scopes.last?.isPrivate == true { privateTypes.insert(path) }
+        if statement.isMainType { mainTypes.insert(path) }
         introduceType(container: path, extended: nil)
     }
 
     private mutating func introduceType(container: String?, extended: String?) {
         introducesType = true
         typeIsPrivate = statement.isPrivate
+        typeIsMain = statement.isMainType || extended.map(mainTypes.contains) == true
         pendingContainer = container
         pendingExtended = scopes.isEmpty ? extended : nil
     }
@@ -578,7 +684,8 @@ extension BranchReview.SwiftScanner {
         }
         advance(after: byte)
         statement.atStart = false
-        statement.continues = byte == UInt8(ascii: ",")
+        // A function's generic parameters may wrap too.
+        statement.continues = byte == UInt8(ascii: ",") || (byte == UInt8(ascii: "<") && statement.function != nil)
     }
 
     /// Where a punctuation leaves the names a declaration lists.
@@ -628,8 +735,11 @@ extension BranchReview.SwiftScanner {
             isPrivate: parent?.isPrivate == true || (!local && typeIsPrivate),
             container: local ? nil : pendingContainer,
             extended: local ? nil : pendingExtended,
+            function: local ? statement.function : nil,
+            isMainType: !local && typeIsMain,
             outer: statement
         ))
+        if let function = scopes.last?.function { functionsOpened.append(function) }
         introducesType = false
         startStatement()
     }

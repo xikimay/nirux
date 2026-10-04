@@ -43,8 +43,10 @@ extension BranchReview {
         /// The line rules its `+` and `-` lines match, by hunk index in
         /// the section. Empty when not looked for.
         var riskHits: Set<RiskHit> = []
-        /// Nil when not collected, or past `AddedLineCollector`'s limit.
-        var addedLines: AddedLines?
+        /// The mode the `index` line states when both sides share it (a
+        /// modified symlink's "120000"). Left out of the patch hash, which
+        /// takes the modes above.
+        var indexMode: String?
 
         /// The path its name-status entry lists last: the new path, or the
         /// old one for a deletion.
@@ -79,8 +81,6 @@ extension BranchReview {
             var whitespace: WhitespaceCheck.Mode? = .ignoringIndentation
             /// Fill `PatchSection.riskHits`.
             var findsRisks = true
-            /// Fill `PatchSection.addedLines`.
-            var collectsAddedLines = false
         }
 
         /// Parses every section, read as `reading` says for each (by its
@@ -111,18 +111,15 @@ extension BranchReview {
             // An added or a deleted file's mode appears or goes.
             let keepsMode = section.oldMode == section.newMode
             var whitespace = reading.whitespace.flatMap { keepsMode ? WhitespaceCheck(mode: $0) : nil }
-            var added = reading.collectsAddedLines ? AddedLineCollector() : nil
             while let header = pendingHunk {
                 guard let read = hunk(
-                    header, from: &reader, into: &section, hasher: &hasher, whitespace: &whitespace, added: &added,
-                    reading: reading
+                    header, from: &reader, into: &section, hasher: &hasher, whitespace: &whitespace, reading: reading
                 ) else { return nil }
                 if reading.keepsLines { section.hunks.append(read.hunk) }
                 section.hunkCount += 1
                 pendingHunk = read.next
             }
             section.changedLinesDigest = hasher.finalize()
-            section.addedLines = added?.finalize()
             section.isWhitespaceOnly = section.hunkCount > 0 && whitespace?.isWhitespaceOnly == true
             return section
         }
@@ -181,11 +178,7 @@ extension BranchReview {
                 } else if let value = line.dropPrefix("rename to ") {
                     renamedTo = unquoted(value)
                 } else if let value = line.dropPrefix("index ") {
-                    let ids = value.split(separator: " ").first?.components(separatedBy: "..") ?? []
-                    if ids.count == 2 {
-                        section.oldObjectID = ids[0]
-                        section.newObjectID = ids[1]
-                    }
+                    readIndexLine(value, into: &section)
                 } else if let value = line.dropPrefix("--- ") {
                     oldName = headerPath(value, prefix: "a/")
                 } else if let value = line.dropPrefix("+++ ") {
@@ -206,6 +199,17 @@ extension BranchReview {
             return (section, pendingHunk)
         }
 
+        /// "abc..def 100644": the object ids, and the mode both sides share.
+        private static func readIndexLine(_ value: Substring, into section: inout PatchSection) {
+            let fields = value.split(separator: " ")
+            let ids = fields.first?.components(separatedBy: "..") ?? []
+            if ids.count == 2 {
+                section.oldObjectID = ids[0]
+                section.newObjectID = ids[1]
+            }
+            if fields.count == 2 { section.indexMode = String(fields[1]) }
+        }
+
         /// Reads one hunk after its `@@` line. Returns it, and the next
         /// hunk's `@@` line if one follows.
         private static func hunk(
@@ -214,7 +218,6 @@ extension BranchReview {
             into section: inout PatchSection,
             hasher: inout ChangedLineHasher,
             whitespace: inout WhitespaceCheck?,
-            added: inout AddedLineCollector?,
             reading: Reading
         ) -> (hunk: Hunk, next: Data?)? {
             guard let header = hunkHeader(Substring(decoded(headerLine))) else { return nil }
@@ -236,13 +239,11 @@ extension BranchReview {
                     switch raw.first {
                     case UInt8(ascii: "+"):
                         guard newRemaining > 0 else { return nil }
-                        added?.add(header.newStart + header.newCount - newRemaining, raw.dropFirst())
                         newRemaining -= 1
                         section.additions += 1
                         kind = .added
                     case UInt8(ascii: "-"):
                         guard oldRemaining > 0 else { return nil }
-                        added?.addRemoved(raw.dropFirst())
                         oldRemaining -= 1
                         section.deletions += 1
                         kind = .removed
@@ -544,8 +545,8 @@ extension BranchReview {
     /// git's `-w`: whitespace inside a line is kept, since `" "` becoming
     /// `""` or `a - -b` becoming `a --b` changes what the code does. Hunk
     /// by hunk, not run by run: a reindent pairs a closing brace with
-    /// another one as context. A Swift multi-line string can't be told
-    /// apart from code here: its indentation reads as code's.
+    /// another one as context. A line can be kept whole on its side: a
+    /// Swift multi-line string's text as Swift reads it (see `readSwift`).
     struct WhitespaceCheck {
         enum Mode: Equatable {
             case ignoringIndentation
@@ -564,9 +565,20 @@ extension BranchReview {
         }
 
         mutating func add(_ kind: Line.Kind, _ content: Data) {
-            guard isWhitespaceOnly, kind != .noNewlineMarker, let kept = significant(content) else { return }
-            if kind != .added { Self.feed(kept, into: &old) }
-            if kind != .removed { Self.feed(kept, into: &new) }
+            guard kind != .noNewlineMarker else { return }
+            add(before: kind == .added ? nil : (content, false), after: kind == .removed ? nil : (content, false))
+        }
+
+        /// A line as each side reads it, nil on a side it isn't on;
+        /// `whole` compares it as it is rather than its significant part.
+        mutating func add(before: (content: Data, whole: Bool)?, after: (content: Data, whole: Bool)?) {
+            guard isWhitespaceOnly else { return }
+            if let before, let kept = before.whole ? before.content[...] : significant(before.content) {
+                Self.feed(kept, into: &old)
+            }
+            if let after, let kept = after.whole ? after.content[...] : significant(after.content) {
+                Self.feed(kept, into: &new)
+            }
         }
 
         mutating func endHunk() {

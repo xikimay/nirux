@@ -1,9 +1,9 @@
 import XCTest
 @testable import Nirux
 
-/// The Swift scanner, the added lines and the mentions of "Tests against
-/// code" on handwritten sources; `BranchReviewTestsAgainstCodeTests` runs
-/// them on real repositories.
+/// The Swift scanner and the mentions of "Tests against code" on
+/// handwritten sources; `BranchReviewTestsAgainstCodeTests` and
+/// `BranchReviewSwiftReadingTests` run them on real repositories.
 final class BranchReviewSymbolsTests: XCTestCase {
     private func scanned(_ source: String, added: Set<Int>? = nil, words: Set<String>? = nil) -> BranchReview.SwiftScanner {
         var scanner = BranchReview.SwiftScanner()
@@ -221,6 +221,68 @@ final class BranchReviewSymbolsTests: XCTestCase {
         ])
     }
 
+    func testEachLineSaysWhereItStartsAndWhatItsCodeIs() {
+        let source = """
+        @main
+        struct App {
+            static func main() {
+                let help = \"\"\"
+                    usage: app // not a comment
+                    \"\"\"
+                run() // Telegram
+                /* block
+                   Telegram */ go()
+            }
+            func handle(done: () -> Void = { }) {
+                done()
+            }
+        }
+        """
+        var scanner = BranchReview.SwiftScanner()
+        var lines: [(inString: Bool, functions: [String], code: String)] = []
+        for line in source.split(separator: "\n", omittingEmptySubsequences: false) {
+            let inString = scanner.stringText != nil
+            let functions = scanner.enclosingFunctions.map { $0.name + ($0.isEntryPoint ? " (entry point)" : "") }
+            Array(line.utf8).withUnsafeBytes { scanner.feed($0, collecting: false, capturingCode: true) }
+            lines.append((inString, functions, String(decoding: scanner.code, as: UTF8.self)))
+        }
+
+        let main = "main (entry point)"
+        XCTAssertEqual(lines.map(\.inString), [false, false, false, false, true, true, false, false, false, false, false, false, false, false])
+        XCTAssertEqual(lines.map(\.functions), [
+            [], [], [], [main], [main], [main], [main], [main], [main], [main], [], ["handle"], ["handle"], []
+        ])
+        XCTAssertEqual(lines[4].code, "            usage: app // not a comment")
+        XCTAssertEqual(lines[6].code, "        run() " + String(repeating: " ", count: "// Telegram".count))
+        XCTAssertEqual(lines[7].code, "        " + String(repeating: " ", count: 8))
+        XCTAssertEqual(lines[8].code, String(repeating: " ", count: 22) + " go()")
+        XCTAssertEqual(scanner.stringIndents, [1: Data(String(repeating: " ", count: 12).utf8)], "the closing delimiter's")
+    }
+
+    func testMainOfAnAtMainTypeIsTheEntryPointWhereverItIsDeclared() {
+        func functions(at line: Int, of source: [String]) -> [BranchReview.SwiftScanner.Function] {
+            var scanner = BranchReview.SwiftScanner()
+            for text in source.prefix(line) { Array(text.utf8).withUnsafeBytes { scanner.feed($0, collecting: false) } }
+            return scanner.enclosingFunctions
+        }
+        let main = [BranchReview.SwiftScanner.Function(name: "main", isEntryPoint: true)]
+        XCTAssertEqual(functions(at: 3, of: ["@main", "final class App {", "    class func main() {", "        go()"]), main)
+        XCTAssertEqual(functions(at: 4, of: ["@main", "struct App {}", "extension App {", "    static func main() {", "        go()"]), main)
+        // Its generic parameters wrap.
+        XCTAssertEqual(
+            functions(at: 2, of: ["func applicationShouldTerminate<", "    T>(_ sender: T) -> Bool {", "    go()"]),
+            [BranchReview.SwiftScanner.Function(name: "applicationShouldTerminate", isEntryPoint: false)]
+        )
+    }
+
+    func testAStringTheLineEndCutsLeavesNoCommentOpen() {
+        var scanner = BranchReview.SwiftScanner()
+        for line in ["let s = \"\\( /* x", "let queue = DispatchQueue.main"] {
+            Array(line.utf8).withUnsafeBytes { scanner.feed($0, collecting: false, capturingCode: true) }
+        }
+        XCTAssertEqual(String(decoding: scanner.code, as: UTF8.self), "let queue = DispatchQueue.main")
+    }
+
     func testByteOrderMarkIsNotAnIdentifier() {
         XCTAssertEqual(declared("\u{FEFF}struct Marked {\n    var level = 0\n}"), ["Marked", "level"])
     }
@@ -237,44 +299,6 @@ final class BranchReviewSymbolsTests: XCTestCase {
         let source = "// alpha\nlet text = \"beta \\(gamma) `delta`\"\n/* epsilon */ zeta(`eta`, model.$theta, kappa$lambda)"
         let names: Set<String> = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "kappa", "lambda"]
         XCTAssertEqual(scanned(source, words: names).words?.names, ["alpha", "beta", "delta", "epsilon", "kappa", "lambda"])
-    }
-
-    // MARK: - Added lines
-
-    func testAddedLinesAreCollectedAsRangesOfTheNewSide() throws {
-        let patch = """
-        diff --git a/a.swift b/a.swift
-        index 1111111..2222222 100644
-        --- a/a.swift
-        +++ b/a.swift
-        @@ -1 +1,3 @@
-         let a = 1
-        +let b = 2\r
-        +let c = 3
-        @@ -10,3 +11,3 @@
-         x
-        -    private var y = 1
-        +z
-         w
-
-        """
-        let reading = BranchReview.Patch.Reading(collectsAddedLines: true)
-        let section = try XCTUnwrap(BranchReview.Patch.section(Data(patch.utf8), reading: reading))
-
-        var digest = BranchReview.LineDigest()
-        for line in ["let b = 2", "let c = 3", "z"] { Array(line.utf8).withUnsafeBytes { digest.add($0) } }
-        XCTAssertEqual(
-            section.addedLines,
-            BranchReview.AddedLines(ranges: [2..<4, 12..<13], digest: digest.finalize(), removedNames: ["y"])
-        )
-        XCTAssertNil(try XCTUnwrap(BranchReview.Patch.section(Data(patch.utf8))).addedLines)
-
-        var collector = BranchReview.AddedLineCollector(maxRanges: 1)
-        collector.add(1, Data("a".utf8))
-        collector.add(2, Data("b".utf8))
-        XCTAssertNotNil(collector.finalize())
-        collector.add(4, Data("c".utf8))
-        XCTAssertNil(collector.finalize(), "a second run of lines is past the limit")
     }
 
     // MARK: - Mentions

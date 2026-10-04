@@ -27,11 +27,11 @@ extension BranchReview {
 
     /// What a Swift code file declares on its added lines.
     enum SymbolScan: Equatable, Sendable {
-        enum Reason: Equatable, Sendable {
+        enum Reason: Error, Equatable, Sendable {
             /// Its patch wasn't read (`Omission.notRead`).
             case patchNotRead
             /// Past `Options.maxScannedFileBytes`, or the rest of
-            /// `maxScannedBytes`, or past 100,000 runs of added lines.
+            /// `maxScannedBytes`.
             case tooLarge
             /// The file no longer matches its patch: the agent edited it
             /// meanwhile. The next refresh reads it again.
@@ -95,37 +95,6 @@ extension BranchReview {
     /// has no line count.
     static func unreadSymbols(of file: FileChange) -> SymbolScan? {
         mayDeclareSymbols(file) && (file.additions > 0 || file.isUntracked) ? .unread(.patchNotRead) : nil
-    }
-
-    /// The symbols declared on `added` lines of the file at `path`, as it
-    /// is on disk, but those its removed lines declared already (a value,
-    /// a conformance or a visibility changed). Nil for a symlink, which
-    /// declares nothing.
-    static func scanSymbols(at path: String, added: AddedLines?, maxFileBytes: Int, budget: inout Int) -> SymbolScan? {
-        var info = stat()
-        if lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFLNK { return nil }
-        let limit = min(maxFileBytes, budget)
-        guard let added else { return .unread(.tooLarge) }
-        guard let head = readPrefix(of: path, maxBytes: limit + 1) else { return .unread(.changedSincePatch) }
-        guard head.count <= limit else { return .unread(.tooLarge) }
-        budget -= head.count
-        var scanner = SwiftScanner()
-        var digest = LineDigest()
-        var ranges = added.ranges[...]
-        var number = 0
-        forEachLine(of: head) { line in
-            number += 1
-            while let first = ranges.first, first.upperBound <= number { ranges.removeFirst() }
-            let isAdded = ranges.first?.contains(number) == true
-            if isAdded { digest.add(line) }
-            scanner.feed(line, collecting: isAdded)
-        }
-        guard digest.finalize() == added.digest else { return .unread(.changedSincePatch) }
-        guard scanner.isBalanced else { return .unread(.unbalanced) }
-        var seen: Set<String> = []
-        return .read(scanner.symbols.filter { symbol in
-            !added.removedNames.contains(symbol.name) && seen.insert((symbol.container ?? "") + "\0" + symbol.name).inserted
-        })
     }
 
     /// "Outer", "Outer.Inner" for "Outer.Inner".
@@ -322,73 +291,5 @@ extension BranchReview {
             for byte in bytes { hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01B3 }
             return hash
         }
-    }
-}
-
-// MARK: - Added lines
-
-extension BranchReview {
-    /// What the first pass keeps of a Swift file's patch: the new side's
-    /// numbers of its `+` lines, as ranges, and a digest of their bytes,
-    /// which the file at the head is checked against; and the names its
-    /// `-` lines declare, which aren't new.
-    struct AddedLines: Equatable, Sendable {
-        var ranges: [Range<Int>] = []
-        var digest = Data()
-        var removedNames: Set<String> = []
-    }
-
-    /// Collects `AddedLines` while a section is parsed, its memory
-    /// bounded: past `maxRanges` runs of added lines, it gives up.
-    struct AddedLineCollector {
-        private let maxRanges: Int
-        private var ranges: [Range<Int>] = []
-        private var digest = LineDigest()
-        private var removedNames: Set<String> = []
-        private var overflowed = false
-
-        init(maxRanges: Int = 100_000) {
-            self.maxRanges = maxRanges
-        }
-
-        mutating func add(_ number: Int, _ content: Data) {
-            guard !overflowed else { return }
-            if let last = ranges.last, last.upperBound == number {
-                ranges[ranges.count - 1] = last.lowerBound..<(number + 1)
-            } else if ranges.count < maxRanges {
-                ranges.append(number..<(number + 1))
-            } else {
-                overflowed = true
-                return
-            }
-            content.withUnsafeBytes { digest.add($0) }
-        }
-
-        /// A removed line, read alone: whatever it declares, at any depth
-        /// and whatever its visibility, was there before the branch.
-        mutating func addRemoved(_ content: Data) {
-            var scanner = SwiftScanner()
-            content.withUnsafeBytes { scanner.feed($0, collecting: true) }
-            removedNames.formUnion(scanner.declarations.map(\.symbol.name))
-        }
-
-        func finalize() -> AddedLines? {
-            overflowed ? nil : AddedLines(ranges: ranges, digest: digest.finalize(), removedNames: removedNames)
-        }
-    }
-
-    /// Hashes lines without their final carriage return: on disk, a file
-    /// may have the CRLF endings its attributes convert in the patch.
-    struct LineDigest {
-        private var hasher = SHA256()
-
-        mutating func add(_ line: UnsafeRawBufferPointer) {
-            var kept = line
-            if kept.last == 0x0D { kept = UnsafeRawBufferPointer(rebasing: kept.dropLast()) }
-            hasher.update(bufferPointer: kept)
-            hasher.update(data: Data([UInt8(ascii: "\n")]))
-        }
-
-        func finalize() -> Data { Data(hasher.finalize()) }
     }
 }

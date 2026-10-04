@@ -129,17 +129,6 @@ final class BranchReviewTestsAgainstCodeTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(snapshot.testsAgainstCode.unscannedFiles, [])
     }
 
-    func testSymbolsOfAFileCheckedOutWithCRLFAreRead() throws {
-        try write(".gitattributes", "*.swift text eol=crlf\n")
-        try commitToMain("attributes")
-        try write("Sources/Gauge.swift", "struct Gauge {\r\n    var level = 0\r\n}\r\n")
-
-        let gauge = try file("Sources/Gauge.swift", in: try snapshot())
-
-        XCTAssertEqual(gauge.hunks.first?.lines.map(\.text), ["struct Gauge {", "    var level = 0", "}"])
-        XCTAssertEqual(gauge.symbols, .read([symbol("Gauge", 1, .type), symbol("level", 2, in: "Gauge")]))
-    }
-
     func testSymbolsOfFilesListedWithoutTheirPatchAreUnknown() throws {
         try write("Sources/Old.swift", (1...20).map { "let line\($0) = \($0)\n" }.joined())
         try commitToMain("base")
@@ -161,37 +150,59 @@ final class BranchReviewTestsAgainstCodeTests: BranchReviewRepositoryTestCase {
 
     func testSymbolsAreUnknownPastTheLimitsOnceTheFileChangedOrWhenItDoesntBalance() throws {
         try write("Sources/Gauge.swift", "struct Gauge {\n    var level = 0\n}\n")
+        try write("Sources/Lever.swift", "struct Lever {\n    var level = 0\n}\n")
+        try write("Sources/Long.swift", (1...100).map { "let line\($0) = \($0)\n" }.joined())
+        try write("AppTests/FirstTests.swift", "let first = 1\n")
+        try commitToMain("gauges")
+        try write("Sources/Long.swift", "let line1 = 1\n")
+        let gauge = "struct Gauge {\n    var level = 0\n    var limit = 0\n}\n"
+        try write("Sources/Gauge.swift", gauge)
+        try write("Sources/Lever.swift", "struct Lever {\n    var level = 0\n    var limit = 0\n}\n")
         // A bare regex reads as code: its brace never closes.
         try write("Sources/Pattern.swift", "struct Pattern {\n    let opening = /\\{/\n}\n")
+        // Read in context too, but declares nothing listed: after the
+        // files that may, though its path sorts first.
+        try write("AppTests/FirstTests.swift", "let first = 1\nlet second = 22\n")
         let snapshot = try snapshot()
         let read = try file("Sources/Gauge.swift", in: snapshot).symbols
-        XCTAssertEqual(read, .read([symbol("Gauge", 1, .type), symbol("level", 2, in: "Gauge")]))
+        XCTAssertEqual(read, .read([symbol("limit", 3, in: "Gauge")]))
+        XCTAssertEqual(try file("Sources/Gauge.swift", in: snapshot).swiftContext, .read)
         XCTAssertEqual(try file("Sources/Pattern.swift", in: snapshot).symbols, .unread(.unbalanced))
-        try git(["add", "-N", "Sources/Gauge.swift"])
-        let added = BranchReview.Patch.section(
-            Data(try git(["diff", "--no-color", "-U3", "main", "--", "Sources/Gauge.swift"]).utf8),
-            reading: .init(collectsAddedLines: true)
-        )?.addedLines
-        func scan(maxFileBytes: Int = 100, budget: Int = 100) -> BranchReview.SymbolScan? {
-            var budget = budget
-            return BranchReview.scanSymbols(at: repo + "/Sources/Gauge.swift", added: added, maxFileBytes: maxFileBytes, budget: &budget)
+        XCTAssertEqual(try file("Sources/Pattern.swift", in: snapshot).swiftContext, .firstPass(.unbalanced))
+
+        let section = Data(try git(["diff", "--no-color", "-U3", "HEAD", "--", "Sources/Gauge.swift"]).utf8)
+        XCTAssertEqual(try BranchReview.readSwift(section, head: Data(gauge.utf8)).get().symbols, [symbol("limit", 3, in: "Gauge")])
+        for edited in ["struct Gauge {\n    var lever = 0\n    var limit = 0\n}\n", "struct Gauge {\n    var level = 0\n    var limits = 0\n}\n"] {
+            guard case .failure(.changedSincePatch) = BranchReview.readSwift(section, head: Data(edited.utf8)) else {
+                return XCTFail("a file edited since its patch: \(edited)")
+            }
         }
 
-        XCTAssertEqual(scan(), read)
-        XCTAssertEqual(scan(maxFileBytes: 20), .unread(.tooLarge))
-        XCTAssertEqual(scan(budget: 20), .unread(.tooLarge))
-        try write("Sources/Gauge.swift", "struct Gauge {\n    var lever = 0\n}\n")
-        XCTAssertEqual(scan(), .unread(.changedSincePatch))
-
         var limited = options()
-        limited.maxScannedBytes = 60
-        try write("Sources/Gauge.swift", "struct Gauge {\n    var level = 0\n}\n")
-        try write("Sources/Lever.swift", "struct Lever {\n    var level = 0\n}\n")
+        limited.maxScannedBytes = 70
         let budgeted = try self.snapshot(limited)
         XCTAssertEqual(try file("Sources/Gauge.swift", in: budgeted).symbols, read)
         XCTAssertEqual(try file("Sources/Lever.swift", in: budgeted).symbols, .unread(.tooLarge), "past the files' budget")
+        XCTAssertEqual(try file("AppTests/FirstTests.swift", in: budgeted).swiftContext, .firstPass(.tooLarge))
         limited.maxScannedFileBytes = 20
-        XCTAssertEqual(try file("Sources/Gauge.swift", in: try self.snapshot(limited)).symbols, .unread(.tooLarge))
+        let small = try self.snapshot(limited)
+        XCTAssertEqual(try file("Sources/Gauge.swift", in: small).symbols, .unread(.tooLarge))
+        XCTAssertEqual(try file("Sources/Pattern.swift", in: small).symbols, .unread(.tooLarge), "its patch is past the limit")
+        limited.maxScannedFileBytes = 300
+        XCTAssertEqual(try file("Sources/Long.swift", in: try self.snapshot(limited)).swiftContext, .firstPass(.tooLarge), "its removals")
+
+    }
+
+    func testAdditionsShareTheScanBudget() throws {
+        try write("Sources/One.swift", "let one = 1\n")
+        try write("Sources/Two.swift", "let two = 2\n")
+        var limited = options()
+        limited.maxScannedBytes = 300
+
+        let snapshot = try snapshot(limited)
+
+        XCTAssertEqual(try file("Sources/One.swift", in: snapshot).symbols, .read([symbol("one", 1)]))
+        XCTAssertEqual(try file("Sources/Two.swift", in: snapshot).symbols, .unread(.tooLarge), "past what One's patch left")
     }
 
     func testMentionsAreLookedForInTheTestGroupsFilesOnly() throws {
@@ -255,18 +266,7 @@ final class BranchReviewTestsAgainstCodeTests: BranchReviewRepositoryTestCase {
     /// #57 as merged, when the clone has its commits (a shallow one hasn't;
     /// CI's checkouts fetch the whole history).
     func testPullRequest57ListsTheSymbolsItsTestsDontMention() throws {
-        let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().path
-        guard (try? git(["cat-file", "-e", "fa74b4c^2^{commit}"], at: source)) != nil else {
-            throw XCTSkip("#57's commits aren't in this clone.")
-        }
-        let clone = root + "/c57"
-        try git(["clone", "-q", "--shared", "--no-checkout", source, clone], at: root)
-        try git(["checkout", "-q", "-b", "feat/keep-awake", "fa74b4c^2"], at: clone)
-        try git(["update-ref", "refs/remotes/origin/main", "fa74b4c^1"], at: clone)
-        _ = try? git(["symbolic-ref", "-d", "refs/remotes/origin/HEAD"], at: clone)
-
-        let tests = try snapshot(at: clone).testsAgainstCode
+        let tests = try snapshotOfMergedPullRequest("fa74b4c", branch: "feat/keep-awake").testsAgainstCode
 
         XCTAssertEqual(tests.testLines, 578)
         XCTAssertEqual(tests.codeLines, 458)

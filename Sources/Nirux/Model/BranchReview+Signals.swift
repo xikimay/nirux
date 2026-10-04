@@ -14,7 +14,8 @@ extension BranchReview {
     /// Deterministic rules on the paths and on the `+` and `-` lines, built
     /// in for Swift and macOS. A line rule matches anywhere in a line,
     /// strings and trailing comments included, but not in a line that is
-    /// only a comment.
+    /// only a comment; a Swift file read in context (`readSwift`) leaves
+    /// out every comment.
     enum RiskRules {
         struct LineRule {
             let kind: RiskKind
@@ -126,10 +127,12 @@ extension BranchReview {
             LineRule(.sideEffects, "launchctl")
         ]
 
-        /// Calls `body` with the index of each line rule `content` matches.
-        static func forEachLineRule(matching content: Data, _ body: (Int) -> Void) {
+        /// Calls `body` with the index of each line rule `content` matches,
+        /// unless it is only a comment; `skippingCommentLines` false when
+        /// its comments are blanked already.
+        static func forEachLineRule(matching content: Data, skippingCommentLines: Bool = true, _ body: (Int) -> Void) {
             content.withUnsafeBytes { line in
-                guard !isCommentOnly(line) else { return }
+                guard !skippingCommentLines || !isCommentOnly(line) else { return }
                 let present = ByteSet(line)
                 for (index, rule) in lineRules.enumerated() where rule.patterns.contains(where: {
                     $0.set.isSubset(of: present) && find($0.bytes, in: line, boundary: rule.boundary)

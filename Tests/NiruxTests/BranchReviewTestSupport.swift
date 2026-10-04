@@ -112,4 +112,21 @@ class BranchReviewRepositoryTestCase: XCTestCase {
     func file(_ path: String, in snapshot: BranchReview.Snapshot) throws -> BranchReview.FileChange {
         try XCTUnwrap(snapshot.files.first { $0.path == path }, "\(path) not in \(snapshot.files.map(\.path))")
     }
+
+    /// The snapshot of a pull request this repository merged as `merge`:
+    /// its branch at the merge's second parent, main at its first. Skips
+    /// when the clone lacks the commits (a shallow one does).
+    func snapshotOfMergedPullRequest(_ merge: String, branch: String) throws -> BranchReview.Snapshot {
+        let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().path
+        guard (try? git(["cat-file", "-e", "\(merge)^2^{commit}"], at: source)) != nil else {
+            throw XCTSkip("\(merge)'s commits aren't in this clone.")
+        }
+        let clone = root + "/" + merge
+        try git(["clone", "-q", "--shared", "--no-checkout", source, clone], at: root)
+        try git(["checkout", "-q", "-b", branch, "\(merge)^2"], at: clone)
+        try git(["update-ref", "refs/remotes/origin/main", "\(merge)^1"], at: clone)
+        _ = try? git(["symbolic-ref", "-d", "refs/remotes/origin/HEAD"], at: clone)
+        return try snapshot(at: clone)
+    }
 }
