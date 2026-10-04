@@ -339,24 +339,64 @@ claude -p --model claude-opus-5-5 --effort medium \
 - **The model id is a full name**, not the `opus` alias, which will move to the
   next model. It is a setting, with this default.
 - **The copy.** The working directory is a fresh temporary folder outside the
-  state directory, deleted after the run; leftovers are swept at launch. Nirux
-  copies files into it from the working tree, so nothing is written to the
-  repository's index or object store, unlike a temporary index would. The
-  paths come from `git ls-files -z`: committed and staged files with their
-  uncommitted edits, and no untracked file (see "Input" below). That list also
-  holds submodules, deleted files, intent-to-add files and one entry per stage
-  of a conflict, so Nirux copies a path once, and only if `lstat` reports a
-  regular file and no folder above it is a symlink. Then it deletes:
-  - paths that look like a secret (`.env*`, `*.pem`, `*.p12`, `*.key`,
-    `*.mobileprovision`, `*credentials*`, `id_rsa*`, `id_ed25519*`,
-    `.netrc`);
-  - text files containing a key marker (`-----BEGIN`, `sk-ant-`, `ghp_`,
-    `github_pat_`, `AKIA`), the same markers the input withholds;
-  - `CLAUDE.md`, `CLAUDE.local.md` and `.claude/`, at any depth: instructions
-    the branch carries must not reach the reviewer as project instructions.
+  state directory, deleted after the run. Nirux copies files into it from the
+  working tree, so nothing is written to the repository's index or object
+  store, unlike a temporary index would. The paths come from `git ls-files -z
+  -v`: committed and staged files with their uncommitted edits, intent-to-add
+  files included, and the untracked files the run sends when the user asks
+  (see "Input" below). That list also holds submodules, deleted files and one
+  entry per stage of a conflict, so Nirux copies a path once, and only if it
+  opens as a regular file with one link and no symlink anywhere in its path
+  (`O_NOFOLLOW_ANY`, and without blocking on a FIFO), and holds UTF-8 text
+  (no NUL in its first 8 KB). A file over 4 MB isn't copied, nor files past
+  1 GB in all, the branch's own files first. These are never copied:
+  - paths that look like a secret, by name whatever the case: `.env*`,
+    `*.env`, keys and stores (`*.pem`, `*.p8`, `*.p12`, `*.pfx`, `*.key`,
+    `*.jks`, `*.keystore`, `*.ppk`, `id_rsa*`, `id_ed25519*`, `id_ecdsa*`,
+    `AuthKey_*`), `*.mobileprovision`, token files (`.netrc`, `.npmrc`,
+    `.pypirc`, `.git-credentials`, `.htpasswd`, `.pgpass`), Terraform's
+    `*.tfvars` and `*.tfstate`, anything under `.config/gh/`; and, unless it
+    is code (Swift, TypeScript, Python, shell, Terraform, SQL, HTML and
+    CSS…) or a CI workflow, a name holding `credentials` or
+    `secret`, or a file under `.ssh/`, `.gnupg/`, `.aws/`, `.docker/`,
+    `.kube/` or `secrets/`. A file renamed from such a path isn't copied
+    either;
+  - files holding something shaped like a key (below);
+  - files whose edits git hides (assume-unchanged, skip-worktree: a common
+    way to keep real credentials in a local config), and files, untracked
+    ones included, that a clean filter stores as something else (git-crypt,
+    git-lfs, a redaction filter): what the working tree holds isn't what
+    the diff shows;
+  - `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md` and
+    `.claude/`, at any depth and in any case (APFS doesn't tell `claude.md`
+    from `CLAUDE.md`): instructions the branch carries must not reach the
+    reviewer as project instructions. Claude Code reads `AGENTS.md` where a
+    project has no `CLAUDE.md`, which is what the copy leaves. With
+    `--restricted`, a canary run of 2.1.289 loaded neither; R3b keeps
+    checking it.
+
+  **Keys by their shape** (validated by the user on 2026-10-04, instead of
+  the plain markers `-----BEGIN`, `sk-ant-`, `ghp_`, `github_pat_`, `AKIA`,
+  which hid code and docs that talk about keys and let other tokens
+  through): `-----BEGIN … PRIVATE KEY`, `-----BEGIN` in base64 (a key or a
+  certificate inside a config file), `sk-ant-`, `sk-proj-` and OpenAI's
+  `sk-` tokens with or without a kind (`sk-svcacct-`), Stripe's live keys, GitHub's `ghp_`, `gho_`,
+  `ghu_`, `ghs_`, `ghr_` and `github_pat_` tokens, GitLab's `glpat-`, AWS's
+  `AKIA` and `ASIA` key ids, Google's `AIza`, Slack's `xox?-` and npm's
+  `npm_`, each followed by as many token characters as the real ones have
+  (OpenAI's with a digit, so a slug like `sk-hynix-reports-…` isn't one).
+  The check reads only a key's first characters: an open-ended repeat over
+  a long run of token characters stops ICU with an error, and a text the
+  check can't finish counts as holding a key.
 
   Not a `git worktree add`: it would show in `git worktree list` and on the
-  Project Board.
+  Project Board. The copy holds an exclusive lock on a sibling `.lock` file,
+  taken as it is created (`O_EXLOCK`), for as long as it lives. Leftovers are
+  swept at launch and before a run: a copy whose lock nobody holds goes (the
+  lock goes with its holder, even after a crash), one without a lock file
+  goes once it is 30 minutes old, and a locked one stays, since it may be
+  another Nirux's run (the installed app and a dev build share the temporary
+  folder).
 - **The environment is an allowlist:** `HOME`, `USER`, `LOGNAME`, `LANG`,
   `TMPDIR`, and a `PATH` that starts with the folder of the `claude` binary
   `AgentCLILocator` found, then `PtySession.effectivePath`: an npm install is
@@ -377,19 +417,37 @@ claude -p --model claude-opus-5-5 --effort medium \
   in `claude --resume`. The session history (#68) already ignores `claude -p`.
 - **One run at a time, in the whole app.** A second Explain waits in line. The
   run has a 6-minute timeout and a Cancel button. `BoundedProcess` can't do
-  this today: R3 extends it with stdin, a cancel handle, a replaced (not
+  this today: R3 extends it with stdin (written on a thread of its own while
+  the output is read, never raising SIGPIPE), a cancel handle, a replaced (not
   merged) environment, and keeping the output it read when it stops, and runs
   it off the main thread. With `stream-json`, a cancelled or timed-out run
   still leaves the usage its events reported; R3 checks that the structured
   output arrives in the final `result` event.
 - **Input:** the PR body, the handover, the commits, and the diff from the
   merge base with numbered hunks. Left out: folded noise, binaries, secret
-  paths, and the disposable paths of section 2. Hunks containing a key marker
-  (`-----BEGIN`, `sk-ant-`, `ghp_`, `github_pat_`, `AKIA`) are replaced by
-  "withheld: looks like a secret". Untracked files are sent by name only,
-  unless the user ticks "Include untracked files".
-- **Size:** one run sends at most about 150 KB of diff. A larger branch is
-  explained one group at a time, each cached as it arrives.
+  paths (a rename from one too), and the disposable paths of section 2. A
+  hunk holding something shaped like a key, in its lines or in its header
+  (git's funcname line, which comes from above the hunk), is replaced by
+  "withheld: looks like a secret" and takes no notes; so is an author's text
+  that holds one (a commit's message, the handover, the PR body). Untracked
+  files are sent by name only, unless the user ticks "Include untracked
+  files". The files are listed; those whose diff isn't sent are named with
+  why, and so are the branch's files the run can't read in its copy. The
+  author's texts are fenced between `<<<nonce` and `nonce>>>` lines, with a
+  nonce none of them holds, so a PR body can't pass for the parts that
+  follow it. Paths and hunk headers show their invisible characters as code
+  points, as the page does, and diff lines their line separators, so none
+  of them can fake a line of the input. A diff read on demand for the run is
+  checked again (the worktree may have moved), and the input keeps the hash
+  of each patch it sent, for the cache.
+- **Size:** one run sends at most about 150 KB of diff, and the whole input
+  stays near 300 KB: each author's text is cut at 32 KB (the previous
+  overview at 16 KB), and past 300 files the lists show the files the run
+  sends and the first others, and count the rest by folder. A larger branch
+  is explained in several runs of whole groups, packed in the page's order
+  (a large group in several runs of whole files), each cached as it
+  arrives. A file whose diff alone is larger is named, not sent. A branch
+  with no diff left to send makes no run.
 - **Output:** JSON matching the schema: an overview, intent groups, a summary
   and an importance per file, notes per hunk (with an optional "check this"),
   the claims checked, and at most 5 questions for the author. Nirux drops
@@ -817,7 +875,10 @@ used.
 3. **R3, Explain.** `BoundedProcess`'s extensions, the run of section 4.3, the
    copy, the account check, the settings (model, effort), the first-use
    notice, the cache, the checks on the output, the claims, the usage line.
-   Run on five merged PRs before its defaults are frozen.
+   Run on five merged PRs before its defaults are frozen. It ships in three
+   pull requests: the engine without network (`BoundedProcess`'s extensions,
+   the copy, the input), then the run (account, output checks, cache, the
+   five PRs), then the page and the settings.
 4. **R4, comments and reviewed marks.** Drafts, re-anchoring, outdated
    comments, and turning a "check this" note into a comment.
 5. **R5, sending to the agent.** The "idle at its prompt" predicate, the
