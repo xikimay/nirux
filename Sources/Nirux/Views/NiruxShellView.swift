@@ -28,6 +28,8 @@ final class NiruxShellView: NSView {
     let projectStore = ProjectStore()
     /// Each space's agent sessions (see AgentSessionLedger).
     var sessionLedger = AgentSessionLedger()
+    /// Resumes under way, and columns just launched to resume a session.
+    let sessionResume = SessionResumeState()
     var workspaces: [WorkspaceState] {
         get { workspaceStore.workspaces }
         set { workspaceStore.replaceWorkspaces(newValue) }

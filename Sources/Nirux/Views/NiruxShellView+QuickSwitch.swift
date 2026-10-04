@@ -27,12 +27,12 @@ final class QuickSwitchState {
 // MARK: - Quick switcher (⌘P workspaces) and Next Waiting Agent (⌘J)
 
 extension NiruxShellView {
-    /// The sections ⌘P lists after its commands: the workspaces. Another
-    /// kind of row (past sessions…) joins with a section of its own here.
+    /// The sections ⌘P lists after its commands: the workspaces, then the
+    /// current space's past sessions.
     func paletteSections() -> [PaletteSection] {
         let snapshot = ProcessSnapshot()
         let now = Date().timeIntervalSince1970
-        return [workspacePaletteSection(snapshot: snapshot, now: now)]
+        return [workspacePaletteSection(snapshot: snapshot, now: now), sessionsPaletteSection(snapshot: snapshot, now: now)]
     }
 
     /// Every workspace of every space, the current space's first, each

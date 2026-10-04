@@ -198,31 +198,28 @@ enum GitWorktree {
     struct WorktreeEntry {
         let path: String
         let branch: String?  // nil for detached HEAD
+        /// `git worktree lock`: prune and remove leave it alone.
+        var isLocked = false
     }
 
-    /// List existing worktrees for the repo at the given root.
-    static func list(repoRoot: String) -> [WorktreeEntry] {
-        let output = gitRun(["worktree", "list", "--porcelain"], cwd: repoRoot)
-        var entries: [WorktreeEntry] = []
-        var currentPath: String?
-        for line in output.components(separatedBy: "\n") {
-            if line.hasPrefix("worktree ") {
-                currentPath = String(line.dropFirst("worktree ".count))
-            } else if line.hasPrefix("branch refs/heads/") {
-                let branch = String(line.dropFirst("branch refs/heads/".count))
-                if let path = currentPath {
-                    entries.append(WorktreeEntry(path: path, branch: branch))
-                }
-                currentPath = nil
-            } else if line.isEmpty {
-                // End of entry — if no branch was found (detached HEAD), still add it
-                if let path = currentPath {
-                    entries.append(WorktreeEntry(path: path, branch: nil))
-                }
-                currentPath = nil
+    /// List existing worktrees for the repo at the given root, as git
+    /// registers them: one whose folder is gone stays listed until it is
+    /// pruned.
+    static func list(repoRoot: String, timeout: TimeInterval = defaultTimeout) -> [WorktreeEntry] {
+        let output = gitRunFull(["worktree", "list", "--porcelain"], cwd: repoRoot, timeout: timeout).stdout
+        // One block per worktree, its lines in any order.
+        return output.components(separatedBy: "\n\n").compactMap { block in
+            let lines = block.split(separator: "\n").map(String.init)
+            guard let path = lines.first(where: { $0.hasPrefix("worktree ") })?.dropFirst("worktree ".count) else {
+                return nil
             }
+            let branch = lines.first { $0.hasPrefix("branch refs/heads/") }?.dropFirst("branch refs/heads/".count)
+            return WorktreeEntry(
+                path: String(path),
+                branch: branch.map(String.init),
+                isLocked: lines.contains { $0 == "locked" || $0.hasPrefix("locked ") }
+            )
         }
-        return entries
     }
 
     /// A linked worktree checkout has `.git` as a *file* (gitdir pointer)
