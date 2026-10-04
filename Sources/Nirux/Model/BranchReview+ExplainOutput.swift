@@ -11,7 +11,7 @@ extension BranchReview {
     /// hides a file or removes a risk signal: the answer has no field for
     /// any of that.
     struct ExplainOutput: Equatable, Sendable {
-        enum Intent: String, CaseIterable, Equatable, Sendable {
+        enum Intent: String, CaseIterable, Codable, Equatable, Sendable {
             case feature
             case behaviorChange
             case refactor
@@ -21,7 +21,7 @@ extension BranchReview {
             case ci
         }
 
-        struct Group: Equatable, Sendable {
+        struct Group: Codable, Equatable, Sendable {
             let intent: Intent
             let title: String
             /// Each path is in one group at most.
@@ -43,14 +43,14 @@ extension BranchReview {
             let check: String?
         }
 
-        enum Verdict: String, CaseIterable, Equatable, Sendable {
+        enum Verdict: String, CaseIterable, Codable, Equatable, Sendable {
             case matches
             case partly
             case contradicts
             case notInDiff
         }
 
-        struct Claim: Equatable, Sendable {
+        struct Claim: Codable, Equatable, Sendable {
             let claim: String
             let verdict: Verdict
             let evidence: String

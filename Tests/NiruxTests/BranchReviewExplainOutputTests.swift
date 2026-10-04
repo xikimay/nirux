@@ -41,7 +41,10 @@ final class BranchReviewExplainOutputTests: XCTestCase {
             .init(intent: .docs, title: "Lockfile", paths: ["Package.resolved"])
         ])
         XCTAssertEqual(output.files, [.init(path: "Sources/KeepAwake.swift", summary: "Adds the controller.", importance: 3)])
-        XCTAssertEqual(output.notes, [.init(hunk: .init(path: "Sources/KeepAwake.swift", index: 0), text: "Changes a.", check: nil)])
+        let hunk = BranchReview.HunkReference(
+            path: "Sources/KeepAwake.swift", index: 0, anchor: BranchReview.hunkAnchor(BranchReviewPageTests.snapshot().files[0].hunks[0])
+        )
+        XCTAssertEqual(output.notes, [.init(hunk: hunk, text: "Changes a.", check: nil)])
         XCTAssertEqual(output.claims, [.init(claim: "Keeps awake", verdict: .matches, evidence: "Read it.")])
         XCTAssertEqual(output.questions, (1...5).map { "Question \($0)?" })
         // f9 twice, and the hunk f0h7: the unsent f2h0 isn't an id either.

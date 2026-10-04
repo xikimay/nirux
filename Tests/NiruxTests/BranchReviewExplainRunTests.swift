@@ -61,14 +61,14 @@ final class BranchReviewExplainRunTests: XCTestCase {
 
         guard case .explained(let output) = run.outcome else { return XCTFail("\(run.outcome)") }
         XCTAssertEqual(output.overview, "Keeps the Mac awake.")
-        XCTAssertEqual(output.notes.first?.hunk, .init(path: "Sources/KeepAwake.swift", index: 0))
+        XCTAssertEqual(output.notes.first.map { "\($0.hunk.path)#\($0.hunk.index)" }, "Sources/KeepAwake.swift#0")
         XCTAssertEqual(run.setup?.version, "2.1.289")
         XCTAssertEqual(try String(contentsOf: fake.appendingPathComponent("stdin"), encoding: .utf8), input.text)
         XCTAssertEqual(try recorded("cwd"), try XCTUnwrap(folder.path.realPath) + "\n")
         let arguments = try recorded("args").split(separator: "\0", omittingEmptySubsequences: false).map(String.init)
         for flags in [
             ["-p"], ["--model", "claude-opus-5-5"], ["--effort", "medium"], ["--output-format", "stream-json"],
-            ["--include-partial-messages"], ["--max-budget-usd", "5.0"], ["--tools", "Read,Grep,Glob"], ["--restricted"],
+            ["--include-partial-messages"], ["--max-budget-usd", "3.0"], ["--tools", "Read,Grep,Glob"], ["--restricted"],
             ["--permission-prompts", "none"], ["--strict-mcp-config"], ["--disable-slash-commands"],
             ["--no-session-persistence"], ["--settings", #"{"disableAllHooks":true,"instructionFiles":"managed-only"}"#]
         ] {
