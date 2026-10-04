@@ -96,6 +96,12 @@ extension NiruxShellView {
                 self?.openCodex()
             },
             PaletteAction(
+                icon: .symbol(Theme.Symbol.sessionHistory), title: "Session History…",
+                subtitle: "Every session of this project, to go back to or resume", shortcut: nil
+            ) { [weak self] in
+                self?.showSessionHistory()
+            },
+            PaletteAction(
                 icon: .symbol("hourglass"), title: "Next Waiting Agent",
                 subtitle: "Jump to the agent blocked on you the longest, then the next",
                 shortcut: .nextWaitingAgent

@@ -99,6 +99,7 @@ final class NiruxShellView: NSView {
     var filePickerPanel: FilePickerPanel?
     var searchPanel: EditorSearchPanel?
     var globalSearchPanel: GlobalSearchPanel?
+    var sessionHistoryPanel: SessionHistoryPanel?
     var worktreeCleanupPanel: WorktreeCleanupPanel?
     /// Worktrees a "Clean Up Worktree…" is checking or confirming, so a
     /// second click doesn't start another. Their cards say so.

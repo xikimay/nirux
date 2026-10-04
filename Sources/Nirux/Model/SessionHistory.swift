@@ -29,15 +29,15 @@ enum SessionHistory {
     /// pull request, and its folder (kept by the palette's middle
     /// truncation).
     static func subtitle(of record: AgentSessionRecord, now: TimeInterval, displayPath: (String) -> String) -> String {
+        ([ago(now - record.lastActivityAt)] + details(of: record, displayPath: displayPath)).joined(separator: " · ")
+    }
+
+    /// Its branch unless the title says it, its pull request, its folder.
+    static func details(of record: AgentSessionRecord, displayPath: (String) -> String) -> [String] {
         let title = title(of: record)
         // A worktree session's name is "<branch> · <space>".
         let branch = record.checkout?.branchName.flatMap { $0 == title || title.hasPrefix($0 + " · ") ? nil : $0 }
-        return [
-            ago(now - record.lastActivityAt),
-            branch,
-            record.pullRequest.map(pullRequestLabel),
-            folder(of: record).map(displayPath)
-        ].compactMap { $0 }.joined(separator: " · ")
+        return [branch, record.pullRequest.map(pullRequestLabel), folder(of: record).map(displayPath)].compactMap { $0 }
     }
 
     /// What ⌘P searches: the title, then the branch, the workspace, the
@@ -172,4 +172,111 @@ extension DeferredAgentLaunch.Agent {
             return nil
         }
     }
+}
+
+// MARK: - The Session History panel
+
+/// What the Session History panel lists: a space's sessions, the ones a
+/// column holds first ("Open"), then the ended ones.
+struct SessionHistoryFilter: Equatable {
+    var text = ""
+    var pullRequest = AgentSessionLedger.Query.PullRequestFilter.any
+    /// The agent switch does what typing its name would.
+    var agent: AgentHookEvent.Kind?
+
+    func admits(_ record: AgentSessionRecord) -> Bool {
+        switch pullRequest {
+        case .any: break
+        case .with: guard record.pullRequest != nil else { return false }
+        case .without: guard record.pullRequest == nil else { return false }
+        }
+        return agent.map { $0 == record.agent } ?? true
+    }
+}
+
+struct SessionHistoryRow: Equatable {
+    let record: AgentSessionRecord
+    /// The column that holds it, when the list was made: Return looks
+    /// again before it goes there.
+    let held: HeldAgentSession?
+    /// "workspace › column", for a held session.
+    let place: String?
+    /// What its column's agent does now, as ⌘P shows it: the history only
+    /// knows the last event it saw.
+    var liveState: QuickSwitchAgentState?
+
+    var isOpen: Bool { held != nil }
+}
+
+extension SessionHistory {
+    /// The panel's rows: `records` (newest first, as the ledger gives them)
+    /// that can be resumed, the held ones first. `holder` finds the column
+    /// of a session, `place` names it, `liveState` reads its agent.
+    static func rows(
+        _ records: [AgentSessionRecord],
+        holder: (AgentSessionRecord) -> HeldAgentSession?,
+        place: (HeldAgentSession) -> String?,
+        liveState: (AgentSessionRecord, HeldAgentSession) -> QuickSwitchAgentState?
+    ) -> [SessionHistoryRow] {
+        let rows = records.filter(\.isResumable).map { record in
+            let held = holder(record)
+            return SessionHistoryRow(
+                record: record, held: held, place: held.flatMap(place), liveState: held.flatMap { liveState(record, $0) }
+            )
+        }
+        return rows.filter(\.isOpen) + rows.filter { !$0.isOpen }
+    }
+
+    /// `rows` that `filter` admits. With text, each part (open, ended) lists
+    /// what matches the way ⌘P ranks it: a title it names first, then the
+    /// best match, the most recent first among equals.
+    static func filtered(_ rows: [SessionHistoryRow], by filter: SessionHistoryFilter) -> [SessionHistoryRow] {
+        let admitted = rows.filter { filter.admits($0.record) }
+        let text = filter.text.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return admitted }
+        func ranked(_ part: [SessionHistoryRow]) -> [SessionHistoryRow] {
+            let order = PaletteRanking.rank(query: text, sections: [part.map { candidate(of: $0.record) }])
+            return order.first?.rows.map { part[$0] } ?? []
+        }
+        return ranked(admitted.filter(\.isOpen)) + ranked(admitted.filter { !$0.isOpen })
+    }
+
+    /// What Return does on a row, shown under the list before it is
+    /// pressed. `plan` is nil while it is computed.
+    static func outcome(
+        of row: SessionHistoryRow, plan: Result<AgentSessionResume.Plan, AgentSessionResume.Unavailable>?,
+        displayPath: (String) -> String
+    ) -> (action: String, detail: String?, isWarning: Bool, isPossible: Bool) {
+        if let held = row.held {
+            let place = row.place ?? "its column"
+            switch held.state {
+            case .running: return ("Go to \(place)", nil, false, true)
+            case .restored: return ("Go to \(place)", "Its agent resumes there.", false, true)
+            case .exited: return ("Go to \(place)", "Its agent exited mid-turn: it resumes there.", false, true)
+            }
+        }
+        switch plan {
+        case nil:
+            return ("Resume", nil, false, true)
+        case .failure(let reason):
+            return ("Can’t resume", message(reason, agent: row.record.agent), false, false)
+        case .success(let plan):
+            var action: String
+            switch plan.place {
+            case .original, .branchCheckout, .mainCheckout:
+                action = "Resume in \(displayPath(plan.directory))"
+            case .recreatedWorktree:
+                action = "Bring the worktree back at \(displayPath(plan.directory)), then resume"
+            }
+            if plan.warning != nil { action += " (asks first)" }
+            return (action, plan.warning, plan.warning != nil, true)
+        }
+    }
+}
+
+extension AgentSessionRecord {
+    /// Claude and Codex name sessions with UUIDs, as restores require: an
+    /// id from a hand-edited history must not reach a launch line, where
+    /// `--resume -x` would read as an option.
+    var isResumable: Bool { UUID(uuidString: sessionID) != nil }
 }

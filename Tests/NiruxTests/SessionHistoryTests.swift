@@ -128,3 +128,86 @@ final class SessionHistoryTests: XCTestCase {
         XCTAssertEqual(state.launchedSession(in: column, now: 110), "s2")
     }
 }
+
+/// What the Session History panel lists and says it will do (see
+/// SessionHistoryPanel).
+final class SessionHistoryPanelModelTests: XCTestCase {
+    private func record(_ id: String, title: String, agent: AgentHookEvent.Kind = .claude, branch: String = "feat/x") -> AgentSessionRecord {
+        var record = AgentSessionRecord(
+            schemaVersion: 1, agent: agent, sessionID: id, startedAt: 0, lastStartAt: 0,
+            lastActivityAt: 1, endedAt: 1, status: .idle, hasConversation: true
+        )
+        record.name = title
+        record.checkout = AgentSessionRecord.Checkout(branch: branch, worktreeRoot: "/repos/app.x", mainCheckout: "/repos/app")
+        return record
+    }
+
+    private let first = "0b5e33d2-6a8f-4c43-9d3e-2f1c7a9b8e10"
+    private let second = "1c6f44e3-7b9a-4d54-8e4f-3a2d8b0c9f21"
+
+    private func ended(_ record: AgentSessionRecord) -> SessionHistoryRow {
+        SessionHistoryRow(record: record, held: nil, place: nil)
+    }
+
+    /// With text, a title the query names comes before a looser match, even
+    /// an older one; the agent's name isn't searched (its switch is).
+    func testTheTextRanksLikeThePalette() {
+        let rows = [ended(record(first, title: "build-lint", branch: "x")), ended(record(second, title: "billing", branch: "y"))]
+        XCTAssertEqual(
+            SessionHistory.filtered(rows, by: SessionHistoryFilter(text: "bill")).map { SessionHistory.title(of: $0.record) },
+            ["billing", "build-lint"]
+        )
+        XCTAssertEqual(SessionHistory.filtered(rows, by: SessionHistoryFilter(text: "  ")), rows)
+        XCTAssertEqual(SessionHistory.filtered(rows, by: SessionHistoryFilter(text: "claude")), [])
+    }
+
+    func testTheSwitchesFilterByPullRequestAndAgent() {
+        var withPR = record(first, title: "a")
+        withPR.pullRequest = AgentSessionRecord.PullRequest(number: 1, url: "", state: "OPEN")
+        let codex = record(second, title: "b", agent: .codex)
+        let rows = [ended(withPR), ended(codex)]
+        XCTAssertEqual(SessionHistory.filtered(rows, by: SessionHistoryFilter(pullRequest: .with)), [ended(withPR)])
+        XCTAssertEqual(SessionHistory.filtered(rows, by: SessionHistoryFilter(pullRequest: .without)), [ended(codex)])
+        XCTAssertEqual(SessionHistory.filtered(rows, by: SessionHistoryFilter(agent: .codex)), [ended(codex)])
+    }
+
+    /// Held sessions first, each part in the order given (newest first);
+    /// an id a launch line can't hold is left out.
+    func testHeldSessionsComeFirst() {
+        let column = UUID()
+        let held = HeldAgentSession(workspaceID: "w", columnID: column, state: .running)
+        let rows = SessionHistory.rows(
+            [record(first, title: "newer"), record("--forged", title: "forged"), record(second, title: "older")],
+            holder: { $0.sessionID == self.second ? held : nil },
+            place: { _ in "repo › Claude" },
+            liveState: { _, _ in .working }
+        )
+        XCTAssertEqual(rows.map { SessionHistory.title(of: $0.record) }, ["older", "newer"])
+        XCTAssertEqual(rows.first?.place, "repo › Claude")
+        XCTAssertEqual(rows.first?.liveState, .working)
+        XCTAssertNil(rows.last?.liveState)
+        XCTAssertEqual(rows.map(\.isOpen), [true, false])
+    }
+
+    func testTheOutcomeSaysWhatReturnDoes() {
+        let session = record(first, title: "x")
+        let restored = SessionHistoryRow(
+            record: session, held: HeldAgentSession(workspaceID: "w", columnID: UUID(), state: .restored), place: "repo › Claude"
+        )
+        let goTo = SessionHistory.outcome(of: restored, plan: nil) { $0 }
+        XCTAssertEqual(goTo.action, "Go to repo › Claude")
+        XCTAssertEqual(goTo.detail, "Its agent resumes there.")
+
+        let ended = SessionHistoryRow(record: session, held: nil, place: nil)
+        XCTAssertEqual(SessionHistory.outcome(of: ended, plan: nil) { $0 }.action, "Resume")
+        let recreated = SessionHistory.outcome(of: ended, plan: .success(AgentSessionResume.Plan(
+            place: .recreatedWorktree(mainCheckout: "/repos/app", ref: "feat/x"), directory: "/repos/app.x", warning: "Careful."
+        ))) { $0 }
+        XCTAssertEqual(recreated.action, "Bring the worktree back at /repos/app.x, then resume (asks first)")
+        XCTAssertEqual(recreated.detail, "Careful.")
+        XCTAssertTrue(recreated.isWarning)
+        let gone = SessionHistory.outcome(of: ended, plan: .failure(.transcriptGone)) { $0 }
+        XCTAssertFalse(gone.isPossible)
+        XCTAssertEqual(gone.detail, SessionHistory.message(.transcriptGone, agent: .claude))
+    }
+}

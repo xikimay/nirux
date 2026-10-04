@@ -150,6 +150,7 @@ enum Theme {
         static let botFeedback = "cpu"
         static let agentError = "exclamationmark.triangle.fill"
         static let resume = "play.fill"
+        static let sessionHistory = "clock.arrow.circlepath"
         static let more = "ellipsis"
         static let back = "chevron.left"
         static let forward = "chevron.right"
