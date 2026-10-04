@@ -543,7 +543,8 @@ its project. The transcript format is internal and may change between versions
 
 Instead Nirux keeps its own **session ledger** per space (`AgentSessionLedger`),
 built from the hook events it already routes. ⌘P lists a space's past sessions
-and resumes them (see "Resuming from ⌘P" below).
+and resumes them, and Session History… lists them all (see "Resuming from ⌘P"
+below).
 
 - **File:** `<state dir>/projects/<space id>/sessions.jsonl`, next to the
   brief. One JSON line per change holding the whole record, the last line of a
@@ -694,11 +695,27 @@ Picking one resumes it (`NiruxShellView.resumeSession`):
 Session ids must be UUIDs, as for restores: a hand-edited history can't put an
 option on the launch line.
 
-Not done yet: a panel listing every session with filters (next PR); refreshing
-pull request states from GitHub; **Browse all sessions** for sessions Nirux
-didn't launch (a column in the main checkout running `claude --resume`, then
-`Ctrl+W`, or `codex resume --all`); spotting a Codex thread that runs outside
-Nirux's columns.
+**Session History…** (⌘P) opens a panel with every prompted session of the
+space, read as it opens. The ones a column holds come first, under **Open**,
+with what the column's agent does now, as ⌘P shows it (working, waiting, an
+API error, running), or "not resumed yet", or "exited mid-turn"; then the
+ended ones. A session the history still has running in a column counts as held there
+even when neither its hooks nor its arguments say so: while its agent is stopped
+with `^Z`, or an editor opened from it is in front (and, for Codex, after `fg`
+until its next turn). Resume looks for that column too. The live state is the
+column's agent's only when that agent runs the session.
+The field filters like ⌘P, each part ranked the same way; two switches filter
+by pull request (with, without) and by agent. Under the list, what Return does
+on the selected row: go to its column, or resume it and where, from the plan
+Resume uses (read off the main thread, after any Resume of the same repository,
+a moment after the selection settles), its warning in orange, "(asks first)"
+when the alert will come. Return, the button or a double click goes through
+Resume, which looks again for a column that holds the session.
+
+Not done yet: refreshing pull request states from GitHub; **Browse all
+sessions** for sessions Nirux didn't launch (a column in the main checkout
+running `claude --resume`, then `Ctrl+W`, or `codex resume --all`); spotting a
+Codex thread that runs outside Nirux's columns.
 
 Rejected: `CLAUDE_CODE_PROJECT_DIR_NAME` could store every worktree's
 transcripts under one name. It only works with `CLAUDE_CONFIG_DIR` set, and

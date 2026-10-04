@@ -30,10 +30,9 @@ extension NiruxShellView {
                           let pty = column.pty, !pty.hasExited
                     else { return nil }
                     let session = pty.terminalSession
-                    let title = column.titleText.isEmpty ? "Terminal \(index + 1)" : column.titleText
                     return GlobalSearchPanel.Target(
                         column: column,
-                        place: "\(workspace.title) › \(title)",
+                        place: columnPlace(workspace: workspace, index: index),
                         read: { TerminalScreenText.read(session) }
                     )
                 }

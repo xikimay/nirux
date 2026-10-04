@@ -23,6 +23,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testImportBrowserCookies": ["Import Browser Cookies"],
             "testAgentCommands": ["Open Claude Code", "Open Codex"],
             "testNextWaitingAgentCommand": ["Next Waiting Agent"],
+            "testSessionHistoryCommand": ["Session History…"],
             "testResumeAllAgentsCommand": ["Resume All Agents"],
             "testWorkspaceCommands": [
                 "New Workspace", "Rename Workspace", "Show/Hide Sidebar", "Show/Hide Inactive Workspaces"
@@ -183,6 +184,82 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.shell.closeActiveColumn()
             harness.waitUntil("the closed column's shell to go") { closedShell == nil }
             XCTAssertTrue(panel.isVisible)
+        }
+    }
+
+    /// The project's sessions, the one a restored column holds first; the
+    /// switches; under the list, what Return does: going to the restored
+    /// column resumes its agent there, Return on an ended one resumes it.
+    func testSessionHistoryCommand() throws {
+        try UIFlowHarness.run { harness in
+            let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+            let restoredID = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+            let pastID = "6f1c2a3e-0d4b-4e5f-8a9b-1c2d3e4f5a60"
+            var reviewed = SessionHistoryFlowTests.session(
+                "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e", title: "reviewed-task", folder: harness.repo, hoursAgo: 5
+            )
+            reviewed.pullRequest = AgentSessionRecord.PullRequest(number: 7, url: "", state: "MERGED")
+            try SessionHistoryFlowTests.seed([
+                SessionHistoryFlowTests.session(restoredID, title: "restored-task", folder: harness.repo),
+                SessionHistoryFlowTests.session(pastID, title: "past-task", folder: harness.worktree, workspaceID: workspace.id, hoursAgo: 3),
+                reviewed
+            ], in: harness)
+            workspace.addColumn(
+                deferredAgent: DeferredAgentLaunch(agent: .claude(resume: .session(restoredID), mode: .default), title: nil, lastStatus: nil),
+                agentUUID: UUID().uuidString, cwd: harness.repo
+            )
+            let restoredColumn = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
+            @MainActor func titles(_ panel: SessionHistoryPanel) -> [String] { panel.rows.map { SessionHistory.title(of: $0.record) } }
+            @MainActor func pick(_ segment: Int, of control: NSSegmentedControl?) throws {
+                let control = try XCTUnwrap(control)
+                control.selectedSegment = segment
+                XCTAssertTrue(control.sendAction(control.action, to: control.target))
+            }
+
+            harness.runPaletteCommand("Session History…")
+            let panel = try XCTUnwrap(harness.shell.sessionHistoryPanel)
+            XCTAssertTrue(panel.isVisible)
+            XCTAssertEqual(panel.items, [.header("Open"), .row(0), .header("Ended"), .row(1), .row(2)])
+            XCTAssertEqual(titles(panel), ["restored-task", "past-task", "reviewed-task"])
+            XCTAssertTrue(panel.actionLabel?.stringValue.hasPrefix("↩ Go to repo › ") == true)
+            XCTAssertEqual(panel.resumeButton?.title, "Go To")
+
+            let field = try XCTUnwrap(panel.searchField)
+            harness.type("nothing-like-it", into: field)
+            XCTAssertEqual(panel.items, [])
+            XCTAssertEqual(panel.actionLabel?.stringValue, "No session matches")
+            harness.type("", into: field)
+            try pick(1, of: panel.pullRequestControl)
+            XCTAssertEqual(titles(panel), ["reviewed-task"])
+            try pick(2, of: panel.pullRequestControl)
+            XCTAssertEqual(titles(panel), ["restored-task", "past-task"])
+            try pick(0, of: panel.pullRequestControl)
+            try pick(2, of: panel.agentControl)
+            XCTAssertEqual(panel.items, [], "no Codex session")
+            try pick(0, of: panel.agentControl)
+
+            harness.press(.escape, in: field.window)
+            XCTAssertFalse(panel.isVisible)
+
+            // The restored column comes forward and resumes its agent.
+            workspace.focusedIndex = 0
+            harness.shell.showSessionHistory()
+            harness.press(.returnKey, in: field.window)
+            XCTAssertFalse(panel.isVisible)
+            XCTAssertIdentical(workspace.columns[safe: workspace.focusedIndex], restoredColumn)
+            XCTAssertEqual(harness.restoredAgentLaunches.count, 1)
+            XCTAssertEqual(harness.agentLaunches, [])
+
+            harness.shell.showSessionHistory()
+            XCTAssertEqual(panel.selectedRow.map { SessionHistory.title(of: $0.record) }, "restored-task")
+            harness.press(.down, in: field.window)
+            XCTAssertEqual(panel.selectedRow.map { SessionHistory.title(of: $0.record) }, "past-task")
+            harness.waitUntil("its plan") { panel.actionLabel?.stringValue == "↩ Resume in \(harness.worktree.abbreviatedPath())" }
+            XCTAssertEqual(panel.resumeButton?.title, "Resume")
+            harness.press(.returnKey, in: field.window)
+            XCTAssertFalse(panel.isVisible)
+            harness.waitUntil("the resume") { harness.agentLaunches.count == 1 }
+            XCTAssertTrue(harness.agentLaunches[0].hasPrefix("command claude --resume '\(pastID)'"))
         }
     }
 

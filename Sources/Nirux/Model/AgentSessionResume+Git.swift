@@ -81,6 +81,15 @@ extension AgentSessionResume {
         return .failed(error.isEmpty ? "git worktree add failed" : error)
     }
 
+    /// `plan` on the disk and git, with the transcript's warning: what a
+    /// Resume does, and what the Session History panel says it will do.
+    static func planOnDisk(for record: AgentSessionRecord, now: TimeInterval) -> Result<Plan, Unavailable> {
+        plan(for: record, probe: .onDisk()).map { plan in
+            let warning = [plan.warning, transcriptChangedElsewhere(record, now: now)].compactMap { $0 }.joined(separator: " ")
+            return Plan(place: plan.place, directory: plan.directory, warning: warning.isEmpty ? nil : warning)
+        }
+    }
+
     /// Two agents appending to one transcript corrupt it. A Claude session
     /// whose transcript changed well after Nirux last saw it, and lately,
     /// runs somewhere else: in another app, or in another Nirux on the same

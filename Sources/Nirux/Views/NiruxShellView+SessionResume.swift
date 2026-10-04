@@ -60,7 +60,7 @@ extension NiruxShellView {
         let holders = agentSessionHolders(snapshot: snapshot)
         let records = sessionLedger.sessions(inSpace: spaceID, matching: AgentSessionLedger.Query(state: .ended))
             .lazy
-            .filter { Self.isResumable($0) && HeldAgentSession.find($0.sessionID, in: holders) == nil }
+            .filter { $0.isResumable && HeldAgentSession.find($0.sessionID, in: holders) == nil }
             .prefix(SessionHistory.paletteLimit)
         let rows = records.map { record in
             PaletteAction(
@@ -74,13 +74,6 @@ extension NiruxShellView {
             }
         }
         return PaletteSection(title: SessionHistory.paletteSectionTitle, rows: Array(rows))
-    }
-
-    /// Claude and Codex name sessions with UUIDs, as restores require: an
-    /// id from a hand-edited history must not reach a launch line, where
-    /// `--resume -x` would read as an option.
-    static func isResumable(_ record: AgentSessionRecord) -> Bool {
-        UUID(uuidString: record.sessionID) != nil
     }
 
     /// What each column still open holds (see `HeldAgentSession`).
@@ -136,7 +129,9 @@ extension NiruxShellView {
     /// of the session's workspace, else of a workspace open on that folder,
     /// else of a new workspace.
     func resumeSession(_ record: AgentSessionRecord, spaceID: String) {
-        guard Self.isResumable(record) else { return showToast("This session’s id can’t be resumed", tone: .error) }
+        // A row may have been listed a while ago.
+        let record = sessionLedger.session(agent: record.agent, sessionID: record.sessionID) ?? record
+        guard record.isResumable else { return showToast("This session’s id can’t be resumed", tone: .error) }
         if goToHeldSession(record) { return }
         guard sessionResume.inFlight.insert(record.key).inserted else {
             return showToast("Already resuming “\(SessionHistory.title(of: record))”…")
@@ -146,11 +141,7 @@ extension NiruxShellView {
 
     private func planResume(_ record: AgentSessionRecord, spaceID: String) {
         sessionResume.queue(for: record).async {
-            let plan = AgentSessionResume.plan(for: record, probe: .onDisk()).map { plan in
-                let elsewhere = AgentSessionResume.transcriptChangedElsewhere(record, now: Date().timeIntervalSince1970)
-                let warning = [plan.warning, elsewhere].compactMap { $0 }.joined(separator: " ")
-                return AgentSessionResume.Plan(place: plan.place, directory: plan.directory, warning: warning.isEmpty ? nil : warning)
-            }
+            let plan = AgentSessionResume.planOnDisk(for: record, now: Date().timeIntervalSince1970)
             DispatchQueue.main.async { [weak self] in
                 self?.continueResume(record, spaceID: spaceID, plan: plan)
             }
@@ -294,9 +285,30 @@ extension NiruxShellView {
     /// column holds it.
     @discardableResult
     private func goToHeldSession(_ record: AgentSessionRecord) -> Bool {
-        guard let held = HeldAgentSession.find(record.sessionID, in: agentSessionHolders(snapshot: ProcessSnapshot())),
-              let workspace = workspaces.first(where: { $0.id == held.workspaceID }),
-              let index = workspace.columns.firstIndex(where: { $0.id == held.columnID })
+        let held = HeldAgentSession.find(record.sessionID, in: agentSessionHolders(snapshot: ProcessSnapshot()))
+            ?? recordedColumn(of: record)
+        return held.map(goTo) ?? false
+    }
+
+    /// The column the history still has the session running in, when
+    /// neither its hooks nor its arguments say so: while its agent is
+    /// stopped with `^Z`, or an editor opened from it is in front (and, for
+    /// Codex, after `fg` until its next turn).
+    func recordedColumn(of record: AgentSessionRecord) -> HeldAgentSession? {
+        guard record.isActive, let agentUUID = record.agentUUID else { return nil }
+        for workspace in workspaces where !workspace.isClosing {
+            if let column = workspace.columns.first(where: { $0.agentUUID == agentUUID && !$0.isClosing }) {
+                return HeldAgentSession(workspaceID: workspace.id, columnID: column.id, state: .running)
+            }
+        }
+        return nil
+    }
+
+    /// Brings forward the column that holds a session; false once it is gone.
+    @discardableResult
+    func goTo(_ held: HeldAgentSession) -> Bool {
+        guard let workspace = workspaces.first(where: { $0.id == held.workspaceID && !$0.isClosing }),
+              let index = workspace.columns.firstIndex(where: { $0.id == held.columnID && !$0.isClosing })
         else { return false }
         focusWorkspace(id: workspace.id, column: index)
         let column = workspace.columns[index]

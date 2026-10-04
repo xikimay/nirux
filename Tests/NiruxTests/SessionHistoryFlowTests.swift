@@ -16,7 +16,7 @@ final class SessionHistoryFlowTests: XCTestCase {
     private static let lostID = "e5f6a7b8-c9d0-4e1f-8a2b-4c5d6e7f8091"
     private static let forgottenID = "f6a7b8c9-d0e1-4f2a-9b3c-5d6e7f8091a2"
 
-    private func session(
+    static func session(
         _ sessionID: String, title: String, folder: String, agent: AgentHookEvent.Kind = .claude,
         workspaceID: String? = nil, checkout: AgentSessionRecord.Checkout? = nil, hoursAgo: Double = 1
     ) -> AgentSessionRecord {
@@ -33,7 +33,7 @@ final class SessionHistoryFlowTests: XCTestCase {
     }
 
     /// Writes the current space's history and has the shell read it again.
-    private func seed(_ records: [AgentSessionRecord], in harness: UIFlowHarness) throws {
+    static func seed(_ records: [AgentSessionRecord], in harness: UIFlowHarness) throws {
         let url = try XCTUnwrap(AgentSessionLedger.fileURL(
             spaceID: harness.shell.activeProfileID, stateDirectory: Persistence.stateDirectory
         ))
@@ -70,18 +70,18 @@ final class SessionHistoryFlowTests: XCTestCase {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let workspace = try XCTUnwrap(shell.activeWorkspace)
-            let flow = session(
+            let flow = Self.session(
                 Self.flowID, title: "feat/flow", folder: harness.worktree, workspaceID: workspace.id,
                 checkout: AgentSessionRecord.Checkout(branch: "feat/flow", worktreeRoot: harness.worktree, mainCheckout: harness.repo),
                 hoursAgo: 2
             )
-            let codex = session(Self.codexID, title: "codex-task", folder: harness.worktree, agent: .codex, workspaceID: workspace.id)
-            let restored = session(Self.restoredID, title: "restored-task", folder: harness.repo)
-            var unprompted = session(Self.emptyID, title: "empty-task", folder: harness.repo)
+            let codex = Self.session(Self.codexID, title: "codex-task", folder: harness.worktree, agent: .codex, workspaceID: workspace.id)
+            let restored = Self.session(Self.restoredID, title: "restored-task", folder: harness.repo)
+            var unprompted = Self.session(Self.emptyID, title: "empty-task", folder: harness.repo)
             unprompted.hasConversation = false
             // Hand-edited: not an id a launch line may hold.
-            let forged = session("--dangerously-skip-permissions", title: "forged-task", folder: harness.repo)
-            try seed([flow, codex, restored, unprompted, forged], in: harness)
+            let forged = Self.session("--dangerously-skip-permissions", title: "forged-task", folder: harness.repo)
+            try Self.seed([flow, codex, restored, unprompted, forged], in: harness)
             workspace.addColumn(
                 deferredAgent: DeferredAgentLaunch(agent: .claude(resume: .session(Self.restoredID), mode: .default), title: nil, lastStatus: nil),
                 agentUUID: UUID().uuidString, cwd: harness.repo
@@ -151,11 +151,11 @@ final class SessionHistoryFlowTests: XCTestCase {
             try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/gone", gone], at: harness.repo)
             try UIFlowHarness.git(["worktree", "remove", gone], at: harness.repo)
             let checkout = AgentSessionRecord.Checkout(branch: "feat/gone", worktreeRoot: gone, mainCheckout: harness.repo)
-            let sibling = session(
+            let sibling = Self.session(
                 Self.siblingID, title: "gone-task", folder: gone, workspaceID: "closed-workspace", checkout: checkout, hoursAgo: 3
             )
-            try seed([
-                session(Self.goneID, title: "gone-task", folder: gone, workspaceID: "closed-workspace", checkout: checkout),
+            try Self.seed([
+                Self.session(Self.goneID, title: "gone-task", folder: gone, workspaceID: "closed-workspace", checkout: checkout),
                 sibling
             ], in: harness)
             let workspaceCount = harness.shell.workspaces.count
@@ -179,6 +179,38 @@ final class SessionHistoryFlowTests: XCTestCase {
         }
     }
 
+    /// The history has a session running in a column whose agent no longer
+    /// shows it (its binding dropped after a `^Z`): the panel lists it as
+    /// open there, and Return goes to that column rather than starting it
+    /// again.
+    func testASessionTheHistoryHasRunningGoesToItsColumn() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let workspace = try XCTUnwrap(shell.activeWorkspace)
+            let column = try XCTUnwrap(workspace.columns.first)
+            // First, and its refresh with it: with no real agent in the
+            // column, a refresh would end the session.
+            shell.addColumn()
+            XCTAssertNotIdentical(workspace.columns[safe: workspace.focusedIndex], column)
+            let now = Date().timeIntervalSince1970
+            for (event, source, at) in [(AgentHookEvent.Name.sessionStart, "startup", now - 60), (.userPromptSubmit, nil, now - 30)] {
+                shell.sessionLedger.record(AgentSessionObservation(
+                    agent: .claude, sessionID: Self.flowID, event: event, source: source, timestamp: at,
+                    agentProcess: ProcessInstance(pid: 4242, startedAt: 1), name: "live-task", cwd: harness.repo,
+                    transcriptPath: nil, checkout: nil, pullRequest: nil, workspaceID: workspace.id,
+                    workspaceTitle: workspace.title, agentUUID: column.agentUUID, columnIndex: 0
+                ), spaceID: shell.activeProfileID)
+            }
+
+            shell.showSessionHistory()
+            let panel = try XCTUnwrap(shell.sessionHistoryPanel)
+            XCTAssertEqual(panel.items, [.header("Open"), .row(0)])
+            harness.press(.returnKey, in: panel.searchField?.window)
+            XCTAssertIdentical(workspace.columns[safe: workspace.focusedIndex], column)
+            XCTAssertEqual(harness.agentLaunches, [])
+        }
+    }
+
     /// Two sessions of one cleaned-up worktree, resumed at once: both plan
     /// to bring it back, the second finds it back and resumes there.
     func testTwoResumesOfOneWorktreeBringItBackOnce() throws {
@@ -187,9 +219,9 @@ final class SessionHistoryFlowTests: XCTestCase {
             try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/gone", gone], at: harness.repo)
             try UIFlowHarness.git(["worktree", "remove", gone], at: harness.repo)
             let checkout = AgentSessionRecord.Checkout(branch: "feat/gone", worktreeRoot: gone, mainCheckout: harness.repo)
-            let first = session(Self.goneID, title: "gone-task", folder: gone, workspaceID: "closed-workspace", checkout: checkout)
-            let second = session(Self.siblingID, title: "gone-task", folder: gone, workspaceID: "closed-workspace", checkout: checkout)
-            try seed([first, second], in: harness)
+            let first = Self.session(Self.goneID, title: "gone-task", folder: gone, workspaceID: "closed-workspace", checkout: checkout)
+            let second = Self.session(Self.siblingID, title: "gone-task", folder: gone, workspaceID: "closed-workspace", checkout: checkout)
+            try Self.seed([first, second], in: harness)
             let workspaceCount = harness.shell.workspaces.count
 
             harness.shell.resumeSession(first, spaceID: harness.shell.activeProfileID)
@@ -218,7 +250,7 @@ final class SessionHistoryFlowTests: XCTestCase {
             try UIFlowHarness.git(["worktree", "remove", gone], at: harness.repo)
             try UIFlowHarness.git(["config", "core.hooksPath", hooks], at: harness.repo)
             let checkout = AgentSessionRecord.Checkout(branch: "feat/gone", worktreeRoot: gone, mainCheckout: harness.repo)
-            try seed([session(Self.goneID, title: "gone-task", folder: gone, checkout: checkout)], in: harness)
+            try Self.seed([Self.session(Self.goneID, title: "gone-task", folder: gone, checkout: checkout)], in: harness)
 
             try resumeFromPalette("gone-task", in: harness)
             harness.waitUntil("the resume") { harness.agentLaunches.count == 1 }
@@ -231,15 +263,15 @@ final class SessionHistoryFlowTests: XCTestCase {
     /// transcript is gone says so.
     func testAResumeElsewhereAsksFirst() throws {
         try UIFlowHarness.run { harness in
-            let lost = session(
+            let lost = Self.session(
                 Self.lostID, title: "lost-task", folder: harness.root + "/repo.feat-lost",
                 checkout: AgentSessionRecord.Checkout(
                     branch: "feat/lost", worktreeRoot: harness.root + "/repo.feat-lost", mainCheckout: harness.repo
                 )
             )
-            var forgotten = session(Self.forgottenID, title: "forgotten-task", folder: harness.repo)
+            var forgotten = Self.session(Self.forgottenID, title: "forgotten-task", folder: harness.repo)
             forgotten.transcriptPath = harness.root + "/missing.jsonl"
-            try seed([lost, forgotten], in: harness)
+            try Self.seed([lost, forgotten], in: harness)
             let workspaceCount = harness.shell.workspaces.count
 
             // Return answers Cancel, the first button.
