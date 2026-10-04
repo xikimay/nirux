@@ -23,8 +23,10 @@ final class SidebarSectionToggleView: NSView {
     }
 }
 
-/// Sidebar: minimal dots in normal mode, expanded detail panel in expanded mode.
-/// Dragging on empty sidebar area moves the window.
+/// Sidebar: the collapsed rail of workspace tiles (SidebarView+Rail), or
+/// the expanded workspace cards. Both are views in the scrollable document
+/// view, with the same hit areas: click, drag, right-click and hover work
+/// alike.
 final class SidebarView: NSView {
     // Note: card drags don't move the window even so — the drag-reorder
     // tracking loop (SidebarView+Drag) consumes the mouse events before
@@ -63,18 +65,14 @@ final class SidebarView: NSView {
     /// (workspace id, space id). By id: a close that finishes while the menu
     /// is open can leave a card's index stale.
     var onMoveWorkspaceToProfile: ((String, String) -> Void)?
+    /// The rail's "+".
+    var onNewWorkspace: (() -> Void)?
     var isExpanded: Bool = false {
         didSet {
-            // Clear dot pulse layers when switching modes
-            pulseLayers.forEach { $0.removeFromSuperlayer() }
-            pulseLayers.removeAll()
-            if !isExpanded { dotsHidden = false }
-            // Force redraw to clear old dot content from backing store
-            setNeedsDisplay(bounds)
-            contentScrollView.isHidden = !isExpanded
-            // Reset on collapse so the next expansion re-follows the active
+            isRailHidden = false
+            // Reset on each switch so the new mode follows the active
             // workspace instead of staying at whatever offset was left.
-            if !isExpanded { lastFollowedActiveIndex = Int.min }
+            lastFollowedActiveIndex = Int.min
             rebuildContent()
         }
     }
@@ -104,6 +102,8 @@ final class SidebarView: NSView {
     /// space's section: `update` folds it back on a space switch or once
     /// the section is empty, so it never reappears unfolded. Not saved.
     private(set) var isInactiveSectionCollapsed = true
+    /// The last render's views, the cards' or the rail's: the next one
+    /// tears them down.
     var expandedViews: [NSView] = []
     var profileIndicatorView: SidebarDotIndicatorView?
     var hitAreas: [SidebarHitArea] = []
@@ -144,16 +144,30 @@ final class SidebarView: NSView {
     var spaceHeaderBadge: SidebarBadgeView?
     var hoveredTarget: SidebarHoverTarget?
 
+    /// The rail's tiles, by the hover target that lights them.
+    var railTileViews: [SidebarHoverTarget: SidebarRailTileView] = [:]
+    /// The hovered tile's tooltip, laid over the columns while it shows
+    /// (see `updateRailTooltip`), kept for the next one.
+    var railTooltipView: SidebarRailTooltipView?
+    /// A click hid the tooltip: it stays hidden until the pointer moves,
+    /// not to cover the terminal the click brought up.
+    var isRailTooltipSuppressed = false
+    /// The rail lights tiles and shows tooltips only for a live pointer:
+    /// Nirux active, its window key. Tests turn it off: xctest never makes
+    /// the app active, and the real pointer is anywhere.
+    var railHoverNeedsLivePointer = true
+    /// The rail faded out for an expansion: rebuilds leave it empty until
+    /// the cards come in.
+    var isRailHidden = false
+    /// Where the drag ghost started, in the document view.
+    var dragGhostOriginY: CGFloat = 0
+
     private var hoveredLabel: NSTextField?
-    private var pulseLayers: [CALayer] = []
     private var trackingArea: NSTrackingArea?
 
-    private static let dotSize: CGFloat = 6
-    private static let dotGap: CGFloat = 8
     static let accentColor: NSColor = Theme.Color.accent
 
-    /// Scrollable container for expanded-mode content. In collapsed mode it's
-    /// hidden and we just draw dots into the sidebar's own layer.
+    /// Scrollable container for the rail and the cards.
     let contentScrollView = NSScrollView()
     let contentDocumentView = NSView()
 
@@ -174,9 +188,9 @@ final class SidebarView: NSView {
         contentScrollView.scrollerStyle = .overlay
         contentScrollView.autohidesScrollers = true
         contentScrollView.documentView = contentDocumentView
-        contentScrollView.isHidden = true
         addSubview(contentScrollView)
         observeScrollingForApprovalArming()
+        observeRailTooltipDismissals()
     }
 
     @available(*, unavailable)
@@ -185,7 +199,12 @@ final class SidebarView: NSView {
     override func layout() {
         super.layout()
         contentScrollView.frame = bounds
-        if isExpanded { rebuildContent() } else { setNeedsDisplay(bounds) }
+        rebuildContent()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if newWindow == nil { hideRailTooltip() }
     }
 
     func update(profiles: [ProfileInfo], workspaces: [WorkspaceInfo]) {
@@ -197,7 +216,6 @@ final class SidebarView: NSView {
         if spaceChanged || !workspaces.contains(where: \.isInactive) { isInactiveSectionCollapsed = true }
         lastProfiles = profiles
         lastInfos = workspaces
-        guard isExpanded else { setNeedsDisplay(bounds); return }
         // The 2s heartbeat calls this even when nothing visible changed.
         // Rebuilding then is not just wasted work: it tears down every
         // row's tooltip tracking rect (the system tooltip delay never
@@ -209,7 +227,7 @@ final class SidebarView: NSView {
         rebuildContent()
     }
 
-    /// Everything the expanded sidebar renders, at display granularity —
+    /// Everything the sidebar renders, at display granularity —
     /// time-derived text (relative ages, elapsed durations) is hashed as
     /// its formatted string so the signature only changes when a label
     /// actually would.
@@ -219,6 +237,7 @@ final class SidebarView: NSView {
         var hasher = Hasher()
         hasher.combine(lastProfiles)
         hasher.combine(lastInfos)
+        hasher.combine(isExpanded)
         hasher.combine(isInactiveSectionCollapsed)
         hasher.combine(onboardingChecklist)
         for workspace in lastInfos {
@@ -231,9 +250,9 @@ final class SidebarView: NSView {
         return hasher.finalize()
     }
 
-    /// Fade out the collapsed dots, then call completion.
-    func fadeOutDots(completion: @escaping () -> Void) {
-        // Snapshot the current dot content into a temporary layer
+    /// Fade the rail out, then call completion: the sidebar widens empty
+    /// and the cards come in once it's wide.
+    func fadeOutRail(completion: @escaping () -> Void) {
         guard let bitmapRep = bitmapImageRepForCachingDisplay(in: bounds) else {
             completion()
             return
@@ -245,12 +264,10 @@ final class SidebarView: NSView {
         fadeLayer.contents = bitmapRep.cgImage
         layer?.addSublayer(fadeLayer)
 
-        // Remove pulse layers immediately (they'd keep pulsing otherwise)
-        pulseLayers.forEach { $0.removeFromSuperlayer() }
-        pulseLayers.removeAll()
-        // Clear the CG-drawn dots so they don't show behind the fade
-        dotsHidden = true
-        setNeedsDisplay(bounds)
+        // Clear the tiles so they don't show behind the fade, nor come back
+        // while the sidebar widens.
+        isRailHidden = true
+        rebuildContent()
 
         CATransaction.begin()
         CATransaction.setCompletionBlock { [weak fadeLayer] in
@@ -267,138 +284,51 @@ final class SidebarView: NSView {
         CATransaction.commit()
     }
 
-    private var dotsHidden = false
-
-    // MARK: - Collapsed mode (dots)
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        // Clear previous dot drawing when expanded or during fade
-        if isExpanded || dotsHidden {
-            if let ctx = NSGraphicsContext.current?.cgContext {
-                ctx.clear(bounds)
-            }
-            return
-        }
-        guard !lastInfos.isEmpty,
-              let ctx = NSGraphicsContext.current?.cgContext else { return }
-
-        // Remove old pulse layers
-        pulseLayers.forEach { $0.removeFromSuperlayer() }
-        pulseLayers.removeAll()
-
-        let dotDiameter = Self.dotSize
-        let gap = Self.dotGap
-        let displayInfos = dotWorkspaceInfos
-        let totalHeight = CGFloat(displayInfos.count) * dotDiameter + CGFloat(displayInfos.count - 1) * gap
-        let startY = bounds.midY + totalHeight / 2
-
-        for (position, workspace) in displayInfos.enumerated() {
-            let dotY = startY - CGFloat(position) * (dotDiameter + gap) - dotDiameter
-            let isFocused = workspace.isActive
-            let dotWidth = isFocused ? dotDiameter + 2 : dotDiameter
-            let dotX = (bounds.width - dotWidth) / 2
-
-            // A wait on the user or an error outranks the focus; a finished
-            // turn doesn't.
-            let attention = workspace.attention
-            let alert = attention.flatMap { $0 == .finished ? nil : $0 }
-            let color: NSColor
-            if let alert {
-                color = SidebarRenderer.color(for: alert)
-            } else if isFocused {
-                color = Self.accentColor
-            } else if let attention {
-                color = SidebarRenderer.color(for: attention)
-            } else {
-                color = Theme.Color.idle
-            }
-            ctx.setFillColor(color.cgColor)
-            ctx.fillEllipse(in: CGRect(x: dotX, y: dotY - (isFocused ? 1 : 0), width: dotWidth, height: dotWidth))
-
-            // Pulsing glow ring for what needs the user
-            if alert != nil, let rootLayer = layer {
-                let glowSize = dotWidth + 6
-                let glow = CALayer()
-                glow.frame = CGRect(x: dotX - 3, y: dotY - (isFocused ? 1 : 0) - 3, width: glowSize, height: glowSize)
-                glow.cornerRadius = glowSize / 2
-                glow.backgroundColor = NSColor.clear.cgColor
-                glow.borderWidth = 1.5
-                glow.borderColor = color.cgColor
-
-                let pulse = CABasicAnimation(keyPath: "opacity")
-                pulse.fromValue = 1.0
-                pulse.toValue = 0.15
-                pulse.duration = 0.6
-                pulse.autoreverses = true
-                pulse.repeatCount = .infinity
-                pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                glow.add(pulse, forKey: "pulse")
-
-                rootLayer.addSublayer(glow)
-                pulseLayers.append(glow)
-            }
-        }
-    }
-
     var displayedWorkspaceInfos: [WorkspaceInfo] {
         lastInfos.filter { !$0.isInactive } + lastInfos.filter { $0.isInactive }
     }
 
-    var dotWorkspaceInfos: [WorkspaceInfo] {
-        displayedWorkspaceInfos.filter(listsWorkspace)
+    /// The workspaces the rail shows a tile for, top to bottom: the cards'
+    /// and, in the folded section, an amber one (`railState`).
+    var railWorkspaceInfos: [WorkspaceInfo] {
+        displayedWorkspaceInfos.filter {
+            listsWorkspace(isInactive: $0.isInactive, isActive: $0.isActive, asksUser: $0.asksUser || $0.railState == .waiting)
+        }
     }
 
     // MARK: - Click handling
 
     override func mouseDown(with event: NSEvent) {
-        if isExpanded {
-            // Click areas are registered in the scrollable document view's
-            // coordinate space, so we hit-test there (which automatically
-            // accounts for the current scroll offset).
-            let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
-            if Self.isLeftoverPress(clickCount: event.clickCount, at: event.timestamp, after: lastButtonActionAt) {
-                return
-            }
-
-            if let area = hitArea(at: docLocation) {
-                // Workspace rows don't click on mouseDown: run the drag
-                // tracking loop, which decides between click and reorder.
-                if case .workspace(let workspaceIndex) = area.region {
-                    if event.clickCount == 2 {
-                        onWorkspaceClicked?(workspaceIndex)
-                        onWorkspaceAction?(.rename, workspaceIndex)
-                        return
-                    }
-                    trackWorkspaceDrag(workspaceIndex: workspaceIndex, rowFrame: area.frame, startPoint: docLocation)
-                    return
-                }
-                if Self.armedButtonKey(for: area.region) != nil {
-                    trackApprovalClick(area.region, event: event)
-                    return
-                }
-                handleHit(area.region, event: event)
-                return
-            }
-            super.mouseDown(with: event)
+        // Click areas are registered in the scrollable document view's
+        // coordinate space, so we hit-test there (which automatically
+        // accounts for the current scroll offset).
+        let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
+        if Self.isLeftoverPress(clickCount: event.clickCount, at: event.timestamp, after: lastButtonActionAt) {
             return
         }
+        if !isExpanded {
+            isRailTooltipSuppressed = true
+            hideRailTooltip()
+        }
 
-        // Collapsed mode: dot hit-test in self's coordinate space.
-        let clickLocation = convert(event.locationInWindow, from: nil)
-        let dotDiameter = Self.dotSize
-        let gap = Self.dotGap
-        let displayInfos = dotWorkspaceInfos
-        let totalHeight = CGFloat(displayInfos.count) * dotDiameter + CGFloat(displayInfos.count - 1) * gap
-        let startY = bounds.midY + totalHeight / 2
-
-        for (position, workspace) in displayInfos.enumerated() {
-            let dotY = startY - CGFloat(position) * (dotDiameter + gap) - dotDiameter
-            let hitRect = NSRect(x: 0, y: dotY - 4, width: bounds.width, height: dotDiameter + 8)
-            if hitRect.contains(clickLocation) {
-                onWorkspaceClicked?(workspace.index)
+        if let area = hitArea(at: docLocation) {
+            // Workspace rows don't click on mouseDown: run the drag
+            // tracking loop, which decides between click and reorder.
+            if case .workspace(let workspaceIndex) = area.region {
+                if event.clickCount == 2 {
+                    onWorkspaceClicked?(workspaceIndex)
+                    onWorkspaceAction?(.rename, workspaceIndex)
+                    return
+                }
+                trackWorkspaceDrag(workspaceIndex: workspaceIndex, rowFrame: area.frame, startPoint: docLocation)
                 return
             }
+            if Self.armedButtonKey(for: area.region) != nil {
+                trackApprovalClick(area.region, event: event)
+                return
+            }
+            handleHit(area.region, event: event)
+            return
         }
         super.mouseDown(with: event)
     }
@@ -418,8 +348,8 @@ final class SidebarView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        guard isExpanded else { clearHover(); setHoverTarget(nil); return }
-
+        isRailTooltipSuppressed = false
+        defer { if !isExpanded { updateRailTooltip() } }
         // The bottom space switcher tracks its own hover — keep the pointing
         // hand (its cursor rect would otherwise be overridden below) and drop
         // any list highlight while the pointer is there.
@@ -484,6 +414,10 @@ final class SidebarView: NSView {
             clearHover()
             setHoverTarget(.workspaceCard(workspaceIndex))
             NSCursor.arrow.set()
+        case .railButton(let button):
+            clearHover()
+            setHoverTarget(.railButton(button))
+            NSCursor.pointingHand.set()
         }
     }
 
@@ -519,6 +453,14 @@ final class SidebarView: NSView {
                 .popUp(positioning: nil, at: point, in: self)
         case .permissionDecision, .agentResume, .deferredAgentResume, .actionBlock:
             break // buttons go through trackApprovalClick; the block is inert
+        case .railButton(.project):
+            let point = convert(event.locationInWindow, from: nil)
+            setHoverTarget(nil) // the tooltip would stay beside the menu
+            projectMenu().popUp(positioning: nil, at: point, in: self)
+        case .railButton(.inactiveSection):
+            toggleInactiveSection()
+        case .railButton(.newWorkspace):
+            onNewWorkspace?()
         }
     }
 
@@ -530,25 +472,37 @@ final class SidebarView: NSView {
     /// switcher (and ⌥⌘←/→), so the header menu doesn't duplicate it.
     func spaceOptionsMenu() -> NSMenu {
         let menu = NSMenu()
+        addSpaceOptions(to: menu)
+        return menu
+    }
+
+    /// The active space's options, then "New Project".
+    func addSpaceOptions(to menu: NSMenu) {
         if let active = lastProfiles.first(where: { $0.isActive }) {
             addSpaceManagementItems(to: menu, for: active)
         }
         menu.addClosureItem(title: "New Project") { [weak self] in
             self?.onCreateProfile?()
         }
-        return menu
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        // Right-click on the space header mirrors its left-click menu —
-        // every region that advertises a menu answers both buttons.
-        if isExpanded {
-            let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
-            if let area = hitArea(at: docLocation), case .spaceHeader = area.region {
-                return spaceOptionsMenu()
-            }
+        // Right-click on the space header (or the rail's project) mirrors
+        // its left-click menu — every region that advertises a menu
+        // answers both buttons.
+        let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
+        switch hitArea(at: docLocation)?.region {
+        case .spaceHeader?:
+            return spaceOptionsMenu()
+        case .railButton(.project)?:
+            setHoverTarget(nil)
+            return projectMenu()
+        default:
+            break
         }
         guard let target = menuTarget(at: event) else { return super.menu(for: event) }
+        // The rail's tooltip would stay beside the menu.
+        if !isExpanded { setHoverTarget(nil) }
         return workspaceActionMenu(workspaceIndex: target.workspaceIndex, columnIndex: target.columnIndex)
     }
 
@@ -625,37 +579,19 @@ final class SidebarView: NSView {
     }
 
     private func menuTarget(at event: NSEvent) -> MenuTarget? {
-        if isExpanded {
-            let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
-            for area in hitAreas where area.frame.contains(docLocation) {
-                switch area.region {
-                case .column(let workspaceIndex, let columnIndex),
-                     .permissionDecision(let workspaceIndex, let columnIndex, _, _),
-                     .agentResume(let workspaceIndex, let columnIndex, _),
-                     .deferredAgentResume(let workspaceIndex, let columnIndex, _):
-                    return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
-                case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
-                     .actionBlock(let workspaceIndex):
-                    return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: nil)
-                case .spaceHeader, .link:
-                    continue
-                }
-            }
-            return nil
-        }
-
-        let clickLocation = convert(event.locationInWindow, from: nil)
-        let dotDiameter = Self.dotSize
-        let gap = Self.dotGap
-        let displayInfos = dotWorkspaceInfos
-        let totalHeight = CGFloat(displayInfos.count) * dotDiameter + CGFloat(displayInfos.count - 1) * gap
-        let startY = bounds.midY + totalHeight / 2
-
-        for (position, workspace) in displayInfos.enumerated() {
-            let dotY = startY - CGFloat(position) * (dotDiameter + gap) - dotDiameter
-            let hitRect = NSRect(x: 0, y: dotY - 4, width: bounds.width, height: dotDiameter + 8)
-            if hitRect.contains(clickLocation) {
-                return MenuTarget(workspaceIndex: workspace.index, columnIndex: nil)
+        let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
+        for area in hitAreas where area.frame.contains(docLocation) {
+            switch area.region {
+            case .column(let workspaceIndex, let columnIndex),
+                 .permissionDecision(let workspaceIndex, let columnIndex, _, _),
+                 .agentResume(let workspaceIndex, let columnIndex, _),
+                 .deferredAgentResume(let workspaceIndex, let columnIndex, _):
+                return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
+            case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
+                 .actionBlock(let workspaceIndex):
+                return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: nil)
+            case .spaceHeader, .link, .railButton:
+                continue
             }
         }
         return nil
@@ -745,11 +681,15 @@ extension SidebarView {
 
     var hasInactiveWorkspaces: Bool { lastInfos.contains(where: \.isInactive) }
 
-    /// The header row's hit area, in document coordinates.
+    /// The header row's hit area (the rail's toggle tile), in document
+    /// coordinates.
     var inactiveSectionHeaderFrame: NSRect? {
         hitAreas.first {
-            if case .link(let url, _) = $0.region { return url == Self.inactiveSectionActionURL }
-            return false
+            switch $0.region {
+            case .link(let url, _): return url == Self.inactiveSectionActionURL
+            case .railButton(.inactiveSection): return true
+            default: return false
+            }
         }?.frame
     }
 
@@ -760,8 +700,8 @@ extension SidebarView {
         isInactiveSectionCollapsed.toggle()
         lastRenderSignature = nil
         // Mid-drag the rebuild is deferred to the drag's end.
-        guard isExpanded, workspaceDrag == nil else {
-            if isExpanded { rebuildContent() } else { setNeedsDisplay(bounds) }
+        guard workspaceDrag == nil else {
+            rebuildContent()
             return
         }
         // Keep the header under the pointer for the next click. Only rows

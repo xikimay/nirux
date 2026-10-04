@@ -29,6 +29,13 @@ extension ColumnInfo {
     /// push"), for the cause the chip shows.
     var attentionToolTip: String? { winningCause?.toolTip }
 
+    /// The cause the chip shows, as a phrase after the agent's name
+    /// ("needs permission", "stopped on an API error") and its specifics
+    /// ("Bash: git push"): the collapsed rail's tooltip.
+    var attentionSummary: (headline: String, detail: String?)? {
+        winningCause.map { ($0.headline, $0.detail) }
+    }
+
     private var winningCause: AttentionCause? {
         guard let attention else { return nil }
         return attentionCauses.first { $0.signal == attention }
@@ -38,6 +45,8 @@ extension ColumnInfo {
         let signal: AttentionSignal
         let label: String
         let toolTip: String?
+        let headline: String
+        let detail: String?
     }
 
     /// A stuck agent says so whatever its status, and so do an approval the
@@ -46,22 +55,34 @@ extension ColumnInfo {
     private var attentionCauses: [AttentionCause] {
         var causes: [AttentionCause] = []
         if let stuck {
-            causes.append(AttentionCause(signal: stuck.isFailure ? .error : .waiting, label: stuck.chipLabel, toolTip: stuck.tooltip))
+            causes.append(AttentionCause(
+                signal: stuck.isFailure ? .error : .waiting, label: stuck.chipLabel, toolTip: stuck.tooltip,
+                headline: stuck.headline, detail: stuck.detail
+            ))
         }
         if let approval = permissionApproval {
+            let isPlan = approval.toolName == "ExitPlanMode"
             causes.append(AttentionCause(
-                signal: .waiting, label: approval.toolName == "ExitPlanMode" ? "plan" : "permission",
-                toolTip: "needs permission — \(approval.toolName): \(approval.text)"
+                signal: .waiting, label: isPlan ? "plan" : "permission",
+                toolTip: "needs permission — \(approval.toolName): \(approval.text)",
+                headline: isPlan ? "needs plan approval" : "needs permission",
+                // A heredoc, a plan: one line.
+                detail: AgentText.clean(isPlan ? approval.text : "\(approval.toolName): \(approval.text)", maxLength: 300)
             ))
         }
         if let openDialog {
-            causes.append(AttentionCause(signal: openDialog.signal, label: openDialog.chipLabel, toolTip: openDialog.toolTip))
+            causes.append(AttentionCause(
+                signal: openDialog.signal, label: openDialog.chipLabel, toolTip: openDialog.toolTip,
+                headline: openDialog.headline, detail: openDialog.cleanDetailLine
+            ))
         }
         if agentStatus == .needsAttention {
             let signal = AttentionSignal.of(attentionReason)
             causes.append(AttentionCause(
                 signal: signal, label: attentionReason?.chipLabel ?? (signal == .waiting ? "needs you" : "done"),
-                toolTip: attentionReason?.toolTip
+                toolTip: attentionReason?.toolTip,
+                headline: attentionReason?.headline ?? (signal == .waiting ? "needs you" : "finished its turn"),
+                detail: attentionReason?.cleanDetailLine
             ))
         }
         return causes
@@ -71,8 +92,12 @@ extension ColumnInfo {
 extension AgentAttentionReason {
     /// "needs permission — Bash: git push": a chip's tooltip.
     var toolTip: String {
-        let detail = detailLine.flatMap { AgentText.clean($0, maxLength: 300) }
-        return [headline, detail].compactMap { $0 }.joined(separator: " — ")
+        [headline, cleanDetailLine].compactMap { $0 }.joined(separator: " — ")
+    }
+
+    /// `detailLine` cleaned for one line of a tooltip.
+    var cleanDetailLine: String? {
+        detailLine.flatMap { AgentText.clean($0, maxLength: 300) }
     }
 
     /// One word for a column chip.
@@ -90,6 +115,26 @@ extension AgentAttentionReason {
 }
 
 extension SidebarStuckState {
+    /// What the agent is stuck on, after its name: "stopped on an API
+    /// error", "exited mid-turn".
+    var headline: String {
+        switch self {
+        case .waiting(let reason, _): return reason.headline
+        case .stoppedOnError: return "stopped on an API error"
+        case .exitedMidTurn: return "exited mid-turn"
+        }
+    }
+
+    /// The dialog's or the error's specifics.
+    var detail: String? {
+        switch self {
+        case .waiting(let reason, _): return reason.cleanDetailLine
+        case .stoppedOnError(let kind, let detail, _, _):
+            return AgentAttentionReason.apiError(kind: kind, detail: detail).cleanDetailLine
+        case .exitedMidTurn: return nil
+        }
+    }
+
     /// Short enough for a chip, the rest in the tooltip (and the Resume
     /// block).
     var chipLabel: String {
@@ -115,10 +160,10 @@ extension WorkspaceInfo {
         return .idle
     }
 
-    /// The collapsed sidebar's dot and the project switcher's ring: what
-    /// the columns ask, then what happened while the user looked elsewhere
-    /// (a child agent's question, a red check: a pulse for as long as a
-    /// check stays red would be noise).
+    /// The project switcher's ring: what the columns ask, then what
+    /// happened while the user looked elsewhere (a child agent's question,
+    /// a red check: a pulse for as long as a check stays red would be
+    /// noise).
     var attention: AttentionSignal? {
         let away = isActive ? nil : notification
         return (columns.compactMap(\.attention) + [away].compactMap { $0 }).max()

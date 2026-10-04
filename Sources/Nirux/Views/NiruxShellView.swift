@@ -3,9 +3,12 @@ import GhosttyTerminal
 
 /// Root AppKit view: sidebar + niri-style 2D scrolling viewport
 final class NiruxShellView: NSView {
-    private static let collapsedSidebarWidth: CGFloat = 16
+    private static let collapsedSidebarWidth = SidebarRailMetrics.width
     private static let expandedSidebarWidth: CGFloat = 260
     var isSidebarExpanded = false
+    /// Counts sidebar toggles: an expansion's delayed step checks that no
+    /// toggle came after it.
+    var sidebarToggleGeneration = 0
     private var sidebarWidth: CGFloat {
         isSidebarExpanded ? Self.expandedSidebarWidth : Self.collapsedSidebarWidth
     }
@@ -176,6 +179,7 @@ final class NiruxShellView: NSView {
         }
         sidebar.onProfileClicked = { [weak self] profileID in self?.selectProfile(profileID) }
         sidebar.onCreateProfile = { [weak self] in self?.createProfileFromActiveContext() }
+        sidebar.onNewWorkspace = { [weak self] in self?.showNewWorkspacePanel() }
         sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }
         sidebar.onEditProfileBrief = { [weak self] profileID in self?.editSpaceBrief(profileID: profileID) }
         sidebar.onEditBoardSettings = { [weak self] profileID in self?.showBoardSettings(profileID: profileID) }
