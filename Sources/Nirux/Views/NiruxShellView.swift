@@ -325,6 +325,7 @@ final class NiruxShellView: NSView {
         syncTerminalOcclusion()
         scheduleDeferredAgentsOnScreen()
         scheduleBranchReviewsOnScreen()
+        refreshStaleBranchReviewsOnScreen()
     }
 
     // MARK: - Terminal Occlusion
@@ -412,6 +413,8 @@ final class NiruxShellView: NSView {
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.syncTerminalOcclusion()
+                    // Uncovered: a stale review reads its branch again.
+                    self?.refreshStaleBranchReviewsOnScreen()
                 }
             }
         }

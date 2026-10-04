@@ -81,6 +81,10 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     private let fileTree: EditorFileTree
     private let treeDivider: NSView
     private let conflictBanner = EditorConflictBanner()
+    /// Over the "Full Branch Diff" tab.
+    let branchReviewBanner = EditorBranchReviewBanner()
+    /// The banner's button: review the branch in a Branch Review column.
+    var onOpenBranchReview: (() -> Void)?
     private let loadFailureOverlay = EditorLoadFailureOverlay()
     private var monacoReady = false
     /// Fires once if `monacoReady` doesn't arrive shortly after loading —
@@ -186,6 +190,10 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         conflictBanner.onKeep = { [weak self] in self?.resolveConflict(reload: false) }
         addSubview(conflictBanner)
 
+        branchReviewBanner.isHidden = true
+        branchReviewBanner.onOpen = { [weak self] in self?.onOpenBranchReview?() }
+        addSubview(branchReviewBanner)
+
         loadFailureOverlay.isHidden = true
         loadFailureOverlay.onRetry = { [weak self] in self?.retryEditorLoad() }
         addSubview(loadFailureOverlay)
@@ -275,7 +283,14 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         let editorX = treeW + dividerW
         let editorW = bounds.width - editorX
         tabBar.frame = NSRect(x: editorX, y: contentH - tabH, width: editorW, height: tabH)
-        webView.frame = NSRect(x: editorX, y: 0, width: editorW, height: max(0, contentH - tabH))
+        // Above the diffs, not over them.
+        var webH = max(0, contentH - tabH)
+        if !branchReviewBanner.isHidden {
+            let bannerH = EditorBranchReviewBanner.height
+            branchReviewBanner.frame = NSRect(x: editorX + 8, y: webH - bannerH - 8, width: max(0, editorW - 16), height: bannerH)
+            webH = max(0, webH - bannerH - 16)
+        }
+        webView.frame = NSRect(x: editorX, y: 0, width: editorW, height: webH)
         loadFailureOverlay.frame = webView.frame
         if !conflictBanner.isHidden {
             let bannerH = EditorConflictBanner.height
@@ -928,6 +943,16 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         tabBar.update(tabs: bars, activePath: activePath)
         refreshHeader()
         updateConflictBanner()
+        updateBranchReviewBanner()
+    }
+
+    /// The banner shows over the branch's whole diff (Full Branch Diff),
+    /// not over a file's or the uncommitted changes'.
+    private func updateBranchReviewBanner() {
+        let shows = activePath.flatMap { diffGroupTabs[$0]?.mode } == .branch
+        guard branchReviewBanner.isHidden == shows else { return }
+        branchReviewBanner.isHidden = !shows
+        needsLayout = true
     }
 
     /// Show the disk-conflict banner when the active tab was modified

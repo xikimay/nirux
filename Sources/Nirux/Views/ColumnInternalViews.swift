@@ -101,6 +101,57 @@ final class EditorConflictBanner: NSView {
     @objc private func keepClicked() { onKeep?() }
 }
 
+/// Banner above the editor's "Full Branch Diff" tab: the same branch reads
+/// better in a Branch Review column (docs/branch-review.md, section 1).
+/// Native, so that a test can click it. Neutral: nothing waits for the user.
+final class EditorBranchReviewBanner: NSView {
+    static let height: CGFloat = 34
+
+    var onOpen: (() -> Void)?
+
+    let openButton = NSButton(title: "Open in Branch Review", target: nil, action: nil)
+    private let messageLabel = NSTextField(labelWithString: "Read this branch on one page: what and why, its risks, its files.")
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.backgroundColor = Theme.Color.surface.cgColor
+        layer?.cornerRadius = Theme.Radius.card
+        layer?.borderWidth = 1
+        layer?.borderColor = Theme.Color.lineStrong.cgColor
+
+        messageLabel.font = Theme.Font.caption
+        messageLabel.textColor = Theme.Color.textSecondary
+        messageLabel.lineBreakMode = .byTruncatingTail
+        addSubview(messageLabel)
+
+        openButton.target = self
+        openButton.action = #selector(openClicked)
+        openButton.bezelStyle = .rounded
+        openButton.controlSize = .small
+        openButton.font = .systemFont(ofSize: 11, weight: .medium)
+        addSubview(openButton)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        let pad: CGFloat = 10
+        let buttonSize = openButton.intrinsicContentSize
+        openButton.frame = NSRect(
+            x: bounds.width - pad - buttonSize.width, y: (bounds.height - buttonSize.height) / 2,
+            width: buttonSize.width, height: buttonSize.height
+        )
+        messageLabel.frame = NSRect(
+            x: pad, y: (bounds.height - 15) / 2, width: max(0, openButton.frame.minX - pad * 2), height: 15
+        )
+    }
+
+    @objc private func openClicked() { onOpen?() }
+}
+
 /// Full-surface overlay shown when the Monaco editor fails to load (missing
 /// bundled assets, or no `monacoReady` within the watchdog window). Replaces
 /// the previous silent blank surface / error tab.

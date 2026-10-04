@@ -597,6 +597,8 @@ extension NiruxShellView {
         // A column that came on screen without a relayout (a dragged
         // width) resumes from here at the latest.
         scheduleDeferredAgentsOnScreen(restartingWait: false)
+        // A window that came back in view (occlusion, the app's return).
+        refreshStaleBranchReviewsOnScreen()
         let snapshot = snapshot ?? ProcessSnapshot()
         refreshHeaderTitles(snapshot: snapshot)
         updateSidebar(snapshot: snapshot)

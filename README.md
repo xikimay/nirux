@@ -330,7 +330,7 @@ In the palette list, a ready worktree is checked in advance only when:
 - risk signals from fixed rules (persistence, security, concurrency, launch, CI, side effects, dependencies), and how the tests compare with the code;
 - the files grouped by path, with lockfiles, generated files, pure renames, whitespace-only changes and binary files folded.
 
-A row opens into its diff. Bidi controls and invisible characters in paths and diffs show as their code point (`⟨U+202E⟩`). The page doesn't follow the worktree yet: it says when it read the branch, and Refresh reads it again, after fetching the pull request's base: a remote-tracking ref, the column's only write to the repository. A review restored at launch reads its branch once its workspace shows. The design is in [docs/branch-review.md](docs/branch-review.md).
+A row opens into its diff. Bidi controls and invisible characters in paths and diffs show as their code point (`⟨U+202E⟩`). The column follows its worktree: a moment after the agent stops writing, it reads the branch again. At the same head, the page updates in place, and the diffs you opened stay unless their file changed. A new head waits behind a Reload banner: a commit doesn't rewrite the page you're reading. Off screen, it reads once it shows again. During a rebase or a merge it pauses, and on another branch it offers to review that one. Refresh reads the branch again, after fetching the pull request's base: a remote-tracking ref, the column's only write to the repository. A review restored at launch reads its branch once its workspace shows. The editor's "Full Branch Diff" tab offers the same branch with an `Open in Branch Review` button. The design is in [docs/branch-review.md](docs/branch-review.md).
 
 ## Local Development
 

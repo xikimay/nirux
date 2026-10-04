@@ -13,6 +13,9 @@ extension BranchReview {
             let branch: String
             let base: String
             let head: String
+            /// What the diffs are from: a diff shown for a file keeps only
+            /// while it and the file's patch stay the same.
+            let mergeBase: String
             let pullRequest: PullRequestSummary?
             let commits: Int
             /// Merges that brought in the base branch, among `commits`.
@@ -105,6 +108,11 @@ extension BranchReview {
             let risks: [String]
             /// `BranchReview.patchHash`; nil when its patch wasn't read.
             let patchHash: String?
+            /// What a diff drawn for it shows: the patch hash and the
+            /// hunks' ranges, which with the merge base fix its context and
+            /// line numbers (the patch hash leaves them out). Nil when its
+            /// hunks aren't in the snapshot: its diff is read again.
+            let diffKey: String?
         }
 
         struct Group: Encodable, Equatable, Sendable {
@@ -181,10 +189,16 @@ extension BranchReview {
                     additions: file.additions, deletions: file.deletions, isBinary: file.isBinary,
                     isUntracked: file.isUntracked, isUncommitted: file.isUncommitted,
                     omission: file.omission.map(\.key), fold: file.fold?.rawValue,
-                    risks: file.signals.map(\.kind.rawValue), patchHash: file.patchHash
+                    risks: file.signals.map(\.kind.rawValue), patchHash: file.patchHash, diffKey: diffKey(of: file)
                 )
             }
         )
+    }
+
+    static func diffKey(of file: FileChange) -> String? {
+        guard let patchHash = file.patchHash, !file.hunks.isEmpty else { return nil }
+        let ranges = file.hunks.map { "\($0.oldStart),\($0.oldCount),\($0.newStart),\($0.newCount)" }
+        return patchHash + ":" + ranges.joined(separator: ";")
     }
 
     private static func header(of snapshot: Snapshot, readAt: Date) -> Page.Header {
@@ -193,6 +207,7 @@ extension BranchReview {
             branch: snapshot.branch,
             base: snapshot.base.name,
             head: snapshot.head,
+            mergeBase: snapshot.base.mergeBase,
             pullRequest: pullRequest.map {
                 Page.PullRequestSummary(number: $0.number, title: $0.title, url: $0.url, isDraft: $0.isDraft)
             },
