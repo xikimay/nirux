@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 // MARK: - What Explain sends (section 4.3)
@@ -29,16 +30,88 @@ extension BranchReview {
         let sentPatches: [String: String]
         /// The diff's size in `text`.
         let diffBytes: Int
+        /// Where, in `text`'s UTF-8, what the earlier parts found goes
+        /// (`addingEarlierParts`).
+        let contextOffset: Int
 
         var sentPaths: Set<String> { Set(sentPatches.keys) }
+
+        /// This part with what the run's earlier parts found, fenced like the
+        /// author's texts, with a nonce of its own: the model answers for the
+        /// whole branch.
+        func addingEarlierParts(_ context: ExplainContext) -> ExplainInput {
+            let body = Secrets.containsKey(context.text) ? "withheld: looks like a secret" : context.text
+            let fence = BranchReview.freshNonce(avoiding: [body, text])
+            let block = "\n# What the earlier parts of this run found, Claude's so far\n<<<\(fence)\n"
+                + body + "\n\(fence)>>>\n"
+            let utf8 = text.utf8
+            let index = utf8.index(utf8.startIndex, offsetBy: min(contextOffset, utf8.count))
+            return ExplainInput(
+                text: String(text[..<index]) + block + String(text[index...]), files: files, listedFiles: listedFiles,
+                hunks: hunks, sentPatches: sentPatches, diffBytes: diffBytes, contextOffset: contextOffset + block.utf8.count
+            )
+        }
     }
 
     /// A hunk, by its file and its index in the file's patch (as
     /// `filePatch` reads it): what notes are stored by, since a run's hunk
-    /// ids live for that run only.
+    /// ids live for that run only. `anchor` tells the hunk again when the
+    /// patch's hunks merge or split (main changed the lines between two of
+    /// them, which the patch hash leaves out): the page places a note by it.
     struct HunkReference: Equatable, Sendable {
         let path: String
         let index: Int
+        var anchor = ""
+    }
+
+    /// Each hunk's anchor (`hunkAnchor`), made unique within the file: a
+    /// hunk whose changed lines an earlier one has too (a rename repeated)
+    /// gets `.1`, `.2`… in order.
+    static func hunkAnchors(of hunks: [Hunk]) -> [String] {
+        var seen: [String: Int] = [:]
+        return hunks.map { hunk in
+            let digest = hunkAnchor(hunk)
+            let count = seen[digest, default: 0]
+            seen[digest] = count + 1
+            return count == 0 ? digest : "\(digest).\(count)"
+        }
+    }
+
+    /// A hunk's changed lines, digested: the same lines added and removed,
+    /// wherever the hunk starts and whatever its context.
+    static func hunkAnchor(_ hunk: Hunk) -> String {
+        var hasher = SHA256()
+        for line in hunk.lines where line.kind == .added || line.kind == .removed {
+            hasher.update(data: Data((line.kind == .added ? "+" : "-").utf8))
+            hasher.update(data: line.bytes ?? Data(line.text.utf8))
+            hasher.update(data: Data([0]))
+        }
+        return hasher.finalize().prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// What a previous explanation, or the earlier parts of a run, found:
+    /// given back to the model, which answers for the whole branch, keeping
+    /// what still holds.
+    struct ExplainContext: Equatable, Sendable {
+        var overview: String
+        var claims: [ExplainOutput.Claim] = []
+        var questions: [String] = []
+
+        /// Cut to `maxExplainOverviewBytes`; a line that would read as a
+        /// fence (`<<<…`, `…>>>`) loses its angle brackets: the text is the
+        /// model's.
+        var text: String {
+            var text = "Overview:\n\(overview)"
+            if !claims.isEmpty {
+                text += "\n\nClaims checked:\n" + claims.map { "- [\($0.verdict.rawValue)] \($0.claim) (\($0.evidence))" }
+                    .joined(separator: "\n")
+            }
+            if !questions.isEmpty { text += "\n\nQuestions for the author:\n" + questions.map { "- \($0)" }.joined(separator: "\n") }
+            let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { line in
+                line.replacingOccurrences(of: "<<<", with: "‹‹‹").replacingOccurrences(of: ">>>", with: "›››")
+            }
+            return BranchReview.cut(lines.joined(separator: "\n"), at: BranchReview.maxExplainOverviewBytes)
+        }
     }
 
     struct ExplainRequest: Equatable, Sendable {
@@ -47,9 +120,9 @@ extension BranchReview {
         /// The paths whose diff to send (the files whose patch changed
         /// since the last explanation); nil sends every file's.
         var only: Set<String>?
-        /// The last explanation's overview, as context for a run that sends
+        /// What the last explanation found, as context for a run that sends
         /// only what changed since.
-        var previousOverview: String?
+        var previous: ExplainContext?
     }
 
     /// Why a file's diff isn't sent. The file is still named, with why.
@@ -114,6 +187,7 @@ extension BranchReview {
         request: ExplainRequest = ExplainRequest(),
         notInCopy: [ExplainCopy.Omitted] = [],
         nonce: String? = nil,
+        onNotSent: (FileChange, NotSent) -> Void = { _, _ in },
         patch: (FileChange) -> FileChange?
     ) -> [ExplainInput] {
         var notSent: [String: NotSent] = [:]
@@ -131,11 +205,13 @@ extension BranchReview {
             // A diff read now is checked again: the worktree may have moved.
             if let reason = notSentReason(read, request: request) {
                 notSent[file.path] = reason
+                onNotSent(read, reason)
                 continue
             }
             let diff = explainDiff(of: read, id: ids[file.path] ?? "")
             guard diff.text.utf8.count <= maxExplainDiffBytes else {
                 notSent[file.path] = .overRunSize
+                onNotSent(read, .overRunSize)
                 continue
             }
             diffs[file.path] = (diff.text, diff.hunks, read.patchHash ?? "")
@@ -149,6 +225,7 @@ extension BranchReview {
         return parts.enumerated().map { number, part in
             var text = explainHeader(snapshot, part: parts.count > 1 ? (number + 1, parts.count, part.titles) : nil)
             text += authorText
+            let contextOffset = text.utf8.count
             let lists = explainFileLists(snapshot, ids: ids, notSent: notSent, notInCopy: notInCopy, sent: Set(part.paths))
             text += lists.text
             var diffText = ""
@@ -163,17 +240,24 @@ extension BranchReview {
             text += "\n# Diff\n" + diffText
             return ExplainInput(
                 text: text, files: fileIDs, listedFiles: lists.listed, hunks: hunks, sentPatches: sentPatches,
-                diffBytes: diffText.utf8.count
+                diffBytes: diffText.utf8.count, contextOffset: contextOffset
             )
         }
     }
 
     private static func notSentReason(_ file: FileChange, request: ExplainRequest) -> NotSent? {
+        if let reason = explainSkipReason(file, request: request) { return reason }
+        if let only = request.only, !only.contains(file.path) { return .unchanged }
+        return nil
+    }
+
+    /// Why Explain never sends a file's diff, whatever changed: what
+    /// `notSentReason` says, but `.unchanged`.
+    static func explainSkipReason(_ file: FileChange, request: ExplainRequest) -> NotSent? {
         if Secrets.isSecretPath(file.path) || file.oldPath.map(Secrets.isSecretPath) == true { return .secretPath }
         if let fold = file.fold { return .folded(fold) }
         if file.isBinary { return .folded(.binary) }
         if file.isUntracked, !request.includeUntracked { return .untracked }
-        if let only = request.only, !only.contains(file.path) { return .unchanged }
         switch file.omission {
         case .notRead?: return .notRead
         case .tooLarge?: return .tooLarge
@@ -189,6 +273,7 @@ extension BranchReview {
         if let oldPath = file.oldPath { text += " (renamed from \(visible(oldPath)))" }
         text += "\n"
         var hunks: [String: HunkReference] = [:]
+        let anchors = hunkAnchors(of: file.hunks)
         for (index, hunk) in file.hunks.enumerated() {
             let hunkID = "\(id)h\(index)"
             let range = "@@ -\(hunk.oldStart),\(hunk.oldCount) +\(hunk.newStart),\(hunk.newCount) @@"
@@ -205,7 +290,7 @@ extension BranchReview {
                 case .noNewlineMarker: text += "\\ No newline at end of file\n"
                 }
             }
-            hunks[hunkID] = HunkReference(path: file.path, index: index)
+            hunks[hunkID] = HunkReference(path: file.path, index: index, anchor: anchors[index])
         }
         return (text, hunks)
     }
@@ -275,7 +360,7 @@ extension BranchReview {
 
     private static func authorTexts(_ snapshot: Snapshot, handover: Handover?, request: ExplainRequest) -> [String] {
         let pullRequest = snapshot.pullRequest.pullRequest
-        return [pullRequest?.title, pullRequest?.body, handover?.text, request.previousOverview].compactMap { $0 }
+        return [pullRequest?.title, pullRequest?.body, handover?.text, request.previous?.text].compactMap { $0 }
             + snapshot.commits.flatMap { [$0.subject, $0.body] }
     }
 
@@ -305,9 +390,9 @@ extension BranchReview {
                 return "\(commit.oid.prefix(12)) " + (Secrets.containsKey(message) ? "withheld: looks like a secret" : message)
             }.joined(separator: "\n\n"))
         }
-        if let overview = request.previousOverview {
-            text += "\n# The last explanation's overview, for the files unchanged since\n"
-            text += fenced(overview, limit: maxExplainOverviewBytes)
+        if let previous = request.previous {
+            text += "\n# What the last explanation found, Claude's, for the files unchanged since\n"
+            text += fenced(previous.text, limit: maxExplainOverviewBytes)
         }
         return text
     }
@@ -372,7 +457,7 @@ extension BranchReview {
 
     /// Cut past `limit` bytes, on a scalar: never inside a UTF-8
     /// sequence, whatever the text (a long run of combining marks).
-    private static func cut(_ text: String, at limit: Int) -> String {
+    static func cut(_ text: String, at limit: Int) -> String {
         let utf8 = text.utf8
         guard utf8.count > limit else { return text }
         var end = utf8.index(utf8.startIndex, offsetBy: limit)
@@ -380,7 +465,7 @@ extension BranchReview {
         return String(decoding: utf8[..<end], as: UTF8.self) + "\n[cut at \(limit / 1_000) KB]"
     }
 
-    private static func freshNonce(avoiding texts: [String]) -> String {
+    static func freshNonce(avoiding texts: [String]) -> String {
         while true {
             let nonce = "author-" + String(UInt64.random(in: 1...UInt64.max), radix: 16)
             if !texts.contains(where: { $0.contains(nonce) }) { return nonce }

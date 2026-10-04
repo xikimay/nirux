@@ -437,6 +437,12 @@ extension BranchReview {
             unlink(copy.lock.path)
         }
 
+        /// `sweep` on a background queue: at launch. Nonisolated, so the
+        /// work never inherits a caller's main-actor isolation (#48).
+        nonisolated static func sweepInBackground() {
+            DispatchQueue.global(qos: .utility).async { sweep() }
+        }
+
         /// Deletes copies left behind (Nirux quit or crashed during a run):
         /// at launch, and before a run. A copy whose lock is held is
         /// another run's, maybe another Nirux's (the installed app and a

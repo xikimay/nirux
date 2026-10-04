@@ -57,7 +57,10 @@ final class BranchReviewExplainInputTests: XCTestCase {
             \\ No newline at end of file
 
             """)
-        XCTAssertEqual(input.hunks, ["f0h0": .init(path: "Sources/KeepAwake.swift", index: 0)])
+        // Each hunk with its anchor: its changed lines, digested.
+        XCTAssertEqual(input.hunks, ["f0h0": .init(
+            path: "Sources/KeepAwake.swift", index: 0, anchor: BranchReview.hunkAnchor(snapshot.files[0].hunks[0])
+        )])
         XCTAssertEqual(input.files, ["f0": "Sources/KeepAwake.swift", "f1": "Package.resolved", "f2": "Sources/New.swift"])
         XCTAssertEqual(input.sentPatches, ["Sources/KeepAwake.swift": "h0"])
     }
@@ -128,12 +131,12 @@ final class BranchReviewExplainInputTests: XCTestCase {
         XCTAssertEqual(input.sentPaths, ["Sources/Keys.swift"])
         XCTAssertTrue(input.text.contains("### f4h0 @@ -1,1 +1,1 @@\nwithheld: looks like a secret\n### f4h1"))
         XCTAssertFalse(input.text.contains(Self.key))
-        XCTAssertEqual(input.hunks, ["f4h1": .init(path: "Sources/Keys.swift", index: 1)])
+        XCTAssertEqual(input.hunks.mapValues { "\($0.path)#\($0.index)" }, ["f4h1": "Sources/Keys.swift#1"])
 
         request.includeUntracked = true
         let withUntracked = try XCTUnwrap(BranchReview.explainInputs(for: snapshot, handover: nil, request: request) { _ in nil }.first)
         XCTAssertEqual(withUntracked.sentPaths, ["notes.txt", "Sources/Keys.swift"])
-        XCTAssertEqual(withUntracked.hunks["f5h0"], .init(path: "notes.txt", index: 0))
+        XCTAssertEqual(withUntracked.hunks["f5h0"].map { "\($0.path)#\($0.index)" }, "notes.txt#0")
     }
 
     /// A diff the snapshot left out to keep the page light is read for the
