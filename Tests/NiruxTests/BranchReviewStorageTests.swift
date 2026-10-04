@@ -133,7 +133,7 @@ final class BranchReviewStorageTests: XCTestCase {
             "branch": "feat/x",
             "repository": repository,
             "lastHead": "a1",
-            "comments": [["id": "c1", "text": "Why?"]],
+            "reactions": [["id": "c1", "text": "Why?"]],
             "flags": [true, NSNull(), 1.5, 9_007_199_254_740_993],
             "reviewed": [
                 "Sources/Old.swift": ["patchHash": "h0", "head": "a0", "reviewer": "kept"]
@@ -146,7 +146,7 @@ final class BranchReviewStorageTests: XCTestCase {
         }.get()
 
         let object = try stored(store)
-        XCTAssertEqual(object["comments"] as? [[String: String]], [["id": "c1", "text": "Why?"]])
+        XCTAssertEqual(object["reactions"] as? [[String: String]], [["id": "c1", "text": "Why?"]])
         let fields = try JSONDecoder().decode([String: JSONValue].self, from: Data(contentsOf: store.fileURL))
         XCTAssertEqual(fields["flags"], .array([.bool(true), .null, .double(1.5), .int(9_007_199_254_740_993)]))
         let marks = try XCTUnwrap(object["reviewed"] as? [String: [String: String]])
