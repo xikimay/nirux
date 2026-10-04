@@ -175,7 +175,9 @@ first step changed is how they are stored and managed:
   workspaces.
 - **Project menu**, on the header or on right-clicking any space's dot:
   "Rename Project…", "Edit Project Brief…", "Board Settings…", "Edit Task
-  Templates…", "Project Color" and "Delete Project…".
+  Templates…", "Project Color" and "Delete Project…". With the sidebar
+  collapsed, the project's tile at the top of the rail opens it, the projects
+  to switch to listed first.
   Right-clicking lets you manage an empty space without opening a workspace in
   it. A deleted space's workspaces move to the default space, and its brief
   stays on disk. A new space takes a color no other space uses.

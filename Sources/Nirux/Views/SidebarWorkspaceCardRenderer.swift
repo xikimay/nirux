@@ -182,7 +182,7 @@ final class SidebarWorkspaceCardRenderer {
 
     /// The working dot breathes, in phase with every other one: a rebuild
     /// doesn't restart it.
-    private static func breathe(_ layer: CALayer?) {
+    static func breathe(_ layer: CALayer?) {
         guard let layer, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
         let animation = CABasicAnimation(keyPath: "opacity")
         animation.fromValue = 1.0

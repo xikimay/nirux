@@ -43,11 +43,12 @@ private final class SidebarActivityHitView: NSView {
     }
 }
 
-// MARK: - Expanded mode rendering helpers
+// MARK: - Rendering
 
 extension SidebarView {
 
-    /// Main entry point for rebuilding expanded sidebar content.
+    /// Main entry point for rebuilding the sidebar's content: the rail or
+    /// the cards.
     func rebuildContent() {
         // Never rebuild mid-drag: rows would shift under the captured drag
         // geometry. SidebarView+Drag defers updates until the drag ends.
@@ -56,7 +57,16 @@ extension SidebarView {
             return
         }
         resetRenderState()
-        guard isExpanded else { approvalButtonArming.removeAll(); setNeedsDisplay(bounds); return }
+        guard isExpanded else {
+            // Kept across rebuilds, put back by the next expanded one.
+            onboardingCardView?.removeFromSuperview()
+            approvalButtonArming.removeAll()
+            guard !isRailHidden else { return }
+            let docHeight = buildRail()
+            refreshHoverTargetFromMouse()
+            followActiveWorkspace(docHeight: docHeight)
+            return
+        }
 
         rebuildBottomIndicators()
 
@@ -122,6 +132,16 @@ extension SidebarView {
 
         refreshHoverTargetFromMouse()
         refreshApprovalArming()
+        followActiveWorkspace(docHeight: docHeight)
+        if revealsOnboardingCardOnNextBuild, onboardingCard != nil {
+            revealsOnboardingCardOnNextBuild = false
+            revealOnboardingCard()
+        }
+    }
+
+    /// Scrolls the active workspace into view when it changed, or to the
+    /// top on the first build.
+    private func followActiveWorkspace(docHeight: CGFloat) {
         let clip = contentScrollView.contentView
         let activeIndex = activeWorkspaceIndex
         let activeChanged = activeIndex != lastFollowedActiveIndex
@@ -136,10 +156,6 @@ extension SidebarView {
             clip.scroll(to: topOrigin)
             contentScrollView.reflectScrolledClipView(clip)
             lastFollowedActiveIndex = activeIndex
-        }
-        if revealsOnboardingCardOnNextBuild, onboardingCard != nil {
-            revealsOnboardingCardOnNextBuild = false
-            revealOnboardingCard()
         }
     }
 
@@ -175,8 +191,8 @@ extension SidebarView {
         return height
     }
 
-    /// Tear down every view and state snapshot from the previous expanded
-    /// render pass before rebuilding.
+    /// Tear down every view and state snapshot from the previous render
+    /// pass before rebuilding.
     private func resetRenderState() {
         expandedViews.forEach { $0.removeFromSuperview() }
         expandedViews.removeAll()
@@ -189,7 +205,9 @@ extension SidebarView {
         approvalButtonViews.removeAll()
         spaceHeaderHoverView = nil
         spaceHeaderBadge = nil
+        railTileViews.removeAll()
         hoveredTarget = nil
+        hideRailTooltip()
     }
 
     /// Index of the active workspace in `lastInfos`, or -1 if none. Used by
@@ -286,8 +304,7 @@ extension SidebarView {
     /// "6 workspaces · 2 waiting": the waiting count in amber, when any.
     private func spaceSubtitle(_ profile: ProfileInfo) -> NSAttributedString {
         let font = Theme.Font.caption
-        let count = profile.workspaceCount
-        let text = NSMutableAttributedString(string: "\(count) \(count == 1 ? "workspace" : "workspaces")", attributes: [
+        let text = NSMutableAttributedString(string: Self.workspaceCountText(profile.workspaceCount), attributes: [
             .font: font, .foregroundColor: Theme.Color.textTertiary
         ])
         let waiting = lastInfos.filter { $0.cardState == .waiting }.count
@@ -300,7 +317,12 @@ extension SidebarView {
         return text
     }
 
-    private static func profileColor(hex: String) -> NSColor {
+    /// "1 workspace", "6 workspaces".
+    static func workspaceCountText(_ count: Int) -> String {
+        "\(count) \(count == 1 ? "workspace" : "workspaces")"
+    }
+
+    static func profileColor(hex: String) -> NSColor {
         NSColor.niruxColor(hex: hex) ?? Theme.Color.accent
     }
 

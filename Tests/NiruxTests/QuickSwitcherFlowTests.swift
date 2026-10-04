@@ -102,7 +102,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
             shell.switchToWorkspace(try index(of: repo, in: shell))
             XCTAssertTrue(parked.isInactive)
             XCTAssertTrue(shell.sidebar.isInactiveSectionCollapsed)
-            XCTAssertFalse(shell.sidebar.dotWorkspaceInfos.contains { $0.id == parked.id })
+            XCTAssertFalse(shell.sidebar.railWorkspaceInfos.contains { $0.id == parked.id })
 
             // Below the active workspace that matches as well.
             let palette = try search("park", in: harness)
@@ -117,7 +117,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
             XCTAssertIdentical(shell.activeWorkspace, parked)
             XCTAssertTrue(parked.isInactive, "opening it doesn't reactivate it")
             XCTAssertTrue(shell.sidebar.isInactiveSectionCollapsed, "nor unfold the section")
-            XCTAssertTrue(shell.sidebar.dotWorkspaceInfos.contains { $0.id == parked.id }, "the sidebar lists it")
+            XCTAssertTrue(shell.sidebar.railWorkspaceInfos.contains { $0.id == parked.id }, "the sidebar lists it")
         }
     }
 

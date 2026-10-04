@@ -3,7 +3,8 @@ import XCTest
 @testable import Nirux
 
 /// What a workspace card says before how it looks: its state, the signal
-/// the collapsed sidebar shows, its one-line form, its action block.
+/// the project switcher and the collapsed rail show, its one-line form,
+/// its action block.
 @MainActor
 final class SidebarCardStateTests: XCTestCase {
     private func column(
@@ -87,11 +88,12 @@ final class SidebarCardStateTests: XCTestCase {
     }
 
     /// A child agent's question (`nirux ask`) is something that happened
-    /// while the user was away: the dot and the ring say it, the card says
-    /// what its column does, the activity feed keeps the question.
-    func testChildAgentQuestionLightsTheDotNotTheCard() {
+    /// while the user was away: the rail's tile and the ring say it, the
+    /// card says what its column does, the activity feed keeps the question.
+    func testChildAgentQuestionLightsTheTileNotTheCard() {
         let asking = workspace([column(status: .working)], isInactive: true, notification: .waiting)
         XCTAssertEqual(asking.attention, .waiting)
+        XCTAssertEqual(asking.railState, .waiting)
         XCTAssertEqual(asking.cardState, .working)
         XCTAssertFalse(asking.asksUser)
     }
@@ -125,9 +127,9 @@ final class SidebarCardStateTests: XCTestCase {
         XCTAssertEqual(workspace([column()], pullRequest: pullRequest(state: "MERGED", ci: "FAILURE")).cardState, .done)
     }
 
-    // MARK: - Collapsed dots
+    // MARK: - Project switcher ring
 
-    func testCollapsedDotTakesTheMostUrgentSignal() {
+    func testRingTakesTheMostUrgentSignal() {
         let finished = column(0, status: .needsAttention, reason: .turnFinished)
         let failed = column(1, status: .needsAttention, reason: .apiError(kind: nil, detail: nil))
         XCTAssertEqual(workspace([finished]).attention, .finished)
@@ -301,7 +303,7 @@ final class SidebarCardStateTests: XCTestCase {
             lastSummary: nil, lastActivityAt: nil
         )
         sidebar.update(profiles: [], workspaces: [asking, parked])
-        XCTAssertEqual(sidebar.dotWorkspaceInfos.map(\.id), ["ws"])
+        XCTAssertEqual(sidebar.railWorkspaceInfos.map(\.id), ["ws"])
         let cards = sidebar.hitAreas.compactMap { area -> Int? in
             if case .workspace(let index) = area.region { return index }
             return nil

@@ -362,14 +362,17 @@ extension NiruxShellView {
     func toggleSidebar() {
         let expanding = !isSidebarExpanded
         isSidebarExpanded = expanding
+        sidebarToggleGeneration += 1
+        let generation = sidebarToggleGeneration
         saveState()
 
         if expanding {
             refreshOnboardingChecklist()
-            sidebar.fadeOutDots {
+            sidebar.fadeOutRail {
                 self.relayout(animated: true)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                    guard let self else { return }
+                    // Toggled again meanwhile: that toggle decides.
+                    guard let self, self.sidebarToggleGeneration == generation else { return }
                     self.sidebar.isExpanded = true
                 }
             }

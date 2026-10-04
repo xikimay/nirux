@@ -29,7 +29,7 @@ final class SidebarCollapseTests: XCTestCase {
         )
     }
 
-    func testCollapsedSectionHidesInactiveDots() {
+    func testCollapsedSectionHidesInactiveTiles() {
         let sidebar = SidebarView()
         sidebar.update(
             profiles: [],
@@ -40,10 +40,10 @@ final class SidebarCollapseTests: XCTestCase {
         )
 
         XCTAssertTrue(sidebar.isInactiveSectionCollapsed)
-        XCTAssertEqual(sidebar.dotWorkspaceInfos.map(\.id), ["active"])
+        XCTAssertEqual(sidebar.railWorkspaceInfos.map(\.id), ["active"])
 
         sidebar.toggleInactiveSection()
-        XCTAssertEqual(sidebar.dotWorkspaceInfos.map(\.id), ["active", "archived"])
+        XCTAssertEqual(sidebar.railWorkspaceInfos.map(\.id), ["active", "archived"])
     }
 
     private func profile(_ id: String, isActive: Bool) -> ProfileInfo {
@@ -77,7 +77,7 @@ final class SidebarCollapseTests: XCTestCase {
 
         XCTAssertTrue(sidebar.isInactiveSectionCollapsed)
         XCTAssertEqual(cardIndices(sidebar), [0, 1])
-        XCTAssertEqual(sidebar.dotWorkspaceInfos.map(\.id), ["active", "on-screen"])
+        XCTAssertEqual(sidebar.railWorkspaceInfos.map(\.id), ["active", "on-screen"])
 
         sidebar.update(
             profiles: [],
@@ -90,7 +90,7 @@ final class SidebarCollapseTests: XCTestCase {
 
         XCTAssertTrue(sidebar.isInactiveSectionCollapsed)
         XCTAssertEqual(cardIndices(sidebar), [0])
-        XCTAssertEqual(sidebar.dotWorkspaceInfos.map(\.id), ["active"])
+        XCTAssertEqual(sidebar.railWorkspaceInfos.map(\.id), ["active"])
     }
 
     /// An unfolded section must not reappear unfolded later on its own:
