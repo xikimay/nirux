@@ -31,9 +31,15 @@ let package = Package(
                 .linkedFramework("Security")
             ]
         ),
+        // Runs NiruxTests' TestBootstrap as the test bundle loads: Swift
+        // has no load-time hook, and a SwiftPM test bundle no principal class.
+        .target(
+            name: "NiruxTestBootstrap",
+            path: "Tests/NiruxTestBootstrap"
+        ),
         .testTarget(
             name: "NiruxTests",
-            dependencies: ["Nirux"],
+            dependencies: ["Nirux", "NiruxTestBootstrap"],
             path: "Tests/NiruxTests"
         )
     ]
