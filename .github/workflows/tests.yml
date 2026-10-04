@@ -1,13 +1,12 @@
 name: Tests
 
-# Nightly (push to main) already gates releases with `swift test`, but PR
-# branches had no test CI at all — an actor-isolation error in a test file
-# once reached main red (2026-07-19, ActivityStoreTests). Run the suite on
-# every PR so mergeStateStatus reflects it before merge.
+# Runs the suite on every PR into main so mergeStateStatus reflects it before
+# merge: an actor-isolation error in a test file once reached main red
+# (2026-07-19, ActivityStoreTests). Not on push to main: the nightly
+# (nightly.yml) already runs `swift test` there, and a second run held another
+# macOS runner on every merge.
 on:
   pull_request:
-    branches: [main]
-  push:
     branches: [main]
 
 concurrency:
