@@ -23,6 +23,7 @@ final class BranchReviewExplainCopyTests: BranchReviewRepositoryTestCase {
         try commitToMain("gone")
         try FileManager.default.removeItem(atPath: repo + "/Sources/Gone.swift")
         try write("Sources/Staged.swift", "staged\n")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: repo + "/Sources/Staged.swift")
         try git(["add", "Sources/Staged.swift"])
         try write("README.md", "edited, not committed\n")
         try write("untracked.txt", "untracked\n")
@@ -36,6 +37,8 @@ final class BranchReviewExplainCopyTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(copy.copied, ["README.md", "Sources/Staged.swift", "Sources/App.swift"])
         XCTAssertEqual(copy.leftOut, [])
         XCTAssertEqual(try String(contentsOf: copy.folder.appendingPathComponent("README.md"), encoding: .utf8), "edited, not committed\n")
+        // Never executable: a branch's script can't run from the copy.
+        XCTAssertFalse(FileManager.default.isExecutableFile(atPath: copy.folder.appendingPathComponent("Sources/Staged.swift").path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: copy.folder.appendingPathComponent("untracked.txt").path))
         XCTAssertEqual(try FileManager.default.attributesOfItem(atPath: repo + "/.git/index")[.modificationDate] as? Date, index)
         XCTAssertEqual(try git(["count-objects"]), objects)

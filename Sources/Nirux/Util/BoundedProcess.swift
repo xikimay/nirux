@@ -46,23 +46,30 @@ enum BoundedProcess {
     }
 
     /// Stops a run from any thread, as a timeout does, within the 50 ms the
-    /// run waits on its pipes at a time.
+    /// run waits on its pipes at a time. Cancelled with its `parent` too.
     final class Cancellation: @unchecked Sendable {
         private let lock = NSLock()
         private var cancelled = false
+        private let parent: Cancellation?
+
+        init(parent: Cancellation? = nil) {
+            self.parent = parent
+        }
 
         func cancel() {
             lock.withLock { cancelled = true }
         }
 
         var isCancelled: Bool {
-            lock.withLock { cancelled }
+            lock.withLock { cancelled } || parent?.isCancelled == true
         }
     }
 
     /// Why a run was stopped before it exited.
     enum Stop: Equatable, Sendable {
         case timedOut
+        /// Its standard output stayed silent past `idleTimeout`.
+        case idle
         case cancelled
         /// Its standard output went past `maxStandardOutputBytes`.
         case outputLimit
@@ -71,9 +78,11 @@ enum BoundedProcess {
     }
 
     struct Outcome: Sendable {
-        /// What it wrote until it exited, or until it was stopped.
+        /// What it wrote until it exited, or until it was stopped; empty
+        /// when the run doesn't keep it.
         let standardOutput: Data
-        /// Empty unless the run was asked to capture standard error.
+        /// Empty unless the run was asked to capture standard error; its
+        /// end only, past `maxStandardErrorBytes`.
         let standardError: Data
         /// Nil when it was stopped.
         let terminationStatus: Int32?
@@ -82,10 +91,12 @@ enum BoundedProcess {
 
     /// `run`, keeping what a stopped process wrote, with `standardInput`
     /// written to its standard input (none: it inherits Nirux's), a
-    /// `cancellation` to stop it, and `onStandardOutput` called with each
-    /// chunk of standard output as it is read, on the waiting thread. Nil
-    /// only when it couldn't start. It waits for the process: call it off
-    /// the main thread.
+    /// `cancellation` to stop it, an `idleTimeout` past which a silent
+    /// standard output stops it, and `onStandardOutput` called with each
+    /// chunk of standard output as it is read, on the waiting thread (the
+    /// output isn't kept too unless `keepsStandardOutput`). Nil only when
+    /// it couldn't start. It waits for the process: call it off the main
+    /// thread.
     static func execute(
         executableURL: URL,
         arguments: [String],
@@ -93,10 +104,13 @@ enum BoundedProcess {
         environment: Environment = .inherited(adding: [:]),
         standardInput: Data? = nil,
         timeout: TimeInterval = 30,
+        idleTimeout: TimeInterval? = nil,
         captureStandardError: Bool = false,
         maxStandardOutputBytes: Int? = nil,
+        maxStandardErrorBytes: Int? = nil,
         cancellation: Cancellation? = nil,
-        onStandardOutput: (@Sendable (Data) -> Void)? = nil
+        onStandardOutput: (@Sendable (Data) -> Void)? = nil,
+        keepsStandardOutput: Bool = true
     ) -> Outcome? {
         guard FileManager.default.isExecutableFile(atPath: executableURL.path) else {
             return nil
@@ -164,9 +178,12 @@ enum BoundedProcess {
             from: process,
             didTerminate: didTerminate,
             timeout: timeout,
+            idleTimeout: idleTimeout,
             maxStandardOutputBytes: maxStandardOutputBytes,
+            maxStandardErrorBytes: maxStandardErrorBytes,
             cancellation: cancellation,
-            onStandardOutput: onStandardOutput
+            onStandardOutput: onStandardOutput,
+            keepsStandardOutput: keepsStandardOutput
         )
         return Outcome(
             standardOutput: standardOutput,
@@ -270,9 +287,12 @@ enum BoundedProcess {
         from process: Process,
         didTerminate: DispatchSemaphore,
         timeout: TimeInterval,
+        idleTimeout: TimeInterval?,
         maxStandardOutputBytes: Int?,
+        maxStandardErrorBytes: Int?,
         cancellation: Cancellation?,
-        onStandardOutput: (@Sendable (Data) -> Void)?
+        onStandardOutput: (@Sendable (Data) -> Void)?,
+        keepsStandardOutput: Bool
     ) -> (standardOutput: Data, standardError: Data, stop: Stop?) {
         let readHandles = [output, errorOutput].compactMap { $0?.fileHandleForReading }
         let deadline = ProcessInfo.processInfo.systemUptime + max(0, timeout)
@@ -282,15 +302,32 @@ enum BoundedProcess {
         var buffer = [UInt8](repeating: 0, count: 64 * 1024)
 
         var reported = 0
+        // Standard output's size, kept or not.
+        var outputBytes = 0
+        var lastOutputAt = ProcessInfo.processInfo.systemUptime
         func report() {
-            guard let onStandardOutput, data[0].count > reported else { return }
-            onStandardOutput(data[0].subdata(in: reported..<data[0].count))
-            reported = data[0].count
+            if let maxStandardErrorBytes, data.count > 1, data[1].count > maxStandardErrorBytes {
+                data[1] = Data(data[1].suffix(maxStandardErrorBytes))
+            }
+            guard data[0].count > reported else { return }
+            lastOutputAt = ProcessInfo.processInfo.systemUptime
+            outputBytes += data[0].count - reported
+            onStandardOutput?(data[0].subdata(in: reported..<data[0].count))
+            if keepsStandardOutput {
+                reported = data[0].count
+            } else {
+                data[0] = Data()
+                reported = 0
+            }
+        }
+        func isIdle() -> Bool {
+            guard let idleTimeout else { return false }
+            return ProcessInfo.processInfo.systemUptime - lastOutputAt > idleTimeout
         }
 
         func isOverLimit() -> Bool {
             guard let maxStandardOutputBytes else { return false }
-            return data[0].count > maxStandardOutputBytes
+            return outputBytes > maxStandardOutputBytes
         }
 
         func stopped(_ stop: Stop) -> (standardOutput: Data, standardError: Data, stop: Stop?) {
@@ -318,6 +355,7 @@ enum BoundedProcess {
                 break
             }
             if cancellation?.isCancelled == true { return stopped(.cancelled) }
+            if isIdle() { return stopped(.idle) }
             let remaining = deadline - ProcessInfo.processInfo.systemUptime
             guard remaining > 0 else { return stopped(.timedOut) }
 

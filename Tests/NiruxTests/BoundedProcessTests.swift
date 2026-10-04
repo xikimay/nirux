@@ -361,6 +361,72 @@ final class BoundedProcessTests: XCTestCase {
     }
 }
 
+extension BoundedProcessTests {
+    /// A child whose output stays silent past the idle timeout stops, well
+    /// before the overall timeout.
+    func testASilentChildStopsAtTheIdleTimeout() throws {
+        let startedAt = Date()
+        let outcome = try XCTUnwrap(BoundedProcess.execute(
+            executableURL: try makeScript("printf first\nexec sleep 30"),
+            arguments: [],
+            currentDirectoryURL: directory,
+            timeout: 30,
+            idleTimeout: 1
+        ))
+        XCTAssertEqual(outcome.stop, .idle)
+        XCTAssertEqual(String(decoding: outcome.standardOutput, as: UTF8.self), "first")
+        XCTAssertLessThan(Date().timeIntervalSince(startedAt), 10)
+    }
+
+    /// Output read through the callback isn't kept a second time, though
+    /// its limit still counts; standard error keeps its end only.
+    func testOutputCanBeStreamedOnlyAndStandardErrorIsCapped() throws {
+        let chunks = Chunks()
+        let outcome = try XCTUnwrap(BoundedProcess.execute(
+            executableURL: try makeScript("""
+            head -c \(Self.largeOutputSize) /dev/zero | tr '\\0' e >&2
+            printf end >&2
+            head -c \(Self.largeOutputSize) /dev/zero | tr '\\0' o
+            """),
+            arguments: [],
+            currentDirectoryURL: directory,
+            timeout: 10,
+            captureStandardError: true,
+            maxStandardErrorBytes: 100,
+            onStandardOutput: { chunks.append($0) },
+            keepsStandardOutput: false
+        ))
+        XCTAssertEqual(outcome.terminationStatus, 0)
+        XCTAssertTrue(outcome.standardOutput.isEmpty)
+        XCTAssertEqual(chunks.data.count, Self.largeOutputSize)
+        XCTAssertEqual(outcome.standardError.count, 100)
+        XCTAssertEqual(String(decoding: outcome.standardError.suffix(3), as: UTF8.self), "end")
+
+        let limited = try XCTUnwrap(BoundedProcess.execute(
+            executableURL: try makeScript("head -c \(Self.largeOutputSize) /dev/zero | tr '\\0' o\nexec sleep 30"),
+            arguments: [],
+            currentDirectoryURL: directory,
+            timeout: 20,
+            maxStandardOutputBytes: 1_000,
+            onStandardOutput: { _ in },
+            keepsStandardOutput: false
+        ))
+        XCTAssertEqual(limited.stop, .outputLimit)
+    }
+
+    /// A cancellation made from another stops with it.
+    func testACancellationStopsWithItsParent() {
+        let parent = BoundedProcess.Cancellation()
+        let child = BoundedProcess.Cancellation(parent: parent)
+        XCTAssertFalse(child.isCancelled)
+        parent.cancel()
+        XCTAssertTrue(child.isCancelled)
+        let other = BoundedProcess.Cancellation(parent: BoundedProcess.Cancellation())
+        other.cancel()
+        XCTAssertTrue(other.isCancelled)
+    }
+}
+
 /// Chunks of output, appended on the waiting thread.
 private final class Chunks: @unchecked Sendable {
     private let lock = NSLock()

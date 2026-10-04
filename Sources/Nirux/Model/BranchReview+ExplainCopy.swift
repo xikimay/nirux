@@ -100,14 +100,15 @@ extension BranchReview {
     /// line breaks, bidi controls and other invisible characters as their
     /// code point (`⟨U+202E⟩`), so a path can't fake a line of the input
     /// or hide its extension. A variation selector stays after an emoji.
-    static func visible(_ text: String) -> String {
+    /// Prose (`keepingLineBreaks`) keeps its line breaks and tabs.
+    static func visible(_ text: String, keepingLineBreaks: Bool = false) -> String {
         var result = ""
         var previous: Unicode.Scalar?
         for scalar in text.unicodeScalars {
             defer { previous = scalar }
             let value = scalar.value
             let isVariationSelector = value == 0xFE0E || value == 0xFE0F
-            let hidden = isVariationSelector
+            let hidden = keepingLineBreaks && (value == 0x0A || value == 0x09) ? false : isVariationSelector
                 ? !(previous?.properties.isEmoji ?? false)
                 : scalar.properties.generalCategory == .control || scalar.properties.isDefaultIgnorableCodePoint
                     || value == 0x2028 || value == 0x2029 || (0xFFF9...0xFFFB).contains(value)
@@ -302,9 +303,9 @@ extension BranchReview {
                     switch read(path, from: rootDescriptor, limits: limits, budget: limits.maxTotalBytes - total) {
                     case .failure(let reason):
                         return reason
-                    case .success(let (data, text, isExecutable)):
+                    case .success(let (data, text)):
                         if Secrets.containsKey(text) { return .key }
-                        guard write(data, to: folder.appendingPathComponent(path), executable: isExecutable) else {
+                        guard write(data, to: folder.appendingPathComponent(path)) else {
                             return .notWritten
                         }
                         total += data.count
@@ -362,7 +363,7 @@ extension BranchReview {
         /// link, within the limits.
         private static func read(
             _ path: String, from rootDescriptor: Int32, limits: Limits, budget: Int
-        ) -> Result<(Data, String, Bool), LeftOut> {
+        ) -> Result<(Data, String), LeftOut> {
             let descriptor = openat(rootDescriptor, path, O_RDONLY | O_NOFOLLOW_ANY | O_NONBLOCK | O_CLOEXEC)
             guard descriptor >= 0 else {
                 switch errno {
@@ -401,15 +402,18 @@ extension BranchReview {
             guard !data.prefix(8_000).contains(0), let text = String(data: data, encoding: .utf8) else {
                 return .failure(.notText)
             }
-            return .success((data, text, info.st_mode & 0o111 != 0))
+            return .success((data, text))
         }
 
-        private static func write(_ data: Data, to url: URL, executable: Bool) -> Bool {
+        /// Never executable: the model only reads, and a branch's `bin/git`
+        /// must not run if something looks it up in the copy (a relative
+        /// `PATH` entry).
+        private static func write(_ data: Data, to url: URL) -> Bool {
             let folder = url.deletingLastPathComponent()
             guard (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil else {
                 return false
             }
-            let descriptor = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, executable ? 0o755 : 0o644)
+            let descriptor = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o644)
             guard descriptor >= 0 else { return false }
             defer { close(descriptor) }
             var offset = 0
