@@ -121,6 +121,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         setUpUsageLimits(window: window)
         setUpKeepAwake(window: window, shell: shellView)
         setupStatusBarNotices()
+        // Copies of a branch an Explain run left when Nirux quit or crashed.
+        BranchReview.ExplainCopy.sweepInBackground()
 
         // Native notifications: click focuses the originating workspace/column.
         NiruxNotifier.shared.setup()

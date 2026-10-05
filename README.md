@@ -14,6 +14,7 @@ Nirux is alpha software.
 - Review badges: a workspace's card shows which of `/code-review`, `/premortem`, `/code-style-review` and an adversarial review ran on the current HEAD (`CR ✓  PM ✓  CS ·  ADV ·`), orange once a newer commit lands. Nirux keeps the pass's name, never the prompt. See [docs/review-badges.md](docs/review-badges.md).
 - CI failures: when a workspace's open pull request turns red (only the latest run of each check counts), its card asks for attention and Nirux notifies once per failed job, once its run has ended, while in the background. The card's menu, and the notification's buttons, offer **Ask Agent Why CI Failed**, which types `gh run view <id> --repo <repository> --log-failed` into the workspace's agent, and **Rerun Failed CI Jobs…**, which runs `gh run rerun <id> --failed` once confirmed. Both act only on GitHub Actions runs of the pull request's own repository. See [docs/ci-failure-actions.md](docs/ci-failure-actions.md).
 - Quick switcher and Next Waiting Agent: type a workspace's name, branch, project or folder in `Cmd+P` and press Return to jump to it — in any project, inactive ones too (listed after active ones that match as well, and left inactive) — each row showing its agents' state (`working`, `waiting 12m`, `API error`); `Cmd+J` goes to the Claude agent blocked on you the longest (a permission, a question, an API error, a mid-turn exit), then on to the next at each press.
+- Session history: `Cmd+P` lists the current project's past Claude and Codex sessions, cleaned-up worktrees included, and Return resumes one — in its workspace, or a new one, bringing its worktree back when it was cleaned up (asking first when it can only resume somewhere else); **Session History…** lists every session, the ones a column runs first, with filters and what Return will do. See [docs/projects.md](docs/projects.md#6-history).
 - Keep Mac awake: while an agent works, Nirux keeps the Mac from idle-sleeping and shows a cup in the title bar; it lets go a minute after the last one stops — see [Keep Mac awake while agents work](#keep-mac-awake-while-agents-work).
 - Claude context usage: a Claude column's title bar shows how full its session's context window is (`ctx 62%`, or `ctx 124k` while the window size is unknown), with the session's token totals in a tooltip — read from the session transcript, see [Claude context usage](#claude-context-usage).
 - Claude plan usage limits (opt-in): the window's title bar shows the 5-hour window and the weekly limit of a Pro or Max plan (`5h 42% · 7d 18%`), with their resets in a tooltip, see [Claude plan usage limits](#claude-plan-usage-limits).
@@ -99,6 +100,7 @@ Typical command palette actions:
 - Open Codex
 - New Task…
 - Resume All Agents
+- Session History…
 - New Worktree
 - Open Worktree
 - Clean Up Merged Worktrees
@@ -140,7 +142,7 @@ Useful shortcuts:
 | `Cmd+,` | Settings (General, Agents, Notifications, Experimental, Telegram); a change applies at once |
 | `Cmd+Z` / `Shift+Cmd+Z` | Undo / redo in the editor and in panel text fields (palette, rename, settings) |
 | `Shift+Cmd+F` | Search workspace |
-| `Alt+Cmd+F` | Search Everywhere: text in the scrollback of every terminal, across workspaces and projects; picking a match opens its terminal's find bar on it. A full-screen program (vim, less, Claude Code in its no-flicker mode) shows no scrollback: only its screen is searched |
+| `Alt+Cmd+F` | Search Everywhere: text in the scrollback of every terminal, across workspaces and projects; picking a match opens its terminal's find bar on it. A full-screen program (vim, less, Claude Code in its no-flicker mode) shows no scrollback: only its screen is searched. Then the transcripts of the Claude sessions the history knows (running or past, only what you typed and Claude answered, read in place within a time budget); picking one of their matches resumes the session, or goes to its column |
 | `Cmd+F` | Find in the focused editor or terminal; a terminal's find bar closes with `Esc` |
 | `Cmd+G` / `Shift+Cmd+G` | Next / previous terminal match (`Return` / `Shift+Return` in the find bar); next moves up to older output, as in Ghostty |
 | `Cmd+S` / `Alt+Cmd+S` | Save the active editor file / save all |

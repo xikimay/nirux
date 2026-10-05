@@ -608,6 +608,37 @@ extension BranchReview {
             }
         }
 
+        /// `change` applied to the review as it is on disk, without
+        /// recording a head: for a writer whose snapshot is older than the
+        /// head the review was opened at since (Explain's cache, whose
+        /// entries hold at that head too). Only while the file is this
+        /// branch's, at `lastHead`: a review deleted (Clean Up), archived or
+        /// moved on again fails with `changedSinceOpened`, and is never
+        /// created. Call it off the main thread.
+        func update(keepingHead lastHead: String, _ change: (inout Record) -> Void) -> Result<Loaded, WriteError> {
+            do {
+                return try Self.withExclusiveLock(at: lockURL, timeout: lockTimeout) {
+                    let current = read().loaded
+                    if case .readOnly(let reason) = current.status { return .failure(.readOnly(reason)) }
+                    if case .missing = current.status {
+                        // Deleted (Clean Up): nor its lock file.
+                        unlink(lockURL.path)
+                        return .failure(.changedSinceOpened)
+                    }
+                    guard case .loaded = current.status, current.record.branch == branch,
+                          current.record.repository == repository, current.record.lastHead == lastHead
+                    else { return .failure(.changedSinceOpened) }
+                    var record = current.record
+                    change(&record)
+                    let written = Loaded(record: record, status: .loaded)
+                    if record == current.record { return .success(written) }
+                    return write(record).map { written }
+                }
+            } catch {
+                return .failure(.couldNotLock(error.localizedDescription))
+            }
+        }
+
         /// Atomically, 0600. Under the lock.
         private func write(_ record: Record) -> Result<Void, WriteError> {
             let encoder = JSONEncoder()

@@ -1,10 +1,13 @@
 import AppKit
 
 /// Search Everywhere (⌥⌘F): one needle, searched in the scrollback of every
-/// terminal of every workspace, in every project. Matches stream in as each
-/// terminal is read (GlobalTerminalSearch), grouped by terminal, the newest
-/// first. Picking one hands it to `onPick`, which brings its column forward
-/// with the find bar open on it.
+/// terminal of every workspace, in every project, then in the Claude
+/// transcripts of the sessions the history knows (a no-flicker conversation
+/// keeps no scrollback, a past one has no terminal). Matches stream in as
+/// each terminal or transcript is read (GlobalTerminalSearch), grouped by
+/// terminal or session, the newest first. Picking a terminal's match hands
+/// it to `onPick`, which brings its column forward with the find bar open on
+/// it; picking a session's hands it to `onPickSession`, which resumes it.
 @MainActor
 final class GlobalSearchPanel: NSObject {
     /// One terminal to search, in the order its matches are listed.
@@ -17,13 +20,39 @@ final class GlobalSearchPanel: NSObject {
         let read: GlobalTerminalSearch.Reader
     }
 
+    /// A session whose Claude transcript is searched after the terminals.
+    struct Session {
+        let record: AgentSessionRecord
+        let spaceID: String
+        /// What the rows call it (see `SessionHistory.title`).
+        let title: String
+        let transcriptPath: String
+    }
+
     struct Row {
+        enum Source {
+            /// A terminal's match, with the terminal's matches when it was
+            /// read.
+            case terminal(ScrollbackSearch.Match, total: Int)
+            /// A match in a session's transcript.
+            case session(Session)
+        }
+
+        /// A terminal's column.
         weak var column: ColumnState?
         let place: String
         let needle: String
-        let match: ScrollbackSearch.Match
-        /// The terminal's matches when it was read.
-        let total: Int
+        let excerpt: String
+        /// The match in `excerpt`, in UTF-16 units.
+        let highlight: NSRange
+        /// "line 12" in a terminal; "you · 2 h ago" in a transcript.
+        let detail: String
+        let source: Source
+
+        var session: Session? {
+            if case .session(let session) = source { return session }
+            return nil
+        }
     }
 
     /// A picked match: its column, still open, and where to find it.
@@ -36,10 +65,13 @@ final class GlobalSearchPanel: NSObject {
     }
 
     nonisolated static let minNeedleLength = 2
+    /// Terminal rows; transcripts have rows of their own, so that terminals
+    /// with a common word don't leave them none.
     nonisolated static let maxRows = 500
+    nonisolated static let maxSessionRows = 200
     nonisolated static let typingDelay: TimeInterval = 0.15
     static let panelSize = NSSize(width: 720, height: 480)
-    static let placeholder = "Search every terminal…"
+    static let placeholder = "Search every terminal and Claude session…"
 
     private var panel: NSPanel?
     private(set) var searchField: NSTextField?
@@ -48,10 +80,13 @@ final class GlobalSearchPanel: NSObject {
 
     private(set) var rows: [Row] = []
     private var targets: [Target] = []
+    private var sessions: [Session] = []
     private var progress = Progress()
     private let search = GlobalTerminalSearch()
     private var targetsProvider: () -> [Target] = { [] }
+    private var sessionsProvider: () -> [Session] = { [] }
     private var onPick: (Pick) -> Void = { _ in }
+    private var onPickSession: (Session) -> Void = { _ in }
 
     private var keyMonitor: Any?
     private var clickMonitor: Any?
@@ -65,14 +100,31 @@ final class GlobalSearchPanel: NSObject {
         var terminals = 0
         var terminalsWithMatches = 0
         var matches = 0
+        var terminalRows = 0
+        var terminalsDone = false
+        var sessions = 0
+        var sessionsWithMatches = 0
+        var sessionMatches = 0
+        var sessionRows = 0
+        /// Set once the transcripts were read.
+        var transcripts: GlobalTerminalSearch.TranscriptSummary?
     }
 
-    /// Shows the panel over `window`. `targets` is asked again on every
-    /// search, so terminals opened meanwhile are searched too. Reopening
-    /// keeps the last needle, selected, and searches it again.
-    func show(relativeTo window: NSWindow, targets: @escaping () -> [Target], onPick: @escaping (Pick) -> Void) {
+    /// Shows the panel over `window`. `targets` and `sessions` are asked
+    /// again on every search, so terminals opened meanwhile are searched
+    /// too. Reopening keeps the last needle, selected, and searches it
+    /// again.
+    func show(
+        relativeTo window: NSWindow,
+        targets: @escaping () -> [Target],
+        sessions: @escaping () -> [Session] = { [] },
+        onPick: @escaping (Pick) -> Void,
+        onPickSession: @escaping (Session) -> Void = { _ in }
+    ) {
         targetsProvider = targets
+        sessionsProvider = sessions
         self.onPick = onPick
+        self.onPickSession = onPickSession
         if panel == nil { createPanel() }
         guard let panel, let searchField else { return }
 
@@ -98,6 +150,10 @@ final class GlobalSearchPanel: NSObject {
         pendingSearch = nil
         search.cancel()
         targets = []
+        sessions = []
+        // Transcript excerpts are the user's prompts: not kept once closed.
+        rows = []
+        tableView?.reloadData()
         removeMonitors()
         panel?.orderOut(nil)
     }
@@ -122,19 +178,34 @@ final class GlobalSearchPanel: NSObject {
         let needle = TerminalSearchSession.sanitized(searchField?.stringValue ?? "")
         guard needle.count >= Self.minNeedleLength else {
             targets = []
+            sessions = []
             statusLabel?.stringValue = needle.isEmpty ? "" : "Type at least \(Self.minNeedleLength) characters"
             return
         }
         targets = targetsProvider()
+        sessions = sessionsProvider()
         progress.terminals = targets.count
-        if !targets.isEmpty {
+        progress.sessions = sessions.count
+        if !targets.isEmpty || !sessions.isEmpty {
             search.start(
                 needle: needle,
                 readers: targets.map(\.read),
+                transcripts: sessions.map(\.transcriptPath),
                 onMatches: { [weak self] index, result in
                     self?.append(result, from: index, needle: needle)
                 },
-                onDone: { [weak self] in self?.updateStatus() }
+                onTerminalsDone: { [weak self] in
+                    self?.progress.terminalsDone = true
+                    self?.updateStatus()
+                },
+                onTranscriptMatches: { [weak self] index, result in
+                    self?.append(result, fromSession: index, needle: needle)
+                },
+                onDone: { [weak self] summary in
+                    self?.progress.terminalsDone = true
+                    self?.progress.transcripts = summary
+                    self?.updateStatus()
+                }
             )
         }
         updateStatus()
@@ -144,9 +215,44 @@ final class GlobalSearchPanel: NSObject {
         guard let target = targets[safe: index] else { return }
         progress.terminalsWithMatches += 1
         progress.matches += result.total
-        let added = result.matches.prefix(Self.maxRows - rows.count).map {
-            Row(column: target.column, place: target.place, needle: needle, match: $0, total: result.total)
+        let added = result.matches.prefix(Self.maxRows - progress.terminalRows).map {
+            Row(
+                column: target.column, place: target.place, needle: needle, excerpt: $0.excerpt,
+                highlight: $0.highlight, detail: "line \($0.line)", source: .terminal($0, total: result.total)
+            )
         }
+        progress.terminalRows += added.count
+        add(added)
+    }
+
+    private func append(_ result: TranscriptSearch.Result, fromSession index: Int, needle: String) {
+        guard let session = sessions[safe: index] else { return }
+        progress.sessionsWithMatches += 1
+        progress.sessionMatches += result.total
+        let place = Self.place(of: session, customTitle: result.customTitle, aiTitle: result.aiTitle)
+        let now = Date()
+        let added = result.matches.prefix(Self.maxSessionRows - progress.sessionRows).map { match in
+            let who = match.role == .user ? "you" : "Claude"
+            let when = match.timestamp.map { SessionHistory.ago(now.timeIntervalSince($0)) }
+            // Its terminal may hold the same lines, with a find bar.
+            let running = session.record.isActive ? "running" : nil
+            return Row(
+                column: nil, place: place, needle: needle, excerpt: match.excerpt, highlight: match.highlight,
+                detail: [who, when, running].compactMap { $0 }.joined(separator: " · "), source: .session(session)
+            )
+        }
+        progress.sessionRows += added.count
+        add(added)
+    }
+
+    /// The session's name, then its title: the one it was given, unless
+    /// that is the name (Nirux launches with `--name`), else Claude's own.
+    nonisolated static func place(of session: Session, customTitle: String?, aiTitle: String?) -> String {
+        let title = [customTitle, aiTitle].compactMap { $0 }.first { $0 != session.title }
+        return title.map { "\(session.title) · \($0)" } ?? session.title
+    }
+
+    private func add(_ added: [Row]) {
         if !added.isEmpty {
             let wasEmpty = rows.isEmpty
             rows += added
@@ -159,13 +265,46 @@ final class GlobalSearchPanel: NSObject {
     }
 
     private func updateStatus() {
-        statusLabel?.stringValue = Self.status(
-            terminals: progress.terminals,
-            terminalsWithMatches: progress.terminalsWithMatches,
-            matches: progress.matches,
-            shown: rows.count,
-            isSearching: search.isRunning
-        )
+        var parts: [String] = []
+        if progress.terminals > 0 || progress.sessions == 0 {
+            parts.append(Self.status(
+                terminals: progress.terminals,
+                terminalsWithMatches: progress.terminalsWithMatches,
+                matches: progress.matches,
+                shown: progress.terminalRows,
+                isSearching: search.isRunning && !progress.terminalsDone
+            ))
+        }
+        if progress.sessions > 0, progress.terminalsDone || progress.terminals == 0 {
+            parts.append(Self.sessionStatus(
+                matches: progress.sessionMatches, withMatches: progress.sessionsWithMatches,
+                shown: progress.sessionRows, summary: progress.transcripts
+            ))
+        }
+        statusLabel?.stringValue = parts.joined(separator: " · ")
+        // The line may be cut: all of it on hover.
+        statusLabel?.toolTip = statusLabel?.stringValue
+    }
+
+    /// The transcripts' part of the status line; `summary` is nil while
+    /// they are read.
+    nonisolated static func sessionStatus(
+        matches: Int, withMatches: Int, shown: Int, summary: GlobalTerminalSearch.TranscriptSummary?
+    ) -> String {
+        guard let summary else {
+            let searching = "Searching Claude sessions…"
+            return matches == 0 ? searching : "\(searching) \(counted(matches, "match", "matches")) so far"
+        }
+        if summary.searched == 0 { return "No Claude session to search" }
+        var status = matches == 0
+            ? "No matches in \(counted(summary.searched, "session"))"
+            : "\(counted(matches, "match", "matches")) in \(withMatches) of \(counted(summary.searched, "session"))"
+        if shown < matches { status += " · \(shown) shown" }
+        let notes = [
+            summary.isCut ? "older sessions not searched" : nil,
+            summary.partial > 0 ? "\(counted(summary.partial, "long transcript")) read from the end" : nil
+        ].compactMap { $0 }
+        return notes.isEmpty ? status : status + " (" + notes.joined(separator: "; ") + ")"
     }
 
     nonisolated static func status(
@@ -190,8 +329,13 @@ final class GlobalSearchPanel: NSObject {
     private func commit(row index: Int) {
         guard let row = rows[safe: index] else { return }
         dismiss()
-        guard let column = row.column else { return NSSound.beep() }
-        onPick(Pick(column: column, needle: row.needle, match: row.match, total: row.total))
+        switch row.source {
+        case .session(let session):
+            onPickSession(session)
+        case .terminal(let match, let total):
+            guard let column = row.column else { return NSSound.beep() }
+            onPick(Pick(column: column, needle: row.needle, match: match, total: total))
+        }
     }
 
     @objc private func tableClicked() {
@@ -363,8 +507,9 @@ extension GlobalSearchPanel: NSTableViewDataSource, NSTableViewDelegate {
     }
 }
 
-/// Where the match is ("workspace › column", its line) over the line
-/// itself, the match highlighted.
+/// Where the match is (a terminal's "workspace › column" and line, or a
+/// session's name, who wrote it and when) over the line itself, the match
+/// highlighted.
 private final class GlobalSearchCellView: NSTableCellView {
     private let placeLabel = NSTextField(labelWithString: "")
     private let lineLabel = NSTextField(labelWithString: "")
@@ -386,7 +531,8 @@ private final class GlobalSearchCellView: NSTableCellView {
 
     override func layout() {
         super.layout()
-        let lineWidth: CGFloat = 90
+        // As wide as "line 12" or "Claude · 5 days ago" needs.
+        let lineWidth = min(180, ceil(lineLabel.intrinsicContentSize.width))
         placeLabel.frame = NSRect(x: 16, y: 21, width: bounds.width - 32 - lineWidth, height: 16)
         lineLabel.frame = NSRect(x: bounds.width - 16 - lineWidth, y: 21, width: lineWidth, height: 16)
         excerptLabel.frame = NSRect(x: 16, y: 4, width: bounds.width - 32, height: 15)
@@ -394,18 +540,26 @@ private final class GlobalSearchCellView: NSTableCellView {
 
     func configure(_ row: GlobalSearchPanel.Row) {
         placeLabel.stringValue = row.place
-        lineLabel.stringValue = "line \(row.match.line)"
-        let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-        let excerpt = NSMutableAttributedString(string: row.match.excerpt, attributes: [
+        lineLabel.stringValue = row.detail
+        // A transcript's text is prose; a terminal's, machine text.
+        let isProse = row.session != nil
+        let font = isProse ? Theme.Font.caption : NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        // The string's paragraph style decides, not the field's.
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let excerpt = NSMutableAttributedString(string: row.excerpt, attributes: [
             .font: font,
-            .foregroundColor: NSColor.white.withAlphaComponent(0.6)
+            .foregroundColor: NSColor.white.withAlphaComponent(0.6),
+            .paragraphStyle: paragraph
         ])
-        if NSMaxRange(row.match.highlight) <= excerpt.length {
+        if NSMaxRange(row.highlight) <= excerpt.length {
             excerpt.addAttributes([
-                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .bold),
+                .font: isProse ? Theme.Font.captionEmphasized : NSFont.monospacedSystemFont(ofSize: 11, weight: .bold),
                 .foregroundColor: Theme.Color.accent
-            ], range: row.match.highlight)
+            ], range: row.highlight)
         }
         excerptLabel.attributedStringValue = excerpt
+        // The detail's width changes with its text.
+        needsLayout = true
     }
 }

@@ -599,9 +599,9 @@ extension WorkspaceState {
         )
     }
 
-    func addColumn(agentUUID: String = UUID().uuidString) {
+    func addColumn(agentUUID: String = UUID().uuidString, cwd: String? = nil) {
         let col = ColumnState(
-            cwd: focusedWorkingDirectory,
+            cwd: cwd ?? focusedWorkingDirectory,
             environment: terminalEnvironment(agentUUID: agentUUID)
         )
         setupAllTracking(for: col)

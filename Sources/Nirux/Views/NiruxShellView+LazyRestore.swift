@@ -35,27 +35,9 @@ extension NiruxShellView {
                 environment: workspace.terminalEnvironment(agentUUID: agentUUID)
             )
         }
-        let command: String
-        switch deferred.agent.openingElsewhere(liveSessions ?? Self.liveSessionIDs(in: workspaces)) {
-        case .claude(let resume, let mode):
-            // The brief goes on restores too: a resumed conversation keeps
-            // the prompt it recorded until it compacts, then rebuilds it
-            // from the flags of this launch.
-            command = Self.claudeCommand(
-                resume: resume, mode: mode, briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile
-            )
-            if case .session(let sessionID)? = resume { column.prepareClaudeResume(sessionID: sessionID) }
-        case .codex(let resume, let mode):
-            command = Self.codexCommand(
-                resume: resume,
-                mode: mode,
-                briefFile: Self.codexBriefFile(
-                    from: spaceBriefInjection(for: workspace),
-                    launchDirectory: column.launchDirectory ?? workspace.cwd
-                )
-            )
-            if case .session(let sessionID) = resume { column.prepareCodexResume(sessionID: sessionID) }
-        }
+        let command = resumeLaunchCommand(
+            deferred.agent.openingElsewhere(liveSessions ?? Self.liveSessionIDs(in: workspaces)), in: workspace, column: column
+        )
         sideEffects.startRestoredAgent(column, command)
         scheduleMetadataRefresh()
         return true
@@ -156,19 +138,7 @@ extension NiruxShellView {
     /// front's own reports tell: a session resumed there while a column
     /// waited is theirs. A waiting column runs nothing.
     static func liveSessionIDs(in workspaces: [WorkspaceState]) -> [String] {
-        let snapshot = ProcessSnapshot()
-        return workspaces.flatMap(\.columns).flatMap { other -> [String] in
-            guard let pty = other.pty, let shellPID = pty.shellPID else { return [] }
-            var live = snapshot.descendantArguments(of: shellPID, named: ["claude", "codex"]).flatMap { $0 }
-            if let foreground = pty.foregroundProcess(snapshot: snapshot) {
-                live += foreground.arguments
-                live += [
-                    other.confirmedClaudeSessionID(foregroundProcess: foreground),
-                    other.boundCodexSessionID(of: foreground.instance)
-                ].compactMap { $0 }
-            }
-            return live
-        }
+        agentSessionHolders(in: workspaces, snapshot: ProcessSnapshot()).flatMap(\.liveText)
     }
 
     /// What a column row shows of an agent that hasn't resumed.

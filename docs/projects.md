@@ -542,8 +542,9 @@ its project. The transcript format is internal and may change between versions
 ([sessions][sessions]), so Nirux does not parse it.
 
 Instead Nirux keeps its own **session ledger** per space (`AgentSessionLedger`),
-built from the hook events it already routes. The data layer has shipped; the
-list in the Project Board comes later.
+built from the hook events it already routes. ⌘P lists a space's past sessions
+and resumes them, and Session History… lists them all (see "Resuming from ⌘P"
+below).
 
 - **File:** `<state dir>/projects/<space id>/sessions.jsonl`, next to the
   brief. One JSON line per change holding the whole record, the last line of a
@@ -573,8 +574,8 @@ list in the Project Board comes later.
   closing; Nirux quitting. A session found open at load was cut off by a crash
   and ends at its last activity. A restored column's agent reopens it. The
   ledger is history, not a lock: a restored Codex thread reads as ended until
-  its first turn completes, so the Project Board must check the live columns
-  before offering Resume.
+  its first turn completes, so Resume checks the live columns first (see
+  "Resuming from ⌘P").
 - **Space:** a running session follows its workspace into another space
   (Move to Project, or its space deleted); an ended one stays where it was.
 - **Checkout:** the workspace's, when the agent works inside it. A worktree
@@ -582,8 +583,10 @@ list in the Project Board comes later.
   its own top level, and gets no checkout.
 - **Pull request:** every session of a checkout learns the pull request found
   for its branch, ended ones included; one that knows another number keeps it,
-  and a session that moves to another branch forgets it. Its state isn't
-  refreshed once the worktree is gone, so the Project Board should ask GitHub.
+  and a session that moves to another branch forgets it. A session a Resume
+  brought back detached in its worktree, or in the main checkout, keeps its
+  branch, pull request and worktree. Its state isn't refreshed once the
+  worktree is gone, so the Project Board should ask GitHub.
 - **Damage and other builds:** a line this build can't fully read (a newer
   `v`, an unknown key or value) is kept as it is through rewrites, and its
   session is never updated here, so a rollback strips nothing. Lines that
@@ -619,17 +622,28 @@ scratch config folders and a fake API server (no request left the machine).
 
 So `AgentSessionResume.plan` picks:
 
-1. the session's folder (or its worktree root) while it exists, with a warning
-   when that folder now has another branch checked out;
-2. otherwise the same path, recreated from the main checkout with
-   `git worktree prune` then `git worktree add <path> <branch>`, so the
-   conversation's paths are valid again and Codex has nothing to ask. Nirux's
-   own clean-up deletes the branch after its merge: the worktree then comes
-   back at the session's last commit, with no branch checked out, and a
-   warning. After a squash merge that commit is unreachable and `git gc`
-   eventually prunes it; the Project Board can fetch `pull/<number>/head`
-   first;
-3. otherwise the main checkout, with a warning that the paths in the
+1. the top of the session's checkout (else its last folder) while it exists,
+   with a warning when it now has another branch checked out. The agent's last
+   folder is often a subfolder it moved to with `cd`;
+2. otherwise the checkout that has its branch now (a worktree moved with
+   `git worktree move`, or the branch checked out elsewhere), with a warning;
+3. otherwise the same path, recreated from the main checkout with
+   `git worktree add <path> <branch>`, so the conversation's paths are valid
+   again and Codex has nothing to ask. Nirux's own clean-up deletes the branch
+   after its merge: the worktree then comes back at the session's last commit,
+   with no branch checked out, and a warning (none for a session that ran
+   detached). After a squash merge that commit is unreachable and `git gc`
+   eventually prunes it. Git may still list the path: the folder then went
+   away outside git (Nirux's clean-up leaves no entry), moved in the Finder or
+   on a disk that isn't mounted, and the plan warns. `--force` replaces that
+   one entry; Nirux never runs `git worktree prune`, which would drop the
+   entry of every missing worktree, a moved one's included, and break it. A
+   branch git still gives to another missing folder rules the branch out (the
+   last commit comes back); a locked entry rules the path out (next step).
+   Resumes of one repository plan and recreate one after the other: two
+   `git worktree add` on one path at once break each other inside git, and a
+   plan made meanwhile would open a folder still being checked out;
+4. otherwise the main checkout, with a warning that the paths in the
    conversation point to the old worktree and edits will land in the main
    checkout.
 
@@ -640,13 +654,99 @@ conversation, or once Claude deleted the transcript (`cleanupPeriodDays`, 30
 days by default). A read-only view isn't needed: resuming sends no request
 until the user types.
 
-Using it, in the Project Board (later):
+### Resuming from ⌘P
 
-- the list of a space's sessions, newest first, filtered by state and pull
-  request (`AgentSessionLedger.sessions(inSpace:matching:)`), with Resume;
-- **Browse all sessions** covers sessions Nirux didn't launch: a column in
-  the main checkout running `claude --resume` (then `Ctrl+W`) or
-  `codex resume --all`.
+⌘P lists the current space's ended sessions under **Sessions**, after the
+workspaces: the 50 most recently active that were prompted, one row each (the
+name it was launched with, else its workspace, branch or folder; when it was
+last active, its branch, pull request and folder). A session a column runs, or
+a restored column will resume, isn't listed: its workspace's row leads there.
+The search matches the title, branch, workspace, folder name and pull request
+number.
+
+Picking one resumes it (`NiruxShellView.resumeSession`):
+
+1. A column that holds the session gets the focus instead: one whose agent
+   runs it (the session its hooks confirmed, else the id in its arguments: after
+   `/clear` they name a session it left), one a Resume or a restore launched
+   it in less than 30 seconds ago (no process shows it yet), a restored column
+   that will resume it, or a column whose agent died on it mid-turn. The last
+   two resume it then. Two agents appending to one transcript corrupt it.
+2. `AgentSessionResume.plan` runs off the main thread, with git read-only.
+   It also warns when Claude's transcript changed well after Nirux last saw
+   the session (its last event, or the end Nirux gave it), in the last 10
+   minutes: it may run in another app, or in
+   another Nirux on the same state.
+3. A plan with a warning asks first, in an alert where Return and Escape
+   cancel (resuming takes a click or ⌘D): it comes after the git reads, under
+   keys meant for a terminal. Recreating the worktree on its branch doesn't
+   ask.
+4. A removed worktree comes back (see the plan above); a toast says so. A
+   folder that appeared after the plan (while the question was up) is planned
+   again. A failure is a toast with git's error, and nothing resumes, unless
+   the checkout is there anyway (a failing post-checkout hook): the toast then
+   says so, and it resumes.
+5. The agent resumes in a new column, in the plan's folder: of the workspace it
+   ran in, else of a workspace of the space open on that folder, else of a new
+   workspace titled like the row. The launch line is the one a restore uses,
+   with Settings' launch mode and the space's brief, and the column is told
+   the session id, so a quit before its first hook still restores it.
+
+Session ids must be UUIDs, as for restores: a hand-edited history can't put an
+option on the launch line.
+
+**Session History…** (⌘P) opens a panel with every prompted session of the
+space, read as it opens. The ones a column holds come first, under **Open**,
+with what the column's agent does now, as ⌘P shows it (working, waiting, an
+API error, running), or "not resumed yet", or "exited mid-turn"; then the
+ended ones. A session the history still has running in a column counts as held there
+even when neither its hooks nor its arguments say so: while its agent is stopped
+with `^Z`, or an editor opened from it is in front (and, for Codex, after `fg`
+until its next turn). Resume looks for that column too. The live state is the
+column's agent's only when that agent runs the session.
+The field filters like ⌘P, each part ranked the same way; two switches filter
+by pull request (with, without) and by agent. Under the list, what Return does
+on the selected row: go to its column, or resume it and where, from the plan
+Resume uses (read off the main thread, after any Resume of the same repository,
+a moment after the selection settles), its warning in orange, "(asks first)"
+when the alert will come. Return, the button or a double click goes through
+Resume, which looks again for a column that holds the session.
+
+**Search Everywhere** (⌥⌘F) reads, after the terminals, the transcripts of
+the Claude sessions the history knows (`TranscriptSearch`): a conversation in
+Claude's no-flicker mode runs on the alternate screen, which keeps no
+scrollback, and a past one has no terminal. Every space's, the most recently
+active first, up to 200 transcripts still on disk. Read-only and in place, off
+the main thread:
+
+- only what the user typed and Claude answered: the text of a `user` line whose
+  `origin` is the human's (older lines have none), part by part, without what
+  a harness wrote into it (a `<system-reminder>`, `[Request interrupted…]`,
+  `!` command output); the arguments of a slash command; a prompt queued while
+  Claude worked (a `queued_command` attachment); an `assistant` line's `text`
+  parts. Not tool calls or output, thinking, task notifications, compaction
+  summaries, API errors, meta or subagent lines. The format is Claude Code's
+  and may change: a line that doesn't parse or look like that is skipped;
+- bounded: the last 64 MB of each transcript, lines up to 2 MB (a longer one
+  is a tool's), and 5 seconds for all of them (8 GB as a guard); a transcript
+  the deadline falls in keeps its newest part unread. A line is parsed only
+  when its bytes hold the needle as JSON writes it (quotes, backslashes and
+  newlines escaped), and not tool output. On 89 transcripts (443 MB) a search
+  takes 0.3 to 1.7 seconds in a release build, the longest for words found in
+  every line's keys ("session", "type"). The status line says when older
+  sessions weren't searched, or when a transcript was read only from its end;
+- the five newest matches of each session, under its name and the title it
+  was given (`--name`, `/rename`) unless that is its name, else Claude's own,
+  with who wrote it, when, and "running" when it runs. Terminals and
+  transcripts have their own rows (500 and 200), so that a common word in the
+  terminals leaves the sessions some. Picking a transcript's match resumes the
+  session (Resume above), or goes to the column that runs it. The rows go when
+  the panel closes.
+
+Not done yet: refreshing pull request states from GitHub; **Browse all
+sessions** for sessions Nirux didn't launch (a column in the main checkout
+running `claude --resume`, then `Ctrl+W`, or `codex resume --all`); spotting a
+Codex thread that runs outside Nirux's columns.
 
 Rejected: `CLAUDE_CODE_PROJECT_DIR_NAME` could store every worktree's
 transcripts under one name. It only works with `CLAUDE_CONFIG_DIR` set, and

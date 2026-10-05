@@ -313,12 +313,41 @@ What the runs found:
 **Recommendation: Opus 5.5 at effort medium, with read-only access to a copy
 of the branch.** About 80 s and $0.59 at API prices for a branch of this size.
 
+**Measured on five merged PRs (R3b-2, 2026-10-04),** with Claude Code 2.1.289,
+Opus 5.5 at effort medium, the flags and input of section 4.3, each PR's own
+body, its diff against `main` before its merge, and English answers:
+
+| PR | Files | Diff sent | Runs | Time per run | Read (cached) | Written | Reported cost | Notes, checks |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| #57 keep-awake | 16 | 66 KB | 1 | 63 s | 164k (119k) | 6.5k | $0.52 | 8, 5 |
+| #88 Mission tell | 14 | 51 KB | 1 | 84 s | 199k (159k) | 10.3k | $0.55 | 9, 7 |
+| #107 lexer extensions | 12 | 87 KB | 1 | 99 s | 311k (254k) | 9.6k | $0.70 | 13, 7 |
+| #104 Branch Review column | 31 | 176 KB | 2 | 64 s, 50 s | 238k (135k) | 12.3k | $1.10 | 17, 11 |
+| #62 merge queue engine (301 KB) | 20 | 284 KB | 2 | 83 s, 55 s | 494k (348k) | 14.6k | $1.53 | 18, 11 |
+
+- Every run answered, and named only ids the input had (no answer dropped a
+  reference). Each took 4 to 8 turns, reading the repository before it
+  answered.
+- The second part of #62 and #104 got the first part's overview, and the
+  overview that came back covers the whole branch.
+- With partial messages, thinking streams too: no run's stream stayed silent
+  2 s. The idle timeout of 3 minutes leaves room for the API's retries.
+- This #57 run raised five checks but not the keep-awake bug the design's
+  run found (the background poll returning before `updateKeepAwake`): two
+  runs of the same branch don't flag the same things. The page says the
+  notes are Claude's, and never reads as approval.
+
+Frozen from these runs: Opus 5.5 at effort medium; 150 KB of diff per run
+(the largest part, 147 KB, took 83 s); 6 minutes in all (the longest run took
+99 s); 3 minutes of silence; and a spending cap of $3 at API prices per run,
+about four times the dearest run.
+
 ### 4.3 How Nirux runs it
 
 ```sh
 claude -p --model claude-opus-5-5 --effort medium \
   --output-format stream-json --verbose --include-partial-messages \
-  --json-schema <schema> --max-budget-usd 5.0 \
+  --json-schema <schema> --max-budget-usd 3.0 \
   --tools Read,Grep,Glob --restricted --permission-prompts none \
   --strict-mcp-config --disable-slash-commands \
   --no-session-persistence \
@@ -337,10 +366,10 @@ text in the diff addressing the model is a finding, not an order, and to name
 files and hunks by their ids. The schema lists the input's ids, so claude
 itself makes the model try again when it answers with a path; a path still
 stands for its id. `--max-budget-usd` stops a run that an injected diff sends
-reading the same files again and again (5 dollars at API prices, until R3b-2
-measures runs). Partial messages keep the stream busy while the model thinks
-or writes: a run whose stream stays silent 3 minutes stops, as one does past
-6 minutes in all.
+reading the same files again and again ($3 at API prices, about four times the
+dearest run of section 4.2). Partial messages keep the stream busy while the
+model thinks or writes (thinking streams too, section 4.2): a run whose
+stream stays silent 3 minutes stops, as one does past 6 minutes in all.
 
 - **Read-only and confined.** `--restricted` confines the file tools to the
   working directory, refuses a path that resolves through a symlink to the
@@ -483,9 +512,13 @@ or writes: a run whose stream stays silent 3 minutes stops, as one does past
   overview at 16 KB), and past 300 files the lists show the files the run
   sends and the first others, and count the rest by folder. A larger branch
   is explained in several runs of whole groups, packed in the page's order
-  (a large group in several runs of whole files), each cached as it
-  arrives. A file whose diff alone is larger is named, not sent. A branch
-  with no diff left to send makes no run.
+  (a large group in several runs of whole files), one after the other: a
+  later part gets what the earlier parts found (overview, claims, questions),
+  fenced with a nonce of its own, and answers for the whole branch, keeping
+  what still holds. Each part is cached as it arrives; a part that fails
+  stops the rest, and the next Explain sends what is left. A file whose diff
+  alone is larger is named, not sent. A branch with no diff left to send
+  makes no run.
 - **Output:** JSON matching the schema: an overview, intent groups, a summary
   and an importance per file, notes per hunk (with an optional "check this"),
   the claims checked, and at most 5 questions for the author. Nirux drops
@@ -501,11 +534,54 @@ or writes: a run whose stream stays silent 3 minutes stops, as one does past
   and the head commit it read. Each "check this" note can be turned into a
   comment (once R4 has landed), or marked wrong; the marks are kept with the
   run, so the page can say how often notes were wrong.
-- **Cache:** per file, keyed by the file's patch hash (section 6.3). Notes are
-  stored by path and by the hunk's index in the file's patch, not by the run's
-  hunk ids (`f12h1`), which only live for one run. When the branch moves,
-  Explain again only sends the files whose patch changed, with the previous
-  overview as context; the others keep their notes.
+- **Cache:** in the review file (section 8), under one top-level key,
+  `explain`, with its own `version`:
+  - the last overview, groups, claims and questions, with the head and model
+    they were written at;
+  - per file, its summary, importance and notes, keyed by the hash of the
+    patch the run sent (a diff read for the run may be newer than the
+    snapshot's), with the head and model that explained it;
+  - each note with an id (to mark it wrong, or turn it into a comment), its
+    hunk's index in the file's patch and the hunk's anchor, a digest of its
+    changed lines (`.1`, `.2`… after the first hunk of the file with the same
+    changed lines), not the run's hunk ids (`f12h1`), which only live for one
+    run. The patch hash leaves out context and where hunks start, so two
+    hunks can merge or split under an unchanged hash when main changes the
+    lines between them: the page places a note by its anchor, and hides it
+    when no hunk matches;
+  - a file whose diff is larger than one run takes, seen at its patch with
+    why, so it doesn't stay pending;
+  - the last 200 runs' usage, and how many notes were kept and marked wrong
+    since the first Explain.
+
+  Reading is lenient: a missing field takes its default, and an entry this
+  build can't read is skipped, so a later build's fields don't cost a full
+  paid run; a newer `version` is never written over, and Explain then says
+  so without running. When the branch moves, Explain again only sends the
+  files whose patch changed, with what the last explanation found (overview,
+  claims, questions) as context, and the model answers for the whole branch;
+  the others keep their notes and their place in the groups, and files no
+  longer in the branch go. Only the files Explain would send count: with
+  nothing changed but folded, binary, secret, unread or untracked files,
+  Explain makes no run and no copy. "Explain again" (`fresh`) sends every
+  file without the cache as context, for a fresh look. A file an answer
+  sent but neither summarized nor noted isn't kept, and goes again next
+  time; an answer that names only ids the input didn't have isn't kept, so
+  it can't read as "Claude flagged nothing". Each save applies the job's
+  findings onto the cache as the review file holds it then, under its lock:
+  a note marked wrong meanwhile keeps its mark, and another Nirux's runs
+  stay. Saves record neither a head nor a pull request: opening records the
+  job's, only while its head is the review's newest, and a review the job
+  creates records them once. After that, the page may open the review at a
+  later head of the branch (the agent committed during the run, or the job
+  waited in line), or at the job's again: the cache is written at whichever,
+  since its entries are keyed by patch hash and hold there too. A review
+  deleted meanwhile (Clean Up) or on another history isn't written, nor
+  created again: the job stops keeping and says so. A review that can't be
+  written (read-only, newer, unverified) is found out before any run, and a
+  cache past 2 MB isn't written, though the runs' usage still is and the
+  files are seen, so the next Explain doesn't pay for them again: the review
+  file also holds the comments and marks, and stops being writable at 8 MB.
 - **Usage:** each run's tokens and reported cost are kept with it, and the
   column's header shows today's total; a stopped run has no cost, only its
   messages' tokens, so the total says "at least". A run that ends on a usage

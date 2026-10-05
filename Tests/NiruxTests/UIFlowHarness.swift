@@ -152,6 +152,7 @@ final class UIFlowHarness {
         shell.commandPalette?.dismiss()
         shell.searchPanel?.dismiss()
         shell.globalSearchPanel?.dismiss()
+        shell.sessionHistoryPanel?.dismiss()
         shell.filePickerPanel?.dismiss()
         shell.worktreeCleanupPanel?.dismiss()
         shell.boardSettingsPanel?.dismiss()
@@ -249,12 +250,13 @@ final class UIFlowHarness {
     // MARK: - Keyboard and fields
 
     enum Key {
-        case returnKey, down
+        case returnKey, down, escape
 
         var code: UInt16 {
             switch self {
             case .returnKey: 0x24
             case .down: 0x7D
+            case .escape: 0x35
             }
         }
 
@@ -262,6 +264,7 @@ final class UIFlowHarness {
             switch self {
             case .returnKey: "\r"
             case .down: String(Character(UnicodeScalar(NSDownArrowFunctionKey)!))
+            case .escape: "\u{1b}"
             }
         }
     }

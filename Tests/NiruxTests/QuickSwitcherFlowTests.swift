@@ -42,7 +42,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
 
             // Without a query: the commands, as before, then the workspaces.
             let all = try search("", in: harness)
-            XCTAssertEqual(all.searchField?.placeholderString, "Type a command or a workspace...")
+            XCTAssertEqual(all.searchField?.placeholderString, "Type a command, a workspace or a session...")
             XCTAssertEqual(headers(all), ["Commands", "Workspaces"])
             XCTAssertEqual(all.filteredActions.first?.title, "Open Browser")
             XCTAssertEqual(all.filteredActions.suffix(2).map(\.title), ["repo", "billing-fix"])
@@ -65,7 +65,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
             all.switchToURLMode()
             all.switchToActionsMode()
             XCTAssertEqual(headers(all), ["Commands", "Workspaces"])
-            XCTAssertEqual(all.searchField?.placeholderString, "Type a command or a workspace...")
+            XCTAssertEqual(all.searchField?.placeholderString, "Type a command, a workspace or a session...")
 
             // A dialog has waited 12 minutes in it.
             let column = try XCTUnwrap(billing.columns.first)

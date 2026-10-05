@@ -61,7 +61,7 @@ extension NiruxShellView {
             },
             PaletteAction(
                 icon: .symbol("text.magnifyingglass"), title: "Search Everywhere",
-                subtitle: "Find text in every terminal's scrollback, across workspaces and projects",
+                subtitle: "Find text in every terminal's scrollback and every Claude session's transcript",
                 shortcut: .searchEverywhere
             ) { [weak self] in
                 self?.showGlobalSearch()
@@ -94,6 +94,12 @@ extension NiruxShellView {
                 subtitle: "Launch OpenAI Codex in a new terminal", shortcut: nil
             ) { [weak self] in
                 self?.openCodex()
+            },
+            PaletteAction(
+                icon: .symbol(Theme.Symbol.sessionHistory), title: "Session History…",
+                subtitle: "Every session of this project, to go back to or resume", shortcut: nil
+            ) { [weak self] in
+                self?.showSessionHistory()
             },
             PaletteAction(
                 icon: .symbol("hourglass"), title: "Next Waiting Agent",
