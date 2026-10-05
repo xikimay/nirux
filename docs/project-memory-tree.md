@@ -14,10 +14,12 @@ conversation and never written down is gone for the next session: on
 write (`cleanupPeriodDays`), so the conversation itself disappears.
 
 This design gives each Nirux project a memory of its whole history, built on
-Victor Taelin's OptChat spec ("the chat history itself is the memory, stored as
-a compressed tree"):
+Victor Taelin's OptChat spec
+(https://gist.github.com/VictorTaelin/91837951a5ce5b38f341ec1ba1df6449, "the
+chat history itself is the memory, stored as a compressed tree"); "the spec"
+below means it, and its section numbers are its own:
 
-- every turn of every agent session of the project is appended to a journal:
+- every turn of every Claude session of the project is appended to a journal:
   the messages that started it and the agent's final reply, word for word,
   kept until the user deletes them;
 - in the background, `claude -p` compresses the journal into a binary tree of
@@ -85,8 +87,8 @@ the user chose:
 
 The History layer fills what nobody wrote anywhere. It does not replace the
 others at first: Claude Code's memory and the tree coexist, and Claude Code's
-memories are also imported into the tree when history is turned on (the user's
-choice on 2026-10-05). Section 7 describes what may come after a few weeks of
+memories can be imported into the tree when history is turned on (the user's
+choice on 2026-10-05; the import is offered, off by default). Section 7 describes what may come after a few weeks of
 use.
 
 ## 2. The journal
@@ -98,17 +100,22 @@ One message per entry, of four kinds:
 - `user`: what the user typed, including prompts queued while the agent worked
   (Claude Code's `queued_command` attachments) and the arguments of slash
   commands;
-- `peer`: a message another session sent this one (`origin.kind` `peer`
-  without a subagent hand-back), and the prompt Nirux types to launch a
-  workspace ("Read .claude-handover.md for full context…"), which is not the
-  user's either;
+- `peer`: a message another session sent this one (`origin.kind` `peer`, its
+  `origin.name` kept as the sender), and what Nirux types or delivers to
+  launch a workspace: its startup prompt ("Read .claude-handover.md for full
+  context…", exactly `agentStartupPrompt`'s text), and the handover file
+  itself, journaled when Nirux delivers it, since the agent then reads it
+  with a tool the journal doesn't keep;
 - `talk`: a turn's final reply, the text parts after the turn's last tool
   call;
 - `note`: a Claude Code memory imported at activation (section 2.6).
 
-A message is stored with its kind, its session's branch and its text, and
-shown to the compactor and the agents as `kind [branch]: text`. Its `size` is
-the bytes of that form, and a free node (section 3.1) keeps it.
+A message is stored with its kind, its session's branch (the transcript
+line's `gitBranch`; none on a detached HEAD), its sender for `peer`, and its
+text, and shown to the compactor and the agents as `kind [branch]: text`, or
+`peer [branch] from <sender>: text`. Its `size` is the bytes of that form, and
+a free node (section 3.1) keeps it. A transcript line without an `origin`
+(older Claude Code) is the user's, as transcript search reads it.
 
 Why `peer` is in: in this project, 776 of the 1,102 final replies come after a
 peer message, the task they answer; without it, most replies lose their
@@ -125,8 +132,9 @@ Left out, with the reason:
   prompt does;
 - **thinking**: the spec's reason (safeguard refusals, little value);
 - **subagent reports and task notifications**: 256 reports, 1.8 MB, the
-  agent's own tooling, like tool results. They still end the turn before them:
-  the agent's reply to a report is that turn's final reply;
+  agent's own tooling, like tool results (a report is a `peer` origin with a
+  `senderTaskId` or `handback`). They still end the turn before them: the
+  agent's reply to a report is that turn's final reply;
 - **harness text**: system reminders, compact summaries, `isMeta` and sidechain
   lines, `<local-command-stdout>` and bash output blocks (the rules of
   `TranscriptSearch`, #115, whose reader the journal shares).
@@ -146,8 +154,17 @@ workspace, and so to its current project:
   (`talk`). A turn that `StopFailure` ended keeps its messages and has no
   reply: the hook's text is the API error;
 - **a turn's messages are appended together**, under the writer's lock, so a
-  turn is contiguous in the journal even with 30 sessions running;
-- `hook-events.jsonl` carries no message text, as today.
+  turn is contiguous in the journal even with 30 sessions running. Ids follow
+  the order turns are journaled in;
+- the journal adds no message text to `hook-events.jsonl`;
+- a turn still incomplete after 5 s (the file kept growing: a new turn began)
+  stays where it is; the next turn's end, the session's end or the launch
+  catch-up reads it.
+
+Claude's Stop payload also carries `last_assistant_message`, which would
+spare reading the transcript; the journal reads the transcript anyway, since
+it needs the turn's messages, which the payload doesn't have, and the import
+reads the same lines.
 
 The other cases:
 
@@ -155,8 +172,13 @@ The other cases:
   the transcript and is journaled with the session's next turn, since reading
   starts at the last journaled offset.
 - **`SessionEnd`** journals any message still unanswered, without a reply.
+  Its payload has no transcript path; the session ledger's record gives it.
 - **Forks**: `/branch` and `--fork-session` copy the parent's lines into the
-  new transcript with `forkedFrom`. Those lines are skipped.
+  new transcript with `forkedFrom`. Those lines are skipped. A rewind keeps
+  the abandoned branch in the file; it was said, so it is journaled, in file
+  order.
+- **A transcript shorter than its offset** (replaced, truncated) is not read
+  again; the case is logged.
 - **The app was not running**: at launch, each recent session of the project
   whose transcript grew past its journaled offset is read, as the import
   does.
@@ -179,12 +201,15 @@ transcript. Before a message is written, the key detector of Explain (#108,
 `BranchReview.Secrets`) runs on it, and each key is replaced by
 `[secret withheld]`.
 
-The detector's patterns only match a key's first characters (`sk-ant-` and
-20 more, a PEM header), on purpose: Explain withholds whole files. PR 1 makes
-it return ranges and grows each match to the end of the key's characters, and
-a PEM block to its `-----END` line. If the regular expression fails (ICU's
-internal error, which the detector counts as a hit), the whole message is
-withheld. Tests use full-length keys.
+The detector's 13 patterns only match a key's first characters (for example
+`sk-ant-` and the 20 characters after it, or a PEM header), on purpose:
+Explain withholds whole files. PR 1 makes it return ranges and grows each
+match, in Swift rather than with an unbounded regular expression (ICU fails
+past about 95,000 characters), over the characters keys and base64 are made
+of (letters, digits, `_ - + / = .`), and a PEM block to its `-----END` line.
+If the regular expression fails (ICU's internal error, which the detector
+counts as a hit), the whole message is withheld. It applies to every kind.
+Tests use full-length keys.
 
 A secret the detector misses stays in the journal and its summaries until
 the user deletes the history, or forgets the message (section 2.4). Sessions
@@ -195,7 +220,7 @@ started before that keep it in their system prompt until they end.
 ```
 <state dir>/projects/<space id>/memory/
   enabled                 present while history is on
-  log/YYYY-MM-DD.jsonl    one message per line: {i, kind, branch, text, size, date, session}
+  log/YYYY-MM-DD.jsonl    one message per line: {i, kind, branch, from, text, size, date, session, source}
   tree/YYYY-MM-DD.jsonl   one node per line:    {l, i, text, size}
   forgotten.jsonl         ids of messages the user forgot
   state.json              per transcript: path, last journaled offset
@@ -206,7 +231,12 @@ started before that keep it in their system prompt until they end.
 
 As in the spec:
 
-- `i` is the global message index, the permanent id.
+- `i` is the global message index, the permanent id. `source` names the
+  transcript, the uuid of the message's line in it, and the offset where its
+  turn ends: offsets are derived from the log, so a crash between two writes
+  neither loses nor repeats a turn, and section 9's uuids map to ids.
+- Files are 0600 and folders 0700, like the session ledger's; a line goes to
+  the file of the local day it is written.
 - **Durability**: each line is one `write` followed by `fsync`, before the
   call returns. A line that is not valid JSON at load is reported and skipped;
   a file not ending in `\n` gets one.
@@ -216,8 +246,12 @@ As in the spec:
   `forgotten.jsonl`, rewrites the day file holding the message with the text
   replaced by "(forgotten)", and rewrites the tree files without the
   message's ancestors, each file atomically (a temporary file, fsync,
-  rename); the ancestors are then built again. Retry on a node that could not
-  be summarized works the same way, without touching the message.
+  rename); the ancestors are then built again, and so is every other node
+  whose text holds a distinctive part of the forgotten text (a free node
+  copies a message word for word, and the compactor may carry a detail into a
+  neighbor's line). The sheet says that copies in the Trash or a backup
+  remain. Retry on a node that could not be summarized works the same way,
+  without touching the message.
 - **One writer**: the app holds `flock(LOCK_EX)` on `lock` for its whole life,
   like the Branch Review store (#97) but held, not per write. A second app on
   the same state directory reads but does not write. The MCP server only
@@ -245,8 +279,8 @@ level-0 node, with no model call.
 
 History is off for every project until the user turns it on in the History
 tab. The sheet says what happens: Nirux keeps every message and final reply
-of the project's sessions until the user deletes them, while Claude Code
-deletes its transcripts after 30 days. It offers:
+of the project's Claude sessions until the user deletes them, while Claude
+Code deletes its transcripts after 30 days. It offers:
 
 - the model (Sonnet 5.5, or Haiku 4.5);
 - **Import past sessions and Claude Code's memories**, off by default, with
@@ -258,14 +292,18 @@ The import reads, in date order:
 
 1. the project's Claude Code memory files (the When relevant items), as
    `note` messages: `note: <title>: <description>`, then the body;
-2. every transcript still on disk whose session belongs to the project: a
-   ledger record of the project, or, for sessions older than the ledger
-   (2026-10-02), a `cwd` in one of the project's repositories, in its main
-   checkout or in a folder named `<repository>.<…>` beside it, the name
-   `GitWorktree.create` gives worktrees. Worktrees removed since are no longer
-   listed by git, so the name is what matches them.
+2. every transcript still on disk whose session belongs to the project, by
+   the scope the history search tool (`feat/history-search-tool`,
+   `HistorySearch.Scope`) already applies: the project's repositories found
+   with `git worktree list`, any folder inside a checkout up to a nested
+   `.git`, a removed `<repository>.<x>` worktree beside the main checkout
+   (the name `GitWorktree.create` gives) when the session's first branch
+   matches `x`, and ledger sessions outside the default project.
 
-Without the import, the journal starts empty and the view says so.
+Turns are journaled by their final reply's date, memories first; transcripts
+already journaled are not read again, so the import runs once. Without the
+import, the journal starts empty and the view says so. Turning history off
+and on again leaves out what was said meanwhile.
 
 ## 3. The tree and the compactor
 
@@ -289,12 +327,18 @@ Changed:
 - **Free nodes don't wait for rule 3.** Rule 3 protects the compactor's
   context, and a free node calls no model. Without this, a pause would hide
   even a one-word reply behind a placeholder.
+- **Very large messages.** A message over 30,000 characters (the spec's `CAP`
+  for tool results) reaches the compactor as its head and tail with a note of
+  what was cut ("[48,213 characters cut here; the message is whole in the
+  journal]"). The journal keeps it whole and `memory_zoom` returns it whole:
+  only the summary step is spared a pasted multi-megabyte log.
 - **Failures.** The spec retries every 10 s forever because the next turn
   waits for the summary; here no turn waits (section 4.3), and rule 3 means
   one node that always fails would stop the whole history. So: a usage limit
   pauses (section 3.7); a connection error or an overloaded API retries every
   10 s; any other failure (a refusal, an empty or error reply, a prompt too
-  long) is retried 5 times, then the node is written as `(could not be
+  long; never retried, since it would fail again) is retried 5 times, then the
+  node is written as `(could not be
   summarized: zoom it)` and listed in the History tab, so the pump goes on.
   Its ancestors can't show what it held, so the tab offers Retry, which
   rebuilds them (section 2.4).
@@ -539,11 +583,14 @@ cache rate, 0.7 extra tries read mostly from the cache, and the measured
 output:
 
 - input ≈ 0.84 × 23,500 tokens at $2 per million ≈ $0.039;
-- retries ≈ 0.7 × (2,350 cached + 700 new tokens) ≈ $0.005;
+- retries ≈ 0.7 × (23,500 tokens read from the cache at 0.1× + 700 new at
+  1.25×) at $2 per million ≈ $0.005;
 - output ≈ 440 tokens at $10 per million ≈ $0.004 (run B: 17,227 output
   tokens for 39 calls, retries and thinking included).
 
-So about $0.048 per summary at API prices:
+So about $0.048 per summary at API prices. These were measured before
+VIEW_DOC asks agents to say in their final reply what they learned; longer
+replies will cost a little more.
 
 | | Messages | Summaries | API-price equivalent |
 |---|---|---|---|
@@ -567,9 +614,11 @@ compactor, and a smaller view (the user's range was 16,000 to 32,000 tokens).
 
 The compactor pauses:
 
-- when its own run reports a usage limit (a `rate_limit_event` with status
-  `allowed_warning` or `rejected`, or a usage-limit text, as Explain detects),
-  until the reported reset time;
+- when its own run reports a usage limit approaching or reached (a
+  `rate_limit_event` with status `allowed_warning` or `rejected`, or any sign
+  of overage, `isUsingOverage` or `overageInUse`), or a usage-limit text, until
+  the reported reset time. Explain pauses only on `rejected` without overage;
+  a background compactor must never spend extra usage, so it stops earlier;
 - when Claude's status line reports the 5-hour or 7-day window at 80% or more
   (`ClaudeUsageLimits.isNearLimit`, #84), until that window resets. The status
   line is only recorded while its Settings indicator is on; without it, the
@@ -591,11 +640,19 @@ same-level parts whose parent is built by that parent, where due =
 `(T − start) / 2^(l+2)`. Never split. Parents not built yet are passed over.
 At load, the view is folded again from message 0.
 
+One change: the spec lets the view stay over budget until a parent is built,
+since its turns wait. Here a pause can last days while free nodes keep
+arriving, and every launch would inject a growing view. So when the view is
+over budget and no parent is built, the most due pair is folded anyway into
+a part `id+n|(not summarized yet: zoom it)`; zooming it opens its children,
+which exist.
+
 **Budget: 60,000 bytes.** Measured on this project's text, Sonnet 5.5's
-tokenizer reads 2.6 bytes per token (Haiku's, 3.5), so 60,000 bytes is about
-23,000 tokens; summary lines are denser than raw text, and the spec's 2 bytes
-per token gives 30,000 at worst. PR 3 measures the token count of the first
-real views and adjusts the constant to stay near 24,000 tokens.
+tokenizer reads 2.6 bytes per token (Haiku's, 3.5), so 60,000 bytes is 23,000
+to 30,000 tokens (summary lines are denser than raw text; the spec's 2 bytes
+per token gives the upper figure). PR 3 counts the first real views with the
+agents' model, Opus 5.5, and adjusts the constant to stay near 24,000
+tokens.
 
 Replaying today's 1,537 messages, the view holds 152 lines: the last 45
 messages one line each, then about 20 lines at each level from 2 to 32
@@ -621,8 +678,11 @@ that is enough is measured before the view ships (section 8, PR 2).
 </history>
 ```
 
-One line per part, `id+n|text`, newlines replaced by spaces, no dates on the
-lines (the agent calls `memory_date`). The opening tag names the project and
+One line per part, `id+n|text`, line breaks (LF, CR, NEL, U+2028, U+2029)
+replaced by spaces, no dates on the lines (the agent calls `memory_date`). A
+text holding `<history`, `</history`, `<chat` or `</chat` has that `<`
+written as `‹`, so no message can close the block it sits in (the agents'
+view or the compactor's context). The opening tag names the project and
 says which message the view ends at and when, so an agent knows what came
 after it is not in it. The
 tag is `<history>`, not the spec's `<chat>`: agents here are not in that chat,
@@ -761,6 +821,10 @@ sessions Nirux launches), next to its search tool:
   even if the workspace later moves to another project.
 - Spec errors: `n` must be a power of 2, `id % n == 0` and `id + n <= T`, or
   the answer is "No line id+n."; a forgotten message reads "(forgotten)".
+- The server reads the log and the tree once per session and keeps an index
+  in memory (today's 1,537 messages are about 1 MB), reloading when a file
+  grows. The tools are added to the server's tool list and to the names it
+  pre-allows (`NiruxMCPServer.toolNames`).
 
 ## 6. The History tab
 
@@ -832,7 +896,10 @@ task as the new agent's first message, which the journal records as `peer`.
 One pull request each, in order, each from `origin/main` once the previous
 one has merged:
 
-1. **Journal**, in two pull requests (about 1,900 lines together):
+1. **Journal**, in two pull requests (about 1,900 lines together), after
+   `feat/history-search-tool` merges: it builds on its shared transcript
+   reader (`TranscriptSearch.message(in:)`, `isToolResult`) and its scope
+   (`HistorySearch.Scope`):
    - **1a**: the memory folder, its lock and the `enabled` marker; the writer
      with fsync and torn-line handling; the transcript reader shared with
      transcript search (kinds, final replies, forks, harness text); the Stop /
@@ -840,9 +907,12 @@ one has merged:
      launch; offsets at the end of running sessions' transcripts when history
      is turned on; secret ranges. Turned on by the `enabled` file until PR 4
      adds the tab. No model call.
-   - **1b**: the import of past transcripts and its estimate. Claude Code's
-     memories are imported with PR 4, which shares their location code with
-     `feat/project-memory`.
+   - **1b**: the import of past transcripts and its estimate, tested without
+     a UI until PR 4's Turn On sheet runs it; and the handover file journaled
+     when Nirux delivers one. Claude Code's memories are imported with PR 4,
+     which shares their location code with `feat/project-memory` (`MEMORY.md`
+     left out; each file's frontmatter title and description, then its body,
+     dated by its modification time).
 2. **Compactor.** The streaming input for `BoundedProcess`; the `claude -p`
    runner generalized from Explain's; the view's fold in memory (rule 3 and
    the context are defined on it); the pump with rule 3, free nodes, SCALE,
@@ -855,8 +925,9 @@ one has merged:
    that covers its source; at least 8 must survive, or the work stops there
    and the design goes back to the user.
 3. **View, tools, injection.** `view.md`, `claude.injected.md` at launch,
-   `memory_zoom` / `memory_date` / `memory_view` on the history MCP server.
-   Needs `feat/history-search-tool` merged.
+   `memory_zoom` / `memory_date` / `memory_view` on the history MCP server,
+   checked with `swift build -c release` and a real stdin run of the server
+   (a release-only trap on threads in that mode was found while building it).
 4. **History tab.** The tab, Turn On… with the estimate and the retention
    notice, Pause / Resume, opening lines, Open Session, Remember, Forget,
    delete, UI harness entries. Needs `feat/project-memory` PR 1 and PR 2
