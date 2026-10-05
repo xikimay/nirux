@@ -9,8 +9,41 @@ extension NiruxShellView {
         globalSearchPanel?.show(
             relativeTo: window,
             targets: { [weak self] in self?.globalSearchTargets() ?? [] },
-            onPick: { [weak self] pick in self?.revealSearchMatch(pick) }
+            sessions: { [weak self] in self?.globalSearchSessions() ?? [] },
+            onPick: { [weak self] pick in self?.revealSearchMatch(pick) },
+            onPickSession: { [weak self] session in
+                self?.window?.makeKey()
+                self?.resumeSession(session.record, spaceID: session.spaceID)
+            }
         )
+    }
+
+    /// Sessions one search may try, before the files that are gone are
+    /// skipped (see `GlobalTerminalSearch.maxSearchedTranscripts`).
+    static let maxTranscriptCandidates = 1000
+
+    /// The Claude sessions of every space whose transcript the history
+    /// knows, the most recently active first, the current space's first
+    /// among equals. Running ones too: a no-flicker conversation has no
+    /// scrollback to search.
+    func globalSearchSessions() -> [GlobalSearchPanel.Session] {
+        let spaces = [activeProfileID] + profiles.map(\.id).filter { $0 != activeProfileID }
+        let records = spaces.enumerated().flatMap { rank, spaceID in
+            sessionLedger.sessions(inSpace: spaceID, matching: AgentSessionLedger.Query(agent: .claude))
+                .filter { $0.transcriptPath != nil }
+                .map { (record: $0, spaceID: spaceID, rank: rank) }
+        }
+        return records
+            .sorted { ($0.record.lastActivityAt, -$0.rank) > ($1.record.lastActivityAt, -$1.rank) }
+            .prefix(Self.maxTranscriptCandidates)
+            .compactMap { entry in
+                entry.record.transcriptPath.map {
+                    GlobalSearchPanel.Session(
+                        record: entry.record, spaceID: entry.spaceID,
+                        title: SessionHistory.title(of: entry.record), transcriptPath: $0
+                    )
+                }
+            }
     }
 
     /// Every terminal column of every workspace: the active workspace's

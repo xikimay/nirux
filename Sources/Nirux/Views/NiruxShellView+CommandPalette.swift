@@ -61,7 +61,7 @@ extension NiruxShellView {
             },
             PaletteAction(
                 icon: .symbol("text.magnifyingglass"), title: "Search Everywhere",
-                subtitle: "Find text in every terminal's scrollback, across workspaces and projects",
+                subtitle: "Find text in every terminal's scrollback and every Claude session's transcript",
                 shortcut: .searchEverywhere
             ) { [weak self] in
                 self?.showGlobalSearch()
