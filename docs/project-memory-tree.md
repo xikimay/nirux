@@ -45,8 +45,8 @@ The spec is followed as written, except where a section says why not.
    bytes; Haiku left 11 of 37 and 5 of 39 over the limit after 5 tries, and
    tagged a subagent's text as the user's (section 3.5).
 4. **Five-minute cache entries, with the cache mark at 90% of each call's
-   context.** On a replay of the project's real cadence this costs 0.73 of
-   uncached input, against 1.13 with one-hour entries and 1.25 without the
+   context.** On a replay of the project's real cadence this costs about 0.84
+   of uncached input, against 1.32 with one-hour entries and 1.25 without the
    mark (section 3.4).
 5. **The view is 60,000 bytes**, about 24,000 tokens (section 4).
 6. **Agents get the view in their system prompt at launch**, appended like the
@@ -110,11 +110,11 @@ A message is stored with its kind, its session's branch and its text, and
 shown to the compactor and the agents as `kind [branch]: text`. Its `size` is
 the bytes of that form, and a free node (section 3.1) keeps it.
 
-Why `peer` is in: in this project, 424 of 641 worker replies answer a peer
-message, their task; without it, most replies lose their question. Launch
-prompts were 72 of the 246 messages tagged `user` before they got their own
-kind, and the compactor ranks the user's words first. The prompt ranks `peer`
-like any text that is not the user's.
+Why `peer` is in: in this project, 776 of the 1,102 final replies come after a
+peer message, the task they answer; without it, most replies lose their
+question. The 71 launch prompts would otherwise be tagged `user`, and the
+compactor ranks the user's words first. The prompt ranks `peer` like any text
+that is not the user's.
 
 Left out, with the reason:
 
@@ -162,6 +162,10 @@ The other cases:
   does.
 - **History turned on while sessions run**: their offsets start at the
   current end of their transcripts, unless the import is checked.
+- **A workspace moves to another project** while its session runs: the
+  session's next turns go to the new project, as the session ledger does.
+  Offsets are kept per transcript across projects (the furthest any journal
+  reached), so the new project doesn't journal the turns the old one has.
 
 Only the column's own agent counts, with the rule the session ledger (#68)
 already applies: not a subagent's events, not a `claude` started inside
@@ -183,7 +187,8 @@ internal error, which the detector counts as a hit), the whole message is
 withheld. Tests use full-length keys.
 
 A secret the detector misses stays in the journal and its summaries until
-the user deletes the history, or forgets the message (section 6).
+the user deletes the history, or forgets the message (section 2.4). Sessions
+started before that keep it in their system prompt until they end.
 
 ### 2.4 Storage
 
@@ -207,9 +212,12 @@ As in the spec:
   a file not ending in `\n` gets one.
 - **Append-only.** The tree is a cache in principle, but it costs model calls
   to rebuild, so it is kept. The one exception the spec doesn't have is
-  Forget: it appends the id to `forgotten.jsonl`, the message then reads
-  "(forgotten)", and its ancestors are built again; a later node line for the
-  same `(l, i)` replaces the earlier one.
+  Forget, so that a secret or a mistake can really go: it appends the id to
+  `forgotten.jsonl`, rewrites the day file holding the message with the text
+  replaced by "(forgotten)", and rewrites the tree files without the
+  message's ancestors, each file atomically (a temporary file, fsync,
+  rename); the ancestors are then built again. Retry on a node that could not
+  be summarized works the same way, without touching the message.
 - **One writer**: the app holds `flock(LOCK_EX)` on `lock` for its whole life,
   like the Branch Review store (#97) but held, not per write. A second app on
   the same state directory reads but does not write. The MCP server only
@@ -226,7 +234,7 @@ On this Mac's transcripts for the Nirux project, on 2026-10-06:
 
 | | Messages | Bytes |
 |---|---|---|
-| All transcripts on disk (74, oldest message 2026-07-19) | 1,537: 180 user, 255 peer, 1,102 replies | 1.02 MB |
+| All transcripts on disk (76 sessions, oldest message 2026-07-19) | 1,537: 180 user, 255 peer, 1,102 replies | 1.02 MB |
 | Last 7 days | 808: 86 user, 139 peer, 583 replies | 480 KB |
 | Left out: subagent reports | 256 | 1.8 MB |
 
@@ -244,7 +252,7 @@ deletes its transcripts after 30 days. It offers:
 - **Import past sessions and Claude Code's memories**, off by default, with
   its estimate: messages, summaries to build, tokens, the API-price equivalent
   and the time. For Nirux today: 1,537 messages and 54 memory files, about
-  1,900 summaries, about $80 at API prices, about 4 hours.
+  1,900 summaries, about $90 at API prices, about 4 hours.
 
 The import reads, in date order:
 
@@ -288,6 +296,8 @@ Changed:
   10 s; any other failure (a refusal, an empty or error reply, a prompt too
   long) is retried 5 times, then the node is written as `(could not be
   summarized: zoom it)` and listed in the History tab, so the pump goes on.
+  Its ancestors can't show what it held, so the tab offers Retry, which
+  rebuilds them (section 2.4).
 
 ### 3.2 The prompt
 
@@ -363,12 +373,34 @@ add to the messages, and never make anything look further along than it was.
 Output only the line; non-ASCII characters cost 2-4 bytes.
 ```
 
-**SCALE** is a realistic 512-byte line about a made-up project (tide alerts,
-chart units), so a summary that borrows from it is easy to spot and never
-plausible as a Nirux fact. No line of the measured runs borrowed from it.
+**SCALE** is a realistic line of exactly 512 bytes about a made-up project
+(tide alerts, chart units), so a summary that borrows from it is easy to spot
+and never plausible as a Nirux fact. No line of the measured runs borrowed
+from it. It is one line:
 
 ```
-user [feat/tide-alerts]: alerts must fire 30 min before high tide, not at it; never page at night unless surge > 1 m, because coastal users sleep; talk: added AlertScheduler + quiet hours, 14 tests pass; peer from main: user froze the Android port until the iOS beta ships; user [fix/chart-scale]: keep metres, drop feet toggle; talk: CI failed on snapshot diff (fonts), fixed by pinning Inter 4.0; talk: PR #212 opened, waits for review; user: rename 'Swell' tab to 'Waves'; talk: tide feed quota is at 80% today
+user [feat/tide-alerts]: alerts must fire 30 min before high tide, not at it; never page at night unless surge > 1 m, because coastal users sleep; talk: added AlertScheduler + quiet hours, 14 tests pass; peer from main: user froze the Android port until the iOS beta ships; user [fix/chart-scale]: keep metres, drop feet toggle; talk: CI failed on snapshot diff (fonts), fixed by pinning Inter 4.0; talk: PR #212 opened, waits for review; user: rename 'Swell' tab to 'Waves'; talk: tide feeds quota is at 80% now
+```
+
+**The step**, after the context, is the spec's. For a message:
+
+```
+For scale, this line is exactly 512 bytes:
+<SCALE>
+
+Compress this message into one line, in at most 512 bytes:
+<kind [branch]: the message, whole, newlines kept>
+```
+
+and for a merge:
+
+```
+For scale, this line is exactly 512 bytes:
+<SCALE>
+
+Merge these two lines into one, in at most 512 bytes:
+<child A, newlines flattened to spaces>
+<child B, newlines flattened to spaces>
 ```
 
 ### 3.3 How a call runs
@@ -446,9 +478,13 @@ apart, the mark at 90% of each call's context:
 
 | Context | Entries | Input cost, relative to uncached |
 |---|---|---|
-| all in the user message | either | 1.25 (every call writes its whole context) |
-| head in the system prompt | one hour (write 2×) | 1.13 |
-| head in the system prompt | five minutes (write 1.25×) | **0.73** |
+| all in the user message | five minutes / one hour | 1.25 / 2.0 (every call writes its whole context) |
+| head in the system prompt | one hour (write 2×) | 1.13 to 1.32 |
+| head in the system prompt | five minutes (write 1.25×) | **0.73 to 0.84** |
+
+The lower figure gives every call the whole view as context; the higher one
+gives a merge the view up to its own last message, as the step does. Two lanes
+(section 3.3) lower the hits a little more, so the cost below uses 0.84.
 
 A third of the turn ends come more than five minutes after the previous one,
 and those miss with five-minute entries. One-hour entries miss only 3% of
@@ -502,17 +538,17 @@ about 23,500 Sonnet tokens with the prompt and the message), the replayed
 cache rate, 0.7 extra tries read mostly from the cache, and the measured
 output:
 
-- input ≈ 0.73 × 23,500 tokens at $2 per million ≈ $0.034;
+- input ≈ 0.84 × 23,500 tokens at $2 per million ≈ $0.039;
 - retries ≈ 0.7 × (2,350 cached + 700 new tokens) ≈ $0.005;
 - output ≈ 440 tokens at $10 per million ≈ $0.004 (run B: 17,227 output
   tokens for 39 calls, retries and thinking included).
 
-So about $0.043 per summary at API prices:
+So about $0.048 per summary at API prices:
 
 | | Messages | Summaries | API-price equivalent |
 |---|---|---|---|
-| A week of Nirux | 808 | about 930 | about $40 |
-| Importing today's history | 1,537 + 54 memories | about 1,900 | about $80 |
+| A week of Nirux | 808 | about 930 | about $45 |
+| Importing today's history | 1,537 + 54 memories | about 1,900 | about $90 |
 
 **The agents' side costs as much.** The view adds about 24,000 tokens to every
 request of every session: about 7,500 requests a week (6,915 tool calls plus
@@ -577,7 +613,7 @@ that is enough is measured before the view ships (section 8, PR 2).
 ### 4.2 Rendering
 
 ```
-<history as-of="1536" date="2026-10-06 01:12">
+<history project="Nirux" as-of="1536" date="2026-10-06 01:12">
 0+64|<summary of messages 0-63>
 ...
 1535+1|<summary of message 1535>
@@ -586,8 +622,9 @@ that is enough is measured before the view ships (section 8, PR 2).
 ```
 
 One line per part, `id+n|text`, newlines replaced by spaces, no dates on the
-lines (the agent calls `memory_date`). The opening tag says which message the
-view ends at and when, so an agent knows what came after it is not in it. The
+lines (the agent calls `memory_date`). The opening tag names the project and
+says which message the view ends at and when, so an agent knows what came
+after it is not in it. The
 tag is `<history>`, not the spec's `<chat>`: agents here are not in that chat,
 they read it as the project's past.
 
@@ -632,10 +669,13 @@ Claude's file holds the brief, then the view:
 </history>
 ```
 
-That file is new, `claude.injected.md`, written whenever the brief or the
-view changes; a project without a brief still gets its history. The Codex
-file stays brief-only (section 7.2). A restarted column replays its original
-command, which names the file, so it reads the current view.
+That file is new, `claude.injected.md`, next to `brief.injected.md` in the
+project's folder (not under `memory/`), written atomically whenever the brief
+or the view changes; a project without a brief still gets its history.
+Turning history off rewrites it with the brief alone, and an empty project
+empties it rather than deleting it, as `SpaceBrief` does, since a restarted
+column replays its original command, which names the file. The Codex file
+stays brief-only (section 7.2).
 
 Why not the SessionStart hook, as first planned: Claude Code 2.1.289 keeps an
 `additionalContext` (or plain stdout) of up to 10,000 characters; above that
@@ -683,9 +723,9 @@ messages it was made from; memory_zoom(id, 1) gives message id in full. Zoom
 whenever a summary only mentions something you need, such as a decision, a
 past attempt, a preference or where something is, before you act, guess or
 ask. memory_date(id) gives the date, time and branch of message id. The
-history ends at the message its tag names; other sessions keep working, so
-before you rely on the project's current state, call memory_view() for what
-came after.
+history ends at the message its tag names (as-of); other sessions keep
+working, so before you rely on the project's current state, call
+memory_view(since: as-of + 1) for what came after.
 
 Only your final message of each turn enters this history: say in it what was
 decided, done, failed and learned.
@@ -704,7 +744,7 @@ sessions Nirux launches), next to its search tool:
 |---|---|
 | `memory_zoom(id, n, part?)` | for n > 1, the two lines under `id+n`, each `id+n\|text`; for n = 1, the message whole, `id+0\|kind [branch]: text` |
 | `memory_date(id)` | the local date and time of message `id`, and its branch |
-| `memory_view(since?)` | the view's lines covering messages from `since` on (by default, those after the launch view), or the whole view with `since: 0` |
+| `memory_view(since)` | the current view's lines covering messages from `since` on; `since: 0` gives the whole view |
 
 - **Never cut**: Claude Code saves an MCP result over 50,000 characters or
   25,000 tokens to a file and shows a 2 KB preview. Each tool sets
@@ -715,10 +755,10 @@ sessions Nirux launches), next to its search tool:
 - **Loaded up front**: each tool sets `_meta["anthropic/alwaysLoad"]`, since
   Claude Code defers MCP tools behind tool search by default and VIEW_DOC
   names them.
-- **Read-only and scoped**: the server reads only its project's folder. It
-  finds the project at each call from its workspace (`NIRUX_WORKSPACE_ID` in
-  the saved state), since a workspace can move to another project while its
-  shell keeps the old `NIRUX_PROFILE_ID`.
+- **Read-only and scoped**: the server reads only the folder of the project
+  the session was launched in (`NIRUX_PROFILE_ID`, the project of the view in
+  its system prompt), so the ids in that view keep meaning the same messages
+  even if the workspace later moves to another project.
 - Spec errors: `n` must be a power of 2, `id % n == 0` and `id + n <= T`, or
   the answer is "No line id+n."; a forgotten message reads "(forgotten)".
 
@@ -744,9 +784,9 @@ view in its tab strip (built by `feat/project-memory`). The mockups show:
    know" if it is a rule.
 5. **Off**: a short explanation, Turn On…, and the sheet of section 2.6.
 
-Also in the tab: Pause / Resume, the nodes that could not be summarized, and
-**Forget** on a message (section 2.4), after a confirmation that names what
-will be rebuilt. Deleting the whole history is in the tab's ⋯ menu.
+Also in the tab: Pause / Resume, the nodes that could not be summarized with
+Retry, and **Forget** on a message (section 2.4), after a confirmation that
+names what will be rebuilt. Deleting the whole history is in the tab's ⋯ menu.
 
 The tab shows no file name or folder. Its states use the visual system's
 tokens: grey for "summarizing", red for a failing compactor, never amber
@@ -792,23 +832,31 @@ task as the new agent's first message, which the journal records as `peer`.
 One pull request each, in order, each from `origin/main` once the previous
 one has merged:
 
-1. **Journal and import.** The memory folder, its lock and the `enabled`
-   marker; the writer with fsync and torn-line handling; the transcript
-   reader shared with transcript search (kinds, final replies, forks, harness
-   text); the Stop / StopFailure / SessionEnd feed with the quiet-file read;
-   catch-up at launch; secret ranges; the import and its estimate. Turned on
-   by the `enabled` file until PR 4 adds the tab. No model call.
+1. **Journal**, in two pull requests (about 1,900 lines together):
+   - **1a**: the memory folder, its lock and the `enabled` marker; the writer
+     with fsync and torn-line handling; the transcript reader shared with
+     transcript search (kinds, final replies, forks, harness text); the Stop /
+     StopFailure / SessionEnd feed with the quiet-file read; catch-up at
+     launch; offsets at the end of running sessions' transcripts when history
+     is turned on; secret ranges. Turned on by the `enabled` file until PR 4
+     adds the tab. No model call.
+   - **1b**: the import of past transcripts and its estimate. Claude Code's
+     memories are imported with PR 4, which shares their location code with
+     `feat/project-memory`.
 2. **Compactor.** The streaming input for `BoundedProcess`; the `claude -p`
-   runner generalized from Explain's; the pump with rule 3, free nodes,
-   SCALE, retries and error nodes; the cache split; the queue; usage records;
-   pause rules. Tested against a fake `claude`, then run once on the real
-   history in a temporary state directory. **Gate**: for each of the 10
-   decisions of section 9, its words must survive into the view line that
-   covers it, for at least 8 of them; otherwise the work stops there and the
-   design goes back to the user.
-3. **View, tools, injection.** The fold and `view.md`, `claude.injected.md`
-   at launch, `memory_zoom` / `memory_date` / `memory_view` on the history MCP
-   server. Needs `feat/history-search-tool` merged.
+   runner generalized from Explain's; the view's fold in memory (rule 3 and
+   the context are defined on it); the pump with rule 3, free nodes, SCALE,
+   retries and error nodes; the cache split; the queue; usage records; pause
+   rules. Tested against a fake `claude`. **Gate**: the real history, copied
+   into a temporary state directory and imported up to the cutoff of section
+   9, is summarized once (about 1,700 summaries, about $80 at API prices and
+   4 hours of the user's plan: asked first). For each of the 10 decisions, a
+   script looks for its key phrases (listed with the test) in the view line
+   that covers its source; at least 8 must survive, or the work stops there
+   and the design goes back to the user.
+3. **View, tools, injection.** `view.md`, `claude.injected.md` at launch,
+   `memory_zoom` / `memory_date` / `memory_view` on the history MCP server.
+   Needs `feat/history-search-tool` merged.
 4. **History tab.** The tab, Turn On… with the estimate and the retention
    notice, Pause / Resume, opening lines, Open Session, Remember, Forget,
    delete, UI harness entries. Needs `feat/project-memory` PR 1 and PR 2
@@ -831,10 +879,13 @@ the orchestrating session `041f0d7b-c095-4a35-b5b3-10f07e7d14b2` (branch
 - Each question goes to a fresh Claude session (Opus 5.5, the user's usual
   settings) started in a worktree of the project **from which this document
   is removed**, since it holds the answers.
-- Two conditions: **without the tree** (as today: `CLAUDE.md`, brief,
-  auto-memory, and the history search tool if it has shipped) and **with the
-  tree** (history on with the import, the view injected, the memory tools
-  served).
+- **Cutoff**: the history holds only messages written before 2026-10-05
+  21:20, just after the last source. Everything later, this design's own
+  sessions included, quotes the questions and answers.
+- Two conditions: **without the tree** (as today: `CLAUDE.md`, brief and
+  auto-memory, no history tools) and **with the tree** (the journal imported
+  up to the cutoff into a temporary state directory, its view injected, the
+  memory tools served).
 - Each condition runs 3 times; the tool calls are logged.
 
 **Scoring.** An answer is right when it matches the expected answer and
@@ -844,8 +895,9 @@ message id cited and the tool that gave it; input and output tokens; tool
 calls.
 
 **Pass**: with the tree, at least 8 of 10 right on the median run, each
-citing a message id that a `memory_*` tool returned, and at least 4 more than
-without the tree. Two memory files written on 2026-10-05 name questions 1 and
+citing the listed source, or a message before it that states the decision,
+by an id a `memory_*` tool returned; and at least 4 more than without the
+tree. Two memory files written on 2026-10-05 name questions 1 and
 2 in passing ("Telegram frozen", "OptMem dropped") without the reason or
 scope; those two are scored on the reason.
 
@@ -865,6 +917,15 @@ questions give a wide margin of error. The run reports them as they are.
 | 9 | Does the tree replace Claude Code's memory? Should Nirux set `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`? | Not at first: both coexist, the memories are imported into the tree; a reversible per-project switch may come after a few weeks. | 2026-10-05 21:19, user, `01ac10fc-5e18-4f55-9f11-5db0f793f2ba` |
 | 10 | Should we merge the per-project trees into one universal history? | No. Each project's tree is the source of truth and trees are never merged; a forest view may come later. | 2026-10-05 21:17, user, `832b55b3-c77c-40c9-b9a3-fa23702b9697` |
 
+Key phrases for PR 2's gate, matched without case in the view line that
+covers each source (the user often writes in French): 1, "telegram" with
+"frozen", "gel", "no new work" or "as it is"; 2, "optmem"; 3, "accessib" or
+"translat" or "traduction"; 4, "routing" or "per-project" or "PR 5" or
+"PR 6"; 5, "auto" with "#42"; 6, "board" or "merge queue" or "B3"; 7,
+"activity"; 8, "optchat" or "chat column" or "option B"; 9, "coexist" or
+"cohabit" or "auto-memory" or "auto memory"; 10, "forest" or "merge" with
+"tree".
+
 Wrong or stale answers, per question: 1, building it because #42 or #38 lists
 it; 2, recommending OptMem; 3, starting a localization or accessibility pull
 request; 4, "they are the next Projects pull requests"; 5, recommending
@@ -876,7 +937,7 @@ memory off now; 10, a single global tree.
 
 - **Interleaved sessions** may blur old lines (section 4.1). PR 2's gate
   measures it on the real history before anything reaches agents.
-- **Cost** (section 3.6): about $85 a week at API prices for this project,
+- **Cost** (section 3.6): about $90 a week at API prices for this project,
   half of it the agents reading the view. The tab shows measured usage; the
   levers are Haiku and a smaller view.
 - **A secret the detector misses** is copied into the journal and its
