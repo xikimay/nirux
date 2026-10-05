@@ -229,8 +229,14 @@ enum BoundedProcess {
             _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL) | O_NONBLOCK)
         }
 
+        /// The body is typed before it reaches `Thread`: once WebKit's
+        /// main-actor blocks are imported earlier in the same compilation
+        /// (as in today's release build), Swift imports `Thread(block:)` as
+        /// taking a `@MainActor` closure, and a literal one then traps on
+        /// this thread (see ThreadClosureGuardTests).
         func start() {
-            let thread = Thread { [self] in write() }
+            let body: @Sendable () -> Void = { [self] in write() }
+            let thread = Thread(block: body)
             thread.name = "BoundedProcess.input"
             thread.start()
         }
