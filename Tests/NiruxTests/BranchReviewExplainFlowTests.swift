@@ -35,7 +35,7 @@ final class BranchReviewExplainFlowTests: XCTestCase {
         }
         defer { page.close() }
         var asked: [String] = []
-        page.controller.confirmExplain = { account, files in
+        page.controller.confirmExplain = { account, files, _ in
             asked.append("\(account.label) \(files)")
             return true
         }
@@ -90,7 +90,7 @@ final class BranchReviewExplainFlowTests: XCTestCase {
             return .init(ending: .stopped(.cancelled))
         }
         defer { page.close() }
-        page.controller.confirmExplain = { _, _ in true }
+        page.controller.confirmExplain = { _, _, _ in true }
         _ = try page.waitFor("\(Self.explainButton) && !\(Self.explainButton).disabled")
         _ = try page.run("\(Self.explainButton).click(); return ''")
         let progress = try page.waitFor(
@@ -118,7 +118,7 @@ final class BranchReviewExplainFlowTests: XCTestCase {
             _ = stopped.append(true)
             return .init(ending: .stopped(.cancelled))
         }
-        page.controller.confirmExplain = { _, _ in true }
+        page.controller.confirmExplain = { _, _, _ in true }
         _ = try page.waitFor("\(Self.explainButton) && !\(Self.explainButton).disabled")
         _ = try page.run("\(Self.explainButton).click(); return ''")
         _ = try page.waitFor("document.querySelector('.explain-progress')")
@@ -165,8 +165,10 @@ final class BranchReviewExplainFlowTests: XCTestCase {
         defer { page.close() }
         var answers = [false, true]
         var asked: [Int] = []
-        page.controller.confirmExplain = { _, files in
+        var noticed: [String] = []
+        page.controller.confirmExplain = { _, files, settings in
             asked.append(files)
+            noticed.append("\(settings.model) \(settings.effort)")
             // Asked from the run loop, not from a main-queue block: the
             // notice's modal loop would hold every other one.
             var drained = false
@@ -184,11 +186,26 @@ final class BranchReviewExplainFlowTests: XCTestCase {
 
         _ = try page.run("document.querySelector('.explain-untracked input').click(); return ''")
         _ = try page.waitFor("document.querySelector('.explain-untracked input').checked")
+        // Settings' model and effort, read once: the notice names what
+        // the run asks for, even if Settings changed right after.
+        var reads = 0
+        page.controller.explainSettings = {
+            reads += 1
+            var chosen = BranchReview.ExplainSettings()
+            if reads == 1 {
+                chosen.model = "claude-sonnet-5-5"
+                chosen.effort = "high"
+            }
+            return chosen
+        }
         _ = try page.run("\(Self.explainButton).click(); return ''")
         page.waitUntil("the run") { jobs.values.count == 1 }
         XCTAssertEqual(asked, [1, 2])
         XCTAssertEqual(jobs.values.first?.requiresSubscription, false)
         XCTAssertEqual(jobs.values.first?.includeUntracked, true)
+        XCTAssertEqual(jobs.values.first.map { [$0.settings.model, $0.settings.effort] }, ["claude-sonnet-5-5", "high"])
+        // The notice named what the run asks for.
+        XCTAssertEqual(noticed.last, "claude-sonnet-5-5 high")
         XCTAssertEqual(
             try page.waitFor("document.querySelector('.explain-message')", then: Self.text(".explain-message")),
             "Nothing for Claude to read: only folded, binary, secret or untracked files changed."
@@ -212,7 +229,7 @@ final class BranchReviewExplainFlowTests: XCTestCase {
             return .init(ending: .explained, explanation: fresh)
         }
         defer { page.close() }
-        page.controller.confirmExplain = { _, _ in true }
+        page.controller.confirmExplain = { _, _, _ in true }
         XCTAssertEqual(try page.waitFor("document.querySelector('.overview')", then: Self.text(".overview")), "Kept.")
 
         page.controller.view.onSelection?(true)
@@ -252,7 +269,7 @@ final class BranchReviewExplainFlowTests: XCTestCase {
             return .init(ending: first ? .explained : .stopped(.usageLimit(resetsAt: nil)), explanation: found)
         }
         defer { page.close() }
-        page.controller.confirmExplain = { _, _ in true }
+        page.controller.confirmExplain = { _, _, _ in true }
         _ = try page.waitFor("!\(Self.explainButton).disabled")
 
         // The same branch: the read finds what was kept before the run.
@@ -303,7 +320,7 @@ final class BranchReviewExplainFlowTests: XCTestCase {
             return .init(ending: .explained, explanation: found)
         }
         defer { page.close() }
-        page.controller.confirmExplain = { _, _ in true }
+        page.controller.confirmExplain = { _, _, _ in true }
         _ = try page.waitFor("!\(Self.explainButton).disabled")
         _ = try page.run("\(Self.explainButton).click(); return ''")
         _ = try page.waitFor("document.querySelector('.explain-progress')")
@@ -333,7 +350,7 @@ final class BranchReviewExplainFlowTests: XCTestCase {
             explainQueue: queue
         )
         defer { page.close() }
-        page.controller.confirmExplain = { _, _ in true }
+        page.controller.confirmExplain = { _, _, _ in true }
         _ = try page.waitFor("!\(Self.explainButton).disabled")
         _ = try page.run("\(Self.explainButton).click(); return ''")
         _ = try page.waitFor("document.querySelector('.explain-progress')")
@@ -378,7 +395,7 @@ final class BranchReviewExplainFlowTests: XCTestCase {
                 },
                 explainQueue: queue
             )
-            page.controller.confirmExplain = { _, _ in true }
+            page.controller.confirmExplain = { _, _, _ in true }
             _ = try page.waitFor("!\(Self.explainButton).disabled")
             _ = try page.run("\(Self.explainButton).click(); return ''")
             return page

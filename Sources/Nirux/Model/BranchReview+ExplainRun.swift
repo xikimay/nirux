@@ -394,7 +394,8 @@ extension BranchReview {
     /// Claude Code would read the branch's `AGENTS.md`, and the user's own
     /// instructions aren't the reviewer's.
     static func explainArguments(for input: ExplainInput, settings: ExplainSettings, language: String) -> [String] {
-        [
+        let settings = settings.checked
+        return [
             "-p", "--model", settings.model, "--effort", settings.effort,
             "--output-format", "stream-json", "--verbose", "--include-partial-messages",
             "--json-schema", ExplainOutput.schema(for: input), "--max-budget-usd", String(settings.maxBudgetUSD),

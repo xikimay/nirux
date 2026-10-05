@@ -410,6 +410,10 @@ struct PersistedSettings: Codable {
     /// the first-use notice for (`ExplainAccount.identity`), by project id.
     /// Asked again when the account changes.
     var explainNoticeAccounts: [String: String] = [:]
+    /// Branch Review's Explain: the model and effort it asks for; nil runs
+    /// `BranchReview.ExplainSettings`'s defaults.
+    var explainModel: String?
+    var explainEffort: String?
 
     init(
         claudeLaunchMode: ClaudeLaunchMode? = nil,
@@ -460,6 +464,8 @@ struct PersistedSettings: Codable {
         case onboardingChecklist
         case agentResumeOnLaunch
         case explainNoticeAccounts
+        case explainModel
+        case explainEffort
         case claudeBypassPermissions // legacy
     }
 
@@ -505,6 +511,8 @@ struct PersistedSettings: Codable {
             if agentResumeOnLaunch == nil { unknownAgentResumeOnLaunchRawValue = raw }
         }
         explainNoticeAccounts = (try? container.decodeIfPresent([String: String].self, forKey: .explainNoticeAccounts)) ?? [:]
+        explainModel = try? container.decodeIfPresent(String.self, forKey: .explainModel)
+        explainEffort = try? container.decodeIfPresent(String.self, forKey: .explainEffort)
     }
 
     /// Custom encoder is required because `CodingKeys` carries the legacy
@@ -534,6 +542,8 @@ struct PersistedSettings: Codable {
             agentResumeOnLaunch?.rawValue ?? unknownAgentResumeOnLaunchRawValue, forKey: .agentResumeOnLaunch
         )
         if !explainNoticeAccounts.isEmpty { try container.encode(explainNoticeAccounts, forKey: .explainNoticeAccounts) }
+        try container.encodeIfPresent(explainModel, forKey: .explainModel)
+        try container.encodeIfPresent(explainEffort, forKey: .explainEffort)
     }
 }
 

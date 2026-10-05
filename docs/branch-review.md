@@ -340,7 +340,9 @@ body, its diff against `main` before its merge, and English answers:
 Frozen from these runs: Opus 5.5 at effort medium; 150 KB of diff per run
 (the largest part, 147 KB, took 83 s); 6 minutes in all (the longest run took
 99 s); 3 minutes of silence; and a spending cap of $3 at API prices per run,
-about four times the dearest run.
+about four times the dearest run. A higher effort chosen in Settings keeps
+these limits: they cap what a run spends, and Settings says Extra high and
+Max can reach them on a large branch.
 
 ### 4.3 How Nirux runs it
 
@@ -393,7 +395,11 @@ stream stays silent 3 minutes stops, as one does past 6 minutes in all.
 - **`--bare` would be leaner, but it refuses OAuth**, so it doesn't work on a
   subscription.
 - **The model id is a full name**, not the `opus` alias, which will move to the
-  next model. It is a setting, with this default.
+  next model. It is a setting, with this default: Settings > Agents > Branch
+  Review offers Opus 5.5 and Sonnet 5.5, and the efforts claude takes (low to
+  max). A model set by hand in the state file stays selectable, unless it
+  couldn't be a model id: it becomes an argument of claude, which must not
+  take it for an option.
 - **The copy.** The working directory is a fresh temporary folder outside the
   state directory, deleted after the run. Nirux copies files into it from the
   working tree, so nothing is written to the repository's index or object
@@ -472,7 +478,8 @@ stream stays silent 3 minutes stops, as one does past 6 minutes in all.
 - **The account.** Before the first run, and when it changes, Nirux reads
   `claude auth status --json`, with the same environment as the run, so it
   reports the account the run will use. The first-use notice of a project
-  names the account and its method ("claude.ai, Max"); any other method
+  names the account and its method ("claude.ai, Max"), and the model and
+  effort the run asks for; any other method
   (`api_key`, `api_key_helper`, `oauth_token`, `third_party`) or a provider
   other than Anthropic (Bedrock, Vertex) is billed per call, and asks
   again.

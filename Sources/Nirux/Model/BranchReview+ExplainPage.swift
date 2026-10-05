@@ -47,6 +47,48 @@ extension BranchReview.ExplainAccount {
 }
 
 extension BranchReview.ExplainSettings {
+    /// The models Settings offers, measured on five merged PRs (section
+    /// 4.2): Opus found the most, Sonnet runs faster.
+    static let models = ["claude-opus-5-5", "claude-sonnet-5-5"]
+    /// What `claude --effort` takes.
+    static let efforts = ["low", "medium", "high", "xhigh", "max"]
+
+    /// The saved model and effort, or the defaults. A model set by hand in
+    /// the state file stays, if it reads as a model id: it becomes an
+    /// argument of claude, which must not take it for an option.
+    static func saved(_ settings: PersistedSettings? = Persistence.load()?.settings) -> Self {
+        var saved = Self()
+        if let model = settings?.explainModel, isModelID(model) { saved.model = model }
+        if let effort = settings?.explainEffort, efforts.contains(effort) { saved.effort = effort }
+        return saved
+    }
+
+    /// Lowercase letters, digits and `.-_:/[]` (`claude-opus-5-5[1m]`, a
+    /// Bedrock id), starting with a letter. Never `--`: claude looks for
+    /// some of its options anywhere in its arguments
+    /// (`--dangerously-skip-permissions`).
+    static func isModelID(_ text: String) -> Bool {
+        guard let first = text.unicodeScalars.first, ("a"..."z").contains(first), text.utf8.count <= 100,
+              !text.contains("--")
+        else { return false }
+        return text.unicodeScalars.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) || ".-_:/[]".unicodeScalars.contains($0) }
+    }
+
+    /// These settings with a model or effort claude couldn't take as such
+    /// put back to the defaults: the last check before they become its
+    /// arguments.
+    var checked: Self {
+        var checked = self
+        if !Self.isModelID(model) { checked.model = Self.defaultModel }
+        if !Self.efforts.contains(effort) { checked.effort = Self.defaultEffort }
+        return checked
+    }
+
+    /// "Medium" for `medium`, "Extra high" for `xhigh`.
+    static func effortTitle(_ effort: String) -> String {
+        effort == "xhigh" ? "Extra high" : effort.prefix(1).uppercased() + effort.dropFirst()
+    }
+
     /// "Opus 5.5" for `claude-opus-5-5`; another id as it is.
     static func displayName(of model: String) -> String {
         let parts = model.split(separator: "-").map(String.init)
