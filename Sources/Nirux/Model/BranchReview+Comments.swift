@@ -123,9 +123,18 @@ extension BranchReview {
         let after: [String]
         /// When it was made, another run of the file's diff read as its
         /// rows and had all of its context too (copied code): its rank among
-        /// the runs that read as its rows, and their number. Nothing else
-        /// tells copies apart.
+        /// the runs that read as its rows and that nothing around
+        /// contradicts, their number, and the row that told it from them.
+        /// Nothing else tells copies apart.
         let copy: CopyRank?
+        /// When it was made, or last found, the best score another run
+        /// that reads as its rows had there (a near copy, with some of its
+        /// context): a run must do better to be taken for it. Nil when
+        /// none had any, and for copied code.
+        let rival: Int?
+        /// How many places its frame stood around other rows then (another
+        /// test's, say): only more of them say it was rewritten somewhere.
+        let frames: Int
 
         var isFile: Bool { rows.isEmpty }
 
@@ -133,12 +142,17 @@ extension BranchReview {
             CommentAnchor(path: path, rows: [], before: [], after: [])
         }
 
-        init(path: String, rows: [DiffRow], before: [String], after: [String], copy: CopyRank? = nil) {
+        init(
+            path: String, rows: [DiffRow], before: [String], after: [String], copy: CopyRank? = nil, rival: Int? = nil,
+            frames: Int = 0
+        ) {
             self.path = path
             self.rows = rows
             self.before = before
             self.after = after
             self.copy = copy
+            self.rival = rival
+            self.frames = frames
         }
 
         /// The rows from `start` to `end`, in either order, of the hunk of
@@ -155,29 +169,64 @@ extension BranchReview {
                 let made = Self.anchor(path: file.path, rows: rows, range: range)
                 guard made.isStorable else { return nil }
                 let runs = BranchReview.runs(of: made, in: hunks)
+                let found = Self.made(path: file.path, hunks: hunks, run: (index, range), runs: runs)
+                // Copies: the runs nothing around contradicts, with as much
+                // of the context as this one.
+                let clean = runs.filter { BranchReview.evidence(of: made, around: $0.range, in: hunks[$0.hunk]).misses == 0 }
                 let own = BranchReview.evidence(of: made, around: range, in: rows)
-                let copies = runs.filter { run in
+                let copies = clean.filter { run in
                     (run.hunk, run.range) != (index, range)
                         && BranchReview.evidence(of: made, around: run.range, in: hunks[run.hunk]).hits >= own.hits
                 }
-                let rank = runs.firstIndex { ($0.hunk, $0.range) == (index, range) }
+                guard !copies.isEmpty, let rank = clean.firstIndex(where: { ($0.hunk, $0.range) == (index, range) }) else {
+                    self = found
+                    return
+                }
+                // Not for rows any code holds (`}`, a blank line): a row
+                // alike slides under the landmark too easily.
+                let isDistinctive = made.rows.contains { $0.text.unicodeScalars.contains { CharacterSet.alphanumerics.contains($0) } }
+                var copyRank = CopyRank(
+                    index: rank, count: clean.count,
+                    landmark: isDistinctive ? BranchReview.Landmark(of: (index, range), among: copies, in: hunks) : nil
+                )
+                // A landmark that doesn't fit with the rows is left out: the
+                // copy is found by its rank.
+                if !CommentAnchor(path: made.path, rows: made.rows, before: made.before, after: made.after, copy: copyRank)
+                    .isStorable {
+                    copyRank.landmark = nil
+                }
                 self.init(
-                    path: made.path, rows: made.rows, before: made.before, after: made.after,
-                    copy: copies.isEmpty ? nil : rank.map { CopyRank(index: $0, count: runs.count) }
+                    path: made.path, rows: made.rows, before: made.before, after: made.after, copy: copyRank,
+                    frames: found.frames
                 )
                 return
             }
             return nil
         }
 
+        /// The anchor of `run` (one of `runs`, those that read the same):
+        /// its context, the best another of `runs` scores against it, and
+        /// the frames standing elsewhere. Not whether it is copied code.
+        static func made(path: String, hunks: [[DiffRow]], run: BranchReview.Run, runs: [BranchReview.Run]) -> CommentAnchor {
+            let base = anchor(path: path, rows: hunks[run.hunk], range: run.range)
+            let rival = runs.filter { ($0.hunk, $0.range) != (run.hunk, run.range) }
+                .map { BranchReview.evidence(of: base, around: $0.range, in: hunks[$0.hunk]).score }.max()
+            return CommentAnchor(
+                path: path, rows: base.rows, before: base.before, after: base.after,
+                rival: rival.flatMap { $0 > 0 ? $0 : nil }, frames: BranchReview.frames(of: base, in: hunks, runs: runs).count
+            )
+        }
+
         /// `range` of a hunk's `rows`, with its context.
-        static func anchor(path: String, rows: [DiffRow], range: ClosedRange<Int>, copy: CopyRank? = nil) -> CommentAnchor {
+        static func anchor(
+            path: String, rows: [DiffRow], range: ClosedRange<Int>, copy: CopyRank? = nil, rival: Int? = nil
+        ) -> CommentAnchor {
             CommentAnchor(
                 path: path,
                 rows: Array(rows[range]),
                 before: rows[max(0, range.lowerBound - contextRows)..<range.lowerBound].map(\.text),
                 after: rows[(range.upperBound + 1)..<min(rows.count, range.upperBound + 1 + contextRows)].map(\.text),
-                copy: copy
+                copy: copy, rival: rival
             )
         }
 
@@ -185,10 +234,12 @@ extension BranchReview {
             BranchReview.cut(text, characters: maxRowCharacters, bytes: maxRowBytes)
         }
 
-        /// What this build can write and read back.
+        /// What this build can write and read back: its rows, context and
+        /// landmark within `maxBytes`.
         var isStorable: Bool {
             !path.isEmpty && rows.count <= Self.maxRows && rows.allSatisfy { $0.line > 0 && $0.old >= 0 && $0.new >= 0 }
-                && (rows.map(\.text) + before + after).reduce(0) { $0 + $1.utf8.count } <= Self.maxBytes
+                && (rows.map(\.text) + before + after + (copy?.landmark?.rows ?? [])).reduce(0) { $0 + $1.utf8.count }
+                <= Self.maxBytes
         }
 
         /// Texts are cut again, so that a later build may keep more of
@@ -218,12 +269,20 @@ extension BranchReview {
             if let rank = object["copy"]?.objectValue {
                 guard let index = rank["index"]?.intValue, let count = rank["count"]?.intValue, (0..<count).contains(index)
                 else { return nil }
-                copy = CopyRank(index: index, count: count)
+                var landmark: BranchReview.Landmark?
+                if let value = rank["landmark"], value != .null {
+                    guard case .array(let values) = value, !values.isEmpty else { return nil }
+                    let texts = values.compactMap(\.stringValue)
+                    guard texts.count == values.count else { return nil }
+                    landmark = BranchReview.Landmark(rows: texts.map(Self.cut))
+                }
+                copy = CopyRank(index: index, count: count, landmark: landmark)
             }
+            let rival = object["rival"]?.intValue.flatMap { $0 > 0 ? $0 : nil }
             self.init(
                 path: path, rows: rows,
                 before: Array(texts("before").suffix(Self.contextRows)), after: Array(texts("after").prefix(Self.contextRows)),
-                copy: copy
+                copy: copy, rival: rival, frames: max(0, object["frames"]?.intValue ?? 0)
             )
         }
 
@@ -241,15 +300,64 @@ extension BranchReview {
                 "before": .array(before.map(JSONValue.string)),
                 "after": .array(after.map(JSONValue.string))
             ]
-            object["copy"] = copy.map { .object(["index": .int(Int64($0.index)), "count": .int(Int64($0.count))]) }
+            object["copy"] = copy.map { copy in
+                var rank: [String: JSONValue] = ["index": .int(Int64(copy.index)), "count": .int(Int64(copy.count))]
+                rank["landmark"] = copy.landmark.map { .array($0.rows.map(JSONValue.string)) }
+                return .object(rank)
+            }
+            object["rival"] = rival.map { .int(Int64($0)) }
+            if frames > 0 { object["frames"] = .int(Int64(frames)) }
             return .object(object)
         }
     }
 
-    /// A copy's rank among the runs of a file's diff that read the same.
+    /// A copy's rank among the runs of a file's diff that read the same
+    /// and that nothing around contradicts, and the row that told it from
+    /// the others when it was made.
     struct CopyRank: Equatable, Sendable {
         let index: Int
         let count: Int
+        var landmark: Landmark?
+    }
+
+    /// The nearest row above a run, within its hunk, that holds a letter
+    /// or a digit and is found nowhere else in the file's diff (a name:
+    /// `func testB() {` above one of three tests alike), with the rows
+    /// between it and the run: a copy is told by all of them, so that
+    /// lines added in between, and a copy sliding to where the run was,
+    /// don't pass for it.
+    struct Landmark: Equatable, Sendable {
+        /// From the landmark down to the row right above the run.
+        let rows: [String]
+
+        init(rows: [String]) {
+            self.rows = rows
+        }
+
+        /// Looked for up to `maxOffset` rows above, as long as each copy has
+        /// a row there. Nil when none tells it.
+        init?(of run: Run, among copies: [Run], in hunks: [[DiffRow]]) {
+            let rows = hunks[run.hunk]
+            var seen: [String: Int] = [:]
+            for row in hunks.joined() { seen[row.text, default: 0] += 1 }
+            for offset in 1...Self.maxOffset {
+                let index = run.range.lowerBound - offset
+                guard index >= 0, copies.allSatisfy({ $0.range.lowerBound - offset >= 0 }) else { return nil }
+                let text = rows[index].text
+                guard seen[text] == 1, text.unicodeScalars.contains(where: { CharacterSet.alphanumerics.contains($0) })
+                else { continue }
+                self.init(rows: rows[index..<run.range.lowerBound].map(\.text))
+                return
+            }
+            return nil
+        }
+
+        static let maxOffset = 8
+
+        func marks(_ run: Run, in hunks: [[DiffRow]]) -> Bool {
+            let start = run.range.lowerBound - rows.count
+            return start >= 0 && hunks[run.hunk][start..<run.range.lowerBound].map(\.text) == rows
+        }
     }
 
     /// When a comment last went to the agent (section 6.2).
@@ -596,7 +704,20 @@ extension BranchReview.Record {
             let fileRows = rows[file.path] ?? BranchReview.diffRows(of: file.hunks)
             rows[file.path] = fileRows
             guard case .placed(let anchor) = BranchReview.place(made, moved: moved, in: file, rows: fileRows) else { return .none }
-            return .some(anchor == made ? nil : anchor)
+            // Where it was made, as it was: nothing to record. Its context
+            // changed, it is recorded, so that the next read looks for it
+            // from there (the search from where it was made may no longer
+            // find it).
+            let isAsMade = anchor.path == made.path && anchor.rows == made.rows && anchor.before == made.before
+                && anchor.after == made.after
+            let next = isAsMade ? nil : anchor
+            // Only what finds it there again: the search from where it was
+            // made may have lost it (an unchanged twin pasted since), and
+            // the anchor made again where it is counts that twin as a near
+            // copy that bars its own run. Then what found it stays.
+            guard case .placed(let again) = BranchReview.place(made, moved: next, in: file, rows: fileRows), again.rows == anchor.rows
+            else { return .none }
+            return .some(next)
         }
         var changed = false
         for comment in comments {
