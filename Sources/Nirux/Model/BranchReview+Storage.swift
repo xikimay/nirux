@@ -90,18 +90,38 @@ extension BranchReview {
         /// it returns false, when its patch wasn't read: there is no hash.
         @discardableResult
         mutating func markReviewed(_ file: FileChange, head: String, at date: Date) -> Bool {
-            guard let patchHash = file.patchHash else { return false }
-            var marks = fields["reviewed"]?.objectValue ?? [:]
-            marks[file.path] = ReviewedMark(patchHash: patchHash, head: head, date: date).json
-            fields["reviewed"] = .object(marks)
-            return true
+            markReviewed([file], head: head, at: date) == 1
+        }
+
+        /// Marks each of `files` whose patch was read; returns how many.
+        /// The marks are changed in place: a group of thousands of files
+        /// isn't copied once per file.
+        @discardableResult
+        mutating func markReviewed(_ files: [FileChange], head: String, at date: Date) -> Int {
+            // Out of `fields` while it changes: changed in place.
+            var marks = fields.removeValue(forKey: "reviewed")?.objectValue ?? [:]
+            var marked = 0
+            for file in files {
+                guard let patchHash = file.patchHash else { continue }
+                marks[file.path] = ReviewedMark(patchHash: patchHash, head: head, date: date).json
+                marked += 1
+            }
+            if !marks.isEmpty { fields["reviewed"] = .object(marks) }
+            return marked
         }
 
         /// The user unticked it. Nothing else clears a mark: a changed
         /// patch reads as `changedSinceReviewed`, an unread one as
         /// `unverified`.
         mutating func clearReviewed(path: String) {
-            guard var marks = fields["reviewed"]?.objectValue, marks.removeValue(forKey: path) != nil else { return }
+            clearReviewed(paths: [path])
+        }
+
+        mutating func clearReviewed(paths: [String]) {
+            guard var marks = fields["reviewed"]?.objectValue else { return }
+            // Out of `fields` while it changes: changed in place.
+            fields["reviewed"] = nil
+            for path in paths { marks.removeValue(forKey: path) }
             fields["reviewed"] = .object(marks)
         }
 
@@ -358,6 +378,10 @@ extension BranchReview {
             /// The review was on disk: a write never recreates it once
             /// deleted (Clean Up). Without one, the first write creates it.
             fileprivate let existed: Bool
+
+            /// The next write creates the review: the branch must still
+            /// exist, or it would come back after Clean Up deleted both.
+            var createsReview: Bool { !existed }
         }
 
         struct Loaded: Equatable, Sendable {

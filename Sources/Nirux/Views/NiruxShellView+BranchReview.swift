@@ -74,7 +74,9 @@ extension NiruxShellView {
     /// A review for a new column or a restored one. It reads nothing before
     /// `start`.
     func makeBranchReview(worktree: String, branch: String?) -> BranchReviewController {
-        let review = BranchReviewController(worktree: worktree, branch: branch, reader: branchReviewReader)
+        let review = BranchReviewController(
+            worktree: worktree, branch: branch, reader: branchReviewReader, reviewOpener: branchReviewOpener
+        )
         review.isOnScreen = { [weak self, weak review] in
             guard let self, let review else { return false }
             return self.isBranchReviewOnScreen(review)

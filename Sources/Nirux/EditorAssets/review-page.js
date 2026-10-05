@@ -290,9 +290,55 @@
     return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
   }
 
+  // Reviewed (section 6.3), by a file's state in the stored review:
+  // "none", "reviewed", "changed" (since it was marked), "unverified"
+  // (marked, its patch not read) or "unmarkable" (not marked, its patch
+  // not read: nothing to mark yet). A mark that can't be checked counts.
+  function isReviewed(state) {
+    return state === "reviewed" || state === "unverified";
+  }
+
+  function isMarkable(state) {
+    return state !== undefined && state !== null && state !== "unmarkable";
+  }
+
+  // "Reviewed 4 of 16 files".
+  function reviewProgress(states) {
+    return `Reviewed ${states.filter(isReviewed).length} of ${count(states.length, "file")}`;
+  }
+
+  // A group's checkbox, from its files' ids: "all" when each file that
+  // can be marked is, "some", "none", or "disabled" when none can be.
+  function groupReviewState(ids, states) {
+    const markable = ids.filter((id) => isMarkable(states[id]));
+    if (markable.length === 0) return "disabled";
+    const reviewed = markable.filter((id) => isReviewed(states[id])).length;
+    return reviewed === markable.length ? "all" : reviewed === 0 ? "none" : "some";
+  }
+
+  // What a group's checkbox does: with every file reviewed, clear them
+  // all; otherwise mark those that aren't.
+  function groupReviewAction(ids, states) {
+    const markable = ids.filter((id) => isMarkable(states[id]));
+    if (groupReviewState(ids, states) === "all") return { reviewed: false, ids: markable };
+    return { reviewed: true, ids: markable.filter((id) => !isReviewed(states[id])) };
+  }
+
+  // A file's checkbox, as its tooltip says it.
+  function reviewTitle(state) {
+    switch (state) {
+      case "reviewed": return "Reviewed";
+      case "changed": return "Changed since you reviewed it";
+      case "unverified": return "Reviewed (its diff wasn’t read, so the mark isn’t checked)";
+      case "unmarkable": return "Open its diff first: Nirux hasn’t read it";
+      default: return "Mark reviewed";
+    }
+  }
+
   const api = {
     parseMarkdown, parseInline, safeURL, splitDecisions, plainText, count, commitsLabel, splitPath,
-    statusLetter, testsSummary, matchesRisk, visible, fileTag, clockTime
+    statusLetter, testsSummary, matchesRisk, visible, fileTag, clockTime,
+    isReviewed, isMarkable, reviewProgress, groupReviewState, groupReviewAction, reviewTitle
   };
   root.ReviewPage = Object.freeze(api);
 })(typeof window !== "undefined" ? window : globalThis);

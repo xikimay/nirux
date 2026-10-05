@@ -48,6 +48,10 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
     var onWindowChange: ((Bool) -> Void)?
     /// The page's text selection came (true) or went (false).
     var onSelection: ((Bool) -> Void)?
+    /// Reviewed checkboxes: mark (true) or clear the files of these ids in
+    /// the page's data of that generation; `sequence` counts the page's
+    /// clicks.
+    var onReviewed: ((_ ids: [Int], _ reviewed: Bool, _ generation: Int, _ sequence: Int) -> Void)?
     /// A web link to open, http or https only.
     var openLink: (URL) -> Void = { NSWorkspace.shared.open($0) }
 
@@ -158,6 +162,14 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
         call("NiruxReview.showDiff(json)", ["json": json])
     }
 
+    /// The stored review (`BranchReview.Page.Review`, encoded): each
+    /// file's Reviewed state, and whether it can be changed. Dropped while
+    /// the page loads: the page's data holds it.
+    func showReview(json: String) {
+        guard isPageReady else { return }
+        call("NiruxReview.showReview(json)", ["json": json])
+    }
+
     /// A message in place of the page, with a button titled `action` when
     /// there is something to do (`onStatusAction`).
     func showStatus(_ message: String, action: String? = nil) {
@@ -237,6 +249,11 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
         case "selection":
             guard let active = body["active"] as? Bool else { return }
             onSelection?(active)
+        case "reviewed":
+            guard let ids = body["ids"] as? [Int], ids.count <= 1_000_000, let reviewed = body["reviewed"] as? Bool,
+                  let generation = body["generation"] as? Int, let sequence = body["sequence"] as? Int
+            else { return }
+            onReviewed?(ids, reviewed, generation, sequence)
         case "openLink":
             guard let text = body["url"] as? String, let url = Self.webLink(text) else { return }
             openLink(url)

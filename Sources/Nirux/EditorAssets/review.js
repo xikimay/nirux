@@ -19,9 +19,16 @@
   // `holders`: every diff drawn, to let go of those a new page drops.
   // `openCommits` and `rowsShown`, by commit and group: what the user
   // opened stays open across pages.
+  // `stored`: the stored review (`BranchReview.Page.Review`), its files'
+  // Reviewed states by id; null until the column opened it. `clicks`: the
+  // Reviewed clicks Swift hasn't answered yet, by path, with their number
+  // (`clickCount`): they show over what it sent before.
   const state = {
     page: null, risk: null, openGroups: new Map(), openFiles: new Set(), openAccounts: new Set(), diffs: new Map(),
-    holders: new Set(), openCommits: new Set(), rowsShown: new Map()
+    holders: new Set(), openCommits: new Set(), rowsShown: new Map(), stored: null, clicks: new Map(),
+    // From the clock: a page loaded again after its process died counts
+    // on from past what Swift answered before.
+    clickCount: Date.now()
   };
 
   function diffKey(file) {
@@ -163,8 +170,15 @@
       if (index > 0) meta.append(element("span", "separator", "·"));
       meta.append(part);
     });
+    const progress = element("span", "review-progress");
+    progress.hidden = true;
+    meta.append(progress);
     const section = element("div", "section");
     section.append(meta);
+    const problem = element("div", "review-problem");
+    problem.setAttribute("role", "status");
+    problem.hidden = true;
+    section.append(problem);
     if (info.notes.length > 0) {
       const notes = element("ul", "notes");
       for (const note of info.notes) {
@@ -324,7 +338,11 @@
       const deletions = members.reduce((sum, file) => sum + file.deletions, 0);
       const count = element("span", "group-count", `${P.count(members.length, "file")} \u00B7 `);
       count.append(lineCounts(additions, deletions));
-      button.append(chevron, element("span", "group-title", group.title), count);
+      button.append(chevron, element("span", "group-title", group.title), count, element("span", "group-progress"));
+      const check = checkbox("group-check");
+      check.addEventListener("click", () => toggleGroupReviewed(group, check));
+      const head = element("div", "group-head");
+      head.append(button, check);
       const body = element("div", "group-body");
       // Rows are built when the group first opens.
       let shown = 0;
@@ -362,7 +380,7 @@
       };
       button.addEventListener("click", () => box.setOpen(body.hidden));
       setOpen(state.openGroups.get(group.key) ?? !group.isFolded);
-      box.append(button, body);
+      box.append(head, body);
       list.append(box);
     }
     section.append(list);
@@ -393,8 +411,10 @@
       fileRisks.append(mark);
     });
     const tag = P.fileTag(file);
+    const tags = element("span", "tag", tag ?? "");
+    tags.append(element("span", "review-note"));
     row.append(
-      chevron, element("span", `status-letter ${letter}`, letter), path, fileRisks, element("span", "tag", tag ?? ""),
+      chevron, element("span", `status-letter ${letter}`, letter), path, fileRisks, tags,
       lineCounts(file.additions, file.deletions)
     );
     row.setAttribute("aria-label", [
@@ -404,10 +424,157 @@
     const diff = element("div", "diff");
     diff.hidden = true;
     row.addEventListener("click", () => toggleFile(file, row, diff));
+    const check = checkbox("file-check");
+    check.addEventListener("click", () => toggleReviewed(file, check));
+    const head = element("div", "file-head");
+    head.append(row, check);
     box.classList.toggle("dim", !P.matchesRisk(file, state.risk));
-    box.append(row, diff);
+    box.append(head, diff);
+    applyFileReview(box, file);
     if (state.openFiles.has(file.path)) toggleFile(file, row, diff);
     return box;
+  }
+
+  // MARK: Reviewed (section 6.3)
+
+  // A checkbox beside a row's button (a button can't hold one): a box
+  // drawn in a larger target.
+  function checkbox(className) {
+    const button = element("button", `review-check ${className}`);
+    button.type = "button";
+    button.setAttribute("role", "checkbox");
+    const box = element("span", "box");
+    const tick = icon("check");
+    tick.classList.add("tick");
+    const dash = icon("minus");
+    dash.classList.add("dash");
+    box.append(tick, dash);
+    button.append(box);
+    return button;
+  }
+
+  // Disabled, but still focusable and with its tooltip.
+  function setEnabled(check, enabled) {
+    if (enabled) check.removeAttribute("aria-disabled");
+    else check.setAttribute("aria-disabled", "true");
+  }
+
+  function isEnabled(check) {
+    return check.getAttribute("aria-disabled") !== "true";
+  }
+
+  // Each file's state, by id: Swift's, under the clicks it hasn't
+  // answered yet. Empty while the review isn't known. Made once per
+  // change: rows are built hundreds at a time.
+  let statesMade = null;
+
+  function reviewStates() {
+    if (statesMade) return statesMade;
+    const stored = state.stored;
+    if (!stored || stored.files.length !== state.page.files.length) return (statesMade = []);
+    statesMade = state.page.files.map((file) => {
+      const click = state.clicks.get(file.path);
+      if (!click || !P.isMarkable(stored.files[file.id])) return stored.files[file.id];
+      return click.reviewed ? "reviewed" : "none";
+    });
+    return statesMade;
+  }
+
+  function canWrite() {
+    return Boolean(state.stored && state.stored.canWrite && reviewStates().length > 0);
+  }
+
+  function applyFileReview(box, file, states) {
+    const stored = state.stored;
+    const reviewState = (states ?? reviewStates())[file.id];
+    const check = box.querySelector(".file-check");
+    check.setAttribute("aria-checked", String(P.isReviewed(reviewState)));
+    check.setAttribute("aria-label", `Reviewed: ${P.visible(file.path)}`);
+    check.title = !stored ? "Opening the review\u2026" : reviewState === undefined ? stored.problem ?? "" : P.reviewTitle(reviewState);
+    setEnabled(check, canWrite() && P.isMarkable(reviewState));
+    box.querySelector(".review-note").textContent = reviewState === "changed" ? "changed since reviewed" : "";
+    box.classList.toggle("reviewed", P.isReviewed(reviewState));
+  }
+
+  // Every row built, every group, the progress and why the review can't
+  // be changed, from Swift's review and the clicks it hasn't answered.
+  function applyReview() {
+    if (!state.page) return;
+    const stored = state.stored;
+    const states = reviewStates();
+    const known = states.length > 0;
+    for (const box of pageElement.querySelectorAll(".file")) {
+      const file = state.page.files[Number(box.dataset.id)];
+      if (file) applyFileReview(box, file, states);
+    }
+    for (const group of state.page.groups) {
+      const box = pageElement.querySelector(`.group[data-key="${CSS.escape(group.key)}"]`);
+      if (!box) continue;
+      const groupState = known ? P.groupReviewState(group.files, states) : "disabled";
+      const check = box.querySelector(".group-check");
+      check.setAttribute("aria-checked", groupState === "all" ? "true" : groupState === "some" ? "mixed" : "false");
+      check.setAttribute("aria-label", `Reviewed: every file of ${group.title}`);
+      check.title = !stored ? "Opening the review\u2026"
+        : groupState === "all" ? "Clear Reviewed for these files" : "Mark these files reviewed";
+      setEnabled(check, canWrite() && groupState !== "disabled");
+      const reviewed = group.files.filter((id) => P.isReviewed(states[id])).length;
+      box.querySelector(".group-progress").textContent = known ? ` \u00B7 ${reviewed}/${group.files.length} reviewed` : "";
+    }
+    const progress = pageElement.querySelector(".review-progress");
+    if (progress) {
+      progress.replaceChildren();
+      if (known) progress.append(element("span", "separator", "\u00B7"), element("span", null, P.reviewProgress(states)));
+      progress.hidden = !known;
+    }
+    // Changed only when its text does: it is a live region.
+    const problem = pageElement.querySelector(".review-problem");
+    const text = stored && stored.problem ? stored.problem : "";
+    if (problem && problem.textContent !== text) {
+      problem.replaceChildren();
+      if (text) problem.append(icon("info"), element("span", null, text));
+      problem.hidden = !text;
+    }
+  }
+
+  function toggleReviewed(file, check) {
+    if (!isEnabled(check)) return;
+    setReviewed([file.id], !P.isReviewed(reviewStates()[file.id]));
+  }
+
+  function toggleGroupReviewed(group, check) {
+    if (!isEnabled(check)) return;
+    const action = P.groupReviewAction(group.files, reviewStates());
+    if (action.ids.length > 0) setReviewed(action.ids, action.reviewed);
+  }
+
+  // Shown at once, until Swift answers this click (`showReview`). A file
+  // marked reviewed folds its diff, as on GitHub.
+  function setReviewed(ids, reviewed) {
+    state.clickCount += 1;
+    const sequence = state.clickCount;
+    const boxes = new Map([...pageElement.querySelectorAll(".file")].map((box) => [Number(box.dataset.id), box]));
+    for (const id of ids) {
+      const file = state.page.files[id];
+      if (!file) continue;
+      state.clicks.set(file.path, { reviewed, sequence });
+      statesMade = null;
+      if (!reviewed) continue;
+      state.openFiles.delete(file.path);
+      const box = boxes.get(id);
+      const diff = box?.querySelector(".diff");
+      if (diff && !diff.hidden) toggleFile(file, box.querySelector(".file-row"), diff);
+    }
+    applyReview();
+    post({ type: "reviewed", ids, reviewed, generation: state.page.generation, sequence });
+  }
+
+  // Swift's review: the clicks it answered go.
+  function takeReview(stored) {
+    statesMade = null;
+    state.stored = stored;
+    for (const [path, click] of state.clicks) {
+      if (stored && click.sequence <= stored.acknowledged) state.clicks.delete(path);
+    }
   }
 
   function toggleFile(file, row, diff) {
@@ -456,7 +623,7 @@
   // what it shows (ids change from page to page), and how far down the
   // viewport it starts. Rows added above it don't move it.
   function anchorKey(node) {
-    return node.classList.contains("file") ? `file:${node.dataset.path}` : `group:${node.parentElement.dataset.key}`;
+    return node.classList.contains("file") ? `file:${node.dataset.path}` : `group:${node.closest(".group").dataset.key}`;
   }
 
   function readingAnchor() {
@@ -510,6 +677,8 @@
       state.rowsShown.clear();
     }
     state.page = page;
+    if (!samebranch) state.clicks.clear();
+    takeReview(page.review ?? null);
     if (state.risk && !page.risks.some((risk) => risk.kind === state.risk && risk.files > 0)) state.risk = null;
     // A refresh keeps the reader where they were, read before the diffs
     // kept move to the new page and shorten the old one.
@@ -534,6 +703,7 @@
       if (!shown.node.isConnected) state.diffs.delete(path);
     }
     applyRiskFilter(false);
+    applyReview();
     window.scrollTo(0, scrolled);
     restoreAnchor(anchor);
   }
@@ -585,6 +755,15 @@
     bannerElement.hidden = true;
   }
 
+  // The stored review again, after a write: for this page's generation
+  // only.
+  function showReview(json) {
+    const stored = JSON.parse(json);
+    if (!state.page || stored.generation !== state.page.generation) return;
+    takeReview(stored);
+    applyReview();
+  }
+
   // A message in place of the page: loading, or why there is no review,
   // with a button when Swift offers something to do. What the user opened
   // stays, for the page that comes back.
@@ -601,6 +780,6 @@
     pageElement.hidden = true;
   }
 
-  window.NiruxReview = Object.freeze({ show, showDiff, showStatus, showReload, hideReload });
+  window.NiruxReview = Object.freeze({ show, showDiff, showStatus, showReload, hideReload, showReview });
   post({ type: "ready" });
 })();
