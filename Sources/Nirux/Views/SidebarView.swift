@@ -60,6 +60,7 @@ final class SidebarView: NSView {
     var onEditProfileBrief: ((String) -> Void)?
     var onEditBoardSettings: ((String) -> Void)?
     var onEditTaskTemplates: ((String) -> Void)?
+    var onShowProjectMemory: ((String) -> Void)?
     var onRecolorProfile: ((String, String) -> Void)?
     var onDeleteProfile: ((String) -> Void)?
     /// (workspace id, space id). By id: a close that finishes while the menu

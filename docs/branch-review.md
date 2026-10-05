@@ -774,9 +774,14 @@ The rules start built in, for Swift and macOS. Per-project rules
   two rows above and below. A row's text is kept up to 1,000 characters and
   4,000 bytes, with a hash of the whole line when it is cut, and a
   comment's rows and context up to 32,000 bytes: past that, the range can't
-  be commented. Not the file's patch hash: it leaves line numbers out, and a
+  be commented, and a landmark (below) that doesn't fit with them is left
+  out. Not the file's patch hash: it leaves line numbers out, and a
   merge from the base moves lines without changing it. A draft's anchor is
   fixed when it is first saved: the diff may change while the user types.
+  With the anchor are kept the best score of a near copy, how many frames
+  stood elsewhere, and for copied code its rank and landmark (below): a
+  change to how they are scored needs a new `version` of the file
+  (section 8).
 - **Following the lines.** Each read looks for the rows in the diff: the
   same kinds and texts, in a row, within one hunk. A comment under the wrong
   line is worse than one marked outdated, so a run counts only with
@@ -785,24 +790,44 @@ The rules start built in, for Swift and macOS. Per-project rules
     and blank lines are everywhere). Each of the comment's found among the
     run's three nearest rows on its side is a hit; each missing, where the
     rows reach as far as it was, a miss. The score is hits less misses;
-  - a run needs a score above 0, or to be where the rows were (at the line
-    the page showed) with neither hit nor miss, and the only run that reads
-    as its rows;
-  - of the runs with the best score, the one where the rows were wins, if
-    one is, else the only one. Two leave the comment outdated, and so does
+  - a run needs a score above 0, and above the best score another run
+    that reads as its rows had when the comment was made or last found (a
+    near copy, with some of its context: it must not take the comment once
+    its own code is rewritten or deleted). A comment found elsewhere is
+    made again there: its near copies are counted where it is now;
+  - where the nearest context rows that hold a letter or a digit, above
+    and below, still stand about as far apart around other rows (a
+    frame), the rows were rewritten or deleted there: a frame where the
+    rows were leaves the comment outdated; frames elsewhere, when there
+    are more of them than when it was made or last found, bar any run that
+    doesn't score above them (scored as a run there would be). Another
+    test's frame there then doesn't count, but one added since does: a
+    test of the same shape added leaves the comment outdated, even
+    untouched, rather than risk the wrong line. The comment's own rows, unchanged where they were,
+    don't stand as a frame (two lines alike, one under the other);
+  - or a run is where the rows were (at the line the page showed), with
+    neither hit nor miss, the only run that reads as its rows, and no
+    frame;
+  - of the runs with the best score, the only one; or the one where the
+    rows were, when something around it changed (an unchanged twin is
+    code copied since). Two leave the comment outdated, and so does
     another run where the rows were that nothing contradicts;
-  - when the nearest context rows that hold a letter or a digit, above and
-    below, still stand around rows that don't read as the comment's, those
-    were rewritten or deleted there: outdated, whatever reads the same
-    elsewhere;
   - a comment made on copied code, where another run read as its rows with
-    all its context, is found by its rank among the runs that read as its
-    rows, and is outdated once their number changes.
+    all its context, is found among the runs nothing around contradicts:
+    by its landmark, the nearest row above found nowhere else in the
+    file's diff (`func testB() {`), with the rows between, when its rows
+    hold a letter or a digit and one is within 8 rows; otherwise by its
+    rank, while the copies' number is the same, the copy at that rank
+    where the rows were, or at their line of the base with no other copy
+    where they were. Within added code every copy has the same line of the
+    base: its own rewritten while another is added after it passes for it
+    (as well as lines added above it keep it in place).
 
   It is looked for from where it was made, which is never rewritten, and
-  from where it was last found, which is recorded when that changes. When
-  they find different places, the better evidence wins, and as good leaves
-  it outdated. Not found, it is "outdated": it keeps its rows as an
+  from where it was last found, which is recorded when the rows, or those
+  around them, aren't as they were made, and only if it finds the comment
+  there again. When they find different places, the better evidence wins,
+  and as good leaves it outdated. Not found, it is "outdated": it keeps its rows as an
   excerpt, and is looked for again at the next read. A comment whose file
   no longer differs from the base says so; one whose file's hunks aren't
   read yet (section 7, "Size") is placed once its row opens; one whose file

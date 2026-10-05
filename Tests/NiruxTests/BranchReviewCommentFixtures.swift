@@ -39,11 +39,19 @@ extension CommentFixtures {
         BranchReview.DiffRow(kind: kind, old: old, new: new, text: text)
     }
 
-    /// The comment on the rows from `start` to `end` of `hunks`.
+    /// The comment on the rows from `start` to `end` of `hunks`, which
+    /// finds itself in the diff it was made in: a comment is never
+    /// outdated as soon as it is made.
     func anchor(
-        _ hunks: [BranchReview.Hunk], _ start: BranchReview.DiffPosition, _ end: BranchReview.DiffPosition? = nil
+        _ hunks: [BranchReview.Hunk], _ start: BranchReview.DiffPosition, _ end: BranchReview.DiffPosition? = nil,
+        file path: StaticString = #filePath, line: UInt = #line
     ) throws -> Anchor {
-        try XCTUnwrap(Anchor(file: file(hunks), from: start, to: end ?? start))
+        let made = try XCTUnwrap(Anchor(file: file(hunks), from: start, to: end ?? start), file: path, line: line)
+        guard case .placed(let found) = BranchReview.place(made, in: file(hunks)), found.rows == made.rows else {
+            XCTFail("not placed where it was made", file: path, line: line)
+            return made
+        }
+        return made
     }
 
     /// The lines, as the page numbers them, of the rows `anchor` is placed

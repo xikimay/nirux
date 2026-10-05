@@ -102,6 +102,12 @@ extension NiruxShellView {
                 self?.showSessionHistory()
             },
             PaletteAction(
+                icon: .symbol(Theme.Symbol.projectMemory), title: "Project Memory…",
+                subtitle: "What Claude Code remembers about this repository", shortcut: nil
+            ) { [weak self] in
+                self?.showProjectMemory()
+            },
+            PaletteAction(
                 icon: .symbol("hourglass"), title: "Next Waiting Agent",
                 subtitle: "Jump to the agent blocked on you the longest, then the next",
                 shortcut: .nextWaitingAgent

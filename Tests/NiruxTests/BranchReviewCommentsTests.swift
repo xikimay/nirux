@@ -210,6 +210,52 @@ final class BranchReviewCommentsTests: XCTestCase, CommentFixtures {
         XCTAssertNil(record.draft(id: "d1")?.moved)
     }
 
+    /// Found from where it was last found, back on the rows it was made on
+    /// but with other rows around them: that is recorded, or the next read,
+    /// with nothing changed, would look for it only from where it was made,
+    /// and not find it.
+    func testCommentBackOnItsRowsAmongNewNeighborsIsStillFound() throws {
+        func source(imports: [String] = [], above: String = "read(url)", below: String = "cache(model)") -> [BranchReview.Hunk] {
+            [hunk(old: 0, new: 1, imports + [
+                "+func load() -> Model? {", "+    let url = locate()", "+    let data = \(above)",
+                "+    guard let model = decode(data) else { return nil }", "+    \(below)", "+    return model", "+}"
+            ])]
+        }
+        var record = Record()
+        record.addComment(id: "c1", anchor: try anchor(source(), at(.additions, 4)), text: "Check", at: date)
+        // An import added above, the line above edited, then the import
+        // removed and the line below edited.
+        let last = source(above: "try read(url)", below: "cache(model, for: url)")
+        for hunks in [source(imports: ["+import Foundation"]), source(imports: ["+import Foundation"], above: "try read(url)"), last] {
+            record.reanchor(in: [file(hunks)])
+        }
+        let comment = try XCTUnwrap(record.comment(id: "c1"))
+        XCTAssertEqual(comment.moved?.rows.map(\.line), [4], "back on its rows, among new neighbors")
+        XCTAssertEqual(placed(comment.anchor, last, moved: comment.moved), [4])
+        XCTAssertFalse(record.reanchor(in: [file(last)]), "nothing moved since")
+    }
+
+    /// Where it was last found is recorded only when it finds the comment
+    /// where it is: back on its rows as made, with a twin pasted since, the
+    /// search from where it was made alone would leave it outdated on the
+    /// next read, with nothing changed.
+    func testWhatIsRecordedFindsTheCommentAgain() throws {
+        func block(_ first: String = "o()") -> [String] {
+            [" let w = \(first)", " let x = p()", "+act()", " let y = q()", " let z = r()"]
+        }
+        var record = Record()
+        record.addComment(id: "c1", anchor: try anchor([hunk(old: 10, new: 10, block())], at(.additions, 12)), text: "Why?", at: date)
+        record.reanchor(in: [file([hunk(old: 10, new: 10, block("o2()"))])])
+        XCTAssertNotNil(record.comment(id: "c1")?.moved)
+        // Its neighbor back as it was, and the block pasted further down.
+        let pasted = [hunk(old: 10, new: 10, block()), hunk(old: 50, new: 50, block().map { "+" + $0.dropFirst() })]
+        for _ in 0..<2 {
+            record.reanchor(in: [file(pasted)])
+            let comment = try XCTUnwrap(record.comment(id: "c1"))
+            XCTAssertEqual(placed(comment.anchor, pasted, moved: comment.moved), [12])
+        }
+    }
+
     // MARK: - In the review file
 
     func testAnchorReadFromTheFileIsCheckedAndCut() throws {
@@ -258,6 +304,30 @@ final class BranchReviewCommentsTests: XCTestCase, CommentFixtures {
         record.addComment(id: "c2", anchor: copy, text: "Copy", at: date)
         XCTAssertEqual(record.comment(id: "c2")?.anchor.copy, BranchReview.CopyRank(index: 1, count: 2))
         XCTAssertNil(Anchor(json: .object(["path": .string("a.swift"), "rows": .array([]), "copy": .object(["index": .int(2), "count": .int(2)])])))
+        // And a near copy's score.
+        let near = try anchor([
+            hunk(old: 10, new: 10, [" p()", " q()", "+    return nil", " r()"]), hunk(old: 50, new: 50, [" p()", " q9()", "+    return nil", " r()"])
+        ], at(.additions, 12))
+        record.addComment(id: "c3", anchor: near, text: "Near", at: date)
+        XCTAssertEqual(record.comment(id: "c3")?.anchor.rival, 1)
+        // And how many frames stood elsewhere.
+        func setUp(_ client: String) -> [String] {
+            [" func setUp() {", " super.setUp()", "+client = \(client)", " user = makeUser()", " url = base"]
+        }
+        let framed = try anchor([hunk(old: 10, new: 10, setUp("Client()")), hunk(old: 40, new: 40, setUp("Client(auth: true)"))], at(.additions, 12))
+        record.addComment(id: "c4", anchor: framed, text: "Framed", at: date)
+        XCTAssertEqual(record.comment(id: "c4")?.anchor.frames, 1)
+        // And the landmark that tells a copy, which a null leaves out.
+        func test(_ name: String) -> [String] {
+            ["+func test\(name)() {", "+    let store = Store()", "+    store.reset()", "+    XCTAssertTrue(store.isEmpty)", "+}"]
+        }
+        let named = try anchor([hunk(old: 0, new: 1, test("A") + test("B"))], at(.additions, 9))
+        XCTAssertNotNil(named.copy?.landmark)
+        XCTAssertEqual(Anchor(json: named.json), named)
+        guard case .object(var object) = named.json, case .object(var rank)? = object["copy"] else { return XCTFail("no copy") }
+        rank["landmark"] = .null
+        object["copy"] = .object(rank)
+        XCTAssertEqual(Anchor(json: .object(object))?.copy, BranchReview.CopyRank(index: 1, count: 2))
     }
 
     func testCommentsAndDraftsGoThroughTheReviewFile() throws {
