@@ -197,11 +197,10 @@ final class BranchReviewCommentPlacementTests: XCTestCase, CommentFixtures {
         let made = try anchor([hunk(old: 10, new: 10, block), hunk(old: 50, new: 50, block)], at(.additions, 51))
         XCTAssertEqual(made.copy, BranchReview.CopyRank(index: 1, count: 2))
         XCTAssertEqual(placed(made, [hunk(old: 10, new: 10, block), hunk(old: 50, new: 50, block)]), [51], "not outdated when made")
-        // 40 lines inserted between them: the first now sits where the
-        // second was.
+        // 40 lines inserted between them.
         XCTAssertEqual(placed(made, [hunk(old: 10, new: 10, block), hunk(old: 50, new: 90, block)]), [91])
-        // A merge from the base moved both.
-        XCTAssertEqual(placed(made, [hunk(old: 15, new: 15, block), hunk(old: 55, new: 55, block)]), [56])
+        // A merge from the base moved both: nothing tells them apart.
+        XCTAssertNil(placed(made, [hunk(old: 15, new: 15, block), hunk(old: 55, new: 55, block)]))
         // Its own row answered: not under its copy.
         let answered = [" func testReset() {", "+    store.reset(all: true)", " }"]
         XCTAssertNil(placed(made, [hunk(old: 10, new: 10, block), hunk(old: 50, new: 50, answered)]))
@@ -248,22 +247,225 @@ final class BranchReviewCommentPlacementTests: XCTestCase, CommentFixtures {
         XCTAssertNil(placed(onA, [hunk(old: 1, new: 1, answered)]), "deleted")
     }
 
-    /// Runs as likely as each other: the one where the rows were, if one
-    /// is; otherwise nothing tells which.
+    /// Runs as likely as each other: the one where the rows were, when
+    /// something around it changed; otherwise nothing tells which.
     func testRunsAsLikelyAsEachOther() throws {
         let first = [" p()", " q()", "+    return nil", " r()"]
         let second = [" p()", " q9()", "+    return nil", " r()"]
-        let onFirst = try anchor([hunk(old: 10, new: 10, first), hunk(old: 50, new: 50, second)], at(.additions, 12))
-        XCTAssertNil(onFirst.copy)
+        let alone = try anchor([hunk(old: 10, new: 10, first)], at(.additions, 12))
+        XCTAssertNil(alone.rival)
         let edited = [" p()", " q3()", "+    return nil", " r()"]
-        XCTAssertEqual(placed(onFirst, [hunk(old: 10, new: 10, edited), hunk(old: 50, new: 50, second)]), [12])
-        XCTAssertNil(placed(onFirst, [hunk(old: 10, new: 13, edited), hunk(old: 50, new: 53, second)]))
+        XCTAssertEqual(placed(alone, [hunk(old: 10, new: 10, edited), hunk(old: 50, new: 50, second)]), [12])
+        XCTAssertNil(placed(alone, [hunk(old: 10, new: 13, edited), hunk(old: 50, new: 53, second)]))
+
+        // A near copy was there when the comment was made: as good as it
+        // was then isn't enough.
+        let nearCopy = try anchor([hunk(old: 10, new: 10, first), hunk(old: 50, new: 50, second)], at(.additions, 12))
+        XCTAssertEqual(nearCopy.rival, 1)
+        XCTAssertNil(placed(nearCopy, [hunk(old: 10, new: 10, edited), hunk(old: 50, new: 50, second)]))
+        // Where it moves, it keeps that bar.
+        guard case .placed(let moved) = BranchReview.place(nearCopy, in: file([hunk(old: 10, new: 15, first), hunk(old: 50, new: 55, second)]))
+        else { return XCTFail("not placed") }
+        XCTAssertEqual(moved.rows.map(\.line), [17])
+        XCTAssertEqual(moved.rival, 1)
 
         // Still where it was, with something against it, and a better run
         // elsewhere with something against it too.
         let near = [" p()", " q()", "+    return nil", " s()"]
         let onNear = try anchor([hunk(old: 10, new: 10, first), hunk(old: 50, new: 50, near)], at(.additions, 12))
         XCTAssertNil(placed(onNear, [hunk(old: 10, new: 10, [" p()", " q2()", "+    return nil", " r2()"]), hunk(old: 50, new: 50, near)]))
+    }
+
+    /// A function copied next to the one commented, after the comment was
+    /// made: the two read the same, and neither changed. Rather outdated
+    /// than under the copy.
+    func testCodeCopiedSinceLeavesTheCommentOutdated() throws {
+        let foo = ["+func foo() {", "+    let a = load()", "+    let b = parse(a)", "+    store(b)", "+    log(b)", "+    return b", "+}"]
+        let header = ["+import X", "+"]
+        let made = try anchor([hunk(old: 0, new: 1, header + foo)], at(.additions, 6))
+        XCTAssertNil(made.copy)
+        var legacy = foo
+        legacy[0] = "+func fooLegacy() {"
+        XCTAssertNil(placed(made, [hunk(old: 0, new: 1, header + legacy + ["+"] + foo)]), "pasted above")
+        XCTAssertNil(placed(made, [hunk(old: 0, new: 1, header + foo + ["+"] + legacy)]), "pasted below")
+    }
+
+    /// Near copies: the comment's code deleted or rewritten doesn't send it
+    /// to the other, which had some of its context when it was made.
+    func testNearCopyDoesntTakeACommentWhoseCodeWent() throws {
+        let funcA = ["+func a() -> Int? {", "+    let config = load()", "+    guard let value = config.value else {", "+        return nil",
+                     "+    }", "+    return use(value)", "+}", "+"]
+        let funcB = ["+func b() -> Int? {", "+    let config = load()", "+    guard let value = config.value else {", "+        return nil",
+                     "+    }", "+    return other(value)", "+}"]
+        let made = try anchor([hunk(old: 0, new: 1, funcA + funcB)], at(.additions, 4))
+        XCTAssertNil(made.copy)
+        XCTAssertNotNil(made.rival)
+        XCTAssertNil(placed(made, [hunk(old: 0, new: 1, funcB)]), "a deleted")
+        var thrown = funcA
+        thrown[3] = "+        throw ConfigError.missing"
+        XCTAssertNil(placed(made, [hunk(old: 0, new: 1, thrown + funcB)]), "a's line rewritten")
+        var collapsed = funcA
+        collapsed.remove(at: 3)
+        collapsed[2] = "+    guard let value = config.value else { throw ConfigError.missing"
+        XCTAssertNil(placed(made, [hunk(old: 0, new: 1, collapsed + funcB)]), "a's guard collapsed")
+
+        let tests = [
+            "+func testA() {", "+    let store = Store()", "+    store.reset()", "+    XCTAssertTrue(store.isEmpty)", "+}",
+            "+func testB() {", "+    let store = Store()", "+    store.reset()", "+    XCTAssertTrue(store.isFull)", "+}"
+        ]
+        let onA = try anchor([hunk(old: 1, new: 1, tests)], at(.additions, 3))
+        var setUp = tests
+        setUp[1] = "+    let store = Store(cache: .none)"
+        setUp[2] = "+    store.reset(keepingCache: false)"
+        XCTAssertNil(placed(onA, [hunk(old: 1, new: 1, setUp)]), "its setup and line rewritten")
+        XCTAssertNil(placed(onA, [hunk(old: 1, new: 1, Array(tests[5...]))]), "testA deleted")
+    }
+
+    /// Rewritten where it was: its frame still stands there, around other
+    /// rows, and that says more than a run elsewhere sharing some of it.
+    func testFrameAroundTheRewrittenRowOutweighsARunElsewhere() throws {
+        let made = try anchor([hunk(old: 10, new: 10, [" p()", " q()", "+    return nil", " r()"])], at(.additions, 12))
+        XCTAssertNil(made.rival)
+        XCTAssertNil(placed(made, [
+            hunk(old: 10, new: 10, [" p()", " q()", "+    throw E.missing", " r()"]),
+            hunk(old: 50, new: 50, [" p()", " q2()", "+    return nil", " r()"])
+        ]))
+        // Its frame elsewhere, around other code: a bare row where it was
+        // isn't taken for it either.
+        let framed = try anchor([hunk(old: 10, new: 10, [" b()", "+row()", " a()"])], at(.additions, 11))
+        XCTAssertEqual(placed(framed, [hunk(old: 11, new: 11, ["+row()"])]), [11])
+        XCTAssertNil(placed(framed, [hunk(old: 11, new: 11, ["+row()"]), hunk(old: 40, new: 40, [" b()", "+other()", " a()"])]))
+    }
+
+    /// Rewritten with a neighbor, the old code kept as a copy below: the
+    /// frame where the rows were says they were rewritten there.
+    func testRowRewrittenWhereItWasStaysOffTheOldCodeKeptElsewhere() throws {
+        let save = ["+func save() {", "+    let a = read()", "+    let b = parse(a)", "+    guard b.isValid else { return }", "+    store(b)",
+                    "+    log(b)", "+}"]
+        let made = try anchor([hunk(old: 0, new: 1, save)], at(.additions, 4))
+        var rewritten = save
+        rewritten[1] = "+    let a = try read()"
+        rewritten[3] = "+    guard b.isValid else { throw SaveError.invalid }"
+        var unchecked = save
+        unchecked[0] = "+func saveUnchecked() {"
+        XCTAssertNil(placed(made, [hunk(old: 0, new: 1, rewritten + ["+"] + unchecked)]))
+    }
+
+    /// A line written twice, one under the other, or around the same
+    /// frame as another test's act: commented, it finds itself.
+    func testCommentOnRepeatedLinesFindsItself() throws {
+        let yields = [" model.start()", "+await Task.yield()", "+await Task.yield()", " XCTAssertTrue(model.isRunning)"]
+        XCTAssertEqual(placed(try anchor([hunk(old: 1, new: 1, yields)], at(.additions, 2)), [hunk(old: 1, new: 1, yields)]), [2])
+        XCTAssertEqual(placed(try anchor([hunk(old: 1, new: 1, yields)], at(.additions, 3)), [hunk(old: 1, new: 1, yields)]), [3])
+        let saved = [" let a = load()", " store.save(a)", "+store.save(a)", " log(\"saved\")"]
+        XCTAssertEqual(placed(try anchor([hunk(old: 1, new: 1, saved)], at(.additions, 3)), [hunk(old: 1, new: 1, saved)]), [3])
+
+        func setUp(_ client: String) -> [String] {
+            [" func setUp() {", " super.setUp()", "+client = \(client)", " user = makeUser()", " url = base"]
+        }
+        let boilerplate = [hunk(old: 10, new: 10, setUp("Client()")), hunk(old: 40, new: 40, setUp("Client(auth: true)"))]
+        let made = try anchor(boilerplate, at(.additions, 12))
+        XCTAssertEqual(made.frames, 1)
+        // Lines added above: still there, the other test's frame as before.
+        XCTAssertEqual(placed(made, [hunk(old: 10, new: 13, setUp("Client()")), hunk(old: 40, new: 43, setUp("Client(auth: true)"))]), [15])
+        // Another test alike added since: its frame could be where the act
+        // was rewritten, so the comment reads outdated, though untouched
+        // (outdated rather than under the wrong line). Also with one test
+        // only when it was made.
+        XCTAssertNil(placed(made, boilerplate + [hunk(old: 80, new: 80, setUp("Client(mock: true)"))]))
+        let alone = try anchor([boilerplate[0]], at(.additions, 12))
+        XCTAssertNil(placed(alone, boilerplate))
+        // Its act rewritten, and a test with the old act added: not that one.
+        XCTAssertNil(placed(made, [
+            hunk(old: 10, new: 10, setUp("Client(retries: 3)")), hunk(old: 40, new: 40, setUp("Client(auth: true)")),
+            hunk(old: 80, new: 80, setUp("Client()"))
+        ]))
+    }
+
+    /// The commented code moved and rewritten elsewhere: its frame stands
+    /// there now, which says more than another run sharing some of it.
+    func testFrameThatAppearedElsewhereOutweighsAPartialRun() throws {
+        let made = try anchor([hunk(old: 10, new: 10, [" p()", " q()", "+    return nil", " r()", " s()"])], at(.additions, 12))
+        XCTAssertEqual(made.frames, 0)
+        XCTAssertNil(placed(made, [
+            hunk(old: 10, new: 10, [" a()", " b()"]),
+            hunk(old: 80, new: 80, [" p()", " q()", "+    throw E.missing", " r()", " s()"]),
+            hunk(old: 120, new: 120, [" p()", " q()", "+    return nil", " r()", " s9()"])
+        ]))
+    }
+
+    /// A comment found elsewhere is made again there: its near copies are
+    /// counted where it is now, not where it was made.
+    func testCommentFoundElsewhereCountsItsNearCopiesThere() throws {
+        let funcA = [" func a() {", " p()", " q()", "+    return nil", " r()", " s()", " }"]
+        let funcB = [" func b() {", " p()", " q2()", "+    return nil", " r()", " s2()", " }"]
+        let made = try anchor([hunk(old: 1, new: 1, funcA), hunk(old: 20, new: 20, funcB)], at(.additions, 4))
+        // Read once: a's q() edited, the comment moves with it.
+        var edited = funcA
+        edited[2] = " q2()"
+        guard case .placed(let moved) = BranchReview.place(made, in: file([hunk(old: 1, new: 1, edited), hunk(old: 20, new: 20, funcB)]))
+        else { return XCTFail("not placed") }
+        XCTAssertEqual(moved.rival, 2, "b now shares p() and q2() with it")
+        // Read twice: a deleted. b isn't it.
+        XCTAssertNil(placed(made, [hunk(old: 20, new: 20, funcB)], moved: moved))
+    }
+
+    /// The same frame around other code (another test's act) doesn't make
+    /// a comment outdated as soon as it is made.
+    func testSameFrameAroundOtherCodeLeavesTheCommentPlaced() throws {
+        let tests = [
+            "+func testA() {", "+    let store = Store()", "+    store.reset()", "+    XCTAssertTrue(store.isEmpty)", "+}",
+            "+func testB() {", "+    let store = Store()", "+    store.add(1)", "+    store.clear()", "+    XCTAssertTrue(store.isEmpty)", "+}"
+        ]
+        let made = try anchor([hunk(old: 0, new: 1, tests)], at(.additions, 3))
+        XCTAssertEqual(placed(made, [hunk(old: 0, new: 1, tests)]), [3])
+        let context = [" func f() {", " let x = compute()", "+validate(x)", " save(x)", " }", " func g() {", " let x = compute()", " save(x)", " }"]
+        let added = try anchor([hunk(old: 10, new: 10, context)], at(.additions, 12))
+        XCTAssertEqual(placed(added, [hunk(old: 10, new: 10, context)]), [12])
+    }
+
+    /// The landmark is stored with the anchor, within its bytes: one that
+    /// doesn't fit with the rows is left out, and the copy is found by its
+    /// rank.
+    func testLandmarkThatDoesntFitIsLeftOut() throws {
+        // Seven rows of nearly 4,000 bytes between each name and its row.
+        let between = (1...7).map { "+    // " + String(repeating: "\u{1F600}", count: 990) + "\($0)" }
+        let tests = ["+func testA() {"] + between + ["+    reset()", "+}", "+func testB() {"] + between + ["+    reset()", "+}"]
+        // testB's reset().
+        let made = try anchor([hunk(old: 0, new: 1, tests)], at(.additions, 19))
+        XCTAssertEqual(made.copy, BranchReview.CopyRank(index: 1, count: 2))
+        XCTAssertTrue(made.isStorable)
+        // Shorter rows between: it fits.
+        let short = tests.map { $0.utf8.count > 1_000 ? "+    // note" : $0 }
+        XCTAssertNotNil(try anchor([hunk(old: 0, new: 1, short)], at(.additions, 19)).copy?.landmark)
+    }
+
+    /// Copies told apart by a row further up (their names): the comment
+    /// goes with its copy, whatever the others do; without such a row, by
+    /// its rank, unless another copy sits where it was.
+    func testCopyIsToldByTheRowThatNamesIt() throws {
+        func test(_ name: String) -> [String] {
+            ["+func test\(name)() {", "+    let store = Store()", "+    store.reset()", "+    XCTAssertTrue(store.isEmpty)", "+}"]
+        }
+        let made = try anchor([hunk(old: 0, new: 1, test("A") + test("B"))], at(.additions, 9))
+        XCTAssertEqual(made.copy, BranchReview.CopyRank(index: 1, count: 2, landmark: BranchReview.Landmark(
+            rows: ["func testB() {", "    let store = Store()", "    store.reset()"]
+        )))
+        var answered = test("A")
+        answered[3] = "+    XCTAssertEqual(store.count, 0)"
+        XCTAssertEqual(placed(made, [hunk(old: 0, new: 1, answered + test("B") + test("C"))]), [9])
+        // testA deleted, an identical testC added: still testB.
+        XCTAssertEqual(placed(made, [hunk(old: 0, new: 1, test("B") + test("C"))]), [4])
+        XCTAssertNil(placed(made, [hunk(old: 0, new: 1, test("A") + test("C"))]), "testB gone")
+
+        // Without a name to tell them, by rank.
+        let blocks = [" {", "+    store.reset()", "+    XCTAssertTrue(store.isEmpty)", " }"]
+        let unnamed = try anchor([hunk(old: 10, new: 10, blocks), hunk(old: 50, new: 50, blocks)], at(.additions, 52))
+        XCTAssertNil(unnamed.copy?.landmark)
+        XCTAssertEqual(placed(unnamed, [hunk(old: 10, new: 10, blocks), hunk(old: 50, new: 60, blocks)]), [62])
+        var other = blocks
+        other[2] = "+    XCTAssertEqual(store.count, 0)"
+        XCTAssertNil(placed(unnamed, [hunk(old: 10, new: 50, other), hunk(old: 50, new: 52, blocks), hunk(old: 90, new: 90, blocks)]))
     }
 
     /// The commented block deleted: the next one, shaped the same, slides
@@ -303,6 +505,23 @@ final class BranchReviewCommentPlacementTests: XCTestCase, CommentFixtures {
     func testRemovedRowStaysAtItsLineOfTheBase() throws {
         let made = try anchor([hunk(old: 10, new: 10, [" a()", "-gone()", " b()"])], at(.deletions, 11))
         XCTAssertEqual(placed(made, [hunk(old: 11, new: 15, ["-gone()"])]), [11])
+    }
+
+    /// A removed row's line of the base can be the comment's line in the
+    /// working tree: it isn't where the comment's rows were, and its frame
+    /// there doesn't make the comment outdated as soon as it is made.
+    func testRemovedRowNumberedAsTheCommentIsntWhereItWas() throws {
+        let lines = [
+            " import XCTest", " ", " final class StoreTests: XCTestCase {",
+            "+    func testB() {", "+        let store = Store()", "+        store.clear()", "+        XCTAssertTrue(store.isEmpty)",
+            "+    }", "+",
+            "     func testA() {", "         let store = Store()", "-        store.reset()", "+        store.removeAll()",
+            "         XCTAssertTrue(store.isEmpty)", "     }", " }"
+        ]
+        // testB's act, at line 6 of the working tree; testA's, removed, at
+        // line 6 of the base.
+        let made = try anchor([hunk(old: 1, new: 1, lines)], at(.additions, 6))
+        XCTAssertEqual(placed(made, [hunk(old: 1, new: 1, lines)]), [6])
     }
 
     func testWhereItWasMadeAndWhereItWasLastFoundAreBothLookedFor() throws {
