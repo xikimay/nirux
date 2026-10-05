@@ -100,6 +100,9 @@ final class NiruxShellView: NSView {
     var searchPanel: EditorSearchPanel?
     var globalSearchPanel: GlobalSearchPanel?
     var sessionHistoryPanel: SessionHistoryPanel?
+    var projectMemoryPanel: ProjectMemoryPanel?
+    /// Counts "Project Memory…" requests: only the latest one's read shows.
+    var projectMemoryRequest = 0
     var worktreeCleanupPanel: WorktreeCleanupPanel?
     /// Worktrees a "Clean Up Worktree…" is checking or confirming, so a
     /// second click doesn't start another. Their cards say so.
@@ -189,6 +192,7 @@ final class NiruxShellView: NSView {
         sidebar.onEditProfileBrief = { [weak self] profileID in self?.editSpaceBrief(profileID: profileID) }
         sidebar.onEditBoardSettings = { [weak self] profileID in self?.showBoardSettings(profileID: profileID) }
         sidebar.onEditTaskTemplates = { [weak self] profileID in self?.editTaskTemplates(profileID: profileID) }
+        sidebar.onShowProjectMemory = { [weak self] profileID in self?.showProjectMemory(profileID: profileID) }
         sidebar.onRecolorProfile = { [weak self] profileID, hex in self?.recolorSpace(profileID: profileID, colorHex: hex) }
         sidebar.onDeleteProfile = { [weak self] profileID in self?.confirmDeleteSpace(profileID: profileID) }
         sidebar.onMoveWorkspaceToProfile = { [weak self] workspaceID, profileID in

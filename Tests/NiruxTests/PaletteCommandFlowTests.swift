@@ -24,6 +24,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testAgentCommands": ["Open Claude Code", "Open Codex"],
             "testNextWaitingAgentCommand": ["Next Waiting Agent"],
             "testSessionHistoryCommand": ["Session History…"],
+            "testProjectMemoryCommand": ["Project Memory…"],
             "testResumeAllAgentsCommand": ["Resume All Agents"],
             "testWorkspaceCommands": [
                 "New Workspace", "Rename Workspace", "Show/Hide Sidebar", "Show/Hide Inactive Workspaces"
@@ -260,6 +261,74 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertFalse(panel.isVisible)
             harness.waitUntil("the resume") { harness.agentLaunches.count == 1 }
             XCTAssertTrue(harness.agentLaunches[0].hasPrefix("command claude --resume '\(pastID)'"))
+        }
+    }
+
+    /// What agents know about the repository, in one list: the project
+    /// brief's rule, the worktree's CLAUDE.md, the memory Claude Code keeps
+    /// in the test's home folder for the main checkout (every worktree
+    /// shares it), and its index line without a file. A link selects the
+    /// memory it names, clearing the filter; Return opens an item's file,
+    /// at its line.
+    func testProjectMemoryCommand() throws {
+        try UIFlowHarness.run { harness in
+            let memory = harness.home + "/.claude/projects/" + ProjectMemory.encodedProjectName(harness.repo) + "/memory"
+            try FileManager.default.createDirectory(atPath: memory, withIntermediateDirectories: true)
+            try "- [Flow rules](flow-rules.md) — how flows run\n- [Gone](gone.md) — no file\n"
+                .write(toFile: memory + "/MEMORY.md", atomically: true, encoding: .utf8)
+            try "---\nname: flow-rules\ndescription: How flows run\nmetadata:\n  type: feedback\n---\n\nSee [[harness-notes]].\n"
+                .write(toFile: memory + "/flow-rules.md", atomically: true, encoding: .utf8)
+            try "---\nname: harness-notes\ndescription: Not indexed\nmetadata:\n  type: reference\n---\n\nNotes.\n"
+                .write(toFile: memory + "/harness-notes.md", atomically: true, encoding: .utf8)
+            try "Team rule: build first.\n".write(toFile: harness.worktree + "/CLAUDE.md", atomically: true, encoding: .utf8)
+            harness.shell.addWorkspace(title: "worktree", cwd: harness.worktree)
+            let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+            let brief = try XCTUnwrap(SpaceBrief.ensureBriefFile(spaceID: workspace.profileID, spaceName: "Flow"))
+            try ("<!-- A comment -->\n" + "- Flow fact: always on.\n").write(to: brief, atomically: true, encoding: .utf8)
+            @MainActor func titles(_ panel: ProjectMemoryPanel) -> [String] {
+                panel.rows.compactMap { panel.model?.knowledge.entries[safe: $0]?.title }
+            }
+
+            harness.runPaletteCommand("Project Memory…")
+            harness.waitUntil("the memory panel") { harness.shell.projectMemoryPanel?.isVisible == true }
+            let panel = try XCTUnwrap(harness.shell.projectMemoryPanel)
+            let field = try XCTUnwrap(panel.searchField)
+            XCTAssertEqual(panel.model?.location.directory.path, memory)
+            XCTAssertEqual(titles(panel), ["Flow fact", "Team rule", "Flow rules", "harness-notes", "Gone"])
+            XCTAssertEqual(panel.model?.knowledge.entries.map(\.scope), [.always, .team, .whenRelevant, .whenRelevant, .whenRelevant])
+            XCTAssertEqual(panel.summaryLabel?.stringValue, "1 always · 1 team · 3 when relevant")
+            XCTAssertEqual(panel.preview?.sourceLabel.stringValue, "Source: Project brief, line 2")
+
+            harness.type("flow", into: field)
+            XCTAssertEqual(titles(panel), ["Flow fact", "Flow rules"])
+            harness.press(.down, in: field.window)
+            XCTAssertEqual(panel.selectedEntry?.title, "Flow rules")
+            let preview = try XCTUnwrap(panel.preview)
+            let link = try XCTUnwrap(preview.textView.textStorage?.attribute(.link, at: 4, effectiveRange: nil))
+            preview.textView.clicked(onLink: link, at: 4)
+            XCTAssertEqual(panel.selectedEntry?.title, "harness-notes")
+            XCTAssertEqual(field.stringValue, "", "the filter hiding the linked memory is cleared")
+
+            let scopes = try XCTUnwrap(panel.scopeControl)
+            scopes.selectedSegment = try XCTUnwrap(ProjectMemoryPanel.scopes.firstIndex(of: .whenRelevant)) + 1
+            XCTAssertTrue(scopes.sendAction(scopes.action, to: scopes.target))
+            XCTAssertEqual(titles(panel), ["Flow rules", "harness-notes", "Gone"])
+            XCTAssertEqual(panel.summaryLabel?.stringValue, "3 of 5")
+
+            harness.press(.returnKey, in: field.window)
+            XCTAssertFalse(panel.isVisible)
+            let editor = try XCTUnwrap(workspace.columns.compactMap(\.editorColumn).first)
+            harness.waitUntil("the memory in the editor") { editor.activePath == memory + "/flow-rules.md" }
+
+            // The index line without a file opens MEMORY.md, in the same
+            // editor.
+            harness.shell.showProjectMemory()
+            harness.waitUntil("the memory panel again") { panel.isVisible && panel.rows.count == 5 }
+            for _ in 0..<4 { harness.press(.down, in: field.window) }
+            XCTAssertEqual(panel.selectedEntry?.title, "Gone")
+            harness.press(.returnKey, in: field.window)
+            harness.waitUntil("MEMORY.md in the editor") { editor.activePath == memory + "/MEMORY.md" }
+            XCTAssertEqual(workspace.columns.compactMap(\.editorColumn).count, 1)
         }
     }
 
