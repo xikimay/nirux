@@ -149,4 +149,17 @@ final class BranchReviewPageScriptTests: XCTestCase {
         XCTAssertEqual(try call("testsSummary", tests), #"{"lines":"Tests +578 for code +458","notes":["#
             + #""4 of 44 new names in no test: a, B.c, d, +1.","Names unknown in Big.swift.","2 test files not read."]}"#)
     }
+    /// Reviewed (section 6.3): a mark that can't be checked still counts,
+    /// and a group's checkbox marks what isn't, or clears all once all is.
+    func testReviewedStatesMakeTheProgressAndTheGroupCheckbox() throws {
+        let states = ["reviewed", "changed", "unverified", "none", "unmarkable"]
+        XCTAssertEqual(try call("reviewProgress", states), #""Reviewed 2 of 5 files""#)
+        XCTAssertEqual(try call("groupReviewState", [0, 2], states), #""all""#)
+        XCTAssertEqual(try call("groupReviewState", [0, 1], states), #""some""#)
+        XCTAssertEqual(try call("groupReviewState", [3, 4], states), #""none""#)
+        XCTAssertEqual(try call("groupReviewState", [4], states), #""disabled""#)
+        XCTAssertEqual(try call("groupReviewAction", [0, 1, 3, 4], states), #"{"reviewed":true,"ids":[1,3]}"#)
+        XCTAssertEqual(try call("groupReviewAction", [0, 2, 4], states), #"{"reviewed":false,"ids":[0,2]}"#)
+        XCTAssertEqual(try call("reviewTitle", "changed"), #""Changed since you reviewed it""#)
+    }
 }

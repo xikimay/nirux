@@ -255,4 +255,47 @@ a.chip { text-decoration: none; cursor: pointer; }
 .diff-box.stale { opacity: 0.55; }
 .nirux-review-diff { display: block; }
 
+/* Reviewed (section 6.3): a checkbox beside each row's button, and one
+   beside each group's: a 16 px box in a 24 px target. */
+.group-head, .file-head { display: flex; align-items: center; }
+.group-head .group-header, .file-head .file-row { flex: 1; min-width: 0; }
+.group-progress { color: var(--text-tertiary); font-size: 11px; white-space: nowrap; }
+.review-note { margin-left: 6px; text-transform: none; letter-spacing: 0; }
+.review-note:empty { display: none; }
+.review-check {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--canvas);
+  cursor: pointer;
+}
+.review-check .box {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+}
+.review-check .icon { grid-area: 1 / 1; width: 11px; height: 11px; stroke-width: 2.5; visibility: hidden; }
+.review-check[aria-checked="true"] .box, .review-check[aria-checked="mixed"] .box { border-color: transparent; background: var(--accent); }
+.review-check[aria-checked="true"] .tick, .review-check[aria-checked="mixed"] .dash { visibility: visible; }
+.review-check:hover:not([aria-disabled="true"]) .box { border-color: var(--accent); }
+.review-check[aria-disabled="true"] { opacity: 0.35; cursor: default; }
+/* Outside the box, so that it shows on the accent fill too. */
+.review-check:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.file.reviewed .path { color: var(--text-secondary); }
+.review-progress { display: inline-flex; gap: 12px; }
+.review-progress[hidden] { display: none; }
+.review-problem { display: flex; gap: 6px; align-items: flex-start; color: var(--text-secondary); font-size: 11px; line-height: 15px; }
+.review-problem[hidden] { display: none; }
+.review-problem .icon { margin-top: 1.5px; color: var(--text-tertiary); }
+
 button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

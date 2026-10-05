@@ -27,6 +27,17 @@ final class BranchReviewController {
     typealias WatcherFactory = @MainActor (
         _ layout: GitRepositoryLayout, _ branch: String?, _ onChange: @escaping @MainActor (GitRepositoryChange) -> Void
     ) -> GitRepositoryWatcher?
+    /// Opens the review file of a shown snapshot's branch (section 8):
+    /// the store, and what `open` found. Nil when the repository can't be
+    /// told. Runs off the main thread.
+    typealias ReviewOpener = @Sendable (BranchReview.Snapshot) -> (BranchReview.Store, BranchReview.Store.Loaded)?
+    /// Whether the store's branch still exists in its repository; nil when
+    /// git can't say. Runs off the main thread.
+    typealias BranchCheck = @Sendable (BranchReview.Store) -> Bool?
+    /// Whether the first head is the second or in its history, in the
+    /// store's repository; nil when git can't say. Runs off the main
+    /// thread.
+    typealias HeadOrder = @Sendable (_ store: BranchReview.Store, _ ancestor: String, _ descendant: String) -> Bool?
 
     /// Why a read runs: a watched change applies only what doesn't move the
     /// page under the user.
@@ -122,12 +133,36 @@ final class BranchReviewController {
     var isOnScreen: @MainActor () -> Bool = { true }
     /// One `git diff` at a time, whatever the number of rows opened.
     private let patchQueue = DispatchQueue(label: "nirux.branch-review.file-diffs", qos: .userInitiated)
+    /// The review file: opened, then written, in order, off the main
+    /// thread.
+    private let reviewQueue = DispatchQueue(label: "nirux.branch-review.review-file", qos: .userInitiated)
+    private let reviewFile: BranchReviewFile
+    /// The stored review of the branch shown, as last opened, read or
+    /// written: for the page, and for what reads it (Explain's cache).
+    /// Nil until the branch shown has been opened.
+    private(set) var review: BranchReviewState?
+    /// The review's record, when it is the file's.
+    var reviewRecord: BranchReview.Record? { review?.isKnown == true ? review?.record : nil }
+    /// Writes asked for, by id, with what to tell once written.
+    private var reviewWrites = 0
+    private var writeCompletions: [Int: @MainActor (BranchReviewState) -> Void] = [:]
+    /// The latest of the page's checkbox clicks Swift has answered: the
+    /// page keeps its own state for the later ones.
+    private(set) var reviewAcknowledged = 0
+    /// Rows' patches read since the page showed (`loadFile`), by id: a
+    /// file not read with the snapshot gets its hash, and can be marked.
+    private var readFiles: [Int: BranchReview.FileChange] = [:]
+    /// The stored review changed (opened, read or written).
+    var onReviewChange: (() -> Void)?
 
     init(
         worktree: String, branch: String?, view: BranchReviewView = BranchReviewView(),
         reader: @escaping Reader = BranchReviewController.readWorktree,
         patchReader: @escaping PatchReader = { BranchReview.filePatch($0, in: $1) },
-        makeWatcher: @escaping WatcherFactory = BranchReviewController.watch
+        makeWatcher: @escaping WatcherFactory = BranchReviewController.watch,
+        reviewOpener: @escaping ReviewOpener = BranchReviewController.openReviewFile,
+        branchCheck: @escaping BranchCheck = BranchReviewController.branchExists,
+        headOrder: @escaping HeadOrder = BranchReviewController.isAncestor
     ) {
         self.worktree = worktree
         self.branch = branch
@@ -135,6 +170,7 @@ final class BranchReviewController {
         self.reader = reader
         self.patchReader = patchReader
         self.makeWatcher = makeWatcher
+        reviewFile = BranchReviewFile(opener: reviewOpener, branchCheck: branchCheck, isAncestor: headOrder)
         view.onRefresh = { [weak self] in
             self?.view.forgetCrashes()
             self?.reload(fetchBase: true)
@@ -151,6 +187,9 @@ final class BranchReviewController {
             }
         }
         view.onSelection = { [weak self] active in self?.selectionChanged(active) }
+        view.onReviewed = { [weak self] ids, reviewed, generation, sequence in
+            self?.markReviewed(ids: ids, reviewed: reviewed, generation: generation, sequence: sequence)
+        }
         view.onReload = { [weak self] in self?.bannerClicked() }
         view.onStatusAction = { [weak self] in self?.statusAction?.perform() }
         view.onWindowChange = { [weak self] inWindow in
@@ -312,9 +351,12 @@ final class BranchReviewController {
         pending = nil
         held = nil
         banner = nil
+        // Another branch's review isn't this one's.
+        if review?.branch != fresh.branch { review = nil }
         setSnapshot(fresh)
         showCurrent()
         watch()
+        openReview(for: fresh)
     }
 
     private func showBanner(_ message: String, action: (title: String, perform: @MainActor () -> Void)? = nil) {
@@ -519,6 +561,7 @@ final class BranchReviewController {
 
     private func setSnapshot(_ snapshot: BranchReview.Snapshot?) {
         self.snapshot = snapshot
+        readFiles = [:]
         snapshotCount += 1
         let count = snapshotCount
         currentGeneration.withLock { $0 = count }
@@ -545,7 +588,9 @@ final class BranchReviewController {
         }
         status = nil
         statusAction = nil
-        let page = BranchReview.page(for: snapshot, handover: handover, generation: snapshotCount, readAt: readAt)
+        let page = BranchReview.page(
+            for: snapshot, handover: handover, generation: snapshotCount, readAt: readAt, review: pageReview()
+        )
         guard let json = Self.encode(page) else { return }
         view.show(pageJSON: json)
         // A page that loaded again keeps the banner of what waits.
@@ -569,11 +614,111 @@ final class BranchReviewController {
             return .some(patchReader(file, snapshot))
         }) { [weak self] outcome in
             guard let self, generation == self.snapshotCount, let read = outcome else { return }
+            if let read, read.patchHash != self.snapshot?.files[safe: id]?.patchHash {
+                // Its hash, for the Reviewed checkbox.
+                self.readFiles[id] = read
+                self.sendReview()
+            }
             self.send(read.map { BranchReview.FileDiff(id: id, generation: generation, read: $0) } ?? BranchReview.FileDiff(
                 id: id, path: file.path, generation: generation,
                 message: "Nirux couldn’t read this file’s diff: it no longer differs from the base, or git failed. Refresh."
             ))
         }
+    }
+
+    // MARK: - The review file (sections 6.3 and 8)
+
+    /// Opens the review of the snapshot shown, off the main thread: a
+    /// write the page asks for after it runs after it, on the same queue.
+    private func openReview(for snapshot: BranchReview.Snapshot) {
+        let generation = snapshotCount
+        Self.inBackground(on: reviewQueue, { [reviewFile] in reviewFile.open(snapshot) }) { [weak self] state in
+            guard let self, generation == self.snapshotCount else { return }
+            self.apply(state)
+        }
+    }
+
+    /// Reads the review file again, without opening it: after a writer
+    /// that isn't this column (Explain) saved it.
+    func reloadReview() {
+        Self.inBackground(on: reviewQueue, { [reviewFile] in reviewFile.reload() }) { [weak self] state in
+            guard let self, let state, state.branch == self.snapshot?.branch else { return }
+            self.apply(state)
+        }
+    }
+
+    /// Changes the stored review of the branch shown now, off the main
+    /// thread, after what was asked before: under its lock, on the review
+    /// as it is on disk. Changes asked for meanwhile are written together.
+    /// Dropped if another branch shows by then. Nothing is written once
+    /// the branch is gone, or while the review is read-only: the page says
+    /// why. `completion` gets the review after the write, failed or not.
+    func writeReview(
+        _ change: @escaping @Sendable (inout BranchReview.Record) -> Void,
+        completion: (@MainActor (BranchReviewState) -> Void)? = nil
+    ) {
+        guard let branch = snapshot?.branch else {
+            completion?(review ?? BranchReviewState(
+                branch: "", record: BranchReview.Record(), isKnown: false, problem: "No branch is shown.", canWrite: false
+            ))
+            return
+        }
+        reviewWrites += 1
+        let id = reviewWrites
+        writeCompletions[id] = completion
+        reviewFile.enqueue(id: id, branch: branch, change)
+        Self.inBackground(on: reviewQueue, { [reviewFile] in reviewFile.write(through: id) }) { [weak self] written in
+            guard let self, let (ids, state) = written else { return }
+            if state.branch == self.snapshot?.branch { self.apply(state) }
+            for id in ids { self.writeCompletions.removeValue(forKey: id)?(state) }
+        }
+    }
+
+    private func apply(_ state: BranchReviewState) {
+        guard state != review else { return }
+        review = state
+        sendReview()
+        onReviewChange?()
+    }
+
+    /// The page's Reviewed checkboxes: `ids` are its file ids, read against
+    /// its generation; `sequence` counts its clicks. Each click is
+    /// answered, written or not, so that the page shows the review again.
+    private func markReviewed(ids: [Int], reviewed: Bool, generation: Int, sequence: Int) {
+        let files = generation == snapshotCount
+            ? ids.compactMap { id in snapshot?.files.indices.contains(id) == true ? readFiles[id] ?? snapshot?.files[id] : nil }
+            : []
+        guard !files.isEmpty, let head = snapshot?.head else { return acknowledge(sequence) }
+        let date = Date()
+        writeReview({ record in
+            if reviewed {
+                record.markReviewed(files, head: head, at: date)
+            } else {
+                record.clearReviewed(paths: files.map(\.path))
+            }
+        }, completion: { [weak self] _ in self?.acknowledge(sequence) })
+    }
+
+    private func acknowledge(_ sequence: Int) {
+        reviewAcknowledged = max(reviewAcknowledged, sequence)
+        sendReview()
+    }
+
+    /// The review as the page shows it; nil until the branch shown has
+    /// been opened. A review that couldn't be read has no states: the page
+    /// shows why.
+    private func pageReview() -> BranchReview.Page.Review? {
+        guard let snapshot, let review, review.branch == snapshot.branch else { return nil }
+        let files = review.isKnown ? snapshot.files.indices.map { readFiles[$0] ?? snapshot.files[$0] } : []
+        return BranchReview.review(
+            of: review.record, files: files, generation: snapshotCount, problem: review.problem, canWrite: review.canWrite,
+            acknowledged: reviewAcknowledged
+        )
+    }
+
+    private func sendReview() {
+        guard status == nil, let review = pageReview(), let json = Self.encode(review) else { return }
+        view.showReview(json: json)
     }
 
     private func send(_ diff: BranchReview.FileDiff) {

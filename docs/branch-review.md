@@ -891,7 +891,28 @@ Rejected:
   change to the branch's own lines clears it: "changed since you reviewed". A
   merge from the base keeps it unless it changed those lines, and an
   uncommitted edit clears it.
-- The header counts reviewed files. Reviewed files can be collapsed.
+- The header counts reviewed files ("Reviewed 4 of 16 files"), and each
+  group its own. Ticking a file folds its diff, as GitHub's "Viewed" does.
+  Each group has a checkbox that marks every file of it not marked yet, or
+  clears them all once all are. (Decided by the user on 2026-10-04.) A file
+  whose patch wasn't read (section 7) can be marked once its row opens and
+  reads it; a mark Nirux can't check for that reason still counts.
+- The column opens the review file (section 8) when it shows a branch, and
+  writes it off the main thread, in order, with the access `open` gave;
+  changes asked for while a write runs are written together. A same-head
+  refresh with the file unchanged doesn't open it again, unless the last
+  open failed in a way that may pass (git, the lock) or the column wrote
+  since. A review opened at
+  another head since (another Nirux, Explain): at an older head, it is
+  opened again at the page's and written; at a later one, written as it is,
+  its head kept (a mark carries its own head); at a head neither before nor
+  after, not written. A write that would create the review asks the
+  repository first (its common folder, which outlives a worktree Clean Up
+  deleted) whether the branch still exists, by its exact name: once gone,
+  nothing is written until the branch is read again. A review that is
+  read-only, or couldn't be opened, disables the checkboxes, and the page
+  says why. The page shows each click at once, until Swift answers it: a
+  write that fails undoes the click.
 - **A new head never re-renders the page under the user.** A banner offers
   Reload; drafts survive it.
 - Later: "Changes since my last review", and the review state on the merge

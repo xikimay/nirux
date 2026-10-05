@@ -15,20 +15,28 @@ final class ReviewPage {
     convenience init(
         snapshot: BranchReview.Snapshot, handover: BranchReview.Handover?,
         patchReader: @escaping BranchReviewController.PatchReader = { _, _ in nil },
-        openLink: @escaping (URL) -> Void = { _ in }
+        openLink: @escaping (URL) -> Void = { _ in },
+        reviewOpener: @escaping BranchReviewController.ReviewOpener = { _ in nil },
+        branchCheck: @escaping BranchReviewController.BranchCheck = { _ in true },
+        headOrder: @escaping BranchReviewController.HeadOrder = { _, ancestor, descendant in ancestor == descendant }
     ) throws {
         try self.init(
-            reader: { _, _, _ in (.snapshot(snapshot), handover) }, patchReader: patchReader, openLink: openLink
+            reader: { _, _, _ in (.snapshot(snapshot), handover) }, patchReader: patchReader, openLink: openLink,
+            reviewOpener: reviewOpener, branchCheck: branchCheck, headOrder: headOrder
         )
     }
 
     /// Waits for the first read to show a page, unless `waitsForPage` is
-    /// false.
+    /// false. No review file opens unless `reviewOpener` opens one: never
+    /// the real state's.
     init(
         reader: @escaping BranchReviewController.Reader,
         patchReader: @escaping BranchReviewController.PatchReader = { _, _ in nil },
         openLink: @escaping (URL) -> Void = { _ in }, waitsForPage: Bool = true,
-        makeWatcher: BranchReviewController.WatcherFactory? = nil, worktree: String = "/repo"
+        makeWatcher: BranchReviewController.WatcherFactory? = nil, worktree: String = "/repo",
+        reviewOpener: @escaping BranchReviewController.ReviewOpener = { _ in nil },
+        branchCheck: @escaping BranchReviewController.BranchCheck = { _ in true },
+        headOrder: @escaping BranchReviewController.HeadOrder = { _, ancestor, descendant in ancestor == descendant }
     ) throws {
         let watchers = watchers
         controller = BranchReviewController(
@@ -36,7 +44,8 @@ final class ReviewPage {
             makeWatcher: makeWatcher ?? { layout, _, _ in
                 _ = watchers.append(layout.worktreeRoot)
                 return nil
-            }
+            },
+            reviewOpener: reviewOpener, branchCheck: branchCheck, headOrder: headOrder
         )
         controller.view.openLink = openLink
         // Tests wait seconds, not the app's.

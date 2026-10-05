@@ -121,6 +121,8 @@ final class NiruxShellView: NSView {
     /// How Branch Review columns read their worktree: git and gh, or a
     /// test's fixture.
     lazy var branchReviewReader: BranchReviewController.Reader = BranchReviewController.readWorktree
+    /// The review files Branch Review columns open: tests give theirs.
+    lazy var branchReviewOpener: BranchReviewController.ReviewOpener = BranchReviewController.openReviewFile
     /// Reloads the boards whose board.json was saved.
     var boardConfigSaveObserver: NSObjectProtocol?
     /// The merge queue's `gh` client. Nil: each new queue gets

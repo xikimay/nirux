@@ -135,6 +135,46 @@ extension BranchReview {
         let tests: Tests
         let groups: [Group]
         let files: [File]
+        /// The stored review, once the column opened it; nil before.
+        let review: Review?
+
+        /// What the page shows of the branch's stored review (sections 6.3
+        /// and 8), sent with the page and again after each write.
+        struct Review: Encodable, Equatable, Sendable {
+            /// Each file's Reviewed state, by its id in the page: "none",
+            /// "reviewed", "changed" (marked at a patch that changed since),
+            /// "unverified" (marked, its patch not read) or "unmarkable" (not
+            /// marked, and its patch not read: there is nothing to mark yet).
+            let files: [String]
+            /// The page's generation the states are for.
+            let generation: Int
+            /// Why the review can't be changed now (read-only, the branch is
+            /// gone), or why the last change failed; nil when all is well.
+            let problem: String?
+            /// Whether the checkboxes can change the review.
+            let canWrite: Bool
+            /// The latest of the page's checkbox clicks this answers: the
+            /// page keeps its own state for later ones.
+            let acknowledged: Int
+        }
+    }
+
+    /// The states of `files` (the snapshot's, or a row's patch read since)
+    /// in `record`.
+    static func review(
+        of record: Record, files: [FileChange], generation: Int, problem: String?, canWrite: Bool, acknowledged: Int = 0
+    ) -> Page.Review {
+        Page.Review(
+            files: files.map { file in
+                switch record.reviewedState(of: file) {
+                case .notReviewed: return file.patchHash == nil ? "unmarkable" : "none"
+                case .reviewed: return "reviewed"
+                case .changedSinceReviewed: return "changed"
+                case .unverified: return "unverified"
+                }
+            },
+            generation: generation, problem: problem, canWrite: canWrite, acknowledged: acknowledged
+        )
     }
 
     /// The author's notes for the next session, found in the worktree.
@@ -168,7 +208,9 @@ extension BranchReview {
         }
     }
 
-    static func page(for snapshot: Snapshot, handover: Handover?, generation: Int = 0, readAt: Date = Date()) -> Page {
+    static func page(
+        for snapshot: Snapshot, handover: Handover?, generation: Int = 0, readAt: Date = Date(), review: Page.Review? = nil
+    ) -> Page {
         // One entry per path (`Snapshot.files`).
         let ids = Dictionary(snapshot.files.enumerated().map { ($1.path, $0) }) { first, _ in first }
         return Page(
@@ -191,7 +233,8 @@ extension BranchReview {
                     omission: file.omission.map(\.key), fold: file.fold?.rawValue,
                     risks: file.signals.map(\.kind.rawValue), patchHash: file.patchHash, diffKey: diffKey(of: file)
                 )
-            }
+            },
+            review: review
         )
     }
 
