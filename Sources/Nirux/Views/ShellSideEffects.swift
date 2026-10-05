@@ -29,6 +29,9 @@ struct ShellSideEffects {
     /// checklist reads it, a workspace with no folder of its own opens in it.
     var homeDirectory: @MainActor () -> String = { NSHomeDirectory() }
 
+    /// Where Claude Code's managed settings live (see ProjectMemory).
+    var claudeManagedSettings: @MainActor () -> ProjectMemory.ManagedFolders = { .system }
+
     /// Chromium browsers with a cookie database.
     var cookieBrowsers: @MainActor () -> [CookieImporter.Browser] = { CookieImporter.availableBrowsers }
 

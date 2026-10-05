@@ -24,7 +24,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             "testReviewBranchMenuItem": ["Review Branch"],
             "testSpaceMenuItems": [
                 "New Project", "Rename Project…", "Project Color", "Edit Project Brief…", "Edit Task Templates…",
-                "Board Settings…", "Move to Project", "Delete Project…"
+                "Project Memory…", "Board Settings…", "Move to Project", "Delete Project…"
             ]
         ],
         exemptions: [:]
@@ -234,6 +234,25 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             harness.waitUntil("the templates in the editor") { editor.activePath == templates }
             XCTAssertEqual(TaskTemplates.load(spaceID: space.id), TaskTemplates.defaults)
             XCTAssertEqual(spaceWorkspace.columns.compactMap(\.editorColumn).count, 1)
+
+            // Nothing known yet about the project's repository: no brief
+            // rule, no CLAUDE.md, no memory in the test's home folder, where
+            // the settings turn auto-memory off.
+            try FileManager.default.createDirectory(atPath: harness.home + "/.claude", withIntermediateDirectories: true)
+            try #"{"autoMemoryEnabled": false}"#.write(toFile: harness.home + "/.claude/settings.json", atomically: true, encoding: .utf8)
+            harness.perform(["Project Memory…"], in: shell.sidebar.spaceOptionsMenu())
+            harness.waitUntil("the memory panel") { shell.projectMemoryPanel?.isVisible == true }
+            let memory = try XCTUnwrap(shell.projectMemoryPanel)
+            XCTAssertEqual(memory.model?.location.projectRoot, harness.repo)
+            XCTAssertEqual(
+                memory.model?.location.directory.path,
+                harness.home + "/.claude/projects/" + ProjectMemory.encodedProjectName(harness.repo) + "/memory"
+            )
+            XCTAssertEqual(memory.rows, [])
+            XCTAssertTrue(memory.preview?.textView.string.contains("Agents know nothing about repo yet.") == true)
+            XCTAssertEqual(memory.noticeRow?.isHidden, false)
+            XCTAssertEqual(memory.noticeLabel?.stringValue.hasPrefix("Auto-memory is off (autoMemoryEnabled is false in ~/.claude/settings.json)"), true)
+            memory.dismiss()
 
             // board.json and the checkouts are read off the main thread,
             // then the form opens as a sheet; Cancel writes nothing.

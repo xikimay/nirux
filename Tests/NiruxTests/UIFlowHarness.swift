@@ -153,6 +153,7 @@ final class UIFlowHarness {
         shell.searchPanel?.dismiss()
         shell.globalSearchPanel?.dismiss()
         shell.sessionHistoryPanel?.dismiss()
+        shell.projectMemoryPanel?.dismiss()
         shell.filePickerPanel?.dismiss()
         shell.worktreeCleanupPanel?.dismiss()
         shell.boardSettingsPanel?.dismiss()
@@ -174,6 +175,11 @@ final class UIFlowHarness {
             self?.restoredAgentLaunches.append(command)
         }
         shell.sideEffects.homeDirectory = { [home] in home }
+        shell.sideEffects.claudeManagedSettings = { [root] in
+            ProjectMemory.ManagedFolders(
+                preferences: URL(fileURLWithPath: root + "/managed-preferences"), settings: URL(fileURLWithPath: root + "/managed")
+            )
+        }
         shell.sideEffects.openURL = { [weak self] url in self?.openedURLs.append(url) }
         shell.sideEffects.rerunFailedJobs = { run in "Run \(run.id) of \(run.repository): refused by the flow test" }
         shell.sideEffects.checkExplain = { .unavailable("Explain doesn’t run in flow tests.") }
@@ -434,7 +440,9 @@ private struct IsolatedEnvironment {
             try? FileManager.default.createDirectory(atPath: root + "/" + folder, withIntermediateDirectories: true)
         }
         let environment = ProcessInfo.processInfo.environment
-        let cleared = ["ZDOTDIR", "XDG_CONFIG_HOME", "RIPGREP_CONFIG_PATH"]
+        // Claude Code's settings and memory come from the fake home only.
+        let cleared = ["ZDOTDIR", "XDG_CONFIG_HOME", "RIPGREP_CONFIG_PATH", "CLAUDE_CONFIG_DIR"]
+            + environment.keys.filter { $0.hasPrefix("CLAUDE_CODE_") }
             + environment.keys.filter { $0.hasPrefix("GIT_") }
         let names = ["NIRUX_STATE_DIR", "HOME"] + cleared
         saved = Dictionary(uniqueKeysWithValues: names.map { ($0, environment[$0]) })
