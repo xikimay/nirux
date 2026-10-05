@@ -96,9 +96,19 @@ enum RemotePromptSanitizer {
     /// newlines and tabs, but discard control characters (especially ESC)
     /// before wrapping the prompt in terminal bracketed-paste markers.
     static func sanitize(_ text: String) -> String? {
+        let sanitized = filtered(String(String.UnicodeScalarView(text.unicodeScalars.prefix(maxCharacters))))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return sanitized.isEmpty ? nil : sanitized
+    }
+
+    /// `text` with what a terminal would read as a key left out: tabs and
+    /// line feeds kept, a carriage return (alone or before a line feed)
+    /// made a line feed, every other C0 control, DEL and C1 control
+    /// dropped. Nothing in it can end a bracketed paste.
+    static func filtered(_ text: String) -> String {
         var result = String.UnicodeScalarView()
         var previousWasCarriageReturn = false
-        for scalar in text.unicodeScalars.prefix(maxCharacters) {
+        for scalar in text.unicodeScalars {
             if previousWasCarriageReturn {
                 previousWasCarriageReturn = false
                 if scalar.value == 0x0A { continue }
@@ -115,8 +125,7 @@ enum RemotePromptSanitizer {
                 continue
             }
         }
-        let sanitized = String(result).trimmingCharacters(in: .whitespacesAndNewlines)
-        return sanitized.isEmpty ? nil : sanitized
+        return String(result)
     }
 
     static func terminalInput(for text: String) -> String? {

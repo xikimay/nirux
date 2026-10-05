@@ -943,7 +943,7 @@ and submits it.
 Review comments on feat/keep-awake (head db9ac66), from Nirux:
 
 1. Sources/Nirux/Views/NiruxShellView+KeepAwake.swift:42
-   > guard ptys.contains(where: { Self.needsBackgroundRefresh($0, now: now) }) else { return }
+   > + guard ptys.contains(where: { Self.needsBackgroundRefresh($0, now: now) }) else { return }
    When this guard returns early, nothing calls updateKeepAwake(): a Claude
    interrupted with Esc keeps the assertion while Nirux is in the
    background. Call updateKeepAwake() before returning, and add an
@@ -965,9 +965,22 @@ say why and change nothing for it. Then say what you did for each number.
   `claude`. The new one keeps its at-prompt checks without the failed turn:
   the foreground process is `claude` driven by Nirux's hooks (`hookKind ==
   "claude"`, and not headless as `AgentHookCenter.isHeadlessClaude` reads it),
-  no dialog is pending, no hook says it is working and no turn has started.
-  Closing a column or a workspace already trusts "idle" only on that same
-  condition (`WorkspaceClosePolicy.LiveAgent`: `processName == "claude" &&
+  no dialog is pending, no hook says it is working and no turn has started;
+  and a prompt went in since the process started, as Mission's `tell` asks:
+  `SessionStart` comes before Claude's own dialogs (trust, an MCP server),
+  and the column's `hookKind` is cleared when Claude ends or another
+  process comes to the front (Ctrl-Z), so a Claude back in front reports
+  again first. Its last turn didn't end on an error that needs the user
+  first (a usage limit, a login, a model), as Resume knows: some show a
+  menu of Claude's own, and neither it nor what the user does there fires
+  a hook, so this refuses until a prompt goes in, and says so.
+  Keys typed since
+  its last prompt went in (a draft, a menu no hook tells of) don't refuse:
+  the sheet says the comments join them.
+  A subagent at work after the main turn, or a turn interrupted with Esc,
+  reads as working.
+  Closing a column or a workspace trusts "idle" on part of this condition
+  (`WorkspaceClosePolicy.LiveAgent`: `processName == "claude" &&
   hookKind == "claude"`). Every other agent is
   refused, with the reason: Codex's notify hook reports turn ends only, so an
   open approval prompt would read as idle; Gemini CLI and OpenCode report
@@ -977,12 +990,25 @@ say why and change nothing for it. Then say what you did for each number.
   comment that is being edited sends it as it was saved; the edit becomes
   the draft of a new comment where it is, so nothing typed is lost, and
   the editor goes on as that draft. An edit that changed nothing goes.
-- **Lines in the message.** A comment's quoted rows show their line breaks
-  (CR, U+2028, U+2029) and invisible characters as code points, as the page
-  does, so a quoted line can't end the quote and read as the user's. A
-  removed row is named as the base's line ("removed, line 42 of main"), and
-  an outdated comment is sent as outdated, with its excerpt and no line
-  number.
+- **Lines in the message.** A comment's quoted rows are marked by their
+  kind ("+", "-", " "), and show their line breaks (LF, CR, U+2028,
+  U+2029), controls and invisible characters as code points, as the page
+  does, so a quoted line can't end the quote and read as the user's; a
+  CRLF file's line endings stay hidden unless they changed. Paths and the
+  branch's and base's names are shown the same way, tabs too: a file named
+  with a line break can't start a forged comment. So is a comment's text,
+  as the sheet shows it, but for its line breaks: each starts a line,
+  indented under its number. The header names the head, and says when
+  the lines hold uncommitted changes: line numbers are the working
+  tree's. A removed row is named as the
+  base's line ("removed, line 42 of main"; a renamed file's in its old
+  path), and an outdated comment is sent as outdated, with its excerpt and
+  no line number; so is one whose file's diff isn't read yet or is too
+  large to place it. A comment quotes up to 20 rows of up to 300 Unicode
+  scalars (whole characters; a row cut when it was stored ends with "…"
+  too), and a message holds up to 128,000 bytes of UTF-8: a comment that
+  doesn't fit stays unsent (the next ones may fit), and the sheet counts
+  those.
 - **The message is sanitized as a whole**, paths and quoted lines included,
   by the scalar filter of `RemotePromptSanitizer`, factored out: keep `\n` and
   `\t`, turn `\r` and `\r\n` into `\n`, drop the other C0 controls, DEL and
@@ -1238,7 +1264,9 @@ used.
    Explain's page has landed.
 5. **R5, sending to the agent.** The "idle at its prompt" predicate, the
    sanitizer, the message, the target rules, the sheet; shared with "Ask Agent
-   to Resolve" if it has landed.
+   to Resolve" if it has landed (it hasn't). It ships in two pull requests:
+   the predicate, the sanitizer's filter and the message, without UI; then
+   the target rules, the sheet and the page's button.
 
 After R3, the user decides whether R4 and R5 are worth building.
 
