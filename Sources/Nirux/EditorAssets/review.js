@@ -30,6 +30,8 @@
     // on from past what Swift answered before.
     clickCount: Date.now()
   };
+  // Ticks the elapsed time of the Explain under way.
+  let explainTimer = null;
 
   function diffKey(file) {
     return file.diffKey ? `${file.diffKey}@${state.page.header.mergeBase}` : null;
@@ -188,12 +190,138 @@
       }
       section.append(notes);
     }
+    const bar = element("div", "explain-bar");
+    bar.id = "explain-bar";
+    fillExplainBar(bar, page);
+    section.append(bar);
+    return section;
+  }
+
+  function button(label, primary, onClick) {
+    const node = element("button", primary ? "action" : "action secondary", label);
+    node.type = "button";
+    node.addEventListener("click", onClick);
+    return node;
+  }
+
+  // Explain's button, what it says, how the last one ended and today's
+  // usage (`BranchReview.Page.ExplainBar`). Swift sends a new bar as the
+  // run goes; the page stays as it is around it.
+  function fillExplainBar(container, page) {
+    const bar = page.explain;
+    const actions = P.explainActions(bar);
+    const row = element("div", "explain-row");
+    const status = element("span", "explain-status");
+    status.append(icon("spark"));
+    const text = element("span");
+    status.append(text);
+    const explained = page.explanation;
+    if (bar.state === "running" && bar.progress) {
+      text.classList.add("explain-progress");
+      text.textContent = P.explainProgress(bar.progress, Date.now());
+    } else if (explained && bar.state === "ready") {
+      // What the page shows, and what changed since.
+      text.textContent = [`Explained by Claude at ${explained.head.slice(0, 7)}`, explained.model, actions.text]
+        .filter(Boolean).join(" \u00B7 ");
+    } else if (actions.text) {
+      text.textContent = actions.text;
+    }
+    // Nothing to say beside the button: no lone icon either.
+    status.firstChild.style.visibility = text.textContent ? "" : "hidden";
+    row.append(status);
+    if (bar.untracked > 0 && (bar.state === "ready" || bar.state === "checking" || bar.state === "unavailable")) {
+      const label = element("label", "explain-untracked");
+      const box = element("input");
+      box.type = "checkbox";
+      box.checked = bar.includeUntracked;
+      box.addEventListener("change", () => post({ type: "includeUntracked", include: box.checked }));
+      label.append(box, ` Include ${P.count(bar.untracked, "untracked file")}`);
+      label.title = "Untracked files go by name only, unless included.";
+      row.append(label);
+    }
+    for (const entry of actions.buttons) {
+      const node = button(entry.label, entry.primary, () => {
+        if (entry.action === "cancel") post({ type: "cancelExplain" });
+        else post({ type: "explain", fresh: entry.fresh });
+      });
+      node.disabled = Boolean(entry.disabled);
+      if (entry.disabled && bar.state === "unavailable") node.title = bar.message ?? "";
+      row.append(node);
+    }
+    container.replaceChildren(row);
+    if (bar.message) container.append(element("div", "explain-message", bar.message));
+    const usage = P.usageLine(bar.usage);
+    if (usage) {
+      const line = element("div", "explain-usage", usage);
+      line.title = "What these runs would cost at API prices. On a Claude subscription, they count toward the plan’s usage limits instead.";
+      container.append(line);
+    }
+    clearInterval(explainTimer);
+    explainTimer = null;
+    if (bar.state === "running" && bar.progress) {
+      explainTimer = setInterval(() => {
+        if (!text.isConnected) return clearInterval(explainTimer);
+        text.textContent = P.explainProgress(bar.progress, Date.now());
+      }, 1000);
+    }
+  }
+
+  // Claude's overview, above the author's account: labeled with the model
+  // and the head it read. Shown as text, line breaks kept.
+  function overview(explanation, page) {
+    const block = element("div", "block");
+    const source = element("div", "source claude");
+    source.append(icon("spark"), element("span", null,
+      `Claude \u00B7 read ${explanation.head.slice(0, 7)} and the repository \u00B7 ${explanation.model}`));
+    if (!explanation.isCurrent) source.append(element("span", "outdated-tag", `the branch is at ${page.header.head.slice(0, 7)} now`));
+    block.append(source, element("div", "overview", explanation.overview));
+    return block;
+  }
+
+  // The author's claims the code doesn't match, with Claude's evidence;
+  // matching ones only counted. Then Claude's questions for the author.
+  function checked(page) {
+    const explanation = page.explanation;
+    if (!explanation || (explanation.claims.length === 0 && explanation.matching === 0 && explanation.questions.length === 0)) {
+      return null;
+    }
+    const section = element("div", "section");
+    section.append(element("div", "label", "Checked by Claude"));
+    if (explanation.claims.length > 0 || explanation.matching > 0) {
+      const block = element("div", "block");
+      const source = element("div", "source claude");
+      const counts = [];
+      if (explanation.matching > 0) counts.push(`${explanation.matching} match`);
+      if (explanation.claims.length > 0) counts.push(`${explanation.claims.length} don’t fully`);
+      source.append(icon("spark"), element("span", null, `The author’s claims, checked against the code \u00B7 ${counts.join(" \u00B7 ")}`));
+      block.append(source);
+      const list = element("div", "claims");
+      for (const claim of explanation.claims) {
+        const item = element("div", "claim");
+        const body = element("div");
+        body.append(element("div", "claim-text", claim.claim), element("div", "claim-evidence", claim.evidence));
+        item.append(element("span", "verdict", P.verdictLabel(claim.verdict)), body);
+        list.append(item);
+      }
+      if (explanation.claims.length > 0) block.append(list);
+      section.append(block);
+    }
+    if (explanation.questions.length > 0) {
+      const block = element("div", "block");
+      const source = element("div", "source claude");
+      source.append(icon("help"), element("span", null, "Claude’s questions for the author"));
+      const list = element("ul", "questions");
+      for (const question of explanation.questions) list.append(element("li", null, question));
+      block.append(source, list);
+      section.append(block);
+    }
     return section;
   }
 
   function accounts(page) {
     const section = element("div", "section");
     section.append(element("div", "label", "What and why"));
+    if (page.explanation) section.append(overview(page.explanation, page));
     const authored = page.accounts.filter((account) => account.source !== "commits");
     if (authored.length === 0) {
       const block = element("div", "block");
@@ -323,7 +451,8 @@
 
   function groups(page) {
     const section = element("div", "section");
-    section.append(element("div", "label", "Changes \u00B7 by path"));
+    const byIntent = page.groups.some((group) => group.intent);
+    section.append(element("div", "label", byIntent ? "Changes \u00B7 by intent (Claude)" : "Changes \u00B7 by path"));
     const list = element("div", "groups");
     const files = new Map(page.files.map((file) => [file.id, file]));
     for (const group of page.groups) {
@@ -338,7 +467,13 @@
       const deletions = members.reduce((sum, file) => sum + file.deletions, 0);
       const count = element("span", "group-count", `${P.count(members.length, "file")} \u00B7 `);
       count.append(lineCounts(additions, deletions));
-      button.append(chevron, element("span", "group-title", group.title), count, element("span", "group-progress"));
+      button.append(chevron);
+      if (group.intent) {
+        const intent = element("span", "intent", P.intentLabel(group.intent));
+        intent.dataset.intent = group.intent;
+        button.append(intent);
+      }
+      button.append(element("span", "group-title", group.title), count, element("span", "group-progress"));
       const check = checkbox("group-check");
       check.addEventListener("click", () => toggleGroupReviewed(group, check));
       const head = element("div", "group-head");
@@ -417,9 +552,15 @@
       chevron, element("span", `status-letter ${letter}`, letter), path, fileRisks, tags,
       lineCounts(file.additions, file.deletions)
     );
+    if (file.summary) {
+      const summary = element("span", `file-summary${file.summaryIsOutdated ? " outdated" : ""}`, file.summary);
+      if (file.summaryIsOutdated) summary.append(element("span", "outdated-tag", "changed since explained"));
+      row.append(summary);
+    }
     row.setAttribute("aria-label", [
       `${file.status} ${path.title}`, tag, `${file.additions} added, ${file.deletions} removed`,
-      riskLabels.length > 0 ? `risks: ${riskLabels.join(", ")}` : null
+      riskLabels.length > 0 ? `risks: ${riskLabels.join(", ")}` : null,
+      file.summary ? `Claude: ${file.summary}${file.summaryIsOutdated ? " (changed since explained)" : ""}` : null
     ].filter(Boolean).join(", "));
     const diff = element("div", "diff");
     diff.hidden = true;
@@ -689,7 +830,7 @@
       state.diffs.clear();
       state.holders.clear();
     }
-    const sections = [header(page), accounts(page), risks(page), groups(page)];
+    const sections = [header(page), accounts(page), checked(page), risks(page), groups(page)].filter(Boolean);
     statusElement.classList.remove("shown");
     bannerElement.hidden = true;
     pageElement.replaceChildren(...sections);
@@ -741,6 +882,15 @@
     if (file && diffKey(file)) state.diffs.set(file.path, { key: diffKey(file), node: holder });
   }
 
+  // Explain's bar as the run goes: only the bar changes.
+  function showExplain(json) {
+    const bar = JSON.parse(json);
+    if (!state.page) return;
+    state.page.explain = bar;
+    const container = document.getElementById("explain-bar");
+    if (container) fillExplainBar(container, state.page);
+  }
+
   // The branch moved since the page was read: it stays as it is, and a
   // banner offers the new one.
   function showReload(message, action) {
@@ -780,6 +930,6 @@
     pageElement.hidden = true;
   }
 
-  window.NiruxReview = Object.freeze({ show, showDiff, showStatus, showReload, hideReload, showReview });
+  window.NiruxReview = Object.freeze({ show, showDiff, showExplain, showStatus, showReload, hideReload, showReview });
   post({ type: "ready" });
 })();

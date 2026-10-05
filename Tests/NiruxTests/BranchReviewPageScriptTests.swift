@@ -162,4 +162,60 @@ final class BranchReviewPageScriptTests: XCTestCase {
         XCTAssertEqual(try call("groupReviewAction", [0, 2, 4], states), #"{"reviewed":false,"ids":[0,2]}"#)
         XCTAssertEqual(try call("reviewTitle", "changed"), #""Changed since you reviewed it""#)
     }
+
+    /// What Explain's bar offers in each state: the changed files once
+    /// something was explained, every file again on "Explain All Again";
+    /// nothing when there is nothing to send.
+    func testExplainActions() throws {
+        func actions(_ bar: [String: Any]) throws -> String {
+            var full: [String: Any] = [
+                "state": "ready", "explained": false, "changed": 0, "unexplained": 0, "sendable": 3, "account": "claude.ai, Max"
+            ]
+            full.merge(bar) { $1 }
+            let json = try call("explainActions", full)
+            let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+            let buttons = (decoded["buttons"] as? [[String: Any]] ?? []).map { button in
+                let fresh = (button["fresh"] as? Bool).map { $0 ? " fresh" : "" } ?? ""
+                let disabled = (button["disabled"] as? Bool) == true ? " disabled" : ""
+                return "\(button["label"] ?? "")\(fresh)\(disabled)"
+            }
+            return ((decoded["text"] as? String).map { [$0] } ?? []).joined() + " | " + buttons.joined(separator: ", ")
+        }
+        XCTAssertEqual(
+            try actions([:]),
+            "Claude can read this branch and its repository, read-only, and explain it file by file: about a minute or two, "
+                + "on claude.ai, Max. | Explain"
+        )
+        XCTAssertEqual(
+            try actions(["explained": true, "changed": 2]), "2 files changed since | Explain 2 Changed Files, Explain All Again fresh"
+        )
+        XCTAssertEqual(
+            try actions(["explained": true, "changed": 1, "unexplained": 2]),
+            "1 file changed since · 2 files not explained yet | Explain 3 Files, Explain All Again fresh"
+        )
+        XCTAssertEqual(try actions(["explained": true]), " | Explain Again fresh")
+        XCTAssertEqual(
+            try actions(["sendable": 0]),
+            "Nothing for Claude to read: only folded, binary, secret or untracked files changed. | Explain disabled"
+        )
+        XCTAssertEqual(try actions(["state": "unavailable"]), " | Explain disabled")
+        XCTAssertEqual(try actions(["state": "queued"]), "Waiting for another Explain to end… | Cancel")
+        XCTAssertEqual(try actions(["state": "stopping"]), "Stopping… | Cancel disabled")
+    }
+
+    func testExplainProgressAndUsage() throws {
+        let progress: [String: Any] = ["part": 2, "parts": 3, "reads": 1, "retries": 0, "startedAt": 1_000]
+        XCTAssertEqual(try call("explainProgress", progress, 66_500), #""Explaining · part 2 of 3 · 1 read · 1:05""#)
+        let single: [String: Any] = ["part": 1, "parts": 1, "reads": 0, "retries": 2, "startedAt": 0]
+        XCTAssertEqual(try call("explainProgress", single, 4_000), #""Explaining · 2 retries (servers busy) · 0:04""#)
+        XCTAssertEqual(
+            try call("usageLine", ["runs": 2, "tokens": 412_400, "costUSD": 1.1234, "isComplete": false]),
+            #""Explain today on this branch: 2 runs · 412k tokens · at least $1.12 at API prices""#
+        )
+        XCTAssertEqual(try call("usageLine", NSNull()), "null")
+        XCTAssertEqual(try call("tokens", 1_250_000), #""1.3M""#)
+        XCTAssertEqual(try call("intentLabel", "behaviorChange"), #""Behavior change""#)
+        XCTAssertEqual(try call("intentLabel", "<b>"), #""Other""#)
+        XCTAssertEqual(try call("verdictLabel", "notInDiff"), #""Not in diff""#)
+    }
 }

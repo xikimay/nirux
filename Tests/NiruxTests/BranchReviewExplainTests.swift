@@ -492,6 +492,52 @@ final class BranchReviewExplainTests: BranchReviewRepositoryTestCase {
         XCTAssertEqual(explanation.runs.first?.date, Date(timeIntervalSince1970: 5))
     }
 
+    /// The page reads what Explain kept, read only, while it is this
+    /// branch's: not after the name was reused for another branch.
+    func testThePageReadsWhatWasKeptOnlyForItsBranch() throws {
+        try write("Sources/A.swift", "let a = 1\n")
+        try commit("a")
+        XCTAssertEqual(BranchReview.explain(try job()).ending, .explained)
+        let state = URL(fileURLWithPath: root + "/state", isDirectory: true)
+        let kept = try XCTUnwrap(try stored())
+        XCTAssertEqual(BranchReviewController.readExplanation(for: try snapshot(), stateDirectory: state, options: options()), kept)
+        let before = try XCTUnwrap(try storedRecord())
+
+        // The branch moves on: still its own.
+        try write("Sources/A.swift", "let a = 2\n")
+        try commit("a again")
+        XCTAssertEqual(BranchReviewController.readExplanation(for: try snapshot(), stateDirectory: state, options: options()), kept)
+        XCTAssertEqual(try storedRecord(), before, "reading records nothing")
+
+        // Deleted and made again from main: another branch of that name.
+        try git(["checkout", "-q", "main"])
+        try git(["branch", "-q", "-D", "feat/x"])
+        try git(["checkout", "-q", "-b", "feat/x"])
+        try write("Sources/B.swift", "let b = 1\n")
+        try commit("b")
+        XCTAssertNil(BranchReviewController.readExplanation(for: try snapshot(), stateDirectory: state, options: options()))
+    }
+
+    /// The worktree moved to another branch since the page read it (the
+    /// run waited in line, or the banner says so): Claude would read that
+    /// branch's files, so nothing runs.
+    func testExplainRunsOnlyOnItsBranch() throws {
+        try write("Sources/A.swift", "let a = 1\n")
+        try commit("a")
+        let job = try job()
+        // A tag of the branch's name doesn't hide it.
+        try git(["tag", "feat/x"])
+        try git(["checkout", "-q", "-b", "other"])
+        let elsewhere = BranchReviewController.explainOnItsBranch(job, cancellation: .init()) { _ in }
+        XCTAssertEqual(elsewhere.ending, .cantKeep(
+            "The worktree isn’t on feat/x anymore: Explain didn’t run. Review the branch it’s on, then Explain."
+        ))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fake.path + "/count"))
+        try git(["checkout", "-q", "feat/x"])
+        XCTAssertEqual(BranchReviewController.explainOnItsBranch(job, cancellation: .init()) { _ in }.ending, .explained)
+        XCTAssertEqual(try runCount(), 1)
+    }
+
     // MARK: - Helpers
 
     private func storedRecord() throws -> BranchReview.Record? {

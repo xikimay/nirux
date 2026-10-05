@@ -202,22 +202,45 @@ extension NiruxShellView {
                 details: candidate.confirmationLines(for: plan),
                 confirmTitle: "Clean Up"
             ) else { return completion() }
-            DispatchQueue.global(qos: .userInitiated).async {
-                let execution = WorktreeCleanup.execute(plan)
-                DispatchQueue.main.async { [weak self] in
-                    defer { completion() }
-                    guard let self else { return }
-                    let outcome = self.finishWorktreeCleanup(execution, of: candidate, plan: plan)
-                    if !outcome.succeeded {
-                        let kept = outcome.keptOpen.isEmpty ? [] : [Self.keptOpenText(outcome.keptOpen) + "."]
-                        self.showWorktreeCleanupNotice(
-                            message: "Clean-up of \(plan.branch) stopped", lines: [outcome.message] + kept
-                        )
-                    } else if !outcome.keptOpen.isEmpty {
-                        self.showKeptOpenNotice(outcome.keptOpen)
+            Self.stoppingExplains(in: plan.worktree.path) { resumeExplains in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let execution = WorktreeCleanup.execute(plan)
+                    DispatchQueue.main.async { [weak self] in
+                        defer {
+                            resumeExplains()
+                            completion()
+                        }
+                        guard let self else { return }
+                        self.reportWorktreeCleanup(execution, of: candidate, plan: plan)
                     }
                 }
             }
+        }
+    }
+
+    /// Clean Up deletes the branch's review file once the branch is gone:
+    /// an Explain of the worktree must not end after and create it again.
+    /// `body` runs once the worktree's Explain is stopped, and gets the
+    /// closure that lets the worktree take Explain runs again.
+    static func stoppingExplains(
+        in worktree: String, queue: ExplainQueue = .shared,
+        _ body: @escaping @MainActor (_ resume: @escaping @MainActor () -> Void) -> Void
+    ) {
+        let key = ExplainQueue.worktreeKey(worktree)
+        queue.stop(worktree: key) {
+            body { queue.resume(worktree: key) }
+        }
+    }
+
+    private func reportWorktreeCleanup(
+        _ execution: WorktreeCleanup.Execution, of candidate: WorktreeCleanupCandidate, plan: WorktreeCleanup.Plan
+    ) {
+        let outcome = finishWorktreeCleanup(execution, of: candidate, plan: plan)
+        if !outcome.succeeded {
+            let kept = outcome.keptOpen.isEmpty ? [] : [Self.keptOpenText(outcome.keptOpen) + "."]
+            showWorktreeCleanupNotice(message: "Clean-up of \(plan.branch) stopped", lines: [outcome.message] + kept)
+        } else if !outcome.keptOpen.isEmpty {
+            showKeptOpenNotice(outcome.keptOpen)
         }
     }
 
@@ -349,17 +372,33 @@ extension NiruxShellView {
         panel.isConfirming = false
         guard confirmed else { return }
         panel.beginRun()
-        runWorktreeCleanups(runnable[...], in: panel)
+        // Every worktree's Explain stops now, not when its row comes: one
+        // waiting behind another's would start meanwhile, and be paid for
+        // in vain. Each row still waits for its own to end.
+        let worktrees = runnable.compactMap { candidate -> String? in
+            if case .ready(let plan, _) = candidate.availability { return ExplainQueue.worktreeKey(plan.worktree.path) }
+            return nil
+        }
+        for worktree in worktrees { ExplainQueue.shared.stop(worktree: worktree) {} }
+        runWorktreeCleanups(runnable[...], in: panel) {
+            for worktree in worktrees { ExplainQueue.shared.resume(worktree: worktree) }
+        }
     }
 
     /// One after the other, reporting on each row; a failure stops only
     /// that worktree, whose row keeps git's output. Stop ends the run
     /// after the worktree in progress.
-    private func runWorktreeCleanups(_ queue: ArraySlice<WorktreeCleanupCandidate>, in panel: WorktreeCleanupPanel) {
-        guard let candidate = queue.first else { return panel.finishRun() }
+    private func runWorktreeCleanups(
+        _ queue: ArraySlice<WorktreeCleanupCandidate>, in panel: WorktreeCleanupPanel, finished: @escaping @MainActor () -> Void
+    ) {
+        guard let candidate = queue.first else {
+            finished()
+            return panel.finishRun()
+        }
         let rest = queue.dropFirst()
         guard !panel.stopRequested else {
             for skipped in queue { panel.setResult(.skipped("Not run: stopped"), for: skipped.path) }
+            finished()
             return panel.finishRun()
         }
         panel.setResult(.running, for: candidate.path)
@@ -367,32 +406,35 @@ extension NiruxShellView {
         case .closeOnly:
             let kept = closeWorkspacesAfterCleanup(of: candidate)
             panel.setResult(kept.isEmpty ? .done("Workspace closed") : .skipped(Self.keptOpenText(kept)), for: candidate.path)
-            runWorktreeCleanups(rest, in: panel)
+            runWorktreeCleanups(rest, in: panel, finished: finished)
         case .ready(let plan, _):
             // A "Clean Up Worktree…" of the same folder may still be running.
             let key = Self.comparablePath(candidate.path)
             guard worktreeCleanupsInFlight.insert(key).inserted else {
                 panel.setResult(.skipped("Not run: another clean-up of it is in progress"), for: candidate.path)
-                return runWorktreeCleanups(rest, in: panel)
+                return runWorktreeCleanups(rest, in: panel, finished: finished)
             }
-            DispatchQueue.global(qos: .userInitiated).async {
-                let execution = WorktreeCleanup.execute(plan)
-                DispatchQueue.main.async { [weak self, weak panel] in
-                    guard let self else { return }
-                    self.worktreeCleanupsInFlight.remove(key)
-                    let outcome = self.finishWorktreeCleanup(execution, of: candidate, plan: plan)
-                    guard let panel else { return }
-                    let keptNote = outcome.keptOpen.isEmpty ? "" : ". \(Self.keptOpenText(outcome.keptOpen))"
-                    panel.setResult(
-                        outcome.succeeded ? .done(outcome.message + keptNote) : .failed(outcome.message + keptNote),
-                        for: candidate.path
-                    )
-                    self.runWorktreeCleanups(rest, in: panel)
+            Self.stoppingExplains(in: plan.worktree.path) { resumeExplains in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let execution = WorktreeCleanup.execute(plan)
+                    DispatchQueue.main.async { [weak self, weak panel] in
+                        resumeExplains()
+                        guard let self else { return finished() }
+                        self.worktreeCleanupsInFlight.remove(key)
+                        let outcome = self.finishWorktreeCleanup(execution, of: candidate, plan: plan)
+                        guard let panel else { return finished() }
+                        let keptNote = outcome.keptOpen.isEmpty ? "" : ". \(Self.keptOpenText(outcome.keptOpen))"
+                        panel.setResult(
+                            outcome.succeeded ? .done(outcome.message + keptNote) : .failed(outcome.message + keptNote),
+                            for: candidate.path
+                        )
+                        self.runWorktreeCleanups(rest, in: panel, finished: finished)
+                    }
                 }
             }
         case .checking, .blocked:
             panel.setResult(.skipped("Not run: no longer ready"), for: candidate.path)
-            runWorktreeCleanups(rest, in: panel)
+            runWorktreeCleanups(rest, in: panel, finished: finished)
         }
     }
 

@@ -94,6 +94,7 @@ final class BranchReviewPersistenceTests: XCTestCase {
         let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1400, height: 900))
         shell.stopHeartbeat()
         shell.branchReviewReader = BranchReviewPageTests.reader
+        shell.sideEffects.checkExplain = { .unavailable("No claude in tests.") }
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1400, height: 900),
             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false

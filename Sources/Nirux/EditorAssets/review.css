@@ -182,6 +182,35 @@ a.chip { text-decoration: none; cursor: pointer; }
 .commits summary { cursor: pointer; color: var(--text-primary); }
 .commits pre { margin: 4px 0 0; font: 11px/16px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 
+/* Explain (section 4.3): Claude's text is neutral, labeled, never approval. */
+.explain-bar { display: grid; gap: 4px; }
+.explain-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-height: 24px; }
+.explain-status { flex: 1; min-width: 200px; display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 11px; line-height: 14px; }
+.explain-status .icon { color: var(--accent); }
+.explain-progress { font-variant-numeric: tabular-nums; }
+.explain-untracked { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); font-size: 11px; }
+.explain-message { color: var(--text-secondary); font-size: 11px; line-height: 15px; }
+.explain-usage { color: var(--text-tertiary); font-size: 11px; line-height: 14px; font-variant-numeric: tabular-nums; }
+.action.secondary { border-color: var(--line-strong); background: var(--fill-hover); color: var(--text-primary); font-weight: 500; }
+.action.secondary:hover { background: var(--fill-pressed); }
+.action:disabled { border-color: var(--line); background: transparent; color: var(--text-disabled); cursor: default; }
+.source.claude .icon { color: var(--accent); }
+.outdated-tag { color: var(--text-tertiary); font-size: 11px; }
+.outdated-tag::before { content: "\00B7\00A0"; }
+.file-summary .outdated-tag { margin-left: 6px; white-space: nowrap; }
+.overview { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-primary); }
+.claims { display: grid; gap: 6px; font-size: 11px; line-height: 15px; }
+.claim { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px; align-items: start; }
+.verdict { color: var(--text-secondary); font-size: 10px; line-height: 15px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.claim-text, .claim-evidence { white-space: pre-wrap; overflow-wrap: anywhere; }
+.claim-evidence { color: var(--text-secondary); }
+.questions { display: grid; gap: 4px; margin: 0; padding-left: 16px; font-size: 11px; line-height: 15px; }
+.questions li { white-space: pre-wrap; overflow-wrap: anywhere; }
+.intent { flex: none; padding: 3px 5px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--text-secondary); font: 600 10px/1 var(--sans); letter-spacing: 0.05em; text-transform: uppercase; }
+.intent[data-intent="behaviorChange"] { border-color: rgba(120, 163, 247, 0.5); color: var(--text-primary); }
+.file-summary { grid-column: 3 / -1; color: var(--text-secondary); font-size: 11px; line-height: 15px; white-space: normal; overflow-wrap: anywhere; }
+.file-summary.outdated { color: var(--text-tertiary); }
+
 /* Risks and tests */
 .risks { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .tests { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; color: var(--text-secondary); font-size: 11px; line-height: 15px; }
