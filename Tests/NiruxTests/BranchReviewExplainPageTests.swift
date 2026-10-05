@@ -165,6 +165,38 @@ final class BranchReviewExplainPageTests: XCTestCase {
         )
     }
 
+    /// Settings' model and effort; a model set by hand is kept when it
+    /// reads as an id, never when claude could take it for an option.
+    func testSavedSettingsKeepOnlyWhatClaudeTakesAsAModel() {
+        var settings = PersistedSettings()
+        XCTAssertEqual(BranchReview.ExplainSettings.saved(settings), BranchReview.ExplainSettings())
+        settings.explainModel = "claude-opus-6-0"
+        settings.explainEffort = "max"
+        XCTAssertEqual(BranchReview.ExplainSettings.saved(settings).model, "claude-opus-6-0")
+        settings.explainModel = "claude-opus-5-5[1m]"
+        XCTAssertEqual(BranchReview.ExplainSettings.saved(settings).model, "claude-opus-5-5[1m]")
+        XCTAssertEqual(BranchReview.ExplainSettings.saved(settings).effort, "max")
+        for model in [
+            "--model", "-x", "", "Claude Opus", "opus\n--tools", "a--dangerously-skip-permissions", String(repeating: "a", count: 101)
+        ] {
+            settings.explainModel = model
+            XCTAssertEqual(BranchReview.ExplainSettings.saved(settings).model, "claude-opus-5-5", model)
+        }
+        settings.explainEffort = "--effort"
+        XCTAssertEqual(BranchReview.ExplainSettings.saved(settings).effort, "medium")
+
+        // The last check, where they become claude's arguments.
+        var injected = BranchReview.ExplainSettings()
+        injected.model = "x--dangerously-skip-permissions"
+        injected.effort = "--print"
+        let input = BranchReview.ExplainInput(
+            text: "", files: [:], listedFiles: [], hunks: [:], sentPatches: [:], diffBytes: 0, contextOffset: 0
+        )
+        let arguments = BranchReview.explainArguments(for: input, settings: injected, language: "English")
+        XCTAssertEqual(Array(arguments.prefix(5)), ["-p", "--model", "claude-opus-5-5", "--effort", "medium"])
+        XCTAssertFalse(arguments.contains { $0.contains("dangerously") })
+    }
+
     /// How an Explain ended, in words that say what to do next.
     func testEndingsSayWhatToDoNext() {
         typealias Ending = BranchReview.ExplainResult.Ending

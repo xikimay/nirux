@@ -54,10 +54,12 @@ final class ReviewPage {
             reviewOpener: reviewOpener, branchCheck: branchCheck, headOrder: headOrder,
             explanationReader: explanationReader, explainChecker: explainChecker, explainer: explainer, explainQueue: explainQueue
         )
-        controller.confirmExplain = { _, _ in
+        controller.confirmExplain = { _, _, _ in
             XCTFail("Explain asked to confirm without a test's answer")
             return false
         }
+        // Not the state file's: a run asks for the defaults.
+        controller.explainSettings = { .init() }
         controller.view.openLink = openLink
         // Tests wait seconds, not the app's.
         controller.watchTiming = .init(settle: 0.2, metadataSettle: 0.1, maxWait: 0.8, quietMaxWait: 3.2)
