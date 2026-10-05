@@ -211,6 +211,41 @@ final class SessionHistoryFlowTests: XCTestCase {
         }
     }
 
+    /// Search Everywhere reads the sessions' Claude transcripts after the
+    /// terminals: a no-flicker conversation keeps no scrollback. A match
+    /// there resumes its session.
+    func testSearchEverywhereFindsASessionByItsTranscript() throws {
+        try UIFlowHarness.run { harness in
+            let needle = "flow-transcript-needle"
+            var record = Self.session(Self.flowID, title: "transcript-task", folder: harness.repo)
+            let transcript = harness.root + "/transcript.jsonl"
+            let prompt = #"{"type":"user","timestamp":"2026-10-04T10:00:00.000Z","message":{"role":"user","content":"please fix the \#(needle)"}}"#
+            try (prompt + "\n").write(toFile: transcript, atomically: true, encoding: .utf8)
+            // Written before the session's last event: it runs nowhere else.
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date(timeIntervalSince1970: record.lastActivityAt - 10)], ofItemAtPath: transcript
+            )
+            record.transcriptPath = transcript
+            try Self.seed([record], in: harness)
+
+            harness.shell.showGlobalSearch()
+            let panel = try XCTUnwrap(harness.shell.globalSearchPanel)
+            let field = try XCTUnwrap(panel.searchField)
+            harness.type(needle.uppercased(), into: field)
+            harness.waitUntil("the search to end") { !panel.isSearching && !panel.rows.isEmpty }
+            XCTAssertEqual(panel.rows.map(\.place), ["transcript-task"])
+            XCTAssertEqual(panel.rows.first?.excerpt, "please fix the \(needle)")
+            XCTAssertTrue(panel.rows.first?.detail.hasPrefix("you · ") == true, panel.rows.first?.detail ?? "")
+            let status = panel.statusLabel?.stringValue ?? ""
+            XCTAssertTrue(status.hasSuffix(" · 1 match in 1 of 1 session"), status)
+
+            harness.press(.returnKey, in: field.window)
+            XCTAssertFalse(panel.isVisible)
+            harness.waitUntil("the resume") { harness.agentLaunches.count == 1 }
+            XCTAssertTrue(harness.agentLaunches[0].hasPrefix("command claude --resume '\(Self.flowID)'"))
+        }
+    }
+
     /// Two sessions of one cleaned-up worktree, resumed at once: both plan
     /// to bring it back, the second finds it back and resumes there.
     func testTwoResumesOfOneWorktreeBringItBackOnce() throws {

@@ -712,6 +712,37 @@ a moment after the selection settles), its warning in orange, "(asks first)"
 when the alert will come. Return, the button or a double click goes through
 Resume, which looks again for a column that holds the session.
 
+**Search Everywhere** (⌥⌘F) reads, after the terminals, the transcripts of
+the Claude sessions the history knows (`TranscriptSearch`): a conversation in
+Claude's no-flicker mode runs on the alternate screen, which keeps no
+scrollback, and a past one has no terminal. Every space's, the most recently
+active first, up to 200 transcripts still on disk. Read-only and in place, off
+the main thread:
+
+- only what the user typed and Claude answered: the text of a `user` line whose
+  `origin` is the human's (older lines have none), part by part, without what
+  a harness wrote into it (a `<system-reminder>`, `[Request interrupted…]`,
+  `!` command output); the arguments of a slash command; a prompt queued while
+  Claude worked (a `queued_command` attachment); an `assistant` line's `text`
+  parts. Not tool calls or output, thinking, task notifications, compaction
+  summaries, API errors, meta or subagent lines. The format is Claude Code's
+  and may change: a line that doesn't parse or look like that is skipped;
+- bounded: the last 64 MB of each transcript, lines up to 2 MB (a longer one
+  is a tool's), and 5 seconds for all of them (8 GB as a guard); a transcript
+  the deadline falls in keeps its newest part unread. A line is parsed only
+  when its bytes hold the needle as JSON writes it (quotes, backslashes and
+  newlines escaped), and not tool output. On 89 transcripts (443 MB) a search
+  takes 0.3 to 1.7 seconds in a release build, the longest for words found in
+  every line's keys ("session", "type"). The status line says when older
+  sessions weren't searched, or when a transcript was read only from its end;
+- the five newest matches of each session, under its name and the title it
+  was given (`--name`, `/rename`) unless that is its name, else Claude's own,
+  with who wrote it, when, and "running" when it runs. Terminals and
+  transcripts have their own rows (500 and 200), so that a common word in the
+  terminals leaves the sessions some. Picking a transcript's match resumes the
+  session (Resume above), or goes to the column that runs it. The rows go when
+  the panel closes.
+
 Not done yet: refreshing pull request states from GitHub; **Browse all
 sessions** for sessions Nirux didn't launch (a column in the main checkout
 running `claude --resume`, then `Ctrl+W`, or `codex resume --all`); spotting a

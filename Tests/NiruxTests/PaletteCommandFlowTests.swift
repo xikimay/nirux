@@ -142,7 +142,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.type(needle.uppercased(), into: field)
             let panel = try XCTUnwrap(harness.shell.globalSearchPanel)
             harness.waitUntil("the search to end") { !panel.isSearching && !panel.rows.isEmpty }
-            XCTAssertEqual(panel.rows.map(\.match.excerpt), ["\(needle) 150", "\(needle) 100", "\(needle) 20"])
+            XCTAssertEqual(panel.rows.map(\.excerpt), ["\(needle) 150", "\(needle) 100", "\(needle) 20"])
             XCTAssertEqual(panel.rows.map(\.place), Array(repeating: "other › Terminal 1", count: 3))
             XCTAssertEqual(panel.statusLabel?.stringValue, "3 matches in 1 of 2 terminals")
 
