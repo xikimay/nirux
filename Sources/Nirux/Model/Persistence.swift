@@ -406,6 +406,10 @@ struct PersistedSettings: Codable {
     var agentResumeOnLaunch: AgentResumeOnLaunch?
     /// A value a newer build wrote, kept so saving doesn't erase it.
     private var unknownAgentResumeOnLaunchRawValue: String?
+    /// Branch Review's Explain: the account each project (space) accepted
+    /// the first-use notice for (`ExplainAccount.identity`), by project id.
+    /// Asked again when the account changes.
+    var explainNoticeAccounts: [String: String] = [:]
 
     init(
         claudeLaunchMode: ClaudeLaunchMode? = nil,
@@ -455,6 +459,7 @@ struct PersistedSettings: Codable {
         case stuckAgentMinutes
         case onboardingChecklist
         case agentResumeOnLaunch
+        case explainNoticeAccounts
         case claudeBypassPermissions // legacy
     }
 
@@ -499,6 +504,7 @@ struct PersistedSettings: Codable {
             agentResumeOnLaunch = AgentResumeOnLaunch(rawValue: raw)
             if agentResumeOnLaunch == nil { unknownAgentResumeOnLaunchRawValue = raw }
         }
+        explainNoticeAccounts = (try? container.decodeIfPresent([String: String].self, forKey: .explainNoticeAccounts)) ?? [:]
     }
 
     /// Custom encoder is required because `CodingKeys` carries the legacy
@@ -527,6 +533,7 @@ struct PersistedSettings: Codable {
         try container.encodeIfPresent(
             agentResumeOnLaunch?.rawValue ?? unknownAgentResumeOnLaunchRawValue, forKey: .agentResumeOnLaunch
         )
+        if !explainNoticeAccounts.isEmpty { try container.encode(explainNoticeAccounts, forKey: .explainNoticeAccounts) }
     }
 }
 

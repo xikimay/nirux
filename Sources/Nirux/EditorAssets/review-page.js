@@ -335,10 +335,105 @@
     }
   }
 
+  // MARK: Explain (section 4.3)
+
+  // What Explain's bar says and offers (`BranchReview.Page.ExplainBar`):
+  // `text` beside the buttons, each button's label and what it posts. Once
+  // something was explained, the files changed since and those not
+  // explained yet; every file again on "Explain All Again". Nothing to
+  // send, nothing offered.
+  function explainActions(bar) {
+    const explain = (label, fresh, primary) => ({ label, action: "explain", fresh, primary, disabled: false });
+    switch (bar.state) {
+      case "checking":
+        return { text: "Checking claude\u2026", buttons: [{ ...explain("Explain", false, true), disabled: true }] };
+      case "unavailable":
+        return { text: null, buttons: [{ ...explain("Explain", false, true), disabled: true }] };
+      case "queued":
+        return { text: "Waiting for another Explain to end\u2026", buttons: [{ label: "Cancel", action: "cancel" }] };
+      case "running":
+        return { text: null, buttons: [{ label: "Cancel", action: "cancel" }] };
+      case "stopping":
+        return { text: "Stopping\u2026", buttons: [{ label: "Cancel", action: "cancel", disabled: true }] };
+      default:
+        break;
+    }
+    if (bar.sendable === 0) {
+      return {
+        text: "Nothing for Claude to read: only folded, binary, secret or untracked files changed.",
+        buttons: [{ ...explain("Explain", false, true), disabled: true }]
+      };
+    }
+    if (!bar.explained) {
+      const where = bar.account ? `, on ${bar.account}` : "";
+      return {
+        text: `Claude can read this branch and its repository, read-only, and explain it file by file: about a minute or two${where}.`,
+        buttons: [explain("Explain", false, true)]
+      };
+    }
+    const pending = bar.changed + bar.unexplained;
+    if (pending > 0) {
+      const parts = [];
+      if (bar.changed > 0) parts.push(`${count(bar.changed, "file")} changed since`);
+      if (bar.unexplained > 0) parts.push(`${count(bar.unexplained, "file")} not explained yet`);
+      const label = bar.unexplained === 0 ? `Explain ${count(pending, "Changed File")}` : `Explain ${count(pending, "File")}`;
+      return { text: parts.join(" \u00B7 "), buttons: [explain(label, false, true), explain("Explain All Again", true, false)] };
+    }
+    return { text: null, buttons: [explain("Explain Again", true, false)] };
+  }
+
+  // "1:05" for 65 seconds.
+  function duration(seconds) {
+    const whole = Math.max(0, Math.floor(seconds));
+    return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+  }
+
+  // "Explaining · part 1 of 2 · 12 reads · 1:05".
+  function explainProgress(progress, now) {
+    const parts = ["Explaining"];
+    if (progress.parts > 1) parts.push(`part ${progress.part} of ${progress.parts}`);
+    if (progress.reads > 0) parts.push(count(progress.reads, "read"));
+    if (progress.retries > 0) parts.push(`${progress.retries === 1 ? "1 retry" : `${progress.retries} retries`} (servers busy)`);
+    parts.push(duration((now - progress.startedAt) / 1000));
+    return parts.join(" \u00B7 ");
+  }
+
+  // "410k", "1.2M".
+  function tokens(number) {
+    if (number >= 1000000) return `${(number / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
+    if (number >= 1000) return `${Math.round(number / 1000)}k`;
+    return String(number);
+  }
+
+  // Today's Explain runs on this branch. A stopped run reports no cost:
+  // the total is then "at least".
+  function usageLine(usage) {
+    if (!usage) return null;
+    const cost = `$${usage.costUSD.toFixed(2)}`;
+    return `Explain today on this branch: ${count(usage.runs, "run")} \u00B7 ${tokens(usage.tokens)} tokens \u00B7 `
+      + `${usage.isComplete ? "" : "at least "}${cost} at API prices`;
+  }
+
+  const intents = {
+    feature: "Feature", behaviorChange: "Behavior change", refactor: "Refactor", tests: "Tests", config: "Config",
+    docs: "Docs", ci: "CI", other: "Other"
+  };
+
+  function intentLabel(intent) {
+    return intents[intent] ?? "Other";
+  }
+
+  const verdicts = { partly: "Partly", contradicts: "Contradicts", notInDiff: "Not in diff", matches: "Matches" };
+
+  function verdictLabel(verdict) {
+    return verdicts[verdict] ?? String(verdict ?? "");
+  }
+
   const api = {
     parseMarkdown, parseInline, safeURL, splitDecisions, plainText, count, commitsLabel, splitPath,
     statusLetter, testsSummary, matchesRisk, visible, fileTag, clockTime,
-    isReviewed, isMarkable, reviewProgress, groupReviewState, groupReviewAction, reviewTitle
+    isReviewed, isMarkable, reviewProgress, groupReviewState, groupReviewAction, reviewTitle,
+    explainActions, explainProgress, duration, tokens, usageLine, intentLabel, verdictLabel
   };
   root.ReviewPage = Object.freeze(api);
 })(typeof window !== "undefined" ? window : globalThis);

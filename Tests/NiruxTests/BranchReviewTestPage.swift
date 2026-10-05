@@ -29,6 +29,8 @@ final class ReviewPage {
     /// Waits for the first read to show a page, unless `waitsForPage` is
     /// false. No review file opens unless `reviewOpener` opens one: never
     /// the real state's.
+    /// Explain finds no claude, and nothing explained, unless a test says
+    /// otherwise; its runs wait in a queue of their own.
     init(
         reader: @escaping BranchReviewController.Reader,
         patchReader: @escaping BranchReviewController.PatchReader = { _, _ in nil },
@@ -36,7 +38,11 @@ final class ReviewPage {
         makeWatcher: BranchReviewController.WatcherFactory? = nil, worktree: String = "/repo",
         reviewOpener: @escaping BranchReviewController.ReviewOpener = { _ in nil },
         branchCheck: @escaping BranchReviewController.BranchCheck = { _ in true },
-        headOrder: @escaping BranchReviewController.HeadOrder = { _, ancestor, descendant in ancestor == descendant }
+        headOrder: @escaping BranchReviewController.HeadOrder = { _, ancestor, descendant in ancestor == descendant },
+        explanationReader: @escaping BranchReviewController.ExplanationReader = { _ in nil },
+        explainChecker: @escaping BranchReviewController.ExplainChecker = { .unavailable("No claude in tests.") },
+        explainer: @escaping BranchReviewController.Explainer = { _, _, _ in .init(ending: .nothingToSend) },
+        explainQueue: ExplainQueue = ExplainQueue()
     ) throws {
         let watchers = watchers
         controller = BranchReviewController(
@@ -45,8 +51,13 @@ final class ReviewPage {
                 _ = watchers.append(layout.worktreeRoot)
                 return nil
             },
-            reviewOpener: reviewOpener, branchCheck: branchCheck, headOrder: headOrder
+            reviewOpener: reviewOpener, branchCheck: branchCheck, headOrder: headOrder,
+            explanationReader: explanationReader, explainChecker: explainChecker, explainer: explainer, explainQueue: explainQueue
         )
+        controller.confirmExplain = { _, _ in
+            XCTFail("Explain asked to confirm without a test's answer")
+            return false
+        }
         controller.view.openLink = openLink
         // Tests wait seconds, not the app's.
         controller.watchTiming = .init(settle: 0.2, metadataSettle: 0.1, maxWait: 0.8, quietMaxWait: 3.2)
@@ -76,6 +87,21 @@ final class ReviewPage {
             guard Date() < deadline else { return XCTFail("timed out waiting for \(description)") }
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         }
+    }
+
+    /// Waits until `condition`, a JavaScript expression, holds in the page,
+    /// then returns `value`, another, as a string. Swift's side runs
+    /// meanwhile.
+    func waitFor(_ condition: String, then value: String = "\"\"", timeout: TimeInterval = 10) throws -> String {
+        let result = try run("""
+            const holds = () => { try { return Boolean(\(condition)); } catch { return false; } };
+            const deadline = Date.now() + \(Int(timeout * 1000));
+            while (!holds() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+            if (!holds()) return "\\u{0}timed out";
+            return String(\(value));
+            """)
+        if result == "\u{0}timed out" { XCTFail("timed out waiting for \(condition)") }
+        return result
     }
 
     /// Runs `body` as an async function in the page; it returns a string.

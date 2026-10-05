@@ -583,7 +583,7 @@ stream stays silent 3 minutes stops, as one does past 6 minutes in all.
   files are seen, so the next Explain doesn't pay for them again: the review
   file also holds the comments and marks, and stops being writable at 8 MB.
 - **Usage:** each run's tokens and reported cost are kept with it, and the
-  column's header shows today's total; a stopped run has no cost, only its
+  page's Explain bar shows today's total on the branch; a stopped run has no cost, only its
   messages' tokens, so the total says "at least". A run that ends on a usage
   limit says so, rather than "failed": a `rate_limit_event` whose status is
   `rejected` (with when it resets) and no later one lifting it, or a result
@@ -597,7 +597,9 @@ stream stays silent 3 minutes stops, as one does past 6 minutes in all.
   overloaded, the spending limit reached.
 - **Language:** the Mac's preferred language, English otherwise.
 - **First use in a project** shows what will be sent, where, and under which
-  account, once.
+  account, once: a native alert, asked again in that project when the
+  account changes, and before every run for an account billed per call
+  (decided by the user on 2026-10-05).
 
 ## 5. Risk signals
 
@@ -1089,7 +1091,14 @@ used.
    Run on five merged PRs before its defaults are frozen. It ships in three
    pull requests: the engine without network (`BoundedProcess`'s extensions,
    the copy, the input), then the run (account, output checks, cache, the
-   five PRs), then the page and the settings.
+   five PRs), then the page and the settings. The page ships in three
+   (decided by the user on 2026-10-05): Explain on the page (its button and
+   states, the account check and the notice, the queue and Cancel, the
+   overview, claims, questions, intent groups and summaries, the usage line,
+   and stopping a run on Clean Up, on closing the column and on quitting),
+   then the model and effort settings, then the notes under the hunks and
+   marking them wrong. A file changed since it was explained keeps its
+   summary, dimmed and marked so.
 4. **R4, comments and reviewed marks.** Drafts, re-anchoring, outdated
    comments, and turning a "check this" note into a comment. It ships in
    four pull requests (decided by the user on 2026-10-04): the comments'

@@ -250,6 +250,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // A queue's last step is written before the process ends.
         MergeQueueController.waitForFiles()
         keepAwakeController?.shutdown()
+        // A claude left running would go on reading, on the user's plan.
+        ExplainQueue.shared.cancelAll(waitingUpTo: 2)
         telegramRemoteAccessController?.shutdown()
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
         ActivityStore.shared.flush()

@@ -113,6 +113,10 @@ extension BranchReview {
             /// line numbers (the patch hash leaves them out). Nil when its
             /// hunks aren't in the snapshot: its diff is read again.
             let diffKey: String?
+            /// Claude's sentence on it, once explained; outdated when its
+            /// patch changed since.
+            var summary: String?
+            var summaryIsOutdated = false
         }
 
         struct Group: Encodable, Equatable, Sendable {
@@ -124,6 +128,9 @@ extension BranchReview {
             let isFolded: Bool
             /// File ids, in the group's order.
             let files: [Int]
+            /// Claude's intent ("feature", "behaviorChange"…, "other") for
+            /// a group of the explained page; nil for a path group.
+            var intent: String?
         }
 
         /// Counts the snapshots the column showed: the page sends it back
@@ -137,6 +144,9 @@ extension BranchReview {
         let files: [File]
         /// The stored review, once the column opened it; nil before.
         let review: Review?
+        /// Claude's overview, claims and questions, once explained.
+        var explanation: Explanation?
+        var explain = ExplainBar()
 
         /// What the page shows of the branch's stored review (sections 6.3
         /// and 8), sent with the page and again after each write.
@@ -208,33 +218,39 @@ extension BranchReview {
         }
     }
 
+    /// The page for `snapshot`, with what Explain kept for its branch:
+    /// Claude's groups replace the path groups, and each file explained
+    /// shows its summary.
     static func page(
-        for snapshot: Snapshot, handover: Handover?, generation: Int = 0, readAt: Date = Date(), review: Page.Review? = nil
+        for snapshot: Snapshot, handover: Handover?, explanation: Explanation? = nil, explain: Page.ExplainBar = .init(),
+        generation: Int = 0, readAt: Date = Date(), review: Page.Review? = nil
     ) -> Page {
         // One entry per path (`Snapshot.files`).
         let ids = Dictionary(snapshot.files.enumerated().map { ($1.path, $0) }) { first, _ in first }
+        let explanation = explanation?.pruned(to: Set(snapshot.files.map(\.path)))
         return Page(
             generation: generation,
             header: header(of: snapshot, readAt: readAt),
             accounts: accounts(of: snapshot, handover: handover),
             risks: risks(of: snapshot.files),
             tests: tests(of: snapshot.testsAgainstCode),
-            groups: snapshot.groups.map { group in
-                Page.Group(
-                    key: group.kind.key, title: group.kind.title, isFolded: group.kind.isFolded,
-                    files: group.paths.compactMap { ids[$0] }
-                )
-            },
+            groups: pageGroups(snapshot, explanation: explanation, ids: ids),
             files: snapshot.files.enumerated().map { id, file in
-                Page.File(
+                let explained = explanation?.files[file.path]
+                return Page.File(
                     id: id, path: file.path, oldPath: file.oldPath, status: file.status.rawValue,
                     additions: file.additions, deletions: file.deletions, isBinary: file.isBinary,
                     isUntracked: file.isUntracked, isUncommitted: file.isUncommitted,
                     omission: file.omission.map(\.key), fold: file.fold?.rawValue,
-                    risks: file.signals.map(\.kind.rawValue), patchHash: file.patchHash, diffKey: diffKey(of: file)
+                    risks: file.signals.map(\.kind.rawValue), patchHash: file.patchHash, diffKey: diffKey(of: file),
+                    // A patch not read isn't known to have changed.
+                    summary: explained?.summary,
+                    summaryIsOutdated: explained?.summary != nil && file.patchHash != nil && explained?.patchHash != file.patchHash
                 )
             },
-            review: review
+            review: review,
+            explanation: pageExplanation(explanation, snapshot: snapshot),
+            explain: explainBar(explain, snapshot: snapshot, explanation: explanation)
         )
     }
 

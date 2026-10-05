@@ -44,6 +44,10 @@ struct ShellSideEffects {
     /// accepted it, else why not. Called off the main thread.
     var rerunFailedJobs: @Sendable (CIFailure.Run) -> String? = { CIFailure.rerun($0) }
 
+    /// Looks for the claude Branch Review's Explain runs, and its account
+    /// (`claude --help`, `claude auth status`). Called off the main thread.
+    var checkExplain: @Sendable () -> BranchReview.ExplainAvailability = { BranchReview.ExplainAvailability.check() }
+
     /// Shows an app-modal alert and waits for its answer.
     var runModal: @MainActor (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }
 

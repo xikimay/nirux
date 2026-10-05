@@ -75,13 +75,37 @@ extension NiruxShellView {
     /// `start`.
     func makeBranchReview(worktree: String, branch: String?) -> BranchReviewController {
         let review = BranchReviewController(
-            worktree: worktree, branch: branch, reader: branchReviewReader, reviewOpener: branchReviewOpener
+            worktree: worktree, branch: branch, reader: branchReviewReader, reviewOpener: branchReviewOpener,
+            explainChecker: sideEffects.checkExplain
         )
         review.isOnScreen = { [weak self, weak review] in
             guard let self, let review else { return false }
             return self.isBranchReviewOnScreen(review)
         }
+        review.confirmExplain = { [weak self, weak review] account, files in
+            guard let self, let review else { return false }
+            return self.confirmExplain(for: review, account: account, files: files)
+        }
         return review
+    }
+
+    /// Explain's first-use notice: once per project (space) and account,
+    /// asked again when the account changes, and every time for an account
+    /// billed per call (docs/branch-review.md, section 4.3).
+    func confirmExplain(for review: BranchReviewController, account: BranchReview.ExplainAccount, files: Int) -> Bool {
+        let project = workspaces.first { $0.columns.contains { $0.branchReview === review } }?.profileID
+            ?? WorkspaceProfile.defaultID
+        if !account.isBilledPerCall,
+           Persistence.load()?.settings?.explainNoticeAccounts[project] == account.identity {
+            return true
+        }
+        let alert = BranchReviewController.explainAlert(account: account, files: files)
+        guard sideEffects.runModal(alert) == .alertFirstButtonReturn else { return false }
+        if !account.isBilledPerCall {
+            // Unsaved, it asks again next time: nothing worse.
+            _ = Persistence.updateSettings(liveLayout: persistedState()) { $0.explainNoticeAccounts[project] = account.identity }
+        }
+        return true
     }
 
     /// Its column shows: in the workspace in front, inside the viewport

@@ -52,6 +52,11 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
     /// the page's data of that generation; `sequence` counts the page's
     /// clicks.
     var onReviewed: ((_ ids: [Int], _ reviewed: Bool, _ generation: Int, _ sequence: Int) -> Void)?
+    /// Explain: the changed files, or every file again (`fresh`).
+    var onExplain: ((_ fresh: Bool) -> Void)?
+    var onCancelExplain: (() -> Void)?
+    /// The page's "Include untracked files".
+    var onIncludeUntracked: ((Bool) -> Void)?
     /// A web link to open, http or https only.
     var openLink: (URL) -> Void = { NSWorkspace.shared.open($0) }
 
@@ -170,6 +175,14 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
         call("NiruxReview.showReview(json)", ["json": json])
     }
 
+    /// Explain's bar (`BranchReview.Page.ExplainBar`, encoded): the page
+    /// updates it in place. Dropped while the page loads: the page's data
+    /// carries it.
+    func showExplain(json: String) {
+        guard isPageReady else { return }
+        call("NiruxReview.showExplain(json)", ["json": json])
+    }
+
     /// A message in place of the page, with a button titled `action` when
     /// there is something to do (`onStatusAction`).
     func showStatus(_ message: String, action: String? = nil) {
@@ -254,6 +267,14 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
                   let generation = body["generation"] as? Int, let sequence = body["sequence"] as? Int
             else { return }
             onReviewed?(ids, reviewed, generation, sequence)
+        case "explain":
+            guard let fresh = body["fresh"] as? Bool else { return }
+            onExplain?(fresh)
+        case "cancelExplain":
+            onCancelExplain?()
+        case "includeUntracked":
+            guard let include = body["include"] as? Bool else { return }
+            onIncludeUntracked?(include)
         case "openLink":
             guard let text = body["url"] as? String, let url = Self.webLink(text) else { return }
             openLink(url)

@@ -38,6 +38,25 @@ final class BranchReviewController {
     /// store's repository; nil when git can't say. Runs off the main
     /// thread.
     typealias HeadOrder = @Sendable (_ store: BranchReview.Store, _ ancestor: String, _ descendant: String) -> Bool?
+    /// What Explain kept for the snapshot's branch, read only (no head
+    /// recorded, nothing written). Runs off the main thread.
+    typealias ExplanationReader = @Sendable (BranchReview.Snapshot) -> BranchReview.Explanation?
+    /// Locates claude and reads its account. Runs off the main thread.
+    typealias ExplainChecker = @Sendable () -> BranchReview.ExplainAvailability
+    /// Explains a branch (`BranchReview.explain`). Runs off the main
+    /// thread, through `ExplainQueue`.
+    typealias Explainer = @Sendable (
+        BranchReview.ExplainJob, BoundedProcess.Cancellation, @escaping @Sendable (BranchReview.ExplainJobProgress) -> Void
+    ) -> BranchReview.ExplainResult
+
+    /// One read of the worktree: the branch, its handover, and what
+    /// Explain kept for it.
+    struct Read {
+        let snapshot: BranchReview.Snapshot
+        let handover: BranchReview.Handover?
+        var explanation: BranchReview.Explanation?
+        let readAt: Date
+    }
 
     /// Why a read runs: a watched change applies only what doesn't move the
     /// page under the user.
@@ -55,6 +74,9 @@ final class BranchReviewController {
     private(set) var snapshot: BranchReview.Snapshot?
     /// Read with the snapshot.
     private var handover: BranchReview.Handover?
+    /// What Explain kept for the branch: read with the snapshot, or what
+    /// the last Explain left.
+    private(set) var explanation: BranchReview.Explanation?
     /// What the page says instead of a review: reading, paused, why there
     /// is none. Shown again if the page loads again.
     private var status: String?
@@ -96,7 +118,7 @@ final class BranchReviewController {
     /// branch again once it shows.
     private(set) var isStale = false
     /// A read at a new head, waiting behind the Reload banner.
-    private(set) var pending: (snapshot: BranchReview.Snapshot, handover: BranchReview.Handover?, readAt: Date)?
+    private(set) var pending: Read?
     /// What the status's button does, when it has one.
     private var statusAction: (title: String, perform: @MainActor () -> Void)?
     /// Counts watched changes: only the last one of a burst reads.
@@ -121,7 +143,7 @@ final class BranchReviewController {
     /// The page has a text selection, which a new page would drop: a read
     /// at the same head waits in `held` until it goes.
     private var pageHasSelection = false
-    private var held: (snapshot: BranchReview.Snapshot, handover: BranchReview.Handover?, readAt: Date)?
+    private var held: Read?
     /// The next read reviews whatever branch the worktree is on: the user
     /// asked to review the other branch.
     private var followsWorktree = false
@@ -155,6 +177,44 @@ final class BranchReviewController {
     /// The stored review changed (opened, read or written).
     var onReviewChange: (() -> Void)?
 
+    // MARK: Explain
+
+    /// The bar the page shows by Explain's button.
+    private var explainBar = BranchReview.Page.ExplainBar()
+    /// The last check of claude and its account.
+    private var availability: BranchReview.ExplainAvailability?
+    /// A check under way, and whether an Explain waits on it (`fresh`).
+    private var isCheckingExplain = false
+    private var explainAfterCheck: Bool?
+    /// The notice is up, or about to be.
+    private var isAskingToExplain = false
+    /// The Explain waiting or under way, and its number: a completion for
+    /// another is dropped.
+    private var explainTicket: ExplainQueue.Ticket?
+    private var activeExplain: Int?
+    private var explainCount = 0
+    /// The user cancelled the Explain under way.
+    private var explainCancelled = false
+    /// When the last Explain ended, and its branch: a read of that branch
+    /// that began before keeps the explanation it left, newer than what the
+    /// read found.
+    private var explanationSetAt = Date.distantPast
+    private var explanationBranch: String?
+    /// An explanation came while the page had a selection: the page shows
+    /// it once the selection goes.
+    private var explanationWaits = false
+    private let explainQueue: ExplainQueue
+    private let explanationReader: ExplanationReader
+    private let explainChecker: ExplainChecker
+    private let explainer: Explainer
+    /// Asks the user before Explain sends the branch to Claude under
+    /// `account`, with the number of files whose diff it sends: false
+    /// doesn't run. The shell asks once per project and account, and every
+    /// time for an account billed per call; this default asks every time.
+    var confirmExplain: @MainActor (_ account: BranchReview.ExplainAccount, _ files: Int) -> Bool = { account, files in
+        BranchReviewController.explainAlert(account: account, files: files).runModal() == .alertFirstButtonReturn
+    }
+
     init(
         worktree: String, branch: String?, view: BranchReviewView = BranchReviewView(),
         reader: @escaping Reader = BranchReviewController.readWorktree,
@@ -162,7 +222,11 @@ final class BranchReviewController {
         makeWatcher: @escaping WatcherFactory = BranchReviewController.watch,
         reviewOpener: @escaping ReviewOpener = BranchReviewController.openReviewFile,
         branchCheck: @escaping BranchCheck = BranchReviewController.branchExists,
-        headOrder: @escaping HeadOrder = BranchReviewController.isAncestor
+        headOrder: @escaping HeadOrder = BranchReviewController.isAncestor,
+        explanationReader: @escaping ExplanationReader = { BranchReviewController.readExplanation(for: $0) },
+        explainChecker: @escaping ExplainChecker = { BranchReview.ExplainAvailability.check() },
+        explainer: @escaping Explainer = { BranchReviewController.explainOnItsBranch($0, cancellation: $1, progress: $2) },
+        explainQueue: ExplainQueue = .shared
     ) {
         self.worktree = worktree
         self.branch = branch
@@ -171,17 +235,25 @@ final class BranchReviewController {
         self.patchReader = patchReader
         self.makeWatcher = makeWatcher
         reviewFile = BranchReviewFile(opener: reviewOpener, branchCheck: branchCheck, isAncestor: headOrder)
+        self.explanationReader = explanationReader
+        self.explainChecker = explainChecker
+        self.explainer = explainer
+        self.explainQueue = explainQueue
         view.onRefresh = { [weak self] in
             self?.view.forgetCrashes()
             self?.reload(fetchBase: true)
+            self?.checkExplain()
         }
+        view.onExplain = { [weak self] fresh in self?.explain(fresh: fresh) }
+        view.onCancelExplain = { [weak self] in self?.cancelExplain() }
+        view.onIncludeUntracked = { [weak self] include in self?.includeUntracked(include) }
         view.onLoadFile = { [weak self] id, generation in self?.loadFile(id: id, generation: generation) }
         view.onPageReady = { [weak self] in
             guard let self else { return }
             // A page that loaded again has no selection: what it held shows.
             self.pageHasSelection = false
             if let held = self.held {
-                self.show(held.snapshot, handover: held.handover, readAt: held.readAt)
+                self.show(held)
             } else {
                 self.showCurrent()
             }
@@ -194,13 +266,15 @@ final class BranchReviewController {
         view.onStatusAction = { [weak self] in self?.statusAction?.perform() }
         view.onWindowChange = { [weak self] inWindow in
             guard let self, self.isStarted else { return }
-            // Closed: the watcher goes with it. Back in a window: watch
-            // again, and read what changed meanwhile once it shows.
+            // Closed: the watcher goes with it, and Explain stops. Back in a
+            // window: watch again, and read what changed meanwhile once it
+            // shows.
             if inWindow {
                 self.watch()
                 self.isStale = true
             } else {
                 self.stopWatching()
+                self.cancelExplain()
             }
         }
         updateHeader()
@@ -215,6 +289,7 @@ final class BranchReviewController {
         // column opened during a rebase comes back once it's over.
         watch()
         reload(fetchBase: fetchBase)
+        checkExplain()
     }
 
     /// Reads the branch again; with `fetchBase`, the pull request's base
@@ -246,16 +321,29 @@ final class BranchReviewController {
         readPushes = pushes
         let known = pushes == pushesAnswered ? knownPullRequest : nil
         // The user waits on their read; a watched one yields to the apps.
-        Self.inBackground(on: .global(qos: reason == .user ? .userInitiated : .utility), { [reader, worktree] in
-            reader(worktree, fetchBase, fetchBase ? nil : known)
+        typealias Found = (BranchReview.Outcome, BranchReview.Handover?, BranchReview.Explanation?)
+        Self.inBackground(on: .global(qos: reason == .user ? .userInitiated : .utility), { [reader, explanationReader, worktree] () -> Found in
+            let (outcome, handover) = reader(worktree, fetchBase, fetchBase ? nil : known)
+            guard case .snapshot(let snapshot) = outcome else { return (outcome, handover, nil) }
+            return (outcome, handover, explanationReader(snapshot))
         }) { [weak self] result in
-            self?.apply(result.0, handover: result.1)
+            self?.apply(result.0, handover: result.1, explanation: result.2)
         }
     }
 
     /// One read runs at a time: its answer is the latest.
-    private func apply(_ outcome: BranchReview.Outcome, handover: BranchReview.Handover?) {
+    private func apply(
+        _ outcome: BranchReview.Outcome, handover: BranchReview.Handover?, explanation found: BranchReview.Explanation?
+    ) {
         isReading = false
+        // An Explain of this branch that ended during the read left a newer
+        // explanation.
+        let explanation: BranchReview.Explanation?
+        if case .snapshot(let fresh) = outcome, fresh.branch == explanationBranch, readStartedAt < explanationSetAt {
+            explanation = self.explanation
+        } else {
+            explanation = found
+        }
         let reason = readReason
         if reason == .watcher {
             lastWatchedReadEnded = Date()
@@ -296,8 +384,10 @@ final class BranchReviewController {
                     "Review \(fresh.branch)", { [weak self] in self?.reviewWorktreeBranch() }
                 ))
             case .snapshot(let fresh) where fresh.head != shown.head:
-                let unchanged = pending.map { $0.snapshot == fresh && $0.handover == handover } ?? false
-                if !unchanged { pending = (fresh, handover, readAt) }
+                let unchanged = pending.map {
+                    $0.snapshot == fresh && $0.handover == handover && $0.explanation == explanation
+                } ?? false
+                if !unchanged { pending = Read(snapshot: fresh, handover: handover, explanation: explanation, readAt: readAt) }
                 return showWatchedBanner(Self.reloadMessage(from: shown, to: fresh), unchanged: unchanged)
             case .snapshot(let fresh):
                 // Back to what the page shows (a rebase aborted, the branch
@@ -305,17 +395,18 @@ final class BranchReviewController {
                 if banner != nil { clearBanner() }
                 // Nothing changed for the page (a build wrote in an ignored
                 // folder): it stays as it is, open details and all.
-                if fresh == shown, handover == self.handover {
+                if fresh == shown, handover == self.handover, explanation == self.explanation {
                     quietReads += 1
                     return
                 }
                 quietReads = 0
+                let read = Read(snapshot: fresh, handover: handover, explanation: explanation, readAt: readAt)
                 // A new page would drop the user's selection: it waits.
                 if pageHasSelection {
-                    held = (fresh, handover, readAt)
+                    held = read
                     return
                 }
-                return show(fresh, handover: handover, readAt: readAt)
+                return show(read)
             case .paused(let operation):
                 pending = nil
                 return showWatchedBanner(Self.pauseMessage(operation))
@@ -336,7 +427,7 @@ final class BranchReviewController {
                     "Review \(fresh.branch)", { [weak self] in self?.reviewWorktreeBranch() }
                 ), watched: watched)
             }
-            show(fresh, handover: handover, readAt: readAt)
+            show(Read(snapshot: fresh, handover: handover, explanation: explanation, readAt: readAt))
         case .paused(let operation):
             showInstead(Self.pauseMessage(operation), watched: watched)
         case .unavailable(let message):
@@ -344,19 +435,26 @@ final class BranchReviewController {
         }
     }
 
-    private func show(_ fresh: BranchReview.Snapshot, handover: BranchReview.Handover?, readAt: Date) {
-        branch = fresh.branch
-        self.handover = handover
-        self.readAt = readAt
+    private func show(_ read: Read) {
+        // How another branch's Explain ended isn't this one's; why Explain
+        // can't run still is.
+        if read.snapshot.branch != branch {
+            if case .unavailable(let reason)? = availability { explainBar.message = reason } else { explainBar.message = nil }
+        }
+        branch = read.snapshot.branch
+        handover = read.handover
+        explanation = read.explanation
+        readAt = read.readAt
         pending = nil
         held = nil
         banner = nil
+        explanationWaits = false
         // Another branch's review isn't this one's.
-        if review?.branch != fresh.branch { review = nil }
-        setSnapshot(fresh)
+        if review?.branch != read.snapshot.branch { review = nil }
+        setSnapshot(read.snapshot)
         showCurrent()
         watch()
-        openReview(for: fresh)
+        openReview(for: read.snapshot)
     }
 
     private func showBanner(_ message: String, action: (title: String, perform: @MainActor () -> Void)? = nil) {
@@ -407,8 +505,12 @@ final class BranchReviewController {
     /// it shows.
     private func selectionChanged(_ active: Bool) {
         pageHasSelection = active
-        guard !active, let held else { return }
-        show(held.snapshot, handover: held.handover, readAt: held.readAt)
+        guard !active else { return }
+        if let held { return show(held) }
+        if explanationWaits {
+            explanationWaits = false
+            showCurrent()
+        }
     }
 
     /// Reviews the branch the worktree is on, read again now: it may have
@@ -422,7 +524,7 @@ final class BranchReviewController {
     private func bannerClicked() {
         if let action = banner?.action { return action.perform() }
         guard let pending else { return reload() }
-        show(pending.snapshot, handover: pending.handover, readAt: pending.readAt)
+        show(pending)
     }
 
     static func reloadMessage(from shown: BranchReview.Snapshot, to fresh: BranchReview.Snapshot) -> String {
@@ -431,6 +533,179 @@ final class BranchReviewController {
         return added > 0
             ? "The branch moved to \(head): \(BranchReview.count(added, "new commit"))."
             : "The branch moved to \(head)."
+    }
+
+    // MARK: - Explain
+
+    /// Checks claude and its account, for the bar: Explain is disabled with
+    /// the reason when it can't run. At start, on Refresh, and before each
+    /// Explain (`explain(fresh:)`), since the account may have changed.
+    func checkExplain() {
+        guard !isCheckingExplain, !isAskingToExplain, activeExplain == nil else { return }
+        isCheckingExplain = true
+        explainBar.state = .checking
+        sendExplainBar()
+        Self.inBackground(on: .global(qos: .userInitiated), explainChecker) { [weak self] availability in
+            self?.checked(availability)
+        }
+    }
+
+    private func checked(_ availability: BranchReview.ExplainAvailability) {
+        isCheckingExplain = false
+        // The reason it couldn't run before goes with it.
+        if case .unavailable(let reason)? = self.availability, explainBar.message == reason { explainBar.message = nil }
+        self.availability = availability
+        let fresh = explainAfterCheck
+        explainAfterCheck = nil
+        // A run under way keeps its bar.
+        guard activeExplain == nil else { return }
+        switch availability {
+        case .unavailable(let reason):
+            explainBar.state = .unavailable
+            explainBar.message = reason
+            explainBar.account = nil
+        case .ready(let cli, let account):
+            explainBar.state = .ready
+            explainBar.account = account.label
+            if let fresh {
+                // From the run loop, not this main-queue block: the notice's
+                // modal loop would hold every other main-queue block (a
+                // terminal's output) until it closes.
+                isAskingToExplain = true
+                RunLoop.main.perform(inModes: [.default]) { [weak self] in
+                    MainActor.assumeIsolated { self?.start(fresh: fresh, cli: cli, account: account) }
+                }
+            }
+        }
+        sendExplainBar()
+    }
+
+    /// The page's Explain: only the files whose patch changed since the
+    /// last explanation, or every file (`fresh`). claude and its account
+    /// are checked first, and the user confirms what goes where.
+    func explain(fresh: Bool) {
+        guard snapshot != nil, activeExplain == nil, explainAfterCheck == nil, !isAskingToExplain else { return }
+        explainBar.message = nil
+        explainAfterCheck = fresh
+        if isCheckingExplain {
+            explainBar.state = .checking
+            return sendExplainBar()
+        }
+        checkExplain()
+    }
+
+    private func start(fresh: Bool, cli: BranchReview.ClaudeCLI, account: BranchReview.ExplainAccount) {
+        defer { isAskingToExplain = false }
+        guard let asked = snapshot else { return sendExplainBar() }
+        let bar = BranchReview.explainBar(explainBar, snapshot: asked, explanation: explanation)
+        let files = fresh || !bar.explained ? bar.sendable : bar.changed + bar.unexplained
+        guard confirmExplain(account, files) else { return sendExplainBar() }
+        // Reads went on while the user read the notice: the page may show
+        // a later head now, but not another branch.
+        guard let snapshot = self.snapshot, snapshot.branch == asked.branch else { return sendExplainBar() }
+        var job = BranchReview.ExplainJob(snapshot: snapshot, handover: handover, cli: cli)
+        job.includeUntracked = explainBar.includeUntracked
+        job.fresh = fresh
+        job.requiresSubscription = !account.isBilledPerCall
+        explainCount += 1
+        let number = explainCount
+        activeExplain = number
+        explainCancelled = false
+        explainBar.state = .queued
+        explainBar.progress = nil
+        let ticket = explainQueue.submit(
+            worktree: ExplainQueue.worktreeKey(snapshot.root),
+            Self.explainWork(job, explainer: explainer) { [weak self] progress in
+                self?.explainProgressed(progress, number: number)
+            },
+            onStart: { [weak self] in self?.explainStarted(number: number) },
+            completion: { [weak self, branch = snapshot.branch] result in
+                self?.explainEnded(result, number: number, branch: branch)
+            }
+        )
+        // A worktree being cleaned up drops it at once.
+        guard activeExplain == number else { return }
+        explainTicket = ticket
+        sendExplainBar()
+    }
+
+    private func explainStarted(number: Int) {
+        guard activeExplain == number else { return }
+        explainBar.state = explainCancelled ? .stopping : .running
+        explainBar.progress = .init(part: 1, parts: 1, reads: 0, retries: 0, startedAt: Date().timeIntervalSince1970 * 1000)
+        sendExplainBar()
+    }
+
+    private func explainProgressed(_ progress: BranchReview.ExplainJobProgress, number: Int) {
+        guard activeExplain == number, let startedAt = explainBar.progress?.startedAt else { return }
+        explainBar.progress = .init(
+            part: progress.part, parts: progress.parts, reads: progress.run.toolUses, retries: progress.run.retries,
+            startedAt: startedAt
+        )
+        sendExplainBar()
+    }
+
+    private func explainEnded(_ result: BranchReview.ExplainResult?, number: Int, branch: String) {
+        guard activeExplain == number else { return }
+        let stoppedForCleanUp = explainTicket?.isStopped ?? !explainCancelled
+        activeExplain = nil
+        explainTicket = nil
+        explainBar.progress = nil
+        explainBar.state = availability.map { if case .ready = $0 { return .ready } else { return .unavailable } } ?? .ready
+        guard let result else {
+            // Left the line: the user cancelled, or Clean Up stopped it.
+            explainBar.message = explainCancelled ? nil : "Explain didn’t run: this worktree is being cleaned up."
+            return sendExplainBar()
+        }
+        // Not another branch's: the column may have moved on to it.
+        guard (snapshot?.branch ?? self.branch) == branch else { return sendExplainBar() }
+        // The run wrote the review file: the column's copy is behind.
+        reloadReview()
+        explainBar.message = stoppedForCleanUp && result.ending == .stopped(.cancelled)
+            ? "Explain stopped: this worktree is being cleaned up."
+            : result.ending.message
+        guard let explained = result.explanation else { return sendExplainBar() }
+        explanationSetAt = Date()
+        explanationBranch = branch
+        // What waits behind a banner or a selection was read before.
+        if pending?.snapshot.branch == branch { pending?.explanation = explained }
+        if held?.snapshot.branch == branch { held?.explanation = explained }
+        guard explained != explanation else { return sendExplainBar() }
+        explanation = explained
+        // The new groups and summaries: the page shows them, once the
+        // user's selection goes.
+        if pageHasSelection || snapshot == nil {
+            explanationWaits = pageHasSelection
+            sendExplainBar()
+        } else {
+            showCurrent()
+            updateHeader()
+        }
+    }
+
+    /// The page's Cancel, or the column closing: an Explain waiting leaves
+    /// the line, one under way stops and keeps what it reported.
+    func cancelExplain() {
+        explainAfterCheck = nil
+        guard let explainTicket else { return }
+        explainCancelled = true
+        if explainBar.state == .running { explainBar.state = .stopping }
+        explainTicket.cancel()
+        if activeExplain != nil { sendExplainBar() }
+    }
+
+    private func includeUntracked(_ include: Bool) {
+        explainBar.includeUntracked = include
+        sendExplainBar()
+    }
+
+    /// Explain's bar on the page shown, without drawing the page again.
+    private func sendExplainBar() {
+        updateHeader()
+        guard let snapshot, status == nil else { return }
+        let bar = BranchReview.explainBar(explainBar, snapshot: snapshot, explanation: explanation)
+        guard let json = Self.encode(bar) else { return }
+        view.showExplain(json: json)
     }
 
     // MARK: - Following the worktree
@@ -589,7 +864,8 @@ final class BranchReviewController {
         status = nil
         statusAction = nil
         let page = BranchReview.page(
-            for: snapshot, handover: handover, generation: snapshotCount, readAt: readAt, review: pageReview()
+            for: snapshot, handover: handover, explanation: explanation, explain: explainBar, generation: snapshotCount,
+            readAt: readAt, review: pageReview()
         )
         guard let json = Self.encode(page) else { return }
         view.show(pageJSON: json)
@@ -736,8 +1012,17 @@ final class BranchReviewController {
         guard view.pageURL != nil else { return }
         // A read the worktree's changes started stays quiet: an agent at
         // work would make the pill blink. A Refresh queued behind one shows.
+        // An Explain is neutral too: nothing here waits on the user.
         let userReads = isReading && (readReason == .user || readAfterRead != nil)
-        view.header.status = userReads ? ColumnHeaderView.Status("Reading", tone: .neutral) : nil
+        if userReads {
+            view.header.status = ColumnHeaderView.Status("Reading", tone: .neutral)
+        } else {
+            switch explainBar.state {
+            case .running, .stopping: view.header.status = ColumnHeaderView.Status("Explaining", tone: .neutral)
+            case .queued: view.header.status = ColumnHeaderView.Status("Queued", tone: .neutral)
+            case .checking, .unavailable, .ready: view.header.status = nil
+            }
+        }
     }
 
     static func pauseMessage(_ operation: BranchReview.Operation) -> String {
