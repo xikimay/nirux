@@ -158,6 +158,22 @@ final class TranscriptSearchTests: XCTestCase {
         XCTAssertEqual(try excerpts(maxBytes: lastTwo - 5), ["new needle"])
     }
 
+    /// From the start, a line the limit cuts isn't handed over.
+    func testAHeadReadStopsAtTheLastWholeLine() throws {
+        let path = try write(["a", "bb", "ccc"])
+        func lines(maxBytes: Int) -> [String] {
+            var budget = TranscriptSearch.Budget.standard()
+            var lines: [String] = []
+            _ = TranscriptSearch.readLines(transcriptAt: path, budget: &budget, maxBytes: maxBytes, fromStart: true) {
+                lines.append(String(bytes: $0, encoding: .utf8) ?? "")
+            }
+            return lines
+        }
+        XCTAssertEqual(lines(maxBytes: 4), ["a"])
+        XCTAssertEqual(lines(maxBytes: 5), ["a", "bb"])
+        XCTAssertEqual(lines(maxBytes: 100), ["a", "bb", "ccc"])
+    }
+
     func testTheBudgetAndACancelStopTheRead() throws {
         let path = try write(try (1...50).map { try prompt("needle \($0)") })
         var budget = TranscriptSearch.Budget(bytes: 200, deadline: ProcessInfo.processInfo.systemUptime + 60)
