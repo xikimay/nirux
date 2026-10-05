@@ -49,15 +49,20 @@ final class BranchReviewExplainNoticeTests: XCTestCase {
     func testTheNoticeSaysWhatGoesWhereAndWhatItCosts() {
         let max = BranchReview.ExplainAccount(isLoggedIn: true, method: "claude.ai", subscription: "max", email: "a@example.test")
         XCTAssertEqual(
-            BranchReviewController.explainNotice(account: max, files: 1),
-            "Claude reads the diff of 1 file, the pull request, the handover and the commits, and a read-only copy of the "
-                + "branch’s files (secrets and instruction files left out). They go to Anthropic under claude.ai, Max "
-                + "(a@example.test).\n\nAbout a minute or two. It counts toward your plan’s usage limits. Nirux asks again "
-                + "if the account changes."
+            BranchReviewController.explainNotice(account: max, files: 1, settings: .init()),
+            "Claude (Opus 5.5, medium effort) reads the diff of 1 file, the pull request, the handover and the commits, "
+                + "and a read-only copy of the branch’s files (secrets and instruction files left out). They go to "
+                + "Anthropic under claude.ai, Max (a@example.test).\n\nAbout a minute or two. It counts toward your plan’s "
+                + "usage limits. Nirux asks again if the account changes."
         )
         let billed = BranchReview.ExplainAccount(isLoggedIn: true, method: "api_key", subscription: nil, email: nil)
-        XCTAssertTrue(BranchReviewController.explainNotice(account: billed, files: 2).hasSuffix(
-            "under api_key.\n\nAbout a minute or two. This account is billed per call: each run can cost up to $3 at API "
+        var sonnet = BranchReview.ExplainSettings()
+        sonnet.model = "claude-sonnet-5-5"
+        sonnet.effort = "xhigh"
+        let notice = BranchReviewController.explainNotice(account: billed, files: 2, settings: sonnet)
+        XCTAssertTrue(notice.hasPrefix("Claude (Sonnet 5.5, extra high effort) reads the diff of 2 files"))
+        XCTAssertTrue(notice.hasSuffix(
+            "under api_key.\n\nSeveral minutes at this effort. This account is billed per call: each run can cost up to $3 at API "
                 + "prices, and a large branch takes several runs. Nirux asks again each time."
         ))
     }

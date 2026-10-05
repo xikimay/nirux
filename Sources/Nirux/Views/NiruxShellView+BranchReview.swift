@@ -82,9 +82,9 @@ extension NiruxShellView {
             guard let self, let review else { return false }
             return self.isBranchReviewOnScreen(review)
         }
-        review.confirmExplain = { [weak self, weak review] account, files in
+        review.confirmExplain = { [weak self, weak review] account, files, settings in
             guard let self, let review else { return false }
-            return self.confirmExplain(for: review, account: account, files: files)
+            return self.confirmExplain(for: review, account: account, files: files, settings: settings)
         }
         return review
     }
@@ -92,14 +92,17 @@ extension NiruxShellView {
     /// Explain's first-use notice: once per project (space) and account,
     /// asked again when the account changes, and every time for an account
     /// billed per call (docs/branch-review.md, section 4.3).
-    func confirmExplain(for review: BranchReviewController, account: BranchReview.ExplainAccount, files: Int) -> Bool {
+    func confirmExplain(
+        for review: BranchReviewController, account: BranchReview.ExplainAccount, files: Int,
+        settings: BranchReview.ExplainSettings = .init()
+    ) -> Bool {
         let project = workspaces.first { $0.columns.contains { $0.branchReview === review } }?.profileID
             ?? WorkspaceProfile.defaultID
         if !account.isBilledPerCall,
            Persistence.load()?.settings?.explainNoticeAccounts[project] == account.identity {
             return true
         }
-        let alert = BranchReviewController.explainAlert(account: account, files: files)
+        let alert = BranchReviewController.explainAlert(account: account, files: files, settings: settings)
         guard sideEffects.runModal(alert) == .alertFirstButtonReturn else { return false }
         if !account.isBilledPerCall {
             // Unsaved, it asks again next time: nothing worse.

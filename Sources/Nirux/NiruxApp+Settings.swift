@@ -139,6 +139,7 @@ extension NiruxApp {
         SettingsForm.select(current, in: stuck)
         settingsStuckAgentPopup = stuck
 
+
         return SettingsForm.pane([
             [
                 SettingsForm.header("Claude Code"),
@@ -166,8 +167,51 @@ extension NiruxApp {
                     "A permission or question dialog open this long marks its agent as stuck: "
                         + "a badge on its card and one notification."
                 )
-            ]
+            ],
+            explainSection()
         ])
+    }
+
+    /// Branch Review's Explain: the model and effort its runs ask for.
+    private func explainSection() -> [NSView] {
+        let explain = BranchReview.ExplainSettings.saved()
+        let explainModel = SettingsForm.popup(target: self, action: #selector(settingsExplainModelChanged(_:)))
+        // A model set outside Settings stays selectable as it is.
+        let models = BranchReview.ExplainSettings.models
+        for model in models {
+            explainModel.addItem(withTitle: BranchReview.ExplainSettings.displayName(of: model))
+            explainModel.lastItem?.representedObject = model
+        }
+        // By its id: a dated id reads as an offered model's name, and a
+        // popup keeps one item per title.
+        if !models.contains(explain.model) {
+            explainModel.addItem(withTitle: explain.model)
+            explainModel.lastItem?.representedObject = explain.model
+        }
+        SettingsForm.select(explain.model, in: explainModel)
+        explainModel.setAccessibilityLabel("Branch Review Explain model")
+        settingsExplainModelPopup = explainModel
+
+        let explainEffort = SettingsForm.popup(target: self, action: #selector(settingsExplainEffortChanged(_:)))
+        for effort in BranchReview.ExplainSettings.efforts {
+            explainEffort.addItem(withTitle: BranchReview.ExplainSettings.effortTitle(effort))
+            explainEffort.lastItem?.representedObject = effort
+        }
+        SettingsForm.select(explain.effort, in: explainEffort)
+        explainEffort.setAccessibilityLabel("Branch Review Explain effort")
+        settingsExplainEffortPopup = explainEffort
+
+        return [
+            SettingsForm.header("Branch Review"),
+            SettingsForm.row("Explain with", explainModel),
+            SettingsForm.row("Effort", explainEffort),
+            SettingsForm.hint(
+                "Explain runs claude -p, reading a read-only copy of the branch, on the account claude is logged "
+                    + "in with. Opus 5.5 at medium found the most in tests, in a minute or two. A higher effort takes "
+                    + "longer and costs more: a run stops after 6 minutes or $3 at API prices, which Extra high and "
+                    + "Max can reach on a large branch."
+            )
+        ]
     }
 
     private func notificationsPane() -> NSView {
@@ -372,6 +416,25 @@ extension NiruxApp {
             { $0.stuckAgentMinutes = minutes }
         ) else { return }
         shell?.stuckAgentWaitThreshold = NiruxShellView.stuckWaitThreshold(minutes: minutes)
+    }
+
+    /// Only a changed choice is written, and the default as none: a later
+    /// default reaches whoever didn't choose, and a value a newer build
+    /// saved, which shows as the default, stays.
+    @objc func settingsExplainModelChanged(_ sender: NSPopUpButton) {
+        let saved = BranchReview.ExplainSettings.saved()
+        guard let model = sender.selectedItem?.representedObject as? String, model != saved.model else { return }
+        saveSetting(revert: { SettingsForm.select(saved.model, in: sender) }) {
+            $0.explainModel = model == BranchReview.ExplainSettings.defaultModel ? nil : model
+        }
+    }
+
+    @objc func settingsExplainEffortChanged(_ sender: NSPopUpButton) {
+        let saved = BranchReview.ExplainSettings.saved()
+        guard let effort = sender.selectedItem?.representedObject as? String, effort != saved.effort else { return }
+        saveSetting(revert: { SettingsForm.select(saved.effort, in: sender) }) {
+            $0.explainEffort = effort == BranchReview.ExplainSettings.defaultEffort ? nil : effort
+        }
     }
 
     @objc func settingsMissionHandoffsChanged(_ sender: NSButton) {
@@ -579,6 +642,8 @@ extension NiruxApp {
         settingsMissionHandoffsCheckbox = nil
         settingsSidebarApprovalsCheckbox = nil
         settingsStuckAgentPopup = nil
+        settingsExplainModelPopup = nil
+        settingsExplainEffortPopup = nil
         settingsTelegramEnabledCheckbox = nil
         settingsTelegramTokenField = nil
         settingsTelegramCompletionCheckbox = nil

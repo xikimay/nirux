@@ -55,26 +55,32 @@ extension BranchReviewController {
         return disposition == .keep ? explanation : nil
     }
 
-    /// The first-use notice: what Explain sends, where, and under which
-    /// account. Its first button explains.
-    static func explainAlert(account: BranchReview.ExplainAccount, files: Int) -> NSAlert {
+    /// The first-use notice: what Explain sends, where, with which model,
+    /// and under which account. Its first button explains.
+    static func explainAlert(account: BranchReview.ExplainAccount, files: Int, settings: BranchReview.ExplainSettings) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = "Explain this branch with Claude?"
-        alert.informativeText = explainNotice(account: account, files: files)
+        alert.informativeText = explainNotice(account: account, files: files, settings: settings)
         alert.addButton(withTitle: "Explain")
         alert.addButton(withTitle: "Cancel")
         if account.isBilledPerCall { alert.alertStyle = .warning }
         return alert
     }
 
-    nonisolated static func explainNotice(account: BranchReview.ExplainAccount, files: Int) -> String {
+    nonisolated static func explainNotice(
+        account: BranchReview.ExplainAccount, files: Int, settings: BranchReview.ExplainSettings
+    ) -> String {
         let who = account.email.map { "\(account.label) (\($0))" } ?? account.label
         let cost = account.isBilledPerCall
             ? "This account is billed per call: each run can cost up to $3 at API prices, and a large branch takes "
                 + "several runs. Nirux asks again each time."
             : "It counts toward your plan’s usage limits. Nirux asks again if the account changes."
-        return "Claude reads the diff of \(BranchReview.count(files, "file")), the pull request, the handover and the commits, "
+        let effort = BranchReview.ExplainSettings.effortTitle(settings.effort).lowercased()
+        let model = "\(BranchReview.ExplainSettings.displayName(of: settings.model)), \(effort) effort"
+        let time = ["low", "medium"].contains(settings.effort) ? "About a minute or two." : "Several minutes at this effort."
+        return "Claude (\(model)) reads the diff of \(BranchReview.count(files, "file")), the pull request, the handover "
+            + "and the commits, "
             + "and a read-only copy of the branch’s files (secrets and instruction files left out). "
-            + "They go to Anthropic under \(who).\n\nAbout a minute or two. \(cost)"
+            + "They go to Anthropic under \(who).\n\n\(time) \(cost)"
     }
 }

@@ -62,6 +62,8 @@ final class SettingsWindowTests: XCTestCase {
                 ("showClaudeUsageLimits", { try self.click(app.settingsUsageLimitsCheckbox) }),
                 ("codexLaunchMode", { try self.choose(CodexLaunchMode.bypass.rawValue, in: app.settingsCodexLaunchModePopup) }),
                 ("stuckAgentMinutes", { try self.choose(30, in: app.settingsStuckAgentPopup) }),
+                ("explainModel", { try self.choose("claude-sonnet-5-5", in: app.settingsExplainModelPopup) }),
+                ("explainEffort", { try self.choose("high", in: app.settingsExplainEffortPopup) }),
                 ("keepMacAwakeWhileAgentsWork", { try self.click(app.settingsKeepAwakeCheckbox) }),
                 ("agentResumeOnLaunch", {
                     try self.choose(AgentResumeOnLaunch.allAtOnce.rawValue, in: app.settingsAgentResumePopup)
@@ -417,6 +419,57 @@ final class SettingsWindowTests: XCTestCase {
 
             XCTAssertEqual(Persistence.load()?.settings?.claudeNoFlicker, false, "the file was written again")
             XCTAssertTrue(try String(contentsOf: stateFile, encoding: .utf8).contains(#""agentResumeOnLaunch":"onIdle""#))
+        }
+    }
+
+    // MARK: - Branch Review's Explain
+
+    /// Opus 5.5 at medium unless chosen otherwise; Explain's next run takes
+    /// the choice. A model set by hand stays selectable, unless it could
+    /// pass for one of claude's options; an unknown effort reads as medium.
+    @MainActor
+    func testExplainModelAndEffort() throws {
+        try withIsolatedState {
+            let app = try openSettings()
+            XCTAssertEqual(app.settingsExplainModelPopup?.itemTitles, ["Opus 5.5", "Sonnet 5.5"])
+            XCTAssertEqual(app.settingsExplainEffortPopup?.itemTitles, ["Low", "Medium", "High", "Extra high", "Max"])
+            XCTAssertEqual(selectedRawValue(app.settingsExplainModelPopup), "claude-opus-5-5")
+            XCTAssertEqual(selectedRawValue(app.settingsExplainEffortPopup), "medium")
+
+            // The shown default, picked again: nothing to write.
+            try choose("claude-opus-5-5", in: app.settingsExplainModelPopup)
+            XCTAssertNil(Persistence.load())
+            try choose("claude-sonnet-5-5", in: app.settingsExplainModelPopup)
+            try choose("xhigh", in: app.settingsExplainEffortPopup)
+            XCTAssertEqual(BranchReview.ExplainSettings.saved().model, "claude-sonnet-5-5")
+            XCTAssertEqual(BranchReview.ExplainSettings.saved().effort, "xhigh")
+            // The default is saved as none: a later default reaches it.
+            try choose("claude-opus-5-5", in: app.settingsExplainModelPopup)
+            XCTAssertNil(Persistence.load()?.settings?.explainModel)
+            XCTAssertEqual(BranchReview.ExplainSettings.saved().model, "claude-opus-5-5")
+            close(app)
+
+            // A dated id keeps its own item: a popup keeps one per title.
+            var state = try XCTUnwrap(Persistence.load())
+            state.settings?.explainModel = "claude-opus-5-5-20261001"
+            XCTAssertTrue(Persistence.save(state))
+            let reopened = try openSettings()
+            XCTAssertEqual(reopened.settingsExplainModelPopup?.itemTitles, ["Opus 5.5", "Sonnet 5.5", "claude-opus-5-5-20261001"])
+            XCTAssertEqual(selectedRawValue(reopened.settingsExplainModelPopup), "claude-opus-5-5-20261001")
+            XCTAssertEqual(selectedRawValue(reopened.settingsExplainEffortPopup), "xhigh")
+            close(reopened)
+
+            // Unknown: the defaults show, and picking them keeps the value.
+            state.settings?.explainModel = "a--dangerously-skip-permissions"
+            state.settings?.explainEffort = "turbo"
+            XCTAssertTrue(Persistence.save(state))
+            let guarded = try openSettings()
+            defer { close(guarded) }
+            XCTAssertEqual(guarded.settingsExplainModelPopup?.itemTitles, ["Opus 5.5", "Sonnet 5.5"])
+            XCTAssertEqual(selectedRawValue(guarded.settingsExplainEffortPopup), "medium")
+            XCTAssertEqual(BranchReview.ExplainSettings.saved(), BranchReview.ExplainSettings())
+            try choose("medium", in: guarded.settingsExplainEffortPopup)
+            XCTAssertEqual(Persistence.load()?.settings?.explainEffort, "turbo")
         }
     }
 

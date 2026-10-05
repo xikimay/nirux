@@ -211,9 +211,14 @@ final class BranchReviewController {
     /// `account`, with the number of files whose diff it sends: false
     /// doesn't run. The shell asks once per project and account, and every
     /// time for an account billed per call; this default asks every time.
-    var confirmExplain: @MainActor (_ account: BranchReview.ExplainAccount, _ files: Int) -> Bool = { account, files in
-        BranchReviewController.explainAlert(account: account, files: files).runModal() == .alertFirstButtonReturn
+    var confirmExplain: @MainActor (
+        _ account: BranchReview.ExplainAccount, _ files: Int, _ settings: BranchReview.ExplainSettings
+    ) -> Bool = { account, files, settings in
+        BranchReviewController.explainAlert(account: account, files: files, settings: settings).runModal() == .alertFirstButtonReturn
     }
+    /// The model and effort a run asks for: Settings', read when the user
+    /// asks for it; a run that waits in line keeps them.
+    var explainSettings: @MainActor () -> BranchReview.ExplainSettings = { .saved() }
 
     init(
         worktree: String, branch: String?, view: BranchReviewView = BranchReviewView(),
@@ -599,7 +604,8 @@ final class BranchReviewController {
         guard let asked = snapshot else { return sendExplainBar() }
         let bar = BranchReview.explainBar(explainBar, snapshot: asked, explanation: explanation)
         let files = fresh || !bar.explained ? bar.sendable : bar.changed + bar.unexplained
-        guard confirmExplain(account, files) else { return sendExplainBar() }
+        let settings = explainSettings()
+        guard confirmExplain(account, files, settings) else { return sendExplainBar() }
         // Reads went on while the user read the notice: the page may show
         // a later head now, but not another branch.
         guard let snapshot = self.snapshot, snapshot.branch == asked.branch else { return sendExplainBar() }
@@ -607,6 +613,7 @@ final class BranchReviewController {
         job.includeUntracked = explainBar.includeUntracked
         job.fresh = fresh
         job.requiresSubscription = !account.isBilledPerCall
+        job.settings = settings
         explainCount += 1
         let number = explainCount
         activeExplain = number
