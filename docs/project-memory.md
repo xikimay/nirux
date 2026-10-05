@@ -1,8 +1,8 @@
 # Project Memory
 
-Status: decided with the user on 2026-10-05. The read-only panel ships first;
-switching, editing and adding come in a second pull request (section 4). The
-History tab, greyed for now, is designed separately.
+Status: decided with the user on 2026-10-05. The list shipped first, read-only;
+changing it (section 4) came second. The History tab, greyed for now, is
+designed separately.
 
 Agents learn about a repository from several files: the Nirux project brief,
 the repository's `CLAUDE.md` and `AGENTS.md`, and the auto-memory Claude Code
@@ -21,7 +21,8 @@ The workspace's own folder decides, not where its focused terminal has
 `cd`'d. The panel reads the files each time it opens, off the main thread. It
 never writes: **Open in Editor** (Return, or a double click) opens the
 selected item's file, at its line, in the editor of that workspace, brought
-forward. The editor's own save and disk-conflict rules apply.
+forward. The editor's own save and disk-conflict rules apply. The panel
+changes the brief and Claude Code's memory itself only when asked (section 4).
 
 ## 2. The list
 
@@ -91,17 +92,49 @@ repository's settings only once its folder is trusted).
 Codex reads the brief (as `developer_instructions`) and `AGENTS.md`, not
 Claude Code's memory.
 
-## 4. Next: writing (second pull request)
+## 4. Changing it
 
-- **Switch Always / When relevant** on an item: it moves between the brief
-  and Claude Code's memory. The destination is written first, then the source
-  removed, so a failure never loses the item.
-- **Edit in place**, and **+ Add** (When relevant by default: a title, its
-  kebab-case file name shown, a description and the text).
-- **Delete…**, after a confirmation: a memory's file goes to the Trash and
-  its `MEMORY.md` line goes.
-- **Safe writes.** Sessions write the memory folder at any time, with no lock
-  shared with Nirux. Every write goes to a temporary file, then a rename that
-  never replaces another file. Nirux re-reads `MEMORY.md` right before
-  writing it and changes only its own line, never rewriting the index from an
-  older copy, and never touches a file the user didn't act on.
+- **Always / When relevant**: the switch above an item of the brief or of
+  the memory moves it to the other. A rule becomes a memory titled after its
+  bold lead or first sentence, of type `feedback`; a memory becomes a rule,
+  its title in bold ahead of its text (unless the text starts with it), its
+  file to the Trash, once confirmed. While auto-memory is off, nothing moves
+  to When relevant, and "+ Add" offers only Always.
+- **Edit** shows the item's text as written, Markdown and all, without
+  smart quotes or dashes; **Save** (⌘S) writes it, **Cancel** (Escape)
+  leaves it. Meanwhile no other item can be picked and the panel stays open:
+  the edit never goes unsaved by a stray click. A memory keeps its
+  frontmatter, its `modified` date updated. An emptied text isn't saved:
+  Delete… asks first.
+- **+ Add**: a title, where it goes (When relevant by default: a memory, its
+  kebab-case file name shown, with a type and a description; or Always: a
+  rule of the brief, its title in bold), and the text. A title already taken
+  gets a number, `MEMORY.md` included; one without a letter a file name can
+  use is filed as `note.md`.
+- **Delete…**, once confirmed: a memory's file goes to the Trash and its
+  `MEMORY.md` lines go; a rule leaves the brief; a `MEMORY.md` line whose
+  file is gone leaves the index.
+- The team's `CLAUDE.md` and `AGENTS.md` change only in the editor, in a
+  commit.
+- A write that fails says why at the bottom of the panel; an edit stays as
+  typed.
+
+**Safe writes.** Sessions write the memory folder at any time, with no lock
+shared with Nirux.
+- What a write acts on is the item the user picked, by its file or its
+  lines, never its place in the list. Nirux runs its writes one at a time,
+  and takes no other action until one ends.
+- Before writing, Nirux checks the item still reads as the panel showed it:
+  a memory an agent changed since, or a brief rule that moved, is left
+  alone, with a message.
+- Every write goes to a hidden temporary file beside its target (a link's
+  target), synced to disk with the target's permissions, then a rename; a
+  new file never replaces one that appeared meanwhile.
+- Right before the rename, Nirux reads the file again: changed meanwhile, it
+  starts over from what is there. `MEMORY.md` gets its line added or
+  removed, every other line kept as written, with its own line breaks.
+- A rule that shares its lines with a `<!-- -->` comment, a file that is
+  read-only, not UTF-8, or past 4 MB, and a brief that would pass the 16,000
+  characters sessions get are left alone, with a message.
+- Nirux writes only the files the user acted on: the brief, the memory's
+  file, `MEMORY.md`.

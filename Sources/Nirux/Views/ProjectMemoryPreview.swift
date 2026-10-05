@@ -1,10 +1,12 @@
 import AppKit
 
 /// The Project Memory panel's right side: the selected item's title, its
-/// scope and what it means, a memory's description, then its text,
-/// read-only, and in small the file it comes from. Its `[[links]]` are
-/// links: a click hands the memory's file to `onLink`; a link to no memory
-/// stays plain.
+/// scope and what it means, a memory's description, then its text, and in
+/// small the file it comes from. Its `[[links]]` are links: a click hands
+/// the memory's file to `onLink`; a link to no memory stays plain. An item
+/// of the brief or of the memory gets a switch between Always and When
+/// relevant (`onScope`), and its text can be edited as written
+/// (`beginEditing`).
 @MainActor
 final class ProjectMemoryPreview: NSView {
     let titleLabel = NSTextField(labelWithString: "")
@@ -16,6 +18,17 @@ final class ProjectMemoryPreview: NSView {
     private let separator = NSView()
     /// Gets the linked memory's file.
     var onLink: (String) -> Void = { _ in }
+    /// Gets the scope the switch was set to.
+    var onScope: (ProjectMemory.Scope) -> Void = { _ in }
+    let scopeControl = NSSegmentedControl(
+        labels: [ProjectMemory.Scope.always.title, ProjectMemory.Scope.whenRelevant.title],
+        trackingMode: .selectOne, target: nil, action: nil
+    )
+    /// The text shown as written, editable.
+    private(set) var isEditing = false
+    /// The edit's own: the panel's window, reused across items, never undoes
+    /// an earlier item's typing into this one.
+    private let editUndo = UndoManager()
 
     nonisolated static let linkScheme = "nirux-memory"
     private static let sourceHeight: CGFloat = 30
@@ -38,6 +51,15 @@ final class ProjectMemoryPreview: NSView {
         sourceLabel.lineBreakMode = .byTruncatingMiddle
         separator.wantsLayer = true
         separator.layer?.backgroundColor = Theme.Color.line.cgColor
+        scopeControl.controlSize = .small
+        scopeControl.font = Theme.Font.caption
+        scopeControl.selectedSegmentBezelColor = Theme.Color.accent
+        // The keyboard stays in the panel's search field.
+        scopeControl.refusesFirstResponder = true
+        scopeControl.setAccessibilityLabel("Applies")
+        scopeControl.target = self
+        scopeControl.action = #selector(scopeChanged)
+        scopeControl.sizeToFit()
 
         textView.isEditable = false
         textView.isSelectable = true
@@ -47,6 +69,12 @@ final class ProjectMemoryPreview: NSView {
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
+        // Agents read what is typed here as written: no curly quotes, no
+        // `—` for `--`, no corrected command names.
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
         textView.linkTextAttributes = [
             .foregroundColor: Theme.Color.accent, .cursor: NSCursor.pointingHand
         ]
@@ -54,7 +82,7 @@ final class ProjectMemoryPreview: NSView {
         scroll.documentView = textView
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
-        [titleLabel, metaLabel, descriptionLabel, separator, scroll, sourceLabel].forEach(addSubview)
+        [titleLabel, metaLabel, descriptionLabel, separator, scroll, sourceLabel, scopeControl].forEach(addSubview)
 
         wantsLayer = true
         layer?.backgroundColor = Theme.Color.canvas.cgColor
@@ -67,7 +95,9 @@ final class ProjectMemoryPreview: NSView {
         let inset = Theme.Space.lg
         let width = bounds.width - 2 * inset
         var y = bounds.height - Theme.Space.md - 20
-        titleLabel.frame = NSRect(x: inset, y: y, width: width, height: 20)
+        let switchWidth = scopeControl.isHidden ? 0 : scopeControl.frame.width + Theme.Space.md
+        scopeControl.frame.origin = NSPoint(x: bounds.width - inset - scopeControl.frame.width, y: y + 1)
+        titleLabel.frame = NSRect(x: inset, y: y, width: width - switchWidth, height: 20)
         y -= 18
         metaLabel.frame = NSRect(x: inset, y: y, width: width, height: 15)
         if descriptionLabel.isHidden {
@@ -91,6 +121,17 @@ final class ProjectMemoryPreview: NSView {
 
     func show(_ entry: ProjectMemory.Entry, in knowledge: ProjectMemory.Knowledge, location: ProjectMemory.Location) {
         setHeaderHidden(false)
+        endEditing()
+        let movable: Bool
+        switch entry.source {
+        case .rule: movable = entry.scope == .always
+        case .memory: movable = true
+        case .missingFile: movable = false
+        }
+        scopeControl.isHidden = !movable
+        scopeControl.selectedSegment = entry.scope == .always ? 0 : 1
+        // While Claude Code doesn't use its memory, nothing moves there.
+        scopeControl.setEnabled(location.disabledBy == nil || entry.scope == .whenRelevant, forSegment: 1)
         titleLabel.stringValue = entry.title
         titleLabel.toolTip = entry.title
         var meta = [entry.scope.title]
@@ -141,12 +182,65 @@ final class ProjectMemoryPreview: NSView {
 
     func showEmpty(_ text: String) {
         setHeaderHidden(true)
+        endEditing()
+        scopeControl.isHidden = true
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
         textView.textStorage?.setAttributedString(NSAttributedString(string: "\n\n" + text, attributes: [
             .font: Theme.Font.body, .foregroundColor: Theme.Color.textTertiary, .paragraphStyle: paragraph
         ]))
         needsLayout = true
+    }
+
+    // MARK: - Editing
+
+    /// Shows `text` as written, Markdown marks and all, ready to change.
+    func beginEditing(_ text: String) {
+        isEditing = true
+        // No move halfway through an edit; the text shows it can change.
+        scopeControl.isHidden = true
+        textView.drawsBackground = true
+        textView.backgroundColor = Theme.Color.surface
+        textView.isEditable = true
+        textView.isRichText = false
+        textView.allowsUndo = true
+        editUndo.removeAllActions()
+        textView.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: Self.bodyAttributes))
+        textView.typingAttributes = Self.bodyAttributes
+        textView.window?.makeFirstResponder(textView)
+        textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+    }
+
+    /// Back to reading; the caller shows the item again.
+    func endEditing() {
+        guard isEditing else { return }
+        isEditing = false
+        textView.isEditable = false
+        textView.allowsUndo = false
+        textView.drawsBackground = false
+        editUndo.removeAllActions()
+        if textView.window?.firstResponder === textView { textView.window?.makeFirstResponder(nil) }
+    }
+
+    var editedText: String { textView.string }
+
+    /// While a save runs, the text can't change: typed then, it would be
+    /// lost.
+    func setEditable(_ editable: Bool) {
+        guard isEditing else { return }
+        textView.isEditable = editable
+    }
+
+    /// An input method composing in the text being edited.
+    var isComposing: Bool { isEditing && textView.hasMarkedText() }
+
+    /// Sets the switch back to `scope`, for a move that didn't start.
+    func reshowScope(_ scope: ProjectMemory.Scope) {
+        scopeControl.selectedSegment = scope == .always ? 0 : 1
+    }
+
+    @objc private func scopeChanged() {
+        onScope(scopeControl.selectedSegment == 0 ? .always : .whenRelevant)
     }
 
     private func setHeaderHidden(_ hidden: Bool) {
@@ -224,6 +318,10 @@ final class ProjectMemoryPreview: NSView {
 }
 
 extension ProjectMemoryPreview: NSTextViewDelegate {
+    func undoManager(for view: NSTextView) -> UndoManager? {
+        editUndo
+    }
+
     func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
         guard let url = link as? URL ?? (link as? String).flatMap(URL.init(string:)), url.scheme == Self.linkScheme,
               let fileName = URLComponents(url: url, resolvingAgainstBaseURL: false)?.path

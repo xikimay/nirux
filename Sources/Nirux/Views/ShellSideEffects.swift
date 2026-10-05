@@ -32,6 +32,10 @@ struct ShellSideEffects {
     /// Where Claude Code's managed settings live (see ProjectMemory).
     var claudeManagedSettings: @MainActor () -> ProjectMemory.ManagedFolders = { .system }
 
+    /// Moves a deleted memory's file to the Trash. Called off the main
+    /// thread.
+    var trash: ProjectMemory.Trash = ProjectMemory.systemTrash
+
     /// Chromium browsers with a cookie database.
     var cookieBrowsers: @MainActor () -> [CookieImporter.Browser] = { CookieImporter.availableBrowsers }
 
