@@ -746,13 +746,61 @@ The rules start built in, for Swift and macOS. Per-project rules
 
 ### 6.1 Comments
 
-- On a line or a range: the gutter button, or a selection. On a file: the
-  file row's Comment button. A comment is plain text. A draft is stored as it
-  is typed.
-- Stored locally (section 8), anchored to the path, the side, the line, the
-  line's text and the file's patch hash. When the patch changes, Nirux looks
-  for the same text near the old line; otherwise the comment is "outdated" and
-  keeps its excerpt.
+- On a line or a range of one hunk, up to 100 rows: the gutter button, or a
+  selection. On a file: the file row's Comment button. A comment is plain
+  text, up to 20,000 characters and 80,000 bytes.
+- **Drafts.** What is typed is a draft, stored as it is typed: it outlives a
+  Reload, the column closing and a crash. The Comment button makes it a
+  comment, ready to send. Only comments go to the agent, never drafts
+  (section 6.2). An unsent comment can be edited and deleted. A sent one
+  stays under its line, read-only, marked "Sent at db9ac66", and can only
+  be deleted. (Decided by the user on 2026-10-04.) The page saves a draft a
+  moment after the last key, and sends a pending save before Comment, Save
+  or Cancel; the column applies them in order: a save arriving after them
+  would bring the draft back.
+- Stored locally (section 8), anchored to the path and to the rows it covers,
+  each with its kind (added, removed or context), its line in the base's
+  file and in the working tree's (what `@pierre/diffs` numbers on its
+  `deletions` and `additions` sides) and its text, and with the text of the
+  two rows above and below. A row's text is kept up to 1,000 characters and
+  4,000 bytes, with a hash of the whole line when it is cut, and a
+  comment's rows and context up to 32,000 bytes: past that, the range can't
+  be commented. Not the file's patch hash: it leaves line numbers out, and a
+  merge from the base moves lines without changing it. A draft's anchor is
+  fixed when it is first saved: the diff may change while the user types.
+- **Following the lines.** Each read looks for the rows in the diff: the
+  same kinds and texts, in a row, within one hunk. A comment under the wrong
+  line is worse than one marked outdated, so a run counts only with
+  evidence, and when no other is as likely:
+  - a context row is evidence only when it holds a letter or a digit (`}`
+    and blank lines are everywhere). Each of the comment's found among the
+    run's three nearest rows on its side is a hit; each missing, where the
+    rows reach as far as it was, a miss. The score is hits less misses;
+  - a run needs a score above 0, or to be where the rows were (at the line
+    the page showed) with neither hit nor miss, and the only run that reads
+    as its rows;
+  - of the runs with the best score, the one where the rows were wins, if
+    one is, else the only one. Two leave the comment outdated, and so does
+    another run where the rows were that nothing contradicts;
+  - when the nearest context rows that hold a letter or a digit, above and
+    below, still stand around rows that don't read as the comment's, those
+    were rewritten or deleted there: outdated, whatever reads the same
+    elsewhere;
+  - a comment made on copied code, where another run read as its rows with
+    all its context, is found by its rank among the runs that read as its
+    rows, and is outdated once their number changes.
+
+  It is looked for from where it was made, which is never rewritten, and
+  from where it was last found, which is recorded when that changes. When
+  they find different places, the better evidence wins, and as good leaves
+  it outdated. Not found, it is "outdated": it keeps its rows as an
+  excerpt, and is looked for again at the next read. A comment whose file
+  no longer differs from the base says so; one whose file's hunks aren't
+  read yet (section 7, "Size") is placed once its row opens; one whose file
+  is too large to show stays with its file. A comment on a file lasts as
+  long as the file differs from the base. A file the diff shows renamed
+  keeps its comments; one the branch added, then renamed, reads as gone. A
+  line that isn't UTF-8 compares as it reads, with U+FFFD where it isn't.
 - Not posted on GitHub. Posting a review there can come later.
 
 ### 6.2 Sending comments to the agent
@@ -797,6 +845,16 @@ say why and change nothing for it. Then say what you did for each number.
   open approval prompt would read as idle; Gemini CLI and OpenCode report
   nothing. It is checked when the sheet opens and again on Send: a Telegram
   prompt or a merge-queue prompt may start a turn meanwhile.
+- **Drafts don't go.** The sheet says how many it leaves out. Sending a
+  comment that is being edited sends it as it was saved; the edit becomes
+  the draft of a new comment where it is, so nothing typed is lost, and
+  the editor goes on as that draft. An edit that changed nothing goes.
+- **Lines in the message.** A comment's quoted rows show their line breaks
+  (CR, U+2028, U+2029) and invisible characters as code points, as the page
+  does, so a quoted line can't end the quote and read as the user's. A
+  removed row is named as the base's line ("removed, line 42 of main"), and
+  an outdated comment is sent as outdated, with its excerpt and no line
+  number.
 - **The message is sanitized as a whole**, paths and quoted lines included,
   by the scalar filter of `RemotePromptSanitizer`, factored out: keep `\n` and
   `\t`, turn `\r` and `\r\n` into `\n`, drop the other C0 controls, DEL and
@@ -933,7 +991,11 @@ Rejected:
   folder per project.)
 - It holds the comments, drafts, reviewed marks, what was sent, the
   explanation cache, each Explain run's usage, the PR number and the last
-  head the review was opened or written at. A reused branch name must not
+  head the review was opened or written at. Comments and drafts are keyed
+  by an id the page makes (letters, digits and `-`, up to 64): a write
+  changes only the entries it is about. It keeps the keys a later build
+  added to an entry, to where its comment was made (never rewritten) and to
+  its "sent" mark; where a comment was last found is rewritten whole. A reused branch name must not
   inherit old comments. The file is kept when its last head is the branch's
   head, or one of the branch's own commits (in HEAD's history and not in the
   base's: the branch moved on from it). Otherwise, when both the file and the
@@ -1008,7 +1070,13 @@ used.
    the copy, the input), then the run (account, output checks, cache, the
    five PRs), then the page and the settings.
 4. **R4, comments and reviewed marks.** Drafts, re-anchoring, outdated
-   comments, and turning a "check this" note into a comment.
+   comments, and turning a "check this" note into a comment. It ships in
+   four pull requests (decided by the user on 2026-10-04): the comments'
+   model, with drafts, anchors and re-anchoring, without UI; the reviewed
+   marks, with the review file wired into the column (a file's checkbox,
+   which folds its diff, a group's that marks all its files, the progress);
+   the comments on the page; then a "check this" note turned into a
+   comment, once Explain's page has landed.
 5. **R5, sending to the agent.** The "idle at its prompt" predicate, the
    sanitizer, the message, the target rules, the sheet; shared with "Ask Agent
    to Resolve" if it has landed.
