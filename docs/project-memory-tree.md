@@ -88,8 +88,8 @@ the user chose:
 The History layer fills what nobody wrote anywhere. It does not replace the
 others at first: Claude Code's memory and the tree coexist, and Claude Code's
 memories can be imported into the tree when history is turned on (the user's
-choice on 2026-10-05; the import is offered, off by default). Section 7 describes what may come after a few weeks of
-use.
+choice on 2026-10-05; the import is offered, off by default). Section 7
+describes what may come after a few weeks of use.
 
 ## 2. The journal
 
@@ -223,7 +223,7 @@ started before that keep it in their system prompt until they end.
   log/YYYY-MM-DD.jsonl    one message per line: {i, kind, branch, from, text, size, date, session, source}
   tree/YYYY-MM-DD.jsonl   one node per line:    {l, i, text, size}
   forgotten.jsonl         ids of messages the user forgot
-  state.json              per transcript: path, last journaled offset
+  state.json              where reading starts in transcripts that ran when history was turned on
   usage.jsonl             one line per compactor call: model, tokens, cost, outcome
   view.md                 the current view, for the launch file (section 5.1)
   lock                    the writer's lock
@@ -985,7 +985,7 @@ questions give a wide margin of error. The run reports them as they are.
 | 6 | Nobody uses the Project Board or the merge queue. Should I hide or delete them? | No. On 2026-10-02 the user chose to finish rather than delete: B3a shipped, the board stays on probation, B3b waits until the user has tried the queue. | 2026-10-02 19:12, user, `6e0e7adb-3137-44a9-b44e-8f35d123cc5d` |
 | 7 | Should I build a full Activity history view with in-app notifications? | Not unasked: it was item 4 of the 2026-10-02 list, and the user picked 1, 2, 3 and 5. | 2026-10-02 20:09, user, `cce20506-05a7-4000-af84-29738c9bfc14` |
 | 8 | Should Nirux add an OptChat-style chat column with its own agent loop? | No. Rejected on 2026-10-05: it would lose Claude Code and Nirux's agent tooling; memory goes to normal Claude Code sessions. | 2026-10-05 19:46, user, `edeaa2cd-4b62-4a48-a707-96ad5497a904` |
-| 9 | Does the tree replace Claude Code's memory? Should Nirux set `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`? | Not at first: both coexist, the memories are imported into the tree; a reversible per-project switch may come after a few weeks. | 2026-10-05 21:19, user, `01ac10fc-5e18-4f55-9f11-5db0f793f2ba` |
+| 9 | Does the tree replace Claude Code's memory? Should Nirux set `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`? | Not at first: both coexist, and the memories can be imported into the tree; a reversible per-project switch may come after a few weeks. | 2026-10-05 21:19, user, `01ac10fc-5e18-4f55-9f11-5db0f793f2ba` |
 | 10 | Should we merge the per-project trees into one universal history? | No. Each project's tree is the source of truth and trees are never merged; a forest view may come later. | 2026-10-05 21:17, user, `832b55b3-c77c-40c9-b9a3-fa23702b9697` |
 
 Key phrases for PR 2's gate, matched without case in the view line that
