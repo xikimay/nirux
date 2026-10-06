@@ -6,8 +6,10 @@ import AppKit
 /// repository's CLAUDE.md and AGENTS.md are the team's, Claude Code's
 /// memory is read when relevant. Filtered by text and scope; on the right,
 /// the selected item, its `[[links]]` clickable, its file in small. Return,
-/// the button or a double click hands that file to `onOpen`. Read-only:
-/// the editor changes the files. The History tab comes later.
+/// the button or a double click opens that file. An item of the brief or of
+/// the memory switches between Always and When relevant, is edited as
+/// written, or deleted; "+ Add" adds one (see `Actions`: the shell writes).
+/// The team's files change in the editor. The History tab comes later.
 @MainActor
 final class ProjectMemoryPanel: NSObject {
     static let panelSize = NSSize(width: 900, height: 600)
@@ -15,6 +17,11 @@ final class ProjectMemoryPanel: NSObject {
     static let title = "Project Memory"
     static let tabs = ["What agents know", "History"]
     static let openTitle = "Open in Editor"
+    static let addTitle = "+ Add"
+    static let editTitle = "Edit"
+    static let deleteTitle = "Delete…"
+    static let saveTitle = "Save"
+    static let cancelTitle = "Cancel"
 
     static func placeholder(repository: String) -> String { "Filter what agents know about \(repository)…" }
 
@@ -37,11 +44,43 @@ final class ProjectMemoryPanel: NSObject {
     private var scrollView: NSScrollView?
     private(set) var noticeRow: NSView?
 
+    /// What the panel asks the shell to do. A write returns whether it
+    /// started; one that did ends with `update(model:selecting:)` or
+    /// `writeFailed(_:)`, and the panel takes no other until then.
+    struct Actions {
+        /// A file to open, and the line to show.
+        var open: @MainActor (URL, Int?) -> Void = { _, _ in }
+        /// An item to move to the other scope.
+        var move: @MainActor (ProjectMemory.Target, ProjectMemory.Scope) -> Bool = { _, _ in false }
+        /// An item's new text, as written.
+        var save: @MainActor (ProjectMemory.Target, String) -> Bool = { _, _ in false }
+        var add: @MainActor (ProjectMemoryAddSheet.Item) -> Bool = { _ in false }
+        var delete: @MainActor (ProjectMemory.Target) -> Bool = { _ in false }
+        /// Asks `alert`'s question; true on its first button.
+        var confirm: @MainActor (NSAlert) -> Bool = { $0.runModal() == .alertFirstButtonReturn }
+    }
+
     private(set) var model: Model?
     /// Indexes into `model.knowledge.entries`, as listed.
     private(set) var rows: [Int] = []
-    /// Gets a file to open, and the line to show.
-    private var onOpen: (URL, Int?) -> Void = { _, _ in }
+    private var actions = Actions()
+    /// The item whose text is being edited, and its text as it was.
+    private(set) var editing: (target: ProjectMemory.Target, text: String)?
+    /// A write the shell runs: the panel takes no other until it ends.
+    private(set) var isWriting = false
+    private(set) var errorLabel: NSTextField?
+    /// The files as read after a refused save, shown once the edit ends.
+    private var freshModel: Model?
+    /// Counts `show`s: a write started before the last one isn't its.
+    private(set) var opening = 0
+    /// An item being added: back in its sheet if the write fails.
+    private var pendingAdd: ProjectMemoryAddSheet.Item?
+    private(set) var addSheet: ProjectMemoryAddSheet?
+    private(set) var addButton: NSButton?
+    private(set) var editButton: NSButton?
+    private(set) var deleteButton: NSButton?
+    private(set) var saveButton: NSButton?
+    private(set) var cancelButton: NSButton?
 
     private var keyMonitor: Any?
     private var clickMonitor: Any?
@@ -58,9 +97,18 @@ final class ProjectMemoryPanel: NSObject {
 
     /// Shows `model` over `window`, filters cleared, the first item
     /// selected.
-    func show(relativeTo window: NSWindow, model: Model, onOpen: @escaping (URL, Int?) -> Void) {
+    func show(relativeTo window: NSWindow, model: Model, actions: Actions) {
         self.model = model
-        self.onOpen = onOpen
+        self.actions = actions
+        // A write that ended after a close never reported to this opening.
+        opening += 1
+        isWriting = false
+        editing = nil
+        freshModel = nil
+        pendingAdd = nil
+        errorLabel?.stringValue = ""
+        preview?.endEditing()
+        setFiltersEnabled(true)
         if panel == nil { createPanel() }
         guard let panel, let searchField else { return }
         searchField.stringValue = ""
@@ -89,8 +137,35 @@ final class ProjectMemoryPanel: NSObject {
     }
 
     func dismiss() {
+        if let sheet = addSheet?.window { panel?.endSheet(sheet) }
+        addSheet = nil
+        editing = nil
+        freshModel = nil
+        preview?.endEditing()
+        setFiltersEnabled(true)
         removeMonitors()
         panel?.orderOut(nil)
+    }
+
+    /// Shows `model` again after a write, the filters kept, the first item
+    /// `select` picks selected (the filters cleared when they hide it).
+    func update(model: Model, selecting isWanted: (ProjectMemory.Entry) -> Bool) {
+        self.model = model
+        isWriting = false
+        editing = nil
+        freshModel = nil
+        pendingAdd = nil
+        preview?.endEditing()
+        setFiltersEnabled(true)
+        reload()
+        defer { focusField() }
+        guard let entry = model.knowledge.entries.firstIndex(where: isWanted) else { return }
+        if !rows.contains(entry) {
+            searchField?.stringValue = ""
+            scopeControl?.selectedSegment = 0
+            reload()
+        }
+        if let row = rows.firstIndex(of: entry) { select(row: row) }
     }
 
     // MARK: - Rows
@@ -148,12 +223,32 @@ final class ProjectMemoryPanel: NSObject {
 
     private func updateSelection() {
         guard let model else { return }
+        editing = nil
+        errorLabel?.stringValue = ""
         if let entry = selectedEntry {
             preview?.show(entry, in: model.knowledge, location: model.location)
         } else {
             preview?.showEmpty(Self.emptyText(model: model, filtered: isFiltered))
         }
-        openButton?.isEnabled = selectedTarget != nil
+        updateButtons()
+    }
+
+    /// Reading: + Add, Edit and Delete… for what can be; editing: Save and
+    /// Cancel; none while a write runs.
+    private func updateButtons() {
+        let target = selectedTarget
+        let isEditing = editing != nil
+        openButton?.isEnabled = !isEditing && selectedFile != nil
+        addButton?.isHidden = isEditing
+        editButton?.isHidden = isEditing
+        deleteButton?.isHidden = isEditing
+        saveButton?.isHidden = !isEditing
+        cancelButton?.isHidden = !isEditing
+        addButton?.isEnabled = !isWriting
+        editButton?.isEnabled = !isWriting && target.flatMap(Self.editableText) != nil
+        deleteButton?.isEnabled = !isWriting && target != nil
+        saveButton?.isEnabled = !isWriting
+        preview?.scopeControl.isEnabled = !isWriting
     }
 
     static func emptyText(model: Model, filtered: Bool) -> String {
@@ -163,21 +258,189 @@ final class ProjectMemoryPanel: NSObject {
             + "Claude Code notes what it learns as its sessions work."
     }
 
+    /// What a write would act on for the selected item; nil for a team rule.
+    var selectedTarget: ProjectMemory.Target? {
+        selectedEntry.flatMap { model?.knowledge.target(of: $0) }
+    }
+
+    /// A target's text as written, when it can be edited here: a brief rule
+    /// or a memory.
+    static func editableText(of target: ProjectMemory.Target) -> String? {
+        switch target {
+        case .briefRule(let rule, _): return rule.text
+        case .memory(let memory, _): return memory.body
+        case .missingFile: return nil
+        }
+    }
+
+    /// While an item is edited, nothing else can be picked: the edit would go.
+    private func setFiltersEnabled(_ enabled: Bool) {
+        searchField?.isEnabled = enabled
+        scopeControl?.isEnabled = enabled
+    }
+
+    /// Ends a write that failed, with why: an edit stays as it was typed,
+    /// what the files hold now showing once it is cancelled; an item that
+    /// was being added comes back in its sheet.
+    func writeFailed(_ message: String, model: Model? = nil, selecting isWanted: (ProjectMemory.Entry) -> Bool = { _ in false }) {
+        if editing != nil {
+            isWriting = false
+            freshModel = model
+            preview?.setEditable(true)
+        } else if let model {
+            update(model: model, selecting: isWanted)
+        } else {
+            isWriting = false
+        }
+        errorLabel?.stringValue = message
+        errorLabel?.toolTip = message
+        if let errorLabel {
+            NSAccessibility.post(element: errorLabel, notification: .announcementRequested, userInfo: [
+                .announcement: message, .priority: NSAccessibilityPriorityLevel.high.rawValue
+            ])
+        }
+        updateButtons()
+        if let item = pendingAdd {
+            pendingAdd = nil
+            showAddSheet(filledWith: item)
+        }
+    }
+
+    /// Ends a write whose result the panel doesn't show (it was closed or
+    /// reopened since): it takes the next one, unless it was reopened (that
+    /// opening's own writes are its own).
+    func writeEnded(opening: Int) {
+        guard opening == self.opening else { return }
+        isWriting = false
+        pendingAdd = nil
+        updateButtons()
+    }
+
+    // MARK: - Writing
+
+    /// Starts a write; false when the panel already waits on one, or when
+    /// the shell started none.
+    private func write(_ start: () -> Bool) -> Bool {
+        guard !isWriting else { NSSound.beep(); return false }
+        errorLabel?.stringValue = ""
+        isWriting = true
+        guard start() else {
+            isWriting = false
+            pendingAdd = nil
+            return false
+        }
+        // Typed while it is written, it would be lost.
+        preview?.setEditable(false)
+        updateButtons()
+        return true
+    }
+
+    @objc func beginEditing() {
+        guard !isWriting, let target = selectedTarget, let text = Self.editableText(of: target) else { return NSSound.beep() }
+        editing = (target, text)
+        setFiltersEnabled(false)
+        preview?.beginEditing(text)
+        updateButtons()
+    }
+
+    /// Writes the edit; an unchanged one just ends, an emptied one is
+    /// refused (Delete… asks first).
+    @objc func saveEditing() {
+        guard let (target, original) = editing, let text = preview?.editedText else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return NSSound.beep() }
+        guard trimmed != original.trimmingCharacters(in: .whitespacesAndNewlines) else { return cancelEditing() }
+        _ = write { actions.save(target, text) }
+    }
+
+    @objc func cancelEditing() {
+        guard !isWriting else { return NSSound.beep() }
+        let target = editing?.target
+        editing = nil
+        setFiltersEnabled(true)
+        // A refused save read the files again: they show now.
+        if let freshModel {
+            update(model: freshModel) { [weak self] entry in self?.model?.knowledge.target(of: entry).map { Self.sameItem($0, target) } ?? false }
+        } else {
+            updateSelection()
+        }
+        focusField()
+    }
+
+    /// The same memory file or brief rule text, read again.
+    static func sameItem(_ lhs: ProjectMemory.Target, _ rhs: ProjectMemory.Target?) -> Bool {
+        switch (lhs, rhs) {
+        case let (.memory(left, _), .memory(right, _)?): return left.fileName == right.fileName
+        case let (.briefRule(left, _), .briefRule(right, _)?): return left.text == right.text
+        case let (.missingFile(left, _), .missingFile(right, _)?): return left.fileName == right.fileName
+        default: return false
+        }
+    }
+
+    @objc func showAddSheet() {
+        showAddSheet(filledWith: nil)
+    }
+
+    private func showAddSheet(filledWith item: ProjectMemoryAddSheet.Item?) {
+        guard !isWriting, editing == nil, let panel, let model else { return NSSound.beep() }
+        let sheet = ProjectMemoryAddSheet()
+        addSheet = sheet
+        sheet.begin(on: panel, memoryFolder: model.location.directory, allowsMemory: model.location.disabledBy == nil, filledWith: item) { [weak self] item in
+            guard let self else { return }
+            addSheet = nil
+            pendingAdd = item
+            _ = write { self.actions.add(item) }
+        }
+    }
+
+    @objc func deleteSelected() {
+        guard !isWriting, let entry = selectedEntry, let target = selectedTarget else { return NSSound.beep() }
+        let alert = NSAlert()
+        alert.messageText = "Delete “\(entry.title)”?"
+        switch target {
+        case .briefRule: alert.informativeText = "It leaves the project brief."
+        case .memory: alert.informativeText = "Its file goes to the Trash and its line leaves MEMORY.md."
+        case .missingFile: alert.informativeText = "Its line leaves MEMORY.md."
+        }
+        alert.addButton(withTitle: "Delete").hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+        // The target was resolved before the question: a write ending
+        // meanwhile can't turn it into another item.
+        guard actions.confirm(alert) else { return }
+        _ = write { actions.delete(target) }
+    }
+
+    /// A memory moved to Always loses its file to the Trash: asked first.
+    private func moveSelected(to scope: ProjectMemory.Scope) {
+        guard let entry = selectedEntry, entry.scope != scope, let target = selectedTarget else { return }
+        defer { if !isWriting { preview?.reshowScope(entry.scope) } }
+        if case .memory = target, scope == .always {
+            let alert = NSAlert()
+            alert.messageText = "Move “\(entry.title)” to Always?"
+            alert.informativeText = "It joins the project brief, which every session Nirux starts in this project gets. "
+                + "Its memory file goes to the Trash."
+            alert.addButton(withTitle: "Move")
+            alert.addButton(withTitle: "Cancel")
+            guard actions.confirm(alert) else { return }
+        }
+        _ = write { actions.move(target, scope) }
+    }
+
     // MARK: - Opening
 
     /// The file of the selected item, and the line where it starts.
-    var selectedTarget: (url: URL, line: Int?)? {
+    var selectedFile: (url: URL, line: Int?)? {
         selectedEntry.flatMap { model?.knowledge.location(of: $0) }
     }
 
     @objc private func commit() {
-        guard let target = selectedTarget else { return NSSound.beep() }
+        guard editing == nil, !isWriting, let file = selectedFile else { return NSSound.beep() }
         dismiss()
-        onOpen(target.url, target.line)
+        actions.open(file.url, file.line)
     }
 
     @objc private func tableDoubleClicked() {
-        guard let table = tableView, rows.indices.contains(table.clickedRow) else { return }
+        guard editing == nil, !isWriting, let table = tableView, rows.indices.contains(table.clickedRow) else { return }
         select(row: table.clickedRow)
         commit()
     }
@@ -192,7 +455,12 @@ final class ProjectMemoryPanel: NSObject {
         }
         clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
             guard let self, let panel = self.panel else { return event }
-            if event.window !== panel { self.dismiss() }
+            // Its own sheet and its alerts keep it open, and so does an edit:
+            // it would go with it.
+            if event.window !== panel, event.window?.sheetParent !== panel, NSApp.modalWindow == nil,
+               self.editing == nil, !self.isWriting {
+                self.dismiss()
+            }
             return event
         }
     }
@@ -206,9 +474,16 @@ final class ProjectMemoryPanel: NSObject {
         guard event.window === panel else { return event }
         // An input method composing in the field keeps its keys.
         if (searchField?.currentEditor() as? NSTextView)?.hasMarkedText() == true { return event }
+        if editing != nil {
+            // The text being edited gets every key but these; an input
+            // method composing keeps Escape.
+            if event.keyCode == 0x35, preview?.isComposing == false { cancelEditing(); return nil }
+            if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "s" { saveEditing(); return nil }
+            return event
+        }
         switch event.keyCode {
         case 0x35: // Escape
-            dismiss()
+            if !isWriting { dismiss() }
             return nil
         case 0x24, 0x4C: // Return / Enter
             commit()
@@ -391,9 +666,38 @@ final class ProjectMemoryPanel: NSObject {
         noticeLabel = notice
     }
 
-    /// What Return does, at the bottom.
+    /// What can be done with the selected item on the left, what Return
+    /// does on the right.
     private func addFooter(to background: NSView) {
         let size = Self.panelSize
+        var x = Theme.Space.lg
+        func button(_ title: String, _ action: Selector) -> NSButton {
+            let button = NSButton(title: title, target: self, action: action)
+            button.bezelStyle = .rounded
+            button.sizeToFit()
+            button.frame.size.width = max(button.frame.width, 72)
+            button.frame.origin = NSPoint(x: x, y: (Self.footerHeight - button.frame.height) / 2)
+            // The keyboard stays in the field, whatever is clicked.
+            button.refusesFirstResponder = true
+            background.addSubview(button)
+            x = button.frame.maxX + Theme.Space.sm
+            return button
+        }
+        addButton = button(Self.addTitle, #selector(showAddSheet as () -> Void))
+        editButton = button(Self.editTitle, #selector(beginEditing))
+        deleteButton = button(Self.deleteTitle, #selector(deleteSelected))
+        x = Theme.Space.lg
+        saveButton = button(Self.saveTitle, #selector(saveEditing))
+        cancelButton = button(Self.cancelTitle, #selector(cancelEditing))
+        saveButton?.isHidden = true
+        cancelButton?.isHidden = true
+        // A failed write says why here: the panel would hide a toast.
+        let error = NSTextField(labelWithString: "")
+        error.font = Theme.Font.caption
+        error.textColor = Theme.Color.error
+        error.lineBreakMode = .byTruncatingTail
+        background.addSubview(error)
+        errorLabel = error
         let button = NSButton(title: Self.openTitle, target: self, action: #selector(commit))
         button.bezelStyle = .rounded
         button.controlSize = .regular
@@ -405,6 +709,8 @@ final class ProjectMemoryPanel: NSObject {
         background.addSubview(button)
         background.addSubview(Self.line(at: Self.footerHeight))
         openButton = button
+        let errorX = (deleteButton?.frame.maxX ?? x) + Theme.Space.md
+        error.frame = NSRect(x: errorX, y: (Self.footerHeight - 15) / 2, width: button.frame.minX - Theme.Space.md - errorX, height: 15)
     }
 
     /// The list on the left, the item on the right.
@@ -437,6 +743,7 @@ final class ProjectMemoryPanel: NSObject {
 
         let preview = ProjectMemoryPreview(frame: .zero)
         preview.onLink = { [weak self] fileName in self?.reveal(fileName: fileName) }
+        preview.onScope = { [weak self] scope in self?.moveSelected(to: scope) }
         background.addSubview(preview)
         tableView = table
         scrollView = scroll
@@ -472,6 +779,11 @@ extension ProjectMemoryPanel: NSTextFieldDelegate {
 
 extension ProjectMemoryPanel: NSTableViewDataSource, NSTableViewDelegate {
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+
+    /// An edit keeps its item until it is saved or cancelled.
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        editing == nil && !isWriting
+    }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         updateSelection()
