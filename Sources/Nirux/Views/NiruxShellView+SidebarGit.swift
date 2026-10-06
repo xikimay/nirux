@@ -461,6 +461,9 @@ extension NiruxShellView {
                ) {
                 changed = true
             }
+            // Before the ledger learns the event's transcript path: the
+            // path the ledger had is what the event's must match.
+            feedProjectHistory(appliedEvent)
             recordAgentSession(appliedEvent, snapshot: snapshot)
 
             if appliedEvent.resolution.workspace.recordAgentHookActivity(event) {

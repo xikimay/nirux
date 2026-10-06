@@ -583,7 +583,10 @@ extension BranchReview {
         /// back: a change another process wrote meanwhile is kept. Returns
         /// what was written, with the access for the next write. Call it
         /// off the main thread.
-        func update(_ access: Access, _ change: (inout Record) -> Void) -> Result<Loaded, WriteError> {
+        /// Unless `createsEmpty`, a change that leaves a review not created
+        /// yet empty (a request about a comment that isn't there) creates
+        /// nothing, nor sets an unreadable file aside.
+        func update(_ access: Access, createsEmpty: Bool = true, _ change: (inout Record) -> Void) -> Result<Loaded, WriteError> {
             guard access.branch == branch, access.repository == repository else { return .failure(.changedSinceOpened) }
             do {
                 try Self.createPrivateFolder(folder)
@@ -605,11 +608,6 @@ extension BranchReview {
                         }
                         record = Record()
                     case .unreadable:
-                        do {
-                            _ = try setAside(reason: "unreadable")
-                        } catch {
-                            return .failure(.couldNotSetAside(error.localizedDescription))
-                        }
                         record = Record()
                     case .loaded:
                         guard current.record.branch == branch, current.record.repository == repository,
@@ -618,6 +616,18 @@ extension BranchReview {
                         record = current.record
                     }
                     change(&record)
+                    var isNew = true
+                    if case .loaded = current.status { isNew = false }
+                    if isNew, !createsEmpty, record == Record() {
+                        return .success(Loaded(record: record, status: current.status, access: access))
+                    }
+                    if case .unreadable = current.status {
+                        do {
+                            _ = try setAside(reason: "unreadable")
+                        } catch {
+                            return .failure(.couldNotSetAside(error.localizedDescription))
+                        }
+                    }
                     record.stamp(branch: branch, repository: repository, head: access.head, pullRequest: access.pullRequest)
                     let next = Access(
                         branch: branch, repository: repository, head: access.head, pullRequest: access.pullRequest,

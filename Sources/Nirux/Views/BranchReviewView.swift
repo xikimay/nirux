@@ -8,7 +8,8 @@ import WebKit
 /// - the web view loads only its bundled page; every other navigation is
 ///   cancelled, and a web link opens in the browser instead;
 /// - the bridge takes messages only from the main frame of that page, and
-///   they carry ids and links, never text to type;
+///   they carry ids, links and the user's comments, never text to type into
+///   an agent (Swift builds that from its stored comments);
 /// - data reaches the page as call arguments, never spliced into a script.
 @MainActor
 final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandler, WKUIDelegate {
@@ -52,6 +53,11 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
     /// the page's data of that generation; `sequence` counts the page's
     /// clicks.
     var onReviewed: ((_ ids: [Int], _ reviewed: Bool, _ generation: Int, _ sequence: Int) -> Void)?
+    /// A comment's button or a draft saved (section 6.1); `sequence` counts
+    /// the page's clicks.
+    /// The request is nil when the page's message isn't one: it is
+    /// answered all the same.
+    var onComment: ((_ request: CommentRequest?, _ sequence: Int) -> Void)?
     /// Explain: the changed files, or every file again (`fresh`).
     var onExplain: ((_ fresh: Bool) -> Void)?
     var onCancelExplain: (() -> Void)?
@@ -280,6 +286,10 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
                   let generation = body["generation"] as? Int, let sequence = body["sequence"] as? Int
             else { return }
             onReviewed?(ids, reviewed, generation, sequence)
+        case "saveDraft", "addComment", "editComment", "removeDraft", "deleteComment":
+            // Malformed, it is answered all the same: the page doesn't wait.
+            guard let sequence = body["sequence"] as? Int else { return }
+            onComment?(CommentRequest(type: type, body: body), sequence)
         case "explain":
             guard let fresh = body["fresh"] as? Bool else { return }
             onExplain?(fresh)
@@ -349,6 +359,101 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
             openLink(link)
         }
         return nil
+    }
+}
+
+extension BranchReviewView {
+    /// What the page asks of a comment or a draft, by its id (section 6.1).
+    enum CommentRequest: Equatable, Sendable {
+        /// Stores what is typed, for a new comment at `place` (needed only
+        /// before its draft exists: its anchor is fixed then), or for the
+        /// unsent comment a draft edits. Empty text removes the draft.
+        case saveDraft(id: String, place: CommentPlace?, text: String)
+        /// Makes the draft of the same id, or `text` at `place`, a comment.
+        case addComment(id: String, place: FilePlace?, text: String)
+        case editComment(id: String, text: String)
+        case removeDraft(id: String)
+        case deleteComment(id: String)
+
+        /// Where a new comment goes: rows of the file of that id in the
+        /// page's data of that generation, from `start` to `end`, or the
+        /// whole file (both nil).
+        struct FilePlace: Equatable, Sendable {
+            let file: Int
+            let generation: Int
+            let start: BranchReview.DiffPosition?
+            let end: BranchReview.DiffPosition?
+        }
+
+        enum CommentPlace: Equatable, Sendable {
+            case file(FilePlace)
+            /// The unsent comment a draft edits.
+            case editing(String)
+        }
+
+        /// Past this, a message isn't read: the page's field stops at
+        /// `Comment.maxCharacters`, and what is stored is cut again.
+        static let maxTextBytes = 1_000_000
+
+        /// Nil when malformed: an id that can't name a comment, text that
+        /// isn't text, a row that isn't one, a file that is neither on rows
+        /// nor said to be on the whole file. A JavaScript null reads as
+        /// absent.
+        init?(type: String, body: [String: Any]) {
+            let body = body.filter { !($0.value is NSNull) }
+            guard let id = body["id"] as? String, BranchReview.isCommentID(id) else { return nil }
+            let text = body["text"] as? String
+            if body["text"] != nil, text == nil { return nil }
+            if let text, text.utf8.count > Self.maxTextBytes { return nil }
+            switch type {
+            case "saveDraft":
+                guard let text, let place = Self.place(body) else { return nil }
+                self = .saveDraft(id: id, place: place, text: text)
+            case "addComment":
+                guard let text, let place = Self.place(body) else { return nil }
+                switch place {
+                case .editing?: return nil
+                case .file(let file)?: self = .addComment(id: id, place: file, text: text)
+                case nil: self = .addComment(id: id, place: nil, text: text)
+                }
+            case "editComment":
+                guard let text else { return nil }
+                self = .editComment(id: id, text: text)
+            case "removeDraft":
+                self = .removeDraft(id: id)
+            case "deleteComment":
+                self = .deleteComment(id: id)
+            default:
+                return nil
+            }
+        }
+
+        /// The place a body names: `.some(nil)` when it names none, nil
+        /// when it names one wrongly.
+        private static func place(_ body: [String: Any]) -> CommentPlace?? {
+            if let editing = body["editing"] {
+                guard let name = editing as? String, BranchReview.isCommentID(name), body["file"] == nil else { return nil }
+                return .some(.editing(name))
+            }
+            guard let fileValue = body["file"] else {
+                let named = ["generation", "start", "end", "onFile"].contains { body[$0] != nil }
+                return named ? nil : .some(nil)
+            }
+            guard let file = fileValue as? Int, let generation = body["generation"] as? Int else { return nil }
+            if body["onFile"] as? Bool == true {
+                guard body["start"] == nil, body["end"] == nil else { return nil }
+                return .some(.file(FilePlace(file: file, generation: generation, start: nil, end: nil)))
+            }
+            guard let start = body["start"].flatMap(position), let end = body["end"].flatMap(position) else { return nil }
+            return .some(.file(FilePlace(file: file, generation: generation, start: start, end: end)))
+        }
+
+        private static func position(_ value: Any) -> BranchReview.DiffPosition? {
+            guard let object = value as? [String: Any], let side = (object["side"] as? String).flatMap({ BranchReview.DiffSide(rawValue: $0) }),
+                  let line = object["line"] as? Int, line > 0
+            else { return nil }
+            return BranchReview.DiffPosition(side: side, line: line)
+        }
     }
 }
 

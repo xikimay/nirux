@@ -209,6 +209,35 @@ extension HistorySearch {
         #"\bhf_[A-Za-z0-9]{30}"#
     ].joined(separator: "|"))).map(Pattern.init)
 
+    /// Where `text` holds a secret pasted in chat, each to the end of its
+    /// value; nil when the patterns can't be run over it (ICU stopped).
+    static func chatSecretRanges(in text: String) -> [Range<String.Index>]? {
+        guard let chatSecretPattern else { return nil }
+        var ranges: [Range<String.Index>] = []
+        var failed = false
+        chatSecretPattern.expression.enumerateMatches(
+            in: text, options: .reportCompletion, range: NSRange(text.startIndex..., in: text)
+        ) { match, flags, stop in
+            if flags.contains(.internalError) {
+                failed = true
+                stop.pointee = true
+                return
+            }
+            if let match, let range = Range(match.range, in: text) {
+                ranges.append(valueStart(in: text, range)..<BranchReview.Secrets.valueEnd(in: text, from: range.upperBound))
+            }
+        }
+        return failed ? nil : ranges
+    }
+
+    /// `NAME=value`, as a .env file writes it: the value, the name kept.
+    private static func valueStart(in text: String, _ match: Range<String.Index>) -> String.Index {
+        guard let separator = text[match].firstIndex(where: { $0 == "=" || $0 == ":" }),
+              text[match.lowerBound..<separator].allSatisfy({ $0.isUppercase || $0.isNumber || "_ \t".contains($0) })
+        else { return match.lowerBound }
+        return text[text.index(after: separator)..<match.upperBound].firstIndex { !" \t\"'".contains($0) } ?? match.upperBound
+    }
+
     /// A key Explain would withhold, or a secret pasted in chat. A text the
     /// patterns can't be run over (ICU stopped) counts as holding one.
     static func holdsSecret(_ text: String) -> Bool {

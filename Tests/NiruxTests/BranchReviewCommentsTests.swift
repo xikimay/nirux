@@ -210,6 +210,25 @@ final class BranchReviewCommentsTests: XCTestCase, CommentFixtures {
         XCTAssertNil(record.draft(id: "d1")?.moved)
     }
 
+    /// A file read records where the comments on it are, not the others';
+    /// a review opened at another head since records nothing.
+    func testReanchoringKeepsToItsPathsAndItsHead() throws {
+        let kept = [" let a = 1", "+let b = 2", " let c = 3"]
+        var record = Record()
+        record.stamp(branch: "b", repository: "/r/.git", head: "aaa", pullRequest: nil)
+        record.addComment(id: "c1", anchor: try anchor([hunk(old: 1, new: 1, kept)], at(.additions, 2)), text: "A", at: date)
+        record.addComment(id: "c2", anchor: try XCTUnwrap(Anchor(
+            file: file([hunk(old: 1, new: 1, kept)], path: "b.swift"), from: at(.additions, 2), to: at(.additions, 2)
+        )), text: "B", at: date)
+        let files = [file([hunk(old: 1, new: 6, kept)]), file([hunk(old: 1, new: 6, kept)], path: "b.swift")]
+        var other = record
+        BranchReviewController.reanchor(&other, in: files, paths: nil, at: "bbb")
+        XCTAssertNil(other.comment(id: "c1")?.moved, "opened at another head since")
+        BranchReviewController.reanchor(&record, in: files, paths: ["b.swift"], at: "aaa")
+        XCTAssertNil(record.comment(id: "c1")?.moved)
+        XCTAssertEqual(record.comment(id: "c2")?.moved?.rows.map(\.line), [7])
+    }
+
     /// Found from where it was last found, back on the rows it was made on
     /// but with other rows around them: that is recorded, or the next read,
     /// with nothing changed, would look for it only from where it was made,

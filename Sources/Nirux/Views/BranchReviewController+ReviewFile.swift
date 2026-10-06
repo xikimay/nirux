@@ -208,7 +208,9 @@ final class BranchReviewFile: @unchecked Sendable {
         guard let access else { return state(nil, problem: state?.problem ?? Self.problem(of: store.load())) }
         // A write at a kept head never creates the review.
         if keptHead == nil, let refused = checkBranch(before: access, of: store) { return refused }
-        var result = keptHead.map { store.update(keepingHead: $0, apply) } ?? store.update(access, apply)
+        // Changes that leave a review not created yet empty (about a draft
+        // or comment that isn't there) don't create it.
+        var result = keptHead.map { store.update(keepingHead: $0, apply) } ?? store.update(access, createsEmpty: false, apply)
         if case .failure(.changedSinceOpened) = result {
             keptHead = nil
             // Opened by another Nirux (or set aside, or deleted) since.
@@ -231,7 +233,7 @@ final class BranchReviewFile: @unchecked Sendable {
                 self.store = reopened
                 self.access = fresh
                 if let refused = checkBranch(before: fresh, of: reopened) { return refused }
-                result = reopened.update(fresh, apply)
+                result = reopened.update(fresh, createsEmpty: false, apply)
             } else if let newer = isAncestor(store, snapshot.head, lastHead), olderOrSame != nil {
                 guard newer else {
                     return state(nil, problem: "The review was opened at another head since. Reload or Refresh to change it.")
