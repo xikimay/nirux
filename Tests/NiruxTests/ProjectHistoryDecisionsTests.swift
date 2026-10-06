@@ -77,6 +77,33 @@ final class ProjectHistoryDecisionsTests: XCTestCase {
         XCTAssertNil(ProjectHistory.decisionFollowUp("ADD 5 scope [A]: \(String(repeating: "y", count: 301))", 2), "asked again once")
     }
 
+    /// A line whose message doesn't hold its decision is void: when the
+    /// decision names an issue, a branch, an id or code, its message (or,
+    /// for an agreement, the proposal) names one of them too. The relaying
+    /// session's name doesn't count.
+    func testALineMustCiteTheMessageThatHoldsIt() {
+        let request = ProjectHistory.DecisionRequest(
+            system: "", message: "", turnIDs: [5, 6], contextID: 4, dates: [5: day, 6: day],
+            texts: [5: "ok pour tout", 6: "Accepte crossSessionInbound par défaut. Et garde B3b gelé."],
+            contextText: "I propose: feat/worktree-cleanup adds a Clean Up Worktree item."
+        )
+        let answers = ProjectHistory.parseDecisionAnswer("""
+            ADD 6 design [Worktrees]: feat/worktree-cleanup adds a Clean Up Worktree item.
+            ADD 5+ design [Worktrees]: feat/worktree-cleanup adds a Clean Up Worktree item, as proposed.
+            ADD 6 scope [Board]: B3b stays frozen (via feat/merge-queue-ui · Nirux)
+            ADD 6 rule [Agent workflow]: Peer messages are accepted without approval.
+            ADD 6 design [Board]: #65 merges first.
+            """)
+        let (operations, _) = ProjectHistory.decisionOperations(answers, list: .init(), request: request, numbering: 1, topics: [])
+        XCTAssertEqual(operations.map(\.text), [
+            "feat/worktree-cleanup adds a Clean Up Worktree item, as proposed.",
+            "B3b stays frozen (via feat/merge-queue-ui · Nirux)",
+            "Peer messages are accepted without approval."
+        ], "the first cites a message that doesn't name the branch; the last names an issue no message does")
+        XCTAssertEqual(ProjectHistory.anchors(of: "Merge #65 into feat/x after R4b, run `swift test`."),
+                       ["#65", "feat/x", "r4b", "swift test"])
+    }
+
     /// Topics: a known one matches but for case, accents and punctuation;
     /// past `maxTopics`, a new one goes to "Other".
     func testTopicsAreFewAndMatched() {

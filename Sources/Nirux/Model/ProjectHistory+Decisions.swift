@@ -265,6 +265,10 @@ extension ProjectHistory {
         /// The decisions the call was shown: one removed meanwhile (by the
         /// user) voids a line about it.
         var shownNumbers: Set<Int> = []
+        /// The turn's messages and the context, for checking that a line's
+        /// message holds its decision.
+        var texts: [Int: String] = [:]
+        var contextText: String?
     }
 
     /// `<id>|<kind> [<branch>] (from <sender>): <text>`, on one line, cut at
@@ -331,8 +335,37 @@ extension ProjectHistory {
             + "\n</context>\n\n<messages>\n" + turn.map { decisionInputLine($0) }.joined(separator: "\n") + "\n</messages>"
         return DecisionRequest(
             system: system, message: message, turnIDs: Set(turn.map(\.i)), contextID: context?.i,
-            dates: Dictionary(turn.map { ($0.i, $0.date) }) { first, _ in first }, shownNumbers: Set(shown.map(\.n))
+            dates: Dictionary(turn.map { ($0.i, $0.date) }) { first, _ in first }, shownNumbers: Set(shown.map(\.n)),
+            texts: Dictionary(turn.map { ($0.i, $0.text) }) { first, _ in first }, contextText: context?.text
         )
+    }
+
+    /// The names a decision rests on that read the same in any language: an
+    /// issue number, a branch or path, an id like `B3b` or `R4`, code.
+    static func anchors(of text: String) -> [String] {
+        let patterns = [#"#\d+"#, #"[\w.-]+/[\w./-]*\w"#, #"\b[A-Z]{1,3}\d+[a-z]?\b"#, #"`[^`]+`"#]
+        var found: [String] = []
+        for pattern in patterns {
+            var rest = text[...]
+            while let range = rest.range(of: pattern, options: .regularExpression) {
+                found.append(String(rest[range]).trimmingCharacters(in: CharacterSet(charactersIn: "`")).lowercased())
+                rest = rest[range.upperBound...]
+            }
+        }
+        return found
+    }
+
+    /// Whether a line's message holds its decision: when the decision names
+    /// something (`anchors`), the message, or for an agreement the proposal
+    /// in the context, names one of those too. A line citing another
+    /// message of the turn than the one that states it is void.
+    static func messageHolds(_ text: String, id: Int, agreed: Bool, request: DecisionRequest) -> Bool {
+        // The relaying session's name is the line's, not its message's.
+        let stated = text.range(of: #"\s*\(via [^()]*\)\s*$"#, options: .regularExpression).map { String(text[..<$0.lowerBound]) } ?? text
+        let anchors = anchors(of: stated)
+        guard !anchors.isEmpty else { return true }
+        let said = ((request.texts[id] ?? "") + "\n" + (agreed ? request.contextText ?? "" : "")).lowercased()
+        return anchors.contains { said.contains($0) }
     }
 
     /// A line of an extraction's answer.
@@ -408,14 +441,14 @@ extension ProjectHistory {
             }
             switch answer {
             case .add(let id, let agreed, let decisionClass, let named, let text):
-                guard request.turnIDs.contains(id) else { continue }
+                guard request.turnIDs.contains(id), messageHolds(text, id: id, agreed: agreed, request: request) else { continue }
                 operations.append(DecisionOperation(
                     op: .add, n: next, id: id, after: agreed ? request.contextID : nil, decisionClass: decisionClass,
                     topic: topic(named), text: withholdingSecrets(text), date: request.dates[id] ?? Date(), by: "model"
                 ))
                 next += 1
             case .replace(let n, let id, let agreed, let decisionClass, let named, let text):
-                guard request.turnIDs.contains(id) else { continue }
+                guard request.turnIDs.contains(id), messageHolds(text, id: id, agreed: agreed, request: request) else { continue }
                 let shown = request.shownNumbers.contains(n)
                 let old = replaced.contains(n) || !shown ? nil : list.inForce[n]
                 // Shown to the call, then removed by the user.
@@ -480,19 +513,25 @@ extension ProjectHistory {
 
         A decision settles what the project does or doesn't do, or how agents must
         work on it, so that a later agent could go wrong without knowing it. It must
-        come from the user: their words, a peer relaying their choice ("the user
-        chose"), or an agent reporting what the user chose. The user often decides
+        come from the user: their words, a peer that quotes them or says plainly
+        that the user decided or said it, or an agent reporting what the user chose.
+        The user often decides
         by agreeing to what an agent proposed, briefly or casually ("ok", "oui",
         "go", "ok pour tout", a list of option numbers, "ça me semble good", "ça a
         l'air nice"), or by turning it down; a doubt or an objection that the
         agent's reply then agrees with ("you're right", "ton intuition est juste")
         is a rejection. The decision is then the proposal agreed to or rejected,
-        read from the context or the reply, with what was left out when the user
-        picked among options; its <id> is the user's message. Not decisions: work
-        done or under way, facts about the code, bugs, test results, status,
-        questions, options the user hasn't chosen, what an agent decided on its own,
-        a request for the task at hand (commit, push, merge, fix, run, review), even
-        in the imperative. A message that restates a recorded decision, quotes one
+        read from the context or the reply; its <id> is the user's message. When the
+        user picks some of several options, each option left out is a decision too:
+        record it as a `scope` line saying it isn't to be done unless the user asks.
+        When the user chooses one thing instead of another, or turns something down,
+        record what was turned down as its own line too, with the reason when one
+        was given. Not decisions: work done or under way, facts about the code, bugs,
+        test results, status, questions, options the user hasn't chosen, what an
+        agent decided on its own, a peer's own calls for the user (made while the
+        user is away, or on a delegation) without the user's words, a request for
+        the task at hand (commit, push, merge, fix, run, review), even in the
+        imperative. A message that restates a recorded decision, quotes one
         from the project's memory (a line ending `[d<n> · msg <id>]`), or cites
         memory or a past session for one, records nothing. Never record a removed
         decision again unless a `user` message states it anew.
@@ -517,18 +556,19 @@ extension ProjectHistory {
         ADD records a new decision. REPLACE records one that changes, reverses,
         narrows or widens recorded decision D<n>: D<n> goes away, the new line
         stays. DROP is for a decision the user withdrew with nothing in its place.
-        <id> is one of the new messages: the one that states the decision. Write
-        <id>+ instead of <id> when the user decided by agreeing to, or turning
-        down, the proposal in the context.
+        <id> is one of the new messages: the one whose text states the decision (for
+        an agreement, the user's message that agrees). Write <id>+ instead of <id>
+        when the user decided by agreeing to, or turning down, the proposal in the
+        context.
 
         Each <decision> is one line of at most 200 characters, in English, that
         stands on its own: what was decided and on what (name the feature, PR
         number or branch), its scope or exceptions, and the reason when one was
-        given. Keep the user's terms. A peer deciding for the user while the user
-        is away ("my calls while the user is away") counts: end that line with
-        "(via <sender>)". Write nothing for a message that only repeats a recorded
-        decision, and nothing when the new messages hold no decision; most messages
-        hold none.
+        given. Keep the user's terms. Record what the user chose and its scope; leave
+        out details of a proposal the user didn't speak to. A decision a peer relays
+        ends with "(via <sender>)". Write nothing for a message that only repeats a
+        recorded decision, and nothing when the new messages hold no decision; most
+        messages hold none.
         """
 
     // MARK: - The merge
