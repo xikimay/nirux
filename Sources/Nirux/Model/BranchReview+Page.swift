@@ -147,6 +147,9 @@ extension BranchReview {
         /// Claude's overview, claims and questions, once explained.
         var explanation: Explanation?
         var explain = ExplainBar()
+        /// Counts the explanations the column showed: an open diff whose
+        /// notes are of another is read again.
+        var notesVersion = 0
 
         /// What the page shows of the branch's stored review (sections 6.3
         /// and 8), sent with the page and again after each write.
@@ -163,16 +166,32 @@ extension BranchReview {
             let problem: String?
             /// Whether the checkboxes can change the review.
             let canWrite: Bool
-            /// The latest of the page's checkbox clicks this answers: the
-            /// page keeps its own state for later ones.
+            /// The latest of the page's clicks this answers (a checkbox, a
+            /// comment's button, a draft saved): the page keeps its own
+            /// state for later ones.
             let acknowledged: Int
+            /// The comments, and the drafts of new ones (section 6.1).
+            let comments: [Comment]
+            /// Why the latest of the page's comment requests that weren't
+            /// saved weren't, by the click that asked: the page knows its
+            /// own.
+            let commentProblems: [CommentProblem]
+        }
+
+        /// A comment or draft the page asked for that wasn't saved, by its
+        /// id and the page's click that asked, and why.
+        struct CommentProblem: Encodable, Equatable, Sendable {
+            let id: String
+            let sequence: Int
+            let message: String
         }
     }
 
     /// The states of `files` (the snapshot's, or a row's patch read since)
-    /// in `record`.
+    /// in `record`, and its comments (`pageComments`, unless given).
     static func review(
-        of record: Record, files: [FileChange], generation: Int, problem: String?, canWrite: Bool, acknowledged: Int = 0
+        of record: Record, files: [FileChange], generation: Int, problem: String?, canWrite: Bool, acknowledged: Int = 0,
+        comments: [Page.Comment]? = nil, commentProblems: [Page.CommentProblem] = []
     ) -> Page.Review {
         Page.Review(
             files: files.map { file in
@@ -183,7 +202,8 @@ extension BranchReview {
                 case .unverified: return "unverified"
                 }
             },
-            generation: generation, problem: problem, canWrite: canWrite, acknowledged: acknowledged
+            generation: generation, problem: problem, canWrite: canWrite, acknowledged: acknowledged,
+            comments: comments ?? pageComments(of: record, files: files), commentProblems: commentProblems
         )
     }
 
@@ -408,6 +428,11 @@ extension BranchReview {
         /// Shown in place of the hunks: a binary file, one too large, a
         /// rename or mode change without lines, a read that failed.
         let message: String?
+        /// Claude's notes under its hunks, and which explanation they come
+        /// from (`Page.notesVersion`): a diff drawn from an older one is
+        /// read again.
+        var notes: [Note] = []
+        var notesVersion = 0
 
         init(id: Int, path: String, generation: Int, hunks: [Hunk] = [], message: String? = nil) {
             self.id = id

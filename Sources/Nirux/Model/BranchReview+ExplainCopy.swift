@@ -55,6 +55,99 @@ extension BranchReview {
             return found
         }
 
+        /// Where `text` holds keys, each from its first character to its
+        /// last: a match only covers a key's first characters, so it grows
+        /// over the key's characters, a PEM block to its `-----END` line, and
+        /// an AWS key id over the rest of its line (its secret is usually
+        /// next to it). Also the value of an assignment to a name that says
+        /// secret (`password=…`, `api_key: …`). Sorted, not overlapping. Nil
+        /// when a pattern can't be run over the text (ICU stopped): withhold
+        /// all of it. Each part of the text is grown over once.
+        static func keyRanges(in text: String) -> [Range<String.Index>]? {
+            var ranges: [Range<String.Index>] = []
+            var failed = false
+            var covered = text.startIndex
+            /// Where the search for a PEM block's end found none: no later
+            /// block has one either.
+            var noEndFrom: String.Index?
+            let whole = NSRange(text.startIndex..., in: text)
+            keyPattern.expression.enumerateMatches(in: text, options: .reportCompletion, range: whole) { match, flags, stop in
+                if flags.contains(.internalError) {
+                    failed = true
+                    stop.pointee = true
+                    return
+                }
+                guard let match, let range = Range(match.range, in: text), range.lowerBound >= covered else { return }
+                let end = keyEnd(in: text, from: range, noEndFrom: &noEndFrom)
+                ranges.append(range.lowerBound..<end)
+                covered = end
+            }
+            guard !failed else { return nil }
+            assignmentPattern.expression.enumerateMatches(in: text, options: .reportCompletion, range: whole) { match, flags, stop in
+                if flags.contains(.internalError) {
+                    failed = true
+                    stop.pointee = true
+                    return
+                }
+                // The pattern takes 512 characters at most: the value goes on
+                // to its end.
+                if let match, let range = Range(match.range(at: 1), in: text) {
+                    ranges.append(range.lowerBound..<valueEnd(in: text, from: range.upperBound))
+                }
+            }
+            guard !failed else { return nil }
+            var merged: [Range<String.Index>] = []
+            for range in ranges.sorted(by: { $0.lowerBound < $1.lowerBound }) {
+                if let last = merged.last, range.lowerBound <= last.upperBound {
+                    merged[merged.count - 1] = last.lowerBound..<max(last.upperBound, range.upperBound)
+                } else {
+                    merged.append(range)
+                }
+            }
+            return merged
+        }
+
+        /// A value given to a name that says it is secret: the value, at
+        /// least 8 characters without a space. Bounded, as `keyPattern`.
+        private static let assignmentPattern = Pattern(expression: try! NSRegularExpression(
+            pattern: #"(?i)(?:secret|token|passw(?:or)?d|api[_-]?key|access[_-]?key|private[_-]?key|credential)s?["']?\s{0,3}[:=]\s{0,3}["']?([^\s"',;]{8,512})"#
+        ))
+
+        /// Where an assigned value ends: at a space, a quote, `,` or `;`.
+        static func valueEnd(in text: String, from start: String.Index) -> String.Index {
+            text[start...].firstIndex { $0.isWhitespace || "\"',;".contains($0) } ?? text.endIndex
+        }
+
+        /// Characters keys and base64 are made of.
+        private static let keyCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_-+/=.~%\\"))
+
+        private static func keyEnd(
+            in text: String, from match: Range<String.Index>, noEndFrom: inout String.Index?
+        ) -> String.Index {
+            let found = text[match]
+            if found.hasPrefix("-----BEGIN") {
+                if let none = noEndFrom, none <= match.upperBound { return text.endIndex }
+                guard let end = text.range(of: "-----END", range: match.upperBound..<text.endIndex) else {
+                    noEndFrom = match.upperBound
+                    return text.endIndex
+                }
+                return text[end.upperBound...].firstIndex(of: "\n") ?? text.endIndex
+            }
+            if found.hasPrefix("AKIA") || found.hasPrefix("ASIA") {
+                // The secret of an access key id sits on its line.
+                return text[match.upperBound...].firstIndex(of: "\n") ?? text.endIndex
+            }
+            return grow(text, from: match.upperBound)
+        }
+
+        private static func grow(_ text: String, from start: String.Index) -> String.Index {
+            var index = start
+            while index < text.endIndex, text[index].unicodeScalars.allSatisfy({ $0.isASCII && keyCharacters.contains($0) }) {
+                index = text.index(after: index)
+            }
+            return index
+        }
+
         /// Folders whose files are secrets whatever their names, and names
         /// and extensions of files that hold one. Checked lowercased.
         private static let folders: Set<String> = [".ssh", ".gnupg", ".aws", ".docker", ".kube", "secrets", ".secrets"]

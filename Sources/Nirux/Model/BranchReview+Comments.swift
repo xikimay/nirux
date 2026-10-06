@@ -7,21 +7,21 @@ extension BranchReview {
     /// The side of a row in the page's unified diff, as `@pierre/diffs`
     /// names it: a removed line is on `deletions`, an added line or a
     /// context line on `additions`.
-    enum DiffSide: String, Equatable, Sendable {
+    enum DiffSide: String, Hashable, Sendable {
         case deletions
         case additions
     }
 
     /// A row of a file's diff, where the page's gutter button and line
     /// selection point.
-    struct DiffPosition: Equatable, Sendable {
+    struct DiffPosition: Hashable, Sendable {
         let side: DiffSide
         let line: Int
     }
 
     /// One row of a file's diff as the page shows it.
-    struct DiffRow: Equatable, Sendable {
-        enum Kind: String, Equatable, Sendable {
+    struct DiffRow: Hashable, Sendable {
+        enum Kind: String, Hashable, Sendable {
             case context
             case added
             case removed
@@ -100,7 +100,7 @@ extension BranchReview {
     /// diff, with what is around them, which say whether they are still
     /// there (`place`). Not the file's patch hash: it leaves line numbers
     /// out, and a merge from the base moves lines without changing it.
-    struct CommentAnchor: Equatable, Sendable {
+    struct CommentAnchor: Hashable, Sendable {
         /// A longer range can't be commented: comment on the file instead.
         static let maxRows = 100
         /// A row's text is kept up to this many characters and bytes (a
@@ -314,7 +314,7 @@ extension BranchReview {
     /// A copy's rank among the runs of a file's diff that read the same
     /// and that nothing around contradicts, and the row that told it from
     /// the others when it was made.
-    struct CopyRank: Equatable, Sendable {
+    struct CopyRank: Hashable, Sendable {
         let index: Int
         let count: Int
         var landmark: Landmark?
@@ -326,7 +326,7 @@ extension BranchReview {
     /// between it and the run: a copy is told by all of them, so that
     /// lines added in between, and a copy sliding to where the run was,
     /// don't pass for it.
-    struct Landmark: Equatable, Sendable {
+    struct Landmark: Hashable, Sendable {
         /// From the landmark down to the row right above the run.
         let rows: [String]
 
@@ -695,11 +695,12 @@ extension BranchReview.Record {
     /// stay as they are. A renamed file's comments follow it. True when
     /// any moved.
     @discardableResult
-    mutating func reanchor(in files: [BranchReview.FileChange]) -> Bool {
+    mutating func reanchor(in files: [BranchReview.FileChange], paths: Set<String>? = nil) -> Bool {
         // Each file's rows once, whatever the number of its comments.
         var rows: [String: [[BranchReview.DiffRow]]] = [:]
         /// Nil when it stays as it is; `.some(nil)` back where it was made.
         func found(_ made: CommentAnchor, _ moved: CommentAnchor?) -> CommentAnchor?? {
+            if let paths, !paths.contains(made.path), !paths.contains(moved?.path ?? made.path) { return .none }
             guard let file = BranchReview.file(for: made, moved: moved, in: files) else { return .none }
             let fileRows = rows[file.path] ?? BranchReview.diffRows(of: file.hunks)
             rows[file.path] = fileRows

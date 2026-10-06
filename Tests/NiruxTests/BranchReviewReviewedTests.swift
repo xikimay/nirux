@@ -131,7 +131,7 @@ final class BranchReviewReviewedTests: XCTestCase {
         let review = BranchReview.review(of: record, files: files, generation: 3, problem: "Why", canWrite: false, acknowledged: 2)
         XCTAssertEqual(review, BranchReview.Page.Review(
             files: ["reviewed", "changed", "unverified", "none", "unmarkable"], generation: 3, problem: "Why", canWrite: false,
-            acknowledged: 2
+            acknowledged: 2, comments: [], commentProblems: []
         ))
         record.clearReviewed(paths: ["a", "c"])
         XCTAssertEqual(Set(record.reviewedMarks.keys), ["b"])
