@@ -147,6 +147,9 @@ extension BranchReview {
         /// Claude's overview, claims and questions, once explained.
         var explanation: Explanation?
         var explain = ExplainBar()
+        /// Counts the explanations the column showed: an open diff whose
+        /// notes are of another is read again.
+        var notesVersion = 0
 
         /// What the page shows of the branch's stored review (sections 6.3
         /// and 8), sent with the page and again after each write.
@@ -408,6 +411,11 @@ extension BranchReview {
         /// Shown in place of the hunks: a binary file, one too large, a
         /// rename or mode change without lines, a read that failed.
         let message: String?
+        /// Claude's notes under its hunks, and which explanation they come
+        /// from (`Page.notesVersion`): a diff drawn from an older one is
+        /// read again.
+        var notes: [Note] = []
+        var notesVersion = 0
 
         init(id: Int, path: String, generation: Int, hunks: [Hunk] = [], message: String? = nil) {
             self.id = id

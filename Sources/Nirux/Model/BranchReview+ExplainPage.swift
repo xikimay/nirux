@@ -175,6 +175,10 @@ extension BranchReview.Page {
         var progress: Progress?
         /// Today's runs on this branch, when there were any.
         var usage: Usage?
+        /// Claude's notes kept since the first Explain, and those the user
+        /// marked wrong: how often notes were wrong.
+        var notes = 0
+        var wrongNotes = 0
     }
 }
 
@@ -184,6 +188,8 @@ extension BranchReview {
         _ bar: Page.ExplainBar, snapshot: Snapshot, explanation: Explanation?, now: Date = Date()
     ) -> Page.ExplainBar {
         var bar = bar
+        bar.notes = explanation?.noteCount ?? 0
+        bar.wrongNotes = explanation?.wrongCount ?? 0
         let explanation = explanation?.pruned(to: Set(snapshot.files.map(\.path)))
         var request = ExplainRequest()
         request.includeUntracked = bar.includeUntracked

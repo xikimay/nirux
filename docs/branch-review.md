@@ -559,9 +559,15 @@ stream stays silent 3 minutes stops, as one does past 6 minutes in all.
   answer without an overview isn't one.
 - **Limits:** the model never marks a file reviewed, never hides a file and
   never removes a risk signal. Its notes are labeled "Claude", with the model
-  and the head commit it read. Each "check this" note can be turned into a
-  comment (once R4 has landed), or marked wrong; the marks are kept with the
-  run, so the page can say how often notes were wrong.
+  and the head commit it read, and sit under the last changed line of the
+  hunk they explain (pierre's line annotations). Each "check this" note can
+  be turned into a comment (once R4 has landed). Every note can be marked
+  wrong, and the mark undone: a note can be wrong without a "check this",
+  and the count of notes kept counts every note (decided without the user,
+  2026-10-06). A mark stays on its note in the review file, and a running
+  count of marks, so the page can say how often notes were wrong ("Claude’s
+  notes marked wrong: 1 of 12", in the Explain bar). A review this Nirux
+  can't write leaves Mark wrong disabled.
 - **Cache:** in the review file (section 8), under one top-level key,
   `explain`, with its own `version`:
   - the last overview, groups, claims and questions, with the head and model

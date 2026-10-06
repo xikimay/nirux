@@ -76,7 +76,13 @@ final class BranchReviewController {
     private var handover: BranchReview.Handover?
     /// What Explain kept for the branch: read with the snapshot, or what
     /// the last Explain left.
-    private(set) var explanation: BranchReview.Explanation?
+    private(set) var explanation: BranchReview.Explanation? {
+        didSet { if explanation?.notesShown != oldValue?.notesShown { explanationVersion += 1 } }
+    }
+    /// Counts the notes Explain kept, as they changed; and the count the
+    /// page was last drawn with: a diff drawn from another is read again.
+    private(set) var explanationVersion = 0
+    private var pageNotesVersion = 0
     /// What the page says instead of a review: reading, paused, why there
     /// is none. Shown again if the page loads again.
     private var status: String?
@@ -252,6 +258,7 @@ final class BranchReviewController {
         view.onExplain = { [weak self] fresh in self?.explain(fresh: fresh) }
         view.onCancelExplain = { [weak self] in self?.cancelExplain() }
         view.onIncludeUntracked = { [weak self] include in self?.includeUntracked(include) }
+        view.onMarkWrong = { [weak self] id, wrong in self?.markWrong(note: id, wrong: wrong) }
         view.onLoadFile = { [weak self] id, generation in self?.loadFile(id: id, generation: generation) }
         view.onPageReady = { [weak self] in
             guard let self else { return }
@@ -666,12 +673,28 @@ final class BranchReviewController {
         }
         // Not another branch's: the column may have moved on to it.
         guard (snapshot?.branch ?? self.branch) == branch else { return sendExplainBar() }
-        // The run wrote the review file: the column's copy is behind.
-        reloadReview()
         explainBar.message = stoppedForCleanUp && result.ending == .stopped(.cancelled)
             ? "Explain stopped: this worktree is being cleaned up."
             : result.ending.message
-        guard let explained = result.explanation else { return sendExplainBar() }
+        guard let explained = result.explanation else {
+            reloadReview()
+            return sendExplainBar()
+        }
+        sendExplainBar()
+        // The run wrote the review file: read again after the column's own
+        // writes, it also holds the notes marked wrong since the run's last
+        // save.
+        reloadReview { [weak self] state in
+            let written = state?.branch == branch ? state?.record.explanation : nil
+            self?.adopt(written ?? explained, branch: branch)
+        }
+    }
+
+    /// What an Explain left for `branch`: shown at once, or once the user's
+    /// selection goes, and given to what waits behind a banner or a
+    /// selection, read before.
+    private func adopt(_ explained: BranchReview.Explanation, branch: String) {
+        guard (snapshot?.branch ?? self.branch) == branch else { return }
         explanationSetAt = Date()
         explanationBranch = branch
         // What waits behind a banner or a selection was read before.
@@ -699,6 +722,55 @@ final class BranchReviewController {
         if explainBar.state == .running { explainBar.state = .stopping }
         explainTicket.cancel()
         if activeExplain != nil { sendExplainBar() }
+    }
+
+    /// The page's "Mark wrong" on one of Claude's notes, or its undo:
+    /// written to the review file, where the mark stays with the note and
+    /// counts how often notes were wrong. The page shows the mark at once,
+    /// then the note's mark as it was written.
+    private func markWrong(note id: String, wrong: Bool) {
+        guard let branch = snapshot?.branch, explanation?.path(ofNote: id) != nil else {
+            return view.markNote(id: id, wrong: nil)
+        }
+        writeReview({ record in
+            guard var explanation = record.explanation, explanation.mark(note: id, wrong: wrong) else { return }
+            record.setExplanation(explanation)
+        }, completion: { [weak self] state in
+            self?.marked(note: id, branch: branch, written: state)
+        })
+    }
+
+    private func marked(note id: String, branch: String, written state: BranchReviewState) {
+        let before = explanation
+        let from = explanationVersion
+        if state.branch == branch, snapshot?.branch == branch, let written = state.record.explanation {
+            // A read under way found the review before this write.
+            explanationSetAt = Date()
+            explanationBranch = branch
+            explanation = written
+            // So did what waits behind a banner or a selection.
+            if let isWrong = written.note(id: id)?.isWrong {
+                if pending?.snapshot.branch == branch { pending?.explanation?.mark(note: id, wrong: isWrong) }
+                if held?.snapshot.branch == branch { held?.explanation?.mark(note: id, wrong: isWrong) }
+            }
+        }
+        let isWrong = explanation?.note(id: id)?.isWrong ?? false
+        // Only marks changed (this one, another written with it): the
+        // diffs drawn stay current, their cards follow their clicks.
+        if explanation?.withoutMarks == before?.withoutMarks, pageNotesVersion == from {
+            view.markNote(id: id, wrong: isWrong, from: from, to: explanationVersion)
+            pageNotesVersion = explanationVersion
+        } else {
+            // The page's notes are behind: drawn again, once the user's
+            // selection goes.
+            view.markNote(id: id, wrong: isWrong)
+            if pageHasSelection {
+                explanationWaits = true
+            } else if snapshot != nil {
+                showCurrent()
+            }
+        }
+        sendExplainBar()
     }
 
     private func includeUntracked(_ include: Bool) {
@@ -870,10 +942,12 @@ final class BranchReviewController {
         }
         status = nil
         statusAction = nil
-        let page = BranchReview.page(
+        var page = BranchReview.page(
             for: snapshot, handover: handover, explanation: explanation, explain: explainBar, generation: snapshotCount,
             readAt: readAt, review: pageReview()
         )
+        page.notesVersion = explanationVersion
+        pageNotesVersion = explanationVersion
         guard let json = Self.encode(page) else { return }
         view.show(pageJSON: json)
         // A page that loaded again keeps the banner of what waits.
@@ -888,7 +962,7 @@ final class BranchReviewController {
         }
         let file = snapshot.files[id]
         if let diff = BranchReview.FileDiff(id: id, generation: generation, file: file) {
-            send(diff)
+            send(diff, of: file)
             return
         }
         Self.inBackground(on: patchQueue, { [patchReader, currentGeneration] () -> BranchReview.FileChange?? in
@@ -902,10 +976,13 @@ final class BranchReviewController {
                 self.readFiles[id] = read
                 self.sendReview()
             }
-            self.send(read.map { BranchReview.FileDiff(id: id, generation: generation, read: $0) } ?? BranchReview.FileDiff(
-                id: id, path: file.path, generation: generation,
-                message: "Nirux couldn’t read this file’s diff: it no longer differs from the base, or git failed. Refresh."
-            ))
+            guard let read else {
+                return self.send(BranchReview.FileDiff(
+                    id: id, path: file.path, generation: generation,
+                    message: "Nirux couldn’t read this file’s diff: it no longer differs from the base, or git failed. Refresh."
+                ))
+            }
+            self.send(BranchReview.FileDiff(id: id, generation: generation, read: read), of: read)
         }
     }
 
@@ -923,10 +1000,11 @@ final class BranchReviewController {
 
     /// Reads the review file again, without opening it: after a writer
     /// that isn't this column (Explain) saved it.
-    func reloadReview() {
+    func reloadReview(then completion: (@MainActor (BranchReviewState?) -> Void)? = nil) {
         Self.inBackground(on: reviewQueue, { [reviewFile] in reviewFile.reload() }) { [weak self] state in
-            guard let self, let state, state.branch == self.snapshot?.branch else { return }
-            self.apply(state)
+            guard let self else { return }
+            if let state, state.branch == self.snapshot?.branch { self.apply(state) }
+            completion?(state)
         }
     }
 
@@ -1004,7 +1082,11 @@ final class BranchReviewController {
         view.showReview(json: json)
     }
 
-    private func send(_ diff: BranchReview.FileDiff) {
+    /// A diff for its row, with Claude's notes on `file`'s hunks.
+    private func send(_ diff: BranchReview.FileDiff, of file: BranchReview.FileChange? = nil) {
+        var diff = diff
+        if let file, diff.message == nil { diff.notes = BranchReview.diffNotes(for: file, explanation: explanation) }
+        diff.notesVersion = explanationVersion
         guard let json = Self.encode(diff) else { return }
         view.showDiff(json: json)
     }
