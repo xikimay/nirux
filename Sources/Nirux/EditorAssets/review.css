@@ -340,3 +340,69 @@ a.chip { text-decoration: none; cursor: pointer; }
 .review-problem .icon { margin-top: 1.5px; color: var(--text-tertiary); }
 
 button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Comments (section 6.1): under their lines, in the diff's slot for them;
+   with their file, above its diff; at the top when their file is gone.
+   Neutral: nothing here waits for the user. */
+.file-comment {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.file-comment:hover { background: var(--fill-hover); color: var(--text-primary); }
+.comment-count { margin-left: 6px; text-transform: none; letter-spacing: 0; }
+.comment-count:empty { display: none; }
+.file-comments { display: grid; gap: 8px; padding: 0 10px 8px 34px; }
+.file-comments[hidden], .gone-comments[hidden] { display: none; }
+.gone-list { display: grid; gap: 8px; }
+.comment { font: 12px/17px var(--sans); color: var(--text-primary); }
+.comment:focus { outline: none; }
+.comment:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.comment-card, .comment-editor {
+  display: grid;
+  gap: 6px;
+  max-width: 720px;
+  margin: 6px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.comment-card.sent { background: var(--base); }
+.comment-meta { display: flex; gap: 6px; align-items: baseline; color: var(--text-secondary); font-size: 11px; }
+.comment-label { font-weight: 600; color: var(--text-secondary); font-size: 11px; }
+.comment-where { color: var(--text-tertiary); }
+.comment-note { color: var(--text-tertiary); font-size: 11px; }
+.comment-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+.comment-excerpt { padding: 4px 0; border-radius: 4px; background: var(--code); font: 11px/16px var(--mono); overflow-x: auto; }
+.excerpt-row { display: flex; gap: 10px; padding: 0 8px; white-space: pre; }
+.excerpt-row.added { background: rgba(76, 195, 138, 0.10); }
+.excerpt-row.removed { background: rgba(240, 101, 107, 0.10); }
+.excerpt-line { min-width: 3ch; color: var(--text-tertiary); text-align: right; }
+.comment-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
+.comment-actions .action { height: 22px; padding: 0 8px; font-size: 11px; }
+.comment-confirm, .comment-pending { margin-right: auto; color: var(--text-secondary); font-size: 11px; }
+.comment-text {
+  width: 100%;
+  min-height: 54px;
+  resize: vertical;
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--base);
+  color: var(--text-primary);
+  font: 12px/17px var(--sans);
+}
+.comment-text:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+.comment-problem { color: var(--removed); font-size: 11px; }
+.comment-problem[hidden] { display: none; }
+.comment-notice { color: var(--text-secondary); font-size: 11px; }
+.file-comments > .action { justify-self: start; }

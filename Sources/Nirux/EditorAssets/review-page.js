@@ -436,11 +436,112 @@
     return verdicts[verdict] ?? String(verdict ?? "");
   }
 
+  // MARK: Comments (section 6.1)
+
+  // A file's rows in the page's order, hunk by hunk: { hunk, side, line,
+  // kind }. A removed line is on "deletions" by its line in the base; an
+  // added or unchanged line on "additions" by its line in the working tree
+  // (`old`: an unchanged line's in the base).
+  function commentRows(hunks) {
+    const rows = [];
+    (hunks || []).forEach((hunk, index) => {
+      let old = Number(hunk.oldStart) || 0;
+      let line = Number(hunk.newStart) || 0;
+      for (const entry of hunk.lines || []) {
+        if (entry.kind === "removed") {
+          rows.push({ hunk: index, side: "deletions", line: old, kind: "removed" });
+          old += 1;
+        } else if (entry.kind === "added") {
+          rows.push({ hunk: index, side: "additions", line, kind: "added" });
+          line += 1;
+        } else if (entry.kind === "context") {
+          rows.push({ hunk: index, side: "additions", line, old, kind: "context" });
+          old += 1;
+          line += 1;
+        }
+      }
+    });
+    return rows;
+  }
+
+  const maxCommentRows = 100;
+
+  // Where a comment on `range` goes: { start, end, count }, its first and
+  // last rows in the page's order as { side, line }; or { problem } when
+  // the page doesn't take it. `range` is the gutter's or the line numbers'
+  // ({ start, side, end, endSide }), from where a drag began: either way
+  // up. An unchanged line can be named by its line in the base too.
+  function commentRange(hunks, range) {
+    const rows = commentRows(hunks);
+    const find = (side, line) => rows.findIndex((row) => (row.side === side && row.line === line)
+      || (side === "deletions" && row.kind === "context" && row.old === line));
+    const first = find(range?.side, range?.start);
+    const last = find(range?.endSide ?? range?.side, range?.end);
+    if (first < 0 || last < 0) return { problem: "These lines aren’t in the diff any more." };
+    const [top, bottom] = first <= last ? [first, last] : [last, first];
+    if (rows[top].hunk !== rows[bottom].hunk) return { problem: "Comment on the lines of one hunk at a time." };
+    if (bottom - top + 1 > maxCommentRows) return { problem: `Comment on up to ${maxCommentRows} lines at a time.` };
+    const position = (row) => ({ side: row.side, line: row.line });
+    return { start: position(rows[top]), end: position(rows[bottom]), count: bottom - top + 1 };
+  }
+
+  // What a comment is on, for its card and its editor: "line 12", "lines
+  // 12–14", "removed line 7", "removed line 7 to line 9"; "the file" without
+  // rows.
+  function linesLabel(start, end) {
+    if (!start || !end) return "the file";
+    const name = (side, plural) => (side === "deletions" ? `removed line${plural ? "s" : ""}` : `line${plural ? "s" : ""}`);
+    if (start.side === end.side && start.line === end.line) return `${name(start.side, false)} ${start.line}`;
+    if (start.side === end.side) return `${name(start.side, true)} ${start.line}\u2013${end.line}`;
+    return `${name(start.side, false)} ${start.line} to ${name(end.side, false)} ${end.line}`;
+  }
+
+  const placementNotes = {
+    outdated: "Outdated: its lines changed.",
+    unread: "Shown under its lines once the file’s diff is open.",
+    tooLarge: "Not shown under its lines: the file’s diff is too large.",
+    fileGone: "Its file no longer differs from the base."
+  };
+
+  // Why a comment isn't under its lines; null when it is, or is on its file.
+  function placementNote(comment) {
+    return placementNotes[comment?.placement] ?? null;
+  }
+
+  // The comments (not the drafts) of each file, by its id in the page.
+  function commentCounts(comments) {
+    const counts = new Map();
+    for (const comment of comments || []) {
+      if (comment.state === "draft" || comment.file === null || comment.file === undefined) continue;
+      counts.set(comment.file, (counts.get(comment.file) ?? 0) + 1);
+    }
+    return counts;
+  }
+
+  // What shows under the lines of file `id`: [{ side, lineNumber, key }],
+  // its comments and drafts placed on rows, then the editors opened since
+  // (`editors`: [{ key, file, end }]) that aren't among them.
+  function commentAnnotations(comments, id, editors) {
+    const out = [];
+    const keys = new Set();
+    for (const comment of comments || []) {
+      if (comment.file !== id || comment.placement !== "placed" || !comment.end) continue;
+      out.push({ side: comment.end.side, lineNumber: comment.end.line, key: comment.id });
+      keys.add(comment.id);
+    }
+    for (const editor of editors || []) {
+      if (editor.file !== id || !editor.end || keys.has(editor.key)) continue;
+      out.push({ side: editor.end.side, lineNumber: editor.end.line, key: editor.key });
+    }
+    return out;
+  }
+
   const api = {
     parseMarkdown, parseInline, safeURL, splitDecisions, plainText, count, commitsLabel, splitPath,
     statusLetter, testsSummary, matchesRisk, visible, fileTag, clockTime,
     isReviewed, isMarkable, reviewProgress, groupReviewState, groupReviewAction, reviewTitle,
-    explainActions, explainProgress, duration, tokens, usageLine, notesLine, intentLabel, verdictLabel
+    explainActions, explainProgress, duration, tokens, usageLine, notesLine, intentLabel, verdictLabel,
+    commentRows, commentRange, linesLabel, placementNote, commentCounts, commentAnnotations
   };
   root.ReviewPage = Object.freeze(api);
 })(typeof window !== "undefined" ? window : globalThis);

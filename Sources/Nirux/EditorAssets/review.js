@@ -1,7 +1,8 @@
 // The Branch Review page (docs/branch-review.md, section 2). Swift sends the
 // page's data (`BranchReview.Page`) and, when a row opens, its file's diff
-// (`BranchReview.FileDiff`); the page sends back ids and links, never text
-// to type. Every string from the branch is set with textContent.
+// (`BranchReview.FileDiff`); the page sends back ids, links and the user's
+// comments, never text to type into an agent. Every string from the branch
+// is set with textContent.
 (function () {
   "use strict";
 
@@ -28,7 +29,23 @@
     holders: new Set(), openCommits: new Set(), rowsShown: new Map(), stored: null, clicks: new Map(),
     // From the clock: a page loaded again after its process died counts
     // on from past what Swift answered before.
-    clickCount: Date.now()
+    clickCount: Date.now(),
+    // Comments (section 6.1). `editors`: what is being written, by key (a
+    // new comment's draft id, or the id of the comment an edit is of).
+    // `dismissed`: drafts closed, by id, with the click Swift must answer
+    // before its data stops showing them. `deleting`: comments asked to
+    // go, likewise. `commentNodes`: what shows under lines and with files,
+    // by key, kept so that a refresh doesn't take a focus. `hunks`: each
+    // file's hunks drawn, by path, for the rows a comment is on.
+    // `holderPaths`: which file each diff drawn shows. `selection`: lines
+    // selected by their numbers ({ path, range }). `notices`: why lines
+    // took no comment, by path. `cardProblems`: why a Delete wasn't done,
+    // by comment. `focusAfter`: the comment just written, which takes the
+    // focus its editor had. `wasWritable`: whether the review could be
+    // written at Swift's last answer.
+    editors: new Map(), dismissed: new Map(), deleting: new Map(), commentNodes: new Map(), hunks: new Map(),
+    holderPaths: new Map(), selection: null, notices: new Map(), cardProblems: new Map(), focusAfter: null, typing: null,
+    wasWritable: false, blockExtras: new Map(), refocus: null
   };
   // Ticks the elapsed time of the Explain under way.
   let explainTimer = null;
@@ -488,7 +505,18 @@
       const showMore = () => {
         const next = members.slice(shown, shown + rowsPerStep);
         shown += next.length;
-        for (const file of next) body.insertBefore(fileRow(file), more);
+        // Rows built after the page shows their comments at once. A
+        // failure is logged: the page stays.
+        const counts = state.page ? fileCounts() : null;
+        for (const file of next) {
+          const row = fileRow(file);
+          body.insertBefore(row, more);
+          try {
+            if (counts) fillFileComments(row, file, counts);
+          } catch (error) {
+            console.error(error);
+          }
+        }
         more.hidden = shown >= members.length;
         more.textContent = `Show ${P.count(Math.min(rowsPerStep, members.length - shown), "more file")}`;
       };
@@ -549,7 +577,7 @@
     });
     const tag = P.fileTag(file);
     const tags = element("span", "tag", tag ?? "");
-    tags.append(element("span", "review-note"));
+    tags.append(element("span", "review-note"), element("span", "comment-count"));
     row.append(
       chevron, element("span", `status-letter ${letter}`, letter), path, fileRisks, tags,
       lineCounts(file.additions, file.deletions)
@@ -559,20 +587,29 @@
       if (file.summaryIsOutdated) summary.append(element("span", "outdated-tag", "changed since explained"));
       row.append(summary);
     }
-    row.setAttribute("aria-label", [
+    row.dataset.label = [
       `${file.status} ${path.title}`, tag, `${file.additions} added, ${file.deletions} removed`,
       riskLabels.length > 0 ? `risks: ${riskLabels.join(", ")}` : null,
       file.summary ? `Claude: ${file.summary}${file.summaryIsOutdated ? " (changed since explained)" : ""}` : null
-    ].filter(Boolean).join(", "));
+    ].filter(Boolean).join(", ");
+    row.setAttribute("aria-label", row.dataset.label);
     const diff = element("div", "diff");
     diff.hidden = true;
     row.addEventListener("click", () => toggleFile(file, row, diff));
     const check = checkbox("file-check");
     check.addEventListener("click", () => toggleReviewed(file, check));
+    const comment = element("button", "file-comment");
+    comment.type = "button";
+    comment.title = "Comment on this file";
+    comment.setAttribute("aria-label", `Comment on ${P.visible(file.path)}`);
+    comment.append(icon("comment"));
+    comment.addEventListener("click", () => openEditor(file, null));
     const head = element("div", "file-head");
-    head.append(row, check);
+    head.append(row, comment, check);
+    const comments = element("div", "file-comments");
+    comments.hidden = true;
     box.classList.toggle("dim", !P.matchesRisk(file, state.risk));
-    box.append(head, diff);
+    box.append(head, comments, diff);
     applyFileReview(box, file);
     if (state.openFiles.has(file.path)) toggleFile(file, row, diff);
     return box;
@@ -693,8 +730,7 @@
   // Shown at once, until Swift answers this click (`showReview`). A file
   // marked reviewed folds its diff, as on GitHub.
   function setReviewed(ids, reviewed) {
-    state.clickCount += 1;
-    const sequence = state.clickCount;
+    const sequence = nextSequence();
     const boxes = new Map([...pageElement.querySelectorAll(".file")].map((box) => [Number(box.dataset.id), box]));
     for (const id of ids) {
       const file = state.page.files[id];
@@ -719,6 +755,8 @@
     for (const [path, click] of state.clicks) {
       if (stored && click.sequence <= stored.acknowledged) state.clicks.delete(path);
     }
+    if (stored) takeComments(stored);
+    else commentsByID = new Map();
   }
 
   function toggleFile(file, row, diff) {
@@ -790,6 +828,700 @@
     return false;
   }
 
+  // MARK: Comments (section 6.1)
+
+  // Swift's comments, and the drafts of new ones, placed, by id.
+  let commentsByID = new Map();
+
+  function storedComments() {
+    return state.stored?.comments ?? [];
+  }
+
+  function storedComment(id) {
+    return commentsByID.get(id) ?? null;
+  }
+
+  function nextSequence() {
+    state.clickCount += 1;
+    return state.clickCount;
+  }
+
+  // The page's files by path, made once per page.
+  let filesByPath = new Map();
+
+  function fileOf(path) {
+    return filesByPath.get(path) ?? null;
+  }
+
+  function canComment() {
+    return Boolean(state.stored?.canWrite);
+  }
+
+  function cantComment() {
+    return state.stored?.problem ?? "Comments can’t be saved now.";
+  }
+
+  // Where a comment's rows were: placed, its own; else its excerpt's ends.
+  function commentEnds(comment) {
+    if (comment.start) return [comment.start, comment.end];
+    const rows = comment.excerpt ?? [];
+    if (rows.length === 0) return [null, null];
+    const end = (row) => ({ side: row.kind === "removed" ? "deletions" : "additions", line: row.line });
+    return [end(rows[0]), end(rows[rows.length - 1])];
+  }
+
+  function dropEditor(editor) {
+    clearTimeout(editor.timer);
+    state.editors.delete(editor.key);
+  }
+
+  // A draft Swift holds that no editor shows: typed before a Reload, the
+  // column closing or a crash. Not one the user just closed or sent, until
+  // Swift has seen it.
+  function restoreEditors() {
+    for (const comment of storedComments()) {
+      const [start, end] = commentEnds(comment);
+      if (comment.state === "draft" && !state.editors.has(comment.id) && !state.dismissed.has(comment.id)) {
+        state.editors.set(comment.id, {
+          key: comment.id, id: comment.id, path: comment.path, start, end, editing: null, text: comment.text, saved: true
+        });
+      }
+      if (comment.edit && !state.editors.has(comment.id) && !state.dismissed.has(comment.edit.id)) {
+        state.editors.set(comment.id, {
+          key: comment.id, id: comment.edit.id, path: comment.path, start, end, editing: comment.id, text: comment.edit.text,
+          saved: true
+        });
+      }
+    }
+  }
+
+  // An edit whose comment went: what was typed becomes a new comment's
+  // editor where the comment was, under its own id, which keeps the
+  // element (and the focus it may have). A save of the edit still on its
+  // way is answered for nothing.
+  function convertEditor(editor) {
+    const node = state.commentNodes.get(editor.key);
+    const focused = editor.parts?.text && document.activeElement === editor.parts.text;
+    state.editors.delete(editor.key);
+    state.commentNodes.delete(editor.key);
+    editor.editing = null;
+    editor.id = crypto.randomUUID();
+    editor.key = editor.id;
+    editor.saved = false;
+    editor.request = undefined;
+    // Where the comment was last seen under its lines, in that page; rows
+    // that weren't (outdated, say) aren't a page's: it goes on the file.
+    if (!editor.underLines) editor.start = editor.end = null;
+    const file = fileOf(editor.path);
+    editor.problem = file
+      ? "Its comment was deleted: Comment saves this as a new one."
+      : "Its comment was deleted, and its file is no longer in the diff: this can’t be saved.";
+    state.editors.set(editor.key, editor);
+    if (node) {
+      node.dataset.key = editor.key;
+      state.commentNodes.set(editor.key, node);
+    }
+    if (focused) state.refocus = editor;
+  }
+
+  // Swift answered up to `stored.acknowledged`, with why the clicks it
+  // refused were refused: an editor whose Comment or Save went closes, one
+  // refused says why, and so does a card whose Delete was.
+  function takeComments(stored) {
+    commentsByID = new Map(storedComments().map((comment) => [comment.id, comment]));
+    const problems = new Map((stored.commentProblems ?? []).map((problem) => [problem.sequence, problem.message]));
+    // Writable again, or its problem gone: what couldn't be done then is
+    // said no more, the drafts closed meanwhile go now, and the text whose
+    // save was refused is saved.
+    const recovered = stored.canWrite && (!state.wasWritable || (state.hadProblem && !stored.problem));
+    if (recovered) {
+      state.cardProblems.clear();
+      for (const [id, sequence] of state.dismissed) {
+        if (sequence !== Infinity) continue;
+        const now = nextSequence();
+        state.dismissed.set(id, now);
+        post({ type: "removeDraft", id, sequence: now });
+      }
+    }
+    state.wasWritable = Boolean(stored.canWrite);
+    state.hadProblem = Boolean(stored.problem);
+    // A review not read (a lock, git) lists no comment: that isn't one
+    // deleted.
+    const known = state.page && stored.files.length === state.page.files.length;
+    // A draft closed whose removal was refused stays closed, and goes once
+    // something can be written again.
+    for (const [id, sequence] of state.dismissed) {
+      if (sequence <= stored.acknowledged) {
+        if (problems.has(sequence)) state.dismissed.set(id, Infinity);
+        else state.dismissed.delete(id);
+      }
+    }
+    for (const [id, sequence] of state.deleting) {
+      if (sequence > stored.acknowledged) continue;
+      state.deleting.delete(id);
+      if (problems.has(sequence)) state.cardProblems.set(id, problems.get(sequence));
+    }
+    for (const editor of [...state.editors.values()]) {
+      // Its comment went (deleted elsewhere): what was typed stays, as a
+      // new comment where it was.
+      if (known && editor.editing && !storedComment(editor.editing) && !editor.submitted) {
+        convertEditor(editor);
+        continue;
+      }
+      // An edit's place as the comment shows now, in this page: where it
+      // goes should its comment be deleted elsewhere.
+      const edited = editor.editing ? storedComment(editor.editing) : null;
+      if (edited) {
+        const [start, end] = commentEnds(edited);
+        const underLines = shownAt(edited.id) === "lines";
+        const file = fileOf(edited.path);
+        Object.assign(editor, {
+          path: edited.path, start, end, underLines,
+          chosen: underLines && file ? { file: file.id, generation: state.page.generation } : null
+        });
+      }
+      // Made a comment, or its edit saved or cancelled, in another column:
+      // an editor with nothing on its way, nothing refused, and not in use
+      // here goes.
+      const idle = editor.request === undefined && !editor.timer && !editor.unsaved && document.activeElement !== editor.parts?.text;
+      const made = !editor.editing && editor.saved && storedComment(editor.id)?.state !== "draft" && storedComment(editor.id);
+      const editDone = known && edited && editor.saved && edited.edit?.id !== editor.id;
+      if (idle && (made || editDone)) {
+        dropEditor(editor);
+        continue;
+      }
+      // Its draft as Swift placed it: its label names where it is, in
+      // this page.
+      const draft = !editor.editing ? storedComment(editor.id) : null;
+      if (draft?.state === "draft") {
+        const [start, end] = draft.onFile ? [null, null] : commentEnds(draft);
+        Object.assign(editor, { path: draft.path, start, end, chosen: null });
+      }
+      if (recovered && editor.unsaved && editor.request === undefined) {
+        editor.unsaved = false;
+        editor.problem = null;
+        scheduleSave(editor);
+      }
+      if (editor.request === undefined || editor.request > stored.acknowledged) continue;
+      const refused = problems.get(editor.request) ?? null;
+      const submitted = editor.submitted;
+      editor.request = undefined;
+      editor.submitted = false;
+      editor.problem = refused;
+      // A save refused: saved again once something can be written.
+      editor.unsaved = Boolean(refused) && !submitted;
+      if (!submitted || refused) continue;
+      // Saved: its comment shows, made or changed.
+      const comment = storedComment(editor.editing ?? editor.id);
+      if (comment && comment.state !== "draft" && !(editor.editing && comment.edit)) {
+        dropEditor(editor);
+        clearSelection(editor.path);
+        state.focusAfter = editor.key;
+      } else {
+        editor.problem = "Nirux couldn’t confirm this was saved: try again.";
+      }
+    }
+    restoreEditors();
+  }
+
+  // Where a comment, or an editor, shows: under its file's lines, with its
+  // file, or among those whose file is gone.
+  function shownAt(key) {
+    const editor = state.editors.get(key);
+    const comment = storedComment(editor?.editing ?? key);
+    if (!comment || (editor && !editor.editing && comment.id !== editor.id)) {
+      if (!editor) return null;
+      if (!fileOf(editor.path)) return "gone";
+      return editor.start && !chosenBefore(editor) ? "lines" : "file";
+    }
+    if (comment.placement === "fileGone") return "gone";
+    return comment.placement === "placed" && comment.start ? "lines" : "file";
+  }
+
+  // The order things first showed in, kept: two on one line don't swap
+  // places (and lose a focus) when one is typed in.
+  let firstSeen = new Map();
+
+  // `items` in the order their keys first showed in, those new in their
+  // order here.
+  function inFirstSeenOrder(items, keyOf = (item) => item) {
+    for (const item of items) if (!firstSeen.has(keyOf(item))) firstSeen.set(keyOf(item), firstSeen.size);
+    return items.sort((one, other) => firstSeen.get(keyOf(one)) - firstSeen.get(keyOf(other)));
+  }
+
+  // Lines chosen in a page a new one replaced, not saved yet: numbered as
+  // that page did, they show with their file until Swift places them.
+  function chosenBefore(editor) {
+    return Boolean(editor.start && editor.chosen && editor.chosen.generation !== state.page?.generation);
+  }
+
+  // What shows under the lines of file `id`: comments, the drafts an editor
+  // shows (a draft closed waits for Swift's answer, unseen), and the
+  // editors Swift doesn't list yet.
+  function annotationsOf(id) {
+    const comments = storedComments().filter((comment) => comment.state !== "draft" || state.editors.has(comment.id));
+    const editors = [...state.editors.values()]
+      .filter((editor) => !storedComment(editor.editing ?? editor.id) && editor.start && !chosenBefore(editor))
+      .map((editor) => ({ key: editor.key, file: fileOf(editor.path)?.id, end: editor.end }));
+    return inFirstSeenOrder(P.commentAnnotations(comments, id, editors), (annotation) => annotation.key);
+  }
+
+  // The element a key shows, made once and filled again as it changes;
+  // each card with what it was made from.
+  const cardSignatures = new WeakMap();
+
+  function commentNode(key) {
+    let node = state.commentNodes.get(key);
+    if (!node) {
+      node = element("div", "comment");
+      node.dataset.key = key;
+      state.commentNodes.set(key, node);
+    }
+    fillComment(key, node);
+    return node;
+  }
+
+  function fillComment(key, node) {
+    const editor = state.editors.get(key);
+    if (editor) {
+      const view = editorView(editor);
+      if (node.firstChild !== view) node.replaceChildren(view);
+      updateEditor(editor);
+      cardSignatures.delete(node);
+      return;
+    }
+    const comment = storedComment(key);
+    if (!comment || comment.state === "draft") {
+      if (node.firstChild) node.replaceChildren();
+      cardSignatures.delete(node);
+      return;
+    }
+    // Made again only when it changed: a button kept keeps its focus.
+    const signature = JSON.stringify([
+      comment, state.deleting.has(key), state.cardProblems.get(key) ?? "", canComment(), node.dataset.confirming ?? ""
+    ]);
+    if (cardSignatures.get(node) === signature) return;
+    cardSignatures.set(node, signature);
+    node.replaceChildren(commentCard(comment, node));
+  }
+
+  function commentCard(comment, node) {
+    const card = element("div", `comment-card${comment.state === "sent" ? " sent" : ""}`);
+    const meta = element("div", "comment-meta");
+    meta.append(element("span", "comment-label", comment.state === "sent" ? `Sent at ${comment.sentAt}` : "Comment"));
+    const ends = commentEnds(comment);
+    const lines = P.linesLabel(...ends);
+    if (shownAt(comment.id) !== "lines") {
+      const where = shownAt(comment.id) === "gone" ? `${P.visible(comment.path)}, ${lines}` : lines;
+      meta.append(element("span", "comment-where", `on ${where}`));
+    }
+    card.append(meta);
+    const note = P.placementNote(comment);
+    if (note) card.append(element("div", "comment-note", note));
+    if (comment.excerpt?.length > 0 && comment.placement !== "placed") {
+      const excerpt = element("div", "comment-excerpt");
+      for (const row of comment.excerpt) {
+        const line = element("div", `excerpt-row ${row.kind}`);
+        // A CRLF file's line ending, which the diff hides too.
+        const text = String(row.text ?? "").replace(/\r$/, "");
+        line.append(element("span", "excerpt-line", String(row.line)), element("span", "excerpt-text", P.visible(text)));
+        excerpt.append(line);
+      }
+      card.append(excerpt);
+    }
+    card.append(element("div", "comment-body", comment.text));
+    const problem = state.cardProblems.get(comment.id);
+    if (problem) {
+      const why = element("div", "comment-problem", problem);
+      why.setAttribute("role", "alert");
+      card.append(why);
+    }
+    const actions = element("div", "comment-actions");
+    const named = (control, verb) => {
+      control.setAttribute("aria-label", `${verb} your comment on ${lines}`);
+      return control;
+    };
+    if (state.deleting.has(comment.id)) {
+      actions.append(element("span", "comment-pending", "Deleting…"));
+    } else if (node.dataset.confirming === "delete") {
+      actions.append(
+        element("span", "comment-confirm", "Delete this comment?"),
+        button("Keep", false, () => {
+          delete node.dataset.confirming;
+          fillComment(comment.id, node);
+          node.querySelector(".comment-actions button")?.focus();
+        }),
+        named(button("Delete", true, () => deleteComment(comment.id, node)), "Delete")
+      );
+    } else {
+      if (comment.state !== "sent") actions.append(named(button("Edit", false, () => editComment(comment)), "Edit"));
+      actions.append(named(button("Delete", false, () => {
+        node.dataset.confirming = "delete";
+        fillComment(comment.id, node);
+        node.querySelector(".comment-actions button:last-child")?.focus();
+      }), "Delete"));
+    }
+    for (const control of actions.querySelectorAll("button")) control.disabled = !canComment();
+    card.append(actions);
+    return card;
+  }
+
+  function editorView(editor) {
+    if (editor.view) return editor.view;
+    const view = element("div", "comment-editor");
+    view.setAttribute("role", "group");
+    view.setAttribute("aria-label", "Comment");
+    const label = element("div", "comment-label");
+    const text = element("textarea", "comment-text");
+    text.maxLength = 20000;
+    text.rows = 3;
+    text.value = editor.text;
+    text.placeholder = "Comment for the agent";
+    text.addEventListener("input", () => {
+      editor.text = text.value;
+      scheduleSave(editor);
+      updateEditor(editor);
+    });
+    text.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        submit(editor);
+      }
+    });
+    const problem = element("div", "comment-problem");
+    problem.setAttribute("role", "alert");
+    const actions = element("div", "comment-actions");
+    const cancel = button("Cancel", false, () => closeEditor(editor));
+    const send = button(editor.editing ? "Save" : "Comment", true, () => submit(editor));
+    actions.append(cancel, send);
+    view.append(label, text, problem, actions);
+    editor.view = view;
+    editor.parts = { label, text, problem, send };
+    return view;
+  }
+
+  function updateEditor(editor) {
+    if (!editor.parts) return;
+    const { label, text, problem, send } = editor.parts;
+    const lines = P.linesLabel(editor.start, editor.end) + (chosenBefore(editor) ? ", as the diff was" : "");
+    label.textContent = editor.editing ? `Editing your comment on ${lines}` : `New comment on ${lines}`;
+    text.setAttribute("aria-label", label.textContent);
+    // Nothing typed meanwhile is lost: the text is Swift's to answer for.
+    text.readOnly = Boolean(editor.submitted);
+    const why = editor.problem ?? (canComment() ? null : cantComment());
+    if (problem.textContent !== (why ?? "")) problem.textContent = why ?? "";
+    problem.hidden = !why;
+    send.disabled = Boolean(editor.submitted) || editor.text.trim() === "" || !canComment();
+    send.textContent = editor.submitted ? "Saving…" : editor.editing ? "Save" : "Comment";
+  }
+
+  // What a request names a comment's place by: the comment an edit is of,
+  // or the file and its rows (or that it is on the whole file), in the
+  // page they were chosen in. Swift fixes a draft's place at its first
+  // save, reading the rows in that page (or one of its last few). An
+  // editor of a draft Swift holds sends the page's file now, or none for a
+  // file no longer in it: its place is fixed.
+  function place(editor) {
+    if (editor.editing) return { editing: editor.editing };
+    const file = fileOf(editor.path);
+    const at = editor.chosen ?? (file ? { file: file.id, generation: state.page.generation } : null);
+    if (!at) return {};
+    return editor.start ? { ...at, start: editor.start, end: editor.end } : { ...at, onFile: true };
+  }
+
+  // A draft is saved a moment after the last key. Comment, Save and Cancel
+  // drop the save still waiting (the text goes with Comment and Save): it
+  // would bring the draft back after them.
+  function scheduleSave(editor) {
+    clearTimeout(editor.timer);
+    editor.timer = setTimeout(() => saveDraft(editor), 600);
+  }
+
+  function saveDraft(editor) {
+    clearTimeout(editor.timer);
+    editor.timer = null;
+    // An editor closed, or of another branch's page, saves nothing.
+    if (state.editors.get(editor.key) !== editor || !state.page || !canComment() || editor.submitted) return;
+    editor.request = nextSequence();
+    editor.saved = true;
+    post({ type: "saveDraft", id: editor.id, text: editor.text, sequence: editor.request, ...place(editor) });
+  }
+
+  function submit(editor) {
+    if (!state.page || !canComment() || editor.submitted || editor.text.trim() === "") return;
+    clearTimeout(editor.timer);
+    editor.request = nextSequence();
+    editor.submitted = true;
+    editor.problem = null;
+    if (editor.editing) {
+      post({ type: "editComment", id: editor.editing, text: editor.text, sequence: editor.request });
+    } else {
+      post({ type: "addComment", id: editor.id, text: editor.text, sequence: editor.request, ...place(editor) });
+    }
+    updateEditor(editor);
+  }
+
+  function closeEditor(editor) {
+    dropEditor(editor);
+    // Its draft waits for Swift's answer, unseen; for good while nothing
+    // can be written.
+    if (editor.saved) {
+      if (canComment()) {
+        const sequence = nextSequence();
+        state.dismissed.set(editor.id, sequence);
+        post({ type: "removeDraft", id: editor.id, sequence });
+      } else {
+        state.dismissed.set(editor.id, Infinity);
+      }
+    }
+    clearSelection(editor.path);
+    refreshComments();
+    // The focus goes back to where comments start: the file's button (not
+    // scrolled to: the page stays where the user reads).
+    fileBox(editor.path)?.querySelector(".file-comment")?.focus({ preventScroll: true });
+  }
+
+  function editComment(comment) {
+    const [start, end] = commentEnds(comment);
+    const editor = {
+      key: comment.id, id: comment.edit?.id ?? crypto.randomUUID(), path: comment.path, start, end, editing: comment.id,
+      text: comment.edit?.text ?? comment.text, saved: Boolean(comment.edit), underLines: shownAt(comment.id) === "lines"
+    };
+    state.editors.set(comment.id, editor);
+    refreshComments();
+    focusEditor(editor);
+  }
+
+  function deleteComment(id, node) {
+    delete node.dataset.confirming;
+    state.cardProblems.delete(id);
+    const sequence = nextSequence();
+    state.deleting.set(id, sequence);
+    post({ type: "deleteComment", id, sequence });
+    refreshComments();
+    // The card goes: the focus goes back to where comments start.
+    fileBox(storedComment(id)?.path)?.querySelector(".file-comment")?.focus({ preventScroll: true });
+  }
+
+  function focusEditor(editor) {
+    const text = editor.parts?.text;
+    if (!text || !text.isConnected) return;
+    text.focus();
+    text.setSelectionRange(text.value.length, text.value.length);
+  }
+
+  function fileBox(path) {
+    const file = fileOf(path);
+    return file ? pageElement.querySelector(`.file[data-id="${file.id}"]`) : null;
+  }
+
+  // A new comment on `lines` of `file` ({ start, end }), or on the whole
+  // file (null).
+  function openEditor(file, lines) {
+    if (!canComment()) {
+      return notice(file.path, cantComment(), { untilWritable: true });
+    }
+    state.notices.delete(file.path);
+    const id = crypto.randomUUID();
+    const editor = { key: id, id, path: file.path, start: lines?.start ?? null, end: lines?.end ?? null, editing: null, text: "", saved: false };
+    // The page the lines were chosen in: a new one may replace it before
+    // the first save, and number them otherwise. A comment on the file
+    // takes the file as the page shows it then.
+    if (editor.start) editor.chosen = { file: file.id, generation: state.page.generation };
+    state.editors.set(id, editor);
+    if (state.selection?.path === file.path) state.selection = null;
+    if (!state.openFiles.has(file.path)) {
+      const box = fileBox(file.path);
+      if (box) toggleFile(file, box.querySelector(".file-row"), box.querySelector(".diff"));
+    }
+    refreshComments();
+    focusEditor(editor);
+  }
+
+  function commentOnLines(container, range) {
+    const file = fileOf(state.holderPaths.get(container));
+    if (!file) return;
+    // A diff dimmed while the file's new one is read numbers lines of
+    // before.
+    if (container.classList.contains("stale")) return notice(file.path, "This diff is being read again: choose the lines once it shows.");
+    const lines = P.commentRange(state.hunks.get(file.path), range);
+    if (lines.problem) return notice(file.path, lines.problem);
+    openEditor(file, lines);
+  }
+
+  // Why the lines the user chose take no comment, by the file, until the
+  // next choice; or why nothing can be written, until it can.
+  function notice(path, text, { untilWritable = false } = {}) {
+    state.notices.set(path, { text, untilWritable });
+    refreshComments();
+  }
+
+  // Lines selected for the file at `path` are let go: their comment is
+  // written, or dropped.
+  function clearSelection(path) {
+    if (state.selection?.path === path) state.selection = null;
+    for (const [holder, shown] of state.holderPaths) if (shown === path) review?.setSelection(holder, null);
+  }
+
+  // Each file's block: its comments on the whole file, those not under
+  // their lines, the editors there, why lines took no comment, and a
+  // button for lines selected by their numbers; and its row's count.
+  // `keys` are the comments and editors of the file, in order.
+  function fillFileComments(box, file, counts, keys) {
+    const block = box.querySelector(".file-comments");
+    if (!block || !state.page) return;
+    const nodes = inFirstSeenOrder((keys ?? fileKeys().get(file.path) ?? []).filter((key) => shownAt(key) === "file"))
+      .map(commentNode);
+    const notice = state.notices.get(file.path);
+    if (notice?.untilWritable && canComment()) state.notices.delete(file.path);
+    const shown = state.notices.get(file.path);
+    // Kept while they say the same, so that the block isn't made again
+    // under an editor being typed in.
+    let extras = state.blockExtras.get(file.path);
+    const selected = state.selection?.path === file.path && !isStale(file.path)
+      ? P.commentRange(state.hunks.get(file.path), state.selection.range) : null;
+    const offer = selected && !selected.problem && canComment() ? P.linesLabel(selected.start, selected.end) : null;
+    if (!extras || extras.notice !== shown?.text || extras.offer !== offer) {
+      const made = [];
+      if (shown) {
+        const note = element("div", "comment-notice", shown.text);
+        note.setAttribute("role", "status");
+        made.push(note);
+      }
+      if (offer) made.push(button(`Comment on ${offer}`, false, () => openEditor(file, selected)));
+      extras = { notice: shown?.text, offer, nodes: made };
+      state.blockExtras.set(file.path, extras);
+    }
+    const wanted = [...nodes, ...extras.nodes];
+    if (wanted.length !== block.children.length || wanted.some((node, index) => block.children[index] !== node)) {
+      block.replaceChildren(...wanted);
+    }
+    block.hidden = wanted.length === 0;
+    const count = counts.comments.get(file.id) ?? 0;
+    const drafts = counts.drafts.get(file.id) ?? 0;
+    const label = [count > 0 ? P.count(count, "comment") : null, drafts > 0 ? P.count(drafts, "draft") : null].filter(Boolean).join(", ");
+    const badge = box.querySelector(".comment-count");
+    if (badge.textContent !== label) badge.textContent = label;
+    const row = box.querySelector(".file-row");
+    const name = [row.dataset.label, label].filter(Boolean).join(", ");
+    if (row.getAttribute("aria-label") !== name) row.setAttribute("aria-label", name);
+  }
+
+  // Each file's comments (drafts aside) and editors, by path, once per
+  // refresh.
+  function fileKeys() {
+    const byPath = new Map();
+    const add = (path, key) => byPath.set(path, [...(byPath.get(path) ?? []), key]);
+    for (const comment of storedComments()) if (comment.state !== "draft") add(comment.path, comment.id);
+    for (const editor of state.editors.values()) if (!editor.editing) add(editor.path, editor.key);
+    return byPath;
+  }
+
+  // The diff drawn for `path` is dimmed while its new one is read: its
+  // lines are of before.
+  function isStale(path) {
+    for (const [holder, shown] of state.holderPaths) if (shown === path && holder.classList.contains("stale")) return true;
+    return false;
+  }
+
+  // Each file's comments and drafts (a new comment's, or an edit's), by
+  // its id: a row counts both, whether its diff is open or not. Not a
+  // draft closed while nothing could be written.
+  function fileCounts() {
+    const drafts = new Map();
+    for (const comment of storedComments()) {
+      if (comment.file === null || comment.file === undefined) continue;
+      const draft = comment.state === "draft" ? comment.id : comment.edit?.id;
+      if (draft && state.dismissed.get(draft) !== Infinity) drafts.set(comment.file, (drafts.get(comment.file) ?? 0) + 1);
+    }
+    return { comments: P.commentCounts(storedComments()), drafts };
+  }
+
+  // Comments whose file no longer differs from the base, at the top; a
+  // draft only through its editor.
+  function fillGoneComments() {
+    const section = pageElement.querySelector(".gone-comments");
+    if (!section) return;
+    const keys = [...new Set([...storedComments().map((comment) => comment.id), ...state.editors.keys()])]
+      .filter((key) => shownAt(key) === "gone" && (storedComment(key)?.state !== "draft" || state.editors.has(key)));
+    const list = section.querySelector(".gone-list");
+    const nodes = keys.map(commentNode);
+    if (nodes.length !== list.children.length || nodes.some((node, index) => list.children[index] !== node)) list.replaceChildren(...nodes);
+    section.hidden = nodes.length === 0;
+  }
+
+  // What each diff drawn was last given, so that a refresh that changes
+  // nothing under its lines renders nothing.
+  const annotated = new WeakMap();
+
+  // Swift's data or the editors changed: what shows under lines, with
+  // files and at the top follows. A failure here is logged: the page and
+  // its diffs stay.
+  function refreshComments() {
+    if (!state.page || !review) return;
+    try {
+      for (const [holder, path] of state.holderPaths) {
+        const file = fileOf(path);
+        if (!holder.isConnected || !file) continue;
+        const annotations = diffAnnotations(holder, file);
+        const key = JSON.stringify(annotations);
+        if (annotated.get(holder) === key) continue;
+        annotated.set(holder, key);
+        review.setAnnotations(holder, annotations);
+      }
+      const counts = fileCounts();
+      const keys = fileKeys();
+      for (const box of pageElement.querySelectorAll(".file")) {
+        const file = state.page.files[Number(box.dataset.id)];
+        if (file) fillFileComments(box, file, counts, keys.get(file.path) ?? []);
+      }
+      fillGoneComments();
+      const shown = new Set([...storedComments().map((comment) => comment.id), ...state.editors.keys()]);
+      for (const [key, node] of state.commentNodes) {
+        if (!shown.has(key)) state.commentNodes.delete(key);
+        else if (node.isConnected) fillComment(key, node);
+      }
+      // A comment just written takes the focus its editor had, unless the
+      // user went elsewhere meanwhile.
+      if (state.focusAfter) {
+        const node = state.commentNodes.get(state.focusAfter);
+        state.focusAfter = null;
+        const dropped = !document.activeElement || document.activeElement === document.body;
+        if (node?.isConnected && dropped) {
+          node.tabIndex = -1;
+          node.focus({ preventScroll: true });
+        }
+      }
+      if (state.refocus) {
+        const editor = state.refocus;
+        state.refocus = null;
+        focusEditor(editor);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+    reportHolding();
+  }
+
+  // An editor moved (from its file to under its lines, as its file's diff
+  // is drawn) loses the focus without a focusout (WebKit says nothing when
+  // a focused element leaves the page), and may wait out of the page for
+  // that diff: once pierre draws it back, its text takes the focus again,
+  // unless the user went elsewhere.
+  function restoreFocus() {
+    const typing = state.typing;
+    if (!typing?.isConnected || document.activeElement === typing) return;
+    if (document.activeElement && document.activeElement !== document.body) return;
+    typing.focus({ preventScroll: true });
+    reportHolding();
+  }
+  document.addEventListener("focusin", (event) => {
+    state.typing = event.target?.classList?.contains("comment-text") ? event.target : null;
+  });
+  document.addEventListener("focusout", (event) => {
+    if (event.target === state.typing) state.typing = null;
+  });
+
   // A text selection in the page: Swift holds back a new page of the same
   // head, which would drop it, until it goes. Diffs draw in shadow roots.
   function inPage(node) {
@@ -800,21 +1532,55 @@
     return false;
   }
 
+  // A comment being typed holds it back too: a new page would move its
+  // editor, and take the focus. So does a press on an editor's button,
+  // which takes the focus from its text before its click.
   let selecting = false;
+  let holding = false;
+  let pressing = false;
+  function reportHolding() {
+    const writing = pressing || Boolean(document.activeElement?.closest?.(".comment-editor"));
+    const active = selecting || writing;
+    if (active === holding) return;
+    holding = active;
+    post({ type: "selection", active });
+  }
   document.addEventListener("selectionchange", () => {
     const selection = document.getSelection();
     // In a shadow root, WebKit reports the selection collapsed, anchored
     // at the host's parent: its text says it's there.
-    const active = Boolean(selection && selection.rangeCount > 0 && selection.toString() !== "" && inPage(selection.anchorNode));
-    if (active === selecting) return;
-    selecting = active;
-    post({ type: "selection", active });
+    selecting = Boolean(selection && selection.rangeCount > 0 && selection.toString() !== "" && inPage(selection.anchorNode));
+    reportHolding();
   });
+  document.addEventListener("focusin", reportHolding);
+  document.addEventListener("focusout", () => setTimeout(reportHolding, 0));
+  document.addEventListener("pointerdown", (event) => {
+    pressing = Boolean(event.target?.closest?.(".comment-editor"));
+    // A press elsewhere: the field that had the focus no longer takes it
+    // back.
+    if (!pressing) state.typing = null;
+    if (pressing) reportHolding();
+  }, true);
+  for (const type of ["pointerup", "pointercancel"]) {
+    document.addEventListener(type, () => setTimeout(() => {
+      pressing = false;
+      reportHolding();
+    }, 0), true);
+  }
 
   function render(page) {
     const samebranch = state.page && state.page.header.branch === page.header.branch;
     if (!samebranch) {
       state.risk = null;
+      // What was being written is another branch's: its saves waiting go.
+      for (const editor of [...state.editors.values()]) dropEditor(editor);
+      state.cardProblems.clear();
+      state.blockExtras.clear();
+      firstSeen = new Map();
+      state.dismissed.clear();
+      state.deleting.clear();
+      state.notices.clear();
+      state.selection = null;
       state.openGroups.clear();
       state.openFiles.clear();
       state.openAccounts.clear();
@@ -822,6 +1588,7 @@
       state.rowsShown.clear();
     }
     state.page = page;
+    filesByPath = new Map(page.files.map((file) => [file.path, file]));
     if (!samebranch) state.clicks.clear();
     takeReview(page.review ?? null);
     if (state.risk && !page.risks.some((risk) => risk.kind === state.risk && risk.files > 0)) state.risk = null;
@@ -830,13 +1597,32 @@
     const scrolled = pageElement.hidden ? 0 : window.scrollY;
     const anchor = samebranch ? readingAnchor() : null;
     if (!samebranch || !review) {
-      review = window.NiruxPierreDiff.createReview(document, { renderAnnotation: noteCard });
+      review = window.NiruxPierreDiff.createReview(document, {
+        // Claude's notes and the comments, under the same lines.
+        renderAnnotation: (annotation) => annotation.key.startsWith(notePrefix)
+          ? noteCard(annotation) : commentNode(annotation.key),
+        // A diff drawn later (as it scrolls into view) may bring back an
+        // editor that had the focus.
+        onRendered: () => restoreFocus(),
+        onGutterClick: (range, container) => commentOnLines(container, range),
+        onSelect: (range, container) => {
+          const path = state.holderPaths.get(container);
+          state.selection = range && path ? { path, range } : null;
+          refreshComments();
+        }
+      });
       notes.clear();
       noteCards.clear();
       state.diffs.clear();
       state.holders.clear();
+      state.holderPaths.clear();
+      state.hunks.clear();
+      state.commentNodes.clear();
     }
-    const sections = [header(page), accounts(page), checked(page), risks(page), groups(page)].filter(Boolean);
+    const gone = element("div", "section gone-comments");
+    gone.hidden = true;
+    gone.append(element("div", "label", "Comments on files no longer in the diff"), element("div", "gone-list"));
+    const sections = [header(page), gone, accounts(page), checked(page), risks(page), groups(page)].filter(Boolean);
     statusElement.classList.remove("shown");
     bannerElement.hidden = true;
     pageElement.replaceChildren(...sections);
@@ -845,6 +1631,7 @@
       if (holder.isConnected) continue;
       review.removeFile(holder);
       state.holders.delete(holder);
+      state.holderPaths.delete(holder);
     }
     for (const [path, shown] of state.diffs) {
       if (!shown.node.isConnected) state.diffs.delete(path);
@@ -857,6 +1644,7 @@
     }
     applyRiskFilter(false);
     applyReview();
+    refreshComments();
     window.scrollTo(0, scrolled);
     restoreAnchor(anchor);
   }
@@ -872,6 +1660,7 @@
     if (previous) {
       review.removeFile(previous);
       state.holders.delete(previous);
+      state.holderPaths.delete(previous);
     }
     // The diff drawn before is gone: a later page mustn't reuse it.
     if (file) state.diffs.delete(file.path);
@@ -889,10 +1678,19 @@
       note.settled = note.isWrong;
       notes.set(note.id, note);
     }
-    const annotations = fileNotes.map((note) => ({ side: note.side, lineNumber: note.lineNumber, key: note.id }));
+    holderNotes.set(holder, fileNotes.map((note) => ({ side: note.side, lineNumber: note.lineNumber, key: notePrefix + note.id })));
+    if (file) {
+      state.hunks.set(file.path, diff.hunks);
+      state.holderPaths.set(holder, file.path);
+      // Lines selected in the diff of before are let go.
+      if (state.selection?.path === file.path) state.selection = null;
+    }
     try {
+      const annotations = diffAnnotations(holder, file);
       review.renderFile(holder, { path: file ? file.path : "", hunks: diff.hunks, annotations });
+      annotated.set(holder, JSON.stringify(annotations));
     } catch (error) {
+      state.holderPaths.delete(holder);
       review.removeFile(holder);
       box.replaceChildren(element("div", "diff-message", `Couldn’t show this diff: ${error.message}`));
       return;
@@ -907,6 +1705,16 @@
   // is updated in place.
   const notes = new Map();
   const noteCards = new Map();
+  // A note's annotation key: never a comment's.
+  const notePrefix = "note:";
+  // The notes each diff drawn came with, as annotations.
+  const holderNotes = new WeakMap();
+
+  // What shows under the lines of the diff in `holder`: Claude's notes,
+  // then the comments, the drafts and the editors of `file`.
+  function diffAnnotations(holder, file) {
+    return [...(holderNotes.get(holder) ?? []), ...(file ? annotationsOf(file.id) : [])];
+  }
 
   // A note under the last changed line of its hunk, labeled as Claude's,
   // with the head it read, its "check this" apart; it can be marked wrong,
@@ -914,7 +1722,7 @@
   let noteCount = 0;
 
   function noteCard(annotation) {
-    const note = notes.get(annotation.key);
+    const note = notes.get(annotation.key.slice(notePrefix.length));
     if (!note) return null;
     const card = element("div", "note");
     const source = element("div", "source claude");
@@ -1023,6 +1831,7 @@
     if (!state.page || stored.generation !== state.page.generation) return;
     takeReview(stored);
     applyReview();
+    refreshComments();
   }
 
   // A message in place of the page: loading, or why there is no review,
