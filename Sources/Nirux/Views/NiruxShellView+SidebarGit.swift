@@ -603,6 +603,8 @@ extension NiruxShellView {
         // A window that came back in view (occlusion, the app's return).
         refreshStaleBranchReviewsOnScreen()
         let snapshot = snapshot ?? ProcessSnapshot()
+        reviewSendPanel?.onRefresh?(snapshot)
+        for workspace in workspaces { for column in workspace.columns { column.pty?.settlePromptWatchers(snapshot: snapshot) } }
         refreshHeaderTitles(snapshot: snapshot)
         updateSidebar(snapshot: snapshot)
     }

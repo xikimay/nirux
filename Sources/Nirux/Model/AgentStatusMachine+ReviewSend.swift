@@ -16,6 +16,12 @@ enum ReviewSendRefusal: Equatable, Sendable {
     case notHeardFrom
     /// `claude -p`: it takes no prompt.
     case headless
+    /// An agent run by another program in front (a launcher): its prompt
+    /// isn't the terminal's, as far as Nirux can tell.
+    case underLauncher(String)
+    /// The agent is stopped (Ctrl-Z) or in the background: the shell is in
+    /// front.
+    case notInFront
     /// A dialog may be on screen: typed text would answer it.
     case dialog
     /// The last turn ended on an error that needs the user first (a usage
@@ -37,6 +43,11 @@ enum ReviewSendRefusal: Equatable, Sendable {
                 + "or restart it if it started before Nirux’s hooks were installed."
         case .headless:
             return "This Claude runs headless (claude -p): it takes no prompt."
+        case .notInFront:
+            return "The agent here is stopped or in the background: bring it back (fg) first."
+        case .underLauncher(let name):
+            return "The agent here runs under \(name): Nirux can’t tell when it waits at its prompt. "
+                + "Copy Message, and paste it there yourself."
         case .dialog:
             return "Claude may be asking something: answer it first."
         case .errorMenu:

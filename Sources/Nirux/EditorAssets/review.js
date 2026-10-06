@@ -198,6 +198,12 @@
     problem.setAttribute("role", "status");
     problem.hidden = true;
     section.append(problem);
+    // The unsent comments go to the agent at once (section 6.2): the
+    // column's sheet says where, and what goes.
+    const send = button("", true, () => post({ type: "sendComments" }));
+    send.classList.add("send-comments");
+    send.hidden = true;
+    section.append(send);
     if (info.notes.length > 0) {
       const notes = element("ul", "notes");
       for (const note of info.notes) {
@@ -899,7 +905,10 @@
   // editor where the comment was, under its own id, which keeps the
   // element (and the focus it may have). A save of the edit still on its
   // way is answered for nothing.
-  function convertEditor(editor) {
+  function convertEditor(
+    editor, why = "Its comment was deleted: Comment saves this as a new one.",
+    whyGone = "Its comment was deleted, and its file is no longer in the diff: this can’t be saved."
+  ) {
     const node = state.commentNodes.get(editor.key);
     const focused = editor.parts?.text && document.activeElement === editor.parts.text;
     state.editors.delete(editor.key);
@@ -913,15 +922,33 @@
     // that weren't (outdated, say) aren't a page's: it goes on the file.
     if (!editor.underLines) editor.start = editor.end = null;
     const file = fileOf(editor.path);
-    editor.problem = file
-      ? "Its comment was deleted: Comment saves this as a new one."
-      : "Its comment was deleted, and its file is no longer in the diff: this can’t be saved.";
+    editor.problem = file ? why : whyGone;
     state.editors.set(editor.key, editor);
     if (node) {
       node.dataset.key = editor.key;
       state.commentNodes.set(editor.key, node);
     }
     if (focused) state.refocus = editor;
+  }
+
+  // An edit whose comment went to the agent: Swift made its draft a new
+  // comment's, where the comment is (section 6.2). The editor goes on as
+  // that draft, its element (and focus) kept.
+  function adoptDraft(editor) {
+    const node = state.commentNodes.get(editor.key);
+    const focused = editor.parts?.text && document.activeElement === editor.parts.text;
+    state.editors.delete(editor.key);
+    state.commentNodes.delete(editor.key);
+    Object.assign(editor, { editing: null, key: editor.id, saved: true, chosen: null, request: undefined, submitted: false });
+    editor.problem = "Its comment went to the agent: this is a new comment now.";
+    state.editors.set(editor.key, editor);
+    if (node) {
+      node.dataset.key = editor.key;
+      state.commentNodes.set(editor.key, node);
+    }
+    if (focused) state.refocus = editor;
+    // What was typed since its draft's last save (a Save refused) is saved.
+    if (storedComment(editor.id)?.text !== editor.text) scheduleSave(editor);
   }
 
   // Swift answered up to `stored.acknowledged`, with why the clicks it
@@ -966,6 +993,25 @@
       // new comment where it was.
       if (known && editor.editing && !storedComment(editor.editing) && !editor.submitted) {
         convertEditor(editor);
+        continue;
+      }
+      // Its comment went to the agent: the edit is a new comment's draft
+      // (Swift's), or what was typed since its last save is, or nothing
+      // changed and it goes.
+      // A Save on its way when it went is refused: its answer goes.
+      if (editor.editing && storedComment(editor.editing)?.state === "sent") {
+        const sent = storedComment(editor.editing);
+        if (storedComment(editor.id)?.state === "draft") {
+          adoptDraft(editor);
+        } else if (editor.text.trim() !== sent.text.trim()) {
+          editor.submitted = false;
+          convertEditor(
+            editor, "Its comment went to the agent: Comment saves this as a new one.",
+            "Its comment went to the agent, and its file is no longer in the diff: this can’t be saved."
+          );
+        } else {
+          dropEditor(editor);
+        }
         continue;
       }
       // An edit's place as the comment shows now, in this page: where it
@@ -1437,6 +1483,20 @@
     return { comments: P.commentCounts(storedComments()), drafts };
   }
 
+  // "Send N Comments to Agent", for the unsent comments not already in an
+  // agent's prompt; off while nothing can be written: sent, they are
+  // marked so.
+  function fillSendButton() {
+    const send = pageElement.querySelector(".send-comments");
+    if (!send) return;
+    const inPrompt = new Set(state.stored?.inPrompt ?? []);
+    const count = storedComments().filter((comment) => comment.state === "unsent" && !inPrompt.has(comment.id)).length;
+    send.hidden = count === 0;
+    send.textContent = P.sendLabel(count);
+    send.disabled = !canComment();
+    send.title = canComment() ? "" : cantComment();
+  }
+
   // Comments whose file no longer differs from the base, at the top; a
   // draft only through its editor.
   function fillGoneComments() {
@@ -1476,6 +1536,7 @@
         if (file) fillFileComments(box, file, counts, keys.get(file.path) ?? []);
       }
       fillGoneComments();
+      fillSendButton();
       const shown = new Set([...storedComments().map((comment) => comment.id), ...state.editors.keys()]);
       for (const [key, node] of state.commentNodes) {
         if (!shown.has(key)) state.commentNodes.delete(key);

@@ -433,6 +433,185 @@ final class PtySession: @unchecked Sendable {
         return nil
     }
 
+    // MARK: Branch Review comments (docs/branch-review.md, section 6.2)
+
+    /// Why a Branch Review's comments can't go into this column's prompt
+    /// now, if they can't (see `AgentStatusMachine.reviewSendRefusal`).
+    func reviewSendRefusal(snapshot: ProcessSnapshot) -> ReviewSendRefusal? {
+        guard !hasExited else { return .noAgent }
+        return state.machine.reviewSendRefusal(foreground: foregroundProcess(snapshot: snapshot))
+    }
+
+    /// Keys reached the prompt since its last prompt went in (see
+    /// `AgentStatusMachine.hasDraft`).
+    var reviewSendHasDraft: Bool { state.machine.hasDraft }
+
+    /// The folder the agent here works in: the process in front's (where
+    /// `claude --worktree` moved it), or else the shell's.
+    func agentCwd(snapshot: ProcessSnapshot) -> String? {
+        if let instance = foregroundInstance(snapshot: snapshot), instance.pid > 0, instance.pid != state.childPid,
+           let folder = Self.cwd(ofExecedProcess: instance.pid) {
+            return folder
+        }
+        return childCwd
+    }
+
+    /// The agent running here now, in front or under a program in front (a
+    /// launcher: `npx`, `caffeinate`), by the process tree alone: not one
+    /// the hooks last named, which may have ended.
+    func runningAgentName(snapshot: ProcessSnapshot) -> String? {
+        guard !hasExited, state.childPid > 0 else { return nil }
+        let isAgent = AgentStatusMachine.isRecognizedAgentProcess
+        if let name = foregroundProcessName(snapshot: snapshot), isAgent(name) { return name }
+        return snapshot.firstDescendantName(of: state.childPid, where: isAgent)
+    }
+
+    /// How a paste ended.
+    enum PasteOutcome: Equatable, Sendable {
+        case pasted
+        /// The terminal closed, or refused the rest.
+        case closed
+        /// Another program came to the front (the agent quit, or was
+        /// stopped): the rest isn't written, not to reach a shell.
+        case agentLeft
+        case cancelled
+        /// The agent stopped reading.
+        case timedOut
+    }
+
+    /// Writes `text` to the terminal off the main thread: a long paste
+    /// fills the terminal's input queue, which empties only as the agent
+    /// reads it, so one write would block the app meanwhile, or stop short
+    /// of the paste's end. A byte at a time, each once the terminal takes
+    /// one (it says so once a byte is free: a longer write could block
+    /// past Cancel and the deadline), and only while `process`'s group is
+    /// in front: what a shell would read as typed lines never reaches it,
+    /// and what the agent left unread is dropped. It counts as typed.
+    /// Cancelled, or timed out, the agent still in front, the paste is
+    /// ended (`ESC[201~`) if the terminal takes it, so that Claude isn't
+    /// left in it. `done` comes on the main queue.
+    func pasteInBackground(
+        _ text: String, keepingInFront process: ProcessInstance?, cancelled: @escaping @Sendable () -> Bool,
+        done: @escaping @MainActor @Sendable (PasteOutcome) -> Void
+    ) {
+        let data = Data(text.utf8)
+        // Gone already, it reads as no group: nothing is written.
+        let group = process.map { getpgid($0.pid) }
+        let fd = hasExited ? nil : state.descriptorForWrite(of: data)
+        Self.writeInBackground(data, to: fd, group: group, cancelled: cancelled, done: done)
+    }
+
+    /// `ESC[200~` and `ESC[201~`.
+    private nonisolated static let markerLength = 6
+
+    /// Past this, a paste the agent doesn't read ends.
+    nonisolated static let pasteTimeout: TimeInterval = 30
+
+    /// `data` written to `fd`, a descriptor of its own (closed after), off
+    /// the main thread; `done` on the main queue.
+    private nonisolated static func writeInBackground(
+        _ data: Data, to fd: Int32?, group: pid_t?, cancelled: @escaping @Sendable () -> Bool,
+        done: @escaping @MainActor @Sendable (PasteOutcome) -> Void
+    ) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome = fd.map { fd in
+                defer { close(fd) }
+                return writePaste(data, to: fd, group: group, cancelled: cancelled, deadline: Date().addingTimeInterval(pasteTimeout))
+            } ?? .closed
+            DispatchQueue.main.async { done(outcome) }
+        }
+    }
+
+    /// `data` written to `fd` as the terminal takes it, a byte once
+    /// `poll` says one is free (a blocking terminal: a write of more could
+    /// block), while `group` (when known) is the terminal's foreground
+    /// process group, until `deadline`, unless `cancelled`.
+    nonisolated static func writePaste(
+        _ data: Data, to fd: Int32, group: pid_t?, cancelled: @Sendable () -> Bool, deadline: Date
+    ) -> PasteOutcome {
+        var offset = 0
+        func writable(_ wait: Int32) -> Bool? {
+            var ready = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+            let count = poll(&ready, 1, wait)
+            if count < 0 { return errno == EINTR ? false : nil }
+            if ready.revents & Int16(POLLERR | POLLHUP | POLLNVAL) != 0 { return nil }
+            return count > 0
+        }
+        func ended(_ outcome: PasteOutcome) -> PasteOutcome {
+            // Still the agent's: its paste ends, rather than wait open; a
+            // byte at a time, each the terminal takes at once.
+            guard offset > 0, group.map({ tcgetpgrp(fd) == $0 }) ?? true else { return outcome }
+            let ending = Date().addingTimeInterval(2)
+            var end = Array("\u{1B}[201~".utf8)[...]
+            while let byte = end.first, Date() < ending {
+                guard let ready = writable(100) else { break }
+                if ready, withUnsafePointer(to: byte, { write(fd, $0, 1) }) == 1 { end = end.dropFirst() }
+            }
+            return outcome
+        }
+        while offset < data.count {
+            if cancelled() { return ended(.cancelled) }
+            if let group, tcgetpgrp(fd) != group {
+                // What the agent left unread would reach what is in front.
+                tcflush(fd, TCIFLUSH)
+                return .agentLeft
+            }
+            if Date() > deadline { return ended(.timedOut) }
+            guard let ready = writable(100) else { return .closed }
+            if !ready { continue }
+            // The paste's markers go whole: Claude gives up on an escape
+            // that stalls halfway (the queue is empty at an idle prompt).
+            let length = offset == 0 || offset == data.count - markerLength ? min(markerLength, data.count - offset) : 1
+            let written = data.withUnsafeBytes { buffer in write(fd, buffer.baseAddress! + offset, length) }
+            if written < 0 {
+                if errno == EINTR || errno == EAGAIN { continue }
+                return .closed
+            }
+            offset += written
+        }
+        return .pasted
+    }
+
+    /// Calls `action(true)` once, on the main thread's next prompt that
+    /// goes in after `time` holding `header` (a Branch Review message's
+    /// first line, as `AgentHookEvent.reviewHeader` reads it), from
+    /// `process` when it is known: what was pasted reached Claude only
+    /// once the user submitted it. `action(false)` on a prompt without it
+    /// (cleared, or set aside: it is still listened for), and once it can't
+    /// be taken any more:
+    /// a new session or the session's end (the prompt it sat in is gone),
+    /// another `claude`'s prompt, the process gone (`settlePromptWatchers`),
+    /// the terminal exited, restarted or closed, or a day later.
+    func onNextPrompt(
+        after time: TimeInterval, from process: ProcessInstance?, header: String,
+        _ action: @escaping @Sendable (_ taken: Bool) -> Void
+    ) {
+        // Another paste of the same message's header: a prompt can't tell
+        // them apart, so the one before (cleared, or joined) is let go,
+        // rather than marked sent for what this one holds.
+        state.settlePromptWatchers { $0.header == header }
+        state.promptWatchers.append(PtyState.PromptWatcher(after: time, process: process, header: header, action: action))
+    }
+
+    /// Past this, a paste waiting for its prompt is let go.
+    nonisolated static let promptWatchLimit: TimeInterval = 24 * 3600
+
+    /// Lets go of the pastes whose `claude` no longer runs (it quit, the
+    /// shell stays), or that waited a day: no hook may come to say so. The
+    /// shell's metadata refresh calls it, with its process table.
+    func settlePromptWatchers(snapshot: ProcessSnapshot) {
+        guard !state.promptWatchers.isEmpty, !snapshot.isEmpty else { return }
+        let now = Date().timeIntervalSince1970
+        state.settlePromptWatchers { watcher in
+            watcher.process.map { !snapshot.contains($0) } == true || now > watcher.after + Self.promptWatchLimit
+        }
+    }
+
+    /// A descriptor of its own on the terminal, nothing noted (tests).
+    func duplicateDescriptorForTests() -> Int32? {
+        state.duplicateDescriptor()
+    }
+
     /// Whether a Mission `tell` sent at `toldAt` may be typed now (see
     /// `AgentStatusMachine.isPromptFree`).
     func acceptsMissionInstruction(toldAt: TimeInterval, snapshot: ProcessSnapshot) -> Bool {
@@ -472,6 +651,7 @@ final class PtySession: @unchecked Sendable {
     func applyAgentHook(_ event: AgentHookEvent, isUserFocused: Bool) -> AgentHookOutcome {
         let dialogsBefore = state.machine.pendingDialogs.count
         let outcome = state.machine.apply(event, isUserFocused: isUserFocused)
+        if event.agentID == nil, !state.promptWatchers.isEmpty { state.settlePromptWatchers(on: event) }
         let dialogs = state.machine.pendingDialogs
         if dialogs.count != dialogsBefore {
             // Stale-gate reports need the trail: which event opened or
@@ -748,6 +928,7 @@ final class PtySession: @unchecked Sendable {
             state.childPid = 0
             state.hasExited = true
             state.machine.reset()
+            state.expirePromptWatchers()
             state.onProcessExit?()
         }
         exitSource.resume()
@@ -802,6 +983,10 @@ final class PtySession: @unchecked Sendable {
     deinit {
         state.exitSource?.cancel()
         state.readSource?.cancel()
+        // The column closed: its pastes are let go, on the main queue as
+        // ever (the last release may come from a paste's thread).
+        let state = state
+        DispatchQueue.main.async { state.expirePromptWatchers() }
         if state.childPid > 0 { kill(state.childPid, SIGTERM) }
     }
 }
@@ -871,8 +1056,96 @@ private final class PtyState: @unchecked Sendable {
 
     func markPtyStarted() {
         machine.reset()
+        expirePromptWatchers()
         localServerStateIsStale = true
         hasTypedInput = false
+    }
+
+    /// A Branch Review paste waiting for its prompt (see
+    /// `PtySession.onNextPrompt`).
+    struct PromptWatcher: Sendable {
+        let after: TimeInterval
+        let process: ProcessInstance?
+        let header: String
+        let action: @Sendable (_ taken: Bool) -> Void
+    }
+
+    var promptWatchers: [PromptWatcher] = []
+
+    /// `event` (the main thread's) settles the watchers it concerns: a
+    /// prompt holding one's header takes it; another `claude`'s prompt, or
+    /// a new session, lets it go; so does the passing of a day.
+    func settlePromptWatchers(on event: AgentHookEvent) {
+        var taken: [PromptWatcher] = []
+        var gone: [PromptWatcher] = []
+        var released: [PromptWatcher] = []
+        promptWatchers.removeAll { watcher in
+            if event.timestamp > watcher.after + PtySession.promptWatchLimit {
+                gone.append(watcher)
+                return true
+            }
+            let other = watcher.process != nil && event.emitterProcess != nil && watcher.process != event.emitterProcess
+            switch event.name {
+            case .userPromptSubmit where other:
+                gone.append(watcher)
+                return true
+            case .userPromptSubmit where event.timestamp >= watcher.after && event.reviewHeader == watcher.header:
+                taken.append(watcher)
+                return true
+            // Claude takes the whole input: one without the message
+            // means the paste was cleared, or set aside (a stash Claude
+            // brings back, an automated prompt): its comments are let go,
+            // and it is still listened for.
+            case .userPromptSubmit where event.timestamp >= watcher.after:
+                released.append(watcher)
+                return false
+            case .sessionStart where event.timestamp >= watcher.after && event.source != "compact",
+                 .sessionEnd where event.timestamp >= watcher.after && !other:
+                gone.append(watcher)
+                return true
+            default:
+                return false
+            }
+        }
+        taken.forEach { $0.action(true) }
+        (gone + released).forEach { $0.action(false) }
+    }
+
+    /// Lets go of the watchers `isGone` says can't be taken any more.
+    func settlePromptWatchers(_ isGone: (PromptWatcher) -> Bool) {
+        var gone: [PromptWatcher] = []
+        promptWatchers.removeAll { watcher in
+            guard isGone(watcher) else { return false }
+            gone.append(watcher)
+            return true
+        }
+        gone.forEach { $0.action(false) }
+    }
+
+    /// The terminal exited or restarted: no paste waits any more.
+    func expirePromptWatchers() {
+        let gone = promptWatchers
+        promptWatchers = []
+        gone.forEach { $0.action(false) }
+    }
+
+    /// A descriptor of its own on the terminal, for `data` written off the
+    /// main thread: noted as typed, as `sendRaw` notes it. Nil once the
+    /// terminal closed. One of its own: the terminal's may close, and its
+    /// number go to another file, while the write goes on.
+    func descriptorForWrite(of data: Data) -> Int32? {
+        noteTypedInput(data)
+        machine.noteUserInput(now: Date())
+        return duplicateDescriptor()
+    }
+
+    func duplicateDescriptor() -> Int32? {
+        guard ptyFd >= 0 else { return nil }
+        let fd = dup(ptyFd)
+        guard fd >= 0 else { return nil }
+        // Not inherited by what Nirux runs meanwhile.
+        _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
+        return fd
     }
 
     func writeToPty(_ data: Data) {

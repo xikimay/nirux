@@ -485,6 +485,11 @@
     return { start: position(rows[top]), end: position(rows[bottom]), count: bottom - top + 1 };
   }
 
+  // The button that sends the unsent comments to the agent.
+  function sendLabel(count) {
+    return `Send ${count} Comment${count === 1 ? "" : "s"} to Agent`;
+  }
+
   // What a comment is on, for its card and its editor: "line 12", "lines
   // 12–14", "removed line 7", "removed line 7 to line 9"; "the file" without
   // rows.
@@ -541,7 +546,7 @@
     statusLetter, testsSummary, matchesRisk, visible, fileTag, clockTime,
     isReviewed, isMarkable, reviewProgress, groupReviewState, groupReviewAction, reviewTitle,
     explainActions, explainProgress, duration, tokens, usageLine, notesLine, intentLabel, verdictLabel,
-    commentRows, commentRange, linesLabel, placementNote, commentCounts, commentAnnotations
+    commentRows, commentRange, linesLabel, sendLabel, placementNote, commentCounts, commentAnnotations
   };
   root.ReviewPage = Object.freeze(api);
 })(typeof window !== "undefined" ? window : globalThis);

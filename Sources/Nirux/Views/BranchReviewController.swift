@@ -159,6 +159,8 @@ final class BranchReviewController {
     /// Whether the column shows: its workspace in front, its window
     /// visible. Set by the shell.
     var isOnScreen: @MainActor () -> Bool = { true }
+    /// "Send N Comments to Agent": the shell's sheet. Nothing by default.
+    var sendToAgent: @MainActor (BranchReviewController) -> Void = { _ in }
     /// One `git diff` at a time, whatever the number of rows opened.
     private let patchQueue = DispatchQueue(label: "nirux.branch-review.file-diffs", qos: .userInitiated)
     /// The review file: opened, then written, in order, off the main
@@ -202,6 +204,9 @@ final class BranchReviewController {
     /// Why the latest comment requests that weren't saved weren't, by the
     /// page's click; kept while the same branch shows.
     var commentProblems: [BranchReview.Page.CommentProblem] = []
+    /// Comments pasted into an agent's prompt, not submitted yet, with
+    /// their text then (section 6.2): Send leaves them out, unless edited.
+    var pastedComments: [String: String] = [:]
     /// The page's comments, placed once for the review and the files as
     /// read: the page's clicks are answered without placing them again.
     private(set) var pageComments: [BranchReview.Page.Comment]?
@@ -300,6 +305,10 @@ final class BranchReviewController {
             self?.markReviewed(ids: ids, reviewed: reviewed, generation: generation, sequence: sequence)
         }
         view.onComment = { [weak self] request, sequence in self?.comment(request, sequence: sequence) }
+        view.onSendComments = { [weak self] in
+            guard let self else { return }
+            sendToAgent(self)
+        }
         view.onReload = { [weak self] in self?.bannerClicked() }
         view.onStatusAction = { [weak self] in self?.statusAction?.perform() }
         view.onWindowChange = { [weak self] inWindow in
@@ -1127,11 +1136,12 @@ final class BranchReviewController {
         pageComments = comments
         return BranchReview.review(
             of: review.record, files: files, generation: snapshotCount, problem: review.problem, canWrite: review.canWrite,
-            acknowledged: reviewAcknowledged, comments: comments, commentProblems: commentProblems
+            acknowledged: reviewAcknowledged, comments: comments, commentProblems: commentProblems,
+            inPrompt: review.record.comments.filter { pastedComments[$0.id] == $0.text && $0.sent == nil }.map(\.id)
         )
     }
 
-    private func sendReview() {
+    func sendReview() {
         guard status == nil, let review = pageReview(), let json = Self.encode(review) else { return }
         view.showReview(json: json)
     }

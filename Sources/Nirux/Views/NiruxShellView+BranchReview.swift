@@ -86,6 +86,7 @@ extension NiruxShellView {
             guard let self, let review else { return false }
             return self.confirmExplain(for: review, account: account, files: files, settings: settings)
         }
+        review.sendToAgent = { [weak self] review in self?.sendReviewComments(from: review) }
         return review
     }
 
