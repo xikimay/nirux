@@ -39,9 +39,10 @@ enum WebContentKeyRouting {
            modifiers == [.command] || modifiers == [.command, .shift] {
             return true
         }
-        // Cmd+F, Cmd+G, Shift+Cmd+G: Edit > Find in Terminal and Find
-        // Next/Previous only act on terminal columns. Monaco's find widget
-        // and web apps' own search keep these chords.
+        // Cmd+F, Cmd+G, Shift+Cmd+G: Monaco's find widget and web apps'
+        // own search keep these chords. A page that leaves them unhandled
+        // hands them back (WebKit resends the key), and Edit > Find opens
+        // a browser column's find bar, as in Safari.
         if types("f", ansiKeyCode: 0x03), modifiers == [.command] {
             return true
         }

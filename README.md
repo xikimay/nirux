@@ -7,7 +7,7 @@ Nirux is alpha software.
 ## Highlights
 
 - Persistent workspaces: keep each task's name and context visible, stack workspaces vertically, and archive inactive ones in a collapsible sidebar section that does not poll GitHub. Collapsed, the sidebar is a rail: the project on top (its menu switches projects), then a tile per workspace with its initials (a branch name drops its type, so `feat/crash-report` reads CR) and its state in the corner, amber only when an agent waits for you; inactive workspaces stay behind an archive tile, and "+" opens a new one. Hover a tile for what it's doing; click, drag and right-click work as on the cards.
-- Horizontal columns: mix Ghostty-backed terminals, WKWebView browser columns, and Monaco editor columns in the same workspace. `Cmd+F` in a terminal searches its scrollback with Ghostty's native search, highlighting every match.
+- Horizontal columns: mix Ghostty-backed terminals, WKWebView browser columns, and Monaco editor columns in the same workspace. `Cmd+F` in a terminal searches its scrollback with Ghostty's native search, highlighting every match; in a browser column, WebKit's find searches the page and counts the matches.
 - Agent launchers: start Claude Code or Codex from the command palette with configurable permission and sandbox presets.
 - Attention and Activity: per-column agent status (working / needs attention, with elapsed time) driven by real Claude Code hooks and Codex turn notifications — not output guessing (Gemini CLI and OpenCode, which have no hooks, get output-activity status) — plus a persistent sidebar feed, edge glows for off-screen attention, native macOS notifications that focus the right workspace and column on click, and a Dock badge counting waiting workspaces.
 - Stuck agents: a permission or question left open past a threshold (Settings, 10 minutes by default) shows `waiting 2h05m` on its card and notifies once (Telegram too, and while Nirux is in the background); a Claude turn that ended on an API error shows `API error`, with a Resume button — for transient errors only (overloaded, server error) — that types `continue` only on a click, once Claude is back at an empty prompt; a `claude` that died mid-turn gets an overlay that resumes its conversation in its permission mode.
@@ -145,8 +145,8 @@ Useful shortcuts:
 | `Cmd+Z` / `Shift+Cmd+Z` | Undo / redo in the editor and in panel text fields (palette, rename, settings) |
 | `Shift+Cmd+F` | Search workspace |
 | `Alt+Cmd+F` | Search Everywhere: text in the scrollback of every terminal, across workspaces and projects; picking a match opens its terminal's find bar on it. A full-screen program (vim, less, Claude Code in its no-flicker mode) shows no scrollback: only its screen is searched. Then the transcripts of the Claude sessions the history knows (running or past, only what you typed and Claude answered, read in place within a time budget); picking one of their matches resumes the session, or goes to its column |
-| `Cmd+F` | Find in the focused editor or terminal; a terminal's find bar closes with `Esc` |
-| `Cmd+G` / `Shift+Cmd+G` | Next / previous terminal match (`Return` / `Shift+Return` in the find bar); next moves up to older output, as in Ghostty |
+| `Cmd+F` | Find in the focused editor, terminal or browser page (unless the page has its own search); the find bar closes with `Esc` (on a page, from its field) |
+| `Cmd+G` / `Shift+Cmd+G` | Next / previous match (`Return` / `Shift+Return` in the find bar); in a terminal, next moves up to older output, as in Ghostty |
 | `Cmd+S` / `Alt+Cmd+S` | Save the active editor file / save all |
 | `Shift+Cmd+D` | Toggle editor diff |
 | `Alt+Cmd+Z` | Toggle word wrap in editor |

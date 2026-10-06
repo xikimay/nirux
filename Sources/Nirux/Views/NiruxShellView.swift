@@ -815,7 +815,12 @@ extension NiruxShellView {
     func focusActiveTerminal(in window: NSWindow?, editorTakesKeyboard: Bool = false) {
         guard let col = activeWorkspace?.columns[safe: activeWorkspace?.focusedIndex ?? 0],
               let window else { return }
-        if let webView = col.webViewColumn {
+        if col.isFindBarOpen {
+            // An open find bar keeps the keyboard: text typed for it must
+            // reach neither the agent nor the page's shortcuts. A click on
+            // the terminal or page takes it back.
+            if !col.isEditingFind { col.findBar?.focusField() }
+        } else if let webView = col.webViewColumn {
             window.makeFirstResponder(webView.webView)
         } else if let editor = col.editorColumn {
             if editorTakesKeyboard { editor.takeKeyboard() }
@@ -823,10 +828,6 @@ extension NiruxShellView {
             window.makeFirstResponder(board.view)
         } else if let review = col.branchReview {
             review.view.takeKeyboard()
-        } else if col.isFindBarOpen {
-            // An open find bar keeps the keyboard: text typed for it must
-            // not reach the agent. A click on the terminal takes it back.
-            if !col.isEditingFind { col.findBar?.focusField() }
         } else if let terminal = col.terminalView {
             window.makeFirstResponder(terminal)
         }

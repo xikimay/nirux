@@ -82,8 +82,8 @@ final class WebContentKeyRoutingTests: XCTestCase {
         XCTAssertFalse(passes(editor: false, "\r", [.command, .option], keyCode: 0x24))
     }
 
-    /// Edit > Find in Terminal and Find Next/Previous act on terminal
-    /// columns only; Monaco's find widget and web pages keep the chords.
+    /// Monaco's find widget and web pages get the find chords first; Edit >
+    /// Find and Find Next/Previous only get what a page leaves unhandled.
     func testFindChordsReachWebContentInEditorAndBrowser() {
         for editor in [true, false] {
             XCTAssertTrue(passes(editor: editor, "f", .command))

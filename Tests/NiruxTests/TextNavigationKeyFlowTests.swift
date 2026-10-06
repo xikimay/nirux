@@ -24,7 +24,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
 
     func testCommandArrowsEditTheEditorText() throws {
         try UIFlowHarness.run { harness in
-            try withApp(on: harness) {
+            try harness.withApp {
                 let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
                 let (editor, webView) = try openEditorWithKeyboard(in: harness)
                 let editorIndex = workspace.focusedIndex
@@ -50,7 +50,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
     /// The diff hides Monaco: Cmd+Arrow navigates again.
     func testCommandArrowsNavigateFromTheEditorDiff() throws {
         try UIFlowHarness.run { harness in
-            try withApp(on: harness) {
+            try harness.withApp {
                 let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
                 let (editor, webView) = try openEditorWithKeyboard(in: harness)
                 let editorIndex = workspace.focusedIndex
@@ -66,7 +66,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
 
     func testCommandArrowsEditTheAddressBar() throws {
         try UIFlowHarness.run { harness in
-            try withApp(on: harness) {
+            try harness.withApp {
                 let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
                 let page = URL(fileURLWithPath: harness.repo + "/README.md").absoluteString
                 workspace.addColumn(webViewURL: page)
@@ -91,7 +91,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
     /// take it: on a page that scrolls, Cmd+Down switches workspace.
     func testCommandArrowsNavigateOutsideText() throws {
         try UIFlowHarness.run { harness in
-            try withApp(on: harness) {
+            try harness.withApp {
                 let shell = harness.shell
                 let workspace = try XCTUnwrap(shell.activeWorkspace)
                 let page = harness.repo + "/long.html"
@@ -241,26 +241,6 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         ))
     }
 
-    /// Runs `body` with the app's key interceptor and menu bar on the
-    /// harness window, as `applicationDidFinishLaunching` sets them up.
-    private func withApp(on harness: UIFlowHarness, _ body: () throws -> Void) throws {
-        let app = NiruxApp()
-        app.shell = harness.shell
-        app.mainWindow = harness.window
-        let previousMenu = NSApp.mainMenu
-        let previousDelegate = NSApp.delegate
-        NSApp.mainMenu = app.makeMainMenu()
-        // Menu items without a target reach the app delegate.
-        NSApp.delegate = app
-        let monitors = app.setupKeyInterceptor()
-        defer {
-            monitors.forEach(NSEvent.removeMonitor)
-            NSApp.delegate = previousDelegate
-            NSApp.mainMenu = previousMenu
-        }
-        try body()
-    }
-
     /// Opens README.md in a new editor column, its Monaco with the keyboard.
     private func openEditorWithKeyboard(in harness: UIFlowHarness) throws -> (EditorColumn, WKWebView) {
         let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
@@ -274,26 +254,11 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         return (editor, webView)
     }
 
-    /// A key press, through the app's event dispatch and so its key
-    /// interceptor. The test process never has a key window: a key the
-    /// interceptor returns to AppKit reaches the menu, not the window's
-    /// views.
     private func press(_ arrow: Arrow, _ modifiers: NSEvent.ModifierFlags, in harness: UIFlowHarness) {
-        let characters = String(Character(UnicodeScalar(arrow.character)!))
-        guard let event = NSEvent.keyEvent(
-            with: .keyDown,
-            location: .zero,
-            // Arrow keys always carry these flags.
-            modifierFlags: modifiers.union([.function, .numericPad]),
-            timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: harness.window.windowNumber,
-            context: nil,
-            characters: characters,
-            charactersIgnoringModifiers: characters,
-            isARepeat: false,
-            keyCode: arrow.rawValue
-        ) else { return XCTFail("no key event") }
-        NSApp.sendEvent(event)
+        // Arrow keys always carry these flags.
+        harness.press(
+            String(Character(UnicodeScalar(arrow.character)!)), keyCode: arrow.rawValue, modifiers.union([.function, .numericPad])
+        )
     }
 
     /// Asks Monaco for its selection until it is `expected`: the page
