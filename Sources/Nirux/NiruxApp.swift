@@ -64,6 +64,12 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         if args.count >= 4, args[1] == "--hook", args[2] == "claude", args[3] == "--statusline" {
             exit(ClaudeStatusLineCLI.run())
         }
+        // Tools server mode: Claude Code runs `Nirux --hook claude --mcp`
+        // for the agents Nirux launches (NiruxMCPServer), spelled as a hook
+        // for the same reason.
+        if args.count >= 4, args[1] == "--hook", args[2] == "claude", args[3] == "--mcp" {
+            exit(NiruxMCPServer.run())
+        }
         if args.count >= 3, args[1] == "--hook", let kind = AgentHookEvent.Kind(rawValue: args[2]) {
             let payload = args.count > 3 ? args.last : nil
             exit(AgentHookCLI.run(kind: kind, payload: payload))

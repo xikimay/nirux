@@ -25,6 +25,8 @@ extension NiruxShellView {
     /// `briefFile` is the space brief (see `SpaceBrief`), appended to the
     /// system prompt on every launch: a resumed conversation keeps the prompt
     /// it recorded until it compacts, then uses this one.
+    /// `niruxExecutable` serves the agents' tools: the project's history
+    /// search (see `NiruxMCPServer`). Every launch gets them by default.
     /// `handoverPrompt` is appended as a single-quoted positional argument
     /// (used by the worktree handover flow).
     ///
@@ -36,6 +38,7 @@ extension NiruxShellView {
         mode: ClaudeLaunchMode,
         sessionName: String? = nil,
         briefFile: String? = nil,
+        niruxExecutable: String? = NiruxShellView.niruxExecutable,
         shell: String = PtySession.defaultShell,
         handoverPrompt: String? = nil
     ) -> String {
@@ -55,10 +58,21 @@ extension NiruxShellView {
         if let briefFile {
             parts.append(contentsOf: Self.claudeAppendSystemPromptArguments(briefFile: briefFile, shell: shell))
         }
+        if let niruxExecutable {
+            parts.append(contentsOf: NiruxMCPServer.claudeArguments(executable: niruxExecutable).map(Self.shellQuotedArgument))
+        }
         if let prompt = handoverPrompt {
             parts.append(Self.shellQuotedArgument(prompt))
         }
         return parts.joined(separator: " ")
+    }
+
+    /// This app's binary, which serves the agents' tools (see
+    /// `NiruxMCPServer`). Nil in a host that isn't Nirux (xctest), which
+    /// can't serve them.
+    static var niruxExecutable: String? {
+        guard let url = Bundle.main.executableURL, url.lastPathComponent == "Nirux" else { return nil }
+        return url.path
     }
 
     static func currentClaudeLaunchMode() -> ClaudeLaunchMode {
