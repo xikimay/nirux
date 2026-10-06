@@ -116,12 +116,16 @@ enum ProjectHistory {
     ) -> String? {
         guard let path = recordPath ?? eventPath else { return nil }
         if let eventPath, eventPath != path { return nil }
+        return isClaudeTranscript(path, sessionID: sessionID, projectsFolders: projectsFolders) ? path : nil
+    }
+
+    /// `<session id>.jsonl` in a folder of one of Claude's `projects`
+    /// folders, not reached through a link or `..`.
+    static func isClaudeTranscript(_ path: String, sessionID: String, projectsFolders: [String]) -> Bool {
         let url = URL(fileURLWithPath: path)
         let projects = url.deletingLastPathComponent().deletingLastPathComponent().path
-        guard url.lastPathComponent == "\(sessionID).jsonl", !path.contains("/../"), !path.contains("/./"),
-              projectsFolders.contains(projects), !isSymbolicLink(url.deletingLastPathComponent().path)
-        else { return nil }
-        return path
+        return url.lastPathComponent == "\(sessionID).jsonl" && !path.contains("/../") && !path.contains("/./")
+            && projectsFolders.contains(projects) && !isSymbolicLink(url.deletingLastPathComponent().path)
     }
 
     /// A folder of Claude's `projects` folder must be one, not a link to

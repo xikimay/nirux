@@ -71,14 +71,15 @@ enum HandoverFile {
         return path
     }
 
-    /// Move `source` to `destinationDirectory/filename`. On success the
-    /// source is removed. On failure the source stays in place, but a stale
-    /// entry at the destination may already have been removed.
+    /// Move `source` to `destinationDirectory/filename`, and return what it
+    /// held. On success the source is removed. On failure the source stays
+    /// in place, but a stale entry at the destination may already have been
+    /// removed.
     static func transfer(
         from source: String,
         toDirectory destinationDirectory: String,
         filename: String
-    ) -> Result<Void, TransferError> {
+    ) -> Result<Data, TransferError> {
         guard isAllowedSourcePath(source),
               let tmpReal = "/tmp".realPath,
               (source as NSString).deletingLastPathComponent.realPath == tmpReal
@@ -116,7 +117,7 @@ enum HandoverFile {
         if lstat(source, &current) == 0, current.st_dev == info.st_dev, current.st_ino == info.st_ino {
             unlink(source)
         }
-        return .success(())
+        return .success(content)
     }
 
     /// Writes a handover Nirux composed itself (New Task…) to

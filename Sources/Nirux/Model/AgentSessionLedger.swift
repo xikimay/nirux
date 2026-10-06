@@ -191,6 +191,24 @@ final class AgentSessionLedger {
         return result
     }
 
+    /// Each Claude session's space, by session id: the space of its most
+    /// recent record across the state folder's files (a moved workspace
+    /// leaves a stale line in its former space's file), and whether that
+    /// record is open. Read from disk, off the main thread.
+    nonisolated static func claudeSessions(stateDirectory: URL) -> [String: (spaceID: String, isActive: Bool)] {
+        let projects = stateDirectory.appendingPathComponent("projects", isDirectory: true)
+        var latest: [String: (spaceID: String, record: AgentSessionRecord)] = [:]
+        for spaceID in ((try? FileManager.default.contentsOfDirectory(atPath: projects.path)) ?? []).sorted() {
+            guard let url = fileURL(spaceID: spaceID, stateDirectory: stateDirectory),
+                  let data = HistorySearch.readRegularFile(url.path, maxBytes: maxFileBytes) else { continue }
+            for record in parse(data).records.values where record.agent == .claude {
+                if let kept = latest[record.sessionID], !isMoreRecent(record, kept.record) { continue }
+                latest[record.sessionID] = (spaceID, record)
+            }
+        }
+        return latest.mapValues { ($0.spaceID, $0.record.isActive) }
+    }
+
     nonisolated private static func isMoreRecent(_ lhs: AgentSessionRecord, _ rhs: AgentSessionRecord) -> Bool {
         if lhs.lastActivityAt != rhs.lastActivityAt { return lhs.lastActivityAt > rhs.lastActivityAt }
         if lhs.startedAt != rhs.startedAt { return lhs.startedAt > rhs.startedAt }

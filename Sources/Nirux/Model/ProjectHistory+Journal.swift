@@ -94,11 +94,28 @@ final class ProjectHistoryJournal: @unchecked Sendable {
         return true
     }
 
+    /// A transcript line (or memory file version) already journaled.
+    func hasWritten(_ uuid: String) -> Bool {
+        writtenLines.contains(uuid)
+    }
+
     /// When Claude session `session` joined the project (a workspace moved
     /// here, a session resumed here): its turns that ended before are
     /// another project's, or from before.
     func joined(_ session: String) -> Date? {
         joins[session]
+    }
+
+    /// History turned on again: joins recorded while it was on before
+    /// don't apply to what was said since.
+    @discardableResult
+    func clearJoins() -> Bool {
+        var state = Self.readState(in: folder)
+        guard state.joins?.isEmpty == false else { return true }
+        state.joins = nil
+        guard Self.writeState(state, in: folder) else { return false }
+        joins = [:]
+        return true
     }
 
     /// Records, in `state.json`, that `session` joined the project at

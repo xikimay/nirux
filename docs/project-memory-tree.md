@@ -103,9 +103,10 @@ One message per entry, of four kinds:
 - `peer`: a message another session sent this one (`origin.kind` `peer`, its
   `origin.name` kept as the sender), and what Nirux types or delivers to
   launch a workspace: its startup prompt ("Read .claude-handover.md for full
-  context…", exactly `agentStartupPrompt`'s text), and the handover file
-  itself, journaled when Nirux delivers it, since the agent then reads it
-  with a tool the journal doesn't keep;
+  context…", exactly `agentStartupPrompt`'s text), and the handover itself,
+  journaled as Nirux delivers it, since the agent then reads it with a tool
+  the journal doesn't keep (the text Nirux wrote, not the file, which the
+  agent can change);
 - `talk`: a turn's final reply, the text parts after the turn's last tool
   call;
 - `note`: a Claude Code memory imported at activation (section 2.6).
@@ -249,6 +250,7 @@ started before that keep it in their system prompt until they end.
 ```
 <state dir>/projects/<space id>/memory/
   enabled                 the date history was turned on; present while it is on
+  import.json             where an import reads, until it is done
   log/YYYY-MM-DD.jsonl    one message per line: {i, kind, branch, from, text, size, date, session, source}
   tree/YYYY-MM-DD.jsonl   one node per line:    {l, i, text, size}
   forgotten.jsonl         ids of messages the user forgot
@@ -327,12 +329,24 @@ The import reads, in date order:
    with `git worktree list`, any folder inside a checkout up to a nested
    `.git`, a removed `<repository>.<x>` worktree beside the main checkout
    (the name `GitWorktree.create` gives) when the session's first branch
-   matches `x`, and ledger sessions outside the default project.
+   matches `x`, and ledger sessions outside the default project. A session
+   belongs to the project its latest ledger record is in, when it has one,
+   so a repository two projects share, or a workspace moved, gives each its
+   own; a transcript path the ledger names must be `<session id>.jsonl` in
+   Claude's `projects` folder.
 
-Turns are journaled by their final reply's date, memories first; transcripts
-already journaled are not read again, so the import runs once. Without the
-import, the journal starts empty and the view says so. Turning history off
-and on again leaves out what was said meanwhile.
+Turns are journaled by their last message's date, memories first; transcripts
+already journaled are not read again, so the import runs once. Turning on and
+importing are one step on the journal's queue, recorded in `import.json` until
+done: no turn's end is read in between. An import a crash or a failed write
+cut short goes on before the live feed reads anything more of the project
+(tried again at most every 5 minutes), and at the next launch. A session still
+running keeps a last turn Claude Code hasn't marked for the live feed: in
+Nirux, as its ledger says, and it may end just before history is on; outside
+Nirux, when its transcript was written in the last 10 minutes. Without the
+import, the journal starts empty and the view says so, and an import cut short
+earlier is dropped. Turning history off and on again without the import leaves
+out what was said meanwhile; with it, the gap is imported.
 
 ## 3. The tree and the compactor
 
