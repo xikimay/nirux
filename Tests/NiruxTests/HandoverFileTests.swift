@@ -32,7 +32,7 @@ final class HandoverFileTests: XCTestCase {
         try content.write(toFile: path, atomically: false, encoding: .utf8)
     }
 
-    private func transfer(_ source: String) -> Result<Void, HandoverFile.TransferError> {
+    private func transfer(_ source: String) -> Result<Data, HandoverFile.TransferError> {
         HandoverFile.transfer(from: source, toDirectory: worktree, filename: ".claude-handover.md")
     }
 
@@ -47,7 +47,7 @@ final class HandoverFileTests: XCTestCase {
         let source = tmpPath()
         try write("# Session Handover\n", to: source)
 
-        XCTAssertNoThrow(try transfer(source).get())
+        XCTAssertEqual(String(decoding: try transfer(source).get(), as: UTF8.self), "# Session Handover\n", "what was moved")
         XCTAssertEqual(try String(contentsOfFile: destination, encoding: .utf8), "# Session Handover\n")
         XCTAssertFalse(FileManager.default.fileExists(atPath: source))
         let permissions = try FileManager.default.attributesOfItem(atPath: destination)[.posixPermissions] as? Int

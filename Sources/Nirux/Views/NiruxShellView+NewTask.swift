@@ -83,6 +83,7 @@ extension NiruxShellView {
             agent: request.agent,
             profileID: request.projectID,
             deliveredHandover: created.handoverError == nil,
+            handoverText: created.handover,
             worktreeBranch: created.checkedOutBranch
         )
         saveState()

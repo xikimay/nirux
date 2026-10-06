@@ -145,10 +145,10 @@ extension HistorySearch {
     }
 
     /// The project's transcripts, the most recently written first, at most
-    /// `maxTranscripts`. The heads read to find each one's `cwd` count
-    /// against `budget`.
+    /// `limit`. The heads read to find each one's `cwd` count against
+    /// `budget`.
     static func transcripts(
-        in scope: Scope, claudeProjects: URL, budget: inout TranscriptSearch.Budget
+        in scope: Scope, claudeProjects: URL, budget: inout TranscriptSearch.Budget, limit: Int = maxTranscripts
     ) -> [Transcript] {
         let records = Dictionary(scope.records.map { ($0.sessionID, $0) }) { first, _ in first }
         var bySession: [String: Transcript] = [:]
@@ -176,7 +176,7 @@ extension HistorySearch {
         candidates.sort { $0.modified != $1.modified ? $0.modified > $1.modified : $0.path < $1.path }
         // A session id in two folders: the most recently written wins.
         for candidate in candidates where bySession[candidate.sessionID] == nil {
-            guard bySession.count < maxTranscripts, !budget.isSpent else { break }
+            guard bySession.count < limit, !budget.isSpent else { break }
             guard let start = sessionStart(ofTranscriptAt: candidate.path, budget: &budget),
                   scope.contains(start.cwd, branch: start.branch)
             else { continue }
@@ -186,7 +186,7 @@ extension HistorySearch {
             )
         }
         let sorted = bySession.values.sorted { $0.modified != $1.modified ? $0.modified > $1.modified : $0.path < $1.path }
-        return Array(sorted.prefix(maxTranscripts))
+        return Array(sorted.prefix(limit))
     }
 
     /// The folder Claude files a session started in `path` under: every
@@ -240,7 +240,7 @@ extension HistorySearch {
         return paths.filter { seen.insert($0).inserted }
     }
 
-    private static func regularFileModified(_ path: String) -> Date? {
+    static func regularFileModified(_ path: String) -> Date? {
         var info = stat()
         guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return nil }
         return Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec) + TimeInterval(info.st_mtimespec.tv_nsec) / 1e9)

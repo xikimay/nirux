@@ -21,6 +21,7 @@ extension NiruxShellView {
         initialAgentUUID: String = UUID().uuidString,
         missionID: String? = nil,
         deliveredHandover: Bool = false,
+        handoverText: String? = nil,
         worktreeBranch: String? = nil
     ) {
         let snapshot: NSImageView? = {
@@ -56,7 +57,9 @@ extension NiruxShellView {
 
         // Launch agent in the new workspace's terminal
         if let agent {
-            launchAgent(agent, in: workspace, deliveredHandover: deliveredHandover, worktreeBranch: worktreeBranch)
+            launchAgent(
+                agent, in: workspace, deliveredHandover: deliveredHandover, handoverText: handoverText, worktreeBranch: worktreeBranch
+            )
         }
 
         if let snapshot {
@@ -107,6 +110,7 @@ extension NiruxShellView {
         _ agent: NiruxApp.WorkspaceAgent,
         in workspace: WorkspaceState,
         deliveredHandover: Bool,
+        handoverText: String?,
         worktreeBranch: String?
     ) {
         guard let col = workspace.columns[safe: workspace.focusedIndex] else { return }
@@ -117,6 +121,12 @@ extension NiruxShellView {
         )
 
         let brief = spaceBriefInjection(for: workspace)
+        if agent == .claude, deliveredHandover, let handoverText {
+            // What Nirux wrote, not the file: the agent may change it.
+            projectHistory.handoverDelivered(
+                spaceID: workspace.profileID, name: Self.handoverFilename(for: agent), text: handoverText, branch: worktreeBranch
+            )
+        }
         let cmd: String
         switch agent {
         case .claude:

@@ -78,7 +78,7 @@ extension NiruxShellView {
                 ))
             }
         }
-        guard !sessions.isEmpty else { return }
+        // Even with none: an import a crash cut short goes on.
         projectHistory.catchUp(sessions)
     }
 }

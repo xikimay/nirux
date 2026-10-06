@@ -15,7 +15,7 @@ final class ProjectHistoryCenter {
         var pollInterval: TimeInterval = 0.25
     }
 
-    private let worker: Worker
+    let worker: Worker
 
     init(stateDirectory: @escaping @Sendable () -> URL = { Persistence.stateDirectory }, timing: Timing = Timing()) {
         worker = Worker(stateDirectory: stateDirectory, timing: timing)
@@ -32,11 +32,13 @@ final class ProjectHistoryCenter {
         Self.enqueue(worker) { $0.request(spaceID: spaceID, path: transcriptPath, session: sessionID, sessionEnded: true) }
     }
 
-    /// At launch: turns written while Nirux was closed. Only transcripts
-    /// the journal already reads, or sessions started after history was
-    /// turned on, so nothing from before is imported.
+    /// At launch: an import a crash cut short, then turns written while
+    /// Nirux was closed. Only transcripts the journal already reads, or
+    /// sessions started after history was turned on, so nothing from
+    /// before is imported.
     func catchUp(_ sessions: [CatchUp]) {
         Self.enqueue(worker) { worker in
+            worker.resumePendingImports()
             for session in sessions {
                 worker.catchUp(session)
             }
@@ -90,7 +92,7 @@ final class ProjectHistoryCenter {
 
     /// Not from a closure formed in this main-actor class: Swift 6.1 would
     /// isolate it to the main actor and trap on the worker's queue.
-    private nonisolated static func enqueue(_ worker: Worker, _ work: @escaping @Sendable (Worker) -> Void) {
+    nonisolated static func enqueue(_ worker: Worker, _ work: @escaping @Sendable (Worker) -> Void) {
         worker.queue.async { work(worker) }
     }
 
@@ -107,6 +109,10 @@ final class ProjectHistoryCenter {
         /// Transcripts waiting for their file to be quiet, by path.
         private var waits: [String: Wait] = [:]
         private var idleCallbacks: [@Sendable () -> Void] = []
+        /// An import a crash cut short was looked for (`resumePendingImports`).
+        var checkedPendingImports = false
+        /// When each project's cut-short import was last tried again.
+        var importAttempts: [String: Date] = [:]
 
         private struct Wait {
             var spaceID: String
@@ -142,6 +148,7 @@ final class ProjectHistoryCenter {
         private func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
 
         func request(spaceID: String, path: String, session: String?, sessionEnded: Bool) {
+            resumePendingImports()
             guard ProjectHistory.isEnabled(spaceID: spaceID, stateDirectory: stateDirectory()) else { return }
             if var wait = waits[path] {
                 wait.spaceID = spaceID
@@ -179,6 +186,7 @@ final class ProjectHistoryCenter {
         }
 
         func catchUp(_ session: CatchUp) {
+            resumePendingImports()
             let spaceID = session.spaceID, path = session.transcriptPath, startedAt = session.startedAt
             let directory = stateDirectory()
             guard ProjectHistory.isEnabled(spaceID: spaceID, stateDirectory: directory),
@@ -210,6 +218,17 @@ final class ProjectHistoryCenter {
                 guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { continue }
                 guard journal.start(path, at: UInt64(info.st_size)) else { return false }
             }
+            // Turned on without the import: one cut short earlier is dropped,
+            // and joins from when it was on before don't apply.
+            try? FileManager.default.removeItem(at: folder.appendingPathComponent(ProjectHistory.importFileName))
+            if !ProjectHistory.isEnabled(spaceID: spaceID, stateDirectory: directory) {
+                guard journal.clearJoins() else { return false }
+            }
+            return writeEnabled(in: folder)
+        }
+
+        /// History is on from now.
+        func writeEnabled(in folder: URL) -> Bool {
             let stamp = Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
             return ProjectHistory.writeAtomically(stamp, to: folder.appendingPathComponent(ProjectHistory.enabledFileName))
         }
@@ -226,7 +245,7 @@ final class ProjectHistoryCenter {
             callbacks.forEach { $0() }
         }
 
-        private func journal(for spaceID: String, creating: Bool = false) -> ProjectHistoryJournal? {
+        func journal(for spaceID: String, creating: Bool = false) -> ProjectHistoryJournal? {
             if let journal = journals[spaceID] { return journal }
             guard let folder = ProjectHistory.folder(spaceID: spaceID, stateDirectory: stateDirectory()) else { return nil }
             var info = stat()
@@ -244,6 +263,8 @@ final class ProjectHistoryCenter {
                 journals[spaceID] = nil
                 return
             }
+            // An import cut short goes on first: nothing it owes is passed over.
+            guard resumeImport(spaceID: spaceID) else { return }
             let offset = offset(for: path)
             guard let result = ProjectHistory.TurnReader.read(
                 path: path, from: offset, lastTurnEnded: lastTurnEnded, session: session
@@ -253,12 +274,10 @@ final class ProjectHistoryCenter {
             }
             if result.skippedLongLine { NiruxDebugLog.log("ProjectHistory: skipped a line too long in \(path)") }
             // Only what was said since history was turned on (the import
-            // brings the past), and since the session joined the project.
+            // brings the past), or since the session joined the project.
             let sessionID = session ?? URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
-            let since = max(
-                ProjectHistory.enabledDate(spaceID: spaceID, stateDirectory: stateDirectory()) ?? .distantPast,
-                journal.joined(sessionID) ?? .distantPast
-            )
+            let since = journal.joined(sessionID)
+                ?? ProjectHistory.enabledDate(spaceID: spaceID, stateDirectory: stateDirectory()) ?? .distantPast
             for turn in result.turns {
                 let ended = turn.messages.last?.date ?? .distantPast
                 if let until, ended > until { return }
@@ -281,7 +300,7 @@ final class ProjectHistoryCenter {
         /// Where reading `path` starts: the furthest any project's journal
         /// reached, so a session whose workspace moved to another project
         /// doesn't give the new one the turns the old one has.
-        private func offset(for path: String) -> UInt64 {
+        func offset(for path: String) -> UInt64 {
             openEnabledJournals()
             return journals.values.map { $0.offset(for: path) }.max() ?? 0
         }

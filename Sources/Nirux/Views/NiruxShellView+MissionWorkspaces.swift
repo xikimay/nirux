@@ -24,6 +24,7 @@ extension NiruxShellView {
             // from a URL: HandoverFile only accepts the user's own regular file
             // directly in /tmp, never a symlink or hard link.
             var deliveredHandover = false
+            var handoverText: String?
             var handoverError: HandoverFile.TransferError?
             if let path, let handoverPath {
                 switch HandoverFile.transfer(
@@ -31,7 +32,9 @@ extension NiruxShellView {
                     toDirectory: path,
                     filename: Self.handoverFilename(for: agent ?? .claude)
                 ) {
-                case .success: deliveredHandover = true
+                case .success(let content):
+                    deliveredHandover = true
+                    handoverText = String(decoding: content, as: UTF8.self)
                 case .failure(let error): handoverError = error
                 }
             }
@@ -90,6 +93,7 @@ extension NiruxShellView {
                         initialAgentUUID: childAgentUUID,
                         missionID: missionID,
                         deliveredHandover: deliveredHandover,
+                        handoverText: handoverText,
                         worktreeBranch: checkedOutBranch
                     )
                     self.saveState()
