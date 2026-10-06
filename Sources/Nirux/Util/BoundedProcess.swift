@@ -90,7 +90,8 @@ enum BoundedProcess {
     }
 
     /// `run`, keeping what a stopped process wrote, with `standardInput`
-    /// written to its standard input (none: it inherits Nirux's), a
+    /// written to its standard input, or else `streamingInput` as the run
+    /// goes (neither: it inherits Nirux's), a
     /// `cancellation` to stop it, an `idleTimeout` past which a silent
     /// standard output stops it, and `onStandardOutput` called with each
     /// chunk of standard output as it is read, on the waiting thread (the
@@ -103,6 +104,7 @@ enum BoundedProcess {
         currentDirectoryURL: URL,
         environment: Environment = .inherited(adding: [:]),
         standardInput: Data? = nil,
+        streamingInput: StreamingInput? = nil,
         timeout: TimeInterval = 30,
         idleTimeout: TimeInterval? = nil,
         captureStandardError: Bool = false,
@@ -138,7 +140,7 @@ enum BoundedProcess {
 
         let output = Pipe()
         let errorOutput = captureStandardError ? Pipe() : nil
-        let input = standardInput == nil ? nil : Pipe()
+        let input = standardInput == nil && streamingInput == nil ? nil : Pipe()
         // Keep terminals forked meanwhile (forkpty) from inheriting a write
         // end and holding the pipe open for their whole lifetime.
         for pipe in [output, errorOutput, input].compactMap({ $0 }) {
@@ -171,6 +173,11 @@ enum BoundedProcess {
         }
         writer?.start()
         defer { writer?.finish() }
+        let streamWriter = writer != nil ? nil : input.flatMap { input in
+            streamingInput.map { StreamWriter(input: $0, pipe: input) }
+        }
+        streamWriter?.start()
+        defer { streamWriter?.finish() }
 
         let (standardOutput, standardError, stop) = drain(
             output: output,

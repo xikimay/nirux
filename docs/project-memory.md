@@ -1,8 +1,10 @@
 # Project Memory
 
 Status: decided with the user on 2026-10-05. The list shipped first, read-only;
-changing it (section 4) came second. The History tab, greyed for now, is
-designed separately.
+changing it (section 4) came second. On 2026-10-06 the user chose to keep
+their decisions, read from the project's sessions, as memories here (section
+5), designed in `project-memory-tree.md`, section 3.8. The History tab,
+greyed for now, is optional and designed there too.
 
 Agents learn about a repository from several files: the Nirux project brief,
 the repository's `CLAUDE.md` and `AGENTS.md`, and the auto-memory Claude Code
@@ -137,4 +139,47 @@ shared with Nirux.
   read-only, not UTF-8, or past 4 MB, and a brief that would pass the 16,000
   characters sessions get are left alone, with a message.
 - Nirux writes only the files the user acted on: the brief, the memory's
-  file, `MEMORY.md`.
+  file, `MEMORY.md`; and, while **Keep my decisions** is on, its own decision
+  files and their index lines (section 5).
+
+## 5. Decisions Nirux keeps
+
+Off by default. **Keep my decisions**, in the panel, turns on the project's
+history (`project-memory-tree.md`, section 2) for the repository the panel
+shows: from then on, Nirux reads each turn of the project's Claude sessions
+for the user's decisions, those made by agreeing to a proposal included,
+and keeps them as memories of that repository, in the background, with the
+user's plan (about $3 to $5 a week here, shown next to the switch). One
+project per memory folder.
+
+- **Files**: one per topic, `decisions-<topic>.md`, of type `project`, at
+  most 12 topics and "Other", each a When relevant item like any other
+  memory, with one line in `MEMORY.md`, added once, before the index's first
+  line, when the file is created. In the file, one line per decision, dated,
+  ending with Nirux's mark and its source message
+  (`[d12 · msg 4521 after 4520]`).
+- **Agents** read them as they read any memory: the index at their start,
+  a topic's file when their work touches it. Nothing is added to their
+  prompts. Codex doesn't read Claude Code's memory, so it doesn't get them.
+- **A later decision replaces the one it changes**: Nirux takes the old
+  line out and adds the new one. A `plan` decision (an order, a next step)
+  leaves after 14 days.
+- **The user's edits win.** The switch, Edit and Delete… work on these files
+  as on any memory, and Nirux can't tell the user from an agent or Claude
+  Code's own upkeep: any change counts as the user's. Nirux changes only the
+  lines that carry its mark and still read as it wrote them. An edited line
+  becomes the decision's text and is never changed or removed by Nirux,
+  even when a later decision replaces it (the new line comes after it). A
+  removed line removes its decision: Nirux doesn't write it again, and for
+  30 days tells the reading not to bring it back unless the user states it
+  anew. A file deleted, or switched to
+  Always (its text goes to the brief, where Nirux never writes), retires its
+  topic: no new file for it until the user picks **Write Again** by the
+  switch. Lines the user adds stay as written.
+- **The index** stays under what sessions read: at most 13 lines for the
+  decisions, and none added once `MEMORY.md` would pass 180 lines or 23,000
+  bytes; the switch then says how many decisions wait, and which topics the
+  index doesn't list.
+- While Claude Code's memory is off for the repository (section 3), or its
+  folder is gone, the reading pauses, and the switch says so; the turns wait
+  for it.
