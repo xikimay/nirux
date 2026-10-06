@@ -149,6 +149,64 @@ final class BranchReviewPageScriptTests: XCTestCase {
         XCTAssertEqual(try call("testsSummary", tests), #"{"lines":"Tests +578 for code +458","notes":["#
             + #""4 of 44 new names in no test: a, B.c, d, +1.","Names unknown in Big.swift.","2 test files not read."]}"#)
     }
+
+    /// A comment's lines: of one hunk, up to 100, in the page's order
+    /// whichever way they were dragged; an unchanged line by either number.
+    func testCommentRangeTakesTheLinesOfOneHunk() throws {
+        let hunks: [[String: Any]] = [
+            ["oldStart": 10, "newStart": 20, "lines": [
+                ["kind": "context", "text": "a"], ["kind": "removed", "text": "b"], ["kind": "added", "text": "c"],
+                ["kind": "noNewlineMarker", "text": ""], ["kind": "context", "text": "d"]
+            ]],
+            ["oldStart": 50, "newStart": 60, "lines": (0..<101).map { ["kind": "added", "text": "x\($0)"] }]
+        ]
+        func range(_ start: Int, _ side: String, _ end: Int, _ endSide: String) -> [String: Any] {
+            ["start": start, "side": side, "end": end, "endSide": endSide]
+        }
+        XCTAssertEqual(
+            try call("commentRange", hunks, range(22, "additions", 11, "deletions")),
+            #"{"start":{"side":"deletions","line":11},"end":{"side":"additions","line":22},"count":3}"#
+        )
+        XCTAssertEqual(
+            try call("commentRange", hunks, range(10, "deletions", 10, "deletions")),
+            #"{"start":{"side":"additions","line":20},"end":{"side":"additions","line":20},"count":1}"#
+        )
+        XCTAssertEqual(try call("commentRange", hunks, range(20, "additions", 60, "additions")), #"{"problem":"Comment on the lines of one hunk at a time."}"#)
+        XCTAssertEqual(try call("commentRange", hunks, range(60, "additions", 160, "additions")), #"{"problem":"Comment on up to 100 lines at a time."}"#)
+        XCTAssertEqual(
+            try call("commentRange", hunks, range(60, "additions", 159, "additions")),
+            #"{"start":{"side":"additions","line":60},"end":{"side":"additions","line":159},"count":100}"#
+        )
+        XCTAssertEqual(try call("commentRange", hunks, range(30, "additions", 30, "additions")), #"{"problem":"These lines aren’t in the diff any more."}"#)
+    }
+
+    func testCommentLabelsCountsAndAnnotations() throws {
+        let line: [String: Any] = ["side": "additions", "line": 12]
+        let removed: [String: Any] = ["side": "deletions", "line": 7]
+        XCTAssertEqual(try call("linesLabel", line, line), #""line 12""#)
+        XCTAssertEqual(try call("linesLabel", line, ["side": "additions", "line": 14]), #""lines 12–14""#)
+        XCTAssertEqual(try call("linesLabel", removed, removed), #""removed line 7""#)
+        XCTAssertEqual(try call("linesLabel", removed, line), #""removed line 7 to line 12""#)
+        XCTAssertEqual(try call("linesLabel", NSNull(), NSNull()), #""the file""#)
+        XCTAssertEqual(try call("placementNote", ["placement": "outdated"]), #""Outdated: its lines changed.""#)
+        XCTAssertEqual(try call("placementNote", ["placement": "placed"]), "null")
+
+        let comments: [[String: Any]] = [
+            ["id": "c1", "state": "unsent", "file": 0, "placement": "placed", "end": line],
+            ["id": "c2", "state": "sent", "file": 0, "placement": "outdated"],
+            ["id": "d1", "state": "draft", "file": 0, "placement": "placed", "end": removed],
+            ["id": "c3", "state": "unsent", "file": 1, "placement": "placed", "end": line],
+            ["id": "c4", "state": "unsent", "file": NSNull(), "placement": "fileGone"]
+        ]
+        XCTAssertEqual(context.evaluateScript("""
+            JSON.stringify([...ReviewPage.commentCounts(\(String(decoding: try JSONSerialization.data(withJSONObject: comments), as: UTF8.self)))])
+            """)?.toString(), "[[0,2],[1,1]]")
+        XCTAssertEqual(
+            try call("commentAnnotations", comments, 0, [["key": "e1", "file": 0, "end": line], ["key": "c1", "file": 0, "end": line]]),
+            #"[{"side":"additions","lineNumber":12,"key":"c1"},{"side":"deletions","lineNumber":7,"key":"d1"},{"side":"additions","lineNumber":12,"key":"e1"}]"#
+        )
+    }
+
     /// Reviewed (section 6.3): a mark that can't be checked still counts,
     /// and a group's checkbox marks what isn't, or clears all once all is.
     func testReviewedStatesMakeTheProgressAndTheGroupCheckbox() throws {

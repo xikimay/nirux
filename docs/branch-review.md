@@ -793,9 +793,10 @@ The rules start built in, for Swift and macOS. Per-project rules
   (section 6.2). An unsent comment can be edited and deleted. A sent one
   stays under its line, read-only, marked "Sent at db9ac66", and can only
   be deleted. (Decided by the user on 2026-10-04.) The page saves a draft a
-  moment after the last key, and sends a pending save before Comment, Save
-  or Cancel; the column applies them in order: a save arriving after them
-  would bring the draft back.
+  moment after the last key, and drops a save still waiting on Comment,
+  Save or Cancel (Comment and Save carry the text); the column applies the
+  page's requests in order: a save arriving after them would bring the
+  draft back.
 - Stored locally (section 8), anchored to the path and to the rows it covers,
   each with its kind (added, removed or context), its line in the base's
   file and in the working tree's (what `@pierre/diffs` numbers on its
@@ -864,6 +865,43 @@ The rules start built in, for Swift and macOS. Per-project rules
   long as the file differs from the base. A file the diff shows renamed
   keeps its comments; one the branch added, then renamed, reads as gone. A
   line that isn't UTF-8 compares as it reads, with U+FFFD where it isn't.
+- **On the page.** The gutter's button by a line, or a drag of it over
+  lines, opens an editor under the last of them; so does "Comment on
+  lines…", which lines selected by their numbers offer with their file.
+  Each file row has a Comment button for the whole file, which the
+  keyboard reaches: pierre's gutter button takes the pointer only. Lines
+  of two hunks, or past 100, open nothing and say why by the file; lines
+  past 32,000 bytes open an editor whose save says why. An editor saves
+  what is typed a moment after the last key; Comment (or ⌘↩) makes it a
+  comment, which then takes the focus unless it went elsewhere; Cancel
+  removes its draft (while nothing can be written, or when the removal is
+  refused, hides it until something can, and removes it then), and
+  the focus goes to the file's Comment button, without scrolling. A save
+  refused is made again once something can be written. While an editor
+  has the focus or a press, a new page of the same head waits, as for a
+  text selection: it would move the editor. Lines chosen on a page that a
+  new one replaced before the first save are saved as that page had them;
+  until then the editor shows with its file ("as the diff was"), then
+  under the lines where they are now. An editor moved as its file's diff
+  is drawn keeps the focus. A draft shows again in its editor after a
+  Reload or a crash: under its lines once its file's diff is open (its
+  row counts it until then), with its file at once when it is on the file
+  or not under its lines. Two on one line keep the order they showed in.
+  An edit whose comment was deleted elsewhere stays, as a new comment
+  where the comment last showed (on the file when it wasn't under its
+  lines; with the comments whose file is gone, saying it can't be saved,
+  once its file left the diff). An editor left idle, nothing of it
+  refused, whose draft another column made a comment, or whose edit it
+  saved, gives way to the comment. A press elsewhere ends the focus an
+  editor moving would take back. A comment shows under its last line,
+  its file's comments and those not under their lines (outdated, with
+  their lines as they were; not read yet; too large) with the file, above
+  its diff, and those whose file is gone at the top; under a line, Claude's
+  notes (section 4.3) come first. An unsent comment
+  offers Edit and Delete, a sent one ("Sent at db9ac66") Delete only;
+  Delete asks first. Each row counts its file's comments and drafts. A
+  review that can't be written takes no comment, and says why; so does a
+  Delete refused.
 - **In the column.** The page asks by ids: save a draft, make it a
   comment, edit, cancel, delete. A new comment's place goes with its saves
   until its draft exists: the file's id, and the rows the user chose (`{
