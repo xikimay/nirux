@@ -140,6 +140,8 @@ final class NiruxShellView: NSView {
     var mergeQueueLockFolder = MergeQueueLock.defaultFolder
     /// The merge queue's confirmation sheet: one at a time.
     var mergeQueueConfirmation: MergeQueueConfirmationPanel?
+    /// "Send N Comments to Agent", while it shows.
+    var reviewSendPanel: ReviewSendPanel?
     /// Projects whose ended queue the user dismissed from the status bar.
     var dismissedMergeQueueNotices: Set<String> = []
     /// A quit waiting on the running queues: asked, then waiting for them

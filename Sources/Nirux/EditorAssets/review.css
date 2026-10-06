@@ -183,6 +183,8 @@ a.chip { text-decoration: none; cursor: pointer; }
 .commits pre { margin: 4px 0 0; font: 11px/16px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Explain (section 4.3): Claude's text is neutral, labeled, never approval. */
+.send-comments { justify-self: start; }
+.send-comments[hidden] { display: none; }
 .explain-bar { display: grid; gap: 4px; }
 .explain-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-height: 24px; }
 .explain-status { flex: 1; min-width: 200px; display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 11px; line-height: 14px; }

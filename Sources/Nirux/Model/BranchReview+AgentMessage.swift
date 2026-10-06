@@ -104,6 +104,19 @@ extension BranchReview {
         return lines
     }
 
+    /// The header line of a message `agentMessage` made, found in `prompt`
+    /// (as Claude Code's UserPromptSubmit hook hands it, a paste expanded);
+    /// nil when it holds none.
+    /// The line may start with what was typed before the paste.
+    static func agentMessageHeader(in prompt: String) -> String? {
+        for line in prompt.split(whereSeparator: \.isNewline) {
+            guard let start = line.range(of: "Review comments on ")?.lowerBound else { continue }
+            let header = line[start...].trimmingCharacters(in: .whitespaces)
+            if header.hasSuffix(", from Nirux:"), header.count <= 1_000 { return header }
+        }
+        return nil
+    }
+
     /// `message` as typed into the agent's prompt: a bracketed paste, with
     /// nothing after it. The user reads it there, and submits it.
     static func agentPaste(_ message: String) -> String {

@@ -957,9 +957,22 @@ Address each comment, run the tests, commit and push. If a comment is wrong,
 say why and change nothing for it. Then say what you did for each number.
 ```
 
-- **Target:** an agent column whose process runs inside the reviewed worktree:
-  the only one, or the one the user picks from a menu. Opened from the main
-  checkout, the page never offers the coordinating agent of another worktree.
+- **Target:** an agent column whose agent works inside the reviewed
+  worktree, by its own folder (where `claude --worktree` works) or else its
+  shell's, not inside a worktree nested in it (`git worktree list`; when git
+  can't list them, nothing is offered): opened from the main checkout, the
+  page never offers the coordinating agent of another worktree. An agent
+  counts when the process tree runs one, in front or under a program in
+  front (a launcher); a column whose hooks once named one doesn't, nor one
+  waiting to be resumed. The sheet lists them all, by workspace, agent,
+  column and folder (a terminal title changes as the agent works), each
+  with why it can't take the comments now (an agent under a launcher
+  can't: Nirux can't tell when it waits at its prompt; nor one stopped or
+  in the background, its shell in front), and picks the first that can;
+  the user picks another from its menu. The pick is the column's: it
+  stays as the sheet reads the columns again (once a second at most, from
+  the metadata refresh); once it is gone, none is if the user picked it,
+  else the first that can take the comments is.
 - **"Idle at its prompt" is a new predicate.** `PtySession.agentResumeRefusal`
   doesn't fit: it refuses any agent without a failed turn, and any agent but
   `claude`. The new one keeps its at-prompt checks without the failed turn:
@@ -989,7 +1002,8 @@ say why and change nothing for it. Then say what you did for each number.
 - **Drafts don't go.** The sheet says how many it leaves out. Sending a
   comment that is being edited sends it as it was saved; the edit becomes
   the draft of a new comment where it is, so nothing typed is lost, and
-  the editor goes on as that draft. An edit that changed nothing goes.
+  the editor goes on as that draft (what was typed since its last save
+  too). An edit that changed nothing goes.
 - **Lines in the message.** A comment's quoted rows are marked by their
   kind ("+", "-", " "), and show their line breaks (LF, CR, U+2028,
   U+2029), controls and invisible characters as code points, as the page
@@ -1022,8 +1036,46 @@ say why and change nothing for it. Then say what you did for each number.
 - **A queued PR:** if the PR is in the merge queue, the sheet warns that the
   agent's push will stop the queue (`docs/project-board.md`, section 3.2).
 - Claude Code collapses a long paste into "[Pasted text #1 +14 lines]", so the
-  sheet is where the user reads what goes out.
-- Sent comments are marked "sent", with the time and the head commit.
+  sheet is where the user reads what goes out. Copy Message puts it on the
+  clipboard instead, whatever the column: for an agent the sheet refuses,
+  or a message too long for one paste.
+- **The paste** goes off the main thread: the terminal's input queue holds
+  about a kilobyte and empties as the agent reads, so one write would hold
+  the app, or stop short of `ESC[201~`. It writes to a descriptor of its
+  own (the terminal's may close meanwhile), a few hundred bytes at a time,
+  each once the terminal takes them, and only while the agent's process
+  group is in front: should the agent quit, the rest never reaches a shell
+  that would run its lines, and what it left unread is dropped. A byte at
+  a time, each once the terminal has room (it says so once one byte is
+  free: a longer write could block), the paste's markers whole. Cancel stops it, and so does a paste
+  not done within 30 seconds; the paste is then ended (`ESC[201~`) if the
+  agent is still in front and takes it, and the sheet says to clear what
+  went in. Done, the
+  column comes to the front: the user reads the message in its prompt, and
+  submits it. Send reads the comments again first: changed since the sheet
+  showed them, it shows them again instead.
+- **Sent once Claude takes it.** The comments in the message are marked
+  "sent", with the time and the head commit they went at, on the main
+  thread's next UserPromptSubmit after the paste, from the `claude` it went
+  to, whose prompt holds the message's header line (the hook gets the
+  prompt with its pastes expanded; the receiver keeps that line only). Not
+  before: pasted into a picker, or cleared from the prompt, they stay
+  unsent. Meanwhile they are in its prompt: the page's button and the
+  sheet leave them out. A prompt of that `claude` without the message
+  (Claude takes the whole input: it was cleared, or set aside, as a stash
+  Claude brings back or an automated prompt) lets them go, and the
+  message is still listened for. The paste is let go on another
+  `claude`'s prompt, a new session in that column or the
+  session's end, once that `claude` no longer runs, when the terminal
+  exits or its column closes, when a paste with the same header goes into
+  that column (a prompt couldn't tell them apart: never marked sent for
+  what the other held), or a day later. The header may follow what was
+  typed before the paste on its line.
+  Marked are those still unsent and as they went: one edited since stays
+  unsent (Claude got the text before). Not when another branch shows in
+  the review by then, nor once the review's column closed. (Chosen without
+  the user: the most conservative of "at the paste" and "on the next
+  prompt".)
 
 Rejected:
 

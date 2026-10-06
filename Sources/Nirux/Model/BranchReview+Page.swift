@@ -176,6 +176,9 @@ extension BranchReview {
             /// saved weren't, by the click that asked: the page knows its
             /// own.
             let commentProblems: [CommentProblem]
+            /// The unsent comments pasted into an agent's prompt, not
+            /// submitted yet (section 6.2): Send leaves them out.
+            var inPrompt: [String] = []
         }
 
         /// A comment or draft the page asked for that wasn't saved, by its
@@ -191,7 +194,7 @@ extension BranchReview {
     /// in `record`, and its comments (`pageComments`, unless given).
     static func review(
         of record: Record, files: [FileChange], generation: Int, problem: String?, canWrite: Bool, acknowledged: Int = 0,
-        comments: [Page.Comment]? = nil, commentProblems: [Page.CommentProblem] = []
+        comments: [Page.Comment]? = nil, commentProblems: [Page.CommentProblem] = [], inPrompt: [String] = []
     ) -> Page.Review {
         Page.Review(
             files: files.map { file in
@@ -203,7 +206,8 @@ extension BranchReview {
                 }
             },
             generation: generation, problem: problem, canWrite: canWrite, acknowledged: acknowledged,
-            comments: comments ?? pageComments(of: record, files: files), commentProblems: commentProblems
+            comments: comments ?? pageComments(of: record, files: files), commentProblems: commentProblems,
+            inPrompt: inPrompt
         )
     }
 

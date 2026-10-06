@@ -78,6 +78,11 @@ struct AgentHookEvent: Codable, Equatable {
     /// an app older than its receiver skips a pass it doesn't know, not
     /// the whole event.
     let reviewPasses: [String]?
+    /// On UserPromptSubmit, the header line of a Branch Review message the
+    /// prompt holds ("Review comments on … from Nirux:"): the comments
+    /// pasted went to Claude (docs/branch-review.md, section 6.2). Only
+    /// that line is kept of the prompt.
+    let reviewHeader: String?
     /// Sidebar approval (see `PermissionApproval`): on a PermissionRequest,
     /// the request ID and deadline (epoch seconds) the receiver waits
     /// under; on approvalResolved, the request and what became of it.
@@ -140,6 +145,9 @@ struct AgentHookEvent: Codable, Equatable {
             promptID = [.userPromptSubmit, .stopFailure].contains(name)
                 ? (payload["prompt_id"] as? String).flatMap { AgentText.clean($0, maxLength: 80) }
                 : nil
+            reviewHeader = name == .userPromptSubmit
+                ? (payload["prompt"] as? String).flatMap(BranchReview.agentMessageHeader(in:))
+                : nil
             reviewPasses = switch name {
             case .userPromptSubmit:
                 (payload["prompt"] as? String).flatMap(ReviewPass.passes(inPrompt:))?.map(\.rawValue)
@@ -179,6 +187,7 @@ struct AgentHookEvent: Codable, Equatable {
             promptID = nil
             transcriptPath = nil
             reviewPasses = nil
+            reviewHeader = nil
         }
     }
 
@@ -229,6 +238,7 @@ struct AgentHookEvent: Codable, Equatable {
         promptID: String? = nil,
         transcriptPath: String? = nil,
         reviewPasses: [String]? = nil,
+        reviewHeader: String? = nil,
         approvalRequestID: String? = nil,
         approvalDeadline: TimeInterval? = nil,
         approvalText: String? = nil,
@@ -253,6 +263,7 @@ struct AgentHookEvent: Codable, Equatable {
         self.promptID = promptID
         self.transcriptPath = transcriptPath
         self.reviewPasses = reviewPasses
+        self.reviewHeader = reviewHeader
         self.approvalRequestID = approvalRequestID
         self.approvalDeadline = approvalDeadline
         self.approvalText = approvalText

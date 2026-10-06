@@ -58,6 +58,8 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
     /// The request is nil when the page's message isn't one: it is
     /// answered all the same.
     var onComment: ((_ request: CommentRequest?, _ sequence: Int) -> Void)?
+    /// "Send N Comments to Agent" (section 6.2).
+    var onSendComments: (() -> Void)?
     /// Explain: the changed files, or every file again (`fresh`).
     var onExplain: ((_ fresh: Bool) -> Void)?
     var onCancelExplain: (() -> Void)?
@@ -290,6 +292,8 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
             // Malformed, it is answered all the same: the page doesn't wait.
             guard let sequence = body["sequence"] as? Int else { return }
             onComment?(CommentRequest(type: type, body: body), sequence)
+        case "sendComments":
+            onSendComments?()
         case "explain":
             guard let fresh = body["fresh"] as? Bool else { return }
             onExplain?(fresh)
