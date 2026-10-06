@@ -757,12 +757,14 @@
   function takeReview(stored) {
     statesMade = null;
     state.stored = stored;
-    showNoteMarks();
     for (const [path, click] of state.clicks) {
       if (stored && click.sequence <= stored.acknowledged) state.clicks.delete(path);
     }
     if (stored) takeComments(stored);
     else commentsByID = new Map();
+    // After the comments: the editor of a note's check that became one is
+    // gone, and its button says so.
+    showNoteMarks();
   }
 
   function toggleFile(file, row, diff) {
@@ -1322,9 +1324,11 @@
     }
     clearSelection(editor.path);
     refreshComments();
-    // The focus goes back to where comments start: the file's button (not
+    // The focus goes back to what opened it when it can (a note's
+    // button), else to where comments start: the file's button (not
     // scrolled to: the page stays where the user reads).
-    fileBox(editor.path)?.querySelector(".file-comment")?.focus({ preventScroll: true });
+    const back = editor.returnFocus?.isConnected ? editor.returnFocus : fileBox(editor.path)?.querySelector(".file-comment");
+    back?.focus({ preventScroll: true });
   }
 
   function editComment(comment) {
@@ -1363,13 +1367,15 @@
 
   // A new comment on `lines` of `file` ({ start, end }), or on the whole
   // file (null).
-  function openEditor(file, lines) {
+  // `text`: what the editor starts with (a note's "check this"). Returns
+  // the editor; none while nothing can be written.
+  function openEditor(file, lines, text = "") {
     if (!canComment()) {
       return notice(file.path, cantComment(), { untilWritable: true });
     }
     state.notices.delete(file.path);
     const id = crypto.randomUUID();
-    const editor = { key: id, id, path: file.path, start: lines?.start ?? null, end: lines?.end ?? null, editing: null, text: "", saved: false };
+    const editor = { key: id, id, path: file.path, start: lines?.start ?? null, end: lines?.end ?? null, editing: null, text, saved: false };
     // The page the lines were chosen in: a new one may replace it before
     // the first save, and number them otherwise. A comment on the file
     // takes the file as the page shows it then.
@@ -1382,6 +1388,7 @@
     }
     refreshComments();
     focusEditor(editor);
+    return editor;
   }
 
   function commentOnLines(container, range) {
@@ -1737,6 +1744,8 @@
     for (const note of fileNotes) {
       // The last mark Swift confirmed.
       note.settled = note.isWrong;
+      // Its file: its "check this" may become one of its comments.
+      note.path = file?.path ?? null;
       notes.set(note.id, note);
     }
     holderNotes.set(holder, fileNotes.map((note) => ({ side: note.side, lineNumber: note.lineNumber, key: notePrefix + note.id })));
@@ -1792,11 +1801,14 @@
     const text = element("div", "note-text", note.text);
     text.id = `note-text-${++noteCount}`;
     card.append(source, text);
+    let checkText = null;
     if (note.check) {
       const check = element("div", "note-check");
       const label = element("div", "note-check-label");
       label.append(icon("help"), element("span", null, "Check this"));
-      check.append(label, element("div", "note-text", note.check));
+      checkText = element("div", "note-text", note.check);
+      checkText.id = `note-check-${noteCount}`;
+      check.append(label, checkText);
       card.append(check);
     }
     const actions = element("div", "note-actions");
@@ -1814,10 +1826,43 @@
       post({ type: "markWrong", id: note.id, wrong: note.isWrong });
     });
     actions.append(marked, toggle);
+    // A "check this" made one of the review's comments: an editor under the
+    // note's line, holding it, to edit, then Comment.
+    if (checkText) {
+      const comment = element("button", "more note-comment", "Comment on this");
+      comment.type = "button";
+      comment.setAttribute("aria-describedby", checkText.id);
+      comment.addEventListener("click", () => {
+        if (isEnabled(comment)) commentOnNote(note, comment);
+      });
+      // After Mark wrong, which stays the actions' first button.
+      actions.append(comment);
+    }
     card.append(actions);
     noteCards.set(note.id, card);
     showNoteMark(card, note);
     return card;
+  }
+
+  // What a note's "check this" makes as a comment: said to be Claude's,
+  // so that the agent doesn't read it as the reviewer's own words.
+  function checkComment(note) {
+    return `Claude’s check: ${note.check}`;
+  }
+
+  // The editor of a new comment under `note`'s line, holding its "check
+  // this" (on its file when the line takes no comment); the one already
+  // open for it, if any. Not in a diff dimmed while its new one is read:
+  // its lines are of before.
+  function commentOnNote(note, button) {
+    const file = note.path ? fileOf(note.path) : null;
+    if (!file) return;
+    if (isStale(file.path)) return notice(file.path, "This diff is being read again: comment on the note once it shows.");
+    const open = [...state.editors.values()].find((editor) => editor.fromNote === note.id);
+    if (open) return focusEditor(open);
+    const lines = P.commentRange(state.hunks.get(file.path), { side: note.side, start: note.lineNumber, end: note.lineNumber });
+    const editor = openEditor(file, lines.problem ? null : lines, checkComment(note));
+    if (editor) Object.assign(editor, { fromNote: note.id, returnFocus: button });
   }
 
   function showNoteMark(card, note) {
@@ -1831,6 +1876,17 @@
     const writable = stored ? stored.canWrite : true;
     setEnabled(toggle, writable);
     toggle.title = !writable && stored?.problem ? stored.problem : "";
+    // Comment on this: not while nothing can be written, on a note marked
+    // wrong, nor once a comment or a draft holds its check, unless that is
+    // its editor's, open: it is shown again.
+    const comment = card.querySelector(".note-comment");
+    if (!comment) return;
+    const open = [...state.editors.values()].some((editor) => editor.fromNote === note.id);
+    const why = !canComment() ? cantComment()
+      : note.isWrong ? "This note is marked wrong."
+      : !open && storedComments().some((made) => made.text === checkComment(note)) ? "This check is in a comment or a draft already." : "";
+    setEnabled(comment, why === "");
+    comment.title = why;
   }
 
   // A note's mark as the review file holds it (null: the click wasn't

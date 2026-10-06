@@ -840,6 +840,94 @@ final class BranchReviewCommentsPageTests: XCTestCase, CommentFixtures {
         )
     }
 
+    /// A note's "check this" made a comment: an editor under the note's
+    /// line holds it, said to be Claude's, and Comment makes it one of the
+    /// review's comments. Asked again, the same editor; Cancel gives the
+    /// focus back; once it is a comment, the button says so; not in a diff
+    /// read again.
+    @MainActor
+    func testCheckThisBecomesAComment() throws {
+        let (page, store, _, cleanUp) = try BranchReviewExplainNotesTests.pageWithANote()
+        defer { cleanUp() }
+        _ = try page.run("\(BranchReviewExplainNotesTests.keepAwakeRow).click(); return ''")
+        try wait(page, until: "document.querySelector('.note .note-comment')")
+        let button = "document.querySelector('.note .note-comment')"
+        XCTAssertEqual(try page.run("return \(button).textContent;"), "Comment on this")
+        XCTAssertEqual(
+            try page.run("return document.getElementById(\(button).getAttribute('aria-describedby')).textContent;"), "Is <i>a</i> read?"
+        )
+        _ = try page.run("\(button).click(); return '';")
+        try wait(page, until: "document.activeElement?.classList.contains('comment-text')")
+        XCTAssertEqual(try page.run("return document.activeElement.value;"), "Claude’s check: Is <i>a</i> read?")
+        XCTAssertEqual(try page.run("return document.activeElement.getAttribute('aria-label');"), "New comment on line 2")
+        XCTAssertEqual(try page.run("return document.activeElement.closest('[data-annotation-slot]')?.slot;"), "annotation-additions-2")
+        // Saved as it is, a draft: the button still shows its editor again.
+        _ = try page.run("document.activeElement.dispatchEvent(new Event('input', { bubbles: true })); return '';")
+        page.waitUntil("the draft") { store.load().record.drafts.first?.text == "Claude’s check: Is <i>a</i> read?" }
+        page.waitUntil("Swift's answer") { page.controller.pageComments?.contains { $0.state == "draft" } == true }
+        _ = try page.run("return '';")
+        XCTAssertEqual(try page.run("return String(\(button).getAttribute('aria-disabled'));"), "null")
+        _ = try page.run("\(button).focus(); \(button).click(); return '';")
+        try wait(page, until: "document.activeElement?.classList.contains('comment-text')")
+        XCTAssertEqual(try page.run("return String(document.querySelectorAll('.comment-editor').length);"), "1")
+        // Cancel: the focus goes back to the button.
+        _ = try page.run("document.querySelector('.comment-editor .action.secondary').click(); return '';")
+        try wait(page, until: "document.activeElement?.classList.contains('note-comment')")
+
+        _ = try page.run("\(button).click(); return '';")
+        try wait(page, until: "document.activeElement?.classList.contains('comment-text')")
+        _ = try page.run("document.querySelector('.comment-editor .action:not(.secondary)').click(); return '';")
+        page.waitUntil("the comment") { store.load().record.comments.count == 1 }
+        let comment = try XCTUnwrap(store.load().record.comments.first)
+        XCTAssertEqual(comment.text, "Claude’s check: Is <i>a</i> read?")
+        XCTAssertEqual(comment.anchor.rows.map(\.text), ["let a = 2"])
+        try wait(page, until: "\(button).getAttribute('aria-disabled') === 'true'")
+        XCTAssertEqual(try page.run("return \(button).title;"), "This check is in a comment or a draft already.")
+        _ = try page.run("\(button).click(); return '';")
+        XCTAssertEqual(try page.run("return String(document.querySelectorAll('.comment-editor').length);"), "0")
+
+        // Dimmed while its new diff is read: nothing opens, and it says why.
+        let snapshot = BranchReviewPageTests.snapshot()
+        let history = BranchReview.History(isOwnCommit: { _ in true }, isInReflog: { _ in true })
+        let access = try XCTUnwrap(store.open(head: snapshot.head, pullRequest: snapshot.pullRequest, history: history).access)
+        _ = store.update(access) { $0.deleteComment(id: comment.id) }
+        page.controller.reloadReview()
+        try wait(page, until: "\(button).getAttribute('aria-disabled') !== 'true'")
+        _ = try page.run("document.querySelector('.file[data-path=\"Sources/KeepAwake.swift\"] .diff-box').classList.add('stale'); \(button).click(); return '';")
+        try wait(page, until: "document.querySelector('.comment-notice')?.textContent === 'This diff is being read again: comment on the note once it shows.'")
+        XCTAssertEqual(try page.run("return String(document.querySelectorAll('.comment-editor').length);"), "0")
+    }
+
+    /// A review that can't be written takes no comment from a note: the
+    /// button says why.
+    @MainActor
+    func testANoteOffersNoCommentWhileNothingCanBeWritten() throws {
+        let (page, store, _, cleanUp) = try BranchReviewExplainNotesTests.pageWithANote()
+        defer { cleanUp() }
+        // As a newer Nirux would write it.
+        var json = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: store.fileURL)) as? [String: Any])
+        json["version"] = 99
+        try JSONSerialization.data(withJSONObject: json).write(to: store.fileURL)
+        page.controller.reloadReview()
+        page.waitUntil("read-only") { page.controller.review?.canWrite == false }
+        _ = try page.run("\(BranchReviewExplainNotesTests.keepAwakeRow).click(); return ''")
+        try wait(page, until: "document.querySelector('.note .note-comment')?.getAttribute('aria-disabled') === 'true'")
+        XCTAssertNotEqual(try page.run("return document.querySelector('.note .note-comment').title;"), "")
+    }
+
+    /// Marked wrong, a note's check doesn't become a comment.
+    @MainActor
+    func testANoteMarkedWrongOffersNoComment() throws {
+        let (page, store, path, cleanUp) = try BranchReviewExplainNotesTests.pageWithANote()
+        defer { cleanUp() }
+        _ = try page.run("\(BranchReviewExplainNotesTests.keepAwakeRow).click(); return ''")
+        try wait(page, until: "document.querySelector('.note .note-comment')")
+        _ = try page.run("document.querySelector('.note .more').click(); return ''")
+        page.waitUntil("the mark written") { store.load().record.explanation?.files[path]?.notes.first?.isWrong == true }
+        try wait(page, until: "document.querySelector('.note .note-comment').getAttribute('aria-disabled') === 'true'")
+        XCTAssertEqual(try page.run("return document.querySelector('.note .note-comment').title;"), "This note is marked wrong.")
+    }
+
     /// Comment, or Cancel, before the save a moment after the last key:
     /// no draft is left, nor an editor brought back.
     @MainActor

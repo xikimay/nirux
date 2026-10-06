@@ -562,8 +562,15 @@ stream stays silent 3 minutes stops, as one does past 6 minutes in all.
 - **Limits:** the model never marks a file reviewed, never hides a file and
   never removes a risk signal. Its notes are labeled "Claude", with the model
   and the head commit it read, and sit under the last changed line of the
-  hunk they explain (pierre's line annotations). Each "check this" note can
-  be turned into a comment (once R4 has landed). Every note can be marked
+  hunk they explain (pierre's line annotations). Each "check this" note
+  offers "Comment on this": a new comment's editor under the note's line
+  (on its file when the line takes no comment), holding the check as
+  "Claude’s check: …", so that the agent doesn't take Claude's words for
+  the reviewer's, to edit, then Comment; again, the same editor. Not in a
+  diff dimmed while its new one is read, nor on a note marked wrong, nor
+  once a comment or a draft holds its check as it was, nor while nothing
+  can be written. Cancel
+  gives the focus back to the button. Every note can be marked
   wrong, and the mark undone: a note can be wrong without a "check this",
   and the count of notes kept counts every note (decided without the user,
   2026-10-06). A mark stays on its note in the review file, and a running
@@ -868,6 +875,7 @@ The rules start built in, for Swift and macOS. Per-project rules
 - **On the page.** The gutter's button by a line, or a drag of it over
   lines, opens an editor under the last of them; so does "Comment on
   lines…", which lines selected by their numbers offer with their file.
+  A note's "check this" opens one with its text (section 4.3).
   Each file row has a Comment button for the whole file, which the
   keyboard reaches: pierre's gutter button takes the pointer only. Lines
   of two hunks, or past 100, open nothing and say why by the file; lines
