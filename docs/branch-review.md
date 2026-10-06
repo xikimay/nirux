@@ -145,9 +145,11 @@ The page has a bridge to Swift, so:
   (`renderPartialHTML`) after escaping it; a test covers that escaping on
   crafted lines (section 9.1). With its file header off, pierre writes no
   path: the page's own row shows it.
-- Bridge messages carry ids, never text to type: Swift builds the message to
-  send to the agent from its own stored comments, and the sheet that confirms
-  it is native.
+- Bridge messages carry ids, links and the user's comments, never text to
+  type: Swift builds the message to send to the agent from its own stored
+  comments, and the sheet that confirms it is native. A page script gone
+  wrong could store any text as a comment, so the sheet shows the whole
+  message before anything is sent (section 6.2).
 
 Rejected:
 
@@ -856,6 +858,33 @@ The rules start built in, for Swift and macOS. Per-project rules
   long as the file differs from the base. A file the diff shows renamed
   keeps its comments; one the branch added, then renamed, reads as gone. A
   line that isn't UTF-8 compares as it reads, with U+FFFD where it isn't.
+- **In the column.** The page asks by ids: save a draft, make it a
+  comment, edit, cancel, delete. A new comment's place goes with its saves
+  until its draft exists: the file's id, and the rows the user chose (`{
+  side, line }` as `@pierre/diffs` numbers them) or that it is on the whole
+  file, and the page they were chosen in (its generation). Swift makes the
+  anchor from the file's diff as that page's data had it (a file read on
+  demand, once its row read it): the branch's page, or one of its last 3,
+  which a new read may have replaced before the first save. Rows chosen
+  on another branch's page or an older one, or that can't take one comment
+  (two hunks, past 100 rows or 32,000 bytes), aren't saved; nor is a new
+  comment or draft past 1,000 in a review, or once the review file holds
+  6 MB (three quarters of its limit: Reviewed marks, edits and deletes
+  still fit). Each request is written in order and answered, saved
+  or not, and never before the writes asked for before it; one that wasn't
+  saved, refused or not written, says why, by the click it answers, while
+  the branch shows. The
+  page gets each comment, and each new comment's draft, placed: under its
+  last row, or listed with its file with its rows as an excerpt when they
+  aren't in the diff, its file gone, or its hunks not read yet. An unsent
+  comment comes with the edit under way. Placing is done again only for
+  what moved or is new, not for a draft's text, nor, after a new read of
+  the branch, in the files it left as they were. Where comments moved to
+  is recorded once the review opens (all of them) and once a file's diff
+  is read (those on it), only in a review that has comments, and not once
+  another column opened the review at another head since: where they are
+  is that head's to say. A request that changes nothing never creates the
+  review file.
 - Not posted on GitHub. Posting a review there can come later.
 
 ### 6.2 Sending comments to the agent
@@ -1159,8 +1188,10 @@ used.
    marks, with the review file wired into the column (a file's checkbox,
    which folds its diff, a group's that marks all its files, the progress);
    the comments on the page, after the wrapper's annotations, gutter
-   button and selection, on their own; then a "check this" note turned
-   into a comment, once Explain's page has landed.
+   button and selection, on their own, in two (the column's side: the
+   comments in the page's data, the requests and their writes; then the
+   page itself); then a "check this" note turned into a comment, once
+   Explain's page has landed.
 5. **R5, sending to the agent.** The "idle at its prompt" predicate, the
    sanitizer, the message, the target rules, the sheet; shared with "Ask Agent
    to Resolve" if it has landed.

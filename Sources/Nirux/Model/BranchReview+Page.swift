@@ -163,16 +163,32 @@ extension BranchReview {
             let problem: String?
             /// Whether the checkboxes can change the review.
             let canWrite: Bool
-            /// The latest of the page's checkbox clicks this answers: the
-            /// page keeps its own state for later ones.
+            /// The latest of the page's clicks this answers (a checkbox, a
+            /// comment's button, a draft saved): the page keeps its own
+            /// state for later ones.
             let acknowledged: Int
+            /// The comments, and the drafts of new ones (section 6.1).
+            let comments: [Comment]
+            /// Why the latest of the page's comment requests that weren't
+            /// saved weren't, by the click that asked: the page knows its
+            /// own.
+            let commentProblems: [CommentProblem]
+        }
+
+        /// A comment or draft the page asked for that wasn't saved, by its
+        /// id and the page's click that asked, and why.
+        struct CommentProblem: Encodable, Equatable, Sendable {
+            let id: String
+            let sequence: Int
+            let message: String
         }
     }
 
     /// The states of `files` (the snapshot's, or a row's patch read since)
-    /// in `record`.
+    /// in `record`, and its comments (`pageComments`, unless given).
     static func review(
-        of record: Record, files: [FileChange], generation: Int, problem: String?, canWrite: Bool, acknowledged: Int = 0
+        of record: Record, files: [FileChange], generation: Int, problem: String?, canWrite: Bool, acknowledged: Int = 0,
+        comments: [Page.Comment]? = nil, commentProblems: [Page.CommentProblem] = []
     ) -> Page.Review {
         Page.Review(
             files: files.map { file in
@@ -183,7 +199,8 @@ extension BranchReview {
                 case .unverified: return "unverified"
                 }
             },
-            generation: generation, problem: problem, canWrite: canWrite, acknowledged: acknowledged
+            generation: generation, problem: problem, canWrite: canWrite, acknowledged: acknowledged,
+            comments: comments ?? pageComments(of: record, files: files), commentProblems: commentProblems
         )
     }
 

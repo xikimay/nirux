@@ -204,6 +204,30 @@ final class BranchReviewStorageTests: XCTestCase {
         }
     }
 
+    /// A change that leaves a review not created yet empty creates
+    /// nothing, when the writer asks so (the column does): no file where
+    /// there was none, and an unreadable one stays as it is.
+    func testChangeThatLeavesNothingCreatesNothingWhenAsked() throws {
+        let store = try store()
+        let access = try access(store)
+        _ = try store.update(access, createsEmpty: false) { $0.removeDraft(id: "d1") }.get()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
+
+        let bytes = Data("{ not json".utf8)
+        try bytes.write(to: store.fileURL)
+        let opened = store.open(head: "a1", pullRequest: .notFound, history: unasked)
+        XCTAssertEqual(opened.status, .unreadable)
+        _ = try store.update(try XCTUnwrap(opened.access), createsEmpty: false) { $0.removeDraft(id: "d1") }.get()
+        XCTAssertEqual(try Data(contentsOf: store.fileURL), bytes)
+        XCTAssertEqual(archived(store), [])
+        // A change that leaves something sets it aside, as always.
+        _ = try store.update(try XCTUnwrap(opened.access), createsEmpty: false) {
+            $0.markReviewed(self.file("a.swift", hash: "h1"), head: "a1", at: self.date)
+        }.get()
+        XCTAssertEqual(store.load().status, .loaded)
+        XCTAssertEqual(archived(store).filter { $0.contains(".unreadable.") }.count, 1)
+    }
+
     func testFileThatCantBeReadNowIsNeitherSetAsideNorReplaced() throws {
         let store = try store()
         let access = try access(store)

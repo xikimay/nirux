@@ -102,7 +102,7 @@ final class BranchReviewController {
     private var readPushes = 0
     /// Counts snapshots: the page's generation. A file's diff is read and
     /// sent only for the snapshot the page shows, whose ids it uses.
-    private var snapshotCount = 0
+    private(set) var snapshotCount = 0
     private let reader: Reader
     private let patchReader: PatchReader
     private let makeWatcher: WatcherFactory
@@ -173,7 +173,32 @@ final class BranchReviewController {
     private(set) var reviewAcknowledged = 0
     /// Rows' patches read since the page showed (`loadFile`), by id: a
     /// file not read with the snapshot gets its hash, and can be marked.
-    private var readFiles: [Int: BranchReview.FileChange] = [:]
+    private(set) var readFiles: [Int: BranchReview.FileChange] = [:] {
+        didSet {
+            pageComments = nil
+            let changed = Set(oldValue.keys).union(readFiles.keys).filter { oldValue[$0] != readFiles[$0] }
+            placements.forget(Set(changed.compactMap { (readFiles[$0] ?? oldValue[$0])?.path }))
+        }
+    }
+    /// Where comments were placed in the files as read: a write that
+    /// changes text alone (a draft as it is typed) places nothing again,
+    /// nor does a new read of the branch in the files it left as they were.
+    private var placements = BranchReview.PlacementCache()
+    /// The files of the branch's last pages, as read, by generation: a new
+    /// comment's rows are those of the page they were chosen in, which a
+    /// new page may have replaced before its first save. A few: each holds
+    /// its diff.
+    private(set) var earlierFiles: [(generation: Int, files: [BranchReview.FileChange])] = []
+    nonisolated static let earlierPages = 3
+    /// Clicks answered while earlier writes were still on their way: the
+    /// page takes Swift's data as what it answered, so they wait for them.
+    private var acknowledgmentWaiting = 0
+    /// Why the latest comment requests that weren't saved weren't, by the
+    /// page's click; kept while the same branch shows.
+    var commentProblems: [BranchReview.Page.CommentProblem] = []
+    /// The page's comments, placed once for the review and the files as
+    /// read: the page's clicks are answered without placing them again.
+    private(set) var pageComments: [BranchReview.Page.Comment]?
     /// The stored review changed (opened, read or written).
     var onReviewChange: (() -> Void)?
 
@@ -267,6 +292,7 @@ final class BranchReviewController {
         view.onReviewed = { [weak self] ids, reviewed, generation, sequence in
             self?.markReviewed(ids: ids, reviewed: reviewed, generation: generation, sequence: sequence)
         }
+        view.onComment = { [weak self] request, sequence in self?.comment(request, sequence: sequence) }
         view.onReload = { [weak self] in self?.bannerClicked() }
         view.onStatusAction = { [weak self] in self?.statusAction?.perform() }
         view.onWindowChange = { [weak self] inWindow in
@@ -842,8 +868,22 @@ final class BranchReviewController {
     }
 
     private func setSnapshot(_ snapshot: BranchReview.Snapshot?) {
+        let sameBranch = snapshot != nil && snapshot?.branch == self.snapshot?.branch
+        // The page keeps its clicks across snapshots of a branch.
+        if !sameBranch { commentProblems = [] }
+        let shown = self.snapshot.map { old in old.files.indices.map { readFiles[$0] ?? old.files[$0] } }
+        if sameBranch, let shown {
+            earlierFiles = Array((earlierFiles + [(snapshotCount, shown)]).suffix(Self.earlierPages))
+        } else {
+            earlierFiles = []
+        }
         self.snapshot = snapshot
         readFiles = [:]
+        if sameBranch, let shown, let snapshot {
+            placements.forget(BranchReview.PlacementCache.changedPaths(from: shown, to: snapshot.files))
+        } else {
+            placements = BranchReview.PlacementCache()
+        }
         snapshotCount += 1
         let count = snapshotCount
         currentGeneration.withLock { $0 = count }
@@ -897,10 +937,14 @@ final class BranchReviewController {
             return .some(patchReader(file, snapshot))
         }) { [weak self] outcome in
             guard let self, generation == self.snapshotCount, let read = outcome else { return }
-            if let read, read.patchHash != self.snapshot?.files[safe: id]?.patchHash {
-                // Its hash, for the Reviewed checkbox.
+            // A file the snapshot read without its hunks gets them too, for
+            // its comments, whatever its hash.
+            if let read, read.patchHash != self.snapshot?.files[safe: id]?.patchHash || self.snapshot?.files[safe: id]?.omission != nil {
+                // Its hash, for the Reviewed checkbox, and its hunks, for
+                // its comments.
                 self.readFiles[id] = read
                 self.sendReview()
+                self.reanchorComments(of: [read.path, read.oldPath].compactMap { $0 })
             }
             self.send(read.map { BranchReview.FileDiff(id: id, generation: generation, read: $0) } ?? BranchReview.FileDiff(
                 id: id, path: file.path, generation: generation,
@@ -918,6 +962,7 @@ final class BranchReviewController {
         Self.inBackground(on: reviewQueue, { [reviewFile] in reviewFile.open(snapshot) }) { [weak self] state in
             guard let self, generation == self.snapshotCount else { return }
             self.apply(state)
+            self.reanchorComments()
         }
     }
 
@@ -954,12 +999,14 @@ final class BranchReviewController {
             guard let self, let (ids, state) = written else { return }
             if state.branch == self.snapshot?.branch { self.apply(state) }
             for id in ids { self.writeCompletions.removeValue(forKey: id)?(state) }
+            if self.writeCompletions.isEmpty, self.acknowledgmentWaiting > 0 { self.acknowledge(self.acknowledgmentWaiting) }
         }
     }
 
     private func apply(_ state: BranchReviewState) {
         guard state != review else { return }
         review = state
+        pageComments = nil
         sendReview()
         onReviewChange?()
     }
@@ -982,8 +1029,13 @@ final class BranchReviewController {
         }, completion: { [weak self] _ in self?.acknowledge(sequence) })
     }
 
-    private func acknowledge(_ sequence: Int) {
-        reviewAcknowledged = max(reviewAcknowledged, sequence)
+    func acknowledge(_ sequence: Int) {
+        guard writeCompletions.isEmpty else {
+            acknowledgmentWaiting = max(acknowledgmentWaiting, sequence)
+            return
+        }
+        reviewAcknowledged = max(reviewAcknowledged, sequence, acknowledgmentWaiting)
+        acknowledgmentWaiting = 0
         sendReview()
     }
 
@@ -993,9 +1045,11 @@ final class BranchReviewController {
     private func pageReview() -> BranchReview.Page.Review? {
         guard let snapshot, let review, review.branch == snapshot.branch else { return nil }
         let files = review.isKnown ? snapshot.files.indices.map { readFiles[$0] ?? snapshot.files[$0] } : []
+        let comments = review.isKnown ? pageComments ?? BranchReview.pageComments(of: review.record, files: files, cache: placements) : []
+        pageComments = comments
         return BranchReview.review(
             of: review.record, files: files, generation: snapshotCount, problem: review.problem, canWrite: review.canWrite,
-            acknowledged: reviewAcknowledged
+            acknowledged: reviewAcknowledged, comments: comments, commentProblems: commentProblems
         )
     }
 
