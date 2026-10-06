@@ -151,11 +151,24 @@ workspace, and so to its current project:
   "may lag" behind the hook; a turn followed by a later message is complete
   whatever the timing, since the file is written in order;
 - each complete turn becomes its messages (`user`, `peer`) and its final reply
-  (`talk`). A turn that `StopFailure` ended keeps its messages and has no
-  reply: the hook's text is the API error;
-- **a turn's messages are appended together**, under the writer's lock, so a
-  turn is contiguous in the journal even with 30 sessions running. Ids follow
-  the order turns are journaled in;
+  (`talk`). Claude Code marks a turn's end with a `system` line
+  (`turn_duration`, or `stop_hook_summary` when hooks ran), also when the
+  turn ended on a tool call (`ScheduleWakeup`, a dismissed question), which
+  then has no reply. A turn not marked yet is complete only once the session
+  has ended, and then has a reply only if its last answer was final (its
+  `stop_reason` isn't `tool_use`). A message that arrives while the agent
+  works (a prompt queued during the tool loop, another session's message, a
+  prompt typed after Esc, even after text Claude wrote before a tool call)
+  belongs to the turn underway;
+  a subagent's report or a task notification starts a turn with no message.
+  A reply that is an API error (`isApiErrorMessage`, or a turn `StopFailure`
+  ended) or Claude Code's own (`<synthetic>`) is no reply: the turn keeps its
+  messages without one;
+- **a turn's messages are appended in one write**, under the writer's lock, so
+  a turn is contiguous in the journal even with 30 sessions running. Ids
+  follow the order turns are journaled in. A transcript line already in the
+  journal (by its `uuid`) is not written again, and only the turn's last
+  message carries where the turn ends;
 - the journal adds no message text to `hook-events.jsonl`;
 - a turn still incomplete after 5 s (the file kept growing: a new turn began)
   stays where it is; the next turn's end, the session's end or the launch
@@ -171,7 +184,8 @@ The other cases:
 - **Esc** returns before the stop hooks run. The interrupted prompt stays in
   the transcript and is journaled with the session's next turn, since reading
   starts at the last journaled offset.
-- **`SessionEnd`** journals any message still unanswered, without a reply.
+- **`SessionEnd`** journals any message still unanswered, without a reply,
+  and text Claude wrote before a tool call isn't one.
   Its payload has no transcript path; the session ledger's record gives it.
 - **Forks**: `/branch` and `--fork-session` copy the parent's lines into the
   new transcript with `forkedFrom`. Those lines are skipped. A rewind keeps
@@ -183,15 +197,25 @@ The other cases:
   whose transcript grew past its journaled offset is read, as the import
   does.
 - **History turned on while sessions run**: their offsets start at the
-  current end of their transcripts, unless the import is checked.
+  current end of their transcripts, unless the import is checked. `enabled`
+  holds the date history was turned on, and a turn that ended before it is
+  passed over, not journaled: the import brings the past.
 - **A workspace moves to another project** while its session runs: the
   session's next turns go to the new project, as the session ledger does.
   Offsets are kept per transcript across projects (the furthest any journal
   reached), so the new project doesn't journal the turns the old one has.
+  A turn belongs to the project its workspace is in when the turn ends:
+  when a workspace moves, or a session is resumed in a project, that project
+  records when the session joined it and journals only its turns that end
+  later, and the project it left first journals those that ended before.
 
 Only the column's own agent counts, with the rule the session ledger (#68)
 already applies: not a subagent's events, not a `claude` started inside
-another program. Explain's `claude -p` runs and the compactor's own calls run
+another program. A session the ledger doesn't record isn't journaled. Any
+program in the agent's shell can run a hook, so the transcript path is
+checked, never trusted: the ledger's record names it (the hook's must
+agree), and it must be `<session id>.jsonl` in a folder of Claude's
+`projects` folder, not reached through a symbolic link. Explain's `claude -p` runs and the compactor's own calls run
 with hooks disabled and leave no transcript.
 
 ### 2.3 Secrets
@@ -206,7 +230,12 @@ The detector's 13 patterns only match a key's first characters (for example
 Explain withholds whole files. PR 1 makes it return ranges and grows each
 match, in Swift rather than with an unbounded regular expression (ICU fails
 past about 95,000 characters), over the characters keys and base64 are made
-of (letters, digits, `_ - + / = .`), and a PEM block to its `-----END` line.
+of (letters, digits, `_ - + / = .`), a PEM block to its `-----END` line, and
+an AWS access key id to the end of its line, where its secret usually sits.
+The value given to a name that says secret (`password=…`, `api_key: …`, 8
+characters or more) is withheld to its end, and so is what history search
+(#125) looks for in chat: JWTs, URLs with a password, `.env` values, Slack,
+Telegram and Hugging Face tokens.
 If the regular expression fails (ICU's internal error, which the detector
 counts as a hit), the whole message is withheld. It applies to every kind.
 Tests use full-length keys.
@@ -219,11 +248,11 @@ started before that keep it in their system prompt until they end.
 
 ```
 <state dir>/projects/<space id>/memory/
-  enabled                 present while history is on
+  enabled                 the date history was turned on; present while it is on
   log/YYYY-MM-DD.jsonl    one message per line: {i, kind, branch, from, text, size, date, session, source}
   tree/YYYY-MM-DD.jsonl   one node per line:    {l, i, text, size}
   forgotten.jsonl         ids of messages the user forgot
-  state.json              where reading starts in transcripts that ran when history was turned on
+  state.json              where reading starts in transcripts that ran when history was turned on, and when sessions joined
   usage.jsonl             one line per compactor call: model, tokens, cost, outcome
   view.md                 the current view, for the launch file (section 5.1)
   lock                    the writer's lock

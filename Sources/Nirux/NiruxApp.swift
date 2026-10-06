@@ -191,6 +191,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             remoteAccess?.handleAgentEvent(event, resolution: resolution, outcome: outcome)
         }
         hooks.start()
+        shellView.catchUpProjectHistory()
         // Start after the hook backlog drain so events queued while Nirux was
         // closed are recorded locally but never replayed as Telegram alerts.
         remoteAccess.reloadFromPersistence()
