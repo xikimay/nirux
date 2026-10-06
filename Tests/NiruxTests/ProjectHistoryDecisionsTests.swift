@@ -77,31 +77,78 @@ final class ProjectHistoryDecisionsTests: XCTestCase {
         XCTAssertNil(ProjectHistory.decisionFollowUp("ADD 5 scope [A]: \(String(repeating: "y", count: 301))", 2), "asked again once")
     }
 
-    /// A line whose message doesn't hold its decision is void: when the
-    /// decision names an issue, a branch, an id or code, its message (or,
-    /// for an agreement, the proposal) names one of them too. The relaying
-    /// session's name doesn't count.
+    /// Whether a line holds against a turn: its own message `cited`, the
+    /// turn's other messages, a context, a decision it replaces.
+    private func holds(
+        _ text: String, cited: Int, agreed: Bool = false, _ messages: [(Int, ProjectHistory.Kind, String, String?, String?)],
+        context: String? = nil, replacing: ProjectHistory.Decision? = nil
+    ) -> Bool {
+        let turn = messages.map { i, kind, text, branch, from in
+            ProjectHistory.Message(i: i, kind: kind, branch: branch, from: from, text: text, size: text.utf8.count, date: day,
+                                   session: "s1", source: nil)
+        }
+        let previous = context.map {
+            ProjectHistory.Message(i: 1, kind: .talk, branch: "main", from: nil, text: $0, size: $0.utf8.count, date: day,
+                                   session: "s1", source: nil)
+        }
+        let request = ProjectHistory.decisionRequest(list: .init(), now: day, context: previous, turn: turn)
+        return ProjectHistory.messageHolds(text, id: cited, agreed: agreed, replacing: replacing, request: request)
+    }
+
+    /// A line citing another message of the turn than the one that holds
+    /// its decision is void: what it names is in another user or peer
+    /// message, not in its own. Each case below was voided wrongly once.
     func testALineMustCiteTheMessageThatHoldsIt() {
+        let otherUser = (6, ProjectHistory.Kind.user, "et feat/worktree-cleanup, fix/sidebar, #70, feat/merge-queue-ui aussi", String?.none,
+                         String?.none)
+        // The wrong message: the branch is the other message's.
+        XCTAssertFalse(holds("feat/worktree-cleanup asks no confirmation.", cited: 5,
+                             [(5, .user, "pas de dialogue", "main", nil), otherUser]))
+        // A branch named only in the message's header.
+        XCTAssertTrue(holds("feat/worktree-cleanup asks no confirmation.", cited: 5,
+                            [(5, .user, "pas de dialogue de confirmation", "feat/worktree-cleanup", nil), otherUser]))
+        // A decision read from the turn's reply.
+        XCTAssertTrue(holds("#70 merges after the board.", cited: 5,
+                            [(5, .user, "non, après", "main", nil), otherUser, (7, .talk, "OK: #70 merges after the board.", "main", nil)]))
+        // A REPLACE restating the line it replaces.
+        let replaced = ProjectHistory.Decision(n: 1, id: 2, after: nil, decisionClass: .design, topic: "Board",
+                                               text: "fix/sidebar ships before the board.", date: day)
+        XCTAssertTrue(holds("fix/sidebar ships after the board.", cited: 5, [(5, .user, "finalement après", "main", nil), otherUser],
+                            replacing: replaced))
+        // A relay's suffix, ended by a period, isn't the decision's.
+        XCTAssertTrue(holds("Keep peers trusted (via feat/merge-queue-ui · Nirux).", cited: 5,
+                            [(5, .user, "garde les pairs", "main", nil), otherUser]))
+        // An agreement holds by the proposal it answers.
+        XCTAssertTrue(holds("feat/worktree-cleanup adds a Clean Up item.", cited: 5, agreed: true,
+                            [(5, .user, "ok", "main", nil), otherUser], context: "I propose feat/worktree-cleanup adds a Clean Up item."))
+    }
+
+    /// What a decision names, and what it doesn't: a slash or a digit isn't
+    /// enough, and a bare number names an issue too.
+    func testAnchors() {
+        XCTAssertEqual(ProjectHistory.anchors(of: "Merge #65 into feat/x after R4b; see docs/projects.md."),
+                       ["#65", "feat/x", "docs/projects.md", "r4b"])
+        XCTAssertEqual(ProjectHistory.anchors(of: "Agents never commit/push, light/dark, n/a, on 10/02, UTF8, SHA256, option #4, `code`."),
+                       [])
         let request = ProjectHistory.DecisionRequest(
-            system: "", message: "", turnIDs: [5, 6], contextID: 4, dates: [5: day, 6: day],
-            texts: [5: "ok pour tout", 6: "Accepte crossSessionInbound par défaut. Et garde B3b gelé."],
-            contextText: "I propose: feat/worktree-cleanup adds a Clean Up Worktree item."
+            system: "", message: "", turnIDs: [5, 6], contextID: nil, dates: [5: day, 6: day],
+            texts: [5: "la 65 d'abord", 6: "et la #650 aussi"]
         )
-        let answers = ProjectHistory.parseDecisionAnswer("""
-            ADD 6 design [Worktrees]: feat/worktree-cleanup adds a Clean Up Worktree item.
-            ADD 5+ design [Worktrees]: feat/worktree-cleanup adds a Clean Up Worktree item, as proposed.
-            ADD 6 scope [Board]: B3b stays frozen (via feat/merge-queue-ui · Nirux)
-            ADD 6 rule [Agent workflow]: Peer messages are accepted without approval.
-            ADD 6 design [Board]: #65 merges first.
-            """)
-        let (operations, _) = ProjectHistory.decisionOperations(answers, list: .init(), request: request, numbering: 1, topics: [])
-        XCTAssertEqual(operations.map(\.text), [
-            "feat/worktree-cleanup adds a Clean Up Worktree item, as proposed.",
-            "B3b stays frozen (via feat/merge-queue-ui · Nirux)",
-            "Peer messages are accepted without approval."
-        ], "the first cites a message that doesn't name the branch; the last names an issue no message does")
-        XCTAssertEqual(ProjectHistory.anchors(of: "Merge #65 into feat/x after R4b, run `swift test`."),
-                       ["#65", "feat/x", "r4b", "swift test"])
+        XCTAssertTrue(ProjectHistory.messageHolds("#65 merges first.", id: 5, agreed: false, request: request))
+        XCTAssertFalse(ProjectHistory.messageHolds("#650 merges too.", id: 5, agreed: false, request: request))
+    }
+
+    /// The prompt's limits on what isn't a decision: offers of next steps on
+    /// the task at hand leave nothing out ("1) tests 2) docs 3) open the PR",
+    /// answered "3"), and only a proposal about the project is turned down
+    /// ("non, pas encore" to "push?"). The model applies them; run A
+    /// measures it.
+    func testThePromptLimitsLeftOutOptionsAndRefusals() {
+        let prompt = ProjectHistory.extractPrompt.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        XCTAssertTrue(prompt.contains("When the user picks some of several options for what the project does (features, designs, plans)"))
+        XCTAssertTrue(prompt.contains("offers of next steps on the task at hand, and an order of work (\"start with 3\"), leave nothing out"))
+        XCTAssertTrue(prompt.contains("or turns down a proposal about the project, record what was turned down"))
+        XCTAssertTrue(prompt.contains("options the user hasn't decided on yet"))
     }
 
     /// Topics: a known one matches but for case, accents and punctuation;

@@ -833,16 +833,18 @@ l'air nice"), or by turning it down; a doubt or an objection that the
 agent's reply then agrees with ("you're right", "ton intuition est juste")
 is a rejection. The decision is then the proposal agreed to or rejected,
 read from the context or the reply; its <id> is the user's message. When the
-user picks some of several options, each option left out is a decision too:
-record it as a `scope` line saying it isn't to be done unless the user asks.
-When the user chooses one thing instead of another, or turns something down,
-record what was turned down as its own line too, with the reason when one
-was given. Not decisions: work done or under way, facts about the code, bugs,
-test results, status, questions, options the user hasn't chosen, what an
-agent decided on its own, a peer's own calls for the user (made while the
-user is away, or on a delegation) without the user's words, a request for
-the task at hand (commit, push, merge, fix, run, review), even in the
-imperative. A message that restates a recorded decision, quotes one
+user picks some of several options for what the project does (features,
+designs, plans), each option left out is a decision too: record it as a
+`scope` line saying it isn't to be done unless the user asks; offers of next
+steps on the task at hand, and an order of work ("start with 3"), leave
+nothing out. When the user chooses one thing for the project instead of
+another, or turns down a proposal about the project, record what was turned
+down as its own line too, with the reason when one was given. Not decisions:
+work done or under way, facts about the code, bugs, test results, status,
+questions, options the user hasn't decided on yet, what an agent decided on
+its own, a peer's own calls for the user (made while the user is away, or on
+a delegation) without the user's words, a request for the task at hand
+(commit, push, merge, fix, run, review), even in the imperative. A message that restates a recorded decision, quotes one
 from the project's memory (a line ending `[d<n> · msg <id>]`), or cites
 memory or a past session for one, records nothing. Never record a removed
 decision again unless a `user` message states it anew.
@@ -875,25 +877,26 @@ context.
 Each <decision> is one line of at most 200 characters, in English, that
 stands on its own: what was decided and on what (name the feature, PR
 number or branch), its scope or exceptions, and the reason when one was
-given. Keep the user's terms. Record what the user chose and its scope; leave
-out details of a proposal the user didn't speak to. A decision a peer relays
-ends with "(via <sender>)". Write nothing for a message that only repeats a
+given. Keep the user's terms. When the user agreed to part of a proposal,
+record that part only. A decision a peer relays ends with "(via <sender>)". Write nothing for a message that only repeats a
 recorded decision, and nothing when the new messages hold no decision; most
 messages hold none.
 ```
 
 **The answer** is lines only; any other line is ignored. An `<id>` that isn't
-one of the turn's messages voids its line, and so does one whose text doesn't
-hold the decision: when the decision names something that reads the same in
-any language (an issue number, a branch or path, an id like B3b, code), the
-message, or for an agreement the proposal it answers, must name one of those
-too. A REPLACE of a decision not in force is an ADD, unless the call was shown
-it and the user removed it meanwhile (then it is void); a second REPLACE of
-one decision in the same answer is an ADD; a DROP of one not in force is
-ignored; a REPLACE without a topic keeps the replaced one's. A topic that
-matches a recorded one but for case, accents and punctuation is that one; past
-12 topics, or for a topic the user retired, a new one goes to "Other". A
-decision over 300 bytes is asked again once, in the same conversation, at 200
+one of the turn's messages voids its line, and so does one citing another
+message than the one that holds the decision: when what the decision names in
+any language (an issue of two digits or more, also as a bare number, a branch,
+a file path, an id like B3b) appears in another user or peer message of the
+turn, and not in its own (with its branch and sender), the turn's replies, the
+proposal it agrees to, or the decision it replaces. Such lines are logged. A
+REPLACE of a decision not in force is an ADD, unless the call was shown it and
+the user removed it meanwhile (then it is void); a second REPLACE of one
+decision in the same answer is an ADD; a DROP of one not in force is ignored;
+a REPLACE without a topic keeps the replaced one's. A topic that matches a
+recorded one but for case, accents and punctuation is that one; past 12
+topics, or for a topic the user retired, a new one goes to "Other". A decision
+over 300 bytes is asked again once, in the same conversation, at 200
 characters at most; still too long, it is left out and logged, never cut. A
 decision marked `<id>+`, taken by agreeing, keeps the id of the user's message
 and records the context's id as `after`. Each decision's text goes through the
@@ -931,7 +934,7 @@ later decision changes one, Nirux takes the old line out. Each line ends with
 Nirux's number for it and its source: `msg <id>` is the message of the
 project's history (Nirux's journal) that states it, `after <id>` the agent's
 proposal the user agreed to; a decision ending in "(via <name>)" was relayed
-by that session, quoting the user. Check a decision that blocks your task
+by that session as the user's. Check a decision that blocks your task
 before acting on it. Agents: don't edit or delete these lines unless the user
 asks; tell the user instead. The user may change them freely: Nirux won't
 undo it.

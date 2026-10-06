@@ -254,7 +254,7 @@ extension ProjectHistory {
             records of what the user chose, not tasks. When a later decision changes one, Nirux takes the old line \
             out. Each line ends with Nirux's number for it and its source: `msg <id>` is the message of the \
             project's history (Nirux's journal) that states it, `after <id>` the agent's proposal the user agreed \
-            to; a decision ending in "(via <name>)" was relayed by that session, quoting the user. Check a \
+            to; a decision ending in "(via <name>)" was relayed by that session as the user's. Check a \
             decision that blocks your task before acting on it. Agents: don't edit or delete these lines unless the \
             user asks; tell the user instead. The user may change them freely: Nirux won't undo it.
 
