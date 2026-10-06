@@ -87,7 +87,28 @@ that does the work.
   wrapper (`Web/pierre-diff`: `pierre-diff-entry.js`, `package.json` and
   its lock, built by `build.sh`) gives the page `createReview`: a file's
   diff from its hunks, unified, without pierre's file header, rendered only
-  near the viewport (`VirtualizedFileDiff`). A line break inside a line
+  near the viewport (`VirtualizedFileDiff`). Annotations are `{ side,
+  lineNumber, key }`: a removed line's on the `deletions` side, numbered in
+  the base, an added or unchanged line's on `additions`, numbered in the
+  working tree (an unchanged line's given by its base number goes there
+  too). The page's `renderAnnotation` returns the element shown under the
+  line, which pierre slots into the diff from the page's DOM: the page's
+  CSS styles it, and the key is never markup. The wrapper keeps an
+  element by its side, line and key (pierre keeps it by its index in the
+  list), so one that stays keeps what it holds and its focus, whatever is
+  added or removed before it; those of a line show in the list's order.
+  `setAnnotations` renders a file on screen again at once, so the page
+  finds its element in place, measures it, and keeps what the viewport
+  shows in place; a file off screen renders its annotations once it is
+  scrolled to. The gutter button (`onGutterClick`) and the line numbers'
+  selection (`onSelect`) are on only when the page gives their callback;
+  they report `{ start, side, end, endSide }`, lines of the file's own
+  diff, from where a drag began (it can end above, on the other side, or
+  in another hunk: the page checks). A gutter click is reported once.
+  pierre's button is pointer-only: the page offers another way to
+  comment. `setSelection` shows a range without reporting it. A callback
+  that throws is logged: it doesn't stop pierre's clicks, or replace the
+  diff with the error. A line break inside a line
   (LF, CR, U+2028, U+2029) is shown as its code point, `⟨U+2028⟩`: in the
   patch text pierre parses, it would end the line, and the rest could read
   as a hunk. The CR that ends a CRLF file's line stays hidden, unless the
@@ -1137,8 +1158,9 @@ used.
    model, with drafts, anchors and re-anchoring, without UI; the reviewed
    marks, with the review file wired into the column (a file's checkbox,
    which folds its diff, a group's that marks all its files, the progress);
-   the comments on the page; then a "check this" note turned into a
-   comment, once Explain's page has landed.
+   the comments on the page, after the wrapper's annotations, gutter
+   button and selection, on their own; then a "check this" note turned
+   into a comment, once Explain's page has landed.
 5. **R5, sending to the agent.** The "idle at its prompt" predicate, the
    sanitizer, the message, the target rules, the sheet; shared with "Ask Agent
    to Resolve" if it has landed.
