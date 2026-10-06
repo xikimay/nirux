@@ -84,7 +84,7 @@ On 2026-10-06, by the user (relayed by the orchestrating session):
 7. **Two measured runs, at API-equivalent prices, $65 in all**, each pausing
    at 60% of a usage window and run at a quiet time: the backfill of this
    project's history, at most $30, then section 9's test, at most $35
-   (section 8). The panel shows the ongoing cost, about $3 to $5 a week here.
+   (section 8). The panel shows the ongoing cost, about $3 to $8 a week here.
 8. **The first project is Nirux itself.**
 
 Earlier the same day, for the tree, now optional:
@@ -365,7 +365,7 @@ Code deletes its transcripts after 30 days. It offers:
 
 - **Import past sessions and Claude Code's memories**, off by default, with
   its estimate: messages, tokens, the API-price equivalent and the time. For
-  Nirux today: 1,537 messages and 54 memory files, about $9 to $30 and an
+  Nirux today: 1,537 messages and 54 memory files, about $9 to $17 and an
   hour to read them for decisions (section 3.8); with the tree on, about
   1,900 summaries more, about $90 at API prices and 4 hours.
 
@@ -788,20 +788,21 @@ decision comes after it.
 cache keeps them while they don't change (section 3.4): `<decisions>`, the
 decisions in force, grouped by topic, within 15,000 bytes (about 5,000
 tokens): the `scope` and `rule` ones first, newest first while they fit, then
-`design` and `plan` ones, newest first, a `plan` one for 14 days; every
-recorded topic is listed, even with none of its decisions, so the model reuses
-it; and `<removed>`, the decisions the user removed in the last 30 days,
-newest first within 3,000 bytes. These days, and the merge's (below), are
-counted from the turn's own date, so a backfill reads the history as the live
-feed did. In the message: `<context>`, the agent's previous final reply in the
-same session, from this project's journal, with its id, its last 12,000
-characters (a proposal's options close it); `<messages>`, the turn's messages,
-each cut at 12,000 characters. Every text is flattened (line breaks as spaces)
-and has the `<` of `<decisions`, `<removed`, `<context`, `<messages` and their
-closings written as `‹`, so no message can close the part it sits in. The cuts
-are for the call only; its answer is never cut. A decision left out of
-`<decisions>` can't be replaced by a later call: its change is recorded as a
-new decision, and the merge below drops the older one.
+`design` and `plan` ones, newest first, a `plan` one for 14 days; every topic
+recorded (but Other and the retired ones) is listed, even with none of its
+decisions, so the model reuses it; and `<removed>`, the decisions the user
+removed in the last 30 days, newest first within 3,000 bytes. These days, and
+the merge's (below), are counted from the turn's own date, so a backfill reads
+the history as the live feed did. In the message: `<context>`, the agent's
+previous final reply in the same session, from this project's journal, with
+its id, its last 12,000 characters (a proposal's options close it);
+`<messages>`, the turn's messages, each cut at 12,000 characters. Every text
+is flattened (line breaks as spaces) and has the `<` of `<decisions`,
+`<removed`, `<context`, `<messages` and their closings written as `‹`, so no
+message can close the part it sits in. The cuts are for the call only; its
+answer is never cut. A decision left out of `<decisions>` can't be replaced by
+a later call: its change is recorded as a new decision, and the merge below
+drops the older one.
 
 **The prompt, EXTRACT:**
 
@@ -833,18 +834,23 @@ is a rejection. The decision is then the proposal agreed to or rejected,
 read from the context or the reply, with what was left out when the user
 picked among options; its <id> is the user's message. Not decisions: work
 done or under way, facts about the code, bugs, test results, status,
-questions, options the user hasn't chosen, what an agent decided on its own.
-A message that restates a recorded decision, or quotes one from the
-project's memory (a line ending `[d<n> · msg <id>]`), records nothing. Never
-record a removed decision again unless a `user` message states it anew.
+questions, options the user hasn't chosen, what an agent decided on its own,
+a request for the task at hand (commit, push, merge, fix, run, review), even
+in the imperative. A message that restates a recorded decision, quotes one
+from the project's memory (a line ending `[d<n> · msg <id>]`), or cites
+memory or a past session for one, records nothing. Never record a removed
+decision again unless a `user` message states it anew.
 
 Each decision has a class: `scope` (something dropped, frozen, deferred,
 kept, or out of plan), `rule` (how agents must work, a standing default or
-limit), `design` (how a feature must behave), `plan` (an order or a next
-step). And a topic: the part of the project it is about, in one to three
-words, such as a feature or a process. Use a recorded topic when one fits;
-start a new one only for a part none covers. Keep topics few and broad: at
-most 12 in all.
+limit), `design` (how a feature must behave), `plan` (what ships next, or in
+what order, beyond the task at hand; a standing order is a `rule`). And a
+topic: the part of the project it is about, in one to three words, such as
+a feature or a process; rules on how agents must work go under `Agent
+workflow`. Use a recorded topic when one fits; start a new one only for a
+part none covers. Keep topics few and broad: at most 12 in all. Before an
+ADD, look in every topic for the same subject: a repeat records nothing, a
+change or an addition is a REPLACE.
 
 Reply with lines only, each one of:
 ADD <id> <class> [<topic>]: <decision>
@@ -869,18 +875,19 @@ decision, and nothing when the new messages hold no decision; most messages
 hold none.
 ```
 
-**The answer** is lines only; any other line is ignored. An `<id>` that
-isn't one of the turn's messages voids its line. A REPLACE of a decision not
-in force is an ADD, unless the call was shown it and the user removed it
-meanwhile (then it is void); a DROP of one is ignored; a REPLACE without a
+**The answer** is lines only; any other line is ignored. An `<id>` that isn't
+one of the turn's messages voids its line. A REPLACE of a decision not in
+force is an ADD, unless the call was shown it and the user removed it
+meanwhile (then it is void); a second REPLACE of one decision in the same
+answer is an ADD; a DROP of one not in force is ignored; a REPLACE without a
 topic keeps the replaced one's. A topic that matches a recorded one but for
-case, accents and punctuation is that one; past 12 topics, a new one goes to
-"Other". A decision over 300 bytes is asked again once, in the same
-conversation, at 200 characters at most; still too long, it is left out and
-logged, never cut. A decision marked `<id>+`, taken by agreeing, keeps the id
-of the user's message and records the context's id as `after`. Each
-decision's text goes through the journal's secret detector (section 2.3)
-before it is recorded.
+case, accents and punctuation is that one; past 12 topics, or for a topic the
+user retired, a new one goes to "Other". A decision over 300 bytes is asked
+again once, in the same conversation, at 200 characters at most; still too
+long, it is left out and logged, never cut. A decision marked `<id>+`, taken
+by agreeing, keeps the id of the user's message and records the context's id
+as `after`. Each decision's text goes through the journal's secret detector
+(section 2.3) before it is recorded.
 
 **A later decision supersedes an earlier one.** REPLACE takes the older
 decision out of the list in force and adds the new one; DROP takes one out
@@ -894,7 +901,8 @@ or delete any line.
 **The memory files.** Each topic is a file in Claude Code's memory folder of
 the project's repository (`docs/project-memory.md`, section 3), named
 `decisions-<topic>.md` (numbered when a file already has that name), type
-`project`:
+`project`, its frontmatter naming its topic, so that a lost record can be
+rebuilt from the files:
 
 ```
 ---
@@ -904,22 +912,25 @@ metadata:
   type: project
   modified: 2026-10-06T18:00:00.000Z
   nirux: decisions
+  topic: "Branch Review"
 ---
 
 The user's decisions on Branch Review, as Nirux read them in this project's
-sessions, oldest first: records of what the user chose, not tasks. A later
-decision replaced any it changed. Each line ends with Nirux's number for it
-and its source: `msg <id>` is the message of the project's history that
-states it, `after <id>` the agent's proposal the user agreed to (Nirux's
-memory_zoom tool opens either); a line ending in "(via <name>)" was decided
-by that session while the user was away. Check a decision that blocks your
-task before acting on it. Edit or delete lines freely: Nirux won't undo it.
+sessions, oldest first: records of what the user chose, not tasks. When a
+later decision changes one, Nirux takes the old line out. Each line ends with
+Nirux's number for it and its source: `msg <id>` is the message of the
+project's history (Nirux's journal) that states it, `after <id>` the agent's
+proposal the user agreed to; a decision ending in "(via <name>)" was decided by
+that session while the user was away. Check a decision that blocks your task
+before acting on it. Agents: don't edit or delete these lines unless the user
+asks; tell the user instead. The user may change them freely: Nirux won't
+undo it.
 
 - 2026-10-02: Branch Review sends a review's comments at once, not one by one. [d12 · msg 4521 after 4520]
 ```
 
-When Nirux creates a file it adds one line to `MEMORY.md`, before its first
-index line (Claude Code cuts the index from the end):
+When Nirux creates a file it adds one line at the end of `MEMORY.md`, as the
+panel adds a memory's, the user's own lines keeping their places:
 `- [Decisions — Branch Review](decisions-branch-review.md) — the user's
 decisions on Branch Review, dated, each with its source`. A session reads the
 index at its start and opens a topic's file when its work touches it, as for
@@ -929,8 +940,9 @@ any memory.
 <id>]`; `<n>` is Nirux's number for the decision, `<id>` its message (for a
 merged decision, the newest merged one's). A line is Nirux's while it bears
 the mark of a decision Nirux wrote in that file and reads exactly as Nirux
-wrote it; when two lines bear one mark, the first counts. A `plan` line
-leaves its file 14 days after its message.
+wrote it; when two lines bear one mark, the first counts. Lines are in the
+order decisions were said, by their message's date (an imported memory takes
+its file's date). A `plan` line leaves its file 14 days after its message.
 
 **Writes**, with Project Memory's safe writes (`ProjectMemory.update` and
 `createFile`, `docs/project-memory.md`, section 4): a hidden temporary file
@@ -940,64 +952,80 @@ appeared. In its own files, Nirux adds the lines of new decisions at the end
 and takes out the lines of its decisions replaced, dropped, merged or
 expired, and updates the frontmatter's `modified`; nothing else. A write
 that can't be made (the file changed three times meanwhile, read-only, not
-UTF-8) is tried again at the next pass. The file is written first, then
+UTF-8) is tried again shortly. The file is written first, then
 `decision-files.json`: after a crash between the two, a line Nirux added is
-recognized as its own by its exact text, and a line it removed reads as
-removed by the user, which takes out nothing still in force but an expired
-`plan` decision.
+recognized as its own by its exact text, a file it created by its
+frontmatter's topic, and a line it removed reads as removed by the user,
+which takes out nothing still in force but an expired `plan` decision.
 
 **The user's edits win.** Before each call and each write, Nirux reads its
 files and compares them with what it wrote there last
 (`decision-files.json`, next to the journal). It can't tell who changed a
-file: the user in the panel or an editor, an agent asked to, or Claude
-Code's own memory upkeep all count as the user.
+file: the user in the panel or an editor, an agent, or Claude Code's own
+memory upkeep all count as the user; the file asks agents to leave it alone.
 
-- A changed line (its mark kept) is an `edit`: the decision takes the new
-  text, so the extraction sees it, no merge sends it, and a `plan` one no
-  longer expires. **Nirux never changes or removes an edited line**, even
-  after a later decision replaces it: the new line is added after it.
-- A line gone, or emptied, is a `drop` by the user: the decision leaves the
-  list in force and goes to `<removed>`, and a later operation citing the
-  same message (a retried turn) is ignored.
-- A file gone, seen missing twice at least 30 s apart (an editor's save
-  doesn't count), was deleted, or switched to Always, which moves its text
-  to the brief and the file to the Trash: every decision Nirux wrote there is
-  dropped the same way, and the topic is retired. Nirux writes no new file
-  for a retired topic: its later decisions stay in the list, unwritten, and
-  the switch lists retired topics with **Write Again**. A renamed file
-  counts as gone.
-- The folder itself gone (an unmounted volume) pauses the keeper; it is
-  never read as every file deleted.
+- A changed line, its mark kept, even only in its day, is an `edit`: the
+  decision takes the new text, so the extraction sees it, no merge sends it,
+  and a `plan` one no longer expires. **Nirux never changes or removes an
+  edited line**, even after a later decision replaces it: the new line is
+  added after it.
+- A line gone, seen gone twice at least 30 s apart (a file read in the
+  middle of a save looks cut), or emptied, is a `drop` by the user: the
+  decision leaves the list in force and goes to `<removed>`, and a later
+  operation citing the same message (a retried turn) is ignored.
+- A file gone, seen missing twice at least 30 s apart, drops every decision
+  Nirux wrote there the same way; a later decision on its topic starts a new
+  file. A renamed file counts as gone. The panel's actions, which Nirux
+  knows of, go further (section 8, PR 4): its **Delete…** retires the topic
+  (no new file for it; its later decisions go to Other, until **Write
+  Again** by the switch), and its switch to Always keeps the decisions in
+  force as promoted to the brief, so they aren't recorded again.
 - Unmarked lines, the frontmatter but for `modified`, and `MEMORY.md`, where
   Nirux adds a topic's line once, at the file's creation, are the user's. A
   line the user edited or removed in the index stays so, and the switch says
   which topics `MEMORY.md` doesn't list.
 
+**State that can't be trusted pauses the keeper**, which never starts over
+on it: a memory folder gone (an unmounted volume) or moved
+(`decision-files.json` names another one: Nirux's decisions stay there), a
+`decision-files.json` that can't be read, a `decisions.jsonl` that can't be
+read (no keeper starts: an empty list would take every decision out of the
+files). A record simply lost is rebuilt: each topic takes back its file, by
+the topic in its frontmatter, with its marked lines.
+
 **The index.** Claude Code reads `MEMORY.md` up to 200 lines or 25,000
 characters (2.1.291). Decisions take one line per topic: at most 12 topics
 and "Other", so 13 lines, about 2.5 KB. A new topic's file is created only
 while `MEMORY.md` stays under 180 lines and 23,000 bytes with its line; past
-that, its decisions wait in the list, and the switch says how many and why.
-This user's index held 60 lines and 14,700 bytes on 2026-10-06.
+that, its decisions go to Other's file when there is one, else wait in the
+list, and the switch says how many and why. This user's index held 61 lines
+and 15,300 bytes on 2026-10-06, and grows by about 1 KB a day; near Claude
+Code's limits the switch says so, since the index's end, Nirux's lines among
+them, is what Claude Code leaves out.
 
 **Which folder.** The memory folder of the repository named when the keeper
 is turned on: the switch names the repository its "What agents know" shows,
 located as that panel locates it (`autoMemoryDirectory` included); until
 the switch ships, `decisions.json` in the project's folder of the state
-directory names it. One project per memory folder: the switch refuses a
-folder another project's keeper writes, since their numbers and message ids
-would mix. A project spanning several repositories writes all its decisions
-to that one. While Claude Code's auto-memory is off for the repository
+directory names it, with the first message to read (`readFrom`: the
+journal's end when turned on, 0 when the user chose to read the past too).
+One project per memory folder: the switch refuses a folder another
+project's keeper writes, since their numbers and message ids would mix. A
+project spanning several repositories writes all its decisions to that one.
+While Claude Code's auto-memory is off for the repository
 (`CLAUDE_CODE_DISABLE_AUTO_MEMORY` in Nirux's environment,
 `autoMemoryEnabled: false`), the reading pauses, and the switch says so; the
 turns wait for it. A variable set only in a shell's startup files isn't
 seen (`docs/project-memory.md`, section 3). The import skips the files
 Nirux keeps (`nirux: decisions` in their frontmatter): imported as notes,
-they would be read again as new decisions.
+they would be read again as new decisions. Only the installed app keeps
+decisions: a development build may run on the real state, so it needs
+`NIRUX_FORCE_DECISIONS=1`, as hooks need `NIRUX_FORCE_HOOK_INSTALL`.
 
-**Turning it off** leaves the files as they are, as memories, no longer
-updated. Turned on again, the keeper reads what was said meanwhile only
-through the import (section 2.6).
+**Turning it off** (removing `decisions.json`) stops the keeper at once: the
+call under way is stopped and its answer dropped. The files stay as they
+are, as memories, no longer updated. Turned on again, the keeper reads from
+its new `readFrom`.
 
 **Storage.** `decisions.jsonl` in the project's memory folder of the state
 directory, append-only, one line per operation:
@@ -1018,33 +1046,40 @@ journal.
 turns with a user or peer message, about 200 bytes each. At about 200 such
 turns a week, that is about 75 decisions and 15 KB a week, spread over the
 topic files; by our reading, 14 of those 19 would be `design` or `plan`. So
-the list in force passes the extraction's 15,000 bytes within a week or two,
-and older decisions can't be replaced. Once it does, at most once a day, a
-merge call gets every decision in force but the user's edited ones, grouped
-by topic, `D<n>|<date> <class>: <decision>`, with this prompt:
+the lasting decisions (all but `plan` ones, which expire) pass the
+extraction's 15,000 bytes within a few weeks, and older ones can't be
+replaced. Once they do, at most once a day, counted on the messages' dates,
+and before the next turn is read, a merge call gets every decision in force
+but `plan` ones and the user's edited ones, grouped by topic, `D<n>|<date>
+<class>: <decision>`, with this prompt:
 
 ```
-These are the decisions in force in one software project. Merge the ones
-that say the same thing, and drop the ones that a later one in the list has
-made moot. Reply with lines only, each one of:
+These are the decisions in force in one software project, grouped by topic,
+each with its date. Merge the ones that say the same thing, and drop the ones
+that a later decision in the list has made moot. Reply with lines only, each
+one of:
 MERGE D<n> D<m> ...: <decision>
-DROP D<n>: <the later decision that makes it moot>
+DROP D<n> D<m>: <why D<m>, a later decision, makes D<n> moot>
 or the single line NONE. A merged decision keeps every point of the ones it
 merges, in at most 200 characters.
 ```
 
 A MERGE replaces the listed decisions with one, keeping the newest one's id,
-date, class and topic; a line naming a decision not in the list, or one
-already named, voids itself; so does a line about a decision the user
-removed or edited while the merge ran. Neither the classes nor the merge are
+date and topic, and the most lasting class among them (scope, then rule, then
+design). A DROP must name the later decision that makes the other moot. A line
+naming a decision not in the list, or one already named, voids itself; so does
+a line about a decision the user removed or edited while the merge ran. Each
+decision the merge drops is logged. Neither the classes nor the merge are
 measured yet; run A (section 8) measures them over the whole history.
 
-**Cost.** About $0.013 a turn with a short list, measured; about $0.025 once
-`<decisions>` fills its 15,000 bytes, estimated; a merge, about $0.03 to
-$0.10 a day at most, as it gets the whole list. So $3 to $5 a week here,
-shown in the panel from `usage.jsonl`, and about $9 to $30 for the backfill
-of the whole history (about 450 turns and memories, most of them read with a
-full list), measured in section 8's run A.
+**Cost.** About $0.006 a call with a short list (measured on 2026-10-06 over
+the history's first 12 turns, Sonnet 5.5 at medium); about $0.025 to $0.04
+once `<decisions>` fills its 15,000 bytes, estimated, since a call rarely
+finds its system prompt in the five-minute cache when turns come minutes
+apart; a merge, about $0.03 to $0.10 a day at most. So $3 to $8 a week here,
+shown in the panel from `usage.jsonl`, and about $9 to $17 for the backfill of
+the whole history (about 420 turns and 54 memories), measured in section 8's
+run A.
 
 **Validated cheaply** (2026-10-06, Sonnet 5.5, $1.60 in all, on the 1,551
 messages journaled up to section 9's cutoff, before topics and `<removed>`
@@ -1424,7 +1459,7 @@ resets:
   about $18 by the harness's earlier estimate, at most $35: the harness
   stops at the cap and reports the runs done.
 
-$65 in all. Then the ongoing cost, about $3 to $5 a week here, shows in the
+$65 in all. Then the ongoing cost, about $3 to $8 a week here, shows in the
 panel.
 
 ### 8.1 The tree's gate
@@ -1568,7 +1603,7 @@ memory off now; 10, a single global tree.
   bytes on 2026-10-06): past 180 lines or 23,000 bytes, new topics wait, and
   the switch says so. Claude Code may change how it reads memory; the
   files are plain memories, so they keep working as notes.
-- **Cost** (section 3.6): $3 to $5 a week here for the decisions, shown in
+- **Cost** (section 3.6): $3 to $8 a week here for the decisions, shown in
   the panel; with the tree on, about $90 a week more, half of it the agents
   reading the view (levers: Haiku and a smaller view).
 - **A secret the detector misses** is copied into the journal, and may be

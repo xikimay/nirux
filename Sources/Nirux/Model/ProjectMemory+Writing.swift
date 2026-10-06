@@ -158,7 +158,7 @@ extension ProjectMemory {
     /// `lines` without their trailing blank ones: ready for lines after
     /// the last, which keeps its own break, or gets the file's when it had
     /// none (the file didn't end with one).
-    private static func trimmedEnd(_ lines: [String], crlf: Bool) -> [String] {
+    static func trimmedEnd(_ lines: [String], crlf: Bool) -> [String] {
         var lines = lines
         var ended = false
         while lines.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
@@ -328,7 +328,7 @@ extension ProjectMemory {
 
     /// The frontmatter's `modified:` line: `metadata`'s, else a top-level
     /// one; never a line of another field's text.
-    private static func modifiedLine(in header: [String]) -> Int? {
+    static func modifiedLine(in header: [String]) -> Int? {
         func indent(_ line: String) -> Int { line.prefix { $0 == " " }.count }
         func key(_ line: String) -> String { line.trimmingCharacters(in: .whitespacesAndNewlines) }
         if let metadata = header.firstIndex(where: { indent($0) == 0 && key($0) == "metadata:" }) {
