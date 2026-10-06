@@ -127,6 +127,30 @@ extension ProjectMemory {
         }
 
         func count(_ scope: Scope) -> Int { entries.filter { $0.scope == scope }.count }
+
+        /// What a write acts on for `entry`, resolved now; nil for the
+        /// team's rules, which change in the editor.
+        func target(of entry: Entry) -> Target? {
+            switch entry.source {
+            case .rule:
+                guard entry.scope == .always, let (file, rule) = rule(of: entry) else { return nil }
+                return .briefRule(rule, file: file.url)
+            case .memory:
+                guard let memory = memory(of: entry), let directory = self.memory?.directory else { return nil }
+                return .memory(memory, directory: directory)
+            case .missingFile(let line):
+                return self.memory.map { .missingFile(line, directory: $0.directory) }
+            }
+        }
+    }
+
+    /// An item as the user acted on it, resolved from the panel's list right
+    /// then: a write never looks it up again by its place in a list that may
+    /// have changed meanwhile.
+    enum Target: Equatable, Sendable {
+        case memory(Memory, directory: URL)
+        case briefRule(Rule, file: URL)
+        case missingFile(IndexLine, directory: URL)
     }
 
     /// The repository's files the team shares, at its checkout's top.
@@ -181,8 +205,9 @@ extension ProjectMemory {
         let raw = text.components(separatedBy: "\n").map { $0.hasSuffix("\r") ? String($0.dropLast()) : $0 }
         let lines = withoutComments(raw, blockOnly: blockCommentsOnly)
         var rules: [Rule] = []
-        /// The rule being read; `indent` is a bullet's, nil for a paragraph.
-        var current: (start: Int, end: Int, lines: [String], indent: Int?)?
+        /// The rule being read; `indent` is a bullet's, nil for a paragraph;
+        /// `content`, the column its text starts at, past the marker.
+        var current: (start: Int, end: Int, lines: [String], indent: Int?, content: Int)?
         /// Blank lines after a bullet's text: they stay with it if an
         /// indented line goes on with it.
         var blanks = 0
@@ -195,7 +220,7 @@ extension ProjectMemory {
             blanks = 0
         }
         func append(_ line: String, number: Int) {
-            if current == nil { current = (number, number, [], nil) }
+            if current == nil { current = (number, number, [], nil, 0) }
             current?.lines.append(contentsOf: Array(repeating: "", count: blanks) + [line])
             current?.end = number
             blanks = 0
@@ -220,10 +245,19 @@ extension ProjectMemory {
                 let inBullet = current?.indent != nil && indent > bulletIndent
                 if !inBullet && !(current != nil && current?.indent == nil) { close() }
                 let fence = String(trimmed.prefix(3))
-                append(line, number: index)
+                // Inside a bullet, its lines lose the indent up to the bullet's
+                // text, as its other lines do: written back under the same
+                // marker, they get it again, no more.
+                let column = current?.content ?? 0
+                func content(_ line: String) -> String {
+                    guard inBullet else { return line }
+                    let line = expandingLeadingTabs(line)
+                    return String(line.dropFirst(min(line.prefix { $0 == " " }.count, column)))
+                }
+                append(content(line), number: index)
                 while index < lines.count {
                     index += 1
-                    append(lines[index - 1], number: index)
+                    append(content(lines[index - 1]), number: index)
                     if lines[index - 1].trimmingCharacters(in: .whitespaces).hasPrefix(fence) { break }
                 }
                 if !inBullet { close() }
@@ -233,9 +267,10 @@ extension ProjectMemory {
                 close()
             } else if let marker = bulletMarker(trimmed), indent <= 3 || current == nil, !(current?.indent != nil && indent > bulletIndent) {
                 close()
-                current = (index, index, [String(trimmed.dropFirst(marker))], indent)
+                // A bare `-` is written back as `- `.
+                current = (index, index, [String(trimmed.dropFirst(marker))], indent, indent + max(marker, 2))
             } else if continues(at: indent) {
-                let content = (current?.indent).map { min(indent, $0 + 2) } ?? 0
+                let content = current?.indent == nil ? 0 : min(indent, current?.content ?? 0)
                 append(String(line.dropFirst(content)), number: index)
             } else {
                 close()
@@ -248,8 +283,8 @@ extension ProjectMemory {
 
     /// The index of the first line after a frontmatter, else 0.
     static func frontmatterEnd(_ lines: [String]) -> Int {
-        guard lines.first.map(stripBOM)?.trimmingCharacters(in: .whitespaces) == "---",
-              let end = lines.dropFirst().firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == "---" })
+        guard lines.first.map(stripBOM)?.trimmingCharacters(in: .whitespacesAndNewlines) == "---",
+              let end = lines.dropFirst().firstIndex(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == "---" })
         else { return 0 }
         return end + 1
     }

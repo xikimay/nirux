@@ -175,6 +175,8 @@ final class UIFlowHarness {
             self?.restoredAgentLaunches.append(command)
         }
         shell.sideEffects.homeDirectory = { [home] in home }
+        // The real Trash never gets a test's file.
+        shell.sideEffects.trash = { url in try FileManager.default.removeItem(at: url) }
         shell.sideEffects.claudeManagedSettings = { [root] in
             ProjectMemory.ManagedFolders(
                 preferences: URL(fileURLWithPath: root + "/managed-preferences"), settings: URL(fileURLWithPath: root + "/managed")
