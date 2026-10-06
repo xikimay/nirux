@@ -1,4 +1,7 @@
-import { FileDiff, VirtualizedFileDiff, Virtualizer, getFiletypeFromFileName, processFile } from "@pierre/diffs";
+import {
+  FileDiff, VirtualizedFileDiff, Virtualizer, createAnnotationWrapperNode, getFiletypeFromFileName, getLineAnnotationName,
+  processFile
+} from "@pierre/diffs";
 
 const activeByRoot = new WeakMap();
 
@@ -284,20 +287,152 @@ function reviewFileDiff(file) {
 // when it renders.
 const reviewGap = 6;
 
-function reviewOptions(fontSize, lineHeight, onRendered) {
+// `interactions`: the file's annotation and pointer callbacks.
+function reviewOptions(fontSize, lineHeight, onRendered, interactions) {
   const options = makeOptions(onRendered);
   return {
     ...options,
+    ...interactions,
     diffStyle: "unified",
     disableFileHeader: true,
+    // The gutter button and the selected lines take the page's accent,
+    // which the host inherits.
     unsafeCSS: `${options.unsafeCSS}
       :host {
         --diffs-font-size: ${fontSize}px;
         --diffs-line-height: ${lineHeight}px;
         --diffs-gap-block: ${reviewGap}px;
+        --diffs-modified-color-override: var(--accent, #78a3f7);
       }
     `
   };
+}
+
+const annotationSides = new Set(["additions", "deletions"]);
+
+// pierre's annotations, from the page's { side, lineNumber, key }: a
+// removed line's on the "deletions" side, numbered in the base, an added
+// or unchanged line's on the "additions" side, numbered in the working
+// tree. An unchanged line's given by its number in the base goes on the
+// working tree's side: pierre would put it in a slot of its own, first.
+// The key is pierre's metadata. Left out: malformed ones, and ones on
+// lines the diff doesn't show.
+function lineAnnotations(annotations, lines) {
+  const out = [];
+  for (const annotation of Array.isArray(annotations) ? annotations : []) {
+    if (!annotation || typeof annotation.key !== "string") continue;
+    const line = shownLine(lines, annotation.side, annotation.lineNumber);
+    if (line) out.push({ ...line, metadata: annotation.key });
+  }
+  return out;
+}
+
+// A line of the diff, { side, lineNumber }: an unchanged one given by its
+// number in the base goes on the working tree's side. Null when it isn't a
+// line the diff shows.
+function shownLine(lines, side, lineNumber) {
+  if (!annotationSides.has(side) || !Number.isSafeInteger(lineNumber)) return null;
+  const unchanged = side === "deletions" ? lines.unchanged.get(lineNumber) : undefined;
+  const line = unchanged === undefined ? { side, lineNumber } : { side: "additions", lineNumber: unchanged };
+  return lines.shown.has(`${line.side}:${line.lineNumber}`) ? line : null;
+}
+
+// The lines the diff shows, as "side:number" (a removed line on the base's
+// side, an added one on the working tree's, an unchanged one on both), and
+// each unchanged line's number in the working tree by its number in the
+// base.
+function diffLines(fileDiff) {
+  const shown = new Set();
+  const unchanged = new Map();
+  for (const hunk of fileDiff.hunks) {
+    let deletion = hunk.deletionStart;
+    let addition = hunk.additionStart;
+    for (const content of hunk.hunkContent) {
+      const context = content.type === "context";
+      const deletions = context ? content.lines : content.deletions;
+      const additions = context ? content.lines : content.additions;
+      for (let offset = 0; offset < deletions; offset++) shown.add(`deletions:${deletion + offset}`);
+      for (let offset = 0; offset < additions; offset++) shown.add(`additions:${addition + offset}`);
+      if (context) for (let offset = 0; offset < content.lines; offset++) unchanged.set(deletion + offset, addition + offset);
+      deletion += deletions;
+      addition += additions;
+    }
+  }
+  return { shown, unchanged };
+}
+
+// A range of lines, as the page gets and gives it: { start, side, end,
+// endSide }, line numbers on their sides. A copy: the page never holds
+// pierre's own object.
+function lineRange(range) {
+  const side = range.side ?? "additions";
+  return { start: range.start, side, end: range.end, endSide: range.endSide ?? side };
+}
+
+// Calls a callback of the page. One that throws doesn't reach pierre: in
+// the middle of a click, pierre would stop taking clicks; in a render, it
+// would show the error in place of the diff.
+function callPage(callback, ...values) {
+  try {
+    return callback(...values);
+  } catch (error) {
+    console.error(error);
+    return undefined;
+  }
+}
+
+// A file of the review.
+class ReviewFileDiff extends VirtualizedFileDiff {
+  constructor(...values) {
+    super(...values);
+    // pierre takes the line under the pointer anywhere in the page: a drag
+    // from one file onto another reported the other's line numbers to the
+    // first. Only the file's own lines count.
+    const manager = this.interactionManager;
+    for (const name of ["getSelectionPointFromPath", "getSelectionPointerInfo"]) {
+      const resolve = manager[name].bind(manager);
+      manager[name] = (path, ...rest) => (manager.pre != null && path.includes(manager.pre) ? resolve(path, ...rest) : undefined);
+    }
+  }
+
+  // pierre keeps an annotation's element by its index in the list: one
+  // added or removed before it made it again, and it lost what it held and
+  // its focus. Here, by its side, line and key. A new one goes among those
+  // of its line in the list's order; one already there moves (and loses its
+  // focus) only when the order of its line changed.
+  renderAnnotations() {
+    const container = this.fileContainer;
+    const { renderAnnotation } = this.options;
+    if (this.isContainerManaged || container == null || renderAnnotation == null) {
+      super.renderAnnotations();
+      return;
+    }
+    const stale = new Map(this.annotationCache);
+    const lastOnLine = new Map();
+    for (const annotation of this.lineAnnotations) {
+      const id = `${annotation.side}:${annotation.lineNumber}:${annotation.metadata}`;
+      const slot = getLineAnnotationName(annotation);
+      const last = lastOnLine.get(slot);
+      let element = this.annotationCache.get(id)?.element;
+      if (element == null) {
+        const content = renderAnnotation(annotation);
+        if (content == null) continue;
+        element = createAnnotationWrapperNode(slot);
+        element.appendChild(content);
+        this.annotationCache.set(id, { element, annotation });
+        if (last != null) last.after(element);
+        else container.insertBefore(element, [...container.children].find((child) => child.slot === slot) ?? null);
+      } else if (last != null && last.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_PRECEDING) {
+        last.after(element);
+      }
+      stale.delete(id);
+      lastOnLine.set(slot, element);
+    }
+    for (const [id, { element }] of stale) {
+      this.annotationCache.delete(id);
+      element.remove();
+    }
+  }
 }
 
 // They go into CSS: a number, or the default.
@@ -310,8 +445,32 @@ const reviewsByRoot = new WeakMap();
 
 // `scrollRoot` is what scrolls: the document, or an element whose first
 // child, already in place, holds the files. `fontSize` and `lineHeight`
-// are in points.
-function createReview(scrollRoot, { fontSize, lineHeight, onRendered } = {}) {
+// are in points. The page's callbacks, each optional, get the container of
+// the file they are about:
+// - `renderAnnotation({ side, lineNumber, key }, container)` returns the
+//   element shown under that line, or nothing (it is asked again at the
+//   next render). The side and line are where it shows: an unchanged
+//   line's given by its number in the base comes with its number in the
+//   working tree. pierre puts the element in the page's DOM, in a slot of
+//   the diff: the page's CSS styles it, and nothing of the annotation is
+//   written as markup. Asked once for each side, line and key while the
+//   annotation stays.
+// - `onGutterClick(range, container)`: the button the gutter shows by the
+//   line under the pointer was clicked, or dragged over lines. With
+//   onSelect, the lines show selected, without a call to it. Without it,
+//   there is no button. The button takes the pointer only, not keys: the
+//   page offers another way to comment.
+// - `onSelect(range, container)`: lines were selected by clicking or
+//   dragging over their numbers (null: unselected). Without it, numbers
+//   don't select.
+// A range is { start, side, end, endSide }: line numbers on their sides,
+// "deletions" for the base's, "additions" for the working tree's (an
+// unchanged line's). `start` is where the drag began: it can be below
+// `end`, on the other side, or in another hunk; both are lines of the
+// file's diff.
+function createReview(scrollRoot, {
+  fontSize, lineHeight, onRendered, renderAnnotation, onGutterClick, onSelect
+} = {}) {
   fontSize = points(fontSize, 12);
   // Whole points: placeholders count lines at this height, and a fraction
   // isn't laid out the same way by every WebKit (macOS 15's rounds it,
@@ -323,14 +482,60 @@ function createReview(scrollRoot, { fontSize, lineHeight, onRendered } = {}) {
   reviewsByRoot.get(root)?.destroy();
   const virtualizer = new Virtualizer();
   virtualizer.setup(root);
+  // pierre adds the scroll position it read last to a file's top on
+  // screen: in a frame that runs between a scroll and the event that says
+  // so (one `setAnnotations` asks for, say), the file's offset comes out
+  // off by the distance scrolled, and the file draws none of its lines
+  // until the next scroll. Both read now agree.
+  virtualizer.getOffsetInScrollContainer = (element) => {
+    const container = virtualizer.getScrollContainerElement();
+    const top = element.getBoundingClientRect().top - (container?.getBoundingClientRect().top ?? 0);
+    return (container ? container.scrollTop : window.scrollY) + top;
+  };
   const views = new Map();
   let destroyed = false;
+  // Set while the page sets a selection: onSelect is the user's.
+  let selecting = false;
 
-  // Renders `file` ({ path, hunks }) into `container`, replacing what it
-  // showed, in a `diffs-container` element (with `data-uncolored="large"`
-  // when the file is too large to color). The path only picks the syntax.
-  // Throws, and leaves what the container showed, when the hunks can't be
-  // read.
+  // pierre's callbacks for the file in `container`.
+  function interactions(container) {
+    const options = {};
+    // pierre reports a gutter click's lines again as a selection.
+    let clickedGutter = false;
+    if (typeof renderAnnotation === "function") {
+      options.renderAnnotation = (annotation) => {
+        const { side, lineNumber, metadata: key } = annotation;
+        const element = callPage(renderAnnotation, { side, lineNumber, key }, container);
+        return element instanceof HTMLElement ? element : undefined;
+      };
+    }
+    if (typeof onGutterClick === "function") {
+      options.enableGutterUtility = true;
+      options.onGutterUtilityClick = (range) => {
+        clickedGutter = true;
+        callPage(onGutterClick, lineRange(range), container);
+      };
+    }
+    if (typeof onSelect === "function") {
+      options.enableLineSelection = true;
+      options.onLineSelected = (range) => {
+        if (selecting) return;
+        if (clickedGutter) {
+          clickedGutter = false;
+          return;
+        }
+        callPage(onSelect, range ? lineRange(range) : null, container);
+      };
+    }
+    return options;
+  }
+
+  // Renders `file` ({ path, hunks, annotations }) into `container`,
+  // replacing what it showed, in a `diffs-container` element (with
+  // `data-uncolored="large"` when the file is too large to color). The
+  // path only picks the syntax; the annotations are as `setAnnotations`
+  // takes them. Throws, and leaves what the container showed, when the
+  // hunks can't be read.
   function renderFile(container, file) {
     if (destroyed) throw new Error("Pierre diff review was destroyed");
     if (!(container instanceof HTMLElement)) {
@@ -343,11 +548,87 @@ function createReview(scrollRoot, { fontSize, lineHeight, onRendered } = {}) {
     // The page can say why a file isn't colored.
     if (large) host.dataset.uncolored = "large";
     container.appendChild(host);
-    const view = new VirtualizedFileDiff(
-      reviewOptions(fontSize, lineHeight, onRendered), virtualizer, { lineHeight, fileGap: reviewGap }
+    const view = new ReviewFileDiff(
+      reviewOptions(fontSize, lineHeight, onRendered && (() => callPage(onRendered)), interactions(container)),
+      virtualizer, { lineHeight, fileGap: reviewGap }
     );
-    views.set(container, { view, host });
+    const lines = diffLines(fileDiff);
+    views.set(container, { view, host, lines });
+    // Set before rendering: off screen, pierre renders a placeholder, and
+    // drops what `render` is given.
+    view.setLineAnnotations(lineAnnotations(file.annotations, lines));
     view.render({ fileDiff, fileContainer: host });
+  }
+
+  // Replaces the annotations of the file in `container`: [{ side,
+  // lineNumber, key }], each shown under its line, in this order on the
+  // same line. On screen, the file renders again now, so the page's
+  // elements are in place on return, and what the viewport shows stays in
+  // place. The same annotations again render nothing: a render would drop
+  // a text selection in the file.
+  function setAnnotations(container, annotations) {
+    const entry = views.get(container);
+    if (!entry) return;
+    const { view } = entry;
+    const next = lineAnnotations(annotations, entry.lines);
+    // The rows whose annotations change lose the height pierre measured
+    // with them: pierre measures again only rows it renders, and none once
+    // a file has no annotation.
+    const keysByLine = (list) => {
+      const byLine = new Map();
+      for (const { side, lineNumber, metadata } of list) {
+        const line = `${side}:${lineNumber}`;
+        byLine.set(line, [...(byLine.get(line) ?? []), metadata]);
+      }
+      return byLine;
+    };
+    const before = keysByLine(view.lineAnnotations);
+    const after = keysByLine(next);
+    let changed = false;
+    for (const line of new Set([...before.keys(), ...after.keys()])) {
+      if (JSON.stringify(before.get(line)) === JSON.stringify(after.get(line))) continue;
+      changed = true;
+      const [side, lineNumber] = line.split(":");
+      // The row's index in the unified view, which the review shows, and
+      // by which pierre keeps its heights then.
+      const index = view.getLineIndex(Number(lineNumber), side)?.[0];
+      if (index !== undefined) view.heightCache.delete(index);
+    }
+    if (!changed) return;
+    // Read after the return: it takes in a resize of the window pierre
+    // hasn't drawn for yet.
+    const anchor = virtualizer.getScrollAnchor(virtualizer.getHeight());
+    view.computeApproximateSize();
+    view.setLineAnnotations(next);
+    // Not `rerender`, which would render the range of the last render,
+    // and the whole file when there was none.
+    view.render({ forceRender: true });
+    view.reconcileHeights();
+    // pierre does so after the renders it starts.
+    virtualizer.scrollFix(anchor);
+  }
+
+  // Shows `range` as the selected lines of the file in `container`, or
+  // none when it is null, or when its ends aren't lines of the diff.
+  // onSelect isn't called.
+  function setSelection(container, range) {
+    const entry = views.get(container);
+    if (!entry) return;
+    let selection = null;
+    if (range) {
+      const { start, side, end, endSide } = lineRange(range);
+      const first = shownLine(entry.lines, side, start);
+      const last = shownLine(entry.lines, endSide, end);
+      if (first && last) {
+        selection = { start: first.lineNumber, side: first.side, end: last.lineNumber, endSide: last.side };
+      }
+    }
+    selecting = true;
+    try {
+      entry.view.setSelectedLines(selection);
+    } finally {
+      selecting = false;
+    }
   }
 
   function removeFile(container) {
@@ -367,7 +648,7 @@ function createReview(scrollRoot, { fontSize, lineHeight, onRendered } = {}) {
     virtualizer.cleanUp();
   }
 
-  const review = { renderFile, removeFile, destroy: destroyReview };
+  const review = { renderFile, setAnnotations, setSelection, removeFile, destroy: destroyReview };
   reviewsByRoot.set(root, review);
   return review;
 }
