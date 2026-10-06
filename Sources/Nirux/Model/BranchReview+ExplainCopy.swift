@@ -193,15 +193,17 @@ extension BranchReview {
     /// line breaks, bidi controls and other invisible characters as their
     /// code point (`⟨U+202E⟩`), so a path can't fake a line of the input
     /// or hide its extension. A variation selector stays after an emoji.
-    /// Prose (`keepingLineBreaks`) keeps its line breaks and tabs.
-    static func visible(_ text: String, keepingLineBreaks: Bool = false) -> String {
+    /// Prose (`keepingLineBreaks`) keeps its line breaks and tabs; a line
+    /// of code (`keepingTabs`), its tabs.
+    static func visible(_ text: String, keepingLineBreaks: Bool = false, keepingTabs: Bool = false) -> String {
         var result = ""
         var previous: Unicode.Scalar?
         for scalar in text.unicodeScalars {
             defer { previous = scalar }
             let value = scalar.value
             let isVariationSelector = value == 0xFE0E || value == 0xFE0F
-            let hidden = keepingLineBreaks && (value == 0x0A || value == 0x09) ? false : isVariationSelector
+            let kept = (keepingLineBreaks && (value == 0x0A || value == 0x09)) || (keepingTabs && value == 0x09)
+            let hidden = kept ? false : isVariationSelector
                 ? !(previous?.properties.isEmoji ?? false)
                 : scalar.properties.generalCategory == .control || scalar.properties.isDefaultIgnorableCodePoint
                     || value == 0x2028 || value == 0x2029 || (0xFFF9...0xFFFB).contains(value)
