@@ -337,13 +337,13 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             let column = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex])
 
             // ⌘F, ⌘G and ⇧⌘G from the Edit menu.
-            shell.showTerminalFind()
+            shell.showFind()
             XCTAssertTrue(column.isFindBarOpen)
             let bar = try XCTUnwrap(column.findBar)
             harness.type("flow", into: bar.field)
             XCTAssertEqual(column.terminalSearch?.needle, "flow")
-            shell.findNextInTerminal()
-            shell.findPreviousInTerminal()
+            shell.findNextMatch()
+            shell.findPreviousMatch()
             @MainActor func button(_ label: String) throws -> NSButton {
                 try XCTUnwrap(bar.subviews.compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == label }, label)
             }

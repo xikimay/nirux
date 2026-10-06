@@ -39,14 +39,14 @@ extension NiruxApp {
                   let col = workspace.columns[safe: workspace.focusedIndex]
             else { return event }
             // Don't consume modifiers for web content columns, or while a
-            // terminal's find field is typing.
+            // find field is typing.
             if Self.takesWebContentKeys(col) || workspace.findFieldColumn != nil { return event }
             return nil
         }
     }
 
-    /// A key typed while a terminal's find field has the focus edits the
-    /// field, never a PTY (see TerminalFindKeyRouting).
+    /// A key typed while a find field has the focus edits the field, never
+    /// a PTY or page (see TerminalFindKeyRouting).
     private static func routeFindFieldKey(_ event: NSEvent, in column: ColumnState) -> NSEvent? {
         switch TerminalFindKeyRouting.routeInField(keyCode: event.keyCode, modifierFlags: event.modifierFlags) {
         case .field:
@@ -202,7 +202,7 @@ extension NiruxApp {
                   let col = workspace.columns[safe: workspace.focusedIndex]
             else { return event }
 
-            // Keys follow a terminal's find field while it has the focus,
+            // Keys follow a find field while it has the focus,
             // even when the focused column changed without moving the
             // keyboard (a resize drag, an agent opening an editor column).
             if let findColumn = workspace.findFieldColumn {

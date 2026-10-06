@@ -285,6 +285,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         if menuItem.action == #selector(resumeAllAgents(_:)) {
             return (shell?.deferredAgentCount ?? 0) > 0
         }
+        if [#selector(showFind(_:)), #selector(findNextMatch(_:)), #selector(findPreviousMatch(_:))].contains(menuItem.action) {
+            return canFind
+        }
         if menuItem.action == #selector(toggleInactiveWorkspaces(_:)) {
             guard let shell else { return false }
             menuItem.state = shell.sidebar.isInactiveSectionCollapsed ? .off : .on

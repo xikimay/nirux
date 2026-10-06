@@ -114,9 +114,10 @@ final class ColumnState {
     /// The user asked to resume the agent that died mid-turn.
     var onResumeExitedAgent: (() -> Void)?
 
-    /// ⌘F find bar and the search it drives, created on first use
-    /// (ColumnState+TerminalFind.swift).
-    var findBar: TerminalFindBar?
+    /// ⌘F find bar, created on first use, and the terminal search it
+    /// drives; a browser column's bar drives its `pageFind`
+    /// (ColumnState+Find.swift).
+    var findBar: FindBar?
     var terminalSearch: TerminalSearchSession?
 
     /// Claude session transcript this column follows, its latest usage and
@@ -138,8 +139,8 @@ final class ColumnState {
     private static func terminalMenu() -> NSMenu {
         let menu = NSMenu()
         menu.addItem(ColumnHeaderView.columnItem(
-            "Find in Terminal…", mainMenuAction: #selector(NiruxApp.showTerminalFind(_:))
-        ) { $0.showTerminalFind() })
+            "Find in Terminal…", mainMenuAction: #selector(NiruxApp.showFind(_:))
+        ) { $0.showFind() })
         menu.addItem(.separator())
         ColumnHeaderView.columnMenuItems().forEach(menu.addItem)
         return menu

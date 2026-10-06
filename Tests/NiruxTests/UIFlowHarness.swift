@@ -256,6 +256,28 @@ final class UIFlowHarness {
         return shell.commandPalette?.actions ?? []
     }
 
+    // MARK: - App
+
+    /// Runs `body` with the app's key interceptor and menu bar on the
+    /// harness window, as `applicationDidFinishLaunching` sets them up.
+    func withApp(_ body: () throws -> Void) throws {
+        let app = NiruxApp()
+        app.shell = shell
+        app.mainWindow = window
+        let previousMenu = NSApp.mainMenu
+        let previousDelegate = NSApp.delegate
+        NSApp.mainMenu = app.makeMainMenu()
+        // Menu items without a target reach the app delegate.
+        NSApp.delegate = app
+        let monitors = app.setupKeyInterceptor()
+        defer {
+            monitors.forEach(NSEvent.removeMonitor)
+            NSApp.delegate = previousDelegate
+            NSApp.mainMenu = previousMenu
+        }
+        try body()
+    }
+
     // MARK: - Keyboard and fields
 
     enum Key {
@@ -292,6 +314,26 @@ final class UIFlowHarness {
             charactersIgnoringModifiers: key.characters,
             isARepeat: false,
             keyCode: key.code
+        ) else { return XCTFail("no key event") }
+        NSApp.sendEvent(event)
+    }
+
+    /// A key press with modifiers, through the app's event dispatch and so
+    /// its key interceptor. The test process never has a key window: a key
+    /// the interceptor returns to AppKit reaches the menu, not the window's
+    /// views.
+    func press(_ characters: String, keyCode: UInt16, _ modifiers: NSEvent.ModifierFlags) {
+        guard let event = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifiers,
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: characters,
+            isARepeat: false,
+            keyCode: keyCode
         ) else { return XCTFail("no key event") }
         NSApp.sendEvent(event)
     }

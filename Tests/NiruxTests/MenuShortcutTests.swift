@@ -115,10 +115,10 @@ final class MenuShortcutTests: XCTestCase {
     }
 
     @MainActor
-    func testTerminalFindUsesTheStandardFindChords() {
-        let find = items(withAction: #selector(NiruxApp.showTerminalFind(_:)))
-        let next = items(withAction: #selector(NiruxApp.findNextInTerminal(_:)))
-        let previous = items(withAction: #selector(NiruxApp.findPreviousInTerminal(_:)))
+    func testFindUsesTheStandardFindChords() {
+        let find = items(withAction: #selector(NiruxApp.showFind(_:)))
+        let next = items(withAction: #selector(NiruxApp.findNextMatch(_:)))
+        let previous = items(withAction: #selector(NiruxApp.findPreviousMatch(_:)))
         XCTAssertEqual(find.compactMap(chord(of:)), [KeyChord("f")])
         XCTAssertEqual(next.compactMap(chord(of:)), [KeyChord("g")])
         XCTAssertEqual(previous.compactMap(chord(of:)), [KeyChord("g", [.command, .shift])])

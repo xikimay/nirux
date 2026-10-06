@@ -1,18 +1,28 @@
 import AppKit
 
-/// The find bar floating over a terminal column's top-right corner (⌘F):
-/// a field, next/previous buttons and a close button. Return goes to the
-/// next match, Shift+Return to the previous one, Escape closes the bar.
-/// Ghostty searches from the bottom, so "next" moves up through older
-/// output, and the up arrow is the next-match button, as in Ghostty.
+/// The find bar floating over a terminal or browser column's top-right
+/// corner (⌘F): a field, a match counter, next/previous buttons and a
+/// close button. Return goes to the next match, Shift+Return to the
+/// previous one, Escape closes the bar.
 ///
-/// libghostty runs the search and highlights the matches in the terminal
-/// (see TerminalSearchSession). There is no match counter: libghostty-spm
-/// does not forward Ghostty's match totals to its delegate.
+/// In a terminal, Ghostty searches from the bottom, so "next" moves up
+/// through older output, and the up arrow is the next-match button, as in
+/// Ghostty. libghostty runs the search and highlights the matches (see
+/// TerminalSearchSession). There is no match counter: libghostty-spm does
+/// not forward Ghostty's match totals to its delegate. On a page, "next"
+/// moves down, and WebKit counts the matches (WebPageFind).
 @MainActor
-final class TerminalFindBar: NSView, NSTextFieldDelegate {
+final class FindBar: NSView, NSTextFieldDelegate {
+    /// What the bar searches: it sets the way "next" goes and the field's
+    /// accessibility label.
+    enum Target {
+        case terminal, page
+    }
+
     static let height: CGFloat = 32
     static let preferredWidth: CGFloat = 320
+    /// The counter hides rather than leave the field narrower.
+    static let minimumFieldWidth: CGFloat = 80
 
     var onNeedleChange: ((String) -> Void)?
     var onNext: (() -> Void)?
@@ -22,18 +32,29 @@ final class TerminalFindBar: NSView, NSTextFieldDelegate {
     var currentModifierFlags: () -> NSEvent.ModifierFlags = { NSApp.currentEvent?.modifierFlags ?? [] }
 
     let field = NSTextField()
-    private let nextButton = TerminalFindBar.makeButton(
-        symbol: "chevron.up", label: "Next Match", toolTip: "Next Match (\u{2318}G)"
-    )
-    private let previousButton = TerminalFindBar.makeButton(
-        symbol: "chevron.down", label: "Previous Match", toolTip: "Previous Match (\u{21E7}\u{2318}G)"
-    )
-    private let closeButton = TerminalFindBar.makeButton(
+    /// The match counter ("12 matches", "Not found"); nil hides it.
+    var status: String? {
+        didSet {
+            statusLabel.stringValue = status ?? ""
+            needsLayout = true
+        }
+    }
+    private let statusLabel = NSTextField(labelWithString: "")
+    private let upButton: NSButton
+    private let downButton: NSButton
+    private let closeButton = FindBar.makeButton(
         symbol: "xmark", label: "Close Find Bar", toolTip: "Close (Esc)"
     )
 
-    override init(frame: NSRect) {
-        super.init(frame: frame)
+    init(target: Target) {
+        let next = (label: "Next Match", toolTip: "Next Match (\u{2318}G)", action: #selector(nextClicked))
+        let previous = (label: "Previous Match", toolTip: "Previous Match (\u{21E7}\u{2318}G)", action: #selector(previousClicked))
+        let (up, down) = target == .terminal ? (next, previous) : (previous, next)
+        upButton = Self.makeButton(symbol: "chevron.up", label: up.label, toolTip: up.toolTip)
+        upButton.action = up.action
+        downButton = Self.makeButton(symbol: "chevron.down", label: down.label, toolTip: down.toolTip)
+        downButton.action = down.action
+        super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = Theme.Color.surface.withAlphaComponent(0.98).cgColor
         layer?.cornerRadius = 7
@@ -53,16 +74,18 @@ final class TerminalFindBar: NSView, NSTextFieldDelegate {
         field.cell?.isScrollable = true
         field.cell?.wraps = false
         field.delegate = self
-        field.setAccessibilityLabel("Find in Terminal")
+        field.setAccessibilityLabel(target == .terminal ? "Find in Terminal" : "Find in Page")
         addSubview(field)
 
-        previousButton.target = self
-        previousButton.action = #selector(previousClicked)
-        nextButton.target = self
-        nextButton.action = #selector(nextClicked)
-        closeButton.target = self
+        statusLabel.font = Theme.Font.caption
+        statusLabel.textColor = Theme.Color.textSecondary
+        statusLabel.lineBreakMode = .byClipping
+        statusLabel.isHidden = true
+        addSubview(statusLabel)
+
         closeButton.action = #selector(closeClicked)
-        for button in [nextButton, previousButton, closeButton] {
+        for button in [upButton, downButton, closeButton] {
+            button.target = self
             addSubview(button)
         }
     }
@@ -71,7 +94,7 @@ final class TerminalFindBar: NSView, NSTextFieldDelegate {
     required init?(coder: NSCoder) { fatalError() }
 
     /// True while the field holds the keyboard focus. The key interceptor
-    /// then lets keys reach the field instead of the PTY.
+    /// then lets keys reach the field instead of the PTY or the page.
     var isEditing: Bool {
         guard let editor = field.currentEditor() else { return false }
         return window?.firstResponder === editor
@@ -87,11 +110,21 @@ final class TerminalFindBar: NSView, NSTextFieldDelegate {
         let inset: CGFloat = 5
         let side: CGFloat = 22
         var buttonX = bounds.width - inset - side
-        for button in [closeButton, previousButton, nextButton] {
+        for button in [closeButton, downButton, upButton] {
             button.frame = NSRect(x: buttonX, y: (bounds.height - side) / 2, width: side, height: side)
             buttonX -= side + 2
         }
-        let fieldMaxX = nextButton.frame.minX - 6
+        var fieldMaxX = upButton.frame.minX - 6
+        let statusSize = statusLabel.cell?.cellSize ?? .zero
+        let statusWidth = ceil(statusSize.width)
+        statusLabel.isHidden = status == nil || fieldMaxX - statusWidth - 4 - inset < Self.minimumFieldWidth
+        if !statusLabel.isHidden {
+            statusLabel.frame = NSRect(
+                x: fieldMaxX - statusWidth, y: (bounds.height - statusSize.height) / 2,
+                width: statusWidth, height: statusSize.height
+            )
+            fieldMaxX = statusLabel.frame.minX - 4
+        }
         field.frame = NSRect(
             x: inset,
             y: (bounds.height - side) / 2,

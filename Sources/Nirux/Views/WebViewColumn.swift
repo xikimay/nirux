@@ -21,6 +21,8 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
     var onURLChanged: (() -> Void)?
     private(set) var pageTitle: String = ""
     private var observations: [NSKeyValueObservation] = []
+    /// Find in page (⌘F), driven by the column's find bar.
+    let pageFind: WebPageFind
     /// Destination URLs of in-flight downloads, for the completion
     /// notification's reveal-in-Finder action.
     private var downloadDestinations: [ObjectIdentifier: URL] = [:]
@@ -39,6 +41,7 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
         config.mediaTypesRequiringUserActionForPlayback = []
 
         webView = WKWebView(frame: .zero, configuration: config)
+        pageFind = WebPageFind(webView: webView)
         progressBar = NSView()
 
         super.init(frame: .zero)
@@ -215,6 +218,12 @@ final class WebViewColumn: NSView, WKNavigationDelegate, WKUIDelegate {
                 URLHistory.add(url)
             }
         }
+    }
+
+    /// A new document has none of the matches the find bar counted.
+    @MainActor
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        pageFind.pageDidChange()
     }
 
     nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

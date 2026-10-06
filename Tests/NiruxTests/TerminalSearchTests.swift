@@ -246,7 +246,7 @@ final class TerminalSearchTests: XCTestCase {
 
     @MainActor
     func testReturnGoesToTheNextMatchAndShiftReturnToThePreviousOne() {
-        let bar = TerminalFindBar(frame: .zero)
+        let bar = FindBar(target: .terminal)
         var calls: [String] = []
         bar.onNext = { calls.append("next") }
         bar.onPrevious = { calls.append("previous") }
@@ -273,7 +273,7 @@ final class TerminalSearchTests: XCTestCase {
 
     @MainActor
     func testEditingTheFieldReportsItsText() {
-        let bar = TerminalFindBar(frame: .zero)
+        let bar = FindBar(target: .terminal)
         var needles: [String] = []
         bar.onNeedleChange = { needles.append($0) }
         bar.field.stringValue = "panic"
@@ -291,7 +291,8 @@ final class TerminalSearchTests: XCTestCase {
             styleMask: [.titled], backing: .buffered, defer: true
         )
         window.isReleasedWhenClosed = false
-        let bar = TerminalFindBar(frame: NSRect(x: 0, y: 0, width: 320, height: TerminalFindBar.height))
+        let bar = FindBar(target: .terminal)
+        bar.frame = NSRect(x: 0, y: 0, width: 320, height: FindBar.height)
         let other = NSTextView(frame: NSRect(x: 0, y: 100, width: 100, height: 50))
         window.contentView?.addSubview(bar)
         window.contentView?.addSubview(other)
@@ -319,7 +320,7 @@ final class TerminalSearchTests: XCTestCase {
         XCTAssertTrue(column.view.subviews.last === bar, "drawn above the terminal")
         XCTAssertEqual(bar?.frame.maxX, 590)
         XCTAssertEqual(bar?.frame.maxY, 400 - column.headerHeight - 10)
-        XCTAssertEqual(bar?.frame.width, TerminalFindBar.preferredWidth)
+        XCTAssertEqual(bar?.frame.width, FindBar.preferredWidth)
 
         // A narrow column shrinks the bar instead of overflowing it.
         column.view.frame = NSRect(x: 0, y: 0, width: 200, height: 400)
@@ -442,14 +443,5 @@ final class TerminalSearchTests: XCTestCase {
         XCTAssertFalse(closes(0x35, [.option]))
         XCTAssertFalse(closes(0x35, [.shift]))
         XCTAssertFalse(closes(0x24, []))
-    }
-
-    @MainActor
-    func testBrowserColumnsHaveNoFindBar() {
-        let column = ColumnState(url: "about:blank")
-        column.showFindBar()
-        XCTAssertNil(column.findBar)
-        XCTAssertFalse(column.isFindBarOpen)
-        XCTAssertFalse(column.isEditingFind)
     }
 }

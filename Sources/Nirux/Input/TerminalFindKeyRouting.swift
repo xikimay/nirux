@@ -1,7 +1,8 @@
 import AppKit
 
-/// Where the key interceptor sends a key when a terminal's find bar is
-/// involved. Terminal columns otherwise write every key to the PTY.
+/// Where the key interceptor sends a key when a find bar is involved: a
+/// terminal's, or a browser column's. Terminal columns otherwise write every
+/// key to the PTY.
 enum TerminalFindKeyRouting {
     enum FieldRoute: Equatable {
         /// Plain keys (Return, Escape, arrows included) edit the field.
@@ -16,7 +17,7 @@ enum TerminalFindKeyRouting {
         case fieldEditor
     }
 
-    /// A key typed while a terminal's find field has the focus.
+    /// A key typed while a find field has the focus.
     static func routeInField(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> FieldRoute {
         let modifiers = modifierFlags.intersection([.command, .option, .control, .shift])
         guard modifiers.contains(.command) else { return .field }

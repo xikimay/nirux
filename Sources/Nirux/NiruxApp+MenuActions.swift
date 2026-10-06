@@ -88,22 +88,31 @@ extension NiruxApp {
         shell?.showGlobalSearch()
     }
 
-    // The find items act on the main window's focused terminal column only:
-    // with a panel or a detached Web Inspector key, the bar would open
-    // behind it.
-    @objc func showTerminalFind(_ sender: Any?) {
-        guard NSApp.keyWindow === mainWindow else { return }
-        shell?.showTerminalFind()
+    // The find items act on the main window's focused terminal or browser
+    // column only: with a panel or a detached Web Inspector key, the bar
+    // would open behind it.
+    @objc func showFind(_ sender: Any?) {
+        guard canFind else { return }
+        shell?.showFind()
     }
 
-    @objc func findNextInTerminal(_ sender: Any?) {
-        guard NSApp.keyWindow === mainWindow else { return }
-        shell?.findNextInTerminal()
+    @objc func findNextMatch(_ sender: Any?) {
+        guard canFind else { return }
+        shell?.findNextMatch()
     }
 
-    @objc func findPreviousInTerminal(_ sender: Any?) {
-        guard NSApp.keyWindow === mainWindow else { return }
-        shell?.findPreviousInTerminal()
+    @objc func findPreviousMatch(_ sender: Any?) {
+        guard canFind else { return }
+        shell?.findPreviousMatch()
+    }
+
+    /// The find items' state: no other window of the app is key (as Close
+    /// Column reads it), the main window isn't in the Dock, and a column can
+    /// search. Editor columns keep ⌘F for Monaco's find widget, which gets it
+    /// first.
+    var canFind: Bool {
+        let isMainWindowInFront = NSApp.keyWindow.map { $0 === mainWindow } ?? (mainWindow?.isMiniaturized != true)
+        return isMainWindowInFront && shell?.findTargetColumn != nil
     }
 
     @objc func toggleEditorDiff(_ sender: Any?) {
@@ -212,11 +221,11 @@ extension NiruxApp {
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(NSMenuItem.separator())
-        editMenu.addItem(withTitle: "Find in Terminal…", action: #selector(showTerminalFind(_:)), keyEquivalent: "f")
-        editMenu.addItem(withTitle: "Find Next", action: #selector(findNextInTerminal(_:)), keyEquivalent: "g")
+        editMenu.addItem(withTitle: "Find…", action: #selector(showFind(_:)), keyEquivalent: "f")
+        editMenu.addItem(withTitle: "Find Next", action: #selector(findNextMatch(_:)), keyEquivalent: "g")
         let findPreviousItem = editMenu.addItem(
             withTitle: "Find Previous",
-            action: #selector(findPreviousInTerminal(_:)),
+            action: #selector(findPreviousMatch(_:)),
             keyEquivalent: "g"
         )
         findPreviousItem.keyEquivalentModifierMask = [.command, .shift]
