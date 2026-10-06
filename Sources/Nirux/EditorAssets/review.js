@@ -256,6 +256,8 @@
       line.title = "What these runs would cost at API prices. On a Claude subscription, they count toward the plan’s usage limits instead.";
       container.append(line);
     }
+    const wrongNotes = P.notesLine(bar);
+    if (wrongNotes) container.append(element("div", "explain-usage", wrongNotes));
     clearInterval(explainTimer);
     explainTimer = null;
     if (bar.state === "running" && bar.progress) {
@@ -713,6 +715,7 @@
   function takeReview(stored) {
     statesMade = null;
     state.stored = stored;
+    showNoteMarks();
     for (const [path, click] of state.clicks) {
       if (stored && click.sequence <= stored.acknowledged) state.clicks.delete(path);
     }
@@ -726,7 +729,8 @@
       state.openFiles.add(file.path);
       if (!diff.hasChildNodes()) {
         const shown = state.diffs.get(file.path);
-        if (shown && diffKey(file) && shown.key === diffKey(file)) {
+        // Drawn from this patch, with this explanation's notes.
+        if (shown && diffKey(file) && shown.key === diffKey(file) && shown.notesVersion === state.page.notesVersion) {
           shown.node.classList.remove("stale");
           diff.append(shown.node);
           return;
@@ -826,7 +830,9 @@
     const scrolled = pageElement.hidden ? 0 : window.scrollY;
     const anchor = samebranch ? readingAnchor() : null;
     if (!samebranch || !review) {
-      review = window.NiruxPierreDiff.createReview(document);
+      review = window.NiruxPierreDiff.createReview(document, { renderAnnotation: noteCard });
+      notes.clear();
+      noteCards.clear();
       state.diffs.clear();
       state.holders.clear();
     }
@@ -842,6 +848,12 @@
     }
     for (const [path, shown] of state.diffs) {
       if (!shown.node.isConnected) state.diffs.delete(path);
+    }
+    // The notes of the diffs let go.
+    for (const [id, card] of noteCards) {
+      if (card.isConnected) continue;
+      noteCards.delete(id);
+      notes.delete(id);
     }
     applyRiskFilter(false);
     applyReview();
@@ -871,15 +883,114 @@
     }
     const holder = element("div", "diff-box");
     box.append(holder);
+    const fileNotes = Array.isArray(diff.notes) ? diff.notes : [];
+    for (const note of fileNotes) {
+      // The last mark Swift confirmed.
+      note.settled = note.isWrong;
+      notes.set(note.id, note);
+    }
+    const annotations = fileNotes.map((note) => ({ side: note.side, lineNumber: note.lineNumber, key: note.id }));
     try {
-      review.renderFile(holder, { path: file ? file.path : "", hunks: diff.hunks });
+      review.renderFile(holder, { path: file ? file.path : "", hunks: diff.hunks, annotations });
     } catch (error) {
       review.removeFile(holder);
       box.replaceChildren(element("div", "diff-message", `Couldn’t show this diff: ${error.message}`));
       return;
     }
     state.holders.add(holder);
-    if (file && diffKey(file)) state.diffs.set(file.path, { key: diffKey(file), node: holder });
+    if (file && diffKey(file)) state.diffs.set(file.path, { key: diffKey(file), node: holder, notesVersion: diff.notesVersion });
+  }
+
+  // MARK: Claude's notes (section 4.3)
+
+  // By id: the diffs' annotations name them by it, and a card, once drawn,
+  // is updated in place.
+  const notes = new Map();
+  const noteCards = new Map();
+
+  // A note under the last changed line of its hunk, labeled as Claude's,
+  // with the head it read, its "check this" apart; it can be marked wrong,
+  // and the mark undone.
+  let noteCount = 0;
+
+  function noteCard(annotation) {
+    const note = notes.get(annotation.key);
+    if (!note) return null;
+    const card = element("div", "note");
+    const source = element("div", "source claude");
+    const head = note.head ? ` \u00B7 read ${String(note.head).slice(0, 7)}` : "";
+    source.append(icon("spark"), element("span", null, `Claude \u00B7 ${note.model}${head}`));
+    const text = element("div", "note-text", note.text);
+    text.id = `note-text-${++noteCount}`;
+    card.append(source, text);
+    if (note.check) {
+      const check = element("div", "note-check");
+      const label = element("div", "note-check-label");
+      label.append(icon("help"), element("span", null, "Check this"));
+      check.append(label, element("div", "note-text", note.check));
+      card.append(check);
+    }
+    const actions = element("div", "note-actions");
+    const marked = element("span", "note-marked", "Marked wrong");
+    // Made once: a keyboard user keeps the focus on it.
+    const toggle = element("button", "more");
+    toggle.type = "button";
+    toggle.setAttribute("aria-describedby", text.id);
+    toggle.addEventListener("click", () => {
+      if (toggle.getAttribute("aria-disabled") === "true") return;
+      note.isWrong = !note.isWrong;
+      // Swift answers each click: until the last answer, the page's mark.
+      note.inFlight = (note.inFlight ?? 0) + 1;
+      showNoteMark(card, note);
+      post({ type: "markWrong", id: note.id, wrong: note.isWrong });
+    });
+    actions.append(marked, toggle);
+    card.append(actions);
+    noteCards.set(note.id, card);
+    showNoteMark(card, note);
+    return card;
+  }
+
+  function showNoteMark(card, note) {
+    card.classList.toggle("wrong", note.isWrong);
+    card.querySelector(".note-marked").hidden = !note.isWrong;
+    const toggle = card.querySelector(".note-actions button");
+    toggle.textContent = note.isWrong ? "Undo" : "Mark wrong";
+    // A review this Nirux can't write: the mark couldn't be kept. Not
+    // `disabled`, which would take the focus away.
+    const stored = state.stored;
+    const writable = stored ? stored.canWrite : true;
+    setEnabled(toggle, writable);
+    toggle.title = !writable && stored?.problem ? stored.problem : "";
+  }
+
+  // A note's mark as the review file holds it (null: the click wasn't
+  // taken), shown once every click on it is answered. With `from` and
+  // `to`, only marks changed: the diffs drawn at `from` stay current.
+  function markNote(id, wrong, from, to) {
+    const note = notes.get(String(id));
+    if (note) {
+      note.inFlight = Math.max(0, (note.inFlight ?? 0) - 1);
+      if (wrong !== null && wrong !== undefined) note.settled = Boolean(wrong);
+      if (note.inFlight === 0) {
+        note.isWrong = Boolean(note.settled);
+        const card = noteCards.get(note.id);
+        if (card) showNoteMark(card, note);
+      }
+    }
+    if (!state.page || from === null || from === undefined || state.page.notesVersion !== from) return;
+    state.page.notesVersion = to;
+    for (const shown of state.diffs.values()) {
+      if (shown.notesVersion === from) shown.notesVersion = to;
+    }
+  }
+
+  // The stored review changed: whether marks can be kept.
+  function showNoteMarks() {
+    for (const [id, card] of noteCards) {
+      const note = notes.get(id);
+      if (note) showNoteMark(card, note);
+    }
   }
 
   // Explain's bar as the run goes: only the bar changes.
@@ -930,6 +1041,6 @@
     pageElement.hidden = true;
   }
 
-  window.NiruxReview = Object.freeze({ show, showDiff, showExplain, showStatus, showReload, hideReload, showReview });
+  window.NiruxReview = Object.freeze({ show, showDiff, showExplain, showStatus, showReload, hideReload, showReview, markNote });
   post({ type: "ready" });
 })();

@@ -211,6 +211,18 @@ a.chip { text-decoration: none; cursor: pointer; }
 .file-summary { grid-column: 3 / -1; color: var(--text-secondary); font-size: 11px; line-height: 15px; white-space: normal; overflow-wrap: anywhere; }
 .file-summary.outdated { color: var(--text-tertiary); }
 
+/* Claude's notes, under the hunks they explain: neutral, labeled. */
+.note { display: grid; gap: 6px; max-width: 640px; margin: 6px 12px 8px 8px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); font: 12px/17px var(--sans); white-space: normal; }
+/* Marked wrong: its text dims; the mark and Undo stay readable. */
+.note.wrong .note-text, .note.wrong .source, .note.wrong .note-check-label { opacity: 0.55; }
+.note-text { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-primary); }
+.note-check { display: grid; gap: 4px; padding-top: 6px; border-top: 1px solid var(--line); }
+.note-check-label { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-weight: 600; }
+.note-check-label .icon { color: var(--accent); }
+.note-actions { display: flex; align-items: center; gap: 8px; }
+.note-actions .more[aria-disabled="true"] { color: var(--text-disabled); cursor: default; text-decoration: none; }
+.note-marked { color: var(--text-tertiary); font-size: 11px; }
+
 /* Risks and tests */
 .risks { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .tests { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; color: var(--text-secondary); font-size: 11px; line-height: 15px; }

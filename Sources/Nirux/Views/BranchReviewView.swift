@@ -63,6 +63,8 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
     var onCancelExplain: (() -> Void)?
     /// The page's "Include untracked files".
     var onIncludeUntracked: ((Bool) -> Void)?
+    /// One of Claude's notes, by its id, marked wrong (true) or not.
+    var onMarkWrong: ((_ id: String, _ wrong: Bool) -> Void)?
     /// A web link to open, http or https only.
     var openLink: (URL) -> Void = { NSWorkspace.shared.open($0) }
 
@@ -189,6 +191,17 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
         call("NiruxReview.showExplain(json)", ["json": json])
     }
 
+    /// A note's mark as the review file holds it; nil: the click wasn't
+    /// taken, the page keeps the last mark it was told. With `from` and
+    /// `to`, the page's notes go from one version to the other (`Page
+    /// .notesVersion`) if they were at the first: only marks changed.
+    func markNote(id: String, wrong: Bool?, from: Int? = nil, to: Int? = nil) {
+        guard isPageReady else { return }
+        call("NiruxReview.markNote(id, wrong, from, to)", [
+            "id": id, "wrong": wrong ?? NSNull(), "from": from ?? NSNull(), "to": to ?? NSNull()
+        ])
+    }
+
     /// A message in place of the page, with a button titled `action` when
     /// there is something to do (`onStatusAction`).
     func showStatus(_ message: String, action: String? = nil) {
@@ -285,6 +298,9 @@ final class BranchReviewView: NSView, WKNavigationDelegate, WKScriptMessageHandl
         case "includeUntracked":
             guard let include = body["include"] as? Bool else { return }
             onIncludeUntracked?(include)
+        case "markWrong":
+            guard let id = body["id"] as? String, id.utf8.count <= 100, let wrong = body["wrong"] as? Bool else { return }
+            onMarkWrong?(id, wrong)
         case "openLink":
             guard let text = body["url"] as? String, let url = Self.webLink(text) else { return }
             openLink(url)
