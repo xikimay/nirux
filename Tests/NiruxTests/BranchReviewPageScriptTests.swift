@@ -217,5 +217,7 @@ final class BranchReviewPageScriptTests: XCTestCase {
         XCTAssertEqual(try call("intentLabel", "behaviorChange"), #""Behavior change""#)
         XCTAssertEqual(try call("intentLabel", "<b>"), #""Other""#)
         XCTAssertEqual(try call("verdictLabel", "notInDiff"), #""Not in diff""#)
+        XCTAssertEqual(try call("notesLine", ["notes": 12, "wrongNotes": 0]), "null")
+        XCTAssertEqual(try call("notesLine", ["notes": 12, "wrongNotes": 1]), #""Claude’s notes marked wrong: 1 of 12""#)
     }
 }

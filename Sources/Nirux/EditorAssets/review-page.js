@@ -414,6 +414,13 @@
       + `${usage.isComplete ? "" : "at least "}${cost} at API prices`;
   }
 
+  // How often Claude's notes were wrong, since the first Explain: once
+  // one was marked.
+  function notesLine(bar) {
+    if (!bar.wrongNotes) return null;
+    return `Claude’s notes marked wrong: ${bar.wrongNotes} of ${bar.notes}`;
+  }
+
   const intents = {
     feature: "Feature", behaviorChange: "Behavior change", refactor: "Refactor", tests: "Tests", config: "Config",
     docs: "Docs", ci: "CI", other: "Other"
@@ -433,7 +440,7 @@
     parseMarkdown, parseInline, safeURL, splitDecisions, plainText, count, commitsLabel, splitPath,
     statusLetter, testsSummary, matchesRisk, visible, fileTag, clockTime,
     isReviewed, isMarkable, reviewProgress, groupReviewState, groupReviewAction, reviewTitle,
-    explainActions, explainProgress, duration, tokens, usageLine, intentLabel, verdictLabel
+    explainActions, explainProgress, duration, tokens, usageLine, notesLine, intentLabel, verdictLabel
   };
   root.ReviewPage = Object.freeze(api);
 })(typeof window !== "undefined" ? window : globalThis);
