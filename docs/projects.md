@@ -744,6 +744,54 @@ the main thread:
   session (Resume above), or goes to the column that runs it. The rows go when
   the panel closes.
 
+### Agent history search
+
+Every `claude` Nirux launches gets a read-only tool, `history_search`, to
+search the project's past conversations: decisions that live only there (a
+feature frozen, a plan dropped) without a model running in the background.
+Validated by the user on 2026-10-05.
+
+- **Server:** `Nirux --hook claude --mcp`, a stdio MCP server
+  (`NiruxMCPServer`), spelled as a hook so that an older build at the same
+  path takes the messages for a hook payload instead of opening its UI (it
+  waits for stdin to close; Claude reports the server as failed). The launch
+  line passes it inline (`--mcp-config={…}`, not a file: Claude won't start
+  when a config file is missing) and allows its tools
+  (`--allowedTools=mcp__nirux__history_search`): they never write and stay in
+  the project, so they never ask. Its `instructions`, which Claude adds to the
+  system prompt, ask agents to search before starting a task and before asking
+  the user about a past decision. Later memory tools join the same server.
+- **Scope:** the Claude sessions that started in a folder of the agent's
+  repository, plus the space's ledger sessions. A folder belongs to the
+  repository when it is one of its checkouts (`git worktree list`), lies
+  inside one (not past another checkout's `.git`, folder or file; a checkout
+  at the home folder or above counts for itself only), or is gone, named like
+  a Nirux worktree (`<main checkout>.<branch, "/" as "-">`) and the session
+  started on that branch. Claude's folder names can't be read back (every
+  other character becomes `-`), so each candidate's `cwd` is checked. The
+  ledger never adds repositories (a moved workspace leaves lines in the old
+  file until a rewrite), and in the default space, where workspaces land
+  unless moved, its sessions only count inside the repository. git runs
+  without the server's `GIT_*` variables.
+- **Matching:** what Search Everywhere reads (above), every term in the same
+  message, case and accents ignored; "double quotes" make a phrase one term.
+  Lines are folded byte by byte before being parsed (each character of the
+  Basic Multilingual Plane decomposed, marks dropped, case folded). Same
+  bounds as Search Everywhere; the newest 1,000 transcripts in scope. On 74
+  transcripts (344 MB) a call takes about a second in a release build.
+- **Answer:** at most 20 messages (8 by default), newest first; `before`
+  pages to older ones, and the answer says how many it would find. Each
+  shows its date, who wrote it, its branch, folder, pull request and session,
+  then 420 characters around the match as a quote. A message that holds a key
+  (Explain's patterns) or a secret pasted in chat (a bot token, a JWT, a URL
+  with a password, a `*_TOKEN=` line) shows no excerpt.
+- **Usage:** each call appends a line to
+  `<state dir>/projects/<space id>/history-search.jsonl` (0600): time, Claude
+  session, column, workspace, query, results and duration. Past 2 MB it moves
+  to `history-search.1.jsonl`. Calls per session:
+  `jq -r .session history-search.jsonl | sort | uniq -c`.
+- **Not done:** Codex.
+
 Not done yet: refreshing pull request states from GitHub; **Browse all
 sessions** for sessions Nirux didn't launch (a column in the main checkout
 running `claude --resume`, then `Ctrl+W`, or `codex resume --all`); spotting a
