@@ -271,7 +271,8 @@ final class MissionAskTests: XCTestCase {
                 environment: parentEnvironment,
                 eventsURL: fixture.eventsURL,
                 missionsURL: fixture.missionsURL,
-                pollInterval: 0.01
+                pollInterval: 0.01,
+                confirmationTimeout: 0
             )
         }
         XCTAssertEqual(receive(), 3, "the child is still working")
@@ -299,6 +300,32 @@ final class MissionAskTests: XCTestCase {
             eventsURL: fixture.eventsURL,
             missionsURL: fixture.missionsURL
         ), 1)
+    }
+
+    func testReceiveDeliversACompletionOnceWhenRunAgainRightAway() async throws {
+        let fixture = try makeFixture()
+        complete(fixture)
+        let environment = parentEnvironment
+        let eventsURL = fixture.eventsURL
+        let missionsURL = fixture.missionsURL
+        let receive: @Sendable () -> Int32 = {
+            MissionEventCLI.receive(
+                arguments: ["--timeout", "0"],
+                environment: environment,
+                eventsURL: eventsURL,
+                missionsURL: missionsURL,
+                pollInterval: 0.01
+            )
+        }
+        let first = Task.detached { receive() }
+        // Nirux drains the queue a moment after the acknowledgement lands.
+        Task { @MainActor in
+            try await Task.sleep(nanoseconds: 300_000_000)
+            fixture.center.drain()
+        }
+        let status = await first.value
+        XCTAssertEqual(status, 0, "prints the completion")
+        XCTAssertEqual(receive(), 4, "the completion is not printed again")
     }
 
     func testReplyStopsWhenTheQuestionWasAlreadyAnswered() throws {

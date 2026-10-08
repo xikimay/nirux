@@ -274,14 +274,17 @@ enum MissionEventCLI {
 
     /// Wait for the next unconsumed child question/completion belonging to
     /// this parent column. Questions stay pending until a response is sent;
-    /// completion is acknowledged immediately after it is printed.
+    /// completion is acknowledged once printed, and `receive` returns only
+    /// after Nirux recorded that (or `confirmationTimeout`), so running it
+    /// again right away does not print the same completion again.
     static func receive(
         arguments: [String],
         environment: [String: String] = ProcessInfo.processInfo.environment,
         now: @escaping () -> TimeInterval = { Date().timeIntervalSince1970 },
         eventsURL: URL = MissionEventCenter.defaultEventsURL,
         missionsURL: URL = MissionStore.defaultFileURL,
-        pollInterval: TimeInterval = 0.2
+        pollInterval: TimeInterval = 0.2,
+        confirmationTimeout: TimeInterval = 5
     ) -> Int32 {
         guard let context = parentContext(environment) else { return notAMissionTerminal(child: false) }
         guard let options = parseOptions(arguments, allowed: ["--timeout"]),
@@ -340,6 +343,13 @@ enum MissionEventCLI {
                 timestamp: now()
             )
             guard append(acknowledgement, to: eventsURL) else { return 1 }
+            _ = waitForLedger(
+                &ledger, timeout: confirmationTimeout, pollInterval: pollInterval
+            ) { missions in
+                missions.lazy.flatMap(\.events).contains(where: {
+                    $0.id == event.id && $0.parentConsumedAt != nil
+                }) ? true : nil
+            }
         }
         return 0
     }
