@@ -56,8 +56,15 @@ final class WorkspaceStore {
         reconcileSelection(preferActiveProfile: true)
     }
 
+    /// A Mission child goes after its parent's group, which it unfolds: the
+    /// store keeps the sidebar's order, so a group dissolves in place.
     func appendWorkspace(_ workspace: WorkspaceState, activate: Bool = true) {
         workspaces.append(workspace)
+        if let parent = groupParentIndex(of: workspaces.count - 1) {
+            workspaces[parent].isGroupFolded = false
+            let groupEnd = groupBlock(of: parent).filter { $0 != workspaces.count - 1 }.max() ?? parent
+            workspaces.insert(workspaces.removeLast(), at: groupEnd + 1)
+        }
         if activate { selectWorkspace(id: workspace.id) }
     }
 
@@ -117,7 +124,8 @@ final class WorkspaceStore {
 
     @discardableResult
     func selectAdjacentWorkspace(delta: Int) -> Int? {
-        let visible = visibleWorkspaceIndices
+        // A folded group is one stop, as in the sidebar.
+        let visible = visibleWorkspaceIndices.filter { $0 == activeWorkspaceIndex || !isInFoldedGroup($0) }
         guard let current = visible.firstIndex(of: activeWorkspaceIndex) else {
             if let first = visible.first { selectWorkspace(at: first); return first }
             return nil
@@ -146,7 +154,9 @@ final class WorkspaceStore {
         let list = visibleWorkspaceIndices(in: profileID)
         let position = list.firstIndex(of: index) ?? list.count
         let neighbours = (Array(list[position...]) + list[..<position].reversed()).filter(isOpen)
-        if let neighbour = neighbours.first(where: isActive) { return neighbour }
+        // Not a card folded out of sight, while a listed one is left.
+        if let neighbour = neighbours.first(where: { isActive($0) && !self.isInFoldedGroup($0) })
+            ?? neighbours.first(where: isActive) { return neighbour }
         let otherSpaces = profiles.filter { $0.id != profileID }
             .flatMap { visibleWorkspaceIndices(in: $0.id) }
             .filter(isOpen)
@@ -158,18 +168,31 @@ final class WorkspaceStore {
 
     @discardableResult
     func moveWorkspace(at index: Int, delta: Int) -> Bool {
-        guard delta != 0, let (candidates, position) = visibleGroupPosition(of: index) else { return false }
+        guard delta != 0, let (candidates, position) = visibleSiblingPosition(of: index) else { return false }
         let newPosition = position + delta
         guard candidates.indices.contains(newPosition) else { return false }
 
-        let workspace = workspaces[index]
-        let targetWorkspace = workspaces[candidates[newPosition]]
-        workspaces.remove(at: index)
-        let adjustedTarget = workspaces.firstIndex { $0 === targetWorkspace } ?? workspaces.count
-        let insertIndex = delta > 0 ? adjustedTarget + 1 : adjustedTarget
-        workspaces.insert(workspace, at: min(insertIndex, workspaces.count))
+        // The group moves as one block of the store, past the target's.
+        let moving = groupBlock(of: index).sorted().map { workspaces[$0] }
+        let targetBlock = groupBlock(of: candidates[newPosition])
+        let anchor = workspaces[(delta > 0 ? targetBlock.max() : targetBlock.min()) ?? candidates[newPosition]]
+        workspaces.removeAll { workspace in moving.contains { $0 === workspace } }
+        let anchorIndex = workspaces.firstIndex { $0 === anchor } ?? workspaces.count
+        workspaces.insert(contentsOf: moving, at: min(delta > 0 ? anchorIndex + 1 : anchorIndex, workspaces.count))
         reconcileSelection(preferActiveProfile: true)
         return true
+    }
+
+    /// A workspace and its descendants, in the sidebar's order.
+    private func groupBlock(of index: Int) -> [Int] {
+        let list = visibleWorkspaceIndices(in: workspaces[index].profileID)
+        guard let start = list.firstIndex(of: index) else { return [index] }
+        return [index] + list[(start + 1)...].prefix { isDescendant($0, of: index) }
+    }
+
+    private func isDescendant(_ index: Int, of ancestor: Int) -> Bool {
+        guard let parent = groupParentIndex(of: index) else { return false }
+        return parent == ancestor || isDescendant(parent, of: ancestor)
     }
 
     /// Move a workspace to an absolute position among its siblings (0 =
@@ -178,7 +201,7 @@ final class WorkspaceStore {
     /// nor leaves its parent.
     @discardableResult
     func moveWorkspace(at index: Int, toPosition targetPosition: Int) -> Bool {
-        guard let (candidates, position) = visibleGroupPosition(of: index) else { return false }
+        guard let (candidates, position) = visibleSiblingPosition(of: index) else { return false }
         let clamped = max(0, min(targetPosition, candidates.count - 1))
         guard clamped != position else { return false }
         return moveWorkspace(at: index, delta: clamped - position)
@@ -186,7 +209,7 @@ final class WorkspaceStore {
 
     /// A workspace's siblings within the visible (active profile) list:
     /// same section, same parent. Plus its position among them.
-    private func visibleGroupPosition(of index: Int) -> (candidates: [Int], position: Int)? {
+    private func visibleSiblingPosition(of index: Int) -> (candidates: [Int], position: Int)? {
         guard workspaces.indices.contains(index) else { return nil }
         let isInactive = workspaces[index].isInactive
         let parent = groupParentIndex(of: index)

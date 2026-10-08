@@ -52,7 +52,7 @@ final class SidebarView: NSView {
     /// in a linked worktree, or its folder is gone). Asked on each menu.
     var offersWorktreeCleanup: ((Int) -> Bool)?
     /// Drag-reorder drop: (store index of dragged workspace, target
-    /// position within its active/inactive group).
+    /// position among its siblings).
     var onWorkspaceReordered: ((Int, Int) -> Void)?
     var onProfileClicked: ((String) -> Void)?
     var onCreateProfile: (() -> Void)?
@@ -442,7 +442,7 @@ final class SidebarView: NSView {
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.cleanupActionPrefix) {
                 onWorkspaceAction?(.cleanUpWorktree, workspaceIndex)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.groupToggleActionPrefix) {
-                onWorkspaceAction?(.toggleGroup, workspaceIndex)
+                toggleGroup(workspaceIndex: workspaceIndex)
             } else if let workspaceID = Self.prFeedbackActionWorkspaceID(url) {
                 prFeedbackMenu?(workspaceID)?.popUp(positioning: nil, at: convert(event.locationInWindow, from: nil), in: self)
             } else if let (workspaceIndex, url) = Self.openActionTarget(url),
@@ -696,6 +696,19 @@ extension SidebarView {
 
     var hasInactiveWorkspaces: Bool { lastInfos.contains(where: \.isInactive) }
 
+    /// Keeps a toggle's row under the pointer for the next click. Only rows
+    /// below it change, but the document view isn't flipped, so a rebuild
+    /// keeps the distance to the bottom: keep the one to the top.
+    func keepingDocumentTop(_ rebuild: () -> Void) {
+        let clip = contentScrollView.contentView
+        let visibleTopFromDocumentTop = contentDocumentView.frame.height - clip.bounds.maxY
+        rebuild()
+        let highestOrigin = max(0, contentDocumentView.frame.height - clip.bounds.height)
+        let originY = contentDocumentView.frame.height - visibleTopFromDocumentTop - clip.bounds.height
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(max(0, originY), highestOrigin)))
+        contentScrollView.reflectScrolledClipView(clip)
+    }
+
     /// The header row's hit area (the rail's toggle tile), in document
     /// coordinates.
     var inactiveSectionHeaderFrame: NSRect? {
@@ -719,16 +732,7 @@ extension SidebarView {
             rebuildContent()
             return
         }
-        // Keep the header under the pointer for the next click. Only rows
-        // below it change, but the document view isn't flipped, so a
-        // rebuild keeps the distance to the bottom: keep the one to the top.
-        let clip = contentScrollView.contentView
-        let visibleTopFromDocumentTop = contentDocumentView.frame.height - clip.bounds.maxY
-        rebuildContent()
-        let highestOrigin = max(0, contentDocumentView.frame.height - clip.bounds.height)
-        let originY = contentDocumentView.frame.height - visibleTopFromDocumentTop - clip.bounds.height
-        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(max(0, originY), highestOrigin)))
-        contentScrollView.reflectScrolledClipView(clip)
+        keepingDocumentTop { rebuildContent() }
         // From the menu or ⌘P the header may be out of view.
         if let header = inactiveSectionHeaderFrame { contentDocumentView.scrollToVisible(header) }
         // The rebuild read the pointer before the rows moved under it.

@@ -445,7 +445,7 @@ extension SidebarView {
         for workspace in infos {
             currentY = buildWorkspaceSection(workspace: workspace, padding: padding, yOffset: currentY)
             currentY -= SidebarExpandedMetrics.workspaceGap
-            if hasGroup(workspace) {
+            if showsGroupToggle(workspace) {
                 currentY = buildGroupToggle(workspace, yOffset: currentY) - SidebarExpandedMetrics.workspaceGap
             }
         }

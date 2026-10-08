@@ -144,6 +144,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         window.makeKeyAndOrderFront(nil)
         mainWindow = window
 
+        // Before the restore: missions group the workspaces it lays out.
+        MissionStore.shared.load()
         // Restore previous session if available
         shellView.restoreState()
 
@@ -152,7 +154,6 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // run AFTER restoreState so queued events resolve to live columns.
         installAgentHooks(reportingTo: shellView)
         ActivityStore.shared.load()
-        MissionStore.shared.load()
         ActivityStore.shared.onChange = { [weak shellView] in
             shellView?.refreshActivitySidebar()
         }

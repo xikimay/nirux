@@ -86,6 +86,55 @@ final class SidebarGroupsTests: XCTestCase {
         XCTAssertEqual(visibleIDs(store), ["a", "a2", "a1", "b"])
     }
 
+    // MARK: - Store order
+
+    private func storeIDs(_ store: WorkspaceStore) -> [String] {
+        store.workspaces.map(\.id)
+    }
+
+    /// A group dissolves in place: a closed parent leaves its children
+    /// where it was, not at the bottom.
+    func testMissionChildIsStoredAfterItsParentsGroup() {
+        let store = makeStore(["a", "b", "a1", "a2", "a1x"], parents: ["a1": "a", "a2": "a", "a1x": "a1"])
+        XCTAssertEqual(storeIDs(store), ["a", "a1", "a1x", "a2", "b"])
+        store.removeWorkspace(store.workspaces[0])
+        XCTAssertEqual(visibleIDs(store), ["a1", "a1x", "a2", "b"])
+    }
+
+    func testNewChildUnfoldsItsParent() {
+        let store = makeStore(["a", "a1"], parents: ["a1": "a", "a2": "a"])
+        store.workspaces[0].isGroupFolded = true
+        store.appendWorkspace(WorkspaceState(id: "a2", title: "a2", cwd: "/tmp/a2", missionID: "mission-a2"))
+        XCTAssertFalse(store.workspaces[0].isGroupFolded)
+    }
+
+    /// State saved before groups: the children at the bottom of the store.
+    func testMovedGroupIsStoredTogether() {
+        let store = makeStore(["a", "b", "c"])
+        store.missionParentID = { $0 == "mission-a1" ? "a" : nil }
+        store.replaceWorkspaces(store.workspaces + [WorkspaceState(id: "a1", title: "a1", cwd: "/tmp/a1", missionID: "mission-a1")])
+        XCTAssertTrue(store.moveWorkspace(at: index("a", in: store), delta: 1))
+        XCTAssertEqual(storeIDs(store), ["b", "a", "a1", "c"])
+        XCTAssertTrue(store.moveWorkspace(at: index("c", in: store), delta: -1))
+        XCTAssertEqual(storeIDs(store), ["b", "c", "a", "a1"])
+    }
+
+    func testClosingAFoldedParentSelectsTheNextCardNotAHiddenChild() {
+        let store = makeStore(["a", "a1", "b"], parents: ["a1": "a"])
+        store.workspaces[index("a", in: store)].isGroupFolded = true
+        XCTAssertEqual(store.fallbackIndexAfterClosingWorkspace(at: index("a", in: store)), index("b", in: store))
+    }
+
+    func testAdjacentWorkspaceSkipsFoldedChildren() {
+        let store = makeStore(["a", "a1", "b"], parents: ["a1": "a"])
+        store.workspaces[index("a", in: store)].isGroupFolded = true
+        store.selectWorkspace(id: "a")
+        XCTAssertEqual(store.selectAdjacentWorkspace(delta: 1), index("b", in: store))
+        // On screen, a folded child steps out like any card.
+        store.selectWorkspace(id: "a1")
+        XCTAssertEqual(store.selectAdjacentWorkspace(delta: 1), index("b", in: store))
+    }
+
     // MARK: - Persistence
 
     func testFoldedStateRoundTrips() throws {
@@ -102,8 +151,8 @@ final class SidebarGroupsTests: XCTestCase {
 
     private func info(
         _ id: String, index: Int, parent: String? = nil, isFolded: Bool = false, inFoldedGroup: Bool = false,
-        isActive: Bool = false, isWaiting: Bool = false, prState: String? = nil, ciStatus: String? = nil,
-        isMissionCompleted: Bool = false
+        isActive: Bool = false, isInactive: Bool = false, isWaiting: Bool = false, prState: String? = nil,
+        ciStatus: String? = nil, isMissionCompleted: Bool = false
     ) -> WorkspaceInfo {
         let waiting = ColumnInfo(
             index: 0, processName: "claude", abbreviatedCwd: nil, isFocused: false, isWebView: false,
@@ -116,7 +165,7 @@ final class SidebarGroupsTests: XCTestCase {
             )
         }
         return WorkspaceInfo(
-            id: id, index: index, title: id, profileID: WorkspaceProfile.defaultID, isInactive: false,
+            id: id, index: index, title: id, profileID: WorkspaceProfile.defaultID, isInactive: isInactive,
             columnCount: isWaiting ? 1 : 0, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: isActive,
             columns: isWaiting ? [waiting] : [], prInfo: pullRequest, diffStats: nil, purpose: nil, nextStep: nil,
             blocker: nil, phase: .active, lastSummary: nil, lastActivityAt: nil,
@@ -186,5 +235,26 @@ final class SidebarGroupsTests: XCTestCase {
             info("a", index: 0), info("a1", index: 1, parent: "a"), info("a1x", index: 2, parent: "a1")
         ])
         XCTAssertEqual(sidebar.groupMembers(of: sidebar.lastInfos[0]).map(\.id), ["a1", "a1x"])
+    }
+
+    /// A parent and its children are one drop target; a child's siblings
+    /// are its parent's other children.
+    func testDragBlockSpansTheParentItsRowAndItsChildren() throws {
+        let sidebar = expandedSidebar([info("a", index: 0), info("a1", index: 1, parent: "a"), info("b", index: 2)])
+        let cards = cardFrames(sidebar)
+        let block = try XCTUnwrap(sidebar.blockFrame(of: sidebar.lastInfos[0]))
+        XCTAssertEqual(block.maxY, try XCTUnwrap(cards[0]).maxY)
+        XCTAssertEqual(block.minY, try XCTUnwrap(cards[1]).minY)
+        XCTAssertEqual(sidebar.blockFrame(of: sidebar.lastInfos[2]), cards[2])
+    }
+
+    /// An inactive parent listed only for being on screen: its children
+    /// stay folded with the section, so no row offers them.
+    func testNoSummaryRowWhenTheChildrenCantShow() {
+        let parent = info("a", index: 0, isActive: true, isInactive: true)
+        let sidebar = expandedSidebar([info("b", index: 2), parent, info("a1", index: 1, parent: "a", isInactive: true)])
+        XCTAssertFalse(sidebar.showsGroupToggle(parent))
+        sidebar.toggleInactiveSection()
+        XCTAssertTrue(sidebar.showsGroupToggle(parent))
     }
 }

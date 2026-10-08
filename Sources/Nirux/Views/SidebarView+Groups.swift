@@ -3,9 +3,12 @@ import AppKit
 // MARK: - Groups (docs/sidebar-groups.md)
 
 extension SidebarView {
-    /// Some workspace is listed under it.
-    func hasGroup(_ workspace: WorkspaceInfo) -> Bool {
+    /// Some workspace is listed under it, and could show: not when the
+    /// card itself is listed only for being on screen or asking the user,
+    /// in a folded section or group.
+    func showsGroupToggle(_ workspace: WorkspaceInfo) -> Bool {
         lastInfos.contains { $0.groupParentID == workspace.id }
+            && listsWorkspace(isInactive: workspace.isInactive, isInFoldedGroup: workspace.isInFoldedGroup, isActive: false)
     }
 
     /// Its children, each followed by its own, listed or folded.
@@ -15,7 +18,7 @@ extension SidebarView {
 
     /// The summary rows under the workspaces of `infos` that have children.
     func groupTogglesHeight(_ infos: [WorkspaceInfo]) -> CGFloat {
-        CGFloat(infos.filter(hasGroup).count) * (SidebarExpandedMetrics.groupToggleHeight + SidebarExpandedMetrics.workspaceGap)
+        CGFloat(infos.filter(showsGroupToggle).count) * (SidebarExpandedMetrics.groupToggleHeight + SidebarExpandedMetrics.workspaceGap)
     }
 
     /// The row under a workspace with children, where its children start:
@@ -28,7 +31,8 @@ extension SidebarView {
             width: bounds.width - metrics.workspaceInsetX - rowX, height: metrics.groupToggleHeight
         )
         let textX = rowX + metrics.cardPaddingX
-        let label = NSTextField.sidebarLine(Self.groupSummary(members: groupMembers(of: parent), isFolded: parent.isGroupFolded))
+        let members = groupMembers(of: parent)
+        let label = NSTextField.sidebarLine(Self.groupSummary(members: members, isFolded: parent.isGroupFolded))
         label.frame = NSRect(x: textX, y: rowFrame.minY + 1, width: rowFrame.maxX - metrics.cardPaddingX - textX, height: 16)
         label.setAccessibilityElement(false)
         addSubviewDoc(label)
@@ -38,13 +42,18 @@ extension SidebarView {
         ))
         let toggle = SidebarSectionToggleView(frame: rowFrame)
         toggle.toolTip = "\(parent.isGroupFolded ? "Show" : "Hide") the workspaces opened from \(parent.title)"
-        toggle.setAccessibilityLabel("Workspaces opened from \(parent.title): \(label.stringValue.dropFirst(2))")
+        toggle.setAccessibilityLabel("Workspaces opened from \(parent.title), \(members.count)")
         toggle.setAccessibilityExpanded(!parent.isGroupFolded)
         let index = parent.index
-        toggle.onPress = { [weak self] in self?.onWorkspaceAction?(.toggleGroup, index) }
+        toggle.onPress = { [weak self] in self?.toggleGroup(workspaceIndex: index) }
         addSubviewDoc(toggle)
         expandedViews.append(toggle)
         return rowFrame.minY
+    }
+
+    /// Keeps the row under the pointer, as `toggleInactiveSection` does.
+    func toggleGroup(workspaceIndex: Int) {
+        keepingDocumentTop { onWorkspaceAction?(.toggleGroup, workspaceIndex) }
     }
 
     /// "▾ 3 workspaces"; folded, where they stand, most pressing first:
@@ -53,26 +62,27 @@ extension SidebarView {
     /// children whose Mission completed or whose pull request merged.
     static func groupSummary(members: [WorkspaceInfo], isFolded: Bool) -> NSAttributedString {
         let font = Theme.Font.caption
-        func count(_ isCounted: (WorkspaceInfo) -> Bool) -> Int { isFolded ? members.filter(isCounted).count : 0 }
-        let allCounts: [(word: String, count: Int, color: NSColor)] = [
-            ("waiting", count { $0.cardState == .waiting }, Theme.Color.waiting),
-            ("✕", count { $0.prInfo?.state == "OPEN" && $0.prInfo?.ciStatus == "FAILURE" }, Theme.Color.error),
-            ("done", count { $0.isMissionCompleted || $0.prInfo?.state == "MERGED" }, Theme.Color.done),
-            ("working", count { $0.cardState == .working }, Theme.Color.working)
+        func count(_ isCounted: (WorkspaceInfo) -> Bool) -> Int { members.filter(isCounted).count }
+        let waiting = count { $0.cardState == .waiting }
+        let red = count { $0.prInfo?.state == "OPEN" && $0.prInfo?.ciStatus == "FAILURE" }
+        let done = count { $0.isMissionCompleted || $0.prInfo?.state == "MERGED" }
+        let working = count { $0.cardState == .working }
+        let allCounts: [(count: Int, text: String, color: NSColor)] = [
+            (waiting, "\(waiting) waiting", Theme.Color.waiting),
+            (red, "✕ \(red)", Theme.Color.error),
+            (done, "\(done) done", Theme.Color.done),
+            (working, "\(working) working", Theme.Color.working)
         ]
-        let counts = allCounts.filter { $0.count > 0 }
+        let counts = isFolded ? allCounts.filter { $0.count > 0 } : []
         // The counts say what they are: the noun would push them out.
         let total = counts.isEmpty ? workspaceCountText(members.count) : "\(members.count)"
         let text = NSMutableAttributedString(
             string: "\(isFolded ? "▸" : "▾") \(total)",
             attributes: [.font: font, .foregroundColor: Theme.Color.textTertiary]
         )
-        for (word, count, color) in counts {
+        for (_, countText, color) in counts {
             text.append(NSAttributedString(string: " · ", attributes: [.font: font, .foregroundColor: Theme.Color.textTertiary]))
-            text.append(NSAttributedString(
-                string: word == "✕" ? "✕ \(count)" : "\(count) \(word)",
-                attributes: [.font: font, .foregroundColor: color]
-            ))
+            text.append(NSAttributedString(string: countText, attributes: [.font: font, .foregroundColor: color]))
         }
         return text
     }

@@ -137,15 +137,15 @@ extension SidebarView {
 
     /// A workspace's card, or tile, with its listed children and its
     /// summary row: they move together, one drop target.
-    private func blockFrame(of workspace: WorkspaceInfo) -> NSRect? {
+    func blockFrame(of workspace: WorkspaceInfo) -> NSRect? {
         let indices = Set([workspace.index] + groupMembers(of: workspace).map(\.index))
         let toggles = Set(indices.map { Self.groupToggleActionURL(workspaceIndex: $0) })
-        var card: NSRect?
+        var hasCard = false
         var block = NSRect.null
         for area in hitAreas {
             switch area.region {
             case .workspace(let index) where indices.contains(index):
-                if index == workspace.index { card = area.frame }
+                hasCard = hasCard || index == workspace.index
                 block = block.union(area.frame)
             case .link(let url, _) where toggles.contains(url):
                 block = block.union(area.frame)
@@ -153,7 +153,8 @@ extension SidebarView {
                 continue
             }
         }
-        return card.map { _ in block }
+        guard hasCard else { return nil }
+        return block
     }
 
     private func dragMoved(_ event: NSEvent, drag: inout SidebarWorkspaceDrag) {
@@ -322,8 +323,9 @@ extension SidebarView {
         } else {
             y = (rows[slot - 1].minY + rows[slot].maxY) / 2
         }
-        let inset = isExpanded ? SidebarExpandedMetrics.workspaceInsetX : SidebarRailMetrics.tileX
-        let width = isExpanded ? bounds.width - inset * 2 : SidebarRailMetrics.tileSize
+        // A child's line starts at its indented card.
+        let inset = isExpanded ? rows[0].minX : SidebarRailMetrics.tileX
+        let width = isExpanded ? bounds.width - SidebarExpandedMetrics.workspaceInsetX - inset : SidebarRailMetrics.tileSize
         indicator.frame = NSRect(x: inset, y: y - 1, width: width, height: 2)
         indicator.isHidden = false
     }

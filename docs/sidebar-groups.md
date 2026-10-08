@@ -25,8 +25,11 @@ close fallback already follow that list, so they agree without changes.
   workspace is open in the same project and the same section (ACTIVE or
   INACTIVE). Otherwise it sits at the top level: a parent closed, moved to
   another project or parked in INACTIVE lets its children go.
-- Read from `MissionStore` on each pass, not cached: missions load after
-  the workspaces are restored.
+- Read from `MissionStore` on each pass, not cached. Missions load before
+  the workspaces are restored, so the first layout is already grouped.
+- The store keeps that order: a new Mission child goes after its parent's
+  group, and a move carries a whole group. A parent closed, parked or
+  moved away leaves its children in its place, at the top level.
 - A grandchild follows its own parent (depth first), drawn at the same
   indent as a child: one level of indent in a 260pt sidebar.
 
@@ -40,9 +43,13 @@ close fallback already follow that list, so they agree without changes.
   no count, `▸ 3 workspaces`.
 - A folded group still lists a child on screen or one that asks the user
   (waiting, broken): the rule the folded INACTIVE section follows
-  (`listsWorkspace`), without Allow / Deny buttons there too. ⌘↑/↓ walks
-  into folded children like into folded inactive ones, and the sidebar
-  then lists the one on screen.
+  (`listsWorkspace`), without Allow / Deny buttons there too. ⌘↑/↓ steps
+  over a folded group as over one card (⌘J still reaches a waiting child),
+  and closing a folded parent selects the next card, not a hidden child.
+- A new child unfolds its parent: it would hide under a fold left from
+  earlier children.
+- A parent listed only for being on screen or asking the user, in the
+  folded INACTIVE section, has no summary row: its children can't show.
 - Folding is saved in state.json, on the parent (`isGroupFolded`): a
   parent with many reviews stays folded across launches.
 - **Rail** (collapsed sidebar, #106): same order, no indent and no toggle
