@@ -114,7 +114,7 @@ final class SidebarWorkspaceCardRenderer {
         let titleX = layout.contentX + Metrics.stateDotSize + Theme.Space.sm
         let isQuiet = !workspace.isActive && [.idle, .done].contains(layout.state)
         let title = textLabel(
-            workspace.title, font: Theme.Font.title,
+            workspace.cardTitle, font: Theme.Font.title,
             color: isQuiet ? Theme.Color.textSecondary : Theme.Color.textPrimary
         )
         title.toolTip = titleToolTip()
@@ -141,7 +141,7 @@ final class SidebarWorkspaceCardRenderer {
     /// The title's tooltip: what the card doesn't print — the phase, the
     /// purpose, the last summary, another card's next step.
     private func titleToolTip() -> String {
-        var lines = [workspace.title, "Phase: \(workspace.phase.displayName)"]
+        var lines = [workspace.cardTitle, "Phase: \(workspace.phase.displayName)"]
         if let purpose = workspace.purpose { lines.append("Purpose: \(purpose)") }
         if let summary = workspace.lastSummary { lines.append("Last: \(summary)") }
         // The selected card prints the next step, every card its blocker.
@@ -213,9 +213,26 @@ final class SidebarWorkspaceCardRenderer {
             maxX = diff.frame.minX - Theme.Space.sm
         }
         if let branchName = workspace.gitBranch {
-            let branch = textLabel(branchName, font: Theme.Font.mono, color: Theme.Color.textSecondary)
+            var x = layout.indentX
+            // A teammate's branch: their initial. Nothing on the user's own.
+            if let author = workspace.lastPullRequest?.otherAuthor, let initial = author.first {
+                let badge = SidebarBadgeView(
+                    text: initial.uppercased(), textColor: Theme.Color.textSecondary,
+                    fillColor: Theme.Color.fillPressed, font: Theme.Font.label
+                )
+                badge.cornerRadius = Theme.Radius.chip
+                badge.frame = NSRect(x: x, y: rowY, width: Metrics.branchRowHeight, height: Metrics.branchRowHeight)
+                badge.toolTip = "Opened by \(author)"
+                badge.setAccessibilityRole(.staticText)
+                badge.setAccessibilityLabel("Opened by \(author)")
+                append(badge)
+                x = badge.frame.maxX + Theme.Space.xs
+            }
+            let branch = textLabel(workspace.branchLabel ?? branchName, font: Theme.Font.mono, color: Theme.Color.textSecondary)
+            // A long branch keeps both ends.
+            branch.lineBreakMode = .byTruncatingMiddle
             branch.toolTip = branchName
-            branch.frame = NSRect(x: layout.indentX, y: rowY, width: max(0, maxX - layout.indentX), height: Metrics.branchRowHeight)
+            branch.frame = NSRect(x: x, y: rowY, width: max(0, maxX - x), height: Metrics.branchRowHeight)
             append(branch)
         }
     }
@@ -470,7 +487,7 @@ final class SidebarWorkspaceCardRenderer {
         ))
 
         let titleX = x + 12 + Theme.Space.sm
-        let title = textLabel(workspace.title, font: Theme.Font.body, color: Theme.Color.textSecondary)
+        let title = textLabel(workspace.cardTitle, font: Theme.Font.body, color: Theme.Color.textSecondary)
         title.toolTip = titleToolTip()
         let height = ceil(title.fittingSize.height)
         title.frame = NSRect(x: titleX, y: midY - height / 2, width: max(0, badge.frame.minX - Theme.Space.sm - titleX), height: height)

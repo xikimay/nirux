@@ -60,7 +60,9 @@ extension NiruxShellView {
                           blocker: workspace.blocker, phase: workspace.effectivePhase,
                           lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt,
                           reviewBadges: workspace.reviewBadges,
-                          mergedCleanup: mergedCleanupOffer(workspaceIndex: index))
+                          mergedCleanup: mergedCleanupOffer(workspaceIndex: index),
+                          branchLabel: sidebarBranchLabel(of: workspace, among: visibleIndices),
+                          lastPullRequest: workspace.lastPullRequest)
         }
         tickHiddenSpaceAgents(visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses)
         updateColumnHeaders(infos: infos, foregroundProcesses: foregroundProcesses, now: now)
@@ -86,6 +88,17 @@ extension NiruxShellView {
         if invalidatedSessionBinding { saveState(snapshot: snapshot) }
         scheduleActivityReadMark()
         refreshProjectBoards(snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
+    }
+
+    /// Line 2's branch, without the prefix it shares with the listed
+    /// worktrees of its repo (the inactive ones are folded away).
+    private func sidebarBranchLabel(of workspace: WorkspaceState, among visibleIndices: [Int]) -> String? {
+        guard let branch = workspace.gitBranch else { return nil }
+        guard let repository = workspace.gitContext?.upstreamRepository else { return branch }
+        let siblings = visibleIndices.map { workspaces[$0] }
+            .filter { !$0.isInactive && $0.gitContext?.upstreamRepository == repository }
+            .compactMap(\.gitBranch)
+        return SidebarCardLayout.distinctiveBranch(branch, siblings: siblings)
     }
 
     /// Every column's foreground process, shown or not, and what follows

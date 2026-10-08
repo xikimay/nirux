@@ -37,6 +37,65 @@ final class SidebarCardStateTests: XCTestCase {
         )
     }
 
+    // MARK: - Title and branch rows
+
+    func testCardIsNamedByItsPullRequestWhileTitledWithItsBranch() {
+        var pullRequest = pullRequest()
+        pullRequest.title = "feat(payouts): ledger entries"
+        var info = workspace([column()])
+        info.lastPullRequest = pullRequest
+        XCTAssertEqual(info.cardTitle, "checkout", "a name set by hand stays")
+
+        info = WorkspaceInfo(
+            id: "ws", index: 1, title: "feat/checkout", profileID: WorkspaceProfile.defaultID, isInactive: false,
+            columnCount: 1, focusedColumn: 0, gitBranch: "feat/checkout", notification: nil, isActive: false,
+            columns: [column()], prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil,
+            phase: .active, lastSummary: nil, lastActivityAt: nil
+        )
+        XCTAssertEqual(info.cardTitle, "feat/checkout")
+        info.lastPullRequest = pullRequest
+        XCTAssertEqual(info.cardTitle, "ledger entries", "the type(scope) every PR shares is dropped")
+        pullRequest.title = "Ledger entries: part 2"
+        info.lastPullRequest = pullRequest
+        XCTAssertEqual(info.cardTitle, "Ledger entries: part 2")
+    }
+
+    func testBranchDropsThePrefixItSharesWithASibling() {
+        let siblings = ["tomiir/payouts-ledger-entries", "tomiir/payouts-payout-status", "cheun/review-payouts", "cheun/review-fo-account"]
+        let labels = siblings.map { SidebarCardLayout.distinctiveBranch($0, siblings: siblings) }
+        XCTAssertEqual(labels, ["ledger-entries", "payout-status", "payouts", "fo-account"])
+        // Cut at the last separator of the shared prefix, never mid-word.
+        XCTAssertEqual(SidebarCardLayout.distinctiveBranch("feat/checkout", siblings: ["feat/check-in"]), "checkout")
+        XCTAssertEqual(SidebarCardLayout.distinctiveBranch("feat/x", siblings: ["feat/x-2"]), "x")
+        XCTAssertEqual(SidebarCardLayout.distinctiveBranch("feat/x-2", siblings: ["feat/x"]), "x-2")
+    }
+
+    func testBranchRowMarksATeammatesBranchAndPrintsItsDistinctiveEnd() {
+        var teammate = pullRequest()
+        teammate.otherAuthor = "tomiir"
+        var info = workspace([column()])
+        info.lastPullRequest = teammate
+        info.branchLabel = "out"
+        let views = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 400).render().views
+
+        XCTAssertTrue(views.contains { ($0 as? SidebarBadgeView)?.accessibilityLabel() == "Opened by tomiir" })
+        let branch = views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "out" }
+        XCTAssertEqual(branch?.toolTip, "feat/checkout")
+
+        var mine = workspace([column()], pullRequest: pullRequest())
+        mine.lastPullRequest = pullRequest()
+        let own = SidebarWorkspaceCardRenderer(workspace: mine, sidebarWidth: 260, yOffset: 400)
+        XCTAssertFalse(own.render().views.contains { ($0 as? SidebarBadgeView)?.accessibilityLabel()?.hasPrefix("Opened by") == true })
+    }
+
+    func testBranchWithoutSiblingStaysWhole() {
+        XCTAssertEqual(SidebarCardLayout.distinctiveBranch("feat/checkout", siblings: []), "feat/checkout")
+        XCTAssertEqual(SidebarCardLayout.distinctiveBranch("feat/checkout", siblings: ["feat/checkout"]), "feat/checkout")
+        XCTAssertEqual(SidebarCardLayout.distinctiveBranch("feat/checkout", siblings: ["fix/login"]), "feat/checkout")
+        XCTAssertEqual(SidebarCardLayout.distinctiveBranch("main", siblings: ["mainline"]), "main")
+        XCTAssertEqual(SidebarCardLayout.distinctiveBranch("fix-", siblings: ["fix-login"]), "fix-")
+    }
+
     private let stopped = SidebarStuckState.stoppedOnError(kind: "rate_limit", detail: nil, failedAt: 1, resume: .offered)
 
     // MARK: - State

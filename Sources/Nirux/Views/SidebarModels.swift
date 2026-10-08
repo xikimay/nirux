@@ -204,6 +204,11 @@ struct PRInfo: Hashable, Sendable {
     let additions: Int?
     let deletions: Int?
     let changedFiles: Int?
+    var title: String?
+    /// Who opened it, when that isn't the gh user: the card marks a
+    /// teammate's branch. `PRDetect` clears it for the user's own, and when
+    /// it can't tell who the user is.
+    var otherAuthor: String?
 
     var failedCheckUrl: String? {
         checks.lazy.filter { $0.result == .failure }.compactMap(\.url).first
@@ -238,6 +243,20 @@ struct WorkspaceInfo: Hashable {
     var reviewBadges: ReviewBadges? = nil
     /// What the card shows after "#N merged"; nil shows nothing.
     var mergedCleanup: MergedCleanupOffer?
+    /// Line 2's branch, without what visible worktrees of its repo share
+    /// (`SidebarCardLayout.distinctiveBranch`); nil prints `gitBranch`.
+    var branchLabel: String?
+    /// `WorkspaceState.lastPullRequest`: names the card, marks a teammate's.
+    var lastPullRequest: PRInfo?
+
+    /// Line 1: the PR's title while the workspace is titled with its
+    /// branch (a name set by hand differs and stays), without the
+    /// `type(scope): ` every PR of a repo shares.
+    var cardTitle: String {
+        guard title == gitBranch, let pullRequestTitle = lastPullRequest?.title else { return title }
+        let name = pullRequestTitle.replacing(/^\w+(\([^)]*\))?!?:\s+/, with: "")
+        return name.isEmpty ? pullRequestTitle : name
+    }
 
     var sidebarAction: (text: String, isBlocker: Bool)? {
         if let blocker = normalizedContextText(blocker) {

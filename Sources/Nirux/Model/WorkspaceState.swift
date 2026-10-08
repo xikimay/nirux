@@ -76,6 +76,9 @@ final class WorkspaceState {
     var prInfo: PRInfo? {
         didSet { if prInfo?.url != oldValue?.url || prInfo?.state != "OPEN" { prFeedback = nil } }
     }
+    /// The last pull request found on this branch: the card keeps its
+    /// title and author while a commit refetches `prInfo`.
+    private(set) var lastPullRequest: PRInfo?
     /// The open PR's feedback (docs/pr-feedback-inbox.md), read after each
     /// PR refresh. Cleared when the PR changes or stops being open.
     var prFeedback: PRFeedback?
@@ -230,6 +233,7 @@ extension WorkspaceState {
         if !sameRevision || (context?.identity.isDirty == true && Self.isTerminalPullRequest(prInfo)) {
             prInfo = nil
         }
+        if previousContext?.branch != context?.branch { lastPullRequest = nil }
         diffStats = nil
         if !titleIsManual, let branch = context?.branch, !branch.isEmpty {
             title = branch
@@ -259,6 +263,7 @@ extension WorkspaceState {
               prInfo != info
         else { return false }
         prInfo = info
+        if let info { lastPullRequest = info }
         return true
     }
 
