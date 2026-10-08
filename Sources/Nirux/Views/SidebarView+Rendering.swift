@@ -73,6 +73,7 @@ extension SidebarView {
         let padding = SidebarExpandedMetrics.padding
         let activeInfos = displayedWorkspaceInfos.filter { !$0.isInactive }
         let inactiveInfos = displayedWorkspaceInfos.filter { $0.isInactive }
+        let listedActiveInfos = activeInfos.filter(listsWorkspace)
         let listedInactiveInfos = inactiveInfos.filter(listsWorkspace)
         let hasWorkspaces = !activeInfos.isEmpty || !inactiveInfos.isEmpty
         let activeProfile = lastProfiles.first(where: { $0.isActive })
@@ -99,7 +100,7 @@ extension SidebarView {
 
         if !activeInfos.isEmpty {
             yOffset = buildSectionHeader("active", count: activeInfos.count, padding: padding, yOffset: yOffset)
-            yOffset = buildWorkspaceGroup(activeInfos, padding: padding, yOffset: yOffset)
+            yOffset = buildWorkspaceGroup(listedActiveInfos, padding: padding, yOffset: yOffset)
         }
         if !inactiveInfos.isEmpty {
             yOffset -= SidebarExpandedMetrics.sectionGap
@@ -165,18 +166,21 @@ extension SidebarView {
         activeInfos: [WorkspaceInfo], inactiveInfos: [WorkspaceInfo], listedInactiveInfos: [WorkspaceInfo],
         activityCount: Int, onboardingHeight: CGFloat?
     ) -> CGFloat {
+        let listedActiveInfos = activeInfos.filter(listsWorkspace)
         var height = SidebarExpandedMetrics.verticalPadding
             + SidebarExpandedMetrics.spaceHeaderHeight
             + SidebarExpandedMetrics.spaceHeaderBottomGap
             + SidebarExpandedMetrics.bottomReserve
         if !activeInfos.isEmpty {
             height += SidebarExpandedMetrics.sectionHeaderAdvance
-            height += SidebarExpandedMetrics.groupHeight(for: activeInfos, sidebarWidth: bounds.width)
+            height += SidebarExpandedMetrics.groupHeight(for: listedActiveInfos, sidebarWidth: bounds.width)
+                + groupTogglesHeight(listedActiveInfos)
         }
         if !inactiveInfos.isEmpty {
             height += SidebarExpandedMetrics.sectionGap
             height += SidebarExpandedMetrics.sectionHeaderAdvance
             height += SidebarExpandedMetrics.groupHeight(for: listedInactiveInfos, sidebarWidth: bounds.width)
+                + groupTogglesHeight(listedInactiveInfos)
         }
         if let onboardingHeight {
             height += SidebarExpandedMetrics.onboardingCardGap + onboardingHeight
@@ -441,6 +445,9 @@ extension SidebarView {
         for workspace in infos {
             currentY = buildWorkspaceSection(workspace: workspace, padding: padding, yOffset: currentY)
             currentY -= SidebarExpandedMetrics.workspaceGap
+            if hasGroup(workspace) {
+                currentY = buildGroupToggle(workspace, yOffset: currentY) - SidebarExpandedMetrics.workspaceGap
+            }
         }
         return currentY
     }

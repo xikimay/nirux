@@ -241,13 +241,13 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         XCTAssertEqual(SidebarExpandedMetrics.approvalLines("ls"), ["ls"])
     }
 
-    /// Every character of a full line fits the request's box: nothing is
-    /// clipped.
+    /// Every character of a full line fits the request's box, on a child
+    /// card too: nothing is clipped.
     func testFullLineFitsTheExpandedSidebar() {
         let metrics = SidebarExpandedMetrics.self
         let line = String(repeating: "W", count: metrics.approvalCharactersPerLine)
         let width = (line as NSString).size(withAttributes: [.font: metrics.approvalFont]).width
-        let card = 260 - (metrics.workspaceInsetX + metrics.cardPaddingX) * 2
+        let card = 260 - (metrics.workspaceInsetX + metrics.cardPaddingX) * 2 - metrics.groupIndent
         XCTAssertLessThanOrEqual(width, card - metrics.approvalBoxPaddingX * 2)
     }
 
@@ -355,22 +355,23 @@ final class PermissionApprovalSidebarTests: XCTestCase {
         XCTAssertTrue(decisionRegions(result.hitAreas).isEmpty)
     }
 
-    /// A line break never hides a space: `rm -rf ./dist/assets/old-js *`
-    /// must not read as `old-js*`.
+    /// A line break never hides a space: `rm -rf ./build/assets/old *`
+    /// must not read as `old*`.
     func testSpacesAtLineBreaksStayVisible() {
-        let text = "rm -rf ./dist/assets/old-js *"
+        let text = "rm -rf ./build/assets/old *"
         let lines = SidebarExpandedMetrics.approvalLines(text)
-        XCTAssertEqual(lines, ["rm -rf ./dist/assets/old-js ", "*"])
+        XCTAssertEqual(lines, ["rm -rf ./build/assets/old ", "*"])
         let shown = SidebarApprovalBlockRenderer.attributedLines(lines).string
-        XCTAssertEqual(shown, "rm -rf ./dist/assets/old-js\u{2423}\n*")
+        XCTAssertEqual(shown, "rm -rf ./build/assets/old\u{2423}\n*")
         for line in shown.split(separator: "\n") {
             XCTAssertFalse(line.hasPrefix(" ") || line.hasSuffix(" "), String(line))
         }
         let inner = SidebarApprovalBlockRenderer.attributedLines(["a b"]).string
         XCTAssertEqual(inner, "a b", "spaces inside a line stay plain")
+        let full = "x" + String(repeating: "y", count: SidebarExpandedMetrics.approvalCharactersPerLine - 2)
         XCTAssertEqual(
-            SidebarApprovalBlockRenderer.attributedLines(SidebarExpandedMetrics.approvalLines("x" + String(repeating: "y", count: 26) + " z")).string,
-            "x" + String(repeating: "y", count: 26) + "\u{2423}\nz"
+            SidebarApprovalBlockRenderer.attributedLines(SidebarExpandedMetrics.approvalLines(full + " z")).string,
+            full + "\u{2423}\nz"
         )
     }
 

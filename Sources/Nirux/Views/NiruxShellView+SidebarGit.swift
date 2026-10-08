@@ -60,7 +60,9 @@ extension NiruxShellView {
                           blocker: workspace.blocker, phase: workspace.effectivePhase,
                           lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt,
                           reviewBadges: workspace.reviewBadges,
-                          mergedCleanup: mergedCleanupOffer(workspaceIndex: index))
+                          mergedCleanup: mergedCleanupOffer(workspaceIndex: index),
+                          groupParentID: workspaceStore.groupParentIndex(of: index).map { workspaces[$0].id }, isGroupFolded: workspace.isGroupFolded,
+                          isInFoldedGroup: workspaceStore.isInFoldedGroup(index), isMissionCompleted: workspace.isMissionCompleted)
         }
         tickHiddenSpaceAgents(visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses)
         updateColumnHeaders(infos: infos, foregroundProcesses: foregroundProcesses, now: now)

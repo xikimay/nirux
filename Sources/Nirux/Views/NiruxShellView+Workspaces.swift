@@ -308,6 +308,9 @@ extension NiruxShellView {
             if didChange { workspaceStore.selectWorkspace(at: workspaceIndex) }
         case .markInactive:
             didChange = workspaceStore.setWorkspaceInactive(at: workspaceIndex, true)
+        case .toggleGroup:
+            workspaces[workspaceIndex].isGroupFolded.toggle()
+            didChange = true
         case .close:
             requestCloseWorkspace(at: workspaceIndex)
             return

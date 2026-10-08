@@ -293,7 +293,10 @@ final class SidebarView: NSView {
     /// and, in the folded section, an amber one (`railState`).
     var railWorkspaceInfos: [WorkspaceInfo] {
         displayedWorkspaceInfos.filter {
-            listsWorkspace(isInactive: $0.isInactive, isActive: $0.isActive, asksUser: $0.asksUser || $0.railState == .waiting)
+            listsWorkspace(
+                isInactive: $0.isInactive, isInFoldedGroup: $0.isInFoldedGroup, isActive: $0.isActive,
+                asksUser: $0.asksUser || $0.railState == .waiting
+            )
         }
     }
 
@@ -438,6 +441,8 @@ final class SidebarView: NSView {
                 onDiffStatsClicked?(workspaceIndex)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.cleanupActionPrefix) {
                 onWorkspaceAction?(.cleanUpWorktree, workspaceIndex)
+            } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.groupToggleActionPrefix) {
+                onWorkspaceAction?(.toggleGroup, workspaceIndex)
             } else if let workspaceID = Self.prFeedbackActionWorkspaceID(url) {
                 prFeedbackMenu?(workspaceID)?.popUp(positioning: nil, at: convert(event.locationInWindow, from: nil), in: self)
             } else if let (workspaceIndex, url) = Self.openActionTarget(url),
@@ -624,6 +629,7 @@ final class SidebarView: NSView {
 
     private static let diffActionPrefix = "action:diff:"
     private static let cleanupActionPrefix = "action:cleanup:"
+    private static let groupToggleActionPrefix = "action:group-toggle:"
 
     static func diffActionURL(workspaceIndex: Int) -> String {
         diffActionPrefix + String(workspaceIndex)
@@ -632,6 +638,11 @@ final class SidebarView: NSView {
     /// The card's "Clean up", shown next to a merged pull request.
     static func cleanupActionURL(workspaceIndex: Int) -> String {
         cleanupActionPrefix + String(workspaceIndex)
+    }
+
+    /// The summary row under a workspace with children.
+    static func groupToggleActionURL(workspaceIndex: Int) -> String {
+        groupToggleActionPrefix + String(workspaceIndex)
     }
 
     static func prFeedbackActionURL(workspaceID: String) -> String {
@@ -668,16 +679,19 @@ final class SidebarView: NSView {
 // MARK: - Inactive section
 
 extension SidebarView {
-    /// Whether the sidebar lists a workspace. The folded section still
-    /// lists the inactive workspace on screen, alone, until the user moves
-    /// to another one, and those whose agent waits on the user or broke
-    /// (`asksUser`) — the section itself stays folded.
-    func listsWorkspace(isInactive: Bool, isActive: Bool, asksUser: Bool = false) -> Bool {
-        !isInactive || isActive || asksUser || !isInactiveSectionCollapsed
+    /// Whether the sidebar lists a workspace. The folded section, or a
+    /// folded group, still lists the workspace on screen, alone, until the
+    /// user moves to another one, and those whose agent waits on the user
+    /// or broke (`asksUser`) — the section itself stays folded.
+    func listsWorkspace(isInactive: Bool, isInFoldedGroup: Bool = false, isActive: Bool, asksUser: Bool = false) -> Bool {
+        isActive || asksUser || ((!isInactive || !isInactiveSectionCollapsed) && !isInFoldedGroup)
     }
 
     func listsWorkspace(_ workspace: WorkspaceInfo) -> Bool {
-        listsWorkspace(isInactive: workspace.isInactive, isActive: workspace.isActive, asksUser: workspace.asksUser)
+        listsWorkspace(
+            isInactive: workspace.isInactive, isInFoldedGroup: workspace.isInFoldedGroup,
+            isActive: workspace.isActive, asksUser: workspace.asksUser
+        )
     }
 
     var hasInactiveWorkspaces: Bool { lastInfos.contains(where: \.isInactive) }
