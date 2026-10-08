@@ -7,7 +7,7 @@ struct SidebarWorkspaceDrag {
     let workspaceID: String      // stable identity — store indices can shift mid-drag
     let title: String            // shown on the floating ghost card (a rail ghost shows the tile)
     let rowFrame: NSRect         // dragged card's (or rail tile's) hit area
-    let groupRowFrames: [NSRect] // rows in the same active/inactive group, top → bottom
+    let groupRowFrames: [NSRect] // its siblings' rows with their children, top → bottom
     let position: Int            // dragged card's position within groupRowFrames
     let startPoint: NSPoint
     var isDragging = false       // movement exceeded the click threshold
@@ -118,13 +118,10 @@ extension SidebarView {
 
     private func makeWorkspaceDrag(workspaceIndex: Int, rowFrame: NSRect, startPoint: NSPoint) -> SidebarWorkspaceDrag? {
         guard let dragged = lastInfos.first(where: { $0.index == workspaceIndex }) else { return nil }
-        let group = displayedWorkspaceInfos.filter { $0.isInactive == dragged.isInactive }
-        let frames = group.compactMap { info in
-            hitAreas.first { area in
-                if case .workspace(let index) = area.region { return index == info.index }
-                return false
-            }?.frame
+        let group = displayedWorkspaceInfos.filter {
+            $0.isInactive == dragged.isInactive && $0.groupParentID == dragged.groupParentID
         }
+        let frames = group.compactMap(blockFrame)
         guard frames.count == group.count,
               let position = group.firstIndex(where: { $0.index == workspaceIndex })
         else { return nil }
@@ -136,6 +133,28 @@ extension SidebarView {
             position: position,
             startPoint: startPoint
         )
+    }
+
+    /// A workspace's card, or tile, with its listed children and its
+    /// summary row: they move together, one drop target.
+    func blockFrame(of workspace: WorkspaceInfo) -> NSRect? {
+        let indices = Set([workspace.index] + groupMembers(of: workspace).map(\.index))
+        let toggles = Set(indices.map { Self.groupToggleActionURL(workspaceIndex: $0) })
+        var hasCard = false
+        var block = NSRect.null
+        for area in hitAreas {
+            switch area.region {
+            case .workspace(let index) where indices.contains(index):
+                hasCard = hasCard || index == workspace.index
+                block = block.union(area.frame)
+            case .link(let url, _) where toggles.contains(url):
+                block = block.union(area.frame)
+            default:
+                continue
+            }
+        }
+        guard hasCard else { return nil }
+        return block
     }
 
     private func dragMoved(_ event: NSEvent, drag: inout SidebarWorkspaceDrag) {
@@ -304,8 +323,9 @@ extension SidebarView {
         } else {
             y = (rows[slot - 1].minY + rows[slot].maxY) / 2
         }
-        let inset = isExpanded ? SidebarExpandedMetrics.workspaceInsetX : SidebarRailMetrics.tileX
-        let width = isExpanded ? bounds.width - inset * 2 : SidebarRailMetrics.tileSize
+        // A child's line starts at its indented card.
+        let inset = isExpanded ? rows[0].minX : SidebarRailMetrics.tileX
+        let width = isExpanded ? bounds.width - SidebarExpandedMetrics.workspaceInsetX - inset : SidebarRailMetrics.tileSize
         indicator.frame = NSRect(x: inset, y: y - 1, width: width, height: 2)
         indicator.isHidden = false
     }

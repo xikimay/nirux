@@ -56,8 +56,15 @@ final class WorkspaceStore {
         reconcileSelection(preferActiveProfile: true)
     }
 
+    /// A Mission child goes after its parent's group, which it unfolds: the
+    /// store keeps the sidebar's order, so a group dissolves in place.
     func appendWorkspace(_ workspace: WorkspaceState, activate: Bool = true) {
         workspaces.append(workspace)
+        if let parent = groupParentIndex(of: workspaces.count - 1) {
+            workspaces[parent].isGroupFolded = false
+            let groupEnd = groupBlock(of: parent).filter { $0 != workspaces.count - 1 }.max() ?? parent
+            workspaces.insert(workspaces.removeLast(), at: groupEnd + 1)
+        }
         if activate { selectWorkspace(id: workspace.id) }
     }
 
@@ -117,7 +124,8 @@ final class WorkspaceStore {
 
     @discardableResult
     func selectAdjacentWorkspace(delta: Int) -> Int? {
-        let visible = visibleWorkspaceIndices
+        // A folded group is one stop, as in the sidebar.
+        let visible = visibleWorkspaceIndices.filter { $0 == activeWorkspaceIndex || !isInFoldedGroup($0) }
         guard let current = visible.firstIndex(of: activeWorkspaceIndex) else {
             if let first = visible.first { selectWorkspace(at: first); return first }
             return nil
@@ -146,7 +154,9 @@ final class WorkspaceStore {
         let list = visibleWorkspaceIndices(in: profileID)
         let position = list.firstIndex(of: index) ?? list.count
         let neighbours = (Array(list[position...]) + list[..<position].reversed()).filter(isOpen)
-        if let neighbour = neighbours.first(where: isActive) { return neighbour }
+        // Not a card folded out of sight, while a listed one is left.
+        if let neighbour = neighbours.first(where: { isActive($0) && !self.isInFoldedGroup($0) })
+            ?? neighbours.first(where: isActive) { return neighbour }
         let otherSpaces = profiles.filter { $0.id != profileID }
             .flatMap { visibleWorkspaceIndices(in: $0.id) }
             .filter(isOpen)
@@ -158,37 +168,54 @@ final class WorkspaceStore {
 
     @discardableResult
     func moveWorkspace(at index: Int, delta: Int) -> Bool {
-        guard delta != 0, let (candidates, position) = visibleGroupPosition(of: index) else { return false }
+        guard delta != 0, let (candidates, position) = visibleSiblingPosition(of: index) else { return false }
         let newPosition = position + delta
         guard candidates.indices.contains(newPosition) else { return false }
 
-        let workspace = workspaces[index]
-        let targetWorkspace = workspaces[candidates[newPosition]]
-        workspaces.remove(at: index)
-        let adjustedTarget = workspaces.firstIndex { $0 === targetWorkspace } ?? workspaces.count
-        let insertIndex = delta > 0 ? adjustedTarget + 1 : adjustedTarget
-        workspaces.insert(workspace, at: min(insertIndex, workspaces.count))
+        // The group moves as one block of the store, past the target's.
+        let moving = groupBlock(of: index).sorted().map { workspaces[$0] }
+        let targetBlock = groupBlock(of: candidates[newPosition])
+        let anchor = workspaces[(delta > 0 ? targetBlock.max() : targetBlock.min()) ?? candidates[newPosition]]
+        workspaces.removeAll { workspace in moving.contains { $0 === workspace } }
+        let anchorIndex = workspaces.firstIndex { $0 === anchor } ?? workspaces.count
+        workspaces.insert(contentsOf: moving, at: min(delta > 0 ? anchorIndex + 1 : anchorIndex, workspaces.count))
         reconcileSelection(preferActiveProfile: true)
         return true
     }
 
-    /// Move a workspace to an absolute position within its own
-    /// active/inactive group (0 = top of group). The position is clamped to
-    /// the group's bounds; a move never crosses the active/inactive boundary.
+    /// A workspace and its descendants, in the sidebar's order.
+    private func groupBlock(of index: Int) -> [Int] {
+        let list = visibleWorkspaceIndices(in: workspaces[index].profileID)
+        guard let start = list.firstIndex(of: index) else { return [index] }
+        return [index] + list[(start + 1)...].prefix { isDescendant($0, of: index) }
+    }
+
+    private func isDescendant(_ index: Int, of ancestor: Int) -> Bool {
+        guard let parent = groupParentIndex(of: index) else { return false }
+        return parent == ancestor || isDescendant(parent, of: ancestor)
+    }
+
+    /// Move a workspace to an absolute position among its siblings (0 =
+    /// first), its children with it. The position is clamped to the
+    /// siblings' bounds; a move never crosses the active/inactive boundary
+    /// nor leaves its parent.
     @discardableResult
     func moveWorkspace(at index: Int, toPosition targetPosition: Int) -> Bool {
-        guard let (candidates, position) = visibleGroupPosition(of: index) else { return false }
+        guard let (candidates, position) = visibleSiblingPosition(of: index) else { return false }
         let clamped = max(0, min(targetPosition, candidates.count - 1))
         guard clamped != position else { return false }
         return moveWorkspace(at: index, delta: clamped - position)
     }
 
-    /// A workspace's same-group neighbours within the visible (active
-    /// profile) list, plus its position among them.
-    private func visibleGroupPosition(of index: Int) -> (candidates: [Int], position: Int)? {
+    /// A workspace's siblings within the visible (active profile) list:
+    /// same section, same parent. Plus its position among them.
+    private func visibleSiblingPosition(of index: Int) -> (candidates: [Int], position: Int)? {
         guard workspaces.indices.contains(index) else { return nil }
         let isInactive = workspaces[index].isInactive
-        let candidates = visibleWorkspaceIndices.filter { workspaces[$0].isInactive == isInactive }
+        let parent = groupParentIndex(of: index)
+        let candidates = visibleWorkspaceIndices.filter {
+            workspaces[$0].isInactive == isInactive && groupParentIndex(of: $0) == parent
+        }
         guard let position = candidates.firstIndex(of: index) else { return nil }
         return (candidates, position)
     }
@@ -283,9 +310,37 @@ final class WorkspaceStore {
         return true
     }
 
+    /// ACTIVE, then INACTIVE; each workspace followed by its children,
+    /// depth first (docs/sidebar-groups.md).
     func visibleWorkspaceIndices(in profileID: String) -> [Int] {
         let matching = workspaces.indices.filter { workspaces[$0].profileID == profileID }
-        return matching.filter { !workspaces[$0].isInactive } + matching.filter { workspaces[$0].isInactive }
+        let sections = matching.filter { !workspaces[$0].isInactive } + matching.filter { workspaces[$0].isInactive }
+        var children: [Int?: [Int]] = [:]
+        for index in sections { children[groupParentIndex(of: index), default: []].append(index) }
+        func withDescendants(_ index: Int) -> [Int] { [index] + (children[index] ?? []).flatMap(withDescendants) }
+        return (children[nil] ?? []).flatMap(withDescendants)
+    }
+
+    /// The workspace a Mission was opened from, by Mission id. Read on each
+    /// call: missions load after the workspaces are restored.
+    var missionParentID: (String) -> String? = { missionID in
+        MissionStore.shared.missions.first { $0.id == missionID }?.parentWorkspaceID
+    }
+
+    /// The workspace this one is listed under: its Mission's parent, when
+    /// that one is open in the same project and section.
+    func groupParentIndex(of index: Int) -> Int? {
+        let workspace = workspaces[index]
+        guard let parentID = workspace.missionID.flatMap(missionParentID) else { return nil }
+        return workspaces.firstIndex {
+            $0.id == parentID && $0.profileID == workspace.profileID && $0.isInactive == workspace.isInactive
+        }
+    }
+
+    /// Under a folded workspace, at any depth.
+    func isInFoldedGroup(_ index: Int) -> Bool {
+        guard let parent = groupParentIndex(of: index) else { return false }
+        return workspaces[parent].isGroupFolded || isInFoldedGroup(parent)
     }
 
     private func reconcileSelection(preferActiveProfile: Bool) {

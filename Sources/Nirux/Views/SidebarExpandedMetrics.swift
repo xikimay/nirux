@@ -41,6 +41,11 @@ enum SidebarExpandedMetrics {
     // An INACTIVE workspace that asks nothing: one line.
     static let compactRowHeight: CGFloat = 26
 
+    // A workspace's children (docs/sidebar-groups.md): indented, under its
+    // summary row.
+    static let groupIndent = Theme.Space.md
+    static let groupToggleHeight: CGFloat = 18
+
     // The action block: rows separated by `actionRowGap`; a line above it
     // unless it only says something (the next step, the review badges).
     static let actionBlockGap: CGFloat = 8
@@ -55,9 +60,9 @@ enum SidebarExpandedMetrics {
     // font, hard-wrapped at a fixed column so the lines are exactly the
     // text, cut nowhere.
     static var approvalFont: NSFont { Theme.Font.code }
-    static let approvalCharactersPerLine = 28
+    static let approvalCharactersPerLine = 26
     static let approvalLineHeight: CGFloat = 16
-    /// 28 characters of `approvalFont` take 208 of the box's 212.
+    /// 26 characters of `approvalFont` take 193 of a child card's box, 200.
     static let approvalBoxPaddingX: CGFloat = 6
     static let approvalBoxPaddingY: CGFloat = 6
 

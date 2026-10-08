@@ -47,6 +47,13 @@ final class WorkspaceState {
     /// must not be selected or closed again.
     var isClosing = false
     let missionID: String?
+    /// The sidebar lists this workspace's children under a summary row
+    /// (docs/sidebar-groups.md).
+    var isGroupFolded = false
+    /// The child of a Mission that reported `completed`.
+    var isMissionCompleted: Bool {
+        MissionStore.shared.missions.contains { $0.id == missionID && $0.status == .completed }
+    }
     /// Controls mission variables for terminals created after a Settings
     /// change. Already-running shells retain the environment they launched
     /// with and pick up changes after a new terminal or app restart.

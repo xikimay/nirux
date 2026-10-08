@@ -44,6 +44,7 @@ extension NiruxShellView {
                 missionHandoffsEnabled: state.settings?.missionHandoffsEnabled == true
             )
             workspace.isInactive = persistedWS.isInactive
+            workspace.isGroupFolded = persistedWS.isGroupFolded
             workspace.purpose = persistedWS.purpose
             workspace.phase = persistedWS.phase
             workspace.unknownPhaseRawValue = persistedWS.unknownPhaseRawValue
@@ -269,6 +270,7 @@ extension NiruxShellView {
                     profileID: workspace.profileID,
                     isInactive: workspace.isInactive,
                     missionID: workspace.missionID,
+                    isGroupFolded: workspace.isGroupFolded,
                     purpose: workspace.purpose,
                     phase: workspace.phase,
                     unknownPhaseRawValue: workspace.unknownPhaseRawValue,

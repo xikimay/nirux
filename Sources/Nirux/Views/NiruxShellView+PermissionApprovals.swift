@@ -51,15 +51,19 @@ extension NiruxShellView {
     /// drawn with the buttons, for a column the user is not looking at
     /// (its terminal dialog answers). Not in a collapsed sidebar, another
     /// space (`listed` holds the listed workspaces), a workspace in the
-    /// folded inactive section (listed there when it waits, without its
-    /// buttons), or under VoiceOver, which the buttons don't serve.
+    /// folded inactive section or a folded group (listed there when it
+    /// waits, without its buttons), or under VoiceOver, which the buttons
+    /// don't serve.
     func approvalHold(workspaceIndex: Int, columnIndex: Int, listed: Set<Int>) -> PermissionApprovalHold {
         guard workspaces.indices.contains(workspaceIndex) else { return .never }
         let workspace = workspaces[workspaceIndex]
         let isOnScreen = columnIndex == workspace.focusedIndex && workspaceIndex == activeWSIndex
         let cardShown = isSidebarExpanded && !isOnScreen
             && listed.contains(workspaceIndex)
-            && sidebar.listsWorkspace(isInactive: workspace.isInactive, isActive: workspaceIndex == activeWSIndex)
+            && sidebar.listsWorkspace(
+                isInactive: workspace.isInactive, isInFoldedGroup: workspaceStore.isInFoldedGroup(workspaceIndex),
+                isActive: workspaceIndex == activeWSIndex
+            )
             && !NSWorkspace.shared.isVoiceOverEnabled
         let userSeesSidebar = NSApp.isActive && window?.isVisible == true && window?.isMiniaturized == false
             && window?.occlusionState.contains(.visible) == true

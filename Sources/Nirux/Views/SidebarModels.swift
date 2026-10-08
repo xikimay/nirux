@@ -238,6 +238,15 @@ struct WorkspaceInfo: Hashable {
     var reviewBadges: ReviewBadges? = nil
     /// What the card shows after "#N merged"; nil shows nothing.
     var mergedCleanup: MergedCleanupOffer?
+    /// The workspace this card is listed under, indented
+    /// (docs/sidebar-groups.md).
+    var groupParentID: String?
+    /// Its children are folded under its summary row.
+    var isGroupFolded = false
+    /// Under a folded workspace, at any depth.
+    var isInFoldedGroup = false
+    /// The child of a Mission that reported `completed`.
+    var isMissionCompleted = false
 
     var sidebarAction: (text: String, isBlocker: Bool)? {
         if let blocker = normalizedContextText(blocker) {
@@ -325,6 +334,8 @@ enum WorkspaceSidebarAction {
     case closeColumn(columnIndex: Int)
     case cleanUpWorktree
     case askWhyCIFailed, rerunFailedCI
+    /// Folds or unfolds the workspace's children.
+    case toggleGroup
 }
 
 /// Hover highlight target in the sidebar. Links have their own dedicated

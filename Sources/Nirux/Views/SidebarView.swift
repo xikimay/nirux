@@ -52,7 +52,7 @@ final class SidebarView: NSView {
     /// in a linked worktree, or its folder is gone). Asked on each menu.
     var offersWorktreeCleanup: ((Int) -> Bool)?
     /// Drag-reorder drop: (store index of dragged workspace, target
-    /// position within its active/inactive group).
+    /// position among its siblings).
     var onWorkspaceReordered: ((Int, Int) -> Void)?
     var onProfileClicked: ((String) -> Void)?
     var onCreateProfile: (() -> Void)?
@@ -293,7 +293,10 @@ final class SidebarView: NSView {
     /// and, in the folded section, an amber one (`railState`).
     var railWorkspaceInfos: [WorkspaceInfo] {
         displayedWorkspaceInfos.filter {
-            listsWorkspace(isInactive: $0.isInactive, isActive: $0.isActive, asksUser: $0.asksUser || $0.railState == .waiting)
+            listsWorkspace(
+                isInactive: $0.isInactive, isInFoldedGroup: $0.isInFoldedGroup, isActive: $0.isActive,
+                asksUser: $0.asksUser || $0.railState == .waiting
+            )
         }
     }
 
@@ -438,6 +441,8 @@ final class SidebarView: NSView {
                 onDiffStatsClicked?(workspaceIndex)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.cleanupActionPrefix) {
                 onWorkspaceAction?(.cleanUpWorktree, workspaceIndex)
+            } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.groupToggleActionPrefix) {
+                toggleGroup(workspaceIndex: workspaceIndex)
             } else if let workspaceID = Self.prFeedbackActionWorkspaceID(url) {
                 prFeedbackMenu?(workspaceID)?.popUp(positioning: nil, at: convert(event.locationInWindow, from: nil), in: self)
             } else if let (workspaceIndex, url) = Self.openActionTarget(url),
@@ -624,6 +629,7 @@ final class SidebarView: NSView {
 
     private static let diffActionPrefix = "action:diff:"
     private static let cleanupActionPrefix = "action:cleanup:"
+    private static let groupToggleActionPrefix = "action:group-toggle:"
 
     static func diffActionURL(workspaceIndex: Int) -> String {
         diffActionPrefix + String(workspaceIndex)
@@ -632,6 +638,11 @@ final class SidebarView: NSView {
     /// The card's "Clean up", shown next to a merged pull request.
     static func cleanupActionURL(workspaceIndex: Int) -> String {
         cleanupActionPrefix + String(workspaceIndex)
+    }
+
+    /// The summary row under a workspace with children.
+    static func groupToggleActionURL(workspaceIndex: Int) -> String {
+        groupToggleActionPrefix + String(workspaceIndex)
     }
 
     static func prFeedbackActionURL(workspaceID: String) -> String {
@@ -668,19 +679,35 @@ final class SidebarView: NSView {
 // MARK: - Inactive section
 
 extension SidebarView {
-    /// Whether the sidebar lists a workspace. The folded section still
-    /// lists the inactive workspace on screen, alone, until the user moves
-    /// to another one, and those whose agent waits on the user or broke
-    /// (`asksUser`) — the section itself stays folded.
-    func listsWorkspace(isInactive: Bool, isActive: Bool, asksUser: Bool = false) -> Bool {
-        !isInactive || isActive || asksUser || !isInactiveSectionCollapsed
+    /// Whether the sidebar lists a workspace. The folded section, or a
+    /// folded group, still lists the workspace on screen, alone, until the
+    /// user moves to another one, and those whose agent waits on the user
+    /// or broke (`asksUser`) — the section itself stays folded.
+    func listsWorkspace(isInactive: Bool, isInFoldedGroup: Bool = false, isActive: Bool, asksUser: Bool = false) -> Bool {
+        isActive || asksUser || ((!isInactive || !isInactiveSectionCollapsed) && !isInFoldedGroup)
     }
 
     func listsWorkspace(_ workspace: WorkspaceInfo) -> Bool {
-        listsWorkspace(isInactive: workspace.isInactive, isActive: workspace.isActive, asksUser: workspace.asksUser)
+        listsWorkspace(
+            isInactive: workspace.isInactive, isInFoldedGroup: workspace.isInFoldedGroup,
+            isActive: workspace.isActive, asksUser: workspace.asksUser
+        )
     }
 
     var hasInactiveWorkspaces: Bool { lastInfos.contains(where: \.isInactive) }
+
+    /// Keeps a toggle's row under the pointer for the next click. Only rows
+    /// below it change, but the document view isn't flipped, so a rebuild
+    /// keeps the distance to the bottom: keep the one to the top.
+    func keepingDocumentTop(_ rebuild: () -> Void) {
+        let clip = contentScrollView.contentView
+        let visibleTopFromDocumentTop = contentDocumentView.frame.height - clip.bounds.maxY
+        rebuild()
+        let highestOrigin = max(0, contentDocumentView.frame.height - clip.bounds.height)
+        let originY = contentDocumentView.frame.height - visibleTopFromDocumentTop - clip.bounds.height
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(max(0, originY), highestOrigin)))
+        contentScrollView.reflectScrolledClipView(clip)
+    }
 
     /// The header row's hit area (the rail's toggle tile), in document
     /// coordinates.
@@ -705,16 +732,7 @@ extension SidebarView {
             rebuildContent()
             return
         }
-        // Keep the header under the pointer for the next click. Only rows
-        // below it change, but the document view isn't flipped, so a
-        // rebuild keeps the distance to the bottom: keep the one to the top.
-        let clip = contentScrollView.contentView
-        let visibleTopFromDocumentTop = contentDocumentView.frame.height - clip.bounds.maxY
-        rebuildContent()
-        let highestOrigin = max(0, contentDocumentView.frame.height - clip.bounds.height)
-        let originY = contentDocumentView.frame.height - visibleTopFromDocumentTop - clip.bounds.height
-        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(max(0, originY), highestOrigin)))
-        contentScrollView.reflectScrolledClipView(clip)
+        keepingDocumentTop { rebuildContent() }
         // From the menu or ⌘P the header may be out of view.
         if let header = inactiveSectionHeaderFrame { contentDocumentView.scrollToVisible(header) }
         // The rebuild read the pointer before the rows moved under it.

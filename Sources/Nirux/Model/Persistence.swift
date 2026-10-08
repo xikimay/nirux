@@ -558,6 +558,7 @@ struct PersistedWorkspace: Codable {
     /// Mission owning this child workspace, when the experimental handoff
     /// flow created it. Optional for backward compatibility.
     var missionID: String?
+    var isGroupFolded: Bool
     var purpose: String?
     /// Optional manual phase override. Nil keeps the workspace on automatic
     /// phase derivation.
@@ -581,6 +582,7 @@ struct PersistedWorkspace: Codable {
         profileID: String? = nil,
         isInactive: Bool = false,
         missionID: String? = nil,
+        isGroupFolded: Bool = false,
         purpose: String? = nil,
         phase: WorkspacePhase? = nil,
         unknownPhaseRawValue: String? = nil,
@@ -599,6 +601,7 @@ struct PersistedWorkspace: Codable {
         self.profileID = profileID
         self.isInactive = isInactive
         self.missionID = missionID
+        self.isGroupFolded = isGroupFolded
         self.purpose = purpose
         self.phase = phase
         self.unknownPhaseRawValue = phase == nil ? unknownPhaseRawValue : nil
@@ -611,7 +614,7 @@ struct PersistedWorkspace: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID
+        case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID, isGroupFolded
         case purpose, phase, lastSummary, lastSummaryIsManual, lastActivityAt
         case nextStep, blocker, reviewRuns
     }
@@ -626,6 +629,7 @@ struct PersistedWorkspace: Codable {
         profileID = try container.decodeIfPresent(String.self, forKey: .profileID)
         isInactive = try container.decodeIfPresent(Bool.self, forKey: .isInactive) ?? false
         missionID = try container.decodeIfPresent(String.self, forKey: .missionID)
+        isGroupFolded = try container.decodeIfPresent(Bool.self, forKey: .isGroupFolded) ?? false
         purpose = try container.decodeIfPresent(String.self, forKey: .purpose)
         let phaseRawValue = try container.decodeIfPresent(String.self, forKey: .phase)
         phase = phaseRawValue.flatMap(WorkspacePhase.init(rawValue:))
@@ -649,6 +653,7 @@ struct PersistedWorkspace: Codable {
         try container.encodeIfPresent(profileID, forKey: .profileID)
         try container.encode(isInactive, forKey: .isInactive)
         try container.encodeIfPresent(missionID, forKey: .missionID)
+        try container.encode(isGroupFolded, forKey: .isGroupFolded)
         try container.encodeIfPresent(purpose, forKey: .purpose)
         try container.encodeIfPresent(
             phase?.rawValue ?? unknownPhaseRawValue,

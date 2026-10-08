@@ -308,6 +308,9 @@ extension NiruxShellView {
             if didChange { workspaceStore.selectWorkspace(at: workspaceIndex) }
         case .markInactive:
             didChange = workspaceStore.setWorkspaceInactive(at: workspaceIndex, true)
+        case .toggleGroup:
+            workspaces[workspaceIndex].isGroupFolded.toggle()
+            didChange = true
         case .close:
             requestCloseWorkspace(at: workspaceIndex)
             return
@@ -342,7 +345,7 @@ extension NiruxShellView {
     }
 
     /// Drop handler for sidebar drag-reorder: move the workspace to an
-    /// absolute position within its active/inactive group, then run the
+    /// absolute position among its siblings, then run the
     /// same refresh dance as the context-menu moves.
     func handleWorkspaceReorder(workspaceIndex: Int, targetPosition: Int) {
         guard workspaces.indices.contains(workspaceIndex),

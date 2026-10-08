@@ -168,6 +168,7 @@ struct SidebarCardLayout {
         actions = isCompact ? [] : workspace.cardActions
 
         let rowWidth = sidebarWidth - (Metrics.workspaceInsetX + Metrics.cardPaddingX) * 2 - Metrics.cardIndent
+            - (workspace.groupParentID == nil ? 0 : Metrics.groupIndent)
         let linksWidth = links.reduce(CGFloat(0)) { $0 + $1.width } + Self.linkGaps(links)
         let firstRowWidth = rowWidth - (links.isEmpty ? 0 : linksWidth + Theme.Space.sm)
         var rows: [[ChipPlacement]] = []
@@ -202,8 +203,10 @@ struct SidebarCardLayout {
         }
     }
 
-    var cardX: CGFloat { Metrics.workspaceInsetX }
-    var cardWidth: CGFloat { sidebarWidth - Metrics.workspaceInsetX * 2 }
+    /// A child card sits right of its parent's.
+    private var groupIndent: CGFloat { workspace.groupParentID == nil ? 0 : Metrics.groupIndent }
+    var cardX: CGFloat { Metrics.workspaceInsetX + groupIndent }
+    var cardWidth: CGFloat { sidebarWidth - Metrics.workspaceInsetX * 2 - groupIndent }
     var contentX: CGFloat { cardX + Metrics.cardPaddingX }
     var contentMaxX: CGFloat { cardX + cardWidth - Metrics.cardPaddingX }
     var indentX: CGFloat { contentX + Metrics.cardIndent }
