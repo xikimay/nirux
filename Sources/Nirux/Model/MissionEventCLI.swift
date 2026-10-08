@@ -274,17 +274,17 @@ enum MissionEventCLI {
 
     /// Wait for the next unconsumed child question/completion belonging to
     /// this parent column. Questions stay pending until a response is sent;
-    /// completion is acknowledged once printed, and `receive` returns only
-    /// after Nirux recorded that (or `confirmationTimeout`), so running it
-    /// again right away does not print the same completion again.
+    /// completion is acknowledged after it is printed, and `receive` returns
+    /// only once Nirux recorded that (or after `confirmationTimeout`), so
+    /// running it again right away does not print the same completion again.
     static func receive(
         arguments: [String],
         environment: [String: String] = ProcessInfo.processInfo.environment,
         now: @escaping () -> TimeInterval = { Date().timeIntervalSince1970 },
         eventsURL: URL = MissionEventCenter.defaultEventsURL,
         missionsURL: URL = MissionStore.defaultFileURL,
-        pollInterval: TimeInterval = 0.2,
-        confirmationTimeout: TimeInterval = 5
+        confirmationTimeout: TimeInterval = 5,
+        pollInterval: TimeInterval = 0.2
     ) -> Int32 {
         guard let context = parentContext(environment) else { return notAMissionTerminal(child: false) }
         guard let options = parseOptions(arguments, allowed: ["--timeout"]),

@@ -208,8 +208,8 @@ final class MissionTests: XCTestCase {
             now: { 40 },
             eventsURL: eventsURL,
             missionsURL: missionsURL,
-            pollInterval: 0.01,
-            confirmationTimeout: 0
+            confirmationTimeout: 0,
+            pollInterval: 0.01
         ), 0)
         let acknowledgement = try decodeSingleEvent(from: eventsURL)
         XCTAssertEqual(acknowledgement.kind, .acknowledged)
@@ -388,8 +388,8 @@ extension MissionTests {
             now: { 40 },
             eventsURL: eventsURL,
             missionsURL: missionsURL,
-            pollInterval: 0.01,
-            confirmationTimeout: 0
+            confirmationTimeout: 0,
+            pollInterval: 0.01
         ), 0)
         let center = MissionEventCenter(store: store, eventsURL: eventsURL, isEnabled: { true })
         center.drain()
