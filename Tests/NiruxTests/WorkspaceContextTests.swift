@@ -106,6 +106,27 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(workspace.lastSummary, "Keep the completed work summary")
     }
 
+    func testCardKeepsItsPullRequestAcrossCommitsOfItsBranch() {
+        let workspace = WorkspaceState(title: "feature/task", cwd: "/tmp")
+        let pullRequest = PRInfo(
+            number: 42, state: "OPEN", isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
+            mergeable: nil, url: "https://example.test/pull/42", additions: nil, deletions: nil, changedFiles: nil,
+            title: "Ledger entries"
+        )
+        let original = GitContext(branch: "feature/task", identity: GitIdentity(repositoryRoot: "/repo", head: "head-a"))
+        let newCommit = GitContext(branch: "feature/task", identity: GitIdentity(repositoryRoot: "/repo", head: "head-b"))
+        let otherBranch = GitContext(branch: "feature/other", identity: GitIdentity(repositoryRoot: "/repo", head: "head-b"))
+
+        XCTAssertTrue(workspace.updateGitContext(original))
+        XCTAssertTrue(workspace.applyPullRequestInfo(pullRequest, for: original))
+        XCTAssertTrue(workspace.updateGitContext(newCommit))
+        XCTAssertNil(workspace.prInfo)
+        XCTAssertEqual(workspace.lastPullRequest, pullRequest)
+
+        XCTAssertTrue(workspace.updateGitContext(otherBranch))
+        XCTAssertNil(workspace.lastPullRequest)
+    }
+
     func testGitContextChangesRejectStalePRMetadata() {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         let pullRequest = PRInfo(

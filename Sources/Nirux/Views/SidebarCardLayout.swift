@@ -212,11 +212,10 @@ struct SidebarCardLayout {
     /// cut after that prefix's last `/` or `-`: worktrees of one repo tell
     /// apart by their ends (`tomiir/payouts-ledger` → `ledger`).
     static func distinctiveBranch(_ branch: String, siblings: [String]) -> String {
-        let shared = siblings.filter { $0 != branch }
-            .map { branch.commonPrefix(with: $0) }
-            .max { $0.count < $1.count } ?? ""
-        guard let separator = shared.lastIndex(where: { $0 == "/" || $0 == "-" }) else { return branch }
-        return String(branch[branch.index(after: separator)...])
+        let shared = siblings.filter { $0 != branch }.map { branch.commonPrefix(with: $0).count }.max() ?? 0
+        guard let separator = branch.prefix(shared).lastIndex(where: { $0 == "/" || $0 == "-" }) else { return branch }
+        let rest = branch[branch.index(after: separator)...]
+        return rest.isEmpty ? branch : String(rest)
     }
 
     /// Between the feedback and the pull request, and the pull request and

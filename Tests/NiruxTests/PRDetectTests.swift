@@ -697,6 +697,9 @@ extension PRDetectTests {
         ])
         XCTAssertEqual(info.title, "Ledger entries for payouts")
         XCTAssertEqual(info.otherAuthor, "tomiir")
+
+        let bot = PRDetect.pullRequestInfo(from: ["author": ["login": "app/dependabot", "is_bot": true]])
+        XCTAssertNil(bot.otherAuthor, "a bot is no teammate")
     }
 
     func testDiffStatsLeaveHandoversOut() throws {

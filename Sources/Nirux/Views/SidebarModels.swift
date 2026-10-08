@@ -246,6 +246,17 @@ struct WorkspaceInfo: Hashable {
     /// Line 2's branch, without what visible worktrees of its repo share
     /// (`SidebarCardLayout.distinctiveBranch`); nil prints `gitBranch`.
     var branchLabel: String?
+    /// `WorkspaceState.lastPullRequest`: names the card, marks a teammate's.
+    var lastPullRequest: PRInfo?
+
+    /// Line 1: the PR's title while the workspace is titled with its
+    /// branch (a name set by hand differs and stays), without the
+    /// `type(scope): ` every PR of a repo shares.
+    var cardTitle: String {
+        guard title == gitBranch, let pullRequestTitle = lastPullRequest?.title else { return title }
+        let name = pullRequestTitle.replacing(/^\w+(\([^)]*\))?!?:\s+/, with: "")
+        return name.isEmpty ? pullRequestTitle : name
+    }
 
     var sidebarAction: (text: String, isBlocker: Bool)? {
         if let blocker = normalizedContextText(blocker) {

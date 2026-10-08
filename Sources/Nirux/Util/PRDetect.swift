@@ -60,27 +60,31 @@ enum PRDetect {
         guard case .success(let context, var info?) = result,
               let host = context.upstreamRepository?.host
         else { return result }
-        // The gh user unknown: no mark, rather than one on their own branches.
-        if let author = info.otherAuthor, viewerLogin(ghPath: ghPath, host: host) ?? author == author {
-            info.otherAuthor = nil
+        if let author = info.otherAuthor {
+            // The gh user unknown: no mark, rather than one on their own branches.
+            let viewer = viewerLogin(ghPath: ghPath, host: host)
+            if viewer == nil || viewer == author { info.otherAuthor = nil }
         }
         return .success(context: context, info: info)
     }
 
-    private static let viewerLogins = OSAllocatedUnfairLock(initialState: [String: String]())
+    private static let viewerLogins = OSAllocatedUnfairLock(initialState: [String: (login: String?, at: Date)]())
 
-    /// The gh user on `host`, asked once per launch; nil while gh can't say.
+    /// The gh user on `host`, asked once per launch; nil while gh can't
+    /// say, asked again ten minutes later rather than at every refresh.
     private static func viewerLogin(ghPath: String, host: String) -> String? {
-        if let login = viewerLogins.withLock({ $0[host] }) { return login }
-        guard let result = GitHubCLIBoardClient.runGH(
-            ghPath, arguments: ["api", "user", "--hostname", host, "--jq", ".login"], timeout: 30
-        ), result.terminationStatus == 0,
-              let login = String(data: result.standardOutput, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-              !login.isEmpty
-        else { return nil }
-        viewerLogins.withLock { $0[host] = login }
-        return login
+        if let known = viewerLogins.withLock({ $0[host] }),
+           known.login != nil || Date().timeIntervalSince(known.at) < 600 {
+            return known.login
+        }
+        let result = GitHubCLIBoardClient.runGH(
+            ghPath, arguments: ["api", "user", "--hostname", host, "--jq", ".login"], timeout: 10
+        )
+        let login = result.flatMap { $0.terminationStatus == 0 ? String(data: $0.standardOutput, encoding: .utf8) : nil }?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let known = (login: login?.isEmpty == false ? login : nil, at: Date())
+        viewerLogins.withLock { $0[host] = known }
+        return known.login
     }
 
     static func fetch(
@@ -223,8 +227,14 @@ enum PRDetect {
             deletions: candidate["deletions"] as? Int,
             changedFiles: candidate["changedFiles"] as? Int,
             title: candidate["title"] as? String,
-            otherAuthor: (candidate["author"] as? [String: Any])?["login"] as? String
+            otherAuthor: author(of: candidate)
         )
+    }
+
+    /// A bot is no teammate: no mark.
+    private static func author(of candidate: [String: Any]) -> String? {
+        guard let author = candidate["author"] as? [String: Any], author["is_bot"] as? Bool != true else { return nil }
+        return author["login"] as? String
     }
 
     private static func repository(for candidate: [String: Any]) -> GitHubRepository? {
@@ -268,11 +278,8 @@ enum PRDetect {
         case .failure:
             return .failure
         }
-        // A mission's handover is the agent's note, not the work: a repo
-        // that tracks one would show it changed in every new worktree.
-        let handovers = BranchReview.Handover.names.map { ":(top,exclude)\($0)" }
         guard let output = gitOutput(
-            arguments: noIndexRefresh + ["diff", "--shortstat", "--"] + handovers,
+            arguments: noIndexRefresh + ["diff", "--shortstat"] + excludingHandovers,
             cwd: cwd,
             gitPath: gitPath
         ) else { return .failure }
@@ -283,13 +290,17 @@ enum PRDetect {
     private static func diffPaths(cwd: String) -> [String] {
         // User-initiated: unlike the background shortstat, this may refresh
         // the index, or it would list touched-but-unchanged files.
-        guard let output = gitOutput(arguments: ["diff", "--name-only"], cwd: cwd) else { return [] }
+        guard let output = gitOutput(arguments: ["diff", "--name-only"] + excludingHandovers, cwd: cwd) else { return [] }
         return output
             .split(separator: "\n")
             .map(String.init)
             .filter { !$0.isEmpty }
             .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
     }
+
+    /// A mission's handover is the agent's note, not the work: a repo that
+    /// tracks one would show it changed in every new worktree.
+    private static let excludingHandovers = ["--"] + BranchReview.Handover.names.map { ":(top,exclude)\($0)" }
 
     /// `git diff` refreshes and rewrites `.git/index` even under
     /// GIT_OPTIONAL_LOCKS=0. `--shortstat` still leaves stat-only changes

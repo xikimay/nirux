@@ -49,10 +49,7 @@ extension NiruxShellView {
                     deferredAgent: Self.sidebarDeferredAgent(of: col)
                 )
             }
-            // Titled with its branch, a worktree reads better by its PR's
-            // title. A name set by hand differs from the branch and stays.
-            let title = workspace.title == workspace.gitBranch ? workspace.prInfo?.title ?? workspace.title : workspace.title
-            return WorkspaceInfo(id: workspace.id, index: index, title: title,
+            return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
                           profileID: workspace.profileID, isInactive: workspace.isInactive,
                           columnCount: workspace.columns.count,
                           focusedColumn: workspace.focusedIndex,
@@ -64,7 +61,8 @@ extension NiruxShellView {
                           lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt,
                           reviewBadges: workspace.reviewBadges,
                           mergedCleanup: mergedCleanupOffer(workspaceIndex: index),
-                          branchLabel: sidebarBranchLabel(of: workspace, among: visibleIndices))
+                          branchLabel: sidebarBranchLabel(of: workspace, among: visibleIndices),
+                          lastPullRequest: workspace.lastPullRequest)
         }
         tickHiddenSpaceAgents(visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses)
         updateColumnHeaders(infos: infos, foregroundProcesses: foregroundProcesses, now: now)
@@ -92,13 +90,13 @@ extension NiruxShellView {
         refreshProjectBoards(snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
     }
 
-    /// Line 2's branch, without the prefix it shares with the visible
-    /// worktrees of its repo.
+    /// Line 2's branch, without the prefix it shares with the listed
+    /// worktrees of its repo (the inactive ones are folded away).
     private func sidebarBranchLabel(of workspace: WorkspaceState, among visibleIndices: [Int]) -> String? {
         guard let branch = workspace.gitBranch else { return nil }
         guard let repository = workspace.gitContext?.upstreamRepository else { return branch }
         let siblings = visibleIndices.map { workspaces[$0] }
-            .filter { $0.gitContext?.upstreamRepository == repository }
+            .filter { !$0.isInactive && $0.gitContext?.upstreamRepository == repository }
             .compactMap(\.gitBranch)
         return SidebarCardLayout.distinctiveBranch(branch, siblings: siblings)
     }
