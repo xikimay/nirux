@@ -208,6 +208,7 @@ final class MissionTests: XCTestCase {
             now: { 40 },
             eventsURL: eventsURL,
             missionsURL: missionsURL,
+            confirmationTimeout: 0,
             pollInterval: 0.01
         ), 0)
         let acknowledgement = try decodeSingleEvent(from: eventsURL)
@@ -387,6 +388,7 @@ extension MissionTests {
             now: { 40 },
             eventsURL: eventsURL,
             missionsURL: missionsURL,
+            confirmationTimeout: 0,
             pollInterval: 0.01
         ), 0)
         let center = MissionEventCenter(store: store, eventsURL: eventsURL, isEnabled: { true })

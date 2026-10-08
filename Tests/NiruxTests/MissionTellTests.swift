@@ -234,6 +234,7 @@ final class MissionTellTests: XCTestCase {
                 environment: parentEnvironment(),
                 eventsURL: fixture.eventsURL,
                 missionsURL: fixture.missionsURL,
+                confirmationTimeout: 0,
                 pollInterval: 0.01
             )
         }
