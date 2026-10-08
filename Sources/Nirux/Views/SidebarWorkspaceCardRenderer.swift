@@ -213,9 +213,26 @@ final class SidebarWorkspaceCardRenderer {
             maxX = diff.frame.minX - Theme.Space.sm
         }
         if let branchName = workspace.gitBranch {
-            let branch = textLabel(branchName, font: Theme.Font.mono, color: Theme.Color.textSecondary)
+            var x = layout.indentX
+            // A teammate's branch: their initial. Nothing on the user's own.
+            if let author = workspace.prInfo?.otherAuthor, let initial = author.first {
+                let badge = SidebarBadgeView(
+                    text: initial.uppercased(), textColor: Theme.Color.textSecondary,
+                    fillColor: Theme.Color.fillPressed, font: Theme.Font.label
+                )
+                badge.cornerRadius = Theme.Radius.chip
+                badge.frame = NSRect(x: x, y: rowY, width: Metrics.branchRowHeight, height: Metrics.branchRowHeight)
+                badge.toolTip = "Opened by \(author)"
+                badge.setAccessibilityRole(.staticText)
+                badge.setAccessibilityLabel("Opened by \(author)")
+                append(badge)
+                x = badge.frame.maxX + Theme.Space.xs
+            }
+            let branch = textLabel(workspace.branchLabel ?? branchName, font: Theme.Font.mono, color: Theme.Color.textSecondary)
+            // The end tells worktrees apart, the start their owner.
+            branch.lineBreakMode = .byTruncatingMiddle
             branch.toolTip = branchName
-            branch.frame = NSRect(x: layout.indentX, y: rowY, width: max(0, maxX - layout.indentX), height: Metrics.branchRowHeight)
+            branch.frame = NSRect(x: x, y: rowY, width: max(0, maxX - x), height: Metrics.branchRowHeight)
             append(branch)
         }
     }

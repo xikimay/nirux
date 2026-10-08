@@ -208,6 +208,17 @@ struct SidebarCardLayout {
     var contentMaxX: CGFloat { cardX + cardWidth - Metrics.cardPaddingX }
     var indentX: CGFloat { contentX + Metrics.cardIndent }
 
+    /// The branch without the longest prefix it shares with a sibling's,
+    /// cut after that prefix's last `/` or `-`: worktrees of one repo tell
+    /// apart by their ends (`tomiir/payouts-ledger` → `ledger`).
+    static func distinctiveBranch(_ branch: String, siblings: [String]) -> String {
+        let shared = siblings.filter { $0 != branch }
+            .map { branch.commonPrefix(with: $0) }
+            .max { $0.count < $1.count } ?? ""
+        guard let separator = shared.lastIndex(where: { $0 == "/" || $0 == "-" }) else { return branch }
+        return String(branch[branch.index(after: separator)...])
+    }
+
     /// Between the feedback and the pull request, and the pull request and
     /// its checks.
     static func linkGaps(_ links: [SidebarCardLink]) -> CGFloat {

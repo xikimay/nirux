@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 enum PRDetect {
     private struct GitHubCLIContext {
@@ -51,11 +52,35 @@ enum PRDetect {
               context.branch == branch
         else { return .failure }
 
-        return fetch(
+        let result = fetch(
             branch: branch,
             ghPath: ghPath,
             context: context
         )
+        guard case .success(let context, var info?) = result,
+              let host = context.upstreamRepository?.host
+        else { return result }
+        // The gh user unknown: no mark, rather than one on their own branches.
+        if let author = info.otherAuthor, viewerLogin(ghPath: ghPath, host: host) ?? author == author {
+            info.otherAuthor = nil
+        }
+        return .success(context: context, info: info)
+    }
+
+    private static let viewerLogins = OSAllocatedUnfairLock(initialState: [String: String]())
+
+    /// The gh user on `host`, asked once per launch; nil while gh can't say.
+    private static func viewerLogin(ghPath: String, host: String) -> String? {
+        if let login = viewerLogins.withLock({ $0[host] }) { return login }
+        guard let result = GitHubCLIBoardClient.runGH(
+            ghPath, arguments: ["api", "user", "--hostname", host, "--jq", ".login"], timeout: 30
+        ), result.terminationStatus == 0,
+              let login = String(data: result.standardOutput, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !login.isEmpty
+        else { return nil }
+        viewerLogins.withLock { $0[host] = login }
+        return login
     }
 
     static func fetch(
@@ -131,7 +156,7 @@ enum PRDetect {
             "number", "state", "headRefOid", "headRepositoryOwner",
             "headRepository", "isDraft", "statusCheckRollup",
             "reviewDecision", "mergeable", "url", "additions",
-            "deletions", "changedFiles"
+            "deletions", "changedFiles", "title", "author"
         ].joined(separator: ",")
         let result = BoundedProcess.run(
             executableURL: URL(fileURLWithPath: cliContext.executablePath),
@@ -196,7 +221,9 @@ enum PRDetect {
             url: candidate["url"] as? String ?? "",
             additions: candidate["additions"] as? Int,
             deletions: candidate["deletions"] as? Int,
-            changedFiles: candidate["changedFiles"] as? Int
+            changedFiles: candidate["changedFiles"] as? Int,
+            title: candidate["title"] as? String,
+            otherAuthor: (candidate["author"] as? [String: Any])?["login"] as? String
         )
     }
 
@@ -241,8 +268,11 @@ enum PRDetect {
         case .failure:
             return .failure
         }
+        // A mission's handover is the agent's note, not the work: a repo
+        // that tracks one would show it changed in every new worktree.
+        let handovers = BranchReview.Handover.names.map { ":(top,exclude)\($0)" }
         guard let output = gitOutput(
-            arguments: noIndexRefresh + ["diff", "--shortstat"],
+            arguments: noIndexRefresh + ["diff", "--shortstat", "--"] + handovers,
             cwd: cwd,
             gitPath: gitPath
         ) else { return .failure }

@@ -37,6 +37,38 @@ final class SidebarCardStateTests: XCTestCase {
         )
     }
 
+    func testBranchDropsThePrefixItSharesWithASibling() {
+        let siblings = ["tomiir/payouts-ledger-entries", "tomiir/payouts-payout-status", "cheun/review-payouts", "cheun/review-fo-account"]
+        let labels = siblings.map { SidebarCardLayout.distinctiveBranch($0, siblings: siblings) }
+        XCTAssertEqual(labels, ["ledger-entries", "payout-status", "payouts", "fo-account"])
+        // Cut at the last separator of the shared prefix, never mid-word.
+        XCTAssertEqual(SidebarCardLayout.distinctiveBranch("feat/checkout", siblings: ["feat/check-in"]), "checkout")
+        XCTAssertEqual(SidebarCardLayout.distinctiveBranch("feat/x", siblings: ["feat/x-2"]), "x")
+        XCTAssertEqual(SidebarCardLayout.distinctiveBranch("feat/x-2", siblings: ["feat/x"]), "x-2")
+    }
+
+    func testBranchRowMarksATeammatesBranchAndPrintsItsDistinctiveEnd() {
+        var teammate = pullRequest()
+        teammate.otherAuthor = "tomiir"
+        var info = workspace([column()], pullRequest: teammate)
+        info.branchLabel = "out"
+        let views = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 400).render().views
+
+        XCTAssertTrue(views.contains { ($0 as? SidebarBadgeView)?.accessibilityLabel() == "Opened by tomiir" })
+        let branch = views.compactMap { $0 as? NSTextField }.first { $0.stringValue == "out" }
+        XCTAssertEqual(branch?.toolTip, "feat/checkout")
+
+        let own = SidebarWorkspaceCardRenderer(workspace: workspace([column()], pullRequest: pullRequest()), sidebarWidth: 260, yOffset: 400)
+        XCTAssertFalse(own.render().views.contains { ($0 as? SidebarBadgeView)?.accessibilityLabel()?.hasPrefix("Opened by") == true })
+    }
+
+    func testBranchWithoutSiblingStaysWhole() {
+        XCTAssertEqual(SidebarCardLayout.distinctiveBranch("feat/checkout", siblings: []), "feat/checkout")
+        XCTAssertEqual(SidebarCardLayout.distinctiveBranch("feat/checkout", siblings: ["feat/checkout"]), "feat/checkout")
+        XCTAssertEqual(SidebarCardLayout.distinctiveBranch("feat/checkout", siblings: ["fix/login"]), "feat/checkout")
+        XCTAssertEqual(SidebarCardLayout.distinctiveBranch("main", siblings: ["mainline"]), "main")
+    }
+
     private let stopped = SidebarStuckState.stoppedOnError(kind: "rate_limit", detail: nil, failedAt: 1, resume: .offered)
 
     // MARK: - State

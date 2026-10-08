@@ -688,3 +688,51 @@ private func fakeGitHubCLIScript(_ configuration: FakeGitHubCLIConfiguration) ->
     kill "$watchdog_pid" 2>/dev/null || true
     """#
 }
+
+// The card: its title, its teammate mark, its diff.
+extension PRDetectTests {
+    func testPullRequestInfoReadsTitleAndAuthor() {
+        let info = PRDetect.pullRequestInfo(from: [
+            "number": 1174, "state": "OPEN", "title": "Ledger entries for payouts", "author": ["login": "tomiir"]
+        ])
+        XCTAssertEqual(info.title, "Ledger entries for payouts")
+        XCTAssertEqual(info.otherAuthor, "tomiir")
+    }
+
+    func testDiffStatsLeaveHandoversOut() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try runGit(["init", "-q"], at: directory)
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent("sub"), withIntermediateDirectories: true
+        )
+        for name in [".claude-handover.md", ".codex-handover.md", "tracked.txt", "sub/kept.txt"] {
+            try "clean\n".write(to: directory.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        try runGit(["add", "."], at: directory)
+        try runGit([
+            "-c", "user.name=Nirux Tests",
+            "-c", "user.email=nirux@example.test",
+            "commit", "-qm", "initial"
+        ], at: directory)
+
+        for name in [".claude-handover.md", ".codex-handover.md"] {
+            try "next steps\nmore\n".write(to: directory.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        // From a subdirectory too: the handovers sit at the top level.
+        let subdirectory = directory.appendingPathComponent("sub").path
+        guard case .observed(_, let handoversOnly) = PRDetect.diffStats(cwd: subdirectory) else {
+            return XCTFail("Expected observed diff stats")
+        }
+        XCTAssertNil(handoversOnly)
+
+        try "changed\n".write(to: directory.appendingPathComponent("tracked.txt"), atomically: true, encoding: .utf8)
+        guard case .observed(_, let stats) = PRDetect.diffStats(cwd: subdirectory) else {
+            return XCTFail("Expected observed diff stats")
+        }
+        XCTAssertEqual(stats, "1 file changed, 1 insertion(+), 1 deletion(-)")
+    }
+}
