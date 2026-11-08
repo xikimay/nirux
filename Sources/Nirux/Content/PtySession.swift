@@ -612,10 +612,18 @@ final class PtySession: @unchecked Sendable {
         state.duplicateDescriptor()
     }
 
-    /// Whether a Mission `tell` sent at `toldAt` may be typed now (see
+    /// Whether a Mission message may be typed now into the prompt of a
+    /// `claude` already running at `runningSince` (see
     /// `AgentStatusMachine.isPromptFree`).
-    func acceptsMissionInstruction(toldAt: TimeInterval, snapshot: ProcessSnapshot) -> Bool {
-        !hasExited && state.machine.isPromptFree(foreground: foregroundProcess(snapshot: snapshot), runningSince: toldAt)
+    func acceptsMissionMessage(runningSince: TimeInterval, snapshot: ProcessSnapshot) -> Bool {
+        !hasExited && state.machine.isPromptFree(
+            foreground: foregroundProcess(snapshot: snapshot), runningSince: runningSince
+        )
+    }
+
+    /// See `AgentStatusMachine.finishedTurn(afterTypingAt:)`.
+    func finishedTurn(afterTypingAt typedAt: TimeInterval) -> Bool {
+        state.machine.finishedTurn(afterTypingAt: typedAt)
     }
 
     /// The user's login shell ($SHELL) when it's a mainstream

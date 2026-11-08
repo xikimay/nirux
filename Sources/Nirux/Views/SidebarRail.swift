@@ -282,8 +282,8 @@ struct SidebarRailTooltip: Equatable {
 @MainActor
 extension WorkspaceInfo {
     /// The tile's state: the card's (`cardState`), and amber for a question
-    /// a Mission child asked while the user was elsewhere (`notification`),
-    /// which the cards leave to the Activity feed the rail doesn't show.
+    /// a Mission child handed to the user while they were elsewhere
+    /// (`notification`).
     var railState: SidebarCardState {
         let state = cardState
         return state != .waiting && !isActive && notification == .waiting ? .waiting : state
@@ -311,7 +311,7 @@ extension WorkspaceInfo {
             if let waiting = asking(.waiting) {
                 (detail, note) = (withAge(waiting.headline), waiting.detail)
             } else {
-                (detail, note) = ("a child agent asked a question", "Reply from Activity, in the expanded sidebar")
+                (detail, note) = ("a child agent asked a question", "Answer from its card, in the expanded sidebar")
             }
         case .error:
             color = Theme.Color.error

@@ -87,9 +87,9 @@ final class SidebarCardStateTests: XCTestCase {
         XCTAssertEqual(SidebarRenderer.attentionTooltip(for: both), "has a question — Which?", "the tooltip follows the chip")
     }
 
-    /// A child agent's question (`nirux ask`) is something that happened
-    /// while the user was away: the rail's tile and the ring say it, the
-    /// card says what its column does, the activity feed keeps the question.
+    /// A child agent's question handed to the user is something that
+    /// happened while the user was away: the rail's tile and the ring say
+    /// it, the card says what its column does.
     func testChildAgentQuestionLightsTheTileNotTheCard() {
         let asking = workspace([column(status: .working)], isInactive: true, notification: .waiting)
         XCTAssertEqual(asking.attention, .waiting)
@@ -326,69 +326,6 @@ final class SidebarCardStateTests: XCTestCase {
         let field = try XCTUnwrap(result.views.compactMap { $0 as? NSTextField }.first { $0.stringValue.hasPrefix("WWW") })
         let needed = try XCTUnwrap(field.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: 1000, height: field.frame.height)))
         XCTAssertLessThanOrEqual(needed.width, field.frame.width)
-    }
-
-    // MARK: - Activity feed
-
-    /// Amber only for a row that waits on the user; a row older builds
-    /// wrote doesn't say, and stays amber.
-    func testActivityRowColorFollowsItsSignal() throws {
-        func entry(_ signal: AttentionSignal?) -> ActivityEntry {
-            ActivityEntry(
-                category: .attention, agentKind: "claude", workspaceID: "ws", columnIndex: 0, workspaceTitle: "t",
-                detail: nil, timestamp: 1, signal: signal
-            )
-        }
-        XCTAssertEqual(SidebarView.activityColor(for: entry(.waiting)), Theme.Color.waiting)
-        XCTAssertEqual(SidebarView.activityColor(for: entry(.error)), Theme.Color.error)
-        XCTAssertEqual(SidebarView.activityColor(for: entry(.finished)), SidebarRenderer.color(for: .finished))
-        XCTAssertEqual(SidebarView.activityColor(for: entry(nil)), Theme.Color.waiting)
-
-        let legacy = Data(#"[{"category":"attention","agentKind":"claude","workspaceTitle":"t","timestamp":1}]"#.utf8)
-        XCTAssertNil(try JSONDecoder().decode([ActivityEntry].self, from: legacy).first?.signal)
-        let newer = Data(#"[{"category":"attention","agentKind":"claude","workspaceTitle":"t","timestamp":1,"signal":"later"}]"#.utf8)
-        XCTAssertEqual(try JSONDecoder().decode([ActivityEntry].self, from: newer).first?.signal, .waiting)
-        let roundTrip = try JSONDecoder().decode(ActivityEntry.self, from: JSONEncoder().encode(entry(.finished)))
-        XCTAssertEqual(roundTrip.signal, .finished)
-    }
-
-    /// An idle reminder after a failed turn neither hides nor handles it.
-    func testIdleReminderLeavesAFailedTurnRed() throws {
-        func row(_ name: AgentHookEvent.Name, type: String? = nil, at time: TimeInterval) throws -> ActivityEntry {
-            let event = AgentHookEvent(
-                kind: .claude, name: name, agentUUID: "agent", workspaceID: "ws", sessionID: "s",
-                detail: "rate_limit", notificationType: type, errorKind: name == .stopFailure ? "rate_limit" : nil,
-                timestamp: time
-            )
-            return try XCTUnwrap(ActivityEntry(event: event, workspaceTitle: "t", columnIndex: 0))
-        }
-        let failed = try row(.stopFailure, at: 10)
-        let reminder = try row(.notification, type: "idle_prompt", at: 70)
-        XCTAssertEqual(failed.signal, .error)
-        let store = ActivityStore(persistsToDisk: false)
-        store.record(failed)
-        store.record(reminder)
-        let feed = store.feedEntries
-        XCTAssertEqual(feed.map(\.signal), [.finished, .error])
-        XCTAssertFalse(ActivityStore.isAttentionSuperseded(at: 1, in: feed))
-
-        // A dialog's row: the reminder says the agent is back at its
-        // prompt, the dialog closed.
-        let asked = ActivityEntry(
-            category: .attention, agentKind: "claude", agentUUID: "agent", workspaceID: "ws", columnIndex: 0,
-            workspaceTitle: "t", detail: "permission: Bash", timestamp: 5, signal: .waiting
-        )
-        XCTAssertTrue(ActivityStore.isAttentionSuperseded(at: 1, in: [reminder, asked]))
-    }
-
-    func testIdlePromptRowIsAFinishedTurnNotAWait() throws {
-        let event = AgentHookEvent(
-            kind: .claude, name: .notification, sessionID: "s", detail: "Claude is waiting for your input",
-            notificationType: "idle_prompt", timestamp: 10
-        )
-        let row = try XCTUnwrap(ActivityEntry(event: event, workspaceTitle: "t", columnIndex: 0))
-        XCTAssertEqual(row.category, .attention)
-        XCTAssertEqual(row.signal, .finished)
     }
 
     // MARK: - Header
