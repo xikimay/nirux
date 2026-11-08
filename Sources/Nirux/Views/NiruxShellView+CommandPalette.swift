@@ -43,7 +43,7 @@ extension NiruxShellView {
             PaletteAction(
                 icon: .symbol("tablecells"), title: "Open Board",
                 subtitle: "Branches, agents and pull requests of the current space",
-                shortcut: nil
+                shortcut: .board
             ) { [weak self] in
                 self?.openProjectBoard()
             },

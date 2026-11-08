@@ -43,8 +43,15 @@ extension NiruxShellView {
         return components.count >= 2 && components[components.count - 2] == "worktrees"
     }
 
-    func offersWorktreeCleanup(workspaceIndex: Int) -> Bool {
-        worktreeCleanupPath(workspaceIndex: workspaceIndex) != nil
+    /// The card menu's "Clean Up Worktree…": suggested once the card shows
+    /// the pull request merged, or with the folder gone. Still offered
+    /// before that, lower: the card of an inactive workspace never learns
+    /// that its pull request merged (pull requests aren't saved, nor
+    /// refreshed for inactive workspaces), and the checks find out.
+    func worktreeCleanupOffer(workspaceIndex: Int) -> WorktreeCleanupMenuOffer? {
+        guard let path = worktreeCleanupPath(workspaceIndex: workspaceIndex) else { return nil }
+        let isSuggested = !FileManager.default.fileExists(atPath: path) || mergedCleanupOffer(workspaceIndex: workspaceIndex) != nil
+        return isSuggested ? .suggested : .available
     }
 
     /// What "Clean Up Worktree…" would clean up for this workspace.
