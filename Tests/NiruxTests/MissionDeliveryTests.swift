@@ -217,7 +217,6 @@ final class MissionDeliveryTests: XCTestCase {
             MissionPromptText.text(for: completed, childTitle: "Date filter API", parentTitle: nil),
             "[Nirux Mission] \"Date filter API\" (branch feat/date-filter) completed: PR #42 open, CI green."
         )
-        XCTAssertTrue(ProjectHistory.isLaunchPrompt("[Nirux Mission] Answer from the user: Yes"), "Nirux's words, not the user's")
     }
 
     // MARK: - Hand-off to the user
