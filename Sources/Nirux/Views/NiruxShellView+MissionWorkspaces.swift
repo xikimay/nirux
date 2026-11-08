@@ -21,7 +21,8 @@ extension NiruxShellView {
         profileID requestedProfileID: String? = nil,
         parentWorkspaceID: String? = nil,
         parentAgentUUID: String? = nil,
-        startsFromHead: Bool = false
+        startsFromHead: Bool = false,
+        startedOutsideNirux: Bool = false
     ) {
         let routesByAnchor = routesByAnchor
         // The space the repository goes to, decided as below, holds the
@@ -37,6 +38,10 @@ extension NiruxShellView {
                 )
             }
             let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot, newBranchStartPoint: start?.startPoint)
+            // A worktree an agent already works in (the branch was checked
+            // out) never runs the setup script again. One opened from outside
+            // Nirux runs none, and leaves it to a later request from Nirux.
+            let firstSetup = !startedOutsideNirux && (path.map(SpaceSetupScript.claimFirstRun(worktree:)) ?? false)
             // Read back from the checkout: the session is named after the
             // branch it will actually work on (see `SessionName`).
             let checkedOutBranch = path.flatMap(GitWorktree.currentBranch(at:))
@@ -119,7 +124,9 @@ extension NiruxShellView {
                         missionID: missionID,
                         deliveredHandover: deliveredHandover,
                         handoverText: handoverText,
-                        worktreeBranch: checkedOutBranch
+                        worktreeBranch: checkedOutBranch,
+                        startedOutsideNirux: startedOutsideNirux,
+                        setupScript: firstSetup ? self.setupScript(for: decision) : nil
                     )
                     self.saveState()
                     if decision.reason == .general { self.presentSpaceArrival(workspaceID: childWorkspaceID) }

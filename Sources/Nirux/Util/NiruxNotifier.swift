@@ -139,6 +139,19 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         post(content)
     }
 
+    /// "Setup script failed" / workspace: a new worktree's setup script
+    /// failed (SpaceSetupScript). Clicking focuses its terminal.
+    func postSetupFailure(workspaceID: String, workspaceTitle: String) {
+        guard !NSApp.isActive else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Setup script failed"
+        content.subtitle = workspaceTitle
+        content.body = "The agent started anyway: its terminal shows what failed."
+        content.sound = .default
+        content.userInfo = ["workspaceID": workspaceID, "columnIndex": 0]
+        post(content)
+    }
+
     /// Post a "download finished" notification; clicking reveals the file
     /// in Finder. Suppressed while the app is active.
     func postDownloadFinished(filename: String, fileURL: URL) {

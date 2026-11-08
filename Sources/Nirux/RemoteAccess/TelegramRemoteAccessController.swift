@@ -583,6 +583,21 @@ extension TelegramRemoteAccessController {
         }
     }
 
+    /// A new worktree's setup script failed (SpaceSetupScript): its agent
+    /// started anyway. Sent with the attention alerts.
+    func handleSetupFailure(workspaceTitle: String, columnIndex: Int, agentUUID: String?) {
+        guard notifyOnAttention, let agentUUID, isAuthorizedConfiguration, Date() >= notificationArmedAt else { return }
+        Task { [weak self] in
+            await self?.sendAgentNotification(
+                label: "Setup script failed",
+                workspaceTitle: workspaceTitle,
+                columnNumber: columnIndex + 1,
+                agentUUID: agentUUID,
+                detail: "The agent started anyway: its terminal shows what failed."
+            )
+        }
+    }
+
     /// Hook events are already normalized upstream; Telegram sees only
     /// completion/attention notifications tied to a stable column ID.
     /// Attention comes from Claude's own notifications, which it sends once

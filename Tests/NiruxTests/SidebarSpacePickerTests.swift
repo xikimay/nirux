@@ -30,10 +30,13 @@ final class SidebarSpacePickerTests: XCTestCase {
         sidebar.update(profiles: spaces, workspaces: [])
         var selected: [String] = []
         sidebar.onProfileClicked = { selected.append($0) }
+        var settingsOpened: [String] = []
+        sidebar.onShowSpaceSettings = { settingsOpened.append($0) }
 
         let menu = sidebar.spacePickerMenu()
-        // An attributed title is the title: the amber dot is in it.
-        XCTAssertEqual(menu.items.map(\.title), ["General", "client  ●", "perso  ●", "", "New Space…", "Space Settings"])
+        // An attributed title is the title: the amber dot is in it. General
+        // can't be deleted.
+        XCTAssertEqual(menu.items.map(\.title), ["General", "client  ●", "perso  ●", "", "New Space…", "Space Settings…"])
         XCTAssertEqual(menu.items.prefix(3).map(\.state), [.on, .off, .off])
         XCTAssertEqual(menu.items.prefix(3).map { $0.badge?.stringValue }, ["2", "4", "0"])
         XCTAssertEqual(menu.items.prefix(3).map(\.keyEquivalent), ["1", "2", "3"])
@@ -43,10 +46,18 @@ final class SidebarSpacePickerTests: XCTestCase {
             return title.attribute(.foregroundColor, at: title.length - 1, effectiveRange: nil) as? NSColor
         }
         XCTAssertEqual([mark(0), mark(1), mark(2)], [nil, Theme.Color.waiting, Theme.Color.error])
-        XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Space Settings")?.submenu).items.contains { $0.title == "Rename Space…" })
 
         menu.performActionForItem(at: 1)
         XCTAssertEqual(selected, ["client"])
+        menu.performActionForItem(at: menu.indexOfItem(withTitle: "Space Settings…"))
+        XCTAssertEqual(settingsOpened, [WorkspaceProfile.defaultID])
+
+        // Another space on screen: its settings, and Delete Space….
+        var other = spaces
+        other[0] = space(WorkspaceProfile.defaultID, workspaces: 3, tasks: 2)
+        other[1] = space("client", isActive: true, workspaces: 6, tasks: 4)
+        sidebar.update(profiles: other, workspaces: [])
+        XCTAssertEqual(sidebar.spacePickerMenu().items.suffix(3).map(\.title), ["New Space…", "Space Settings…", "Delete Space…"])
     }
 
     /// The closed picker says when an agent waits in another space, which

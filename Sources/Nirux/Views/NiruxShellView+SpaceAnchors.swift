@@ -144,6 +144,7 @@ extension NiruxShellView {
         if let workspaceID { moveWorkspaceToSpace(workspaceID: workspaceID, profileID: spaceID) }
         updateSidebar()
         saveState()
+        spaceSettingsSpacesChanged()
         refreshNewTaskPanelRepositories(selecting: anchor.key)
         offerToMoveWorkspaces(into: spaceID) {}
     }
@@ -152,12 +153,14 @@ extension NiruxShellView {
         guard canChangeAnchors(), workspaceStore.removeAnchor(key: key, fromProfile: spaceID) else { return }
         updateSidebar()
         saveState()
+        spaceSettingsSpacesChanged()
     }
 
     func makeDefaultSpaceAnchor(key: String, inSpace spaceID: String) {
         guard canChangeAnchors(), workspaceStore.makeDefaultAnchor(key: key, inProfile: spaceID) else { return }
         updateSidebar()
         saveState()
+        spaceSettingsSpacesChanged()
     }
 
     /// The banner's "Anchor to…": the repository holding the workspace's

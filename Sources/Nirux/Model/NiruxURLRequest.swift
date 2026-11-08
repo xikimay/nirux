@@ -87,6 +87,10 @@ struct NiruxURLRequest: Equatable, Sendable {
     var action: Action
     var profileID: String?
     let launchID: String?
+    /// Confirmed by the user, with no launch ID: it came from outside Nirux,
+    /// so the workspace it opens gets neither the space's environment nor
+    /// its setup script (see `WorkspaceState.startedOutsideNirux`).
+    private(set) var cameFromOutside = false
 
     init?(url: URL) {
         guard url.scheme == "nirux" else { return nil }
@@ -187,6 +191,7 @@ struct NiruxURLRequest: Equatable, Sendable {
     func restrictedForConfirmation() -> NiruxURLRequest {
         var restricted = self
         restricted.profileID = nil
+        restricted.cameFromOutside = true
         switch action {
         case .newWorktree(var request):
             request.parentWorkspaceID = nil

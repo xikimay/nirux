@@ -122,10 +122,24 @@ extension NiruxShellView {
         Persistence.load()?.settings?.codexLaunchMode ?? .default
     }
 
+    /// The mode a fresh Claude launch in `workspace` uses: its space's,
+    /// else Settings' (docs/projects.md, section 5). A restore keeps the
+    /// mode its column recorded. A workspace opened from outside Nirux
+    /// takes Settings' mode: the one its confirmation named.
+    static func claudeLaunchMode(for workspace: WorkspaceState) -> ClaudeLaunchMode {
+        guard !workspace.startedOutsideNirux else { return currentClaudeLaunchMode() }
+        return SpaceDefaultsStore.defaults(forSpace: workspace.profileID).claudeMode(settings: currentClaudeLaunchMode())
+    }
+
+    static func codexLaunchMode(for workspace: WorkspaceState) -> CodexLaunchMode {
+        guard !workspace.startedOutsideNirux else { return currentCodexLaunchMode() }
+        return SpaceDefaultsStore.defaults(forSpace: workspace.profileID).codexMode(settings: currentCodexLaunchMode())
+    }
+
     func openClaudeCode() {
         guard let workspace = activeWorkspace else { return }
         let cmd = Self.claudeCommand(
-            mode: Self.currentClaudeLaunchMode(),
+            mode: Self.claudeLaunchMode(for: workspace),
             briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile
         )
         workspace.addColumn()
@@ -140,7 +154,7 @@ extension NiruxShellView {
     func openCodex() {
         guard let workspace = activeWorkspace else { return }
         let cmd = Self.codexCommand(
-            mode: Self.currentCodexLaunchMode(),
+            mode: Self.codexLaunchMode(for: workspace),
             briefFile: Self.codexBriefFile(
                 from: spaceBriefInjection(for: workspace), launchDirectory: workspace.focusedWorkingDirectory
             )

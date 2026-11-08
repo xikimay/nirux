@@ -17,6 +17,11 @@ extension NiruxApp {
         shell?.selectSpace(number: sender.tag)
     }
 
+    @objc func showActiveSpaceSettings(_ sender: Any?) {
+        guard let shell else { return }
+        shell.showSpaceSettings(profileID: shell.activeProfileID)
+    }
+
     @objc func openBoard(_ sender: Any?) {
         shell?.openProjectBoard()
     }
@@ -76,18 +81,12 @@ extension NiruxApp {
 
     // MARK: - Menus
 
-    /// The active space's settings come from the sidebar's own builder, so
-    /// the space menu there and this one list the same items. They open
-    /// today's panels until Space Settings is one window.
+    /// Space Settings acts on the space in front (docs/spaces.md, S8).
     @MainActor
     func spaceMenuItem() -> NSMenuItem {
         let menu = SpaceListMenu(title: "Space") { [weak self] in self?.shell?.sidebar.lastProfiles ?? [] }
         menu.addItem(withTitle: SidebarView.newSpaceTitle, action: #selector(newSpace(_:)), keyEquivalent: "")
-        let settings = NSMenuItem(title: "Space Settings", action: nil, keyEquivalent: "")
-        settings.submenu = RebuiltMenu(title: "Space Settings") { [weak self] menu in
-            self?.shell?.sidebar.addActiveSpaceSettings(to: menu)
-        }
-        menu.addItem(settings)
+        menu.addItem(withTitle: SidebarView.spaceSettingsTitle, action: #selector(showActiveSpaceSettings(_:)), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Board", action: #selector(openBoard(_:)), shortcut: .board)
         menu.addItem(withTitle: "Session History…", action: #selector(showSessionHistory(_:)), keyEquivalent: "")
@@ -156,36 +155,6 @@ extension NiruxApp {
         item.tag = Self.helpMenuTag
         item.submenu = menu
         return item
-    }
-}
-
-/// A submenu emptied and filled by `populate` each time it opens. It answers
-/// no key equivalent, so a key press never rebuilds it: its items must carry
-/// none.
-final class RebuiltMenu: NSMenu, NSMenuDelegate {
-    private let populate: @MainActor (NSMenu) -> Void
-
-    init(title: String, populate: @escaping @MainActor (NSMenu) -> Void) {
-        self.populate = populate
-        super.init(title: title)
-        delegate = self
-    }
-
-    @available(*, unavailable)
-    required init(coder: NSCoder) { fatalError() }
-
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
-        populate(menu)
-    }
-
-    func menuHasKeyEquivalent(
-        _ menu: NSMenu,
-        for event: NSEvent,
-        target: AutoreleasingUnsafeMutablePointer<AnyObject?>,
-        action: UnsafeMutablePointer<Selector?>
-    ) -> Bool {
-        false
     }
 }
 

@@ -15,9 +15,13 @@ list, **What agents know**, whatever file holds an item.
 
 ## 1. Opening it
 
-- **⌘P › Space Memory…**: the active workspace's repository.
-- **The space menu › Space Memory…**: the repository of that space's
-  active workspace, else of its first workspace.
+Space Settings › Memory shows it ([spaces.md](spaces.md), S8):
+
+- **⌘P › Space Memory…**: the active space's.
+- **The space menu › Space Memory…**: that space's.
+
+It reads the repository of the space's active workspace, else of its first
+workspace, else of its default repository or folder.
 
 The workspace's own folder decides, not where its focused terminal has
 `cd`'d. The panel reads the files each time it opens, off the main thread. It

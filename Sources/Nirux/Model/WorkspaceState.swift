@@ -51,6 +51,11 @@ final class WorkspaceState {
     /// change. Already-running shells retain the environment they launched
     /// with and pick up changes after a new terminal or app restart.
     var missionHandoffsEnabled: Bool
+    /// Opened by a `nirux://` request from outside Nirux (one the user
+    /// confirmed, with no launch ID): its shells never get the space's
+    /// environment, nor its first agent the setup script (docs/projects.md,
+    /// section 5). Kept across launches.
+    let startedOutsideNirux: Bool
     private(set) var gitContext: GitContext?
     private var gitContextObservationGeneration: UInt64 = 0
     private var gitContextObservation: GitContextObservation?
@@ -137,9 +142,12 @@ final class WorkspaceState {
         profileID: String = WorkspaceProfile.defaultID,
         missionID: String? = nil,
         missionHandoffsEnabled: Bool = false,
+        startedOutsideNirux: Bool = false,
         initialAgentUUID: String = UUID().uuidString
     ) {
         self.id = id
+        // Before the first column: its shell reads it.
+        self.startedOutsideNirux = startedOutsideNirux
         self.cwd = cwd
         self.title = title ?? "workspace"
         self.titleIsManual = (title != nil)
@@ -515,7 +523,15 @@ extension WorkspaceState {
         if let briefURL = SpaceBrief.briefURL(spaceID: profileID) {
             environment["NIRUX_PROJECT_BRIEF"] = briefURL.path
         }
-        return environment
+        guard !startedOutsideNirux else {
+            // Its agents' nirux:// requests ask first, as its own did: they
+            // come from outside Nirux too.
+            environment[NiruxLaunchAuthorization.environmentKey] = ""
+            return environment
+        }
+        // The space's variables, under Nirux's own: they never replace a
+        // NIRUX_ one (SpaceDefaults refuses those names anyway).
+        return environment.merging(SpaceDefaultsStore.defaults(forSpace: profileID).effectiveEnvironment) { nirux, _ in nirux }
     }
 
     // Pure builder so feature-gating of terminal metadata can be tested

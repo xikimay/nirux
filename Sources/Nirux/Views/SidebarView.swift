@@ -62,19 +62,8 @@ final class SidebarView: NSView {
     var onProfileClicked: ((String) -> Void)?
     /// "New Space…": the sheet (see NewSpacePanel).
     var onCreateProfile: (() -> Void)?
-    /// (space id): "Add Repository…".
-    var onAddRepository: ((String) -> Void)?
-    /// (space id, anchor key): the Repositories submenu.
-    var onMakeDefaultAnchor: ((String, String) -> Void)?
-    var onRemoveAnchor: ((String, String) -> Void)?
-    /// A space's repositories and folders, for its menu.
-    var spaceAnchors: ((String) -> [SpaceAnchor])?
-    var onRenameProfile: ((String) -> Void)?
-    var onEditProfileBrief: ((String) -> Void)?
-    var onEditBoardSettings: ((String) -> Void)?
-    var onEditTaskTemplates: ((String) -> Void)?
-    var onShowProjectMemory: ((String) -> Void)?
-    var onRecolorProfile: ((String, String) -> Void)?
+    /// (space id): Space Settings….
+    var onShowSpaceSettings: ((String) -> Void)?
     var onDeleteProfile: ((String) -> Void)?
     /// (workspace id, space id). By id: a close that finishes while the menu
     /// is open can leave a card's index stale.

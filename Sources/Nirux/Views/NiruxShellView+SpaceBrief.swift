@@ -39,23 +39,6 @@ extension NiruxShellView {
         SpaceBrief.prepareInjection(spaceID: workspace.profileID)
     }
 
-    /// Opens the space's brief in an editor column, creating it on first use.
-    func editSpaceBrief(profileID: String) {
-        let spaceName = workspaceStore.profiles.first { $0.id == profileID }?.name ?? profileID
-        do {
-            guard let url = try SpaceBrief.ensureBriefFile(spaceID: profileID, spaceName: spaceName) else {
-                showToast("Couldn’t find this space’s brief", tone: .error)
-                return
-            }
-            // A tab in the workspace's usual editor: rooting an editor at the
-            // brief's folder would make it the workspace's working directory.
-            openInEditorColumn(path: url.path)
-        } catch {
-            NiruxDebugLog.log("SpaceBrief: could not create the brief file: \(error)")
-            showToast("Couldn’t create the space’s brief", tone: .error)
-        }
-    }
-
     /// The Codex brief file, unless one of the user's Codex configs already
     /// sets `developer_instructions`, which Nirux must not override: the user
     /// config (`$CODEX_HOME` when Nirux sees it, else ~/.codex) and project

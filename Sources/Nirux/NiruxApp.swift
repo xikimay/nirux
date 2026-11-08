@@ -70,6 +70,12 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         if args.count >= 4, args[1] == "--hook", args[2] == "claude", args[3] == "--mcp" {
             exit(NiruxMCPServer.run())
         }
+        // A setup script failed in a new worktree (SpaceSetupScript), also
+        // spelled as a hook: an older build reads a Codex payload it can't
+        // parse and exits.
+        if let workspaceID = SetupFailureSignal.workspaceID(in: args) {
+            exit(SetupFailureSignal.run(workspaceID: workspaceID))
+        }
         if args.count >= 3, args[1] == "--hook", let kind = AgentHookEvent.Kind(rawValue: args[2]) {
             let payload = args.count > 3 ? args.last : nil
             exit(AgentHookCLI.run(kind: kind, payload: payload))
@@ -176,6 +182,12 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
                 reason, workspaceTitle: workspace.title, columnIndex: columnIndex, agentUUID: column.agentUUID
             )
         }
+        shellView.onSetupScriptFailed = { [weak remoteAccess] workspace, columnIndex, column in
+            remoteAccess?.handleSetupFailure(
+                workspaceTitle: workspace.title, columnIndex: columnIndex, agentUUID: column.agentUUID
+            )
+        }
+        observeSetupFailures()
         remoteAccess.onStateChange = { [weak self] in
             self?.refreshTelegramSettingsState()
         }
@@ -254,6 +266,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     /// command, and a call already sent is waited for.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let shell else { return .terminateNow }
+        // Changes typed in Space Settings ask first (an update's relaunch
+        // too).
+        guard shell.spaceSettingsAllowQuit() else { return .terminateCancel }
         return shell.mergeQueueTerminateReply { quit in
             NSApp.reply(toApplicationShouldTerminate: quit)
         }

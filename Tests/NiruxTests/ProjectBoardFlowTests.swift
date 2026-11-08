@@ -196,7 +196,7 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
-            try waitUntil("Board Settings opens") { shell.boardSettingsPanel?.panel != nil }
+            try waitUntil("Board Settings opens") { shell.boardSettingsPanel?.hostView != nil }
             let form = try XCTUnwrap(shell.boardSettingsPanel)
             XCTAssertEqual(form.spaceID, space.id)
             guard case .message(let message)? = board.view.content?.body else { return XCTFail("no message") }
@@ -205,7 +205,7 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             XCTAssertEqual(form.repositoryField.stringValue, "acme/widgets")
             try click(form.saveButton)
-            XCTAssertNil(shell.boardSettingsPanel)
+            XCTAssertEqual(BoardConfigStore(spaceID: space.id)?.load().config?.repository, "acme/widgets")
             try waitUntil("the saved config is read, then the pull requests") {
                 Self.wasUpdated(board.view) && !board.view.rowViews.isEmpty
             }
@@ -345,7 +345,7 @@ final class ProjectBoardFlowTests: XCTestCase {
         window.isReleasedWhenClosed = false
         window.contentView = shell
         defer {
-            shell.boardSettingsPanel?.dismiss()
+            shell.spaceSettings?.close()
             window.close()
         }
         if let state {
@@ -425,6 +425,7 @@ final class ProjectBoardFlowTests: XCTestCase {
     private func click(_ button: NSButton) throws {
         let window = try XCTUnwrap(button.window)
         let contentView = try XCTUnwrap(window.contentView)
+        contentView.layoutSubtreeIfNeeded()
         let frameView = try XCTUnwrap(contentView.superview)
         let location = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
         let hitView = try XCTUnwrap(contentView.hitTest(frameView.convert(location, from: nil)))

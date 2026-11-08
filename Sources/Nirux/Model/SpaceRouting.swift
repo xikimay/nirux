@@ -57,6 +57,9 @@ enum SpaceRouting {
     struct Decision: Equatable, Sendable {
         let spaceID: String
         let reason: Reason
+        /// The anchor holding the folder, with `.anchor`: its setup script
+        /// runs in a worktree Nirux made (SpaceSetupScript).
+        var anchor: SpaceAnchor?
     }
 
     /// In this order: the most specific anchor holding the folder, the
@@ -69,8 +72,8 @@ enum SpaceRouting {
         startedFromSpaceID: String?,
         spaces: [WorkspaceProfile]
     ) -> Decision {
-        if let identity, let spaceID = anchoringSpace(of: identity, in: spaces) {
-            return Decision(spaceID: spaceID, reason: .anchor)
+        if let identity, let match = anchoring(identity, in: spaces) {
+            return Decision(spaceID: match.spaceID, reason: .anchor, anchor: match.anchor)
         }
         let known = Set(spaces.map(\.id))
         if let parentSpaceID, known.contains(parentSpaceID) {
@@ -88,7 +91,12 @@ enum SpaceRouting {
     /// inside a repository beats the repository, and a repository beats a
     /// folder anchor holding the whole checkout.
     static func anchoringSpace(of identity: FolderIdentity, in spaces: [WorkspaceProfile]) -> String? {
-        var best: (spaceID: String, depth: Int, isFolder: Bool)?
+        anchoring(identity, in: spaces)?.spaceID
+    }
+
+    /// The anchor `anchoringSpace` picks, and its space.
+    static func anchoring(_ identity: FolderIdentity, in spaces: [WorkspaceProfile]) -> (spaceID: String, anchor: SpaceAnchor)? {
+        var best: (spaceID: String, anchor: SpaceAnchor, depth: Int, isFolder: Bool)?
         for space in spaces {
             for anchor in space.anchors {
                 let depth: Int
@@ -108,10 +116,10 @@ enum SpaceRouting {
                 if let current = best, current.depth > depth || (current.depth == depth && (current.isFolder || !isFolder)) {
                     continue
                 }
-                best = (space.id, depth, isFolder)
+                best = (space.id, anchor, depth, isFolder)
             }
         }
-        return best?.spaceID
+        return best.map { ($0.spaceID, $0.anchor) }
     }
 
     /// `folder` is `path` or one of its parents, comparing whole components:
