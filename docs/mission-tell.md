@@ -1,6 +1,9 @@
 # Mission Tell
 
-Status: design validated on 2026-10-03, implemented.
+Status: design validated on 2026-10-03, implemented. Since 2026-11-08 the
+same guarded typing also carries a child's questions and completion to the
+parent and the answers back to a Claude Code child, and the Activity feed is
+gone (see "Missions without waiting" in [spaces.md](spaces.md)).
 
 Missions only went child → parent (`ask`, `completed`). When the parent agent
 had something for a child (a follow-up, review output, "run /code-review then
@@ -54,8 +57,7 @@ child's prompt.
 - **Ledger:** a new event kind `instruction` (parent → child), with
   `childConsumedAt` set once typed. Nirux routes only events that carry the
   recorded parent identity; as for `reply`, any process of the user that can
-  write the queue can forge one. It shows in Activity as `told: ...`, read,
-  like a reply.
+  write the queue can forge one.
 - **Docs:** the README and the `nirux-worktree` skill describe `tell`.
 
 ## Not in this version

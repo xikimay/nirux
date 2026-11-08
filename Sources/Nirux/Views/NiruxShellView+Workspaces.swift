@@ -84,25 +84,44 @@ extension NiruxShellView {
     nonisolated static func agentStartupPrompt(
         agent: NiruxApp.WorkspaceAgent, deliveredHandover: Bool, isMission: Bool
     ) -> String? {
+        startupPrompt(
+            agent: agent, deliveredHandover: deliveredHandover,
+            mission: isMission ? (agent == .claude ? typedAnswerMission : waitingMission) : nil
+        )
+    }
+
+    nonisolated static func startupPrompt(
+        agent: NiruxApp.WorkspaceAgent, deliveredHandover: Bool, mission: String?
+    ) -> String? {
         var instructions: [String] = []
         if deliveredHandover {
             let handoverName = handoverFilename(for: agent)
             instructions.append("Read \(handoverName) for full context, then proceed with the next steps described there.")
         }
-        if isMission {
-            instructions.append(
-                "This is a Nirux mission workspace. Ask the parent and wait safely with "
-                + "\"$NIRUX_CLI_PATH\" --mission ask --message \"...\" "
-                + "(at most \(MissionEventCLI.maxMessageLength) characters); the command output is the parent's answer. "
-                + "It waits up to \(Int(MissionEventCLI.defaultWaitTimeout)) seconds, so allow it a shell-tool timeout "
-                + "of at least 120 seconds. If it exits with status 3, or your shell tool stops it before it "
-                + "prints anything, run the exact same command again: it resumes the same question. "
-                + "Status 4 means the Mission is over; do not retry. Report the final result with "
-                + "\"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
-            )
-        }
+        if let mission { instructions.append(mission) }
         return instructions.isEmpty ? nil : instructions.joined(separator: " ")
     }
+
+    /// A Claude Code child: Nirux types the answer into its prompt
+    /// (`MissionPromptText`).
+    nonisolated static let typedAnswerMission = "This is a Nirux mission workspace. To ask the parent agent, run "
+        + "\"$NIRUX_CLI_PATH\" --mission ask --message \"...\" "
+        + "(at most \(MissionEventCLI.maxMessageLength) characters), then end your turn: Nirux types "
+        + "the answer into your prompt as a message starting with \(MissionPromptText.prefix). "
+        + "If it exits with status 3, run the exact same command again: it does not ask twice. "
+        + "Status 4 means the Mission is over; do not retry. Report the final result with "
+        + "\"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
+
+    /// A Codex child, and every child before Nirux typed answers: `ask`
+    /// waits for the answer.
+    nonisolated static let waitingMission = "This is a Nirux mission workspace. Ask the parent and wait safely with "
+        + "\"$NIRUX_CLI_PATH\" --mission ask --message \"...\" "
+        + "(at most \(MissionEventCLI.maxMessageLength) characters); the command output is the parent's answer. "
+        + "It waits up to \(Int(MissionEventCLI.defaultWaitTimeout)) seconds, so allow it a shell-tool timeout "
+        + "of at least 120 seconds. If it exits with status 3, or your shell tool stops it before it "
+        + "prints anything, run the exact same command again: it resumes the same question. "
+        + "Status 4 means the Mission is over; do not retry. Report the final result with "
+        + "\"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
 
     /// `worktreeBranch` is the branch read back from the checkout
     /// (`GitWorktree.currentBranch(at:)`) of a worktree workspace Nirux just

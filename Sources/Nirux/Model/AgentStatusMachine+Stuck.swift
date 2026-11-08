@@ -65,11 +65,12 @@ extension AgentStatusMachine {
         return nil
     }
 
-    /// Whether a Mission `tell` sent at `time` may be typed now, into an
-    /// empty prompt of `foreground`: the column's interactive `claude`,
-    /// already running at `time`, that took a prompt since it started (Claude
-    /// Code shows some dialogs, such as trust or MCP servers, before any
-    /// hook could list them), whose turn is over, with no dialog listed and
+    /// Whether a Mission message may be typed now, into an empty prompt of
+    /// `foreground`: the column's interactive `claude`, already running at
+    /// `time`, that took a prompt since it started (Claude Code shows some
+    /// dialogs, such as trust or MCP servers, before any hook could list
+    /// them), whose turn is over and didn't fail (a usage limit would fail
+    /// every message typed, one after the other), with no dialog listed and
     /// nothing typed since its last prompt went in (a draft, or text typed
     /// by Nirux that Claude has not submitted yet).
     func isPromptFree(foreground: ForegroundProcess?, runningSince time: TimeInterval) -> Bool {
@@ -77,6 +78,14 @@ extension AgentStatusMachine {
               foreground.instance.startedAt <= time,
               let lastPromptAt, lastPromptAt >= foreground.instance.startedAt
         else { return false }
-        return pendingDialogs.isEmpty && !hookWorking && turnStartedAt == nil && lastDraftInputAt <= lastPromptAt
+        return pendingDialogs.isEmpty && !hookWorking && turnStartedAt == nil && turnFailure == nil
+            && lastDraftInputAt <= lastPromptAt
+    }
+
+    /// Whether a message typed at `typedAt` went in and the turn that took
+    /// it is over: nothing works, no dialog waits.
+    func finishedTurn(afterTypingAt typedAt: TimeInterval) -> Bool {
+        guard let lastPromptAt, lastPromptAt >= typedAt else { return false }
+        return pendingDialogs.isEmpty && !hookWorking && turnStartedAt == nil
     }
 }

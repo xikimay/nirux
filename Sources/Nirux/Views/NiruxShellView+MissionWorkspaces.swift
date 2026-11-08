@@ -164,28 +164,47 @@ extension NiruxShellView {
         }
     }
 
-    /// Types each pending `tell` into its child's prompt if that prompt is
-    /// free; the others wait for the child's next turn end. Runs when a
-    /// `tell` arrives and when a turn ends.
-    func typeMissionInstructions() {
-        guard !MissionStore.shared.pendingInstructions().isEmpty, Self.currentMissionHandoffsEnabled() else { return }
+    /// Types each pending Mission message into its recipient's prompt if
+    /// that prompt is free (see `MissionStore.pendingPromptDeliveries`); the
+    /// others wait for that agent's next turn end. Runs when a Mission event
+    /// arrives and when a turn ends.
+    func typeMissionMessages() {
+        guard !MissionStore.shared.pendingPromptDeliveries().isEmpty, Self.currentMissionHandoffsEnabled() else { return }
         // Apply what may still wait out a queue's drain debounce: a dialog
-        // that opened, or the child's `completed`, which must not close the
-        // Mission after a `tell` reopened it.
+        // that opened, a prompt that went in, or the child's `completed`,
+        // which must not close the Mission after a `tell` reopened it.
         AgentHookCenter.shared.drain()
         MissionEventCenter.shared.drain()
         let snapshot = ProcessSnapshot()
-        for instruction in MissionStore.shared.pendingInstructions() {
-            let mission = instruction.mission
-            guard let pty = workspaces.first(where: { $0.id == mission.childWorkspaceID })?
-                .columns.first(where: { $0.agentUUID == mission.childAgentUUID })?.pty,
-                pty.acceptsMissionInstruction(toldAt: instruction.event.timestamp, snapshot: snapshot),
-                let input = RemotePromptSanitizer.terminalInput(for: instruction.event.message),
-                // Recorded first: a failed save must not type it twice.
-                MissionStore.shared.markInstructionTyped(eventID: instruction.event.id)
+        let now = Date().timeIntervalSince1970
+        var typedAny = false
+        for delivery in MissionStore.shared.pendingPromptDeliveries(now: now) {
+            let mission = delivery.mission
+            let childWorkspace = workspaces.first { $0.id == mission.childWorkspaceID }
+            let parentWorkspace = workspaces.first { $0.id == mission.parentWorkspaceID }
+            let toParent = delivery.event.kind == .question || delivery.event.kind == .completed
+            let recipient = toParent
+                ? parentWorkspace?.columns.first { $0.agentUUID == mission.parentAgentUUID }
+                : childWorkspace?.columns.first { $0.agentUUID == mission.childAgentUUID }
+            // A `tell` goes only to the `claude` that ran when it was sent.
+            // The rest goes to whichever runs now: the child ended its turn
+            // to wait for its answer, and a parent restored since resumed
+            // its conversation.
+            let runningSince = delivery.event.kind == .instruction ? delivery.event.timestamp : now
+            guard let pty = recipient?.pty,
+                  pty.acceptsMissionMessage(runningSince: runningSince, snapshot: snapshot),
+                  let text = MissionPromptText.text(
+                      for: delivery, childTitle: childWorkspace?.title, parentTitle: parentWorkspace?.title
+                  ),
+                  let input = RemotePromptSanitizer.terminalInput(for: text),
+                  // Recorded first: a failed save must not type it twice.
+                  MissionStore.shared.markTyped(delivery, at: now)
             else { continue }
             pty.sendRaw(input)
+            typedAny = true
         }
+        // The cards' "Asking …" and "Answer … ready" rows follow.
+        if typedAny { updateSidebar(snapshot: snapshot) }
     }
 
     static func currentMissionHandoffsEnabled() -> Bool {

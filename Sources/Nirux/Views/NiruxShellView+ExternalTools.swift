@@ -295,36 +295,47 @@ extension NiruxShellView {
            Nirux moves the handover file into the worktree on launch; no manual cleanup is needed.
 
         When `mission_query` is present, Nirux records the parent/child link and starts the child
-        with explicit mailbox instructions. The child asks and waits without PTY injection:
+        with Mission instructions. Nirux types the messages between the two agents into their
+        Claude Code prompts, once the agent's turn is over and nobody is typing there:
 
-        ```bash
-        "$NIRUX_CLI_PATH" --mission ask --message "<concise blocker or question>"
-        "$NIRUX_CLI_PATH" --mission completed --message "<concise result>"
-        ```
+        - The child asks with the command below and ends its turn; Nirux types the answer into
+          its prompt. A Codex child's `ask` waits for the answer instead.
+          ```bash
+          "$NIRUX_CLI_PATH" --mission ask --message "<concise blocker or question>"
+          ```
+        - The child's question reaches your prompt as a `[Nirux Mission] Question from …` message
+          that ends with the command to answer it. Answer briefly, then go on with your work. If
+          nobody answers for a while, Nirux asks the user instead.
+          ```bash
+          "$NIRUX_CLI_PATH" --mission reply --event <question-event-id> --message "<concise answer>"
+          ```
+        - The child reports its result with the command below, and it reaches your prompt as a
+          `[Nirux Mission] … completed: …` message.
+          ```bash
+          "$NIRUX_CLI_PATH" --mission completed --message "<concise result>"
+          ```
+        - Nirux types only into Claude Code. A Codex parent waits for the child's question or
+          result instead, then answers a question with `reply` as above:
+          ```bash
+          "$NIRUX_CLI_PATH" --mission receive
+          ```
 
-        The parent can wait for a child event, then answer a question by its `eventID`:
-
-        ```bash
-        "$NIRUX_CLI_PATH" --mission receive
-        "$NIRUX_CLI_PATH" --mission reply --event <question-event-id> --message "<concise answer>"
-        ```
-
-        To give a child more work (a follow-up, `/code-review`), even after it completed, the parent
-        names it by branch. Nirux types the message and Enter into the child's Claude Code prompt
-        once its turn is over and nobody is typing there. The Mission is then active again, so use
-        `receive` for the child's next question or result:
+        To give a Claude Code child more work (a follow-up, `/code-review`), even after it
+        completed, name it by branch. Nirux types the message and Enter into the child's prompt,
+        and the Mission is active again:
 
         ```bash
         "$NIRUX_CLI_PATH" --mission tell --branch <child-branch> --message "<instruction or /command>"
         ```
 
-        Messages hold at most \(MissionEventCLI.maxMessageLength) characters. `ask`, `receive` and
-        `tell` wait at most \(Int(MissionEventCLI.defaultWaitTimeout)) seconds, under the default 2-minute
-        limit of the Claude Code shell tool; if your shell tool takes a timeout, allow at least 120
-        seconds. Exit statuses:
+        Messages hold at most \(MissionEventCLI.maxMessageLength) characters. `tell` waits at most
+        \(Int(MissionEventCLI.defaultWaitTimeout)) seconds for Nirux to type the message, and a Codex
+        child's `ask` and `receive` as long for an event, under the default 2-minute limit of the Claude
+        Code shell tool; if your shell tool takes a timeout, allow at least 120 seconds. Exit statuses:
 
-        - 0: done. The output is the answer, the event, or (for `tell`) a confirmation, even if
-          the shell tool also reported a timeout.
+        - 0: done. The output says what happens next (for a Claude Code child's `ask`: end your turn
+          now), or is the answer or (for `receive`) one JSON event, even if the shell tool also
+          reported a timeout.
         - 3: nothing yet. Run the exact same command again to keep waiting, and do the same if the
           shell tool stops the command before it prints anything. An identical `ask` resumes the
           same question instead of sending it twice, and prints the answer if it arrived meanwhile.
@@ -333,16 +344,11 @@ extension NiruxShellView {
           drops a `tell` it could not type within an hour.
         - 4: do not retry that command. Mission handoffs are off, the Mission has ended, the
           terminal is not part of it, (for `reply`) the question no longer waits for an answer,
-          for example because a human answered it from Nirux Activity, or (for `tell`) no Mission on
-          that branch came from this terminal, or its child runs Codex.
+          for example because the user answered it in Nirux, or (for `tell`) no Mission on that
+          branch came from this terminal, or its child runs Codex.
         - 2: invalid usage, or not a Mission terminal; the error message says which.
         - 1: Nirux's state could not be read or written. If a sandbox blocks it, run the command
           outside the sandbox.
-
-        `receive` prints one JSON object. For a `question`, reply before calling `receive` again;
-        for `completed`, the event is acknowledged automatically, so stop calling `receive` unless
-        another child Mission is still running or you sent a `tell`. A human can also click the
-        question in Nirux Activity and use the Reply action.
 
         Do not report completion from a Stop/turn-complete hook. Use `completed` only when the
         delegated task is genuinely complete; use `ask` only when parent input is needed.
