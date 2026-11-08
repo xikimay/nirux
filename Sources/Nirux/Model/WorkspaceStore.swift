@@ -206,19 +206,87 @@ final class WorkspaceStore {
         return true
     }
 
-    func createProfile(named baseName: String) -> WorkspaceProfile {
+    /// A new space, in the color asked for or one no space uses. Its
+    /// anchors are taken from the spaces that had them (one space per
+    /// anchor). `select` makes it the active space, with no workspace yet:
+    /// the caller opens one.
+    @discardableResult
+    func createProfile(
+        named baseName: String, colorHex: String? = nil, anchors: [SpaceAnchor] = [], select: Bool = true
+    ) -> WorkspaceProfile {
         let name = uniqueProfileName(baseName)
-        let usedColors = Set(profiles.map { $0.colorHex.uppercased() })
-        let profile = WorkspaceProfile(
-            id: UUID().uuidString,
-            name: name,
-            colorHex: WorkspaceProfile.palette.first { !usedColors.contains($0.hex.uppercased()) }?.hex
-                ?? WorkspaceProfile.colorHex(for: profiles.count)
-        )
+        let profile = WorkspaceProfile(id: UUID().uuidString, name: name, colorHex: colorHex ?? unusedColorHex())
         profiles.append(profile)
-        activeProfileID = profile.id
-        activeWorkspaceID = nil
-        return profile
+        setAnchors(anchors, forProfile: profile.id)
+        if select {
+            activeProfileID = profile.id
+            activeWorkspaceID = nil
+        }
+        return profiles.first { $0.id == profile.id } ?? profile
+    }
+
+    /// The first palette color no space uses, else the next in turn.
+    func unusedColorHex() -> String {
+        let usedColors = Set(profiles.map { $0.colorHex.uppercased() })
+        return WorkspaceProfile.palette.first { !usedColors.contains($0.hex.uppercased()) }?.hex
+            ?? WorkspaceProfile.colorHex(for: profiles.count)
+    }
+
+    // MARK: - Anchors (see SpaceAnchor)
+
+    /// The space a repository or folder (`SpaceAnchor.key`) belongs to.
+    func profile(anchoring key: String) -> WorkspaceProfile? {
+        profiles.first { $0.anchors.contains { $0.key == key } }
+    }
+
+    /// Replaces a space's anchors, taking each from the space that had it.
+    /// The default space has none: refused. Unknown kinds it already had
+    /// stay.
+    @discardableResult
+    func setAnchors(_ anchors: [SpaceAnchor], forProfile id: String) -> Bool {
+        guard id != WorkspaceProfile.defaultID, let index = profiles.firstIndex(where: { $0.id == id }) else { return false }
+        let known = anchors.filter(\.isKnown)
+        let keys = Set(known.compactMap(\.key))
+        for other in profiles.indices where other != index {
+            profiles[other].anchors.removeAll { $0.key.map(keys.contains) ?? false }
+            profiles[other].anchors = profiles[other].anchors.normalizedAnchors()
+        }
+        profiles[index].anchors = (known + profiles[index].anchors.filter { !$0.isKnown }).normalizedAnchors()
+        return true
+    }
+
+    /// Adds a repository or folder to a space, taking it from the space that
+    /// had it. The first one becomes the default.
+    @discardableResult
+    func addAnchor(_ anchor: SpaceAnchor, toProfile id: String) -> Bool {
+        guard anchor.isKnown, let profile = profiles.first(where: { $0.id == id }) else { return false }
+        var anchors = profile.anchors.filter { $0.key != anchor.key }
+        var added = anchor
+        added.isDefault = !anchors.contains(where: \.isKnown)
+        anchors.append(added)
+        return setAnchors(anchors, forProfile: id)
+    }
+
+    /// Removes one; the next one becomes the default if it was.
+    @discardableResult
+    func removeAnchor(key: String, fromProfile id: String) -> Bool {
+        guard let index = profiles.firstIndex(where: { $0.id == id }),
+              profiles[index].anchors.contains(where: { $0.key == key })
+        else { return false }
+        profiles[index].anchors.removeAll { $0.key == key }
+        profiles[index].anchors = profiles[index].anchors.normalizedAnchors()
+        return true
+    }
+
+    @discardableResult
+    func makeDefaultAnchor(key: String, inProfile id: String) -> Bool {
+        guard let index = profiles.firstIndex(where: { $0.id == id }),
+              profiles[index].anchors.contains(where: { $0.key == key })
+        else { return false }
+        for anchor in profiles[index].anchors.indices where profiles[index].anchors[anchor].isKnown {
+            profiles[index].anchors[anchor].isDefault = profiles[index].anchors[anchor].key == key
+        }
+        return true
     }
 
     @discardableResult
@@ -338,10 +406,19 @@ final class WorkspaceStore {
         return "\(fallback) \(idx)"
     }
 
+    /// The default space comes first if missing. Each repository or folder
+    /// belongs to the first space listing it, and each space has one default
+    /// anchor (a hand-edited or merged file may break both).
     private static func normalizedProfiles(_ profiles: [WorkspaceProfile]) -> [WorkspaceProfile] {
         var result = profiles.isEmpty ? [WorkspaceProfile.defaultProfile] : profiles
         if !result.contains(where: { $0.id == WorkspaceProfile.defaultID }) {
             result.insert(WorkspaceProfile.defaultProfile, at: 0)
+        }
+        var claimed = Set<String>()
+        for index in result.indices {
+            result[index].anchors = result[index].anchors.filter { anchor in
+                anchor.key.map { claimed.insert($0).inserted } ?? true
+            }.normalizedAnchors()
         }
         return result
     }

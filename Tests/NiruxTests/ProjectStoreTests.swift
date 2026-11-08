@@ -43,7 +43,8 @@ final class ProjectStoreTests: XCTestCase {
         XCTAssertTrue(store.isFileCurrent)
 
         guard case .ok(let file, _) = ProjectStore.read(fileURL) else { return XCTFail("file not written") }
-        XCTAssertEqual(file.schemaVersion, ProjectStore.schemaVersion)
+        // No anchors: the file version 1 wrote, which older builds still write.
+        XCTAssertEqual(file.schemaVersion, 1)
         XCTAssertEqual(file.projects, [main, work])
         let permissions = try FileManager.default.attributesOfItem(atPath: fileURL.path)[.posixPermissions] as? Int
         XCTAssertEqual(permissions, 0o600)
@@ -101,14 +102,14 @@ final class ProjectStoreTests: XCTestCase {
 
     @MainActor
     func testANewerSchemaThatDoesNotDecodeHereIsStillNeverWritten() throws {
-        try writeFile(#"{"schemaVersion": 2, "projects": {"format": "changed"}}"#)
+        try writeFile(#"{"schemaVersion": 3, "projects": {"format": "changed"}}"#)
         let before = try Data(contentsOf: fileURL)
         let store = ProjectStore(fileURL: fileURL)
 
         XCTAssertEqual(store.load(mirror: [main, work], markerPresent: false), [main, work])
         store.save([main])
 
-        XCTAssertEqual(store.availability, .readOnlyNewerSchema(2))
+        XCTAssertEqual(store.availability, .readOnlyNewerSchema(3))
         XCTAssertEqual(try Data(contentsOf: fileURL), before)
     }
 
@@ -185,7 +186,7 @@ final class ProjectStoreTests: XCTestCase {
         // would strip it.
         try writeFile(##"""
         {"schemaVersion": 1, "deletedIDs": [],
-         "projects": [{"id": "work", "name": "Work", "colorHex": "#9ECE6A", "anchors": ["x"]}]}
+         "projects": [{"id": "work", "name": "Work", "colorHex": "#9ECE6A", "isArchived": true}]}
         """##)
         let before = try Data(contentsOf: fileURL)
         let store = ProjectStore(fileURL: fileURL)
@@ -264,12 +265,12 @@ final class ProjectStoreTests: XCTestCase {
     @MainActor
     func testAFileANewerInstanceWroteMeanwhileIsNotOverwritten() throws {
         let store = savedStore([main, work])
-        try writeFile(##"{"schemaVersion": 2, "projects": [{"id": "work", "name": "Work", "colorHex": "#9ECE6A"}]}"##)
+        try writeFile(##"{"schemaVersion": 3, "projects": [{"id": "work", "name": "Work", "colorHex": "#9ECE6A"}]}"##)
         let newer = try Data(contentsOf: fileURL)
 
         XCTAssertFalse(store.save([main, work, home]))
         XCTAssertEqual(try Data(contentsOf: fileURL), newer)
-        XCTAssertEqual(store.availability, .readOnlyNewerSchema(2))
+        XCTAssertEqual(store.availability, .readOnlyNewerSchema(3))
     }
 
     @MainActor
@@ -300,5 +301,88 @@ final class ProjectStoreTests: XCTestCase {
         let loaded = ProjectStore(fileURL: fileURL).load(mirror: [work], markerPresent: true)
 
         XCTAssertEqual(loaded.map(\.id), ["work"], "home was dropped; the default space is added by the store")
+    }
+
+    // MARK: - Anchors (schema 2)
+
+    private static let repositoryAnchor = SpaceAnchor(
+        kind: .gitRepository(commonDir: "/code/web/.git"), name: "web", isDefault: true
+    )
+
+    @MainActor
+    func testAnchorsAreSavedAsSchemaTwoAndReadBack() throws {
+        var anchored = work
+        anchored.anchors = [Self.repositoryAnchor, .folder("/code/docs")]
+        let store = savedStore([main, anchored])
+
+        guard case .ok(let file, let data) = ProjectStore.read(fileURL) else { return XCTFail("file not written") }
+        XCTAssertEqual(file.schemaVersion, 2)
+        XCTAssertEqual(store.availability, .writable)
+        let reloaded = ProjectStore(fileURL: fileURL)
+        XCTAssertEqual(reloaded.load(mirror: nil, markerPresent: true), [main, anchored])
+        XCTAssertEqual(reloaded.availability, .writable, "this build writes what it wrote")
+        // The space without anchors is written as before.
+        let text = String(decoding: data, as: UTF8.self)
+        XCTAssertEqual(text.components(separatedBy: "\"anchors\"").count, 2)
+    }
+
+    /// An older nightly reads a schema 2 file as read-only and saves a
+    /// mirror without anchors (it drops keys it doesn't know) and without
+    /// the marker: the next launch keeps the file's anchors.
+    @MainActor
+    func testAnOlderBuildsMirrorKeepsTheFilesAnchors() {
+        var anchored = work
+        anchored.anchors = [Self.repositoryAnchor]
+        _ = savedStore([main, anchored])
+        let renamedByOlderBuild = WorkspaceProfile(id: "work", name: "Renamed", colorHex: work.colorHex)
+
+        let loaded = ProjectStore(fileURL: fileURL).load(mirror: [main, renamedByOlderBuild, home], markerPresent: false)
+
+        XCTAssertEqual(loaded.map(\.name), [main.name, "Renamed", "Home"])
+        XCTAssertEqual(loaded.first { $0.id == "work" }?.anchors, [Self.repositoryAnchor])
+    }
+
+    @MainActor
+    func testAnchorKindsFromANewerBuildSurviveAndBadAnchorsCostNothing() throws {
+        try writeFile(##"""
+        {"schemaVersion": 2, "deletedIDs": [], "projects": [
+         {"id": "work", "name": "Work", "colorHex": "#9ECE6A", "anchors": [
+           {"kind": "gitRepository", "commonDir": "/code/web/.git", "name": "web", "isDefault": true},
+           {"kind": "monorepoPackage", "package": "@acme/ui", "name": "ui"}]},
+         {"id": "home", "name": "Home", "colorHex": "#E0AF68", "anchors": "not a list"}]}
+        """##)
+        let store = ProjectStore(fileURL: fileURL)
+        let loaded = store.load(mirror: nil, markerPresent: true)
+
+        XCTAssertEqual(loaded.map(\.id), ["work", "home"], "a bad anchors value doesn't make the file unreadable")
+        XCTAssertEqual(loaded[0].anchors.first, Self.repositoryAnchor)
+        XCTAssertEqual(loaded[0].anchors.count, 2)
+        XCTAssertFalse(loaded[0].anchors[1].isKnown)
+        XCTAssertEqual(loaded[1].anchors, [])
+        XCTAssertEqual(store.availability, .writable)
+
+        XCTAssertTrue(store.save(loaded))
+        let rewritten = try XCTUnwrap(
+            (try JSONSerialization.jsonObject(with: Data(contentsOf: fileURL)) as? [String: Any])?["projects"] as? [[String: Any]]
+        )
+        let kept = try XCTUnwrap((rewritten[0]["anchors"] as? [[String: Any]])?.last)
+        XCTAssertEqual(kept["kind"] as? String, "monorepoPackage")
+        XCTAssertEqual(kept["package"] as? String, "@acme/ui", "an unknown kind is written back as read")
+    }
+
+    @MainActor
+    func testAnAnchorWithFieldsThisBuildDoesNotKnowIsNeverRewritten() throws {
+        try writeFile(##"""
+        {"schemaVersion": 2, "deletedIDs": [], "projects": [{"id": "work", "name": "Work", "colorHex": "#9ECE6A",
+         "anchors": [{"kind": "gitRepository", "commonDir": "/code/web/.git", "name": "web", "isDefault": true,
+                      "fingerprint": "abc"}]}]}
+        """##)
+        let before = try Data(contentsOf: fileURL)
+        let store = ProjectStore(fileURL: fileURL)
+        _ = store.load(mirror: nil, markerPresent: true)
+
+        XCTAssertFalse(store.save([main, work]))
+        XCTAssertEqual(store.availability, .readOnlyNewerSchema(2))
+        XCTAssertEqual(try Data(contentsOf: fileURL), before)
     }
 }

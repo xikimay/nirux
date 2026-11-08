@@ -8,7 +8,10 @@ extension NiruxApp {
     func setupClickToFocus() {
         NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown]) { [weak self] event in
             // Before the click is handled, so a toast it shows stays.
-            if event.window === self?.mainWindow { self?.shell?.dismissToastOnInput() }
+            if event.window === self?.mainWindow {
+                self?.shell?.dismissToastOnInput()
+                self?.shell?.dismissSpaceArrivalOnClick(event)
+            }
             guard let shell = self?.shell,
                   let workspace = shell.activeWorkspaceForKeyIntercept,
                   let contentView = event.window?.contentView

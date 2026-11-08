@@ -58,6 +58,24 @@ struct ShellSideEffects {
     /// Shows an app-modal alert and waits for its answer.
     var runModal: @MainActor (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }
 
+    /// Asks for a folder ("Add Repository…", "Add Folder…"): a sheet on
+    /// `window` when there is one. `completion` gets nil on Cancel.
+    var chooseFolder: @MainActor (
+        _ prompt: String, _ window: NSWindow?, _ completion: @escaping @MainActor (String?) -> Void
+    ) -> Void = { prompt, window, completion in
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = prompt
+        guard let window else {
+            return completion(panel.runModal() == .OK ? panel.url?.path : nil)
+        }
+        panel.beginSheetModal(for: window) { response in
+            completion(response == .OK ? panel.url?.path : nil)
+        }
+    }
+
     /// Quits Nirux, through `applicationShouldTerminate`, from the next
     /// turn of the run loop. Never from a main-queue block: a quit that waits
     /// (`.terminateLater`) runs AppKit's modal loop inside it, and the main

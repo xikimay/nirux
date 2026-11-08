@@ -63,15 +63,22 @@ extension NiruxShellView {
         }
     }
 
-    /// Over the column dots and the status bar, centered on the viewport.
-    /// `relayout` passes the frames it is moving them to.
+    /// Over the column dots and the status bar, centered on the viewport,
+    /// above the space arrival banner when one shows (see
+    /// NiruxShellView+SpaceRouting). `relayout` passes the frames it is
+    /// moving them to.
     func layoutToast(_ frames: ChromeFrames? = nil) {
-        guard let toast else { return }
         let viewportFrame = frames?.viewport ?? viewport.frame
-        let bottom = max(
+        var bottom = max(
             frames?.statusBar.maxY ?? (statusBar.isHidden ? 0 : statusBar.frame.maxY),
             frames?.indicator.maxY ?? columnIndicator.frame.maxY
         )
+        if let banner = spaceArrivalBanner {
+            banner.frame = banner.frame(centeredIn: NSRect(x: viewportFrame.minX, y: bottom, width: viewportFrame.width, height: 0))
+            banner.needsLayout = true
+            bottom = banner.frame.maxY - ToastView.bottomGap / 2
+        }
+        guard let toast else { return }
         toast.frame = toast.frame(centeredIn: NSRect(x: viewportFrame.minX, y: bottom, width: viewportFrame.width, height: 0))
         toast.needsLayout = true
     }

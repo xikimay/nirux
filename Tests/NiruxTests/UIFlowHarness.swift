@@ -53,6 +53,9 @@ final class UIFlowHarness {
     var alertResponses: [NSApplication.ModalResponse] = []
     /// Links opened in the default browser, in order.
     private(set) var openedURLs: [URL] = []
+    /// Folders the folder picker double returns, in order; Cancel once
+    /// empty.
+    var chosenFolders: [String] = []
     /// Browsers the cookie double reports as installed.
     var cookieBrowsers: [CookieImporter.Browser] = []
     /// Browsers the cookie double was asked to import from.
@@ -158,6 +161,7 @@ final class UIFlowHarness {
         shell.worktreeCleanupPanel?.dismiss()
         shell.boardSettingsPanel?.dismiss()
         shell.newTaskPanel?.dismiss()
+        shell.newSpacePanel?.dismiss()
         for other in NSApp.windows where other !== window && !windowsBefore.contains(ObjectIdentifier(other)) {
             if let sheet = other.attachedSheet { other.endSheet(sheet) }
             other.orderOut(nil)
@@ -189,6 +193,10 @@ final class UIFlowHarness {
         shell.sideEffects.importCookies = { [weak self] browser in
             self?.cookieImports.append(browser)
             return CookieImporter.ImportResult(imported: 2, failed: 0, browser: browser)
+        }
+        shell.sideEffects.chooseFolder = { [weak self] _, _, completion in
+            guard let self, !chosenFolders.isEmpty else { return completion(nil) }
+            completion(chosenFolders.removeFirst())
         }
         shell.sideEffects.runModal = { [weak self] alert in
             guard let self else { return .alertFirstButtonReturn }

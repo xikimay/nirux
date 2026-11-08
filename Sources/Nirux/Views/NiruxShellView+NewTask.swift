@@ -76,12 +76,15 @@ extension NiruxShellView {
         }
     }
 
+    /// In the space its repository belongs to, else the one picked in the
+    /// form (docs/spaces.md, "Routing").
     private func openTaskWorkspace(_ request: NewTask.Request, _ created: CreatedTaskWorktree) {
+        let decision = decideSpace(identity: created.identity, parentWorkspaceID: nil, startedFromSpaceID: request.projectID)
         addWorkspace(
             title: NewTask.workspaceTitle(description: request.description) ?? request.branch,
             cwd: created.workingDirectory,
             agent: request.agent,
-            profileID: request.projectID,
+            profileID: decision.spaceID,
             deliveredHandover: created.handoverError == nil,
             handoverText: created.handover,
             worktreeBranch: created.checkedOutBranch
@@ -130,6 +133,8 @@ extension NiruxShellView {
         let handoverError: HandoverFile.TransferError?
         /// git's error, when it failed after creating the worktree.
         let gitWarning: String?
+        /// `workingDirectory`'s repository, for routing.
+        let identity: FolderIdentity?
     }
 
     enum TaskWorktreeResult: Sendable {
@@ -215,7 +220,8 @@ extension NiruxShellView {
             checkedOutBranch: GitWorktree.currentBranch(at: path),
             handover: handover,
             handoverError: handoverError,
-            gitWarning: error
+            gitWarning: error,
+            identity: FolderIdentity.identify(workingDirectory, timeout: FolderIdentity.routingTimeout)
         ))
     }
 }
