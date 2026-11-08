@@ -26,6 +26,15 @@ extension NiruxShellView {
         Self.readBoardSettings(store: store, workspaceFolders: folders) { [weak self] loaded, suggestions in
             guard let self else { return }
             self.isReadingBoardSettings = false
+            guard let current = self.spaceSettings, current.spaceID == spaceID else {
+                // Another space's window opened meanwhile, on its Board tab:
+                // its read was refused while this one ran.
+                if let current = self.spaceSettings, current.selectedTab == .board,
+                   self.boardSettingsPanel?.spaceID != current.spaceID {
+                    self.loadBoardTab(spaceID: current.spaceID)
+                }
+                return
+            }
             self.presentBoardSettings(profileID: spaceID, store: store, loaded: loaded, suggestions: suggestions, status: status)
         }
     }
