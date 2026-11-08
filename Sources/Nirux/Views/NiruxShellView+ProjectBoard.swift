@@ -205,10 +205,10 @@ extension NiruxShellView {
     }
 
     /// Each section's queue for its rows, and the queue lines: one line on a
-    /// board with one repository (what `boardQueue(_:section: nil)`
-    /// reaches), else one per repository with a queue and one per queue
-    /// left running on a repository no section has. The lines don't depend
-    /// on the rows: a board showing a message keeps every Stop in reach.
+    /// board with one repository, else one per repository with a queue and
+    /// one per queue left running on a repository no section has. The lines
+    /// don't depend on the rows: a board showing a message keeps every Stop
+    /// in reach.
     private func addQueues(to content: inout ProjectBoardView.Content, board: ProjectBoardController) {
         let orphans = projectBoardOrphanQueues(board)
         var states: [String: ProjectBoard.QueueState] = [:]
@@ -219,25 +219,22 @@ extension NiruxShellView {
             for index in sections.indices { sections[index].queue = states[sections[index].id] }
             content.body = .sections(sections, others: others)
         }
-        let own = board.section(id: nil).flatMap { states[$0.id] }
-        content.queue = own
-        if board.sections.count <= 1, orphans.count <= 1, !(own?.isLocked == true && !orphans.isEmpty) {
-            if let orphan = orphans.first { content.queue = orphanQueueState(orphan, named: true) }
-            return
-        }
+        // A one-repository board's cells read its own queue, whatever runs elsewhere.
+        content.queue = board.section(id: nil).flatMap { states[$0.id] }
+        guard board.sections.count > 1 || !orphans.isEmpty else { return }
         content.queueLines = board.sections.compactMap { section in
             states[section.id].map { state in
                 let repository = board.repository(of: section)?.name
+                let name = section.anchor == nil ? repository : board.displayNames[section.id]
                 return ProjectBoardView.QueueLine(
-                    id: section.id, title: board.displayNames[section.id] ?? section.name ?? repository ?? "Repository",
-                    tooltip: repository, queue: state
+                    id: section.id, title: name ?? repository ?? "Repository", tooltip: repository, queue: state
                 )
             }
         } + orphans.map { orphan in
             ProjectBoardView.QueueLine(
                 id: Self.orphanSectionID(orphan), title: orphan.queueRepository.ownerAndName,
                 tooltip: "Its queue runs, but it isn’t one of this board’s repositories now.",
-                queue: orphanQueueState(orphan, named: false)
+                queue: orphanQueueState(orphan)
             )
         }
     }

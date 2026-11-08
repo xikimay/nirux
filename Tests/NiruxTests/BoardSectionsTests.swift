@@ -114,25 +114,18 @@ final class BoardSectionsTests: XCTestCase {
         XCTAssertEqual(summary(BoardSections.sections(entries, context: named)), ["back:none:own", "front:acme/front-v2:own"])
     }
 
-    /// An anchor whose remotes git couldn't read might be the one schema 1's
-    /// config belongs to: nothing is placed for good meanwhile.
-    func testNothingIsPlacedForGoodWhileARemoteIsUnread() {
+    /// An anchor whose remotes git couldn't read might name the one config
+    /// saved: it is written with its anchor, not left to the rule. (Board
+    /// Settings refuses to save while schema 1's config waits for a place.)
+    func testOneConfigIsWrittenWithItsAnchorWhileARemoteIsUnread() {
         var unread = context()
         unread.unread = ["/code/front/.git"]
-        let entries = [Entry(slot: .legacy, config: config("acme/front"))]
-        let sections = BoardSections.sections(entries, context: unread)
-        XCTAssertEqual(summary(sections), ["back:acme/front:legacy", "front:none:own"], "shown where the rule puts it now")
-        XCTAssertEqual(BoardSections.entries(saving: config("acme/back"), as: sections[1], in: entries, context: unread), [
-            Entry(slot: .legacy, config: config("acme/front")),
-            Entry(slot: .anchor(commonDir: "/code/front/.git"), config: config("acme/back"))
-        ], "schema 1's config keeps no anchor")
-        var edited = config("acme/front")
-        edited.baseBranch = "develop"
-        XCTAssertEqual(BoardSections.entries(saving: edited, as: sections[0], in: entries, context: unread),
-                       [Entry(slot: .legacy, config: edited)])
-        XCTAssertEqual(BoardSections.entries(saving: config("acme/back"), as: sections[1], in: [], context: unread),
-                       [Entry(slot: .anchor(commonDir: "/code/front/.git"), config: config("acme/back"))],
-                       "one config: written with its anchor, not left to the rule")
+        let back = BoardSections.sections([], context: unread)[0]
+        XCTAssertEqual(back.name, "back")
+        XCTAssertEqual(BoardSections.entries(saving: config("acme/back"), as: back, in: [], context: unread),
+                       [Entry(slot: .anchor(commonDir: "/code/back/.git"), config: config("acme/back"))])
+        XCTAssertEqual(BoardSections.entries(saving: config("acme/back"), as: back, in: [], context: context()),
+                       [Entry(slot: .legacy, config: config("acme/back"))], "with every remote read: schema 1")
     }
 
     func testTwoAnchorsWithOneNameAreToldApart() {

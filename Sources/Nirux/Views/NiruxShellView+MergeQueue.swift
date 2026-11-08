@@ -137,13 +137,11 @@ extension NiruxShellView {
         }
     }
 
-    /// An orphan queue's state, its status named after its repository on a
-    /// line that doesn't say it (`named`): its numbers match none of the
-    /// board's rows.
-    func orphanQueueState(_ controller: MergeQueueController, named: Bool) -> ProjectBoard.QueueState {
+    /// An orphan queue's state, on a line named after its repository: its
+    /// numbers match none of the board's rows.
+    func orphanQueueState(_ controller: MergeQueueController) -> ProjectBoard.QueueState {
         var state = queueState(of: controller)
         let name = controller.queueRepository.ownerAndName
-        if named { state.status = state.status.map { "\(name): \($0)" } }
         state.entries = []
         state.selection = []
         state.startProblems = ["\(name) isn’t one of this board’s repositories now."]
@@ -184,22 +182,15 @@ extension NiruxShellView {
         return state
     }
 
-    /// The queue a board's line shows: its section's, or an orphan's line
-    /// on a board with several; on a board with one line (`id` nil), a queue
-    /// left running on a repository the board no longer has, unless the
-    /// board's own runs: Stop must reach what runs.
+    /// The queue a board's line shows: a section's (nil: the board's only
+    /// one), or one left running on a repository the board no longer has.
     func boardQueue(_ board: ProjectBoardController, section id: String?) -> MergeQueueController? {
-        let orphans = projectBoardOrphanQueues(board)
-        if let id, let orphan = orphans.first(where: { Self.orphanSectionID($0) == id }) {
+        if let id, let orphan = projectBoardOrphanQueues(board).first(where: { Self.orphanSectionID($0) == id }) {
             return orphan
         }
-        let own = board.section(id: id).flatMap { section in
+        return board.section(id: id).flatMap { section in
             board.repository(of: section).map { mergeQueue(projectID: board.projectID, repository: $0.gitHub) }
         }
-        guard id == nil, let orphan = orphans.first, own.map({ !$0.isRunning && !$0.runsElsewhere }) ?? true else {
-            return own
-        }
-        return orphan
     }
 
     /// The id of an orphan queue's section on a board with several lines.

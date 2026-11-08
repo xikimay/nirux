@@ -242,8 +242,8 @@ anchors don't appear. Decided with the user on 2026-11-08:
   run, on the schedule of section 6. The worktrees are listed once for all.
   Adding, removing or making default a repository reads board.json again.
 - **A queue left running** on a repository no section has any more (Board
-  Settings changed, the anchor was removed) keeps a line, and its Stop: the
-  board's one line while its own queue doesn't run, else a line of its own.
+  Settings changed, the anchor was removed) keeps a line of its own, and its
+  Stop; the rows keep the board's own queue.
 - **Pull requests match** a worktree only in a checkout a remote of which
   names the section's repository: elsewhere, a branch of the same name is
   other work. Its pull request then shows as not checked out.

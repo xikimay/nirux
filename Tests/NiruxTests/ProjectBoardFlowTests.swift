@@ -407,7 +407,8 @@ final class ProjectBoardFlowTests: XCTestCase {
     }
 
     /// A queue still running on the repository Board Settings just replaced
-    /// keeps the board's line and its Stop, named after its repository.
+    /// keeps a line of its own and its Stop, named after its repository;
+    /// the rows keep the board's own queue.
     @MainActor
     func testAQueueLeftOnAnotherRepositoryKeepsItsStop() throws {
         try withShell(client: makeClient()) { shell, space in
@@ -433,14 +434,17 @@ final class ProjectBoardFlowTests: XCTestCase {
                                       postMergeWorkflow: .noWorkflow)
             XCTAssertNoThrow(try XCTUnwrap(BoardConfigStore(spaceID: space.id)).save(gadgets).get())
 
-            try waitUntil("the line shows the widgets queue") {
+            try waitUntil("a line shows the widgets queue") {
                 shell.renderProjectBoard(board)
-                return board.view.queueLabel.stringValue.hasPrefix("Queue: acme/widgets: ")
+                return board.view.queueLines.map(\.name.stringValue) == ["acme/gadgets", "acme/widgets"]
             }
             XCTAssertEqual(board.repository?.name, "acme/gadgets")
-            XCTAssertTrue(board.view.queueLines.isEmpty, "one line")
-            XCTAssertFalse(board.view.stopQueueButton.isHidden)
-            try click(board.view.stopQueueButton)
+            XCTAssertTrue(board.view.queueLabel.isHidden, "no single line")
+            XCTAssertEqual(board.view.content?.queue?.isLocked, false, "the rows read gadgets' queue")
+            let line = try XCTUnwrap(board.view.queueLines.last)
+            XCTAssertTrue(line.label.stringValue.hasPrefix("Queue: "), line.label.stringValue)
+            XCTAssertFalse(line.stopButton.isHidden)
+            try click(line.stopButton)
             try waitUntil("the widgets queue stops") { !queue.isRunning }
             MergeQueueController.waitForFiles()
         }

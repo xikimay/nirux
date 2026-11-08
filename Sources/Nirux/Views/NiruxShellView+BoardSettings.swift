@@ -35,9 +35,9 @@ extension NiruxShellView {
             settings.showBoardPlaceholder("Couldn’t find this space’s board settings.")
             return
         }
-        // Inactive workspaces belong to the space too.
-        let folders = workspaces.filter { $0.profileID == spaceID && !$0.isClosing }.map(\.cwd)
+        // Inactive workspaces belong to the space too; then its folders.
         let anchors = profiles.first { $0.id == spaceID }?.anchors ?? []
+        let folders = workspaces.filter { $0.profileID == spaceID && !$0.isClosing }.map(\.cwd) + anchors.compactMap(\.folder)
         boardSettingsPanel?.dismiss()
         settings.showBoardPlaceholder("Reading the board settings…")
         isReadingBoardSettings = true
@@ -51,13 +51,17 @@ extension NiruxShellView {
                 // its read was refused while this one ran.
                 if let current = self.spaceSettings, current.selectedTab == .board,
                    self.boardSettingsPanel?.spaceID != current.spaceID {
+                    // What it asked meanwhile is this read.
+                    current.pendingBoardReload = nil
                     self.loadBoardTab(spaceID: current.spaceID)
                 }
                 return
             }
             if let pending = current.pendingBoardReload {
+                // The later ask wins, and its status: a save's "Saved." isn't
+                // the repository picked after it.
                 current.pendingBoardReload = nil
-                return self.loadBoardTab(spaceID: spaceID, status: pending ?? status)
+                return self.loadBoardTab(spaceID: spaceID, status: pending)
             }
             self.presentBoardSettings(profileID: spaceID, store: store, read: read, status: status)
         }

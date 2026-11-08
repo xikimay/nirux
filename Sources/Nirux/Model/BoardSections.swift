@@ -119,14 +119,14 @@ enum BoardSections {
     /// What to write when `config` is saved as `section`'s: the other
     /// configs as read, schema 1's own placed explicitly once another
     /// joins it, and schema 1 again when one config is left that the rule
-    /// gives back to its anchor. While some anchor's remotes couldn't be
-    /// read, nothing is placed for good: schema 1's config keeps no anchor.
+    /// gives back to its anchor; not while some anchor's remotes couldn't
+    /// be read. Callers refuse to save schema 1's config then (Board
+    /// Settings does): where it belongs rests on every anchor's remotes.
     static func entries(saving config: BoardConfig, as section: Section, in entries: [Entry], context: Context) -> [Entry] {
-        let isPlacing = context.unread.isEmpty
-        let target: Slot = section.slot == .legacy && !isPlacing ? .legacy : section.commonDir.map { .anchor(commonDir: $0) } ?? .legacy
+        let target: Slot = section.commonDir.map { .anchor(commonDir: $0) } ?? .legacy
         var result = entries.map { entry -> Entry in
             // Placed where it shows now, before the new config changes that.
-            guard isPlacing, entry.slot == .legacy,
+            guard entry.slot == .legacy,
                   let anchor = legacyAnchor(for: entry.config, entries: entries, context: context),
                   let commonDir = commonDir(of: anchor)
             else { return entry }
@@ -139,7 +139,7 @@ enum BoardSections {
         }
         // Schema 1 only for the default repository, which is how an older
         // Nirux reads it (its tasks take the board's base branch there).
-        guard isPlacing, result.count == 1, case .anchor(let commonDir) = result[0].slot,
+        guard context.unread.isEmpty, result.count == 1, case .anchor(let commonDir) = result[0].slot,
               let defaultRepository = repositoryAnchors(context.anchors).first,
               Self.commonDir(of: defaultRepository) == commonDir,
               legacyAnchor(for: config, entries: [], context: context)?.key == defaultRepository.key
