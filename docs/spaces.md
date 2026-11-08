@@ -1,8 +1,9 @@
 # Spaces, anchors and the Lead
 
 Status: design validated by the user on 2026-11-08. Shipped: anchors and
-routing (S4), one ⌘N (S7). Where this document and [projects.md](projects.md) differ
-(management UI, routing, defaults), this one wins.
+routing (S4), one ⌘N (S7). Where this document and
+[projects.md](projects.md) differ (management UI, routing, defaults), this
+one wins.
 
 Creating spaces and workspaces was messy because a space didn't know where its
 code lives. Five ways to create a workspace each guessed a different starting
@@ -203,7 +204,7 @@ Mockups were validated in the design session. What changes:
 - **Menu bar:** Space, Agent and Help menus, so every command has a menu item
   and its shortcut. ⌃⌘B opens the Board.
 - **Card menu:** state actions first (Review Branch, failed CI, Clean Up once
-  merged), then an Organize submenu, then Rename and Close.
+  merged), then an Organize submenu, then Rename, the context and Close.
 - **Space Settings:** one window with tabs (General, Defaults, Lead, Brief,
   Memory, Board, Templates) instead of five separate panels.
 - **An empty space** shows Add Repository…, New… and Start a Lead.
@@ -250,7 +251,8 @@ Notes per PR:
   out of scope.
 - **S5.** Sections and scope; typing still finds workspaces in every space.
 - **S6.** Items open today's panels until S8 lands.
-- **S7.** See "One door: ⌘N". The palette keeps a single "New…".
+- **S7.** See "One door: ⌘N". The palette keeps a single "New…", and so
+  does the menu bar's Workspaces menu.
 - **S8.** Defaults follow projects.md section 5 (precedence, literal env,
   reserved `NIRUX_*`, `0600`, setup script typed before the agent, only for
   workspaces the user started).

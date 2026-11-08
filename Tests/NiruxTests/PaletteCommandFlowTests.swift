@@ -465,7 +465,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
 
             // The section only toggles with an inactive workspace to show.
             let secondIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0 === second })
-            harness.perform(["Move to Inactive"], in: shell.sidebar.workspaceActionMenu(workspaceIndex: secondIndex, columnIndex: nil))
+            harness.perform(["Organize", "Move to Inactive"], in: shell.sidebar.workspaceActionMenu(workspaceIndex: secondIndex, columnIndex: nil))
             XCTAssertTrue(second.isInactive)
             XCTAssertTrue(shell.sidebar.isInactiveSectionCollapsed)
             harness.runPaletteCommand("Show/Hide Inactive Workspaces")
