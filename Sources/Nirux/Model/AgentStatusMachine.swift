@@ -506,7 +506,7 @@ struct AgentStatusMachine {
             endTurn()
             // Esc is a key: the user stopped it. Without one since the
             // prompt, the turn's Stop got lost, and this is its end.
-            if lastInputAt > (lastPromptAt ?? 0) {
+            if true { // MUTANT B
                 _ = block(for: .turnFinished, isUserFocused: isUserFocused, alert: false)
                 return
             }
@@ -637,7 +637,7 @@ struct AgentStatusMachine {
         }
         // Back in front after something else held the terminal (^Z and
         // `fg`, Ctrl-G's $EDITOR): its hooks still drive it.
-        if claudeFiredHooks, fgName == "claude" { hookKind = "claude" }
+        // MUTANT A: no restore
 
         // Hook-authoritative path (Claude with installed hooks): events own
         // every transition; output silence mid-turn means nothing.
@@ -653,7 +653,7 @@ struct AgentStatusMachine {
             } else if state == .working {
                 state = .idle
                 // The fallback's turn, if it ran one: hooks show none.
-                if !hookTurnInFlight { turnStartedAt = nil }
+                // MUTANT T: timer kept
             }
             return state
         }
@@ -708,7 +708,7 @@ struct AgentStatusMachine {
         // Nor its reason to wait — unless the new `claude`'s own hooks gave
         // it, which can come first too: a Stop while the heartbeat waited
         // with Nirux in the background.
-        if fgName != "claude" || hookKind != "claude" { lastAttentionReason = nil }
+        lastAttentionReason = nil // MUTANT F
         // Another integrated agent took over the terminal: a `claude` that
         // died without SessionEnd left its dialogs behind. (A shell in front
         // may just mean it's suspended; a new claude's SessionStart clears
