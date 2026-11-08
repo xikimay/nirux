@@ -144,6 +144,8 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         window.makeKeyAndOrderFront(nil)
         mainWindow = window
 
+        // Before the restore relaunches agent sessions, which read the skills.
+        updateAgentSkills(reportingTo: shellView)
         // Restore previous session if available
         shellView.restoreState()
 
@@ -151,7 +153,6 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // ~/.codex/config.toml, then start routing events to columns. Must
         // run AFTER restoreState so queued events resolve to live columns.
         installAgentHooks(reportingTo: shellView)
-        updateAgentSkills(reportingTo: shellView)
         ActivityStore.shared.load()
         MissionStore.shared.load()
         ActivityStore.shared.onChange = { [weak shellView] in
@@ -242,13 +243,14 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     /// Brings the installed copies of Nirux's skills that Nirux wrote up to
     /// this version's text, off the main thread, then refreshes Getting
     /// Started, which keeps offering the update for copies the user edited.
+    /// A development build or a copy on a state of its own would put its
+    /// wording in every agent session, so only the installed app does it.
     private func updateAgentSkills(reportingTo shellView: NiruxShellView) {
-        guard AgentSkillsInstaller.updatesOnLaunch(
+        guard AgentHookInstaller.maintainsSharedAgentFiles(
             environment: ProcessInfo.processInfo.environment, bundleURL: Bundle.main.bundleURL
         ) else { return }
         AgentSkillsInstaller.updateNiruxCopiesInBackground(
-            of: NiruxShellView.agentSkills, home: shellView.sideEffects.homeDirectory(),
-            stateDirectory: Persistence.stateDirectory
+            of: NiruxShellView.agentSkills, home: shellView.sideEffects.homeDirectory()
         ) { [weak shellView] in
             shellView?.refreshOnboardingChecklist()
         }

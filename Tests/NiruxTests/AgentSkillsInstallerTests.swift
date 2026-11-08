@@ -3,14 +3,12 @@ import XCTest
 
 final class AgentSkillsInstallerTests: XCTestCase {
     private var home: String!
-    private var state: URL!
     private let skills = ["alpha": "---\nname: alpha\n---\nAlpha", "beta": "---\nname: beta\n---\nBeta"]
 
     override func setUp() {
         super.setUp()
         home = FileManager.default.temporaryDirectory
             .appendingPathComponent("nirux-skills-\(UUID().uuidString)").path
-        state = URL(fileURLWithPath: home + "/state")
     }
 
     override func tearDown() {
@@ -21,7 +19,7 @@ final class AgentSkillsInstallerTests: XCTestCase {
     func testInstallWritesEverySkillToBothRoots() throws {
         XCTAssertEqual(AgentSkillsInstaller.status(of: skills, home: home), .missing)
 
-        try AgentSkillsInstaller.install(skills, home: home, stateDirectory: state)
+        try AgentSkillsInstaller.install(skills, home: home)
 
         for root in [home + "/.agents/skills", home + "/.claude/skills"] {
             for (name, content) in skills {
@@ -33,21 +31,21 @@ final class AgentSkillsInstallerTests: XCTestCase {
     }
 
     func testChangedCopyIsOutdated() throws {
-        try AgentSkillsInstaller.install(skills, home: home, stateDirectory: state)
+        try AgentSkillsInstaller.install(skills, home: home)
         try "older wording\n".write(
             toFile: home + "/.claude/skills/beta/SKILL.md", atomically: true, encoding: .utf8)
         XCTAssertEqual(AgentSkillsInstaller.status(of: skills, home: home), .outdated)
 
-        try AgentSkillsInstaller.install(skills, home: home, stateDirectory: state)
+        try AgentSkillsInstaller.install(skills, home: home)
         XCTAssertEqual(AgentSkillsInstaller.status(of: skills, home: home), .installed)
     }
 
     func testPartialInstallIsOutdated() throws {
         // Older builds only wrote some of the skills, or one root.
-        try AgentSkillsInstaller.install(["alpha": skills["alpha"]!], home: home, stateDirectory: state)
+        try AgentSkillsInstaller.install(["alpha": skills["alpha"]!], home: home)
         XCTAssertEqual(AgentSkillsInstaller.status(of: skills, home: home), .outdated)
 
-        try AgentSkillsInstaller.install(skills, home: home, stateDirectory: state)
+        try AgentSkillsInstaller.install(skills, home: home)
         try FileManager.default.removeItem(atPath: home + "/.agents/skills/alpha")
         XCTAssertEqual(AgentSkillsInstaller.status(of: skills, home: home), .outdated)
     }
@@ -61,8 +59,7 @@ final class AgentSkillsInstallerTests: XCTestCase {
     private func update(
         _ skills: [String: String], shippedBefore: [String: Set<String>] = [:]
     ) -> AgentSkillsInstaller.UpdateReport {
-        AgentSkillsInstaller.updateNiruxCopies(
-            of: skills, home: home, stateDirectory: state, shippedBefore: shippedBefore)
+        AgentSkillsInstaller.updateNiruxCopies(of: skills, home: home, shippedBefore: shippedBefore)
     }
 
     private func write(_ text: String, to path: String) throws {
@@ -76,16 +73,15 @@ final class AgentSkillsInstallerTests: XCTestCase {
     }
 
     func testUpdateRewritesTheCopiesNiruxWrote() throws {
-        try AgentSkillsInstaller.install(skills, home: home, stateDirectory: state)
-        XCTAssertTrue(FileManager.default.fileExists(
-            atPath: state.appendingPathComponent(AgentSkillsInstaller.recordFileName).path))
+        try AgentSkillsInstaller.install(skills, home: home)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: AgentSkillsInstaller.recordURL(home: home).path))
 
         XCTAssertEqual(update(newSkills).updated.count, 4)
         XCTAssertEqual(AgentSkillsInstaller.status(of: newSkills, home: home), .installed)
     }
 
     func testUpdateKeepsACopyTheUserEdited() throws {
-        try AgentSkillsInstaller.install(skills, home: home, stateDirectory: state)
+        try AgentSkillsInstaller.install(skills, home: home)
         let edited = home + "/.claude/skills/beta/SKILL.md"
         try write("my own wording\n", to: edited)
 
@@ -122,7 +118,7 @@ final class AgentSkillsInstallerTests: XCTestCase {
     }
 
     func testUpdateNeverInstallsASkill() throws {
-        try AgentSkillsInstaller.install(["alpha": skills["alpha"]!], home: home, stateDirectory: state)
+        try AgentSkillsInstaller.install(["alpha": skills["alpha"]!], home: home)
         try FileManager.default.removeItem(atPath: home + "/.agents/skills/alpha")
 
         XCTAssertEqual(update(newSkills).updated, [home + "/.claude/skills/alpha/SKILL.md"])
@@ -131,36 +127,24 @@ final class AgentSkillsInstallerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: home + "/.claude/skills/beta"))
     }
 
-    func testUpdateKeepsALinkedCopy() throws {
-        try AgentSkillsInstaller.install(skills, home: home, stateDirectory: state)
-        let target = home + "/dotfiles/alpha.md"
-        try write(skills["alpha"]! + "\n", to: target)
-        let link = home + "/.claude/skills/alpha/SKILL.md"
-        try FileManager.default.removeItem(atPath: link)
-        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: target)
+    func testUpdateKeepsACopyReachedThroughALink() throws {
+        // Dotfiles managers link the file, or its folder.
+        try AgentSkillsInstaller.install(skills, home: home)
+        let file = home + "/dotfiles/alpha.md"
+        let folder = home + "/dotfiles/beta"
+        try write(skills["alpha"]! + "\n", to: file)
+        try write(skills["beta"]! + "\n", to: folder + "/SKILL.md")
+        let fileLink = home + "/.claude/skills/alpha/SKILL.md"
+        let folderLink = home + "/.claude/skills/beta"
+        try FileManager.default.removeItem(atPath: fileLink)
+        try FileManager.default.removeItem(atPath: folderLink)
+        try FileManager.default.createSymbolicLink(atPath: fileLink, withDestinationPath: file)
+        try FileManager.default.createSymbolicLink(atPath: folderLink, withDestinationPath: folder)
 
-        XCTAssertEqual(update(newSkills).kept, [link])
-        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: link), target)
-        XCTAssertEqual(try read(target), skills["alpha"]! + "\n")
-    }
-
-    func testOnlyTheInstalledAppOnTheRealStateUpdatesAtLaunch() {
-        let app = URL(fileURLWithPath: "/Applications/Nirux.app")
-        XCTAssertTrue(AgentSkillsInstaller.updatesOnLaunch(environment: [:], bundleURL: app))
-        XCTAssertFalse(AgentSkillsInstaller.updatesOnLaunch(environment: ["NIRUX_STATE_DIR": "/tmp/x"], bundleURL: app))
-        XCTAssertFalse(AgentSkillsInstaller.updatesOnLaunch(
-            environment: [:], bundleURL: URL(fileURLWithPath: "/tmp/nirux/.build/debug")))
-    }
-
-    @MainActor
-    func testShippedTextsBelongToSkillsNiruxShips() {
-        let names = Set(NiruxShellView.agentSkills.keys)
-        for (name, digests) in AgentSkillsInstaller.textsShippedBeforeRecords {
-            XCTAssertTrue(names.contains(name), name)
-            for digest in digests {
-                XCTAssertTrue(digest.count == 64 && digest.allSatisfy { "0123456789abcdef".contains($0) }, digest)
-            }
-        }
+        XCTAssertEqual(update(newSkills).kept, [fileLink, folderLink + "/SKILL.md"])
+        XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: fileLink), file)
+        XCTAssertEqual(try read(file), skills["alpha"]! + "\n")
+        XCTAssertEqual(try read(folder + "/SKILL.md"), skills["beta"]! + "\n")
     }
 
     @MainActor
