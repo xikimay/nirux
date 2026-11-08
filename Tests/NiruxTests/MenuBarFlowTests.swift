@@ -72,14 +72,11 @@ final class MenuBarFlowTests: XCTestCase {
             }
             shell.commandPalette?.dismiss()
 
-            bar.run(["Workspaces", "New Worktree…"])
-            try XCTUnwrap(harness.waitForField(placeholder: "Branch name (e.g. feat/my-feature)")).window?.orderOut(nil)
-
-            bar.run(["Workspaces", "New Task…"])
-            harness.waitUntil("the new task sheet") { shell.newTaskPanel?.panel?.isSheet == true }
-            let form = try XCTUnwrap(shell.newTaskPanel)
-            harness.waitUntil("the space's repository") { form.info != nil }
-            form.cancelButton.performClick(nil)
+            bar.run(["Workspaces", "New…"])
+            harness.waitUntil("the sheet") { shell.newTaskPanel?.panel?.isSheet == true }
+            let sheet = try XCTUnwrap(shell.newTaskPanel)
+            harness.waitUntil("the space's info") { sheet.info != nil }
+            sheet.cancelButton.performClick(nil)
             XCTAssertNil(shell.newTaskPanel)
 
             // The context of the workspace in front, not the first one.
