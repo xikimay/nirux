@@ -151,6 +151,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // ~/.codex/config.toml, then start routing events to columns. Must
         // run AFTER restoreState so queued events resolve to live columns.
         installAgentHooks(reportingTo: shellView)
+        updateAgentSkills(reportingTo: shellView)
         ActivityStore.shared.load()
         MissionStore.shared.load()
         ActivityStore.shared.onChange = { [weak shellView] in
@@ -236,6 +237,21 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     private func installAgentHooks(reportingTo shellView: NiruxShellView) {
         AgentHookInstaller.installAll(claudeStatusLine: Self.savedClaudeStatusLineOption())
         shellView.refreshOnboardingChecklist()
+    }
+
+    /// Brings the installed copies of Nirux's skills that Nirux wrote up to
+    /// this version's text, off the main thread, then refreshes Getting
+    /// Started, which keeps offering the update for copies the user edited.
+    private func updateAgentSkills(reportingTo shellView: NiruxShellView) {
+        guard AgentSkillsInstaller.updatesOnLaunch(
+            environment: ProcessInfo.processInfo.environment, bundleURL: Bundle.main.bundleURL
+        ) else { return }
+        AgentSkillsInstaller.updateNiruxCopiesInBackground(
+            of: NiruxShellView.agentSkills, home: shellView.sideEffects.homeDirectory(),
+            stateDirectory: Persistence.stateDirectory
+        ) { [weak shellView] in
+            shellView?.refreshOnboardingChecklist()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

@@ -560,7 +560,8 @@ extension NiruxShellView {
     /// alert.
     func installAgentSkills(confirmsSuccess: Bool = true) {
         do {
-            try AgentSkillsInstaller.install(Self.agentSkills, home: sideEffects.homeDirectory())
+            try AgentSkillsInstaller.install(
+                Self.agentSkills, home: sideEffects.homeDirectory(), stateDirectory: Persistence.stateDirectory)
             refreshOnboardingChecklist()
             guard confirmsSuccess else { return }
             let alert = NSAlert()
