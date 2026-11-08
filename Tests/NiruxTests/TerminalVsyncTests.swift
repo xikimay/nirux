@@ -62,6 +62,27 @@ final class TerminalVsyncTests: XCTestCase {
         XCTAssertFalse(config.contains(TerminalAppearance.vsyncOffLine), config)
     }
 
+    /// A display can count as active while Ghostty can't link to it (as it
+    /// wakes, say): a build with vsync that fails is redone without, for good.
+    func testAFailedBuildWithVsyncIsRedoneWithoutForGood() {
+        var decision = TerminalVsyncDecision()
+        XCTAssertEqual(decision.controllerChange(afterBuildAttempt: false, canHaveSurface: false) { true }, true)
+
+        XCTAssertEqual(decision.controllerChange(afterBuildAttempt: true, canHaveSurface: true) { true }, false)
+        XCTAssertNil(decision.controllerChange(afterBuildAttempt: false, canHaveSurface: true) { true })
+    }
+
+    /// Only a call that tried to build the surface can see it fail: a
+    /// terminal sized before it moves into a window has had no try yet.
+    func testNoBuildTriedIsNoFailure() {
+        var decision = TerminalVsyncDecision()
+        _ = decision.controllerChange(afterBuildAttempt: false, canHaveSurface: false) { true }
+
+        XCTAssertNil(decision.controllerChange(afterBuildAttempt: false, canHaveSurface: true) { true })
+        XCTAssertNil(decision.controllerChange(afterBuildAttempt: true, canHaveSurface: false) { true })
+        XCTAssertEqual(decision.hasVsync, true)
+    }
+
     /// Ghostty creates vsync's display link from the active displays: a
     /// surface with vsync can be built exactly when `Displays` says one is
     /// active, display asleep or not.

@@ -129,11 +129,10 @@ final class ColumnState {
     /// The terminal's surface was built (its lifecycle callbacks); stays
     /// true (see `matchTerminalVsyncToDisplays`).
     private(set) var terminalSurfaceWasBuilt = false
+    private var terminalVsync = TerminalVsyncDecision()
     /// The terminal's controller builds surfaces with vsync; nil before it
     /// has one.
-    private(set) var terminalHasVsync: Bool?
-    /// A surface failed to build with vsync: the next is built without.
-    private var vsyncSurfaceFailed = false
+    var terminalHasVsync: Bool? { terminalVsync.hasVsync }
     /// Whether a display is active (tests replace it).
     var isAnyDisplayActive: () -> Bool = Displays.anyActive
 
@@ -352,17 +351,17 @@ final class ColumnState {
     /// stops the display link then). A built surface keeps its controller:
     /// another one would replace it, and its screen and scrollback with it.
     func matchTerminalVsyncToDisplays(afterBuildAttempt: Bool = false) {
-        guard !terminalSurfaceWasBuilt, let terminal = terminalView else { return }
-        if afterBuildAttempt, terminalHasVsync == true, terminal.canHaveSurface {
-            vsyncSurfaceFailed = true
-        }
-        let vsync = !vsyncSurfaceFailed && isAnyDisplayActive()
-        guard vsync != terminalHasVsync else { return }
+        guard !terminalSurfaceWasBuilt, let terminal = terminalView,
+              let vsync = terminalVsync.controllerChange(
+                  afterBuildAttempt: afterBuildAttempt,
+                  canHaveSurface: terminal.canHaveSurface,
+                  isAnyDisplayActive: isAnyDisplayActive
+              )
+        else { return }
         if !vsync {
-            NSLog("[Terminal] building a terminal without vsync: %@",
-                  vsyncSurfaceFailed ? "its build with vsync failed" : "no display is active")
+            NSLog("[Terminal] a terminal's surface will be built without vsync: %@",
+                  terminalVsync.vsyncFailed ? "its build with vsync failed" : "no display is active")
         }
-        terminalHasVsync = vsync
         let controller = TerminalAppearance.makeController(vsync: vsync)
         // AppTerminalView gives it only as it moves to a window.
         controller.setColorScheme(terminal.colorScheme)

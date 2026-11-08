@@ -46,6 +46,30 @@ final class ColumnTerminalView: TerminalView {
     }
 }
 
+/// The vsync of a column's terminal controller, until its surface is built
+/// (see `ColumnState.matchTerminalVsyncToDisplays`).
+struct TerminalVsyncDecision {
+    /// The controller builds surfaces with vsync; nil before there is one.
+    private(set) var hasVsync: Bool?
+    /// A surface failed to build with vsync: the next is built without.
+    private(set) var vsyncFailed = false
+
+    /// The vsync of the controller to put in place, nil to keep it.
+    /// `afterBuildAttempt`: AppTerminalView just built the surface if the
+    /// terminal could have one; it has none.
+    mutating func controllerChange(
+        afterBuildAttempt: Bool, canHaveSurface: Bool, isAnyDisplayActive: () -> Bool
+    ) -> Bool? {
+        if afterBuildAttempt, canHaveSurface, hasVsync == true {
+            vsyncFailed = true
+        }
+        let vsync = !vsyncFailed && isAnyDisplayActive()
+        guard vsync != hasVsync else { return nil }
+        hasVsync = vsync
+        return vsync
+    }
+}
+
 enum Displays {
     /// Whether a display is active: none while every display sleeps (a
     /// locked Mac, its screen off). Unknown reads as active: a surface that
