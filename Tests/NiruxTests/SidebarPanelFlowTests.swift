@@ -79,8 +79,9 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 "Review Branch", "Ask Agent Why CI Failed", "Rerun Failed CI Jobs…", "",
                 "Organize", "",
                 "Rename Workspace", "View/Edit Context…", "",
-                "Close Workspace"
+                "Clean Up Worktree…", "Close Workspace"
             ])
+            // The folder is gone: Clean Up comes up among the state actions.
             XCTAssertEqual(menus[2].items.prefix(3).map(\.title), ["Review Branch", "Clean Up Worktree…", ""])
         }
     }
@@ -145,9 +146,9 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             harness.perform(["Close Workspace"], in: try menu(for: added))
             harness.waitUntil("the workspace to close") { !shell.workspaces.contains { $0 === added } }
 
-            // In the linked worktree: offered once its pull request is
-            // merged, then checked off the main thread and refused (no GitHub
-            // remote), and nothing goes.
+            // In the linked worktree: next to Close, then on top once its
+            // pull request is merged; checked off the main thread and refused
+            // (no GitHub remote), and nothing goes.
             shell.addWorkspace(title: "in worktree", cwd: harness.worktree)
             let worktreeWorkspace = try XCTUnwrap(shell.activeWorkspace)
             shell.refreshGitContextNow(for: worktreeWorkspace)
@@ -155,14 +156,17 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 worktreeWorkspace.gitContext.map { NiruxShellView.comparablePath($0.identity.repositoryRoot) }
                     == NiruxShellView.comparablePath(harness.worktree)
             }
-            XCTAssertFalse(try menu(for: worktreeWorkspace).items.contains { $0.title == "Clean Up Worktree…" }, "no merged pull request")
+            XCTAssertEqual(try menu(for: worktreeWorkspace).items.suffix(2).map(\.title), ["Clean Up Worktree…", "Close Workspace"])
             // Set and read in one run-loop turn: a git refresh can't clear it
             // in between.
             worktreeWorkspace.prInfo = PRInfo(
                 number: 7, state: "MERGED", isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
                 mergeable: nil, url: "https://example.test/pull/7", additions: nil, deletions: nil, changedFiles: nil
             )
-            harness.perform(["Clean Up Worktree…"], in: try menu(for: worktreeWorkspace))
+            let merged = try menu(for: worktreeWorkspace)
+            XCTAssertEqual(merged.items.prefix(2).map(\.title), ["Review Branch", "Clean Up Worktree…"])
+            XCTAssertEqual(merged.items.filter { $0.title == "Clean Up Worktree…" }.count, 1)
+            harness.perform(["Clean Up Worktree…"], in: merged)
             harness.waitUntil("the clean-up verdict") { !harness.alerts.isEmpty && shell.worktreeCleanupsInFlight.isEmpty }
             XCTAssertTrue(harness.alerts.last?.hasPrefix("Can’t clean up") == true, "\(harness.alerts)")
             XCTAssertTrue(FileManager.default.fileExists(atPath: harness.worktree))

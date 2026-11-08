@@ -48,9 +48,9 @@ final class SidebarView: NSView {
     /// A card's PR link clicked: (workspaceIndex, url).
     var onWorkspaceURLClicked: ((Int, String) -> Void)?
     var onWorkspaceAction: ((WorkspaceSidebarAction, Int) -> Void)?
-    /// Whether the workspace's menu offers "Clean Up Worktree…" (it's open
-    /// in a linked worktree, or its folder is gone). Asked on each menu.
-    var offersWorktreeCleanup: ((Int) -> Bool)?
+    /// Where the workspace's menu offers "Clean Up Worktree…", nil outside
+    /// a linked worktree. Asked on each menu.
+    var worktreeCleanupOffer: ((Int) -> WorktreeCleanupMenuOffer?)?
     /// Drag-reorder drop: (store index of dragged workspace, target
     /// position within its active/inactive group).
     var onWorkspaceReordered: ((Int, Int) -> Void)?
@@ -521,7 +521,8 @@ final class SidebarView: NSView {
 
     /// Per-workspace action menu, shared by right-click and the "⋯" button:
     /// what the workspace's state offers first (Review Branch, failed CI,
-    /// Clean Up), then Organize, then Rename, its context and Close.
+    /// Clean Up once merged), then Organize, then Rename, its context and
+    /// Close (with Clean Up before it, not merged yet).
     /// `columnIndex` non-nil when invoked from a column row — adds the
     /// column-level actions on top.
     func workspaceActionMenu(workspaceIndex: Int, columnIndex: Int?) -> NSMenu {
@@ -541,11 +542,12 @@ final class SidebarView: NSView {
             menu.addItem(.separator())
         }
 
+        let cleanup = worktreeCleanupOffer?(workspaceIndex)
         menu.addClosureItem(title: "Review Branch") { [weak self] in
             self?.onWorkspaceAction?(.reviewBranch, workspaceIndex)
         }
         addCIFailureItems(to: menu, pullRequest: workspace?.prInfo, workspaceIndex: workspaceIndex)
-        addWorktreeCleanupItem(to: menu, workspaceIndex: workspaceIndex)
+        if cleanup == .suggested { addWorktreeCleanupItem(to: menu, workspaceIndex: workspaceIndex) }
         menu.addItem(.separator())
         menu.addItem(organizeItem(workspaceIndex: workspaceIndex, isInactive: workspace?.isInactive == true))
         menu.addItem(.separator())
@@ -557,6 +559,7 @@ final class SidebarView: NSView {
         }
         // Apart, so a click aimed at the context doesn't close the workspace.
         menu.addItem(.separator())
+        if cleanup == .available { addWorktreeCleanupItem(to: menu, workspaceIndex: workspaceIndex) }
         menu.addClosureItem(title: "Close Workspace") { [weak self] in
             self?.onWorkspaceAction?(.close, workspaceIndex)
         }.isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
