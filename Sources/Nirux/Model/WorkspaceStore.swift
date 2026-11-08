@@ -95,12 +95,15 @@ final class WorkspaceStore {
     }
 
     /// Selects a space. An empty one is selected with no active workspace,
-    /// and stays so until a workspace opens or moves in.
+    /// and stays so until a workspace opens or moves in. So is one whose
+    /// last workspace is closing.
     @discardableResult
     func selectProfile(_ profileID: String) -> Bool {
         guard profiles.contains(where: { $0.id == profileID }) else { return false }
         activeProfileID = profileID
-        activeWorkspaceID = visibleWorkspaceIndices(in: profileID).first.map { workspaces[$0].id }
+        activeWorkspaceID = visibleWorkspaceIndices(in: profileID)
+            .first { !workspaces[$0].isClosing }
+            .map { workspaces[$0].id }
         return true
     }
 
@@ -314,7 +317,6 @@ final class WorkspaceStore {
         }
         profiles.remove(at: index)
         deletedProfileIDs.insert(id)
-        if activeProfileID == id { activeProfileID = WorkspaceProfile.defaultID }
         reconcileSelection(preferActiveProfile: true)
         return true
     }
@@ -359,13 +361,13 @@ final class WorkspaceStore {
     }
 
     private func reconcileSelection(preferActiveProfile: Bool) {
-        if !profiles.contains(where: { $0.id == activeProfileID }) {
-            activeProfileID = WorkspaceProfile.defaultID
-        }
+        let activeSpaceIsGone = !profiles.contains { $0.id == activeProfileID }
+        if activeSpaceIsGone { activeProfileID = WorkspaceProfile.defaultID }
 
         // An empty space on screen stays there while workspaces elsewhere
-        // close or move, until one opens or moves in.
-        if activeWorkspaceID == nil, !hasWorkspaces(in: activeProfileID) { return }
+        // close or move, until one opens or moves in. Once it is deleted,
+        // the selection goes where the work is.
+        if !activeSpaceIsGone, activeWorkspaceID == nil, !hasWorkspaces(in: activeProfileID) { return }
 
         if preferActiveProfile,
            !hasWorkspaces(in: activeProfileID),

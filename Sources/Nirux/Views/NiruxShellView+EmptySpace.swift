@@ -17,11 +17,19 @@ extension NiruxShellView {
         let isEmpty = activeWorkspace == nil
         emptySpaceView.isHidden = !isEmpty
         guard isEmpty else { return }
-        emptySpaceView.frame = viewport.bounds
+        if emptySpaceView.frame != viewport.bounds { emptySpaceView.frame = viewport.bounds }
         let space = workspaceStore.activeProfile
         emptySpaceView.show(EmptySpaceView.Content(
             spaceName: space.name,
             offersAddRepository: space.id != WorkspaceProfile.defaultID && !space.anchors.contains(where: \.isKnown)
         ))
+    }
+
+    /// Where a space's brief or task templates open: the active workspace's
+    /// editor, else (on an empty space) a new workspace in that space.
+    func workspaceForSpaceFile(spaceID: String, spaceName: String) -> WorkspaceState? {
+        if let activeWorkspace { return activeWorkspace }
+        addWorkspace(title: spaceName, profileID: spaceID)
+        return activeWorkspace
     }
 }

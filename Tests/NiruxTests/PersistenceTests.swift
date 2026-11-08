@@ -305,6 +305,24 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertTrue(store.moveWorkspace(at: store.workspaces.firstIndex { $0.id == "w" }!, toProfile: empty.id))
         XCTAssertEqual(store.activeWorkspace?.id, "w")
         XCTAssertEqual(store.activeProfileID, empty.id)
+
+        // A space whose last workspace is closing is empty already.
+        store.workspaces.first { $0.id == "w" }?.isClosing = true
+        XCTAssertTrue(store.selectProfile(WorkspaceProfile.defaultID))
+        XCTAssertTrue(store.selectProfile(empty.id))
+        XCTAssertNil(store.activeWorkspace)
+        store.workspaces.first { $0.id == "w" }?.isClosing = false
+        XCTAssertTrue(store.selectProfile(empty.id))
+        XCTAssertEqual(store.activeWorkspace?.id, "w")
+
+        // Deleting the empty space on screen goes where the work is, even
+        // with General empty too.
+        XCTAssertTrue(store.moveWorkspace(at: store.workspaces.firstIndex { $0.id == "b" }!, toProfile: empty.id))
+        let deleted = store.createProfile(named: "deleted")
+        XCTAssertNil(store.activeWorkspace)
+        XCTAssertTrue(store.deleteProfile(id: deleted.id))
+        XCTAssertEqual(store.activeProfileID, empty.id)
+        XCTAssertEqual(store.activeWorkspace?.id, "w")
     }
 
     @MainActor

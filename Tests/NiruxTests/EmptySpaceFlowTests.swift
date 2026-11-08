@@ -29,6 +29,7 @@ final class EmptySpaceFlowTests: XCTestCase {
             XCTAssertEqual(view.titleLabel.stringValue, "Empty")
             XCTAssertEqual(view.accessibilityLabel(), "Empty")
             XCTAssertFalse(view.addRepositoryButton.isHidden)
+            XCTAssertEqual(view.newButton.keyEquivalent, "\r")
             XCTAssertIdentical(harness.window.firstResponder, view)
 
             // A workspace closing in another space leaves it on screen.
@@ -39,54 +40,102 @@ final class EmptySpaceFlowTests: XCTestCase {
             XCTAssertEqual(shell.activeProfileID, empty.id)
             XCTAssertFalse(view.isHidden)
 
-            // Return presses New…, which asks for the workspace's name.
+            // Return presses New…, which asks for the workspace's name. It
+            // opens in this space, even after another one opened elsewhere
+            // meanwhile.
             pressReturn(in: harness.window)
             let field = try XCTUnwrap(harness.waitForField(placeholder: "Name this workspace for the task"))
+            shell.addWorkspace(title: "arrived", cwd: harness.repo, profileID: WorkspaceProfile.defaultID)
             harness.submit("first", into: field)
             let first = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertEqual(first.title, "first")
             XCTAssertEqual(first.profileID, empty.id)
             XCTAssertTrue(view.isHidden)
+            XCTAssertEqual(view.newButton.keyEquivalent, "", "hidden, New… takes no Return a page left unhandled")
         }
     }
 
-    /// Quit on an empty space, Nirux opens on it again.
+    /// A space's brief and task templates need an editor: on an empty
+    /// space, they open in a new workspace there.
+    func testTheBriefAndTemplatesOfAnEmptySpaceOpenInANewWorkspace() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let briefSpace = shell.workspaceStore.createProfile(named: "Brief", select: false)
+            shell.selectProfile(briefSpace.id)
+            harness.perform(["Edit Space Brief…"], in: shell.sidebar.spaceOptionsMenu())
+            let briefWorkspace = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertEqual(briefWorkspace.profileID, briefSpace.id)
+            XCTAssertEqual(briefWorkspace.title, "Brief")
+            let brief = try XCTUnwrap(SpaceBrief.briefURL(spaceID: briefSpace.id)).path
+            let briefEditor = try XCTUnwrap(briefWorkspace.columns.compactMap(\.editorColumn).first)
+            harness.waitUntil("the brief in the editor") { briefEditor.activePath == brief }
+
+            let templatesSpace = shell.workspaceStore.createProfile(named: "Templates", select: false)
+            shell.selectProfile(templatesSpace.id)
+            harness.perform(["Edit Task Templates…"], in: shell.sidebar.spaceOptionsMenu())
+            let templatesWorkspace = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertEqual(templatesWorkspace.profileID, templatesSpace.id)
+            let templates = try XCTUnwrap(TaskTemplates.fileURL(spaceID: templatesSpace.id)).path
+            let templatesEditor = try XCTUnwrap(templatesWorkspace.columns.compactMap(\.editorColumn).first)
+            harness.waitUntil("the templates in the editor") { templatesEditor.activePath == templates }
+        }
+    }
+
+    /// Quit on an empty space, Nirux opens on it again; on the workspace at
+    /// the saved position once that space is gone, not on an empty General.
     func testAnEmptySpaceComesBackAtLaunch() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
+            let work = shell.workspaceStore.createProfile(named: "Work", select: false)
+            let repoWorkspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.moveWorkspaceToSpace(workspaceID: repoWorkspace.id, profileID: work.id)
             let empty = shell.workspaceStore.createProfile(named: "Empty", select: false)
             shell.selectProfile(empty.id)
-            let state = shell.persistedState()
+            var state = shell.persistedState()
             XCTAssertEqual(state.activeProfileID, empty.id)
             XCTAssertNil(state.activeWorkspaceID)
 
-            XCTAssertTrue(Persistence.save(state))
+            let back = relaunch(state, in: harness)
+            XCTAssertEqual(back.spaceID, empty.id)
+            XCTAssertNil(back.workspaceTitle)
+            XCTAssertEqual(back.emptyViewSpaceName, "Empty")
 
-            // Gone before the harness puts the environment back: nothing it
-            // deferred may reach the real state.
-            weak var released: NiruxShellView?
-            try autoreleasepool {
-                let relaunched = NiruxShellView(frame: shell.frame)
-                released = relaunched
-                relaunched.stopHeartbeat()
-                let window = NSWindow(
-                    contentRect: shell.frame, styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false
-                )
-                window.isReleasedWhenClosed = false
-                window.contentView = relaunched
-                defer {
-                    window.close()
-                    window.contentView = nil
-                }
-                relaunched.restoreState()
-                XCTAssertEqual(relaunched.activeProfileID, empty.id)
-                XCTAssertNil(relaunched.activeWorkspace)
-                XCTAssertEqual(relaunched.workspaces.map(\.title), shell.workspaces.map(\.title))
-                XCTAssertFalse(relaunched.emptySpaceView.isHidden)
-                XCTAssertEqual(try XCTUnwrap(relaunched.emptySpaceView.content).spaceName, "Empty")
-            }
-            harness.waitUntil("the relaunched shell to go") { released == nil }
+            state.activeProfileID = "deleted since"
+            let gone = relaunch(state, in: harness)
+            XCTAssertEqual(gone.spaceID, work.id)
+            XCTAssertEqual(gone.workspaceTitle, repoWorkspace.title)
+            XCTAssertNil(gone.emptyViewSpaceName)
         }
+    }
+
+    /// What a new shell restoring `state` shows. It is gone before the
+    /// harness puts the environment back: nothing it deferred may reach the
+    /// real state.
+    private func relaunch(
+        _ state: PersistedState, in harness: UIFlowHarness
+    ) -> (spaceID: String, workspaceTitle: String?, emptyViewSpaceName: String?) {
+        XCTAssertTrue(Persistence.save(state))
+        weak var released: NiruxShellView?
+        let shown = autoreleasepool { () -> (String, String?, String?) in
+            let relaunched = NiruxShellView(frame: harness.shell.frame)
+            released = relaunched
+            relaunched.stopHeartbeat()
+            let window = NSWindow(
+                contentRect: harness.shell.frame, styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false
+            )
+            window.isReleasedWhenClosed = false
+            window.contentView = relaunched
+            defer {
+                window.close()
+                window.contentView = nil
+            }
+            relaunched.restoreState()
+            XCTAssertEqual(relaunched.workspaces.map(\.title), harness.shell.workspaces.map(\.title))
+            let view = relaunched.emptySpaceView
+            return (relaunched.activeProfileID, relaunched.activeWorkspace?.title, view.isHidden ? nil : view.content?.spaceName)
+        }
+        harness.waitUntil("the relaunched shell to go") { released == nil }
+        return shown
     }
 
     /// Return as AppKit delivers it once the key interceptor let it

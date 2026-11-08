@@ -548,8 +548,11 @@ extension NiruxShellView {
         if nameInputPanel == nil {
             nameInputPanel = NameInputPanel()
         }
+        // The space it was asked in: a workspace arriving meanwhile (a
+        // Mission, a `nirux://` request) makes its own space active.
+        let spaceID = activeProfileID
         nameInputPanel?.onSubmit = { [weak self] title in
-            self?.addWorkspace(title: title)
+            self?.addWorkspace(title: title, profileID: spaceID)
             self?.saveState()
         }
         nameInputPanel?.show(

@@ -65,6 +65,12 @@ final class EmptySpaceView: NSView {
         needsLayout = true
     }
 
+    /// Return is New…'s only while the view shows: hidden, it must not
+    /// take a Return a page or a field in a workspace left unhandled.
+    override var isHidden: Bool {
+        didSet { newButton.keyEquivalent = isHidden ? "" : "\r" }
+    }
+
     /// The view itself takes the keyboard: a button only can with Full
     /// Keyboard Access on.
     override var acceptsFirstResponder: Bool { true }

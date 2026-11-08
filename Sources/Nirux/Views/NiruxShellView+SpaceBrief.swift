@@ -49,7 +49,7 @@ extension NiruxShellView {
             }
             // A tab in the workspace's usual editor: rooting an editor at the
             // brief's folder would make it the workspace's working directory.
-            openInEditorColumn(path: url.path)
+            openInEditorColumn(path: url.path, in: workspaceForSpaceFile(spaceID: profileID, spaceName: spaceName))
         } catch {
             NiruxDebugLog.log("SpaceBrief: could not create the brief file: \(error)")
             showToast("Couldn’t create the space’s brief", tone: .error)

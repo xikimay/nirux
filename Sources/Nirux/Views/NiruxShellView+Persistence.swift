@@ -72,8 +72,12 @@ extension NiruxShellView {
         if let activeWorkspaceID = state.activeWorkspaceID,
            workspaceStore.selectWorkspace(id: activeWorkspaceID) {
             // Restored by stable identity.
+        } else if activeWorkspace == nil, activeProfileID == state.activeProfileID {
+            // Saved on an empty space, still there and empty: it shows again.
         } else {
-            activeWSIndex = min(state.activeWorkspaceIndex, max(workspaces.count - 1, 0))
+            // A space that is gone since, or an older state: the workspace
+            // at the saved position.
+            activeWSIndex = min(max(state.activeWorkspaceIndex, 0), max(workspaces.count - 1, 0))
         }
         restoreSidebarState(state.settings)
         // Lays out the workspace on screen, which resumes the agents it

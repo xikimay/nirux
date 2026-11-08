@@ -119,7 +119,7 @@ extension NiruxShellView {
                 NSSound.beep()
                 return
             }
-            openInEditorColumn(path: url.path)
+            openInEditorColumn(path: url.path, in: workspaceForSpaceFile(spaceID: profileID, spaceName: projectName))
         } catch {
             NiruxDebugLog.log("TaskTemplates: could not create the templates file: \(error)")
             NSSound.beep()

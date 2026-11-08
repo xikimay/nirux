@@ -329,8 +329,7 @@ extension NiruxShellView {
 
     /// Creates the space (or fills an empty one of that name that has no
     /// repository), offers to move its repositories' workspaces in, then
-    /// shows it, opening a workspace in its default folder when it is
-    /// empty.
+    /// shows it: its empty view when none moved in.
     func createSpace(_ draft: NewSpacePanel.Draft) {
         // The sheet adds none then; one taken from another space would come
         // back to it at the next launch.
