@@ -138,11 +138,14 @@ final class WorkspaceContextTests: XCTestCase {
             XCTAssertFalse(workspace.recordAgentHookActivity(event))
         }
         XCTAssertEqual(workspace.lastActivityAt, 20)
-        let permission = try XCTUnwrap(AgentHookEvent(
-            kind: .claude, payload: ["hook_event_name": "Notification", "notification_type": "permission_prompt"],
-            env: [:], now: 3_100
-        ))
-        XCTAssertTrue(workspace.recordAgentHookActivity(permission))
+        let real: [[String: Any]] = [
+            ["hook_event_name": "Notification", "notification_type": "permission_prompt"],
+            ["hook_event_name": "SessionStart", "source": "clear"]
+        ]
+        for (index, payload) in real.enumerated() {
+            let event = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: payload, env: [:], now: 3_100 + Double(index)))
+            XCTAssertTrue(workspace.recordAgentHookActivity(event))
+        }
     }
 
     func testGitContextChangesRejectStalePRMetadata() {
