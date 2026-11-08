@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Sidebar permission approvals (Settings → Experimental)
+// MARK: - Sidebar permission approvals (Settings → Agents)
 
 extension NiruxShellView {
     /// Allow / Deny clicked under a column (see `PermissionApproval`).
@@ -118,7 +118,7 @@ extension NiruxShellView {
     }
 
     static func currentSidebarApprovalsEnabled() -> Bool {
-        Persistence.load()?.settings?.sidebarApprovalsEnabled == true
+        PersistedSettings.effective(Persistence.load()?.settings).sidebarApprovalsEnabled
     }
 }
 

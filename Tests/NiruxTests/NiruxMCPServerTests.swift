@@ -46,6 +46,19 @@ final class NiruxMCPServerTests: XCTestCase {
 
     // MARK: - Protocol
 
+    /// The Lead's Claude learns its role from the server, from its
+    /// workspace's `NIRUX_LEAD=1`; any other agent doesn't.
+    func testOnlyTheLeadGetsTheLeadsRole() throws {
+        var lead = context
+        lead.environment["NIRUX_LEAD"] = "1"
+        let initialize = ["jsonrpc": "2.0", "id": 0, "method": "initialize", "params": [:]] as [String: Any]
+        let leads = try XCTUnwrap(result(try send(initialize, context: lead))?["instructions"] as? String)
+        XCTAssertTrue(leads.hasPrefix("You are the Lead of this Nirux space."))
+        XCTAssertTrue(leads.contains("Before starting a task"), "history_search stays")
+        let others = try XCTUnwrap(result(try send(initialize))?["instructions"] as? String)
+        XCTAssertFalse(others.contains("Lead"))
+    }
+
     func testHandshakeListsTheReadOnlyTool() throws {
         // Claude probes a newer protocol first and falls back on this error.
         let probe = try send(["jsonrpc": "2.0", "id": "probe", "method": "server/discover"])

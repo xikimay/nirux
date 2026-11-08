@@ -30,21 +30,29 @@ extension NiruxShellView {
         workspaceStore.replaceProfiles(loadedProfiles, activeProfileID: state.activeProfileID)
         let validProfileIDs = Set(profiles.map { $0.id })
 
+        // One Lead per space, never in General (a hand-edited or merged
+        // file, a space deleted by an older build): the first one stays.
+        var spacesWithALead = Set<String>()
         for persistedWS in state.workspaces {
             let persistedProfileID = persistedWS.profileID ?? WorkspaceProfile.defaultID
             let profileID = validProfileIDs.contains(persistedProfileID)
                 ? persistedProfileID
                 : WorkspaceProfile.defaultID
+            let isLead = persistedWS.isLead && profileID != WorkspaceProfile.defaultID
+                && spacesWithALead.insert(profileID).inserted
             let workspace = WorkspaceState(
                 id: persistedWS.id ?? UUID().uuidString,
                 title: persistedWS.title,
                 cwd: persistedWS.cwd,
                 profileID: profileID,
                 missionID: persistedWS.missionID,
-                missionHandoffsEnabled: state.settings?.missionHandoffsEnabled == true,
-                startedOutsideNirux: persistedWS.startedOutsideNirux
+                missionHandoffsEnabled: PersistedSettings.effective(state.settings).missionHandoffsEnabled,
+                startedOutsideNirux: persistedWS.startedOutsideNirux,
+                isLead: isLead,
+                reportsToLead: persistedWS.reportsToLead
             )
-            workspace.isInactive = persistedWS.isInactive
+            // A Lead is never parked.
+            workspace.isInactive = persistedWS.isInactive && !isLead
             workspace.purpose = persistedWS.purpose
             workspace.phase = persistedWS.phase
             workspace.unknownPhaseRawValue = persistedWS.unknownPhaseRawValue
@@ -285,7 +293,11 @@ extension NiruxShellView {
                     reviewRuns: workspace.reviewRuns.isEmpty ? nil : Dictionary(
                         uniqueKeysWithValues: workspace.reviewRuns.map { ($0.key.rawValue, $0.value) }
                     ),
-                    startedOutsideNirux: workspace.startedOutsideNirux)
+                    startedOutsideNirux: workspace.startedOutsideNirux,
+                    // One closing is no longer the Lead: a new one may
+                    // start before it goes.
+                    isLead: workspace.isLead && !workspace.isClosing,
+                    reportsToLead: workspace.reportsToLead)
             },
             activeWorkspaceIndex: activeWSIndex,
             settings: settings,

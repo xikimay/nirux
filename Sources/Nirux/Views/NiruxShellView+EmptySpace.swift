@@ -9,6 +9,10 @@ extension NiruxShellView {
             guard let self else { return }
             self.addRepository(toSpace: self.activeProfileID)
         }
+        emptySpaceView.onStartLead = { [weak self] in
+            guard let self else { return }
+            self.startLead(spaceID: self.activeProfileID)
+        }
     }
 
     /// Shows the view over the viewport while the active space has no
@@ -21,7 +25,8 @@ extension NiruxShellView {
         let space = workspaceStore.activeProfile
         emptySpaceView.show(EmptySpaceView.Content(
             spaceName: space.name,
-            offersAddRepository: space.id != WorkspaceProfile.defaultID && !space.anchors.contains(where: \.isKnown)
+            offersAddRepository: space.id != WorkspaceProfile.defaultID && !space.anchors.contains(where: \.isKnown),
+            offersLead: Self.spaceCanHaveLead(space.id)
         ))
     }
 }

@@ -10,9 +10,16 @@ extension NiruxShellView {
     /// on the main thread, so a terminal never starts in a folder that is
     /// gone: an anchor on a network volume that went away waits for it.
     func defaultFolder(forSpace spaceID: String) -> String {
-        let space = profiles.first { $0.id == spaceID }
-        let folders = [space?.defaultFolder] + (space?.anchors.map(\.folder) ?? [])
-        return folders.lazy.compactMap { $0 }.first(where: NiruxURLRequest.directoryExists) ?? sideEffects.homeDirectory()
+        defaultFolderAnchor(forSpace: spaceID)?.folder ?? sideEffects.homeDirectory()
+    }
+
+    /// The anchor whose folder `defaultFolder(forSpace:)` opens in, or nil
+    /// for the home folder.
+    func defaultFolderAnchor(forSpace spaceID: String) -> SpaceAnchor? {
+        let anchors = profiles.first { $0.id == spaceID }?.anchors ?? []
+        return ([anchors.defaultAnchor].compactMap { $0 } + anchors).first { anchor in
+            anchor.folder.map(NiruxURLRequest.directoryExists) == true
+        }
     }
 
     /// A space has a repository or folder: only then is git asked where a

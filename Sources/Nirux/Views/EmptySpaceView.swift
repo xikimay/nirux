@@ -9,21 +9,24 @@ import AppKit
 /// (never in General, which has none). "New…" does what ⌘N does; it looks
 /// like the default button and Return presses it while the view has the
 /// keyboard. It has no key equivalent: a window's default button takes
-/// Returns from anywhere, a hidden view must take none. The Lead (S11)
-/// adds "Start a Lead" to `Content`.
+/// Returns from anywhere, a hidden view must take none. "Start a Lead"
+/// shows in every space but General (docs/spaces.md, "The Lead").
 @MainActor
 final class EmptySpaceView: NSView {
     struct Content: Equatable {
         var spaceName: String
         var offersAddRepository: Bool
+        var offersLead = false
     }
 
     let titleLabel = NSTextField(labelWithString: "")
     let detailLabel = NSTextField(labelWithString: "Nothing open yet. Press \(NiruxShortcuts.newWorkspaceDisplay) to start.")
     let addRepositoryButton = NSButton(title: "Add Repository…", target: nil, action: nil)
+    let startLeadButton = NSButton(title: "Start a Lead", target: nil, action: nil)
     let newButton = NSButton(title: "New…", target: nil, action: nil)
 
     var onAddRepository: (() -> Void)?
+    var onStartLead: (() -> Void)?
     var onNew: (() -> Void)?
 
     private(set) var content: Content?
@@ -42,13 +45,14 @@ final class EmptySpaceView: NSView {
         titleLabel.setAccessibilityElement(false)
         detailLabel.font = Theme.Font.body
         detailLabel.textColor = Theme.Color.textSecondary
-        for button in [addRepositoryButton, newButton] {
+        for button in [addRepositoryButton, startLeadButton, newButton] {
             button.bezelStyle = .rounded
             button.controlSize = .large
             button.target = self
             addSubview(button)
         }
         addRepositoryButton.action = #selector(addRepository(_:))
+        startLeadButton.action = #selector(startLead(_:))
         newButton.action = #selector(new(_:))
         newButton.bezelColor = .controlAccentColor
         setAccessibilityElement(true)
@@ -64,6 +68,7 @@ final class EmptySpaceView: NSView {
         titleLabel.stringValue = content.spaceName
         setAccessibilityLabel(content.spaceName)
         addRepositoryButton.isHidden = !content.offersAddRepository
+        startLeadButton.isHidden = !content.offersLead
         needsLayout = true
     }
 
@@ -87,7 +92,7 @@ final class EmptySpaceView: NSView {
     override func layout() {
         super.layout()
         let width = max(0, min(bounds.width - Theme.Space.xl * 2, 480))
-        let buttons = [addRepositoryButton, newButton].filter { !$0.isHidden }
+        let buttons = [addRepositoryButton, startLeadButton, newButton].filter { !$0.isHidden }
         let sizes = buttons.map { button -> NSSize in
             let fitting = button.fittingSize
             return NSSize(width: max(ceil(fitting.width), 96), height: ceil(fitting.height))
@@ -113,6 +118,10 @@ final class EmptySpaceView: NSView {
 
     @objc private func addRepository(_ sender: Any?) {
         onAddRepository?()
+    }
+
+    @objc private func startLead(_ sender: Any?) {
+        onStartLead?()
     }
 
     @objc private func new(_ sender: Any?) {

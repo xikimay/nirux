@@ -2,9 +2,9 @@
 
 Status: design validated by the user on 2026-11-08. Shipped: anchors and
 routing (S4), one ⌘N (S7), Space Settings and per-space defaults (S8), the
-empty space view (S9), a board per repository (S12). Where this document and
-[projects.md](projects.md) differ (management UI, routing, defaults), this one
-wins.
+empty space view (S9), the Lead's workspace and settings (S11a), a board per
+repository (S12). Where this document and [projects.md](projects.md) differ
+(management UI, routing, defaults), this one wins.
 
 Creating spaces and workspaces was messy because a space didn't know where its
 code lives. Five ways to create a workspace each guessed a different starting
@@ -173,9 +173,24 @@ New flow, built on the guarded typing `tell` already uses
 
 ## The Lead
 
-- **Opt-in per space:** "Start a Lead" in New Space… and Space Settings. A
-  workspace pinned at the top of the sidebar, in the default anchor's main
-  checkout, with Claude and the Board column. One per space; ⌘0 focuses it.
+- **Opt-in per space:** "Start a Lead" in New Space… (off unless switched on)
+  and Space Settings › Lead. A workspace pinned at the top of the sidebar, in
+  the default anchor's main checkout, with Claude and the Board column (unless
+  another workspace of the space shows the Board). One per space, never in
+  General; it can't be moved, dragged, parked or sent to another space.
+  ⌃⌘L (Space › Lead) focuses it, or starts it when the space has none: ⌘0
+  stays the editor's font-size reset. Turning it off, or closing its
+  workspace, closes it (asking first while Claude runs); the tasks it started
+  then ask the user, as for any parent gone, and a new Lead doesn't take them
+  over. Deleting its space makes it a plain workspace in General (its running
+  shells keep `NIRUX_LEAD=1` until they restart).
+- **Its role** reaches its Claude through the Nirux MCP server's instructions:
+  its shells carry `NIRUX_LEAD=1` (blank in every other shell). Until its
+  tools land (S11b) it starts tasks with the `nirux-worktree` skill, which
+  Nirux installs if no copy is there, and which links them to it as Missions.
+  Its folder is fixed when it starts: Space Settings › Lead says when it is
+  none of the space's repositories any more, and turning it off and on moves
+  it.
 - **Tools** (Nirux MCP server, given to the Lead's Claude only), limited to its
   space and its anchors:
   - `start_task(description, repo?, template?)`: the ⌘N path, reporting to the
@@ -189,8 +204,12 @@ New flow, built on the guarded typing `tell` already uses
 - **No tool merges, removes a worktree or a branch, or reaches another space.**
 - **State lives in Nirux** (board, Missions), not in the Lead's conversation: a
   `/clear` or a restart loses nothing.
-- Mission handoffs and sidebar permission answers leave Experimental and are on
-  by default.
+- Mission handoffs and sidebar permission answers leave Experimental for
+  Settings › Agents › Missions (shipped with S11a), on for a new install. A
+  state file keeps the value it holds: both were opt-in, and turning Missions
+  on would link every worktree an agent opens to it. A Lead and the tasks it
+  starts use Missions whatever the setting (`Mission.reportsToLead`, and the
+  Mission variables in their shells).
 
 ## Interface
 
@@ -217,8 +236,8 @@ Mockups were validated in the design session. What changes:
   script is edited in a sheet from General. A space's default agent only
   preselects the agent of its tasks; a plain workspace stays a shell.
 - **An empty space** shows its name, Add Repository… until it has a
-  repository or folder, and New… (Return, ⌘N); Start a Lead comes with the
-  Lead (S11). General shows only New…. The view stays while workspaces
+  repository or folder, Start a Lead (shipped with S11a), and New… (Return,
+  ⌘N). General shows only New…. The view stays while workspaces
   elsewhere close or move, and comes back at launch. Closing a space's last
   workspace still selects another space's.
 - **Nirux's own skills update themselves** on launch, unless the user edited
@@ -270,11 +289,14 @@ Notes per PR:
   reserved `NIRUX_*`, `0600`, setup script typed before the agent, only for
   workspaces the user started). Shipped; the defaults live in the space's
   own `defaults.json`, not in projects.json (see projects.md section 5).
-- **S9.** "Start a Lead" appears once S11 lands.
+- **S9.** Shipped. "Start a Lead" came with S11a.
 - **S10.** Which title-bar accessories stay (keep-awake cup, plan usage
   limits) is the user's call, asked in the PR. Check ⌘1…⌘9 against the editor
   and Ghostty bindings.
-- **S11.** See "The Lead". Adds the Lead tab, ⌘0 and the ⌘N checkbox.
+- **S11.** See "The Lead". Three PRs: S11a the Lead's workspace, the New
+  Space switch, the Lead tab, ⌃⌘L, Missions and sidebar answers on by
+  default; S11b its MCP tools; S11c the ⌘N checkbox and Mission children
+  under their parent in the sidebar.
 - **S12.** `board.json` gets one config per anchor; the current single
   repository becomes the matching anchor's. Shipped: see
   [project-board.md](project-board.md), sections 2.2 and 5.1.

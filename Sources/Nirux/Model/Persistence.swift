@@ -374,12 +374,14 @@ struct PersistedSettings: Codable {
     var claudeNoFlicker: Bool? = true
     var codexLaunchMode: CodexLaunchMode?
     var sidebarExpanded: Bool?
-    /// Experimental and intentionally opt-in. Missing in older state files
-    /// decodes to false so existing worktree behavior is unchanged.
-    var missionHandoffsEnabled: Bool = false
-    /// Experimental, opt-in: answer Claude permission dialogs from the
-    /// sidebar (see `PermissionApproval`). Missing decodes to false.
-    var sidebarApprovalsEnabled: Bool = false
+    /// Parent/child messages between worktree agents (Missions). On for a
+    /// new install; a state file keeps what it holds (before the Lead it
+    /// was an opt-in Experimental setting, always written). A space's Lead
+    /// and its tasks use Missions whatever it says (`Mission.reportsToLead`).
+    var missionHandoffsEnabled: Bool = true
+    /// Answer Claude permission dialogs from the sidebar (see
+    /// `PermissionApproval`). On for a new install, as Mission handoffs.
+    var sidebarApprovalsEnabled: Bool = true
     /// See `KeepAwakeController`. On by default: missing decodes to true.
     var keepMacAwakeWhileAgentsWork: Bool = true
     /// The Claude plan usage limits in the title bar (see
@@ -420,8 +422,8 @@ struct PersistedSettings: Codable {
         claudeNoFlicker: Bool? = true,
         codexLaunchMode: CodexLaunchMode? = nil,
         sidebarExpanded: Bool? = nil,
-        missionHandoffsEnabled: Bool = false,
-        sidebarApprovalsEnabled: Bool = false,
+        missionHandoffsEnabled: Bool = true,
+        sidebarApprovalsEnabled: Bool = true,
         telegramRemoteAccessEnabled: Bool = false,
         telegramPairedUserID: Int64? = nil,
         telegramPairedChatID: Int64? = nil,
@@ -483,8 +485,8 @@ struct PersistedSettings: Codable {
         claudeNoFlicker = try container.decodeIfPresent(Bool.self, forKey: .claudeNoFlicker) ?? true
         codexLaunchMode = try container.decodeIfPresent(CodexLaunchMode.self, forKey: .codexLaunchMode)
         sidebarExpanded = try container.decodeIfPresent(Bool.self, forKey: .sidebarExpanded)
-        missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? false
-        sidebarApprovalsEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarApprovalsEnabled) ?? false
+        missionHandoffsEnabled = try container.decodeIfPresent(Bool.self, forKey: .missionHandoffsEnabled) ?? true
+        sidebarApprovalsEnabled = try container.decodeIfPresent(Bool.self, forKey: .sidebarApprovalsEnabled) ?? true
         keepMacAwakeWhileAgentsWork = try container.decodeIfPresent(Bool.self, forKey: .keepMacAwakeWhileAgentsWork) ?? true
         showClaudeUsageLimits = try container.decodeIfPresent(Bool.self, forKey: .showClaudeUsageLimits) ?? false
         telegramRemoteAccessEnabled = try container.decodeIfPresent(
@@ -545,6 +547,12 @@ struct PersistedSettings: Codable {
         try container.encodeIfPresent(explainModel, forKey: .explainModel)
         try container.encodeIfPresent(explainEffort, forKey: .explainEffort)
     }
+
+    /// What applies: the saved settings, else the defaults (nothing saved
+    /// yet, or the state file can't be read).
+    static func effective(_ settings: PersistedSettings?) -> PersistedSettings {
+        settings ?? PersistedSettings()
+    }
 }
 
 struct PersistedWorkspace: Codable {
@@ -573,6 +581,11 @@ struct PersistedWorkspace: Codable {
     var reviewRuns: [String: ReviewRun]?
     /// See `WorkspaceState.startedOutsideNirux`. Written only when true.
     var startedOutsideNirux: Bool
+    /// See `WorkspaceState.isLead`. Written only when true: a build before
+    /// the Lead restores it as a plain workspace.
+    var isLead: Bool
+    /// See `WorkspaceState.reportsToLead`. Written only when true.
+    var reportsToLead: Bool
 
     init(
         id: String? = nil,
@@ -592,7 +605,9 @@ struct PersistedWorkspace: Codable {
         nextStep: String? = nil,
         blocker: String? = nil,
         reviewRuns: [String: ReviewRun]? = nil,
-        startedOutsideNirux: Bool = false
+        startedOutsideNirux: Bool = false,
+        isLead: Bool = false,
+        reportsToLead: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -612,12 +627,14 @@ struct PersistedWorkspace: Codable {
         self.blocker = blocker
         self.reviewRuns = reviewRuns
         self.startedOutsideNirux = startedOutsideNirux
+        self.isLead = isLead
+        self.reportsToLead = reportsToLead
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID
         case purpose, phase, lastSummary, lastSummaryIsManual, lastActivityAt
-        case nextStep, blocker, reviewRuns, startedOutsideNirux
+        case nextStep, blocker, reviewRuns, startedOutsideNirux, isLead, reportsToLead
     }
 
     init(from decoder: Decoder) throws {
@@ -642,6 +659,8 @@ struct PersistedWorkspace: Codable {
         // Only badges: a shape this build can't read never fails the state.
         reviewRuns = (try? container.decodeIfPresent([String: ReviewRun].self, forKey: .reviewRuns)) ?? nil
         startedOutsideNirux = (try? container.decodeIfPresent(Bool.self, forKey: .startedOutsideNirux)) ?? false
+        isLead = (try? container.decodeIfPresent(Bool.self, forKey: .isLead)) ?? false
+        reportsToLead = (try? container.decodeIfPresent(Bool.self, forKey: .reportsToLead)) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -666,6 +685,8 @@ struct PersistedWorkspace: Codable {
         try container.encodeIfPresent(blocker, forKey: .blocker)
         try container.encodeIfPresent(reviewRuns, forKey: .reviewRuns)
         if startedOutsideNirux { try container.encode(true, forKey: .startedOutsideNirux) }
+        if isLead { try container.encode(true, forKey: .isLead) }
+        if reportsToLead { try container.encode(true, forKey: .reportsToLead) }
     }
 }
 
