@@ -396,7 +396,7 @@ final class WorkspaceStore {
 
     private func uniqueProfileName(_ base: String, excluding excludedID: String? = nil) -> String {
         let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallback = trimmed.isEmpty ? "project" : trimmed
+        let fallback = trimmed.isEmpty ? "space" : trimmed
         let existing = Set(profiles.compactMap { profile in
             profile.id == excludedID ? nil : profile.name
         })
@@ -406,18 +406,17 @@ final class WorkspaceStore {
         return "\(fallback) \(idx)"
     }
 
-    /// The default space comes first if missing. It has no repositories or
-    /// folders; each other one belongs to the first space listing it, and
-    /// each space has one default anchor (a hand-edited or merged file may
-    /// break all three).
+    /// The default space (General) always exists and comes first, so every
+    /// list of spaces starts with it: the switcher, the menus, Move to Space,
+    /// New Task's popup. It has no repositories or folders; each other one
+    /// belongs to the first space listing it, and each space has one default
+    /// anchor (a hand-edited or merged file may break all three).
     private static func normalizedProfiles(_ profiles: [WorkspaceProfile]) -> [WorkspaceProfile] {
-        var result = profiles.isEmpty ? [WorkspaceProfile.defaultProfile] : profiles
-        if !result.contains(where: { $0.id == WorkspaceProfile.defaultID }) {
-            result.insert(WorkspaceProfile.defaultProfile, at: 0)
-        }
+        var general = profiles.first { $0.id == WorkspaceProfile.defaultID } ?? WorkspaceProfile.defaultProfile
+        general.anchors.removeAll(where: \.isKnown)
+        var result = [general] + profiles.filter { $0.id != WorkspaceProfile.defaultID }
         var claimed = Set<String>()
         for index in result.indices {
-            if result[index].id == WorkspaceProfile.defaultID { result[index].anchors.removeAll(where: \.isKnown) }
             result[index].anchors = result[index].anchors.filter { anchor in
                 anchor.key.map { claimed.insert($0).inserted } ?? true
             }.normalizedAnchors()

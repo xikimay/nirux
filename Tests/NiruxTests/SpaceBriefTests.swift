@@ -46,7 +46,7 @@ final class SpaceBriefTests: XCTestCase {
         ))
 
         let claude = try String(contentsOfFile: injection.claudePromptFile, encoding: .utf8)
-        XCTAssertTrue(claude.hasPrefix("# Project brief (from Nirux)\n"))
+        XCTAssertTrue(claude.hasPrefix("# Space brief (from Nirux)\n"))
         XCTAssertTrue(claude.contains("The brief lives at \(url.path)."))
         XCTAssertTrue(claude.contains("Edit it only when the user asks you to in this conversation"))
         XCTAssertTrue(claude.hasSuffix("- Never merge; the maintainer merges.\n- Say \"done\"."))
@@ -172,7 +172,7 @@ final class SpaceBriefTests: XCTestCase {
 
     @MainActor
     func testShellsPassTheClaudeBriefAsOneExactArgument() throws {
-        let brief = "# Project brief (from Nirux)\nLine two: \"q\" $HOME `id` \\ 'x' é\n\n- last"
+        let brief = "# Space brief (from Nirux)\nLine two: \"q\" $HOME `id` \\ 'x' é\n\n- last"
         let file = stateDirectory.appendingPathComponent("brief injected.md")
         try Data(brief.utf8).write(to: file)
         let arguments = NiruxShellView.claudeAppendSystemPromptArguments(briefFile: file.path, shell: "/bin/zsh")

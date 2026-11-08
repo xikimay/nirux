@@ -17,6 +17,7 @@ final class SessionNameTests: XCTestCase {
     }
 
     func testDefaultSpaceWithItsDefaultNameIsLeftOut() {
+        XCTAssertEqual(name(space: "General", isDefaultSpace: true), "feat/projects")
         XCTAssertEqual(name(space: "main", isDefaultSpace: true), "feat/projects")
     }
 

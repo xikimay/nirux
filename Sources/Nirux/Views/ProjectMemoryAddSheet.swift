@@ -99,7 +99,7 @@ final class ProjectMemoryAddSheet: NSObject, NSTextFieldDelegate, NSTextViewDele
             let name = try? ProjectMemory.newFileName(for: item.title, taken: takenNames)
             fileLabel.stringValue = name.map { "Claude Code memory: \($0)" } ?? "Its title names its file"
         } else {
-            fileLabel.stringValue = "A rule of the project brief, in every session Nirux starts"
+            fileLabel.stringValue = "A rule of the space brief, in every session Nirux starts"
         }
         addButton?.isEnabled = isComplete(item)
     }

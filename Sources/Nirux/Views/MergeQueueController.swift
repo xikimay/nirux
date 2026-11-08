@@ -22,14 +22,14 @@ final class MergeQueueController {
 
         var message: String {
             switch self {
-            case .alreadyRunning: return "This project’s merge queue is already running."
+            case .alreadyRunning: return "This space’s merge queue is already running."
             case .nothingToQueue: return "Add pull requests to the queue first."
             case .invalidEntry(let problem): return problem
             case .invalidSettings(let problems): return problems.joined(separator: "\n")
-            case .repositoryBusy: return "Another project’s merge queue is running on this repository."
+            case .repositoryBusy: return "Another space’s merge queue is running on this repository."
             case .lockedElsewhere:
                 return "Another Nirux is running a merge queue on this repository (or its lock can’t be taken)."
-            case .noProjectFolder: return "This project has no folder for its queue’s files."
+            case .noProjectFolder: return "This space has no folder for its queue’s files."
             }
         }
     }
