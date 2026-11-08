@@ -344,14 +344,18 @@ final class ProjectBoardFlowTests: XCTestCase {
             shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
             let front = root + "/front"
             let back = root + "/back"
+            let docs = root + "/docs"
             try BoardConfigSuggestionsTests.makeRepository(at: front, remote: "https://github.com/acme/front.git")
             try BoardConfigSuggestionsTests.makeRepository(at: back, remote: "git@github.com:acme/back.git")
+            // No remote and no config: only its anchor puts it in its section.
+            try BoardConfigSuggestionsTests.makeRepository(at: docs, remote: nil)
             try git(["worktree", "add", "-q", "-b", "feat/login", root + "/front.login"], at: front)
             try git(["worktree", "add", "-q", "-b", "feat/api", root + "/back.api"], at: back)
             var frontAnchor = try XCTUnwrap(FolderIdentity.identify(front, timeout: 10)).anchor
             frontAnchor.isDefault = true
             let backAnchor = try XCTUnwrap(FolderIdentity.identify(back, timeout: 10)).anchor
-            XCTAssertTrue(shell.workspaceStore.setAnchors([frontAnchor, backAnchor], forProfile: space.id))
+            let docsAnchor = try XCTUnwrap(FolderIdentity.identify(docs, timeout: 10)).anchor
+            XCTAssertTrue(shell.workspaceStore.setAnchors([frontAnchor, backAnchor, docsAnchor], forProfile: space.id))
             let config = { (name: String) in
                 BoardConfig(repository: "acme/\(name)", baseBranch: "main", requiredChecks: ["test"], postMergeWorkflow: .noWorkflow)
             }
@@ -370,15 +374,17 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             try waitUntil("both repositories read") {
                 guard case .sections(let sections, _)? = board.view.content?.body else { return false }
-                return sections.map { $0.rows.compactMap(\.pullRequest?.number) } == [[12], [21]]
+                return sections.map { $0.rows.compactMap(\.pullRequest?.number) } == [[12], [21], []]
             }
             guard case .sections(let sections, let others)? = board.view.content?.body else { return XCTFail("no sections") }
-            XCTAssertEqual(sections.map(\.title), ["front", "back"], "the default repository first")
-            XCTAssertEqual(sections.map(\.repository), ["acme/front", "acme/back"])
+            XCTAssertEqual(sections.map(\.title), ["front", "back", "docs"], "the default repository first")
+            XCTAssertEqual(sections.map(\.repository), ["acme/front", "acme/back", nil])
             XCTAssertEqual(sections[1].rows.map(\.name), ["main", "api"], "its main checkout too, without a workspace")
+            XCTAssertEqual(sections[2].rows.map(\.name), ["main"], "found by its anchor alone")
+            XCTAssertNotNil(sections[2].note, "it says to set its GitHub repository")
             XCTAssertEqual(others, [])
             XCTAssertEqual(board.view.header.context, space.name, "the header names the space, not one repository")
-            XCTAssertEqual(board.view.queueLines.map(\.name.stringValue), ["front", "back"])
+            XCTAssertEqual(board.view.queueLines.map(\.name.stringValue), ["front", "back"], "docs has no queue")
             XCTAssertTrue(board.view.queueLabel.isHidden, "no single queue line")
             XCTAssertTrue(client.calls.contains { $0.what == "pr open acme/back" })
 
@@ -397,6 +403,46 @@ final class ProjectBoardFlowTests: XCTestCase {
             let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
             XCTAssertEqual(sheet.repository, backRepository)
             sheet.dismiss()
+        }
+    }
+
+    /// A queue still running on the repository Board Settings just replaced
+    /// keeps the board's line and its Stop, named after its repository.
+    @MainActor
+    func testAQueueLeftOnAnotherRepositoryKeepsItsStop() throws {
+        try withShell(client: makeClient()) { shell, space in
+            var world = MQ.World()
+            world.pullRequests[52] = MQ.pullRequest(52, head: MQ.sha("a"))
+            world.checks[MQ.sha("a")] = MQ.checks(MQ.checkRun(id: 1, status: "IN_PROGRESS", conclusion: nil))
+            shell.mergeQueueClient = FakeQueueClient(world: world, isDryRun: true)
+            shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
+            let repo = root + "/widgets"
+            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            try writeConfig(for: space, workflow: "nightly.yml")
+            shell.addWorkspace(title: "widgets", cwd: repo, profileID: space.id)
+            try select("widgets", in: shell)
+            try runPaletteAction("Open Board", in: shell)
+            let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
+            dropWorkspaceSnapshots(shell)
+
+            let queue = shell.mergeQueue(projectID: space.id, repository: MQ.widgets)
+            queue.beginActivity = { NSObject() }
+            queue.endActivity = { _ in }
+            XCTAssertNil(queue.start(settings: MQ.settings(), entries: [MQ.entry(52, head: MQ.sha("a"))]))
+            let gadgets = BoardConfig(repository: "acme/gadgets", baseBranch: "main", requiredChecks: ["test"],
+                                      postMergeWorkflow: .noWorkflow)
+            XCTAssertNoThrow(try XCTUnwrap(BoardConfigStore(spaceID: space.id)).save(gadgets).get())
+
+            try waitUntil("the line shows the widgets queue") {
+                shell.renderProjectBoard(board)
+                return board.view.queueLabel.stringValue.hasPrefix("Queue: acme/widgets: ")
+            }
+            XCTAssertEqual(board.repository?.name, "acme/gadgets")
+            XCTAssertTrue(board.view.queueLines.isEmpty, "one line")
+            XCTAssertFalse(board.view.stopQueueButton.isHidden)
+            try click(board.view.stopQueueButton)
+            try waitUntil("the widgets queue stops") { !queue.isRunning }
+            MergeQueueController.waitForFiles()
         }
     }
 

@@ -448,6 +448,13 @@ final class MergeQueueFlowTests: XCTestCase {
         own.status = .finished
         own.save(to: files.state)
         XCTAssertEqual(controller(FakeQueueClient(), clock: VirtualClock()).saved?.status, .finished)
+
+        // The older Nirux ran a queue since: its file is the newer one.
+        var newer = legacy
+        newer.status = .stopped
+        newer.savedAt = Date().addingTimeInterval(3600)
+        newer.save(to: files.legacyState)
+        XCTAssertEqual(controller(FakeQueueClient(), clock: VirtualClock()).saved?.status, .stopped)
     }
 
     @MainActor

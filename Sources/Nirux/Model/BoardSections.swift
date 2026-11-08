@@ -8,9 +8,10 @@ import Foundation
 ///
 /// Schema 1's one config (`.legacy`) goes to the anchor whose remotes name
 /// its repository, else to the default repository anchor; only anchors
-/// without a config of their own take it. Saving keeps schema 1 while the
-/// file holds one config that rule gives back to the same anchor, so an
-/// older Nirux keeps using it.
+/// without a config of their own take it, and none when the anchor that
+/// names it has its own. Saving keeps schema 1 while the file holds one
+/// config, the default repository's, that rule gives back to it: an older
+/// Nirux, which reads schema 1 as the default repository's, keeps using it.
 enum BoardSections {
     typealias Slot = BoardConfigStore.Slot
     typealias Entry = BoardConfigStore.Entry
@@ -96,22 +97,23 @@ enum BoardSections {
     /// The anchor schema 1's config belongs to, among repository anchors
     /// without a config of their own: one whose remotes name its repository
     /// (the default first), else the default one, else the first free one.
+    /// None when only anchors with a config of their own name it: it was
+    /// theirs, and no other anchor's.
     static func legacyAnchor(for config: BoardConfig, entries: [Entry], context: Context) -> SpaceAnchor? {
         let taken = Set(entries.compactMap { entry -> String? in
             if case .anchor(let commonDir) = entry.slot { return commonDir }
             return nil
         })
-        let free = repositoryAnchors(context.anchors).filter { anchor in
-            commonDir(of: anchor).map { !taken.contains($0) } ?? false
-        }
-        if let repository = config.gitHubRepository,
-           let named = free.first(where: { anchor in
-               let remotes = commonDir(of: anchor).flatMap { context.remotes[$0] } ?? []
-               return remotes.contains { $0.owner == repository.owner && $0.name == repository.name }
-           }) {
-            return named
-        }
-        return free.first
+        let anchors = repositoryAnchors(context.anchors)
+        let isFree = { (anchor: SpaceAnchor) in commonDir(of: anchor).map { !taken.contains($0) } ?? false }
+        let named = config.gitHubRepository.map { repository in
+            anchors.filter { anchor in
+                let remotes = commonDir(of: anchor).flatMap { context.remotes[$0] } ?? []
+                return remotes.contains { $0.owner == repository.owner && $0.name == repository.name }
+            }
+        } ?? []
+        if !named.isEmpty { return named.first(where: isFree) }
+        return anchors.first(where: isFree)
     }
 
     /// What to write when `config` is saved as `section`'s: the other
@@ -135,9 +137,14 @@ enum BoardSections {
         } else {
             result.append(Entry(slot: target, config: config))
         }
-        guard isPlacing, result.count == 1, case .anchor(let commonDir) = result[0].slot else { return result }
-        let placed = legacyAnchor(for: config, entries: [], context: context)
-        return placed.flatMap(Self.commonDir(of:)) == commonDir ? [Entry(slot: .legacy, config: config)] : result
+        // Schema 1 only for the default repository, which is how an older
+        // Nirux reads it (its tasks take the board's base branch there).
+        guard isPlacing, result.count == 1, case .anchor(let commonDir) = result[0].slot,
+              let defaultRepository = repositoryAnchors(context.anchors).first,
+              Self.commonDir(of: defaultRepository) == commonDir,
+              legacyAnchor(for: config, entries: [], context: context)?.key == defaultRepository.key
+        else { return result }
+        return [Entry(slot: .legacy, config: config)]
     }
 
     static func commonDir(of anchor: SpaceAnchor) -> String? {

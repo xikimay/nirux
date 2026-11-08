@@ -227,7 +227,8 @@ anchors don't appear. Decided with the user on 2026-11-08:
 - **A space without a repository anchor, or with one**, shows the board above:
   one table, the queue line under the header.
 - **With several**, the header names the space. One queue line per
-  repository, named, stays fixed under it, so Stop is always in sight. The
+  repository, named, stays fixed under it, so Stop is always in sight, even
+  while the board shows a message instead of its rows. The
   rows scroll below, under a header per repository (its name, `owner/name`,
   the post-merge run's pill or what went wrong reading it), the default
   repository first, then "Other workspaces".
@@ -241,7 +242,8 @@ anchors don't appear. Decided with the user on 2026-11-08:
   run, on the schedule of section 6. The worktrees are listed once for all.
   Adding, removing or making default a repository reads board.json again.
 - **A queue left running** on a repository no section has any more (Board
-  Settings changed, the anchor was removed) keeps a line, and its Stop.
+  Settings changed, the anchor was removed) keeps a line, and its Stop: the
+  board's one line while its own queue doesn't run, else a line of its own.
 - **Pull requests match** a worktree only in a checkout a remote of which
   names the section's repository: elsewhere, a branch of the same name is
   other work. Its pull request then shows as not checked out.
@@ -867,18 +869,22 @@ schema 2:
 - **Migration** (with the user): schema 1's one config goes to the anchor a
   remote of which names its repository, else to the default repository
   anchor; only anchors without a config of their own take it.
-- **Schema 1 stays** while the file holds one config that rule places back
-  where the user saved it, so an older Nirux keeps using a space with one
-  repository. A second config, or one the rule would place elsewhere, writes
-  schema 2, which an older build reads read-only (newer schema): it neither
-  rewrites it nor starts a queue.
+- **Schema 1 stays** while the file holds one config, the default
+  repository's, that rule places back there, so an older Nirux, which reads
+  schema 1 as the default repository's (S7), keeps using it. A second
+  config, or one for another repository, writes schema 2, which an older
+  build reads read-only (newer schema): it neither rewrites it nor starts a
+  queue.
+- Schema 1's config goes to no other anchor once the anchor whose remote
+  names it has a config of its own. Save refuses two repositories with one
+  GitHub repository (their queue would be one), and refuses while git can't
+  read the remotes of an anchor schema 1's config may belong to.
 - The rules above hold for each entry: unknown keys in one, or an unsupported
   merge method, make the file read-only; an entry that isn't an object, a
   `commonDir` that isn't an absolute path, or two entries for one anchor make
   it unreadable. Save checks only the config it changes: the others stay as
   read. A removed anchor's own config stays in the file, and comes back with
-  it. While git can't read some anchor's remotes, Save places nothing for
-  good: schema 1's config keeps no anchor.
+  it.
 - **Board Settings** (with the user): a Repository pop-up above the form picks
   the repository edited, the default one first; each form suggests from that
   repository's checkout. Leaving one with values typed and not saved asks to

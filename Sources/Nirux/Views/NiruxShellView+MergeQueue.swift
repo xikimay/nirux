@@ -137,12 +137,13 @@ extension NiruxShellView {
         }
     }
 
-    /// An orphan queue's state, its status named after its repository: its
-    /// numbers match none of the board's rows.
-    func orphanQueueState(_ controller: MergeQueueController) -> ProjectBoard.QueueState {
+    /// An orphan queue's state, its status named after its repository on a
+    /// line that doesn't say it (`named`): its numbers match none of the
+    /// board's rows.
+    func orphanQueueState(_ controller: MergeQueueController, named: Bool) -> ProjectBoard.QueueState {
         var state = queueState(of: controller)
         let name = controller.queueRepository.ownerAndName
-        state.status = state.status.map { "\(name): \($0)" }
+        if named { state.status = state.status.map { "\(name): \($0)" } }
         state.entries = []
         state.selection = []
         state.startProblems = ["\(name) isn’t one of this board’s repositories now."]

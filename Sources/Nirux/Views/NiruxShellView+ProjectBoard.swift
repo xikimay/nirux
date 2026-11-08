@@ -204,34 +204,41 @@ extension NiruxShellView {
         board.view.show(content)
     }
 
-    /// Each section's queue, and those left running on a repository no
-    /// section has: their Stop stays in reach, on the line of a board with
-    /// one (when its own repository has no queue) or a line of their own.
+    /// Each section's queue for its rows, and the queue lines: one line on a
+    /// board with one repository (what `boardQueue(_:section: nil)`
+    /// reaches), else one per repository with a queue and one per queue
+    /// left running on a repository no section has. The lines don't depend
+    /// on the rows: a board showing a message keeps every Stop in reach.
     private func addQueues(to content: inout ProjectBoardView.Content, board: ProjectBoardController) {
         let orphans = projectBoardOrphanQueues(board)
+        var states: [String: ProjectBoard.QueueState] = [:]
+        for section in board.sections {
+            states[section.id] = projectBoardQueueState(board, section: section)
+        }
         if case .sections(var sections, let others) = content.body {
-            for index in sections.indices {
-                guard let section = board.section(id: sections[index].id) else { continue }
-                sections[index].queue = projectBoardQueueState(board, section: section)
-            }
-            for orphan in orphans {
-                let name = orphan.queueRepository.ownerAndName
-                sections.append(ProjectBoardView.Section(
-                    id: Self.orphanSectionID(orphan), title: name,
-                    note: "Its queue runs, but it isn’t one of this board’s repositories now.",
-                    rows: [], queue: orphanQueueState(orphan)
-                ))
-            }
+            for index in sections.indices { sections[index].queue = states[sections[index].id] }
             content.body = .sections(sections, others: others)
+        }
+        let own = board.section(id: nil).flatMap { states[$0.id] }
+        content.queue = own
+        if board.sections.count <= 1, orphans.count <= 1, !(own?.isLocked == true && !orphans.isEmpty) {
+            if let orphan = orphans.first { content.queue = orphanQueueState(orphan, named: true) }
             return
         }
-        // The line shows what its Stop reaches (`boardQueue`): an orphan
-        // that runs, even on a board showing a message (no repository).
-        guard let shown = boardQueue(board, section: nil) else { return content.queue = nil }
-        if orphans.contains(where: { $0 === shown }) {
-            content.queue = orphanQueueState(shown)
-        } else {
-            content.queue = board.section(id: nil).flatMap { projectBoardQueueState(board, section: $0) }
+        content.queueLines = board.sections.compactMap { section in
+            states[section.id].map { state in
+                let repository = board.repository(of: section)?.name
+                return ProjectBoardView.QueueLine(
+                    id: section.id, title: board.displayNames[section.id] ?? section.name ?? repository ?? "Repository",
+                    tooltip: repository, queue: state
+                )
+            }
+        } + orphans.map { orphan in
+            ProjectBoardView.QueueLine(
+                id: Self.orphanSectionID(orphan), title: orphan.queueRepository.ownerAndName,
+                tooltip: "Its queue runs, but it isn’t one of this board’s repositories now.",
+                queue: orphanQueueState(orphan, named: false)
+            )
         }
     }
 

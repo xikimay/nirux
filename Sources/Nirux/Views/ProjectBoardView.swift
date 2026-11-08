@@ -55,6 +55,16 @@ final class ProjectBoardView: NSView {
         var queue: ProjectBoard.QueueState?
     }
 
+    /// A queue line of a board with several: a repository's queue, or one
+    /// left running on a repository the board no longer has.
+    struct QueueLine: Equatable {
+        /// Its section's id, or the orphan's.
+        let id: String
+        var title: String
+        var tooltip: String?
+        var queue: ProjectBoard.QueueState
+    }
+
     enum Body: Equatable {
         case message(String)
         case rows([ProjectBoard.Row])
@@ -69,9 +79,12 @@ final class ProjectBoardView: NSView {
         var requiredChecks: [String] = []
         /// The configured base branch: another one is named in the PR column.
         var baseBranch: String?
-        /// The project's merge queue; nil while the board can't show one
-        /// (no repository, a deleted project).
+        /// The project's merge queue on a board with one repository (its
+        /// rows' cells, and its line unless `queueLines` has some); nil
+        /// while the board can't show one (no repository, a deleted project).
         var queue: ProjectBoard.QueueState?
+        /// One line per queue, under the header, when the board has several.
+        var queueLines: [QueueLine] = []
     }
 
     /// A button of the queue line or of a Queue cell.
@@ -314,10 +327,8 @@ final class ProjectBoardView: NSView {
         let previous = self.content
         self.content = content
         applyHeader(content.header)
-        let isSections: Bool
-        if case .sections = content.body { isSections = true } else { isSections = false }
-        applyQueueHeader(isSections ? nil : content.queue.map(Self.queueHeader))
-        applyQueueLines(content)
+        applyQueueHeader(content.queueLines.isEmpty ? content.queue.map(Self.queueHeader) : nil)
+        applyQueueLines(content.queueLines)
         if content.body != previous?.body || content.requiredChecks != previous?.requiredChecks
             || content.baseBranch != previous?.baseBranch || content.queue != previous?.queue {
             if !updateAgentsInPlace(from: previous) { buildBody() }
@@ -699,7 +710,7 @@ final class ProjectBoardView: NSView {
         // The sheet shows the list as it was when it opened.
         let isFrozen = queue.isLocked || queue.isConfirming
         let locked = queue.run == .elsewhere
-            ? "Another Nirux runs this space’s queue: wait until it ends."
+            ? "Another Nirux runs this repository’s queue: wait until it ends."
             : queue.isLocked ? "The queue is running: change the list once it stops."
             : "The confirmation sheet is open: change the list once it closes."
         // What the last queue did with it, under its place in the next one.
@@ -805,7 +816,7 @@ final class ProjectBoardView: NSView {
             header.text = "Queue: running in another Nirux, read-only here" + (queue.status.map { " · \($0)" } ?? "")
             header.tone = .active
             header.start = QueueButton(title: startTitle(queue), isEnabled: false,
-                                       tooltip: "Another Nirux runs this space’s queue: Start once it ends there.")
+                                       tooltip: "Another Nirux runs this repository’s queue: Start once it ends there.")
             return header
         case .ended:
             header.text = "Queue: " + (queue.status ?? "ended") + (count > 0 ? " · \(queued)" : "")
@@ -853,27 +864,25 @@ final class ProjectBoardView: NSView {
         }
     }
 
-    /// One line per repository with a queue, named, on a board with several.
-    private func applyQueueLines(_ content: Content) {
-        var sections: [Section] = []
-        if case .sections(let list, _) = content.body { sections = list.filter { $0.queue != nil } }
-        if queueLines.map(\.section) != sections.map(\.id) {
+    /// One line per queue, named, on a board with several.
+    private func applyQueueLines(_ lines: [QueueLine]) {
+        if queueLines.map(\.section) != lines.map(\.id) {
             queueLines.forEach { $0.views.forEach { $0.removeFromSuperview() } }
-            queueLines = sections.map(makeQueueLine)
+            queueLines = lines.map(makeQueueLine)
         }
-        for (line, section) in zip(queueLines, sections) {
-            line.name.stringValue = section.title
-            line.name.toolTip = section.repository ?? section.title
-            apply(section.queue.map(Self.queueHeader), label: line.label, badge: line.badge,
-                  start: line.startButton, stop: line.stopButton)
+        for (views, line) in zip(queueLines, lines) {
+            views.name.stringValue = line.title
+            views.name.toolTip = line.tooltip ?? line.title
+            apply(Self.queueHeader(line.queue), label: views.label, badge: views.badge,
+                  start: views.startButton, stop: views.stopButton)
             // Start and Stop name the repository for VoiceOver.
-            line.startButton.setAccessibilityLabel("\(line.startButton.title) \(section.title)")
-            line.stopButton.setAccessibilityLabel("\(line.stopButton.title) \(section.title)")
+            views.startButton.setAccessibilityLabel("\(views.startButton.title) \(line.title)")
+            views.stopButton.setAccessibilityLabel("\(views.stopButton.title) \(line.title)")
         }
     }
 
-    private func makeQueueLine(_ section: Section) -> QueueLineViews {
-        let line = QueueLineViews(section: section.id)
+    private func makeQueueLine(_ shown: QueueLine) -> QueueLineViews {
+        let line = QueueLineViews(section: shown.id)
         line.name.font = .systemFont(ofSize: 11, weight: .semibold)
         line.name.textColor = Self.primaryText
         line.name.lineBreakMode = .byTruncatingTail

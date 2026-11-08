@@ -148,6 +148,17 @@ final class BoardSettingsPanelTests: XCTestCase {
             ])
             XCTAssertEqual(loaded.entries.last?.config.baseBranch, "develop")
 
+            // Two repositories of the space can't share a GitHub repository.
+            form = try pick("back", in: form, shell: shell)
+            form.repositoryField.stringValue = "Acme/Front"
+            form.askToSaveChanges = { _, answer in answer(.discard) }
+            let saved = try Data(contentsOf: try store(space).fileURL)
+            try click(form.saveButton)
+            XCTAssertTrue(form.errorLabel.stringValue.contains("“front” of this space already uses acme/front"),
+                          form.errorLabel.stringValue)
+            XCTAssertEqual(try Data(contentsOf: try store(space).fileURL), saved)
+            form = try pick("front", in: form, shell: shell)
+
             // Typed and let go: nothing written.
             form.checksTimeoutField.stringValue = "99"
             form.askToSaveChanges = { _, answer in answer(.discard) }

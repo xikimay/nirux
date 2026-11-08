@@ -4,7 +4,8 @@ import XCTest
 /// Which repository each config of board.json belongs to, and what Save
 /// writes (docs/spaces.md, S12): schema 1's one config goes to the anchor
 /// whose remotes name its repository, else to the default repository
-/// anchor, and the file stays schema 1 while that rule places it.
+/// anchor, and the file stays schema 1 while that rule places it on the
+/// default repository, as an older Nirux reads it.
 final class BoardSectionsTests: XCTestCase {
     private typealias Entry = BoardConfigStore.Entry
 
@@ -78,15 +79,21 @@ final class BoardSectionsTests: XCTestCase {
         ])
     }
 
-    /// One config schema 1 would give to another anchor: written with its
-    /// anchor, so it stays where the user put it.
+    /// One config schema 1 would give to another anchor, or that isn't the
+    /// default repository's: written with its anchor, so it stays where the
+    /// user put it, and an older Nirux, which reads schema 1 as the default
+    /// repository's, leaves it alone.
     func testOneConfigTheRuleWouldMoveIsWrittenWithItsAnchor() {
-        let front = BoardSections.sections([], context: context())[1]
+        let sections = BoardSections.sections([], context: context())
+        let front = sections[1]
         XCTAssertEqual(BoardSections.entries(saving: config("acme/front"), as: front, in: [], context: context()),
                        [Entry(slot: .anchor(commonDir: "/code/front/.git"), config: config("acme/front"))])
-        let named = context(remotes: ["/code/front/.git": ["acme/front"]])
+        let named = context(remotes: ["/code/front/.git": ["acme/front"], "/code/back/.git": ["acme/back"]])
         XCTAssertEqual(BoardSections.entries(saving: config("acme/front"), as: front, in: [], context: named),
-                       [Entry(slot: .legacy, config: config("acme/front"))], "a remote names it: schema 1 places it back")
+                       [Entry(slot: .anchor(commonDir: "/code/front/.git"), config: config("acme/front"))],
+                       "its remote names it, but it isn't the default repository")
+        XCTAssertEqual(BoardSections.entries(saving: config("acme/back"), as: sections[0], in: [], context: named),
+                       [Entry(slot: .legacy, config: config("acme/back"))], "the default repository's: schema 1")
 
         // The default's config renamed to a repository another anchor's remote names.
         let entries = [Entry(slot: .legacy, config: config("acme/web"))]
@@ -94,6 +101,17 @@ final class BoardSectionsTests: XCTestCase {
         XCTAssertEqual(owner.name, "back")
         XCTAssertEqual(BoardSections.entries(saving: config("acme/front"), as: owner, in: entries, context: named),
                        [Entry(slot: .anchor(commonDir: "/code/back/.git"), config: config("acme/front"))])
+    }
+
+    /// Schema 1's config was the anchor's that its remote names: once that
+    /// one has its own, no other anchor takes the old one.
+    func testTheLegacyConfigGoesNowhereElseOnceItsAnchorHasItsOwn() {
+        let named = context(remotes: ["/code/front/.git": ["acme/front"]])
+        let entries = [
+            Entry(slot: .legacy, config: config("acme/front")),
+            Entry(slot: .anchor(commonDir: "/code/front/.git"), config: config("acme/front-v2"))
+        ]
+        XCTAssertEqual(summary(BoardSections.sections(entries, context: named)), ["back:none:own", "front:acme/front-v2:own"])
     }
 
     /// An anchor whose remotes git couldn't read might be the one schema 1's

@@ -102,6 +102,47 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertFalse(shell.statusBar.hasContent)
     }
 
+    /// The sheet's Start finds its settings among several repositories'
+    /// (schema 2) and starts that repository's queue only.
+    @MainActor
+    func testTheSheetStartsOneRepositorysQueueFromASchema2File() throws {
+        let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
+        let space = shell.workspaceStore.createProfile(named: "Repositories")
+        let config = { (name: String) in
+            BoardConfig(repository: "acme/\(name)", baseBranch: "main", requiredChecks: ["test"],
+                        postMergeWorkflow: .workflow("nightly.yml"))
+        }
+        let store = try XCTUnwrap(BoardConfigStore(spaceID: space.id))
+        XCTAssertNoThrow(try store.save(entries: [
+            BoardConfigStore.Entry(slot: .anchor(commonDir: "/code/widgets/.git"), config: config("widgets")),
+            BoardConfigStore.Entry(slot: .anchor(commonDir: "/code/gadgets/.git"), config: config("gadgets"))
+        ]).get())
+        let settings = try XCTUnwrap(store.load().view(for: .anchor(commonDir: "/code/gadgets/.git")).queueSettings)
+        var reading = MergeQueue.ConfirmationReading(settings: settings, isDryRun: true)
+        reading.rateLimit = MergeQueue.RateLimit(coreRemaining: 5000, coreReset: Date(), graphQLRemaining: 5000, graphQLReset: Date())
+        reading.baseMergeQueue = false
+        reading.baseRuns = []
+        var candidate = MergeQueue.ConfirmationReading.Candidate(number: 7)
+        candidate.pullRequest = MQ.pullRequest(7, head: MQ.sha("b"), repository: settings.gitHubRepository)
+        candidate.checks = MQ.checks(MQ.checkRun(id: 1))
+        candidate.comparison = .some(MergeQueue.Comparison(status: "ahead", aheadBy: 1, behindBy: 0, baseCommit: MQ.sha("0")))
+        candidate.local = MergeQueue.LocalState()
+        reading.candidates = [candidate]
+        let confirmation = MergeQueue.confirmation(reading)
+        XCTAssertTrue(confirmation.canStart)
+        let panel = MergeQueueConfirmationPanel(projectID: space.id, repository: settings.gitHubRepository, isDryRun: true, numbers: [7])
+        panel.show(attachedTo: nil, repository: "acme/gadgets", baseBranch: "main")
+        defer { panel.dismiss() }
+
+        let queue = shell.mergeQueue(projectID: space.id, repository: settings.gitHubRepository)
+        queue.beginActivity = { NSObject() }
+        queue.endActivity = { _ in }
+        shell.confirmMergeQueueStart(confirmation, panel: panel)
+        XCTAssertEqual(queue.engine?.entries.map(\.number), [7], "started: \(panel.statusLabel?.stringValue ?? "")")
+        XCTAssertNil(shell.mergeQueue(projectID: space.id, repository: MQ.widgets).engine, "the other repository's stays")
+        queue.stop()
+    }
+
     /// A queue checks the worktrees of its space's repositories even where
     /// no workspace of the space is open: the board lists them
     /// (docs/spaces.md, S12), and an unpushed commit there must stop it.

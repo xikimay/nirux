@@ -86,6 +86,19 @@ extension NiruxShellView {
             // The other repositories' configs stay as read; refused if
             // another Nirux saved the file since it was read.
             let kept = read.loaded.status == .unreadable ? [] : read.loaded.entries
+            // Which repository schema 1's config belongs to rests on every
+            // anchor's remotes.
+            if kept.contains(where: { $0.slot == .legacy }), let unread = read.context.unread.first {
+                let name = read.sections.first { $0.commonDir == unread }?.name ?? (unread as NSString).deletingLastPathComponent
+                return "Nirux couldn’t read the remotes of “\(name)”, so it can’t tell which repository the board’s "
+                    + "current settings belong to. Close the form and try again once that repository can be read."
+            }
+            // A queue never mixes repositories, and two sections' would be one.
+            if let repository = config.gitHubRepository,
+               let other = read.sections.first(where: { $0.id != read.section.id && $0.config?.gitHubRepository == repository }) {
+                return "“\(other.name ?? "Another repository")” of this space already uses \(repository.ownerAndName): "
+                    + "each repository needs its own GitHub repository."
+            }
             let entries = BoardSections.entries(saving: config, as: read.section, in: kept, context: read.context)
             switch store.save(entries: entries, replacing: read.loaded) {
             case .success: return nil
