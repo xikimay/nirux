@@ -101,7 +101,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             try click(try XCTUnwrap(sheet.startButton))
             XCTAssertNil(shell.mergeQueueConfirmation, "started: the sheet is gone")
 
-            let queue = shell.mergeQueue(projectID: board.projectID)
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
             XCTAssertEqual(queue.engine?.entries.map(\.number), [14, 12])
             try waitUntil("the dry run stops at its first mutation") { !queue.isRunning }
             guard case .stopped(let reason)? = queue.engine?.phase else { return XCTFail("not stopped") }
@@ -134,7 +134,7 @@ final class MergeQueueBoardFlowTests: XCTestCase {
             try waitUntil("the sheet read GitHub") { sheet.startButton?.isEnabled == true }
             try click(try XCTUnwrap(sheet.startButton))
 
-            let queue = shell.mergeQueue(projectID: board.projectID)
+            let queue = shell.mergeQueue(projectID: board.projectID, repository: MQ.widgets)
             try waitUntil("the queue waits for the checks") {
                 if case .waitingForChecks? = queue.engine?.currentEntry?.step { return true }
                 return false

@@ -2,16 +2,27 @@ import AppKit
 
 // MARK: - Merge queue (docs/project-board.md, sections 3.6 and 4)
 
-/// The shell owns each project's merge queue, so a queue outlives the
-/// board that shows it. It also tells a queue which agents are busy in a
-/// pull request's worktrees, and fans the queue's changes out to the
-/// board, the status bar, keep-awake and a quit waiting on it.
+/// A merge queue's place: its project and the repository it merges into.
+struct MergeQueueKey: Hashable {
+    let projectID: String
+    let repository: GitHubRepository
+}
+
+/// The shell owns each project's merge queues, one per repository, so a
+/// queue outlives the board that shows it and queues on different
+/// repositories run side by side (docs/spaces.md, S12). It also tells a
+/// queue which agents are busy in a pull request's worktrees, and fans the
+/// queue's changes out to the board, the status bar, keep-awake and a quit
+/// waiting on it.
 extension NiruxShellView {
-    /// The project's merge queue, made the first time it is asked for.
-    func mergeQueue(projectID: String) -> MergeQueueController {
-        if let existing = mergeQueues[projectID] { return existing }
+    /// The project's queue on `repository`, made the first time it is asked
+    /// for.
+    func mergeQueue(projectID: String, repository: GitHubRepository) -> MergeQueueController {
+        let key = MergeQueueKey(projectID: projectID, repository: repository)
+        if let existing = mergeQueues[key] { return existing }
         let controller = MergeQueueController(
             projectID: projectID,
+            repository: repository,
             client: mergeQueueClient ?? MergeQueue.client(),
             local: MergeQueueLocalAccess(
                 folders: { [weak self] in self?.projectWorkspaces(of: projectID).map(\.cwd) ?? [] },
@@ -27,8 +38,17 @@ extension NiruxShellView {
             return self.mergeQueues.values.contains { $0 !== controller && $0.isRunning && $0.repository == repository }
         }
         controller.onChange = { [weak self] in self?.mergeQueueDidChange(projectID: projectID) }
-        mergeQueues[projectID] = controller
+        mergeQueues[key] = controller
         return controller
+    }
+
+    /// The project's queues made so far, by repository name.
+    func mergeQueues(of projectID: String) -> [MergeQueueController] {
+        mergeQueues.values.filter { $0.projectID == projectID }.sorted { Self.queueOrder($0) < Self.queueOrder($1) }
+    }
+
+    private static func queueOrder(_ controller: MergeQueueController) -> String {
+        "\(controller.queueRepository.owner)/\(controller.queueRepository.name)"
     }
 
     /// The agents working or waiting on a dialog in these worktrees (paths
@@ -63,9 +83,10 @@ extension NiruxShellView {
 
     private var sortedMergeQueues: [MergeQueueController] {
         let order = profiles.map(\.id)
-        return mergeQueues.values.sorted {
-            (order.firstIndex(of: $0.projectID) ?? .max, $0.projectID) < (order.firstIndex(of: $1.projectID) ?? .max, $1.projectID)
+        let rank = { (controller: MergeQueueController) in
+            (order.firstIndex(of: controller.projectID) ?? .max, controller.projectID, Self.queueOrder(controller))
         }
+        return mergeQueues.values.sorted { rank($0) < rank($1) }
     }
 
     /// After every step of a queue, and every change to its list. A board
@@ -82,55 +103,92 @@ extension NiruxShellView {
 
     // MARK: The board
 
-    /// What the board shows of its project's queue; nil while it can't
-    /// show one (no repository, a deleted project, board.json unread),
-    /// unless a queue runs: its Stop stays in reach whatever board.json says.
-    /// Only reads: `refreshMergeQueuesElsewhere` reads the saved file again.
-    func projectBoardQueueState(_ board: ProjectBoardController) -> ProjectBoard.QueueState? {
-        let existing = mergeQueues[board.projectID]
-        let isActive = existing?.isRunning == true || existing?.runsElsewhere == true
-        guard isActive || (board.repository != nil && board.loaded != nil && profiles.contains { $0.id == board.projectID })
+    /// What the board shows of a section's queue; nil while it can't show
+    /// one (no repository, a deleted project, board.json unread). Only
+    /// reads: `refreshMergeQueuesElsewhere` reads the saved file again.
+    func projectBoardQueueState(_ board: ProjectBoardController, section: BoardSections.Section) -> ProjectBoard.QueueState? {
+        guard let repository = board.repository(of: section)?.gitHub, board.loaded != nil,
+              profiles.contains(where: { $0.id == board.projectID })
         else { return nil }
-        // Made once per project: it reads the saved queue.
-        let controller = existing ?? mergeQueue(projectID: board.projectID)
-        let repository = board.repository?.gitHub
+        // Made once per repository: it reads the saved queue.
+        let controller = mergeQueue(projectID: board.projectID, repository: repository)
+        var state = queueState(of: controller)
+        state.startProblems = board.loaded(for: section)?.queueStartProblems ?? ["board.json isn’t read yet."]
+        return state
+    }
+
+    /// The project's queues running here or in another Nirux on a
+    /// repository none of the board's sections has (board.json changed
+    /// since it started): their Stop stays in reach.
+    func projectBoardOrphanQueues(_ board: ProjectBoardController) -> [MergeQueueController] {
+        let shown = Set(board.sections.compactMap { board.repository(of: $0)?.gitHub })
+        return mergeQueues(of: board.projectID).filter { controller in
+            (controller.isRunning || controller.runsElsewhere) && !shown.contains(controller.queueRepository)
+        }
+    }
+
+    /// An orphan queue's state, its status named after its repository: its
+    /// numbers match none of the board's rows.
+    func orphanQueueState(_ controller: MergeQueueController) -> ProjectBoard.QueueState {
+        var state = queueState(of: controller)
+        let name = "\(controller.queueRepository.owner)/\(controller.queueRepository.name)"
+        state.status = state.status.map { "\(name): \($0)" }
+        state.entries = []
+        state.selection = []
+        state.startProblems = ["\(name) isn’t one of this board’s repositories now."]
+        return state
+    }
+
+    /// The queue shown: running here, running elsewhere, or the last one.
+    private func queueState(of controller: MergeQueueController) -> ProjectBoard.QueueState {
         var state = ProjectBoard.QueueState(isDryRun: controller.isDryRun, dryRunReason: controller.dryRunReason)
-        state.selection = controller.selection(for: repository)
-        state.startProblems = board.loaded?.queueStartProblems ?? ["board.json isn’t read yet."]
+        state.selection = controller.selection(for: controller.queueRepository)
         state.isConfirming = mergeQueueConfirmation != nil
-        // The queue shown: running here, running elsewhere, or the last one.
-        let shown: (entries: [MergeQueue.Entry], workflow: String?, repository: String)?
+        let shown: (entries: [MergeQueue.Entry], workflow: String?)?
         if let engine = controller.engine, controller.isRunning {
             state.run = .running(isStopping: engine.phase == .stopping)
             state.status = engine.statusText
-            shown = (engine.entries, engine.settings.postMergeWorkflow, engine.settings.repository)
+            shown = (engine.entries, engine.settings.postMergeWorkflow)
         } else if controller.runsElsewhere, let saved = controller.saved {
             state.run = .elsewhere
             state.status = saved.statusText
-            shown = (saved.entries, saved.postMergeWorkflow, saved.repository)
+            shown = (saved.entries, saved.postMergeWorkflow)
         } else if let engine = controller.engine {
             state.run = .ended
             state.status = engine.statusText
             if case .stopped(let reason) = engine.phase { state.statusIsFailure = reason.isProblem }
-            shown = (engine.entries, engine.settings.postMergeWorkflow, engine.settings.repository)
+            shown = (engine.entries, engine.settings.postMergeWorkflow)
         } else if let saved = controller.saved {
             state.run = .ended
             state.status = saved.statusText
             state.statusIsFailure = saved.status == .stopped && saved.stopReason?.isProblem != false
-            shown = (saved.entries, saved.postMergeWorkflow, saved.repository)
+            shown = (saved.entries, saved.postMergeWorkflow)
         } else {
             shown = nil
         }
         if let shown {
             state.workflow = shown.workflow
-            // Its numbers name other pull requests in another repository.
-            if GitHubRepository(ownerAndName: shown.repository) == repository {
-                state.entries = shown.entries
-            } else {
-                state.status = state.status.map { "\(shown.repository): \($0)" }
-            }
+            state.entries = shown.entries
         }
         return state
+    }
+
+    /// The queue a board's line shows: its section's (nil: the board's only
+    /// one), else, on a board with one line, a queue left running on a
+    /// repository the board no longer has.
+    func boardQueue(_ board: ProjectBoardController, section id: String?) -> MergeQueueController? {
+        if let id, let orphan = projectBoardOrphanQueues(board).first(where: { Self.orphanSectionID($0) == id }) {
+            return orphan
+        }
+        if let section = board.section(id: id), let repository = board.repository(of: section)?.gitHub {
+            return mergeQueue(projectID: board.projectID, repository: repository)
+        }
+        return id == nil ? projectBoardOrphanQueues(board).first : nil
+    }
+
+    /// The id of an orphan queue's section on a board with several lines.
+    static func orphanSectionID(_ controller: MergeQueueController) -> String {
+        "queue:\(controller.queueRepository.owner)/\(controller.queueRepository.name)"
     }
 
     /// At each status refresh: a queue another Nirux runs is looked at
@@ -141,18 +199,19 @@ extension NiruxShellView {
         }
     }
 
-    func addToMergeQueue(_ number: Int, board: ProjectBoardController) {
+    func addToMergeQueue(_ number: Int, board: ProjectBoardController, section id: String?) {
         if let busy = mergeQueueSelectionBusy { return showToast(busy) }
         guard board.loaded != nil else { return showToast("The board is still loading") }
-        guard let repository = board.repository?.gitHub else {
+        guard let section = board.section(id: id), let repository = board.repository(of: section)?.gitHub else {
             return showToast("The board has no GitHub repository: open Board Settings…")
         }
-        mergeQueue(projectID: board.projectID).addToSelection(number, repository: repository)
+        mergeQueue(projectID: board.projectID, repository: repository).addToSelection(number, repository: repository)
     }
 
-    func removeFromMergeQueue(_ number: Int, board: ProjectBoardController) {
+    func removeFromMergeQueue(_ number: Int, board: ProjectBoardController, section id: String?) {
         if let busy = mergeQueueSelectionBusy { return showToast(busy) }
-        mergeQueue(projectID: board.projectID).removeFromSelection(number)
+        guard let section = board.section(id: id), let repository = board.repository(of: section)?.gitHub else { return }
+        mergeQueue(projectID: board.projectID, repository: repository).removeFromSelection(number)
     }
 
     /// Why the queue's list can't change now, if it can't; as the board's
@@ -163,15 +222,15 @@ extension NiruxShellView {
         return nil
     }
 
-    /// Stop, from the board or the status bar: before the next command.
-    func stopMergeQueue(projectID: String) {
-        mergeQueues[projectID]?.stop()
+    /// Stop, from a board's queue line: before the next command.
+    func stopMergeQueue(board: ProjectBoardController, section id: String?) {
+        boardQueue(board, section: id)?.stop()
     }
 
     /// Deleting a space whose queue runs would take its folders, and its
     /// board's Stop, away: stop the queue first.
     func refuseToDeleteSpaceWithRunningQueue(profileID: String) -> Bool {
-        guard mergeQueues[profileID]?.isRunning == true else { return false }
+        guard mergeQueues(of: profileID).contains(where: \.isRunning) else { return false }
         let alert = NSAlert()
         alert.messageText = "This space’s merge queue is running"
         alert.informativeText = "Stop it from the board or the status bar, then delete the space."
@@ -183,24 +242,27 @@ extension NiruxShellView {
 
     /// Start: the sheet reads the queued pull requests on GitHub as they
     /// are now, then shows what will happen. Every Start opens a new one.
-    func requestMergeQueueStart(board: ProjectBoardController) {
+    func requestMergeQueueStart(board: ProjectBoardController, section id: String?) {
         // Already open: in front, which says it.
         if let open = mergeQueueConfirmation { return open.focus() }
-        let controller = mergeQueue(projectID: board.projectID)
         guard mergeQueueQuit == nil else { return showToast("Nirux is stopping the merge queue to quit") }
-        guard let loaded = board.loaded else { return showToast("The board is still loading") }
+        guard let section = board.section(id: id), let loaded = board.loaded(for: section) else {
+            return showToast("The board is still loading")
+        }
         guard let settings = loaded.queueSettings else {
             let problem = loaded.queueStartProblems.first ?? "The board isn’t configured yet: open Board Settings…"
             return showToast(problem.hasSuffix(".") ? String(problem.dropLast()) : problem)
         }
+        let controller = mergeQueue(projectID: board.projectID, repository: settings.gitHubRepository)
         guard !controller.isRunning else { return showToast("The merge queue is already running") }
         guard !controller.runsElsewhere else {
-            return showToast("Another Nirux runs this space’s queue: wait until it ends")
+            return showToast("Another Nirux runs this repository’s queue: wait until it ends")
         }
         let numbers = controller.selection(for: settings.gitHubRepository)
         guard !numbers.isEmpty else { return showToast("Add pull requests to the queue first") }
         let panel = MergeQueueConfirmationPanel(
-            projectID: board.projectID, isDryRun: controller.isDryRun, numbers: numbers, dryRunReason: controller.dryRunReason
+            projectID: board.projectID, repository: settings.gitHubRepository, isDryRun: controller.isDryRun,
+            numbers: numbers, dryRunReason: controller.dryRunReason
         )
         panel.onStart = { [weak self, weak panel] confirmation in
             guard let self, let panel else { return }
@@ -228,22 +290,26 @@ extension NiruxShellView {
     }
 
     /// The sheet's Start: with the settings it showed, which board.json
-    /// must still hold, and its list in its order.
+    /// must still hold for its repository, and its list in its order.
     func confirmMergeQueueStart(_ confirmation: MergeQueue.Confirmation, panel: MergeQueueConfirmationPanel) {
         guard confirmation.canStart else { return }
         guard mergeQueueQuit == nil else { return panel.showError("Nirux is quitting.") }
         guard profiles.contains(where: { $0.id == panel.projectID }) else {
             return panel.showError("This space was deleted.")
         }
-        guard BoardConfigStore(spaceID: panel.projectID)?.load().queueSettings == confirmation.settings else {
+        let loaded = BoardConfigStore(spaceID: panel.projectID)?.load()
+        let holdsSettings = loaded.map { loaded in
+            loaded.entries.contains { loaded.view(for: $0.slot).queueSettings == confirmation.settings }
+        } ?? false
+        guard holdsSettings, confirmation.settings.gitHubRepository == panel.repository else {
             return panel.showError("Board Settings changed since this sheet read GitHub: Cancel, then Start again.")
         }
-        let controller = mergeQueue(projectID: panel.projectID)
+        let controller = mergeQueue(projectID: panel.projectID, repository: panel.repository)
         guard controller.isDryRun == confirmation.isDryRun else { return panel.showError("Cancel, then Start again.") }
         if let refusal = controller.start(settings: confirmation.settings, entries: confirmation.entries) {
             return panel.showError(refusal.message)
         }
-        dismissedMergeQueueNotices.remove(panel.projectID)
+        dismissedMergeQueueNotices.remove(MergeQueueKey(projectID: panel.projectID, repository: panel.repository))
         panel.dismiss()
         mergeQueueDidChange(projectID: panel.projectID)
     }
@@ -263,12 +329,13 @@ extension NiruxShellView {
         let queues = sortedMergeQueues
         let running = queues.filter(\.isRunning)
         // The last to end, so a newer stop never hides behind an older notice.
-        let ended = queues.filter { !$0.isRunning && $0.engine != nil && !dismissedMergeQueueNotices.contains($0.projectID) }
+        let ended = queues.filter { !$0.isRunning && $0.engine != nil && !dismissedMergeQueueNotices.contains($0.key) }
             .max { ($0.saved?.savedAt ?? .distantPast) < ($1.saved?.savedAt ?? .distantPast) }
         guard let shown = running.first ?? ended, let engine = shown.engine else {
             return statusBar.showQueue(nil)
         }
         let projectID = shown.projectID
+        let key = shown.key
         let prefix = shown.isDryRun ? "Queue (dry run)" : "Queue"
         var text: String
         var isFailure = false
@@ -303,12 +370,12 @@ extension NiruxShellView {
             if stopsAll {
                 self.runningMergeQueues.forEach { $0.stop() }
             } else {
-                self.stopMergeQueue(projectID: projectID)
+                self.mergeQueues[key]?.stop()
             }
         }
         statusBar.onQueueDismiss = { [weak self] in
             guard let self else { return }
-            self.dismissedMergeQueueNotices.insert(projectID)
+            self.dismissedMergeQueueNotices.insert(key)
             self.updateMergeQueueStatusBar()
         }
         statusBar.showQueue(notice)
@@ -440,4 +507,8 @@ extension NiruxShellView {
         quit.isAnswered = true
         quit.reply(confirmed)
     }
+}
+
+extension MergeQueueController {
+    var key: MergeQueueKey { MergeQueueKey(projectID: projectID, repository: queueRepository) }
 }

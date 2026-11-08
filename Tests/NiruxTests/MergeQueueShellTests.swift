@@ -58,7 +58,7 @@ final class MergeQueueShellTests: XCTestCase {
 
     @MainActor
     private func start(_ shell: NiruxShellView, projectID: String = "project") -> MergeQueueController {
-        let queue = shell.mergeQueue(projectID: projectID)
+        let queue = shell.mergeQueue(projectID: projectID, repository: MQ.widgets)
         queue.beginActivity = { NSObject() }
         queue.endActivity = { _ in }
         XCTAssertNil(queue.start(settings: MQ.settings(), entries: [MQ.entry(52, head: MQ.sha("a"))]))
@@ -108,7 +108,7 @@ final class MergeQueueShellTests: XCTestCase {
         // "aaa" comes first in order, and ends first.
         let older = start(shell, projectID: "aaa")
         older.stop()
-        let newer = shell.mergeQueue(projectID: "bbb")
+        let newer = shell.mergeQueue(projectID: "bbb", repository: GitHubRepository(owner: "acme", name: "gadgets"))
         newer.beginActivity = { NSObject() }
         newer.endActivity = { _ in }
         let gadgets = BoardConfig.QueueSettings(
@@ -176,7 +176,7 @@ final class MergeQueueShellTests: XCTestCase {
     func testWithSeveralQueuesTheStatusBarStopsThemAll() throws {
         let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))
         let first = start(shell, projectID: "first")
-        let second = shell.mergeQueue(projectID: "second")
+        let second = shell.mergeQueue(projectID: "second", repository: GitHubRepository(owner: "acme", name: "gadgets"))
         second.beginActivity = { NSObject() }
         second.endActivity = { _ in }
         var gadgets = MQ.settings()
@@ -356,13 +356,15 @@ final class MergeQueueShellTests: XCTestCase {
         reading.candidates = [candidate]
         let confirmation = MergeQueue.confirmation(reading)
         XCTAssertTrue(confirmation.canStart)
-        let panel = MergeQueueConfirmationPanel(projectID: space.id, isDryRun: true, numbers: [7])
+        let panel = MergeQueueConfirmationPanel(
+            projectID: space.id, repository: settings.gitHubRepository, isDryRun: true, numbers: [7]
+        )
         panel.show(attachedTo: nil, repository: "acme/gadgets", baseBranch: "main")
         defer { panel.dismiss() }
 
         shell.confirmMergeQueueStart(confirmation, panel: panel)
         XCTAssertEqual(panel.statusLabel?.stringValue, "Nirux is quitting.")
-        XCTAssertNil(shell.mergeQueues[space.id]?.engine, "nothing started")
+        XCTAssertNil(shell.mergeQueue(projectID: space.id, repository: settings.gitHubRepository).engine, "nothing started")
         running.stop()
     }
 

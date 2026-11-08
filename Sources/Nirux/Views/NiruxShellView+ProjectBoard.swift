@@ -60,6 +60,10 @@ extension NiruxShellView {
             guard let self, let board else { return [] }
             return self.projectWorkspaces(of: board.projectID).map(\.cwd)
         }
+        board.spaceAnchors = { [weak self, weak board] in
+            guard let self, let board else { return [] }
+            return self.profiles.first { $0.id == board.projectID }?.anchors ?? []
+        }
         board.isOnScreen = { [weak self, weak board] in
             guard let self, let board else { return false }
             return self.isProjectBoardOnScreen(board)
@@ -96,13 +100,13 @@ extension NiruxShellView {
             guard let self, let board else { return }
             self.performProjectBoardAction(action, board: board)
         }
-        board.view.onStartQueue = { [weak self, weak board] in
+        board.view.onStartQueue = { [weak self, weak board] section in
             guard let self, let board else { return }
-            self.requestMergeQueueStart(board: board)
+            self.requestMergeQueueStart(board: board, section: section)
         }
-        board.view.onStopQueue = { [weak self, weak board] in
+        board.view.onStopQueue = { [weak self, weak board] section in
             guard let self, let board else { return }
-            self.stopMergeQueue(projectID: board.projectID)
+            self.stopMergeQueue(board: board, section: section)
         }
         return board
     }
@@ -193,10 +197,37 @@ extension NiruxShellView {
         if let local = board.local, members.contains(where: { local.folders[$0.cwd] == nil }) {
             board.expireWorktrees()
         }
+        board.reloadIfAnchorsChanged()
         let projects = profiles.map { ProjectBoardView.Project(id: $0.id, name: $0.name) }
         var content = board.content(workspaces: inputs, projects: projects)
-        content.queue = projectBoardQueueState(board)
+        addQueues(to: &content, board: board)
         board.view.show(content)
+    }
+
+    /// Each section's queue, and those left running on a repository no
+    /// section has: their Stop stays in reach, on the line of a board with
+    /// one (when its own repository has no queue) or a line of their own.
+    private func addQueues(to content: inout ProjectBoardView.Content, board: ProjectBoardController) {
+        let orphans = projectBoardOrphanQueues(board)
+        if case .sections(var sections, let others) = content.body {
+            for index in sections.indices {
+                guard let section = board.section(id: sections[index].id) else { continue }
+                sections[index].queue = projectBoardQueueState(board, section: section)
+            }
+            for orphan in orphans {
+                let name = "\(orphan.queueRepository.owner)/\(orphan.queueRepository.name)"
+                sections.append(ProjectBoardView.Section(
+                    id: Self.orphanSectionID(orphan), title: name,
+                    note: "Its queue runs, but it isn’t one of this board’s repositories now.",
+                    rows: [], queue: orphanQueueState(orphan)
+                ))
+            }
+            content.body = .sections(sections, others: others)
+            return
+        }
+        // A board showing a message (no repository) still shows a queue that runs.
+        content.queue = board.section(id: nil).flatMap { projectBoardQueueState(board, section: $0) }
+            ?? orphans.first.map(orphanQueueState)
     }
 
     /// A worktree was cleaned up: the boards list their worktrees again.
@@ -262,14 +293,15 @@ extension NiruxShellView {
                   let column = workspace.columns.first(where: { $0.id == columnID && !$0.isClosing })
             else { return showToast("That agent’s column was closed") }
             resumeExitedAgent(in: workspace, column: column)
-        case .addToQueue(let number):
-            addToMergeQueue(number, board: board)
-        case .removeFromQueue(let number):
-            removeFromMergeQueue(number, board: board)
-        case .retarget(let number, let base):
+        case .addToQueue(let number, let section):
+            addToMergeQueue(number, board: board, section: section)
+        case .removeFromQueue(let number, let section):
+            removeFromMergeQueue(number, board: board, section: section)
+        case .retarget(let number, let base, let section):
             // Changes GitHub: never from a dry-run build, like the queue.
-            guard !mergeQueue(projectID: board.projectID).isDryRun else { return NSSound.beep() }
-            board.retarget(number, onto: base)
+            guard let target = board.section(id: section), let repository = board.repository(of: target)?.gitHub else { return }
+            guard !mergeQueue(projectID: board.projectID, repository: repository).isDryRun else { return NSSound.beep() }
+            board.retarget(number, onto: base, section: target.id)
         }
         renderProjectBoard(board)
     }

@@ -1,8 +1,10 @@
 import Foundation
 
 /// Reads and writes a project's `board.json` (see BoardConfig), next to its
-/// brief in `<state dir>/projects/<space id>/`. It follows ProjectStore's
-/// rules:
+/// brief in `<state dir>/projects/<space id>/`. Schema 1 holds one config,
+/// the space's repository; schema 2 one per git anchor (see BoardSections),
+/// written only once the file needs it, so an older Nirux keeps using a
+/// space with one repository. It follows ProjectStore's rules:
 /// - decoding is lenient (see `BoardConfig.init(from:)`);
 /// - a file this build can't write back as it found it is read but never
 ///   written: a newer `schemaVersion`, keys it doesn't know, a merge method
@@ -22,6 +24,31 @@ import Foundation
 struct BoardConfigStore: Sendable {
     static let fileName = "board.json"
     static let maxFileBytes = SpaceBrief.maxFileBytes
+    /// The newest schema this build reads and writes. It writes schema 1
+    /// whenever the file holds one config an older build can place.
+    static let schemaVersion = 2
+
+    /// Where a repository's config sits in the file.
+    enum Slot: Hashable, Sendable {
+        /// Schema 1's one config: the space's repository, which
+        /// `BoardSections` gives to one of its git anchors.
+        case legacy
+        /// A schema 2 entry: the git anchor with this common git dir.
+        case anchor(commonDir: String)
+    }
+
+    /// One repository's config. Schema 2 writes it as the config's keys
+    /// plus `commonDir` (none for `.legacy`), in a `repositories` list.
+    struct Entry: Equatable, Sendable {
+        static let listKey = "repositories"
+        static let commonDirKey = "commonDir"
+        /// Never remove one: a file that has it would turn read-only.
+        static let knownKeys = Set(BoardConfig.CodingKeys.allCases.map(\.rawValue))
+            .subtracting([BoardConfig.CodingKeys.schemaVersion.rawValue]).union([commonDirKey])
+
+        var slot: Slot
+        var config: BoardConfig
+    }
 
     /// Posted after each save, on the thread that saved, with the space's id
     /// as `userInfo["spaceID"]`.
@@ -51,13 +78,23 @@ struct BoardConfigStore: Sendable {
             case readOnly(ReadOnlyReason)
         }
 
-        /// What the file holds. Nil when it is missing, unreadable, or not
-        /// read at all (see `ReadOnlyReason`).
+        /// The config this is about: a schema 1 file's one config, or one
+        /// repository's (`view(for:)`). Nil when there is none, or the file
+        /// is unreadable or wasn't read at all (see `ReadOnlyReason`).
         var config: BoardConfig?
         var status: Status
         /// The bytes read, so `save(_:replacing:)` can tell whether the file
         /// changed since. Nil when it is missing or wasn't read.
         var contents: Data?
+        /// Every config the file holds, in its order.
+        var entries: [Entry] = []
+
+        /// The same file, about the config in `slot` (none yet: nil).
+        func view(for slot: Slot) -> Loaded {
+            var view = self
+            view.config = entries.first { $0.slot == slot }?.config
+            return view
+        }
 
         var isWritable: Bool {
             if case .readOnly = status { return false }
@@ -152,30 +189,99 @@ struct BoardConfigStore: Sendable {
 
     static func decode(_ data: Data) -> Loaded {
         let top = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        let config = try? JSONDecoder().decode(BoardConfig.self, from: data)
         let schema = top.map(schema(of:)) ?? .invalid
         // A newer schema may have changed what a key holds: it is never
-        // written, even when this build can't read it at all.
+        // written, even when this build can't read it at all. What it reads
+        // as this build's schemas is shown.
         if case .newer(let version) = schema {
-            return Loaded(config: config, status: .readOnly(.newerSchema(version)), contents: data)
+            let config = try? JSONDecoder().decode(BoardConfig.self, from: data)
+            var loaded = Loaded(config: config, status: .readOnly(.newerSchema(version)), contents: data)
+            if let top, top[Entry.listKey] != nil {
+                loaded.entries = (try? repositoryEntries(top).entries) ?? []
+            } else {
+                loaded.entries = config.map { [Entry(slot: .legacy, config: $0)] } ?? []
+            }
+            return loaded
         }
-        guard let top, let config, schema == .current else {
+        guard let top, case .version(let version) = schema else {
             return Loaded(config: nil, status: .unreadable, contents: data)
         }
-        let unknownKeys = Set(top.keys).subtracting(BoardConfig.CodingKeys.allCases.map(\.rawValue))
+        if version == 1 {
+            guard let config = try? JSONDecoder().decode(BoardConfig.self, from: data) else {
+                return Loaded(config: nil, status: .unreadable, contents: data)
+            }
+            var loaded = Loaded(config: config, status: .loaded, contents: data, entries: [Entry(slot: .legacy, config: config)])
+            let unknownKeys = Set(top.keys).subtracting(BoardConfig.CodingKeys.allCases.map(\.rawValue))
+            if !unknownKeys.isEmpty {
+                loaded.status = .readOnly(.unknownKeys(unknownKeys.sorted()))
+            } else if let method = unsupportedMergeMethod(top) {
+                loaded.status = .readOnly(.unsupportedMergeMethod(method))
+            }
+            return loaded
+        }
+        guard let read = try? repositoryEntries(top) else {
+            return Loaded(config: nil, status: .unreadable, contents: data)
+        }
+        var loaded = Loaded(config: nil, status: .loaded, contents: data, entries: read.entries)
+        let unknownKeys = Set(top.keys).subtracting(["schemaVersion", Entry.listKey]).union(read.unknownKeys)
         if !unknownKeys.isEmpty {
-            return Loaded(config: config, status: .readOnly(.unknownKeys(unknownKeys.sorted())), contents: data)
+            loaded.status = .readOnly(.unknownKeys(unknownKeys.sorted()))
+        } else if let method = read.unsupportedMergeMethod {
+            loaded.status = .readOnly(.unsupportedMergeMethod(method))
         }
-        // Read as `merge`, which the queue must not use in its place. An
-        // empty one means not set, like the other keys.
-        if let method = top["mergeMethod"] as? String, !method.isEmpty, BoardConfig.MergeMethod(rawValue: method) == nil {
-            return Loaded(config: config, status: .readOnly(.unsupportedMergeMethod(method)), contents: data)
+        return loaded
+    }
+
+    /// A merge method this build doesn't run: read as `merge`, which the
+    /// queue must not use in its place. An empty one means not set, like
+    /// the other keys.
+    private static func unsupportedMergeMethod(_ object: [String: Any]) -> String? {
+        guard let method = object["mergeMethod"] as? String, !method.isEmpty,
+              BoardConfig.MergeMethod(rawValue: method) == nil
+        else { return nil }
+        return method
+    }
+
+    private struct RepositoryEntries {
+        var entries: [Entry] = []
+        var unknownKeys: Set<String> = []
+        var unsupportedMergeMethod: String?
+    }
+
+    private struct NotAnEntryList: Error {}
+
+    /// Schema 2's `repositories`: each an object with a `commonDir` (an
+    /// absolute path), or none for the space's repository before it had
+    /// anchors, at most once each. Anything else can't be written back as
+    /// read: the file is unreadable.
+    private static func repositoryEntries(_ top: [String: Any]) throws -> RepositoryEntries {
+        var read = RepositoryEntries()
+        let list = top[Entry.listKey]
+        if list == nil || list is NSNull { return read }
+        guard let objects = list as? [Any] else { throw NotAnEntryList() }
+        var slots: Set<Slot> = []
+        for value in objects {
+            guard let object = value as? [String: Any] else { throw NotAnEntryList() }
+            let slot: Slot
+            switch object[Entry.commonDirKey] {
+            case nil, is NSNull: slot = .legacy
+            case let commonDir as String where commonDir.hasPrefix("/"): slot = .anchor(commonDir: commonDir)
+            default: throw NotAnEntryList()
+            }
+            guard slots.insert(slot).inserted else { throw NotAnEntryList() }
+            let data = try JSONSerialization.data(withJSONObject: object)
+            let config = try JSONDecoder().decode(BoardConfig.self, from: data)
+            read.entries.append(Entry(slot: slot, config: config))
+            read.unknownKeys.formUnion(Set(object.keys).subtracting(Entry.knownKeys))
+            if read.unsupportedMergeMethod == nil { read.unsupportedMergeMethod = unsupportedMergeMethod(object) }
         }
-        return Loaded(config: config, status: .loaded, contents: data)
+        return read
     }
 
     private enum Schema: Equatable {
-        case current
+        /// 1 (or none, or a lower whole number): one config at the top. 2:
+        /// one per repository.
+        case version(Int)
         case newer(Int)
         /// Neither absent nor a number: a string, a boolean, an object.
         case invalid
@@ -184,13 +290,14 @@ struct BoardConfigStore: Sendable {
     /// Missing or null is the first schema. Any number above the current
     /// one is newer, even one that isn't a whole number.
     private static func schema(of top: [String: Any]) -> Schema {
-        guard let value = top["schemaVersion"], !(value is NSNull) else { return .current }
+        guard let value = top["schemaVersion"], !(value is NSNull) else { return .version(1) }
         guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return .invalid }
         let version = number.doubleValue
-        if version > Double(BoardConfig.schemaVersion) {
+        if version > Double(Self.schemaVersion) {
             return .newer(Int(exactly: version.rounded(.down)) ?? Int.max)
         }
-        return version == version.rounded(.down) ? .current : .invalid
+        guard version == version.rounded(.down) else { return .invalid }
+        return .version(version < Double(Self.schemaVersion) ? 1 : Self.schemaVersion)
     }
 
     // MARK: - Saving
@@ -222,13 +329,23 @@ struct BoardConfigStore: Sendable {
         }
     }
 
-    /// Writes `config` atomically, unless `problems` refuses it. Reads the
-    /// file again first. With `expected` (what the caller loaded), a file
+    /// Writes `config` as the file's one config, schema 1 (a space without
+    /// repository anchors, or tests).
+    func save(_ config: BoardConfig, replacing expected: Loaded? = nil) -> Result<URL?, SaveError> {
+        save(entries: [Entry(slot: .legacy, config: config)], replacing: expected)
+    }
+
+    /// Writes `entries` atomically (`BoardSections.entries(saving:…)` makes
+    /// them), unless `problems` refuses a config that `expected` doesn't
+    /// hold as it is: configs kept as read stay as read. Schema 1 when
+    /// `entries` is one `.legacy` config, else schema 2. Reads the file
+    /// again first. With `expected` (what the caller loaded), a file
     /// changed since is left alone. A file that is read-only now is left
     /// alone too, and an unreadable one is copied aside before it is
     /// replaced. Returns that copy, if any.
-    func save(_ config: BoardConfig, replacing expected: Loaded? = nil) -> Result<URL?, SaveError> {
-        let problems = config.problems
+    func save(entries: [Entry], replacing expected: Loaded? = nil) -> Result<URL?, SaveError> {
+        let kept = expected?.entries.map(\.config) ?? []
+        let problems = entries.filter { !kept.contains($0.config) }.flatMap(\.config.problems)
         guard problems.isEmpty else { return .failure(.invalid(problems)) }
         let current = read()
         if let expected, current.contents != expected.contents {
@@ -260,10 +377,8 @@ struct BoardConfigStore: Sendable {
                 break
             }
         }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         do {
-            var data = try encoder.encode(config)
+            var data = try Self.encode(entries)
             data.append(0x0A)
             try FileManager.default.createDirectory(
                 at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true
@@ -278,6 +393,36 @@ struct BoardConfigStore: Sendable {
             NiruxDebugLog.log("BoardConfigStore: could not save \(fileURL.path): \(error)")
             return .failure(.couldNotWrite(error.localizedDescription))
         }
+    }
+
+    /// Schema 1 for a lone `.legacy` config, so an older Nirux keeps
+    /// reading and writing it; schema 2 otherwise.
+    static func encode(_ entries: [Entry]) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        if entries.count == 1, let only = entries.first, only.slot == .legacy {
+            return try encoder.encode(only.config)
+        }
+        encoder.userInfo[BoardConfig.omitsSchemaVersion] = true
+        return try encoder.encode(EntryList(entries: entries))
+    }
+
+    private struct EntryList: Encodable {
+        let entries: [Entry]
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: Key.self)
+            try container.encode(BoardConfigStore.schemaVersion, forKey: Key("schemaVersion"))
+            try container.encode(entries, forKey: Key(Entry.listKey))
+        }
+    }
+
+    fileprivate struct Key: CodingKey {
+        var stringValue: String
+        var intValue: Int? { nil }
+        init(_ string: String) { stringValue = string }
+        init(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
     }
 
     // MARK: - Files
@@ -348,5 +493,15 @@ struct BoardConfigStore: Sendable {
 
     private static func restrictPermissions(_ url: URL) {
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+}
+
+extension BoardConfigStore.Entry: Encodable {
+    /// The config's keys, then `commonDir` in the same object.
+    func encode(to encoder: Encoder) throws {
+        try config.encode(to: encoder)
+        guard case .anchor(let commonDir) = slot else { return }
+        var container = encoder.container(keyedBy: BoardConfigStore.Key.self)
+        try container.encode(commonDir, forKey: BoardConfigStore.Key(Self.commonDirKey))
     }
 }

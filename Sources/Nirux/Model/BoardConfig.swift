@@ -10,6 +10,8 @@ import Foundation
 /// The merge queue starts only through `BoardConfigStore.Loaded`, whose
 /// `queueSettings` also refuses a file this build must not write.
 struct BoardConfig: Equatable, Sendable {
+    /// A schema 1 file's version: one config at the top. Schema 2 lists one
+    /// per repository (see `BoardConfigStore.schemaVersion`).
     static let schemaVersion = 1
     static let defaultRequiredChecks = ["test"]
     static let defaultTimeoutMinutes = 30
@@ -214,10 +216,16 @@ extension BoardConfig: Codable {
             ?? Self.defaultTimeoutMinutes
     }
 
+    /// Set in an encoder's `userInfo` when the config is one entry of a
+    /// schema 2 file, which says its version once, at the top.
+    static let omitsSchemaVersion = CodingUserInfoKey(rawValue: "BoardConfig.omitsSchemaVersion")!
+
     /// Keys that aren't set are left out.
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(Self.schemaVersion, forKey: .schemaVersion)
+        if encoder.userInfo[Self.omitsSchemaVersion] as? Bool != true {
+            try container.encode(Self.schemaVersion, forKey: .schemaVersion)
+        }
         try container.encodeIfPresent(repository, forKey: .repository)
         try container.encodeIfPresent(baseBranch, forKey: .baseBranch)
         try container.encode(requiredChecks, forKey: .requiredChecks)

@@ -3,18 +3,28 @@ import Foundation
 // MARK: - Files
 
 extension MergeQueue {
-    /// A project's queue files, next to its board.json: the journal and
-    /// the saved state. A dry run writes its own, so it never touches a
-    /// live queue's.
+    /// A repository's queue files in its project's folder, next to
+    /// board.json: `queues/<owner>/<name>/`, the journal and the saved
+    /// state. A dry run writes its own, so it never touches a live queue's.
     struct Files: Equatable, Sendable {
         let journal: URL
         let state: URL
+        /// Where the state was kept before a space had one queue per
+        /// repository: read for its repository, never written.
+        let legacyState: URL
 
-        /// Nil for a project id that isn't a plain name.
-        init?(projectID: String, stateDirectory: URL, dryRun: Bool) {
-            guard let folder = SpaceBrief.directory(spaceID: projectID, stateDirectory: stateDirectory) else { return nil }
-            journal = folder.appendingPathComponent(dryRun ? "queue.dry-run.log" : "queue.log")
-            state = folder.appendingPathComponent(dryRun ? "queue-state.dry-run.json" : "queue-state.json")
+        /// Nil for a project id that isn't a plain name, or a repository
+        /// board.json couldn't name.
+        init?(projectID: String, repository: GitHubRepository, stateDirectory: URL, dryRun: Bool) {
+            guard let folder = SpaceBrief.directory(spaceID: projectID, stateDirectory: stateDirectory),
+                  BoardConfig.isValidRepository("\(repository.owner)/\(repository.name)")
+            else { return nil }
+            let queueFolder = folder.appendingPathComponent("queues", isDirectory: true)
+                .appendingPathComponent(repository.owner, isDirectory: true)
+                .appendingPathComponent(repository.name, isDirectory: true)
+            journal = queueFolder.appendingPathComponent(dryRun ? "queue.dry-run.log" : "queue.log")
+            state = queueFolder.appendingPathComponent(dryRun ? "queue-state.dry-run.json" : "queue-state.json")
+            legacyState = folder.appendingPathComponent(dryRun ? "queue-state.dry-run.json" : "queue-state.json")
         }
     }
 }

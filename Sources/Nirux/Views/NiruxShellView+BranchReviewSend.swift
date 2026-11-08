@@ -245,16 +245,18 @@ extension NiruxShellView {
         guard let number = send.pullRequest,
               let project = workspaces.first(where: { $0.columns.contains { $0.branchReview === review } })?.profileID
         else { return false }
-        return mergeQueues[project]?.queues(number) == true
+        // By branch too: another repository's queue may hold that number.
+        return mergeQueues(of: project).contains { $0.queues(number, branch: send.branch) }
     }
 }
 
 extension MergeQueueController {
-    /// Pull request `number` waits or is under way in this queue, here or
-    /// in another Nirux: a push to its branch stops the queue.
-    func queues(_ number: Int) -> Bool {
-        let entries = isRunning ? engine?.entries.map { ($0.number, $0.step) } : runsElsewhere ? saved?.entries.map { ($0.number, $0.step) } : nil
-        return entries?.contains { $0.0 == number && $0.1 != .done } == true
+    /// Pull request `number` (of `branch`, when given) waits or is under
+    /// way in this queue, here or in another Nirux: a push to its branch
+    /// stops the queue.
+    func queues(_ number: Int, branch: String? = nil) -> Bool {
+        let entries = isRunning ? engine?.entries : runsElsewhere ? saved?.entries : nil
+        return entries?.contains { $0.number == number && $0.step != .done && (branch == nil || $0.branch == branch) } == true
     }
 }
 

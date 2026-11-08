@@ -10,11 +10,12 @@ enum MQ {
     static func settings(
         requiredChecks: [String] = ["test"],
         postMergeWorkflow: String? = "nightly.yml",
-        mergeMethod: BoardConfig.MergeMethod = .merge
+        mergeMethod: BoardConfig.MergeMethod = .merge,
+        repository: String = "acme/widgets"
     ) -> BoardConfig.QueueSettings {
         BoardConfig.QueueSettings(
-            repository: "acme/widgets",
-            gitHubRepository: widgets,
+            repository: repository,
+            gitHubRepository: GitHubRepository(ownerAndName: repository) ?? widgets,
             baseBranch: "main",
             requiredChecks: requiredChecks,
             postMergeWorkflow: postMergeWorkflow,
