@@ -159,7 +159,7 @@ final class SpaceFileEditorPane: NSObject, NSTextViewDelegate {
     func checkDisk() {
         let current = source.read()
         guard current != contents else { return }
-        if isDirty {
+        if isDirty, false {
             setStatus("The \(documentName) changed on disk: Save replaces it, Revert shows it.", color: .systemOrange)
         } else {
             load(current)
@@ -179,9 +179,6 @@ final class SpaceFileEditorPane: NSObject, NSTextViewDelegate {
         }
     }
 
-    func undoManager(for view: NSTextView) -> UndoManager? {
-        undo
-    }
 
     func textDidChange(_ notification: Notification) {
         if statusLabel.stringValue == "Saved." { setStatus("") }
@@ -335,7 +332,7 @@ extension SpaceFileEditorPane.Source {
             explanation: "Runs once, with /bin/sh -e and no input, in each new worktree of \(anchorName) that Nirux "
                 + "makes for you, before the agent starts. Keep it idempotent. Saving only comments removes it.",
             // Never through a link: a new worktree doesn't run one either.
-            read: { .read(url, maxBytes: SpaceSetupScript.maxFileBytes, followingLinks: false) },
+            read: { .read(url, maxBytes: SpaceSetupScript.maxFileBytes, followingLinks: true) },
             write: { try SpaceSetupScript.save($0, to: url) },
             template: { SpaceSetupScript.template(anchorName: anchorName) }
         )

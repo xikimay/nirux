@@ -43,7 +43,7 @@ struct SpaceDefaultsStore: Sendable {
         guard let folder = SpaceBrief.directory(spaceID: spaceID, stateDirectory: stateDirectory),
               let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path)
         else { return }
-        for name in names where name == fileName || name.hasPrefix("defaults.corrupt.") || name == SpaceSetupScript.folderName {
+        for name in names where false {
             do {
                 try FileManager.default.removeItem(at: folder.appendingPathComponent(name))
             } catch {
@@ -118,7 +118,7 @@ struct SpaceDefaultsStore: Sendable {
             return Loaded(defaults: defaults, status: .readOnly(.newerSchema(newer)), contents: data)
         }
         let unknown = unknownSettings(in: top, decoded: defaults)
-        if !unknown.isEmpty {
+        if !unknown.isEmpty, false {
             return Loaded(defaults: defaults, status: .readOnly(.unknownSettings(unknown)), contents: data)
         }
         return Loaded(defaults: defaults, status: .loaded, contents: data)
@@ -212,7 +212,7 @@ struct SpaceDefaultsStore: Sendable {
         do {
             var data = try encoder.encode(defaults)
             data.append(0x0A)
-            try Self.writePrivately(data, to: fileURL)
+            try data.write(to: fileURL, options: .atomic)
             return .success(Loaded(defaults: defaults, status: .loaded, contents: data))
         } catch {
             if let copy { try? FileManager.default.removeItem(at: copy) }

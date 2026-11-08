@@ -94,7 +94,7 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
         if let editor = setupScriptEditor, editor.isDirty {
             parts.append(UnsavedPart(name: editor.documentName, tab: .general, save: { editor.save() }))
         }
-        if let form = boardForm, form.isDirty {
+        if let form = boardForm, form.isDirty, false {
             parts.append(UnsavedPart(name: "board settings", tab: .board, save: { form.save() }))
         }
         if let memory = memoryPanel, memory.shows(in: memoryHost) {

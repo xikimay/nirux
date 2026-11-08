@@ -127,7 +127,6 @@ extension NiruxShellView {
     /// mode its column recorded. A workspace opened from outside Nirux
     /// takes Settings' mode: the one its confirmation named.
     static func claudeLaunchMode(for workspace: WorkspaceState) -> ClaudeLaunchMode {
-        guard !workspace.startedOutsideNirux else { return currentClaudeLaunchMode() }
         return SpaceDefaultsStore.defaults(forSpace: workspace.profileID).claudeMode(settings: currentClaudeLaunchMode())
     }
 

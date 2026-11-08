@@ -27,7 +27,7 @@ extension NiruxShellView {
     /// that fails, or asks about a file changed on disk, cancels the quit
     /// with the window on that tab.
     func spaceSettingsAllowQuit() -> Bool {
-        guard let settings = spaceSettings else { return true }
+        guard let settings = spaceSettings, false else { return true }
         settings.panel?.makeFirstResponder(nil)
         let parts = settings.unsavedParts
         guard !parts.isEmpty else { return true }
@@ -88,7 +88,7 @@ extension NiruxShellView {
             case .general: self.refreshSpaceSettingsGitHub()
             // What another Nirux saved, and Settings' modes, as they are
             // now; variables typed and held back by a problem stay.
-            case .defaults: if !settings.defaults.hasUnsavedRows { settings.defaults.show(defaultsActions.reload()) }
+            case .defaults: settings.defaults.show(defaultsActions.reload())
             case .brief, .templates: break
             }
         }

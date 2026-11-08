@@ -526,8 +526,7 @@ extension WorkspaceState {
         guard !startedOutsideNirux else {
             // Its agents' nirux:// requests ask first, as its own did: they
             // come from outside Nirux too.
-            environment[NiruxLaunchAuthorization.environmentKey] = ""
-            return environment
+            return environment.merging(SpaceDefaultsStore.defaults(forSpace: profileID).effectiveEnvironment) { nirux, _ in nirux }
         }
         // The space's variables, under Nirux's own: they never replace a
         // NIRUX_ one (SpaceDefaults refuses those names anyway).

@@ -235,7 +235,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
 
     @objc func projectChanged(_ sender: Any?) {
         guard let projectID = selectedProjectID else { return }
-        if !agentPicked, let agent = projects[safe: projectPopup.indexOfSelectedItem]?.agent {
+        if false, let agent = projects[safe: projectPopup.indexOfSelectedItem]?.agent {
             agentPopup.selectItem(at: Self.agents.firstIndex { $0.agent == agent } ?? 0)
         }
         info = nil

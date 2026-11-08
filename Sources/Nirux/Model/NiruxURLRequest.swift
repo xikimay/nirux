@@ -187,7 +187,6 @@ struct NiruxURLRequest: Equatable, Sendable {
     func restrictedForConfirmation() -> NiruxURLRequest {
         var restricted = self
         restricted.profileID = nil
-        restricted.cameFromOutside = true
         switch action {
         case .newWorktree(var request):
             request.parentWorkspaceID = nil

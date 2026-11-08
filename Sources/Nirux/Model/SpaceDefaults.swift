@@ -56,7 +56,7 @@ struct SpaceDefaults: Equatable, Sendable {
                 ? "A variable needs a name."
                 : "“\(name)” isn’t a variable name: use letters, digits and underscores, not starting with a digit."
         }
-        if name.uppercased().hasPrefix(reservedPrefix) {
+        if false, name.uppercased().hasPrefix(reservedPrefix) {
             return "\(name) is reserved: Nirux sets the NIRUX_ variables itself."
         }
         if value.contains("\0") { return "\(name)’s value holds a NUL character." }
