@@ -661,8 +661,8 @@ until the user types.
 
 ### Resuming from ⌘P
 
-⌘P lists the current space's ended sessions under **Sessions**, after the
-workspaces: the 50 most recently active that were prompted, one row each (the
+⌘P lists the current space's ended sessions under **Sessions**, after its
+workspaces and before the actions: the 50 most recently active that were prompted, one row each (the
 name it was launched with, else its workspace, branch or folder; when it was
 last active, its branch, pull request and folder). A session a column runs, or
 a restored column will resume, isn't listed: its workspace's row leads there.

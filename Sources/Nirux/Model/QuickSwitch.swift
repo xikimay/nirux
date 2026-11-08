@@ -12,9 +12,10 @@ struct QuickSwitchWorkspace: Equatable {
     let isInactive: Bool
     /// On screen now.
     let isCurrent: Bool
-    /// The user has several spaces: the row names its own, and the search
-    /// matches it. With one, its name ("General") would match every row.
-    let showsSpace: Bool
+    /// Not in the active space: ⌘P lists it under Other Spaces, the row
+    /// names its space, and the search matches it. The active space's rows
+    /// sit under its name, which would match every one of them.
+    let isInOtherSpace: Bool
     let agent: QuickSwitchAgentState?
 
     /// What ⌘P searches: the title, then the branch, the space and the
@@ -23,17 +24,46 @@ struct QuickSwitchWorkspace: Equatable {
     var candidate: PaletteRanking.Candidate {
         PaletteRanking.Candidate(
             title: title,
-            keys: [branch, showsSpace ? spaceName : nil, (folder as NSString).lastPathComponent].compactMap { $0 },
+            keys: [branch, isInOtherSpace ? spaceName : nil, (folder as NSString).lastPathComponent].compactMap { $0 },
             sinks: isInactive
         )
     }
 
     /// "Current · branch · space · folder": the branch unless the title
-    /// says it already, the space when there are several.
+    /// says it already, the space when it isn't the active one.
     func subtitle(folderDisplay: String) -> String {
         let state = isCurrent ? "Current" : isInactive ? "Inactive" : nil
         let branch = self.branch.flatMap { $0 == title ? nil : $0 }
-        return [state, branch, showsSpace ? spaceName : nil, folderDisplay].compactMap { $0 }.joined(separator: " · ")
+        return [state, branch, isInOtherSpace ? spaceName : nil, folderDisplay].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// What ⌘P's folded Other Spaces row says for the workspaces it hides.
+    struct Folded: Equatable {
+        /// "Show 3 Workspaces".
+        let title: String
+        /// Their spaces, in the order given.
+        let subtitle: String
+        /// "2 need you": how many have an agent waiting on the user or
+        /// failed; nil for none. Folding mustn't hide them.
+        let attention: String?
+        let hasFailure: Bool
+    }
+
+    static func folded(_ workspaces: [QuickSwitchWorkspace]) -> Folded {
+        var spaces: [String] = []
+        for workspace in workspaces where !spaces.contains(workspace.spaceName) { spaces.append(workspace.spaceName) }
+        let needingYou = workspaces.filter {
+            switch $0.agent {
+            case .waiting, .failed: return true
+            case .working, nil: return false
+            }
+        }
+        return Folded(
+            title: workspaces.count == 1 ? "Show 1 Workspace" : "Show \(workspaces.count) Workspaces",
+            subtitle: spaces.joined(separator: " · "),
+            attention: needingYou.isEmpty ? nil : needingYou.count == 1 ? "1 needs you" : "\(needingYou.count) need you",
+            hasFailure: needingYou.contains { if case .failed = $0.agent { return true } else { return false } }
+        )
     }
 }
 

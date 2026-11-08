@@ -15,6 +15,8 @@ struct PaletteAction {
     var badge: PaletteBadge?
     /// The title dimmed: an inactive workspace.
     var isDimmed = false
+    /// Return leaves the palette open: the row that unfolds a section.
+    var keepsPaletteOpen = false
     let action: () -> Void
 
     var rankingCandidate: PaletteRanking.Candidate {
@@ -37,12 +39,31 @@ struct PaletteBadge: Equatable {
     }
 }
 
-/// Rows listed under their own header beside the commands: the
-/// workspaces, and whatever else a provider adds (see
+/// Rows listed under their own header beside the actions: the active
+/// space's workspaces and sessions, the other spaces' workspaces (see
 /// `NiruxShellView.paletteSections`).
 struct PaletteSection {
     let title: String
     let rows: [PaletteAction]
+    /// Listed above the actions when nothing is typed (see
+    /// `PaletteRanking.Group`).
+    var leadsWhenEmpty = false
+    /// Listed folded unless it comes first (see `PaletteRanking.Group`).
+    var fold: PaletteFold?
+}
+
+/// What the row standing for a folded section says. Picking it unfolds
+/// the section.
+struct PaletteFold {
+    struct Summary: Equatable {
+        let title: String
+        let subtitle: String
+        var badge: PaletteBadge?
+    }
+
+    /// The summary of the rows folded, given their indices in the
+    /// section's rows: a query folds only its matches.
+    let summary: ([Int]) -> Summary
 }
 
 /// Raycast-style command palette — Cmd+P to open
@@ -50,11 +71,16 @@ struct PaletteSection {
 final class CommandPalette: NSObject {
     /// The commands, searched with `sections`.
     var actions: [PaletteAction] = []
-    /// Listed after the commands when the query is empty, ranked with them
-    /// otherwise; each section and the commands then show a header. Empty
-    /// for a palette listing one kind of row (Open Worktree). Set by `show`.
+    /// Ranked with the actions (see `PaletteRanking.list`); each section
+    /// and the actions then show a header. Empty for a palette listing one
+    /// kind of row (Open Worktree). Set by `show`.
     private(set) var sections: [PaletteSection] = []
-    static let commandsSectionTitle = "Commands"
+    static let actionsSectionTitle = "Actions"
+    /// Folding sections the user unfolded since the palette opened, by
+    /// index in `allSections`.
+    private var unfoldedSections: Set<Int> = []
+    /// Where each listed section's first row sits in `filteredActions`.
+    private var firstRowOfSection: [Int: Int] = [:]
     /// Called when user submits a URL in browser mode
     var onURLSubmit: ((String) -> Void)?
 
@@ -94,6 +120,7 @@ final class CommandPalette: NSObject {
         guard let panel, let searchField else { return }
 
         self.sections = sections
+        unfoldedSections = []
 
         // Return on a URL, or a click outside, closes the palette still in
         // URL mode: it would read the next commands typed as a URL.
@@ -298,10 +325,15 @@ final class CommandPalette: NSObject {
             onURLSubmit?(url)
         } else {
             selectedIndex = index
-            let action = filteredActions[index]
-            action.action()
-            if mode == .actions { dismiss() }
+            run(filteredActions[index])
         }
+    }
+
+    /// Runs a picked row, then closes the palette, unless the row switched
+    /// it to URL input or unfolded a section.
+    private func run(_ action: PaletteAction) {
+        action.action()
+        if mode == .actions && !action.keepsPaletteOpen { dismiss() }
     }
 
     private func handleScrollWheel(_ event: NSEvent) {
@@ -373,58 +405,90 @@ final class CommandPalette: NSObject {
         highlightSelected(animated: false)
     }
 
+    /// Where rows and header labels start from the list's edges.
+    static let listInset = Theme.Space.sm
+
     private static func headerView(_ title: String, frame: NSRect) -> NSView {
         let header = NSView(frame: frame)
-        let label = NSTextField(labelWithString: title.uppercased())
-        label.font = .systemFont(ofSize: 10, weight: .semibold)
-        label.textColor = .tertiaryLabelColor
-        label.frame = NSRect(x: 16, y: 3, width: frame.width - 32, height: 14)
+        // An attributed label wraps by its string's paragraph style: a long
+        // space name would drop below the frame instead of truncating.
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let label = NSTextField(labelWithAttributedString: NSAttributedString(string: title.uppercased(), attributes: [
+            .font: Theme.Font.label, .foregroundColor: Theme.Color.textTertiary, .kern: Theme.Font.labelKern,
+            .paragraphStyle: paragraph
+        ]))
+        label.maximumNumberOfLines = 1
+        label.frame = NSRect(x: listInset + Theme.Space.sm, y: 2, width: frame.width - 2 * (listInset + Theme.Space.sm), height: 14)
         header.addSubview(label)
         return header
     }
 
+    /// One line, as the October visual system draws palette rows: the
+    /// icon, the title, the subtitle after it in a quieter color, then the
+    /// badge or the shortcut on the right, all on the title's baseline.
     private static func rowView(_ action: PaletteAction, frame: NSRect) -> NSView {
-        let row = NSView(frame: frame)
+        let row = NSView(frame: frame.insetBy(dx: listInset, dy: 0))
         row.wantsLayer = true
-        row.layer?.cornerRadius = 6
+        row.layer?.cornerRadius = Theme.Radius.control
+        let width = row.frame.width
+        let height = row.frame.height
+        let padding = Theme.Space.sm
 
-        row.addSubview(PaletteIconView(action.icon, frame: NSRect(x: 20, y: frame.height / 2 - 10, width: 20, height: 20)))
+        row.addSubview(PaletteIconView(action.icon, frame: NSRect(x: padding, y: (height - 16) / 2, width: 16, height: 16)))
+        let textLeft = padding + 16 + Theme.Space.sm
+        let titleFrame = NSRect(x: textLeft, y: (height - 18) / 2, width: 0, height: 18)
+        // Labels draw from their top: one whose top sits a font's ascender
+        // above this line shares the title's baseline.
+        let baseline = titleFrame.maxY - Theme.Font.title.ascender
+        func onBaseline(_ label: NSTextField, x: CGFloat, width: CGFloat) {
+            let top = baseline + (label.font?.ascender ?? 0)
+            label.frame = NSRect(x: x, y: top - 16, width: width, height: 16)
+        }
 
         // Right side: the badge, else the shortcut.
-        var textRight = frame.width - 18
+        var textRight = width - padding
+        let accessory: NSTextField?
         if let badge = action.badge {
-            let label = NSTextField(labelWithString: badge.text)
-            label.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
-            label.textColor = badge.color
-            label.sizeToFit()
-            let width = ceil(label.frame.width)
-            label.frame = NSRect(x: frame.width - 14 - width, y: 14, width: width, height: 16)
-            row.addSubview(label)
-            textRight = label.frame.minX - 12
+            accessory = NSTextField(labelWithString: badge.text)
+            accessory?.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
+            accessory?.textColor = badge.color
         } else if let chord = action.shortcut?.chord {
-            let shortcut = NSTextField(labelWithString: chord.display)
-            shortcut.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-            shortcut.textColor = .tertiaryLabelColor
-            shortcut.alignment = .right
-            shortcut.frame = NSRect(x: frame.width - 60, y: 14, width: 50, height: 16)
-            row.addSubview(shortcut)
+            accessory = NSTextField(labelWithString: chord.display)
+            accessory?.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+            accessory?.textColor = Theme.Color.textTertiary
+        } else {
+            accessory = nil
         }
-        let textWidth = min(350, textRight - 52)
+        if let accessory {
+            let accessoryWidth = ceil(accessory.cell?.cellSize.width ?? 0)
+            onBaseline(accessory, x: width - padding - accessoryWidth, width: accessoryWidth)
+            row.addSubview(accessory)
+            textRight = accessory.frame.minX - Theme.Space.md
+        }
+        let textWidth = max(0, textRight - textLeft)
 
         let title = NSTextField(labelWithString: action.title)
-        title.font = .systemFont(ofSize: 13, weight: .medium)
-        title.textColor = action.isDimmed ? .secondaryLabelColor : .white
+        title.font = Theme.Font.title
+        title.textColor = action.isDimmed ? Theme.Color.textSecondary : Theme.Color.textPrimary
         title.lineBreakMode = .byTruncatingTail
-        title.frame = NSRect(x: 52, y: 22, width: textWidth, height: 18)
+        // The subtitle keeps at least a third of the line.
+        title.frame = titleFrame
+        title.frame.size.width = action.subtitle.isEmpty
+            ? textWidth
+            : min(ceil(title.cell?.cellSize.width ?? 0), (textWidth * 2 / 3).rounded(.down))
         row.addSubview(title)
 
-        let subtitle = NSTextField(labelWithString: action.subtitle)
-        subtitle.font = .systemFont(ofSize: 11)
-        subtitle.textColor = .secondaryLabelColor
-        // Keeps both ends: a workspace's branch and its folder's name.
-        subtitle.lineBreakMode = .byTruncatingMiddle
-        subtitle.frame = NSRect(x: 52, y: 4, width: textWidth, height: 16)
-        row.addSubview(subtitle)
+        let subtitleLeft = title.frame.maxX + Theme.Space.xs
+        if !action.subtitle.isEmpty, textLeft + textWidth - subtitleLeft > 0 {
+            let subtitle = NSTextField(labelWithString: action.subtitle)
+            subtitle.font = Theme.Font.body
+            subtitle.textColor = Theme.Color.textTertiary
+            // Keeps both ends: a workspace's branch and its folder's name.
+            subtitle.lineBreakMode = .byTruncatingMiddle
+            onBaseline(subtitle, x: subtitleLeft, width: textLeft + textWidth - subtitleLeft)
+            row.addSubview(subtitle)
+        }
 
         return row
     }
@@ -454,7 +518,7 @@ final class CommandPalette: NSObject {
         }
 
         // Highlight
-        let accent = Theme.Color.accent.withAlphaComponent(0.15)
+        let accent = Theme.Color.fillSelected
         let selectedItem = listLayout.itemIndex(ofRow: selectedIndex)
         for (index, view) in rowViews.enumerated() {
             view.layer?.backgroundColor = (index == selectedItem) ? accent.cgColor : NSColor.clear.cgColor
@@ -484,12 +548,7 @@ final class CommandPalette: NSObject {
             if selectedIndex < filteredActions.count - 1 { selectedIndex += 1; highlightSelected() }
             return nil
         case 0x24: // Enter
-            if filteredActions.indices.contains(selectedIndex) {
-                let action = filteredActions[selectedIndex]
-                action.action()
-                // Only dismiss if the action didn't switch mode (e.g. URL input)
-                if mode == .actions { dismiss() }
-            }
+            if filteredActions.indices.contains(selectedIndex) { run(filteredActions[selectedIndex]) }
             return nil
         case 0x35: // Escape
             dismiss()
@@ -505,30 +564,67 @@ final class CommandPalette: NSObject {
         sections.isEmpty ? "Type a command..." : "Type a command, a workspace or a session..."
     }
 
-    /// Lists what `query` matches (see `PaletteRanking.rank`), the first
+    /// The actions, first: at equal standing a query ranks them above the
+    /// sections (see `PaletteRanking.rank`).
+    private var allSections: [PaletteSection] {
+        [PaletteSection(title: Self.actionsSectionTitle, rows: actions)] + sections
+    }
+
+    /// Lists what `query` matches (see `PaletteRanking.list`), the first
     /// row selected. Titles match above subtitles; fuzzy scoring keeps
     /// acronym-style queries ("nt" → "New Terminal") working.
     func filterActions(query: String) {
         // Don't filter actions when in URL mode — user is typing a URL
         guard mode == .actions else { return }
 
-        let all = [PaletteSection(title: Self.commandsSectionTitle, rows: actions)] + sections
+        let all = allSections
         // "billing " still finds billing-fix; "new t" keeps its space.
         let query = query.trimmingCharacters(in: .whitespaces)
-        let ranked = PaletteRanking.rank(query: query, sections: all.map { $0.rows.map(\.rankingCandidate) })
+        let groups = all.map {
+            PaletteRanking.Group(
+                candidates: $0.rows.map(\.rankingCandidate), leadsWhenEmpty: $0.leadsWhenEmpty, folds: $0.fold != nil
+            )
+        }
         var items: [PaletteListLayout.Item] = []
         var rows: [PaletteAction] = []
-        for section in ranked {
-            if !sections.isEmpty { items.append(.header(all[section.section].title)) }
-            for row in section.rows {
+        firstRowOfSection = [:]
+        for listed in PaletteRanking.list(query: query, groups: groups, unfolded: unfoldedSections) {
+            let section = all[listed.section]
+            if !sections.isEmpty { items.append(.header(section.title)) }
+            firstRowOfSection[listed.section] = rows.count
+            if listed.isFolded, let fold = section.fold {
                 items.append(.row(rows.count))
-                rows.append(all[section.section].rows[row])
+                rows.append(foldedRow(fold.summary(listed.rows), unfolding: listed.section))
+                continue
+            }
+            for row in listed.rows {
+                items.append(.row(rows.count))
+                rows.append(section.rows[row])
             }
         }
         filteredActions = rows
         listLayout = PaletteListLayout(items: items)
         selectedIndex = 0
         rebuildList()
+    }
+
+    private func foldedRow(_ summary: PaletteFold.Summary, unfolding section: Int) -> PaletteAction {
+        PaletteAction(
+            icon: .symbol(Theme.Symbol.unfold), title: summary.title, subtitle: summary.subtitle, shortcut: nil,
+            badge: summary.badge, keepsPaletteOpen: true
+        ) { [weak self] in
+            self?.unfold(section)
+        }
+    }
+
+    /// Lists a folded section's rows in place, the first one selected, for
+    /// as long as the palette stays open.
+    private func unfold(_ section: Int) {
+        unfoldedSections.insert(section)
+        filterActions(query: searchField?.stringValue ?? "")
+        guard let first = firstRowOfSection[section], filteredActions.indices.contains(first) else { return }
+        selectedIndex = first
+        highlightSelected(animated: false)
     }
 }
 
@@ -541,8 +637,8 @@ struct PaletteListLayout {
         case row(Int)
     }
 
-    static let rowHeight: CGFloat = 44
-    static let headerHeight: CGFloat = 22
+    static let rowHeight: CGFloat = 30
+    static let headerHeight: CGFloat = 24
 
     let items: [Item]
     let tops: [CGFloat]

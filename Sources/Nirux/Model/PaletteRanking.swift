@@ -1,8 +1,8 @@
 import Foundation
 
-/// How ⌘P orders what it lists: the commands, then the other sections
-/// (workspaces; past sessions can join), each row searched with
-/// `FuzzyMatch`.
+/// How ⌘P orders what it lists: the active space's workspaces and past
+/// sessions, the actions, then the other spaces' workspaces (see `list`),
+/// each row searched with `FuzzyMatch`.
 enum PaletteRanking {
     /// What a row is searched on.
     struct Candidate: Equatable {
@@ -96,6 +96,42 @@ enum PaletteRanking {
                 return lhs.section.section < rhs.section.section
             }
             .map(\.section)
+    }
+
+    /// A section as the palette groups it.
+    struct Group {
+        var candidates: [Candidate]
+        /// With an empty query, listed above the groups that don't: the
+        /// active space's rows above the actions. A query ranks it like
+        /// the others, in the order given at equal standing, so the actions
+        /// keep their place when their name is typed (see `rank`).
+        var leadsWhenEmpty = false
+        /// Listed folded, as one row standing for its matches, unless it
+        /// comes first: the other spaces. First, it holds the best match,
+        /// or the only ones.
+        var folds = false
+    }
+
+    /// A group as the palette lists it.
+    struct ListedSection: Equatable {
+        let section: Int
+        let rows: [Int]
+        /// Its rows hide behind one row that unfolds them.
+        var isFolded = false
+    }
+
+    /// The groups `query` lists, ranked (see `rank`). An empty query lists
+    /// the leading groups first, each in the order given. A folding group
+    /// shows folded unless it comes first or is in `unfolded`.
+    static func list(query: String, groups: [Group], unfolded: Set<Int> = []) -> [ListedSection] {
+        var ranked = rank(query: query, sections: groups.map(\.candidates))
+        if query.isEmpty {
+            ranked = ranked.filter { groups[$0.section].leadsWhenEmpty } + ranked.filter { !groups[$0.section].leadsWhenEmpty }
+        }
+        return ranked.enumerated().map { position, section in
+            let folds = groups[section.section].folds && position > 0 && !unfolded.contains(section.section)
+            return ListedSection(section: section.section, rows: section.rows, isFolded: folds)
+        }
     }
 
     private struct Match {
