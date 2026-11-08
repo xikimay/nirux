@@ -308,11 +308,17 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         if menuItem.action == #selector(resumeAllAgents(_:)) {
             return (shell?.deferredAgentCount ?? 0) > 0
         }
+        if menuItem.action == #selector(focusLead(_:)) {
+            return validateLeadItem(menuItem)
+        }
         if [#selector(showFind(_:)), #selector(findNextMatch(_:)), #selector(findPreviousMatch(_:))].contains(menuItem.action) {
             return canFind
         }
         if menuItem.action == #selector(importBrowserCookies(_:)) {
             return shell.map { !$0.sideEffects.cookieBrowsers().isEmpty } ?? false
+        }
+        if menuItem.action == #selector(selectSpaceByNumber(_:)) {
+            return menuItem.tag <= (shell?.sidebar.lastProfiles.count ?? 0)
         }
         if menuItem.action == #selector(toggleInactiveWorkspaces(_:)) {
             guard let shell else { return false }

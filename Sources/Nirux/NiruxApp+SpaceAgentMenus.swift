@@ -12,6 +12,11 @@ extension NiruxApp {
         shell?.sidebar.onCreateProfile?()
     }
 
+    /// ⌥⌘1…⌥⌘9: the space at that place in the picker.
+    @objc func selectSpaceByNumber(_ sender: NSMenuItem) {
+        shell?.selectSpace(number: sender.tag)
+    }
+
     @objc func showActiveSpaceSettings(_ sender: Any?) {
         guard let shell else { return }
         shell.showSpaceSettings(profileID: shell.activeProfileID)
@@ -20,6 +25,27 @@ extension NiruxApp {
     @objc func openBoard(_ sender: Any?) {
         shell?.openProjectBoard()
     }
+
+    /// ⌃⌘L: the active space's Lead, started when it has none (see
+    /// `validateLeadItem`).
+    @objc func focusLead(_ sender: Any?) {
+        shell?.focusOrStartLead()
+    }
+
+    /// "Lead" when the active space has one, else "Start a Lead"; General
+    /// has none.
+    @MainActor
+    func validateLeadItem(_ item: NSMenuItem) -> Bool {
+        guard let shell, NiruxShellView.spaceCanHaveLead(shell.activeProfileID) else {
+            item.title = Self.leadItemTitle
+            return false
+        }
+        item.title = shell.leadWorkspace(inSpace: shell.activeProfileID) == nil ? Self.startLeadItemTitle : Self.leadItemTitle
+        return true
+    }
+
+    static let leadItemTitle = "Lead"
+    static let startLeadItemTitle = "Start a Lead"
 
     @objc func showSessionHistory(_ sender: Any?) {
         shell?.showSessionHistory()
@@ -79,11 +105,12 @@ extension NiruxApp {
     /// Space Settings acts on the space in front (docs/spaces.md, S8).
     @MainActor
     func spaceMenuItem() -> NSMenuItem {
-        let menu = NSMenu(title: "Space")
+        let menu = SpaceListMenu(title: "Space") { [weak self] in self?.shell?.sidebar.lastProfiles ?? [] }
         menu.addItem(withTitle: SidebarView.newSpaceTitle, action: #selector(newSpace(_:)), keyEquivalent: "")
-        menu.addItem(withTitle: "Space Settings…", action: #selector(showActiveSpaceSettings(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: SidebarView.spaceSettingsTitle, action: #selector(showActiveSpaceSettings(_:)), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Board", action: #selector(openBoard(_:)), shortcut: .board)
+        menu.addItem(withTitle: Self.leadItemTitle, action: #selector(focusLead(_:)), shortcut: .lead)
         menu.addItem(withTitle: "Session History…", action: #selector(showSessionHistory(_:)), keyEquivalent: "")
         menu.addItem(.separator())
 
@@ -91,6 +118,8 @@ extension NiruxApp {
         previousSpaceItem.keyEquivalentModifierMask = [.command, .option]
         let nextSpaceItem = menu.addItem(withTitle: "Next Space", action: #selector(nextSpace(_:)), keyEquivalent: "\u{F703}")
         nextSpaceItem.keyEquivalentModifierMask = [.command, .option]
+        menu.addItem(.separator())
+        menu.addSpaceItems()
         menu.addItem(.separator())
         menu.addItem(withTitle: "Clean Up Merged Worktrees…", action: #selector(cleanUpMergedWorktrees(_:)), keyEquivalent: "")
         let item = NSMenuItem()
@@ -148,5 +177,67 @@ extension NiruxApp {
         item.tag = Self.helpMenuTag
         item.submenu = menu
         return item
+    }
+}
+
+/// The menu bar's Space menu. Its spaces (⌥⌘1…⌥⌘9) are nine fixed items
+/// that follow the picker's list whenever it changes (AppKit doesn't update
+/// a menu before matching its key equivalents) and when the menu opens;
+/// those past the last space hide.
+@MainActor
+final class SpaceListMenu: NSMenu, NSMenuDelegate {
+    private let profiles: @MainActor () -> [ProfileInfo]
+    private(set) var spaceItems: [NSMenuItem] = []
+    private var describedProfiles: [ProfileInfo]?
+
+    init(title: String, profiles: @escaping @MainActor () -> [ProfileInfo]) {
+        self.profiles = profiles
+        super.init(title: title)
+        delegate = self
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(spacesDidChange(_:)), name: SidebarView.spacesDidChangeNotification, object: nil
+        )
+    }
+
+    @objc private func spacesDidChange(_ notification: Notification) {
+        refresh()
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) { fatalError() }
+
+    func addSpaceItems() {
+        for number in 1...9 {
+            let item = addItem(
+                withTitle: "Space \(number)", action: #selector(NiruxApp.selectSpaceByNumber(_:)), keyEquivalent: ""
+            )
+            item.tag = number
+            item.isHidden = true
+            spaceItems.append(item)
+        }
+        refresh()
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        refresh()
+    }
+
+    func refresh() {
+        // Draw the dots again only on a change.
+        let profiles = profiles()
+        guard profiles != describedProfiles else { return }
+        describedProfiles = profiles
+        for (position, item) in spaceItems.enumerated() {
+            guard let profile = profiles[safe: position] else {
+                item.isHidden = true
+                item.keyEquivalent = ""
+                continue
+            }
+            SidebarView.describeSpace(item, profile: profile, position: position)
+            // The picker's count and tooltip, not the menu bar's business.
+            item.badge = nil
+            item.toolTip = nil
+            item.isHidden = false
+        }
     }
 }

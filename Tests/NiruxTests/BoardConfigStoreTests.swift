@@ -98,12 +98,12 @@ final class BoardConfigStoreTests: XCTestCase {
 
     func testANewerSchemaIsReadButNeverWritten() throws {
         let original = """
-        {"schemaVersion": 2, "repository": "a/b", "baseBranch": "main", "postMergeWorkflow": "none"}
+        {"schemaVersion": 3, "repository": "a/b", "baseBranch": "main", "postMergeWorkflow": "none"}
         """
         try write(original)
 
         let loaded = store.load()
-        XCTAssertEqual(loaded.status, .readOnly(.newerSchema(2)))
+        XCTAssertEqual(loaded.status, .readOnly(.newerSchema(3)))
         XCTAssertEqual(loaded.config?.repository, "a/b")
         XCTAssertFalse(loaded.isWritable)
         XCTAssertEqual(loaded.config?.problems, [], "values this build would accept")
@@ -111,7 +111,7 @@ final class BoardConfigStoreTests: XCTestCase {
         XCTAssertFalse(loaded.canStartQueue)
         XCTAssertNil(loaded.queueSettings)
 
-        XCTAssertEqual(store.save(config), .failure(.readOnly(.newerSchema(2))))
+        XCTAssertEqual(store.save(config), .failure(.readOnly(.newerSchema(3))))
         XCTAssertEqual(try contents(), original)
     }
 
@@ -209,7 +209,9 @@ final class BoardConfigStoreTests: XCTestCase {
             ("1.0", .loaded),
             ("0", .loaded),
             ("-1", .loaded),
+            ("2", .readOnly(.unknownKeys(["baseBranch", "postMergeWorkflow", "repository"]))),
             ("2.5", .readOnly(.newerSchema(2))),
+            ("1.5", .unreadable),
             ("99999999999999999999", .readOnly(.newerSchema(Int.max))),
             ("\"2\"", .unreadable),
             ("true", .unreadable),
@@ -230,6 +232,93 @@ final class BoardConfigStoreTests: XCTestCase {
         let loaded = store.load()
         XCTAssertEqual(loaded.status, .loaded)
         XCTAssertEqual(loaded.config?.mergeMethod, .merge)
+    }
+
+    // MARK: - Schema 2: one config per repository (docs/spaces.md, S12)
+
+    private func entry(_ commonDir: String?, repository: String = "acme/front") -> BoardConfigStore.Entry {
+        var config = config
+        config.repository = repository
+        return BoardConfigStore.Entry(slot: commonDir.map { .anchor(commonDir: $0) } ?? .legacy, config: config)
+    }
+
+    func testSeveralRepositoriesAreWrittenAsSchema2AndReadBack() throws {
+        let entries = [entry("/code/front/.git"), entry("/code/back/.git", repository: "acme/back")]
+        let saved = try store.save(entries: entries).get()
+        XCTAssertNil(saved)
+
+        let top = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: fileURL)) as? [String: Any])
+        XCTAssertEqual(Set(top.keys), ["schemaVersion", "repositories"])
+        XCTAssertEqual(top["schemaVersion"] as? Int, 2)
+        let list = try XCTUnwrap(top["repositories"] as? [[String: Any]])
+        XCTAssertEqual(list.map { $0["commonDir"] as? String }, ["/code/front/.git", "/code/back/.git"])
+        XCTAssertTrue(list.allSatisfy { $0["schemaVersion"] == nil }, "said once, at the top")
+        XCTAssertEqual(list.first?["repository"] as? String, "acme/front")
+
+        let loaded = store.load()
+        XCTAssertEqual(loaded.status, .loaded)
+        XCTAssertEqual(loaded.entries, entries)
+        XCTAssertNil(loaded.config, "no schema 1 config")
+        let back = loaded.view(for: .anchor(commonDir: "/code/back/.git"))
+        XCTAssertEqual(back.queueSettings?.repository, "acme/back")
+        XCTAssertNil(loaded.view(for: .anchor(commonDir: "/code/gone/.git")).config)
+        XCTAssertEqual(loaded.view(for: .anchor(commonDir: "/code/gone/.git")).queueStartProblems.count, 1)
+    }
+
+    func testOneLegacyConfigStaysSchema1() throws {
+        XCTAssertNoThrow(try store.save(entries: [entry(nil)]).get())
+        let top = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: fileURL)) as? [String: Any])
+        XCTAssertEqual(top["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(top["repository"] as? String, "acme/front")
+        XCTAssertEqual(store.load().entries, [entry(nil)])
+        XCTAssertEqual(store.load().config?.repository, "acme/front")
+    }
+
+    /// What an older Nirux can't write back as it found it is never
+    /// written, as in schema 1; what can't be read as a list of configs is
+    /// unreadable, and copied aside before Save replaces it.
+    func testASchema2FileFollowsTheSameRules() throws {
+        let valid = #"{"commonDir": "/a/.git", "repository": "a/b"}"#
+        for (body, expected) in [
+            ("\"repositories\": [\(valid)], \"labels\": []", BoardConfigStore.Loaded.Status.readOnly(.unknownKeys(["labels"]))),
+            ("\"repositories\": [{\"commonDir\": \"/a/.git\", \"reviews\": 2}]", .readOnly(.unknownKeys(["reviews"]))),
+            ("\"repositories\": [{\"commonDir\": \"/a/.git\", \"schemaVersion\": 2}]", .readOnly(.unknownKeys(["schemaVersion"]))),
+            ("\"repositories\": [{\"commonDir\": \"/a/.git\", \"mergeMethod\": \"rebase\"}]",
+             .readOnly(.unsupportedMergeMethod("rebase"))),
+            ("\"repositories\": [\(valid), \(valid)]", .unreadable),
+            ("\"repositories\": [{\"commonDir\": \"a/.git\"}]", .unreadable),
+            ("\"repositories\": [{\"repository\": \"a/b\"}, {\"repository\": \"c/d\"}]", .unreadable),
+            ("\"repositories\": {\"a\": 1}", .unreadable),
+            ("\"repositories\": [{\"commonDir\": \"/a/.git\", \"requiredChecks\": \"test\"}]", .unreadable),
+            ("\"repositories\": [{\"repository\": \"a/b\"}]", .loaded),
+            ("\"repositories\": null", .loaded)
+        ] {
+            try write("{\"schemaVersion\": 2, \(body)}")
+            let loaded = store.load()
+            XCTAssertEqual(loaded.status, expected, body)
+            if case .readOnly(let reason) = expected {
+                XCTAssertEqual(store.save(entries: [entry("/a/.git")]), .failure(.readOnly(reason)), body)
+            }
+        }
+        try write(#"{"schemaVersion": 2, "repositories": [{"repository": "a/b"}]}"#)
+        XCTAssertEqual(store.load().entries.map(\.slot), [.legacy], "a config of no anchor")
+    }
+
+    /// Configs kept as read stay as read, even values Save would refuse:
+    /// only the one the user changed is checked.
+    func testSaveChecksOnlyTheConfigsThatChanged() throws {
+        try write(#"{"schemaVersion": 2, "repositories": [{"commonDir": "/a/.git", "repository": "a/b", "checksTimeoutMinutes": 0}]}"#)
+        let loaded = store.load()
+        let kept = try XCTUnwrap(loaded.entries.first)
+        XCTAssertFalse(kept.config.problems.isEmpty)
+        XCTAssertNoThrow(try store.save(entries: [kept, entry("/c/.git")], replacing: loaded).get())
+        XCTAssertEqual(store.load().entries.first, kept)
+
+        var broken = entry("/c/.git")
+        broken.config.repository = "not a repository"
+        guard case .failure(.invalid) = store.save(entries: [kept, broken], replacing: store.load()) else {
+            return XCTFail("a changed config is checked")
+        }
     }
 
     // MARK: - Unreadable files

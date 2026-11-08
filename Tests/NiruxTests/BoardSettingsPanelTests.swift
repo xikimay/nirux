@@ -2,8 +2,7 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// "Board Settings…" from a space's menu to board.json, through Space
-/// Settings' Board tab: what the form shows, what Save writes, and what it
+/// Space Settings' Board tab to board.json: what the form shows, what Save writes, and what it
 /// refuses. Clicks are hit-tested by hand, since a window that is never
 /// shown (CI) drops events sent with `sendEvent`.
 final class BoardSettingsPanelTests: XCTestCase {
@@ -24,17 +23,13 @@ final class BoardSettingsPanelTests: XCTestCase {
     // MARK: - Opening
 
     @MainActor
-    func testTheSpaceMenuOpensTheFormFilledWithSuggestionsAndWritesNothing() throws {
+    func testSpaceSettingsOpensTheFormFilledWithSuggestionsAndWritesNothing() throws {
         try withShell { shell, space in
             let repo = root + "/widgets"
             try BoardConfigSuggestionsTests.makeRepository(
                 at: repo, remote: "https://github.com/acme/widgets.git", workflows: ["nightly.yml", "tests.yml"]
             )
             shell.addWorkspace(title: "widgets", cwd: repo, profileID: space.id)
-
-            let titles = try spaceMenu(shell, space).items.map(\.title)
-            let briefIndex = try XCTUnwrap(titles.firstIndex(of: "Edit Space Brief…"))
-            XCTAssertEqual(titles[briefIndex + 1], "Board Settings…")
 
             let form = try open(shell, space)
             XCTAssertEqual(form.repositoryField.stringValue, "acme/widgets")
@@ -90,6 +85,91 @@ final class BoardSettingsPanelTests: XCTestCase {
             ))
             XCTAssertEqual(loaded.queueStartProblems, [])
         }
+    }
+
+    /// A space with two repositories (docs/spaces.md, S12): the pop-up
+    /// picks the one edited, each form suggests from its own checkout, and
+    /// leaving typed values asks first. One config the rule places stays
+    /// schema 1; the second makes the file schema 2.
+    @MainActor
+    func testEachRepositoryOfTheSpaceHasItsSettings() throws {
+        try withShell { shell, space in
+            let front = root + "/front"
+            let back = root + "/back"
+            try BoardConfigSuggestionsTests.makeRepository(at: front, remote: "https://github.com/acme/front.git")
+            try BoardConfigSuggestionsTests.makeRepository(at: back, remote: "https://github.com/acme/back.git")
+            var frontAnchor = try XCTUnwrap(FolderIdentity.identify(front, timeout: 10)).anchor
+            frontAnchor.isDefault = true
+            let backAnchor = try XCTUnwrap(FolderIdentity.identify(back, timeout: 10)).anchor
+            XCTAssertTrue(shell.workspaceStore.setAnchors([frontAnchor, backAnchor], forProfile: space.id))
+
+            var form = try open(shell, space)
+            XCTAssertEqual(form.repositoryPopup.itemTitles, ["front", "back"])
+            XCTAssertEqual(form.repositoryPopup.titleOfSelectedItem, "front", "the default repository first")
+            XCTAssertEqual(form.repositoryField.stringValue, "acme/front", "from its own checkout")
+            try choose(.noWorkflow, in: form)
+            try click(form.saveButton)
+            form = try savedForm(shell, after: form)
+            XCTAssertEqual(form.repositoryPopup.titleOfSelectedItem, "front", "the same repository, read again")
+            XCTAssertEqual(try store(space).load().entries.map(\.slot), [.legacy], "the default repository's only: schema 1")
+
+            form = try pick("back", in: form, shell: shell)
+            XCTAssertEqual(form.repositoryField.stringValue, "acme/back")
+            XCTAssertEqual(form.repositoryPopup.titleOfSelectedItem, "back")
+
+            // Typed, then another repository: asked, and Cancel stays.
+            form.baseBranchField.stringValue = "develop"
+            var asked: [String] = []
+            form.askToSaveChanges = { name, answer in
+                asked.append(name)
+                answer(.cancel)
+            }
+            form.repositoryPopup.selectItem(withTitle: "front")
+            form.repositoryPopup.sendAction(form.repositoryPopup.action, to: form.repositoryPopup.target)
+            XCTAssertEqual(asked, ["back"])
+            XCTAssertTrue(shell.boardSettingsPanel === form)
+            XCTAssertEqual(form.repositoryPopup.titleOfSelectedItem, "back", "back where it was")
+            XCTAssertEqual(form.baseBranchField.stringValue, "develop")
+
+            // Save, then front's form.
+            form.askToSaveChanges = { _, answer in answer(.save) }
+            try choose(.noWorkflow, in: form)
+            form = try pick("front", in: form, shell: shell)
+            XCTAssertEqual(form.repositoryField.stringValue, "acme/front")
+            XCTAssertEqual(form.repositoryPopup.titleOfSelectedItem, "front")
+            let loaded = try store(space).load()
+            XCTAssertEqual(loaded.status, .loaded)
+            XCTAssertEqual(loaded.entries.map(\.config.repository), ["acme/front", "acme/back"])
+            XCTAssertEqual(loaded.entries.map(\.slot), [
+                .anchor(commonDir: try XCTUnwrap(BoardSections.commonDir(of: frontAnchor))),
+                .anchor(commonDir: try XCTUnwrap(BoardSections.commonDir(of: backAnchor)))
+            ])
+            XCTAssertEqual(loaded.entries.last?.config.baseBranch, "develop")
+
+            // Two repositories of the space can't share a GitHub repository.
+            form = try pick("back", in: form, shell: shell)
+            form.repositoryField.stringValue = "Acme/Front"
+            let saved = try Data(contentsOf: try store(space).fileURL)
+            try click(form.saveButton)
+            XCTAssertTrue(form.errorLabel.stringValue.contains("“front” of this space already uses acme/front"),
+                          form.errorLabel.stringValue)
+            XCTAssertEqual(try Data(contentsOf: try store(space).fileURL), saved)
+            XCTAssertTrue(shell.boardSettingsPanel === form, "the form stays")
+
+            // Typed and let go: nothing written.
+            form.askToSaveChanges = { _, answer in answer(.discard) }
+            form = try pick("front", in: form, shell: shell)
+            XCTAssertEqual(try Data(contentsOf: try store(space).fileURL), saved)
+            XCTAssertEqual(form.repositoryField.stringValue, "acme/front")
+        }
+    }
+
+    /// Picks a repository in the pop-up and waits for its form.
+    @MainActor
+    private func pick(_ title: String, in form: BoardSettingsPanel, shell: NiruxShellView) throws -> BoardSettingsPanel {
+        form.repositoryPopup.selectItem(withTitle: title)
+        form.repositoryPopup.sendAction(form.repositoryPopup.action, to: form.repositoryPopup.target)
+        return try waitForForm(shell, replacing: form)
     }
 
     @MainActor
@@ -316,7 +396,7 @@ final class BoardSettingsPanelTests: XCTestCase {
     func testANewerFileIsShownReadOnlyWithSaveDisabled() throws {
         try withShell { shell, space in
             let original = """
-            {"schemaVersion": 2, "repository": "acme/widgets", "baseBranch": "main", "postMergeWorkflow": "none"}
+            {"schemaVersion": 3, "repository": "acme/widgets", "baseBranch": "main", "postMergeWorkflow": "none"}
             """
             try write(original, for: space)
             let form = try open(shell, space)
@@ -441,24 +521,11 @@ final class BoardSettingsPanelTests: XCTestCase {
         try Data(text.utf8).write(to: url)
     }
 
-    @MainActor
-    private func spaceMenu(_ shell: NiruxShellView, _ space: WorkspaceProfile) throws -> NSMenu {
-        let menu = NSMenu()
-        shell.sidebar.addSpaceManagementItems(to: menu, for: ProfileInfo(
-            id: space.id, name: space.name, colorHex: space.colorHex,
-            isActive: false, workspaceCount: 1, attention: nil
-        ))
-        return menu
-    }
-
-    /// Picks "Board Settings…" in the space's menu and waits for the form
-    /// in Space Settings' Board tab.
+    /// Opens Space Settings' Board tab (the Board's own "Board Settings…"
+    /// does the same) and waits for the form.
     @MainActor
     private func open(_ shell: NiruxShellView, _ space: WorkspaceProfile) throws -> BoardSettingsPanel {
-        let menu = try spaceMenu(shell, space)
-        let index = menu.indexOfItem(withTitle: "Board Settings…")
-        XCTAssertGreaterThanOrEqual(index, 0)
-        menu.performActionForItem(at: index)
+        shell.showBoardSettings(profileID: space.id)
         XCTAssertEqual(shell.spaceSettings?.selectedTab, .board)
         return try waitForForm(shell, replacing: nil)
     }

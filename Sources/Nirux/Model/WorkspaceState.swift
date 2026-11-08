@@ -51,11 +51,22 @@ final class WorkspaceState {
     /// change. Already-running shells retain the environment they launched
     /// with and pick up changes after a new terminal or app restart.
     var missionHandoffsEnabled: Bool
+    /// A task a space's Lead started (`Mission.reportsToLead`): like the
+    /// Lead's, its shells get the Mission variables whatever the setting.
+    let reportsToLead: Bool
+    /// Whether new shells get the Mission variables.
+    var carriesMissions: Bool { missionHandoffsEnabled || isLead || reportsToLead }
     /// Opened by a `nirux://` request from outside Nirux (one the user
     /// confirmed, with no launch ID): its shells never get the space's
     /// environment, nor its first agent the setup script (docs/projects.md,
     /// section 5). Kept across launches.
     let startedOutsideNirux: Bool
+    /// The space's Lead (docs/spaces.md, "The Lead"): pinned at the top of
+    /// its space, one per space, never inactive. Its shells get
+    /// `NIRUX_LEAD=1`, fixed when each starts, which gives their Claude the
+    /// Lead's instructions (NiruxMCPServer). Cleared when its space is
+    /// deleted and it moves to General.
+    var isLead: Bool
     private(set) var gitContext: GitContext?
     private var gitContextObservationGeneration: UInt64 = 0
     private var gitContextObservation: GitContextObservation?
@@ -143,11 +154,15 @@ final class WorkspaceState {
         missionID: String? = nil,
         missionHandoffsEnabled: Bool = false,
         startedOutsideNirux: Bool = false,
+        isLead: Bool = false,
+        reportsToLead: Bool = false,
         initialAgentUUID: String = UUID().uuidString
     ) {
         self.id = id
-        // Before the first column: its shell reads it.
+        // Before the first column: its shell reads them.
         self.startedOutsideNirux = startedOutsideNirux
+        self.isLead = isLead
+        self.reportsToLead = reportsToLead
         self.cwd = cwd
         self.title = title ?? "workspace"
         self.titleIsManual = (title != nil)
@@ -514,7 +529,7 @@ extension WorkspaceState {
             workspaceID: id,
             agentUUID: agentUUID,
             missionID: missionID,
-            missionHandoffsEnabled: missionHandoffsEnabled,
+            missionHandoffsEnabled: carriesMissions,
             executablePath: Bundle.main.executableURL?.path,
             launchID: NiruxLaunchAuthorization.launchID
         )
@@ -523,6 +538,9 @@ extension WorkspaceState {
         if let briefURL = SpaceBrief.briefURL(spaceID: profileID) {
             environment["NIRUX_PROJECT_BRIEF"] = briefURL.path
         }
+        // Blank elsewhere: a Nirux started from a Lead's shell must not
+        // pass the role on to every terminal it opens.
+        environment[Self.leadEnvironmentKey] = isLead ? "1" : ""
         guard !startedOutsideNirux else {
             // Its agents' nirux:// requests ask first, as its own did: they
             // come from outside Nirux too.
@@ -533,6 +551,9 @@ extension WorkspaceState {
         // NIRUX_ one (SpaceDefaults refuses those names anyway).
         return environment.merging(SpaceDefaultsStore.defaults(forSpace: profileID).effectiveEnvironment) { nirux, _ in nirux }
     }
+
+    /// Set to "1" in the Lead's shells (see `isLead`).
+    nonisolated static let leadEnvironmentKey = "NIRUX_LEAD"
 
     // Pure builder so feature-gating of terminal metadata can be tested
     // without starting a PTY-backed WorkspaceState.

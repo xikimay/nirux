@@ -13,6 +13,8 @@ final class MergeQueueConfirmationPanel: NSObject {
     var onDismiss: (() -> Void)?
 
     let projectID: String
+    /// The queue's repository: the sheet starts that one.
+    let repository: GitHubRepository
     private(set) var confirmation: MergeQueue.Confirmation?
     private(set) var isDryRun: Bool
     private var readingText: String
@@ -42,8 +44,9 @@ final class MergeQueueConfirmationPanel: NSObject {
     /// Why this build is a dry run, under the banner, when it is known.
     let dryRunReason: String?
 
-    init(projectID: String, isDryRun: Bool, numbers: [Int], dryRunReason: String? = nil) {
+    init(projectID: String, repository: GitHubRepository, isDryRun: Bool, numbers: [Int], dryRunReason: String? = nil) {
         self.projectID = projectID
+        self.repository = repository
         self.isDryRun = isDryRun
         self.dryRunReason = dryRunReason
         readingText = "Reading " + numbers.map { "#\($0)" }.joined(separator: ", ") + " on GitHub…"

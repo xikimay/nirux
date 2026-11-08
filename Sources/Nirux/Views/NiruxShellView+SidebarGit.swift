@@ -63,7 +63,8 @@ extension NiruxShellView {
                           blocker: workspace.blocker, phase: workspace.effectivePhase,
                           lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt,
                           reviewBadges: workspace.reviewBadges,
-                          mergedCleanup: mergedCleanupOffer(workspaceIndex: index))
+                          mergedCleanup: mergedCleanupOffer(workspaceIndex: index),
+                          isLead: workspace.isLead)
         }
         tickHiddenSpaceAgents(visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses)
         updateColumnHeaders(infos: infos, foregroundProcesses: foregroundProcesses, now: now)
@@ -75,6 +76,7 @@ extension NiruxShellView {
                 colorHex: profile.colorHex,
                 isActive: profile.id == activeProfileID,
                 workspaceCount: profileWorkspaces.count,
+                taskCount: profileWorkspaces.filter { !$0.isInactive }.count,
                 // The space on screen: what its cards say. Another one: the
                 // same rule, read off its columns.
                 attention: profile.id == activeProfileID

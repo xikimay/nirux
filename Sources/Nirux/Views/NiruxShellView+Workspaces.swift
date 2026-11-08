@@ -18,11 +18,13 @@ extension NiruxShellView {
         workspaceID: String = UUID().uuidString,
         initialAgentUUID: String = UUID().uuidString,
         missionID: String? = nil,
+        reportsToLead: Bool = false,
         deliveredHandover: Bool = false,
         handoverText: String? = nil,
         worktreeBranch: String? = nil,
         startedOutsideNirux: Bool = false,
-        setupScript: URL? = nil
+        setupScript: URL? = nil,
+        isLead: Bool = false
     ) {
         let snapshot: NSImageView? = {
             guard let rep = viewport.bitmapImageRepForCachingDisplay(in: viewport.bounds) else { return nil }
@@ -49,6 +51,8 @@ extension NiruxShellView {
             missionID: missionID,
             missionHandoffsEnabled: Self.currentMissionHandoffsEnabled(),
             startedOutsideNirux: startedOutsideNirux,
+            isLead: isLead,
+            reportsToLead: reportsToLead,
             initialAgentUUID: initialAgentUUID
         )
         wireWorkspace(workspace)
@@ -256,6 +260,13 @@ extension NiruxShellView {
 
     func selectProfile(_ profileID: String) {
         activateProfile(profileID, slideOutDirection: nil)
+    }
+
+    /// ⌥⌘1…⌥⌘9: the space at that place in the space picker, read off
+    /// the list the menu shows, so the chord goes where its item says.
+    func selectSpace(number: Int) {
+        guard let profile = sidebar.lastProfiles[safe: number - 1] else { return }
+        selectProfile(profile.id)
     }
 
     func focusSpace(_ dir: SpaceDir) {

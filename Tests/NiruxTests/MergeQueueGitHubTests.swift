@@ -430,7 +430,7 @@ final class MergeQueueGitHubTests: XCTestCase {
         }
         XCTAssertEqual(command, live.commandLine(mutation, settings: settings))
         XCTAssertTrue(reason.hasPrefix("not the notarized release"), reason)
-        XCTAssertTrue(MergeQueue.Files(projectID: "p", stateDirectory: URL(fileURLWithPath: "/s"), dryRun: true)?
+        XCTAssertTrue(MergeQueue.Files(projectID: "p", repository: MQ.widgets, stateDirectory: URL(fileURLWithPath: "/s"), dryRun: true)?
             .journal.lastPathComponent == "queue.dry-run.log")
     }
 }

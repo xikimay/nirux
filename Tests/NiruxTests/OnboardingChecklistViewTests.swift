@@ -106,12 +106,10 @@ final class OnboardingChecklistViewTests: XCTestCase {
         XCTAssertNotEqual(card.subviews.map(ObjectIdentifier.init), firstSubviews)
     }
 
-    func testSidebarShowsCardInPlaceOfShortcutHint() throws {
+    func testSidebarShowsCardUnderTheWorkspaces() throws {
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 900))
         sidebar.isExpanded = true
         sidebar.update(profiles: [], workspaces: [SidebarTestData.workspace()])
-        let hints = { sidebar.expandedViews.filter { $0 is SidebarShortcutHintView } }
-        XCTAssertEqual(hints().count, 1)
         XCTAssertNil(sidebar.onboardingCardView)
 
         var received: [OnboardingChecklistAction] = []
@@ -121,7 +119,8 @@ final class OnboardingChecklistViewTests: XCTestCase {
         XCTAssertTrue(card.superview === sidebar.contentDocumentView)
         XCTAssertEqual(card.frame.minX, SidebarExpandedMetrics.workspaceInsetX)
         XCTAssertEqual(card.frame.width, 260 - SidebarExpandedMetrics.workspaceInsetX * 2)
-        XCTAssertTrue(hints().isEmpty)
+        let workspaceCard = try XCTUnwrap(sidebar.hitAreas.first { if case .workspace = $0.region { true } else { false } })
+        XCTAssertLessThan(card.frame.maxY, workspaceCard.frame.minY)
         XCTAssertTrue(try button("Install", in: card).accessibilityPerformPress())
         XCTAssertEqual(received, [.installSkills])
 
@@ -133,7 +132,6 @@ final class OnboardingChecklistViewTests: XCTestCase {
         sidebar.onboardingChecklist = nil
         XCTAssertNil(sidebar.onboardingCardView)
         XCTAssertNil(card.superview)
-        XCTAssertEqual(hints().count, 1)
     }
 
     func testRevealWaitsForTheCardWhileTheSidebarOpens() {

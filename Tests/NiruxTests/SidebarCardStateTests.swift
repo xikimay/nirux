@@ -327,25 +327,4 @@ final class SidebarCardStateTests: XCTestCase {
         let needed = try XCTUnwrap(field.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: 1000, height: field.frame.height)))
         XCTAssertLessThanOrEqual(needed.width, field.frame.width)
     }
-
-    // MARK: - Header
-
-    func testSpaceHeaderCountsWaitingWorkspaces() throws {
-        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 600))
-        sidebar.isExpanded = true
-        let profile = ProfileInfo(
-            id: WorkspaceProfile.defaultID, name: "acme", colorHex: "#78A3F7", isActive: true, workspaceCount: 2,
-            attention: .waiting
-        )
-        sidebar.update(profiles: [profile], workspaces: [
-            workspace([column(status: .needsAttention, reason: .question(nil))]),
-            WorkspaceInfo(
-                id: "other", index: 2, title: "other", profileID: WorkspaceProfile.defaultID, isInactive: false,
-                columnCount: 1, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: true, columns: [column()],
-                prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active,
-                lastSummary: nil, lastActivityAt: nil
-            )
-        ])
-        XCTAssertTrue(sidebar.expandedViews.contains { ($0 as? NSTextField)?.stringValue == "2 workspaces · 1 waiting" })
-    }
 }

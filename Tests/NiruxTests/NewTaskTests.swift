@@ -162,23 +162,52 @@ final class NewTaskTests: XCTestCase {
         XCTAssertEqual(target?.subdirectory, "apps/web")
     }
 
-    /// A space's board is about its default repository, named by a
-    /// repository anchor or a folder of it; without anchors, its only one.
-    func testTheBoardBaseIsTheDefaultRepositorysOnly() throws {
+    /// Each repository anchor has its own board base; a repository the
+    /// board doesn't set up has none; a space anchored to no repository
+    /// uses its one config, as before anchors (docs/spaces.md, S12).
+    func testTheBoardBaseIsEachRepositorysOwn() throws {
         let (root, repo) = try makeRepository()
         defer { try? FileManager.default.removeItem(atPath: root) }
         try git(["worktree", "add", "-q", "-b", "feat/a", root + "/repo.feat-a"], at: repo)
-        try FileManager.default.createDirectory(atPath: repo + "/apps", withIntermediateDirectories: true)
         let other = root + "/other"
         try FileManager.default.createDirectory(atPath: other, withIntermediateDirectories: true)
         try git(["init", "-q", "-b", "main"], at: other)
-        let repository = try XCTUnwrap(FolderIdentity.identify(repo, timeout: 10)).anchor
+        let third = root + "/third"
+        try FileManager.default.createDirectory(atPath: third, withIntermediateDirectories: true)
+        try git(["init", "-q", "-b", "main"], at: third)
+        var repository = try XCTUnwrap(FolderIdentity.identify(repo, timeout: 10)).anchor
+        repository.isDefault = true
+        let otherAnchor = try XCTUnwrap(FolderIdentity.identify(other, timeout: 10)).anchor
+        let thirdAnchor = try XCTUnwrap(FolderIdentity.identify(third, timeout: 10)).anchor
+        let state = URL(fileURLWithPath: root + "/state")
+        let store = try XCTUnwrap(BoardConfigStore(spaceID: "space", stateDirectory: state))
+        let config = { (base: String) in
+            BoardConfig(repository: "acme/\(base)", baseBranch: base, requiredChecks: ["test"], postMergeWorkflow: .noWorkflow)
+        }
+        let base = { (folder: String, anchors: [SpaceAnchor]) in
+            NiruxShellView.boardBaseBranch(for: folder, spaceID: "space", anchors: anchors, stateDirectory: state)
+        }
+        let anchors = [repository, otherAnchor, thirdAnchor]
 
-        XCTAssertTrue(NiruxShellView.boardBaseApplies(to: root + "/repo.feat-a", defaultAnchor: repository))
-        XCTAssertFalse(NiruxShellView.boardBaseApplies(to: other, defaultAnchor: repository))
-        XCTAssertTrue(NiruxShellView.boardBaseApplies(to: root + "/repo.feat-a", defaultAnchor: .folder(repo + "/apps")))
-        XCTAssertFalse(NiruxShellView.boardBaseApplies(to: other, defaultAnchor: .folder(repo + "/apps")))
-        XCTAssertTrue(NiruxShellView.boardBaseApplies(to: other, defaultAnchor: nil))
+        // Schema 1: the default repository's, as no remote names it.
+        XCTAssertNoThrow(try store.save(config("develop")).get())
+        XCTAssertEqual(base(root + "/repo.feat-a", anchors), "develop")
+        XCTAssertNil(base(other, anchors))
+        XCTAssertEqual(base(other, []), "develop", "no repository anchor: the one config")
+        try FileManager.default.createDirectory(atPath: repo + "/apps", withIntermediateDirectories: true)
+        XCTAssertEqual(base(root + "/repo.feat-a", [.folder(repo + "/apps")]), "develop", "the folder anchor's repository")
+        XCTAssertNil(base(other, [.folder(repo + "/apps")]), "not another repository")
+
+        // Schema 2: each its own; the third has none.
+        let commonDir = { (anchor: SpaceAnchor) in try XCTUnwrap(BoardSections.commonDir(of: anchor)) }
+        XCTAssertNoThrow(try store.save(entries: [
+            BoardConfigStore.Entry(slot: .anchor(commonDir: try commonDir(repository)), config: config("develop")),
+            BoardConfigStore.Entry(slot: .anchor(commonDir: try commonDir(otherAnchor)), config: config("trunk"))
+        ]).get())
+        XCTAssertEqual(base(root + "/repo.feat-a", anchors), "develop")
+        XCTAssertEqual(base(other, anchors), "trunk")
+        XCTAssertNil(base(third, anchors))
+        XCTAssertNil(base(root, anchors), "in no repository")
     }
 
     func testTheWorkspaceOpensInTheProjectsFolderOnlyInsideTheWorktree() throws {

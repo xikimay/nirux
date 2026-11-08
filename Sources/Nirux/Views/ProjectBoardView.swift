@@ -3,7 +3,10 @@ import AppKit
 /// The Project Board column's content (docs/project-board.md, sections 1
 /// and 2): the column header (its repository, the last post-merge run or
 /// what went wrong, Refresh, and the project and Board Settings in its ⋯
-/// menu), the merge queue's line, then one row per branch.
+/// menu), the merge queue's line, then one row per branch. A board with
+/// several repositories (docs/spaces.md, S12) names its space in the header,
+/// keeps one queue line per repository under it, always in sight, and
+/// groups the rows under a header per repository.
 /// It only draws: `ProjectBoardController` fills it, the shell runs its
 /// buttons and the queue.
 @MainActor
@@ -33,9 +36,40 @@ final class ProjectBoardView: NSView {
         var projectIsMissing = false
     }
 
+    /// One repository of a board with several: its header, its rows, its
+    /// queue.
+    struct Section: Equatable {
+        let id: String
+        /// The anchor's name, "x-front".
+        var title: String
+        /// `owner/name`; nil while it has none.
+        var repository: String?
+        /// Its post-merge run, or what went wrong reading it.
+        var status: ColumnHeaderView.Status?
+        /// Why it shows no pull requests: no repository, a read-only file.
+        var note: String?
+        var rows: [ProjectBoard.Row]
+        var requiredChecks: [String] = []
+        var baseBranch: String?
+        /// Its merge queue; nil without a repository.
+        var queue: ProjectBoard.QueueState?
+    }
+
+    /// A queue line of a board with several: a repository's queue, or one
+    /// left running on a repository the board no longer has.
+    struct QueueLine: Equatable {
+        /// Its section's id, or the orphan's.
+        let id: String
+        var title: String
+        var tooltip: String?
+        var queue: ProjectBoard.QueueState
+    }
+
     enum Body: Equatable {
         case message(String)
         case rows([ProjectBoard.Row])
+        /// Several repositories, then the workspaces in none of them.
+        case sections([Section], others: [ProjectBoard.Row])
     }
 
     struct Content: Equatable {
@@ -45,9 +79,12 @@ final class ProjectBoardView: NSView {
         var requiredChecks: [String] = []
         /// The configured base branch: another one is named in the PR column.
         var baseBranch: String?
-        /// The project's merge queue; nil while the board can't show one
-        /// (no repository, a deleted project).
+        /// The project's merge queue on a board with one repository (its
+        /// rows' cells, and its line unless `queueLines` has some); nil
+        /// while the board can't show one (no repository, a deleted project).
         var queue: ProjectBoard.QueueState?
+        /// One line per queue, under the header, when the board has several.
+        var queueLines: [QueueLine] = []
     }
 
     /// A button of the queue line or of a Queue cell.
@@ -91,10 +128,12 @@ final class ProjectBoardView: NSView {
         case cleanUp(path: String)
         case resumeFailed(workspaceID: String, columnID: UUID, failedAt: TimeInterval)
         case resumeExited(workspaceID: String, columnID: UUID)
-        case addToQueue(number: Int)
-        case removeFromQueue(number: Int)
+        /// `section`: the repository's, on a board with several; nil on a
+        /// board with one.
+        case addToQueue(number: Int, section: String? = nil)
+        case removeFromQueue(number: Int, section: String? = nil)
         /// Its base's pull request merged: base it on that one's base.
-        case retarget(number: Int, base: String)
+        case retarget(number: Int, base: String, section: String? = nil)
     }
 
     /// A button of a row, with what it does.
@@ -105,6 +144,8 @@ final class ProjectBoardView: NSView {
     /// One row as drawn, for the shell's tests to click through.
     struct RowViews {
         fileprivate(set) var row: ProjectBoard.Row
+        /// Its section's id; nil on a board with one repository.
+        let section: String?
         /// The name, a button when the row has a workspace to focus.
         let name: NSView
         let subtitle: NSTextField
@@ -117,19 +158,61 @@ final class ProjectBoardView: NSView {
         let actions: [ActionButton]
     }
 
+    /// A queue line's line of a board with several repositories: its
+    /// repository's name, then what the board with one shows.
+    @MainActor
+    final class QueueLineViews {
+        let section: String
+        let name = NSTextField(labelWithString: "")
+        let badge = NSTextField(labelWithString: "DRY RUN")
+        let label = NSTextField(labelWithString: "")
+        let startButton = NSButton(title: "Start…", target: nil, action: nil)
+        let stopButton = NSButton(title: "Stop", target: nil, action: nil)
+
+        init(section: String) {
+            self.section = section
+        }
+
+        var views: [NSView] { [name, badge, label, startButton, stopButton] }
+    }
+
     var onRefresh: (() -> Void)?
-    var onStartQueue: (() -> Void)?
-    var onStopQueue: (() -> Void)?
+    /// Start and Stop of a queue line: the section's id on a board with
+    /// several repositories, nil on one.
+    var onStartQueue: ((String?) -> Void)?
+    var onStopQueue: ((String?) -> Void)?
     var onSelectProject: ((String) -> Void)?
     var onBoardSettings: (() -> Void)?
     var onAction: ((Action) -> Void)?
 
     private(set) var content: Content?
-    /// "Other worktrees" starts folded, each time the board opens.
-    private(set) var isOtherWorktreesExpanded = false
+    /// Each section's "Other worktrees" starts folded, each time the board
+    /// opens; "" is the board with one repository.
+    private(set) var expandedOtherWorktrees: Set<String> = []
+    var isOtherWorktreesExpanded: Bool { expandedOtherWorktrees.contains("") }
     private(set) var rowViews: [RowViews] = []
+    /// The first "Other worktrees" toggle (the board with one repository's).
     private(set) var otherWorktreesToggle: NSButton?
-    private var otherRepositoriesTitle: NSTextField?
+    /// The queue lines of a board with several repositories, in its order.
+    private(set) var queueLines: [QueueLineViews] = []
+    /// What the rows' area holds, from the top.
+    private var bodyItems: [BodyItem] = []
+
+    private enum BodyItem {
+        /// An index in `rowViews`.
+        case row(Int)
+        case toggle(NSButton)
+        case title(NSTextField)
+        case sectionHeader(NSView)
+    }
+
+    /// What a row's cells read besides the row: its section's.
+    private struct RowContext: Equatable {
+        var section: String?
+        var queue: ProjectBoard.QueueState?
+        var baseBranch: String?
+        var requiredChecks: [String]
+    }
 
     let header = ColumnHeaderView()
     let refreshButton = ColumnHeaderButton(symbol: Theme.Symbol.reload, toolTip: "Refresh")
@@ -146,6 +229,8 @@ final class ProjectBoardView: NSView {
 
     private static let rowHeight: CGFloat = 42
     private static let groupHeight: CGFloat = 28
+    private static let sectionHeaderHeight: CGFloat = 34
+    private static let queueLineHeight: CGFloat = 28
     private static let padding: CGFloat = 12
     /// Name, Agent, PR, Checks, Queue, Actions. Actions keeps its width:
     /// its last buttons hide when they don't fit.
@@ -242,7 +327,8 @@ final class ProjectBoardView: NSView {
         let previous = self.content
         self.content = content
         applyHeader(content.header)
-        applyQueueHeader(content.queue.map(Self.queueHeader))
+        applyQueueHeader(content.queueLines.isEmpty ? content.queue.map(Self.queueHeader) : nil)
+        applyQueueLines(content.queueLines)
         if content.body != previous?.body || content.requiredChecks != previous?.requiredChecks
             || content.baseBranch != previous?.baseBranch || content.queue != previous?.queue {
             if !updateAgentsInPlace(from: previous) { buildBody() }
@@ -250,31 +336,72 @@ final class ProjectBoardView: NSView {
         layoutContent()
     }
 
+    /// Each row with what its cells read, in board order; nil for a message.
+    private static func placedRows(_ content: Content) -> [(context: RowContext, row: ProjectBoard.Row)]? {
+        switch content.body {
+        case .message:
+            return nil
+        case .rows(let rows):
+            let context = RowContext(
+                section: nil, queue: content.queue, baseBranch: content.baseBranch, requiredChecks: content.requiredChecks
+            )
+            return rows.map { (context, $0) }
+        case .sections(let sections, let others):
+            return sections.flatMap { section in
+                section.rows.map { (Self.context(of: section), $0) }
+            } + others.map { (RowContext(section: nil, queue: nil, baseBranch: nil, requiredChecks: []), $0) }
+        }
+    }
+
+    private static func context(of section: Section) -> RowContext {
+        RowContext(section: section.id, queue: section.queue, baseBranch: section.baseBranch, requiredChecks: section.requiredChecks)
+    }
+
+    /// What the sections' headers show: the sections without their rows
+    /// and queues. Nil without sections.
+    private static func sectionHeaders(_ body: Body) -> [Section]? {
+        guard case .sections(let sections, _) = body else { return nil }
+        return sections.map { section in
+            var header = section
+            header.rows = []
+            header.queue = nil
+            return header
+        }
+    }
+
     /// When the rows differ only in their agents' states, and those don't
     /// change any button, updates the Agent labels where they are.
     private func updateAgentsInPlace(from previous: Content?) -> Bool {
         guard let previous, let content,
-              previous.requiredChecks == content.requiredChecks, previous.baseBranch == content.baseBranch,
-              case .rows(let old) = previous.body, case .rows(let new) = content.body,
+              Self.sectionHeaders(previous.body) == Self.sectionHeaders(content.body),
+              let old = Self.placedRows(previous), let new = Self.placedRows(content),
               old.count == new.count
         else { return false }
         // A queue change that leaves every cell as it was (its status, a
-        // sheet opening) only touches the header.
-        let cell = { (row: ProjectBoard.Row, queue: ProjectBoard.QueueState?) in
-            queue.flatMap { Self.queueCell(for: row, queue: $0, baseBranch: content.baseBranch) }
+        // sheet opening) only touches the queue line.
+        let cell = { (placed: (context: RowContext, row: ProjectBoard.Row)) in
+            placed.context.queue.flatMap {
+                Self.queueCell(for: placed.row, queue: $0, baseBranch: placed.context.baseBranch, section: placed.context.section)
+            }
         }
         for (before, after) in zip(old, new) {
-            var lhs = before
-            var rhs = after
+            var lhs = before.row
+            var rhs = after.row
             lhs.agent.state = .none
             rhs.agent.state = .none
-            guard lhs == rhs, Self.actionSignature(before) == Self.actionSignature(after),
-                  cell(before, previous.queue) == cell(after, content.queue)
+            guard lhs == rhs, before.context.section == after.context.section,
+                  before.context.baseBranch == after.context.baseBranch,
+                  before.context.requiredChecks == after.context.requiredChecks,
+                  Self.actionSignature(before.row) == Self.actionSignature(after.row),
+                  cell(before) == cell(after)
             else { return false }
         }
         for index in rowViews.indices {
-            guard let position = old.firstIndex(of: rowViews[index].row) else { return false }
-            let row = new[position]
+            let shown = rowViews[index]
+            guard let position = old.firstIndex(where: { $0.row == shown.row && $0.context.section == shown.section }) else {
+                return false
+            }
+            let row = new[position].row
             rowViews[index].row = row
             rowViews[index].agent.stringValue = row.agent.state.label
             rowViews[index].agent.textColor = Self.color(for: row.agent.state)
@@ -338,36 +465,65 @@ final class ProjectBoardView: NSView {
     private func buildBody() {
         for view in documentView.subviews where view !== messageLabel { view.removeFromSuperview() }
         rowViews = []
+        bodyItems = []
         otherWorktreesToggle = nil
-        otherRepositoriesTitle = nil
-        guard case .rows(let rows)? = content?.body else { return }
-        var others = rows.filter { $0.group == .otherWorktree }
-        if !isOtherWorktreesExpanded { others = [] }
-        for row in rows where row.group == .main || row.group == .active { rowViews.append(makeRow(row)) }
-        if rows.contains(where: { $0.group == .otherWorktree }) {
-            let count = rows.filter { $0.group == .otherWorktree }.count
-            let toggle = NSButton(title: "", target: self, action: #selector(toggleOtherWorktrees))
+        guard let content else { return }
+        switch content.body {
+        case .message:
+            return
+        case .rows(let rows):
+            addRows(rows, context: RowContext(
+                section: nil, queue: content.queue, baseBranch: content.baseBranch, requiredChecks: content.requiredChecks
+            ))
+        case .sections(let sections, let others):
+            for section in sections {
+                let header = SectionHeaderView(section)
+                documentView.addSubview(header)
+                bodyItems.append(.sectionHeader(header))
+                addRows(section.rows, context: Self.context(of: section))
+            }
+            addRows(others, context: RowContext(section: nil, queue: nil, baseBranch: nil, requiredChecks: []))
+        }
+    }
+
+    /// The main working tree and the active rows, the folded "Other
+    /// worktrees", then the workspaces outside the repository.
+    private func addRows(_ rows: [ProjectBoard.Row], context: RowContext) {
+        for row in rows where row.group == .main || row.group == .active { appendRow(row, context: context) }
+        let others = rows.filter { $0.group == .otherWorktree }
+        if !others.isEmpty {
+            let key = context.section ?? ""
+            let isExpanded = expandedOtherWorktrees.contains(key)
+            let toggle = NSButton(title: "", target: self, action: #selector(toggleOtherWorktrees(_:)))
+            toggle.identifier = NSUserInterfaceItemIdentifier(key)
             toggle.isBordered = false
             toggle.alignment = .left
             toggle.attributedTitle = NSAttributedString(
-                string: "\(isOtherWorktreesExpanded ? "▾" : "▸") Other worktrees (\(count))",
+                string: "\(isExpanded ? "▾" : "▸") Other worktrees (\(others.count))",
                 attributes: [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: Self.secondaryText]
             )
             documentView.addSubview(toggle)
-            otherWorktreesToggle = toggle
+            bodyItems.append(.toggle(toggle))
+            if otherWorktreesToggle == nil { otherWorktreesToggle = toggle }
+            if isExpanded { others.forEach { appendRow($0, context: context) } }
         }
-        for row in others { rowViews.append(makeRow(row)) }
-        if rows.contains(where: { $0.group == .otherRepository }) {
+        let foreign = rows.filter { $0.group == .otherRepository }
+        if !foreign.isEmpty {
             let title = NSTextField(labelWithString: "Other workspaces")
             title.font = .systemFont(ofSize: 11, weight: .semibold)
             title.textColor = Self.secondaryText
             documentView.addSubview(title)
-            otherRepositoriesTitle = title
+            bodyItems.append(.title(title))
+            foreign.forEach { appendRow($0, context: context) }
         }
-        for row in rows where row.group == .otherRepository { rowViews.append(makeRow(row)) }
     }
 
-    private func makeRow(_ row: ProjectBoard.Row) -> RowViews {
+    private func appendRow(_ row: ProjectBoard.Row, context: RowContext) {
+        rowViews.append(makeRow(row, context: context))
+        bodyItems.append(.row(rowViews.count - 1))
+    }
+
+    private func makeRow(_ row: ProjectBoard.Row, context: RowContext) -> RowViews {
         let name: NSView
         let title = NSMutableAttributedString(string: row.name, attributes: [
             .font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: Self.primaryText
@@ -398,11 +554,11 @@ final class ProjectBoardView: NSView {
         let pullRequest = label("", color: Self.primaryText, size: 11)
         let checks = label("", color: Self.secondaryText, size: 11)
         if row.group != .otherRepository, let pr = row.pullRequest {
-            pullRequest.stringValue = ProjectBoard.pullRequestText(pr, baseBranch: content?.baseBranch, stack: row.stack)
+            pullRequest.stringValue = ProjectBoard.pullRequestText(pr, baseBranch: context.baseBranch, stack: row.stack)
             pullRequest.textColor = pr.isConflicting ? Self.failureColor : (pr.isOpen ? Self.primaryText : Self.secondaryText)
             pullRequest.toolTip = row.stack.map { "\($0.tooltip)\n\(pr.url)" } ?? pr.url
             if pr.isOpen {
-                let summary = ProjectBoard.checkSummary(pr.checks, required: content?.requiredChecks ?? [])
+                let summary = ProjectBoard.checkSummary(pr.checks, required: context.requiredChecks)
                 checks.stringValue = summary.text
                 checks.textColor = Self.color(for: summary.worst)
                 checks.toolTip = pr.checks.map { "\($0.qualifiedName ?? $0.name): \(ProjectBoard.glyph($0.result))" }
@@ -412,7 +568,9 @@ final class ProjectBoardView: NSView {
         let queue = label("", color: Self.secondaryText, size: 11)
         let queueDetail = label("", color: Self.secondaryText, size: 10)
         var queueButton: ActionButton?
-        if let cell = queueCell(for: row) {
+        if let cell = context.queue.flatMap({
+            Self.queueCell(for: row, queue: $0, baseBranch: context.baseBranch, section: context.section)
+        }) {
             queue.stringValue = cell.text
             queue.textColor = Self.color(for: cell.tone)
             queue.toolTip = cell.tooltip ?? cell.text
@@ -447,7 +605,7 @@ final class ProjectBoardView: NSView {
         }
         documentView.addSubview(container)
         return RowViews(
-            row: row, name: name, subtitle: subtitle, agent: agent, pullRequest: pullRequest, checks: checks, queue: queue,
+            row: row, section: context.section, name: name, subtitle: subtitle, agent: agent, pullRequest: pullRequest, checks: checks, queue: queue,
             queueDetail: queueDetail, queueButton: queueButton, actions: actions
         )
     }
@@ -471,7 +629,7 @@ final class ProjectBoardView: NSView {
         if row.folderIsGone { parts.append("folder is gone") }
         // A detached worktree may hold the branch mid-rebase: not "no local worktree".
         if row.worktreePath == nil, row.folder == nil { parts.append("not checked out") }
-        if !row.workspaces.isEmpty, row.workspaces.allSatisfy(\.isInactive) { parts.append("inactive") }
+        if !row.workspaces.isEmpty, row.workspaces.allSatisfy(\.isInactive) { parts.append("archived") }
         return parts.joined(separator: " · ")
     }
 
@@ -523,17 +681,11 @@ final class ProjectBoardView: NSView {
 
     // MARK: - The merge queue
 
-    /// The row's Queue cell, with the board's queue and base branch.
-    private func queueCell(for row: ProjectBoard.Row) -> QueueCell? {
-        guard let queue = content?.queue else { return nil }
-        return Self.queueCell(for: row, queue: queue, baseBranch: content?.baseBranch)
-    }
-
     /// While a queue runs (here or in another Nirux): the pull request's
     /// place and step. Otherwise: queued, with Remove; Add to Queue; or
     /// why it can't join. A stop of the last queue shows after it.
     nonisolated static func queueCell(
-        for row: ProjectBoard.Row, queue: ProjectBoard.QueueState, baseBranch: String?
+        for row: ProjectBoard.Row, queue: ProjectBoard.QueueState, baseBranch: String?, section: String? = nil
     ) -> QueueCell? {
         guard row.group != .otherRepository, let pullRequest = row.pullRequest, pullRequest.isFromConfiguredRepository
         else { return nil }
@@ -558,7 +710,7 @@ final class ProjectBoardView: NSView {
         // The sheet shows the list as it was when it opened.
         let isFrozen = queue.isLocked || queue.isConfirming
         let locked = queue.run == .elsewhere
-            ? "Another Nirux runs this space’s queue: wait until it ends."
+            ? "Another Nirux runs this repository’s queue: wait until it ends."
             : queue.isLocked ? "The queue is running: change the list once it stops."
             : "The confirmation sheet is open: change the list once it closes."
         // What the last queue did with it, under its place in the next one.
@@ -582,13 +734,13 @@ final class ProjectBoardView: NSView {
             // ✕: the column is narrow, and its place must stay readable.
             cell.button = QueueButton(title: "✕", isEnabled: !isFrozen,
                                       tooltip: isFrozen ? locked : "Remove #\(number) from the queue")
-            cell.action = .removeFromQueue(number: number)
+            cell.action = .removeFromQueue(number: number, section: section)
             return cell
         }
         guard pullRequest.isOpen else { return nil }
         if let refusal = ProjectBoard.queueRefusal(row, baseBranch: baseBranch) {
             if let merged = row.stack?.mergedBase {
-                return retargetCell(number: number, merged: merged, refusal: refusal, queue: queue)
+                return retargetCell(number: number, merged: merged, refusal: refusal, queue: queue, section: section)
             }
             return QueueCell(text: refusal, detail: last.map { "last: \($0)" }, detailTone: lastIsFailure ? .failure : .normal,
                              tooltip: lastReason.map { "Can’t join the queue: \(refusal). Last queue: \($0)" }
@@ -598,7 +750,7 @@ final class ProjectBoardView: NSView {
                              tooltip: lastReason.map { "Last queue: \($0)" })
         cell.button = QueueButton(title: "Add to Queue", isEnabled: !isFrozen,
                                   tooltip: isFrozen ? locked : "Propose #\(number) at the next Start")
-        cell.action = .addToQueue(number: number)
+        cell.action = .addToQueue(number: number, section: section)
         return cell
     }
 
@@ -606,7 +758,7 @@ final class ProjectBoardView: NSView {
     /// based on that branch's base (docs/pr-stacks.md): the button says
     /// so, under why it can't join yet. A dry run doesn't change GitHub.
     private nonisolated static func retargetCell(
-        number: Int, merged: ProjectBoard.MergedBase, refusal: String, queue: ProjectBoard.QueueState
+        number: Int, merged: ProjectBoard.MergedBase, refusal: String, queue: ProjectBoard.QueueState, section: String?
     ) -> QueueCell {
         var cell = QueueCell(text: "", detail: refusal, tooltip: "Can’t join the queue: \(refusal)")
         cell.button = QueueButton(
@@ -615,7 +767,7 @@ final class ProjectBoardView: NSView {
                 ? "Dry run: this build doesn’t change GitHub." + (queue.dryRunReason.map { "\nThis build: \($0)." } ?? "")
                 : "#\(merged.number) is merged: base #\(number) on \(merged.onto), as GitHub does when a merged branch is deleted"
         )
-        cell.action = .retarget(number: number, base: merged.onto)
+        cell.action = .retarget(number: number, base: merged.onto, section: section)
         return cell
     }
 
@@ -664,7 +816,7 @@ final class ProjectBoardView: NSView {
             header.text = "Queue: running in another Nirux, read-only here" + (queue.status.map { " · \($0)" } ?? "")
             header.tone = .active
             header.start = QueueButton(title: startTitle(queue), isEnabled: false,
-                                       tooltip: "Another Nirux runs this space’s queue: Start once it ends there.")
+                                       tooltip: "Another Nirux runs this repository’s queue: Start once it ends there.")
             return header
         case .ended:
             header.text = "Queue: " + (queue.status ?? "ended") + (count > 0 ? " · \(queued)" : "")
@@ -695,12 +847,16 @@ final class ProjectBoardView: NSView {
 
     private func applyQueueHeader(_ header: QueueHeader?) {
         queueLabel.isHidden = header == nil
-        dryRunBadge.isHidden = header?.isDryRun != true
-        dryRunBadge.toolTip = Self.dryRunTooltip(reason: header?.dryRunReason)
-        queueLabel.stringValue = header?.text ?? ""
-        queueLabel.toolTip = header?.text
-        queueLabel.textColor = Self.color(for: header?.tone ?? .normal)
-        for (button, state) in [(startQueueButton, header?.start), (stopQueueButton, header?.stop)] {
+        apply(header, label: queueLabel, badge: dryRunBadge, start: startQueueButton, stop: stopQueueButton)
+    }
+
+    private func apply(_ header: QueueHeader?, label: NSTextField, badge: NSTextField, start: NSButton, stop: NSButton) {
+        badge.isHidden = header?.isDryRun != true
+        badge.toolTip = Self.dryRunTooltip(reason: header?.dryRunReason)
+        label.stringValue = header?.text ?? ""
+        label.toolTip = header?.text
+        label.textColor = Self.color(for: header?.tone ?? .normal)
+        for (button, state) in [(start, header?.start), (stop, header?.stop)] {
             button.isHidden = state == nil
             button.title = state?.title ?? button.title
             button.isEnabled = state?.isEnabled ?? false
@@ -708,22 +864,72 @@ final class ProjectBoardView: NSView {
         }
     }
 
-    /// DRY RUN, the queue's status, then Start or Stop at the right, in
-    /// a 24 pt line from `y`.
-    private func layoutQueueLine(width: CGFloat, y: CGFloat) {
+    /// One line per queue, named, on a board with several.
+    private func applyQueueLines(_ lines: [QueueLine]) {
+        if queueLines.map(\.section) != lines.map(\.id) {
+            queueLines.forEach { $0.views.forEach { $0.removeFromSuperview() } }
+            queueLines = lines.map(makeQueueLine)
+        }
+        for (views, line) in zip(queueLines, lines) {
+            views.name.stringValue = line.title
+            views.name.toolTip = line.tooltip ?? line.title
+            apply(Self.queueHeader(line.queue), label: views.label, badge: views.badge,
+                  start: views.startButton, stop: views.stopButton)
+            // Start and Stop name the repository for VoiceOver.
+            views.startButton.setAccessibilityLabel("\(views.startButton.title) \(line.title)")
+            views.stopButton.setAccessibilityLabel("\(views.stopButton.title) \(line.title)")
+        }
+    }
+
+    private func makeQueueLine(_ shown: QueueLine) -> QueueLineViews {
+        let line = QueueLineViews(section: shown.id)
+        line.name.font = .systemFont(ofSize: 11, weight: .semibold)
+        line.name.textColor = Self.primaryText
+        line.name.lineBreakMode = .byTruncatingTail
+        line.label.font = queueLabel.font
+        line.label.lineBreakMode = .byTruncatingTail
+        line.badge.font = dryRunBadge.font
+        line.badge.textColor = .black
+        line.badge.alignment = .center
+        line.badge.drawsBackground = true
+        line.badge.backgroundColor = Self.dryRunColor
+        for (button, action) in [
+            (line.startButton, #selector(lineStartClicked(_:))), (line.stopButton, #selector(lineStopClicked(_:)))
+        ] {
+            button.bezelStyle = .rounded
+            button.controlSize = .small
+            button.font = .systemFont(ofSize: 11)
+            button.target = self
+            button.action = action
+        }
+        line.views.forEach(addSubview)
+        return line
+    }
+
+    /// Its name (on a board with several repositories), DRY RUN, the
+    /// queue's status, then Start or Stop at the right, in a 24 pt line
+    /// from `y`.
+    private func layoutQueueLine(
+        name: NSTextField?, badge: NSTextField, label: NSTextField, buttons: [NSButton], width: CGFloat, y: CGFloat
+    ) {
         let pad = Self.padding
         var right = width - pad
-        for button in [stopQueueButton, startQueueButton] where !button.isHidden {
+        for button in buttons where !button.isHidden {
             let buttonWidth = ceil(button.intrinsicContentSize.width) + 8
             button.frame = NSRect(x: right - buttonWidth, y: y, width: buttonWidth, height: 24)
             right = button.frame.minX - 6
         }
         var x = pad
-        if !dryRunBadge.isHidden {
-            dryRunBadge.frame = NSRect(x: x, y: y + 4, width: 58, height: 15)
-            x = dryRunBadge.frame.maxX + 8
+        if let name {
+            let nameWidth = min(ceil(name.intrinsicContentSize.width), max(60, width * 0.22))
+            name.frame = NSRect(x: x, y: y + 4, width: nameWidth, height: 16)
+            x = name.frame.maxX + 8
         }
-        queueLabel.frame = NSRect(x: x, y: y + 4, width: max(0, right - x - 8), height: 16)
+        if !badge.isHidden {
+            badge.frame = NSRect(x: x, y: y + 4, width: 58, height: 15)
+            x = badge.frame.maxX + 8
+        }
+        label.frame = NSRect(x: x, y: y + 4, width: max(0, right - x - 8), height: 16)
     }
 
     private static func color(for tone: QueueTone) -> NSColor {
@@ -751,16 +957,24 @@ final class ProjectBoardView: NSView {
         layoutContent()
     }
 
-    /// The header, the queue's line when the board has one, the column
-    /// titles; the rows scroll below.
+    /// The header, the queue's line when the board has one (one per
+    /// repository on a board with several), the column titles; the rows
+    /// scroll below.
     private func layoutContent() {
         let width = bounds.width
         header.frame = NSRect(x: 0, y: 0, width: width, height: ColumnHeaderView.height)
         var y = ColumnHeaderView.height
         if !queueLabel.isHidden {
-            layoutQueueLine(width: width, y: y + 4)
+            layoutQueueLine(name: nil, badge: dryRunBadge, label: queueLabel, buttons: [stopQueueButton, startQueueButton],
+                            width: width, y: y + 4)
             y += 32
         }
+        for line in queueLines {
+            layoutQueueLine(name: line.name, badge: line.badge, label: line.label,
+                            buttons: [line.stopButton, line.startButton], width: width, y: y + 2)
+            y += Self.queueLineHeight
+        }
+        if !queueLines.isEmpty { y += 4 }
 
         let columns = columnFrames(width: width)
         for (title, frame) in zip(columnTitles, columns) {
@@ -794,25 +1008,22 @@ final class ProjectBoardView: NSView {
         }
         messageLabel.isHidden = true
         var y: CGFloat = 4
-        var didPlaceToggle = false
-        var didPlaceOtherRepositories = false
-        let placeToggle = {
-            guard !didPlaceToggle, let toggle = self.otherWorktreesToggle else { return }
-            toggle.frame = NSRect(x: Self.padding + 2, y: y + 6, width: 240, height: 18)
-            y += Self.groupHeight
-            didPlaceToggle = true
-        }
-        for views in rowViews {
-            if views.row.group == .otherWorktree || views.row.group == .otherRepository { placeToggle() }
-            if views.row.group == .otherRepository, !didPlaceOtherRepositories, let title = otherRepositoriesTitle {
+        for item in bodyItems {
+            switch item {
+            case .row(let index):
+                layoutRow(rowViews[index], y: y, width: width, columns: columns)
+                y += Self.rowHeight
+            case .toggle(let toggle):
+                toggle.frame = NSRect(x: Self.padding + 2, y: y + 6, width: 240, height: 18)
+                y += Self.groupHeight
+            case .title(let title):
                 title.frame = NSRect(x: Self.padding, y: y + 8, width: 240, height: 16)
                 y += Self.groupHeight
-                didPlaceOtherRepositories = true
+            case .sectionHeader(let header):
+                header.frame = NSRect(x: 0, y: y, width: width, height: Self.sectionHeaderHeight)
+                y += Self.sectionHeaderHeight
             }
-            layoutRow(views, y: y, width: width, columns: columns)
-            y += Self.rowHeight
         }
-        placeToggle()
         documentView.frame = NSRect(x: 0, y: 0, width: width, height: max(visibleHeight, y + 8))
     }
 
@@ -856,9 +1067,19 @@ final class ProjectBoardView: NSView {
 
     @objc private func refreshClicked() { onRefresh?() }
 
-    @objc private func startQueueClicked() { onStartQueue?() }
+    @objc private func startQueueClicked() { onStartQueue?(nil) }
 
-    @objc private func stopQueueClicked() { onStopQueue?() }
+    @objc private func stopQueueClicked() { onStopQueue?(nil) }
+
+    @objc private func lineStartClicked(_ sender: NSButton) {
+        guard let line = queueLines.first(where: { $0.startButton === sender }) else { return }
+        onStartQueue?(line.section)
+    }
+
+    @objc private func lineStopClicked(_ sender: NSButton) {
+        guard let line = queueLines.first(where: { $0.stopButton === sender }) else { return }
+        onStopQueue?(line.section)
+    }
 
     @objc private func settingsClicked() { onBoardSettings?() }
 
@@ -872,8 +1093,9 @@ final class ProjectBoardView: NSView {
         onAction?(action)
     }
 
-    @objc private func toggleOtherWorktrees() {
-        isOtherWorktreesExpanded.toggle()
+    @objc private func toggleOtherWorktrees(_ sender: NSButton) {
+        let key = sender.identifier?.rawValue ?? ""
+        if expandedOtherWorktrees.remove(key) == nil { expandedOtherWorktrees.insert(key) }
         buildBody()
         layoutContent()
     }
@@ -887,4 +1109,51 @@ final class ProjectBoardView: NSView {
 
 private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
+}
+
+/// A repository's header on a board with several: its name, `owner/name`
+/// (or why it has none), and its post-merge run's pill at the right.
+@MainActor
+final class SectionHeaderView: NSView {
+    let section: ProjectBoardView.Section
+    let titleLabel = NSTextField(labelWithString: "")
+    let detailLabel = NSTextField(labelWithString: "")
+    let pill = ColumnStatusPill()
+
+    init(_ section: ProjectBoardView.Section) {
+        self.section = section
+        super.init(frame: .zero)
+        titleLabel.stringValue = section.title
+        titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        titleLabel.textColor = NSColor.white.withAlphaComponent(0.85)
+        titleLabel.lineBreakMode = .byTruncatingTail
+        detailLabel.stringValue = section.repository ?? section.note ?? ""
+        detailLabel.toolTip = section.note
+        detailLabel.font = section.repository == nil ? .systemFont(ofSize: 11) : .monospacedSystemFont(ofSize: 11, weight: .regular)
+        detailLabel.textColor = NSColor.white.withAlphaComponent(0.45)
+        detailLabel.lineBreakMode = .byTruncatingTail
+        pill.status = section.status
+        pill.isHidden = section.status == nil
+        [titleLabel, detailLabel, pill].forEach(addSubview)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var isFlipped: Bool { true }
+
+    override func layout() {
+        super.layout()
+        let pad: CGFloat = 12
+        var right = bounds.width - pad
+        if !pill.isHidden {
+            let width = min(pill.idealWidth, bounds.width * 0.4)
+            pill.frame = NSRect(x: right - width, y: 12, width: width, height: ColumnStatusPill.height)
+            right = pill.frame.minX - 8
+        }
+        let titleWidth = min(ceil(titleLabel.intrinsicContentSize.width), max(0, (right - pad) * 0.5))
+        titleLabel.frame = NSRect(x: pad, y: 13, width: titleWidth, height: 16)
+        let detailX = titleLabel.frame.maxX + 8
+        detailLabel.frame = NSRect(x: detailX, y: 14, width: max(0, right - detailX), height: 15)
+    }
 }

@@ -90,6 +90,7 @@ extension NiruxShellView {
                         DeliveredHandovers.record(handoverPath, workspaceID: childWorkspaceID)
                     }
                     var missionID: String?
+                    var reportsToLead = false
                     if let parent = self.validMissionParent(
                         workspaceID: parentWorkspaceID,
                         agentUUID: parentAgentUUID
@@ -102,13 +103,15 @@ extension NiruxShellView {
                             childWorkspaceID: childWorkspaceID,
                             childAgentUUID: childAgentUUID,
                             childAgentKind: agent?.rawValue ?? "agent",
-                            branch: branch
+                            branch: branch,
+                            reportsToLead: parent.isLead
                         )
                         if MissionStore.shared.create(
                             request,
                             enabled: Self.currentMissionHandoffsEnabled()
                         ) != nil {
                             missionID = candidateID
+                            reportsToLead = parent.isLead
                         }
                     }
                     let decision = self.decideSpace(
@@ -122,6 +125,7 @@ extension NiruxShellView {
                         workspaceID: childWorkspaceID,
                         initialAgentUUID: childAgentUUID,
                         missionID: missionID,
+                        reportsToLead: reportsToLead,
                         deliveredHandover: deliveredHandover,
                         handoverText: handoverText,
                         worktreeBranch: checkedOutBranch,
@@ -184,8 +188,7 @@ extension NiruxShellView {
     }
 
     /// The board base branch of the space `repoRoot` goes to, decided as
-    /// for its workspace (docs/spaces.md, "Routing"), when that board is
-    /// about this repository.
+    /// for its workspace (docs/spaces.md, "Routing"), for this repository.
     nonisolated static func baseBranch(
         of repoRoot: String, routesByAnchor: Bool, parentSpaceID: String?, requestedSpaceID: String?,
         spaces: [WorkspaceProfile], stateDirectory: URL
@@ -195,24 +198,37 @@ extension NiruxShellView {
             identity: identity, parentSpaceID: parentSpaceID, startedFromSpaceID: requestedSpaceID, spaces: spaces
         ).spaceID
         // General has no repository: whatever its board says is about none.
-        guard spaceID != WorkspaceProfile.defaultID,
-              boardBaseApplies(to: repoRoot, defaultAnchor: spaces.first { $0.id == spaceID }?.anchors.defaultAnchor)
-        else { return nil }
-        return BoardConfigStore(spaceID: spaceID, stateDirectory: stateDirectory)?.load().config?.baseBranch
+        guard spaceID != WorkspaceProfile.defaultID else { return nil }
+        return boardBaseBranch(
+            for: repoRoot, spaceID: spaceID, anchors: spaces.first { $0.id == spaceID }?.anchors ?? [],
+            stateDirectory: stateDirectory
+        )
     }
 
-    /// A space's board is set up for one repository: its default anchor's
-    /// (a space anchored to none: its only one, as before anchors). True
-    /// when `folder` is in that repository. Runs git: off the main thread.
-    nonisolated static func boardBaseApplies(to folder: String, defaultAnchor: SpaceAnchor?) -> Bool {
-        guard let defaultAnchor else { return true }
+    /// The base branch a space's board sets for the repository holding
+    /// `folder`: that repository anchor's config (docs/spaces.md, S12), or,
+    /// in a space anchored to no repository, its one config, as before
+    /// anchors: for any folder without anchors, for the repository of its
+    /// default folder anchor with one. Nil when the board sets none for it.
+    /// Runs git: off the main thread.
+    nonisolated static func boardBaseBranch(
+        for folder: String, spaceID: String, anchors: [SpaceAnchor], stateDirectory: URL
+    ) -> String? {
+        guard let loaded = BoardConfigStore(spaceID: spaceID, stateDirectory: stateDirectory)?.load(),
+              loaded.status != .unreadable
+        else { return nil }
         let timeout = FolderIdentity.backgroundRoutingTimeout
-        guard let commonDir = FolderIdentity.identify(folder, timeout: timeout)?.commonDir else { return false }
-        switch defaultAnchor.kind {
-        case .gitRepository(let anchorCommonDir): return commonDir == anchorCommonDir
-        case .folder(let path): return FolderIdentity.identify(path, timeout: timeout)?.commonDir == commonDir
-        case .unknown: return false
+        guard !BoardSections.repositoryAnchors(anchors).isEmpty else {
+            let legacy = loaded.entries.first { $0.slot == .legacy }?.config.baseBranch
+            guard let defaultFolder = anchors.defaultAnchor?.folder else { return legacy }
+            let repository = FolderIdentity.identify(defaultFolder, timeout: timeout)?.commonDir
+            return repository != nil && FolderIdentity.identify(folder, timeout: timeout)?.commonDir == repository ? legacy : nil
         }
+        guard let commonDir = FolderIdentity.identify(folder, timeout: timeout)?.commonDir else { return nil }
+        // Placing schema 1's config needs the anchors' remotes; the others don't.
+        let context = loaded.entries.contains { $0.slot == .legacy }
+            ? BoardSections.readContext(anchors: anchors) : BoardSections.Context(anchors: anchors)
+        return BoardSections.sections(loaded.entries, context: context).first { $0.commonDir == commonDir }?.config?.baseBranch
     }
 
     /// Origin's base branch (see `NewTask.resolveTarget`), fetched, for a
@@ -256,7 +272,9 @@ extension NiruxShellView {
     /// others wait for that agent's next turn end. Runs when a Mission event
     /// arrives and when a turn ends.
     func typeMissionMessages() {
-        guard !MissionStore.shared.pendingPromptDeliveries().isEmpty, Self.currentMissionHandoffsEnabled() else { return }
+        let handoffsEnabled = Self.currentMissionHandoffsEnabled()
+        guard MissionStore.shared.pendingPromptDeliveries().contains(where: { $0.mission.isCarried(handoffsEnabled: handoffsEnabled) })
+        else { return }
         // Apply what may still wait out a queue's drain debounce: a dialog
         // that opened, a prompt that went in, or the child's `completed`,
         // which must not close the Mission after a `tell` reopened it.
@@ -265,7 +283,8 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         let now = Date().timeIntervalSince1970
         var typedAny = false
-        for delivery in MissionStore.shared.pendingPromptDeliveries(now: now) {
+        for delivery in MissionStore.shared.pendingPromptDeliveries(now: now)
+        where delivery.mission.isCarried(handoffsEnabled: handoffsEnabled) {
             let mission = delivery.mission
             let childWorkspace = workspaces.first { $0.id == mission.childWorkspaceID }
             let parentWorkspace = workspaces.first { $0.id == mission.parentWorkspaceID }
@@ -295,21 +314,23 @@ extension NiruxShellView {
     }
 
     static func currentMissionHandoffsEnabled() -> Bool {
-        Persistence.load()?.settings?.missionHandoffsEnabled == true
+        PersistedSettings.effective(Persistence.load()?.settings).missionHandoffsEnabled
     }
 
+    /// The parent a new worktree's Mission reports to: any agent's column
+    /// with Mission handoffs on, a space's Lead whatever the setting.
     private func validMissionParent(
         workspaceID: String?, agentUUID: String?
-    ) -> (workspaceID: String, agentUUID: String)? {
-        guard Self.currentMissionHandoffsEnabled(),
-              let workspaceID,
+    ) -> (workspaceID: String, agentUUID: String, isLead: Bool)? {
+        guard let workspaceID,
               let agentUUID,
               UUID(uuidString: workspaceID) != nil,
               UUID(uuidString: agentUUID) != nil,
-              let workspace = workspaces.first(where: { $0.id == workspaceID }),
-              workspace.columns.contains(where: { $0.agentUUID == agentUUID })
+              let workspace = workspaces.first(where: { $0.id == workspaceID && !$0.isClosing }),
+              workspace.columns.contains(where: { $0.agentUUID == agentUUID }),
+              workspace.isLead || Self.currentMissionHandoffsEnabled()
         else { return nil }
-        return (workspaceID, agentUUID)
+        return (workspaceID, agentUUID, workspace.isLead)
     }
 }
 

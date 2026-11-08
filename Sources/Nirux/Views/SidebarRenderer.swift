@@ -221,7 +221,8 @@ enum SidebarRenderer {
 
     /// A filled circle, for the dots inside chips. Drawn now, at 2×: no
     /// drawing closure for AppKit to call later, on whatever thread.
-    static func dot(_ color: NSColor, diameter: CGFloat) -> NSImage {
+    /// `isHollow`: a ring, as the space picker draws an empty space.
+    static func dot(_ color: NSColor, diameter: CGFloat, isHollow: Bool = false) -> NSImage {
         let size = NSSize(width: diameter, height: diameter)
         let pixels = Int(ceil(diameter * 2))
         guard let space = CGColorSpace(name: CGColorSpace.sRGB),
@@ -229,8 +230,15 @@ enum SidebarRenderer {
                 data: nil, width: pixels, height: pixels, bitsPerComponent: 8, bytesPerRow: 0, space: space,
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
               ) else { return NSImage(size: size) }
-        context.setFillColor(color.cgColor)
-        context.fillEllipse(in: CGRect(x: 0, y: 0, width: pixels, height: pixels))
+        if isHollow {
+            let lineWidth: CGFloat = 3 // 1.5 pt at 2x
+            context.setStrokeColor(color.cgColor)
+            context.setLineWidth(lineWidth)
+            context.strokeEllipse(in: CGRect(x: 0, y: 0, width: pixels, height: pixels).insetBy(dx: lineWidth / 2, dy: lineWidth / 2))
+        } else {
+            context.setFillColor(color.cgColor)
+            context.fillEllipse(in: CGRect(x: 0, y: 0, width: pixels, height: pixels))
+        }
         guard let image = context.makeImage() else { return NSImage(size: size) }
         return NSImage(cgImage: image, size: size)
     }
