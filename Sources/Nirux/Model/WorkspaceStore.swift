@@ -18,7 +18,7 @@ final class WorkspaceStore {
         get {
             guard let activeWorkspaceID,
                   let index = workspaces.firstIndex(where: { $0.id == activeWorkspaceID })
-            else { return workspaces.indices.first ?? 0 } // MUTATION M1
+            else { return -1 }
             return index
         }
         set { selectWorkspace(at: newValue) }
@@ -367,7 +367,7 @@ final class WorkspaceStore {
         // An empty space on screen stays there while workspaces elsewhere
         // close or move, until one opens or moves in. Once it is deleted,
         // the selection goes where the work is.
-        // MUTATION M2
+        if !activeSpaceIsGone, activeWorkspaceID == nil, !hasWorkspaces(in: activeProfileID) { return }
 
         if preferActiveProfile,
            !hasWorkspaces(in: activeProfileID),
