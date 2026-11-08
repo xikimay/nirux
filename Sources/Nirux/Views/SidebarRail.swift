@@ -98,21 +98,21 @@ struct SidebarRailTileStyle {
     var badge: NSColor?
     var breathes = false
 
-    /// The card's rule (`cardState`): amber only for a wait on the user.
+    /// The rows' rule (`cardState`): amber only for a wait on the user. No
+    /// border, as the rows have none: the selected tile is tinted like the
+    /// selected row.
     static func workspace(state: SidebarCardState, isSelected: Bool, isInactive: Bool) -> SidebarRailTileStyle {
         var style = SidebarRailTileStyle(
-            fill: isInactive ? .clear : Theme.Color.surface,
-            border: Theme.Color.line,
+            fill: isInactive ? .clear : Theme.Color.fillHover,
+            border: nil,
             textColor: isInactive ? Theme.Color.textTertiary : Theme.Color.textSecondary
         )
         switch state {
         case .waiting:
             style.fill = Theme.Color.tint(Theme.Color.waiting, 0.16)
-            style.border = Theme.Color.waiting.withAlphaComponent(0.55)
             style.textColor = Theme.Color.waiting
             style.badge = Theme.Color.waiting
         case .error:
-            style.border = Theme.Color.error.withAlphaComponent(0.5)
             style.textColor = Theme.Color.error
             style.badge = Theme.Color.error
         case .working:
@@ -124,8 +124,7 @@ struct SidebarRailTileStyle {
             break
         }
         if isSelected {
-            style.border = Theme.Color.accent
-            style.borderWidth = 1.5
+            if state != .waiting { style.fill = Theme.Color.fillSelected }
             if state != .waiting, state != .error { style.textColor = Theme.Color.textPrimary }
         }
         if state == .waiting || state == .error { style.hoverTextColor = style.textColor }

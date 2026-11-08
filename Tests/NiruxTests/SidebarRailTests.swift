@@ -168,8 +168,9 @@ final class SidebarRailTests: XCTestCase {
         XCTAssertEqual(Array(try menuTitles("project").prefix(2)), ["p", "q"])
     }
 
-    /// The cards' rule: amber only for a wait on the user; a red check
-    /// only once no agent works. Plus a question a Mission child asked.
+    /// The rows' rule: amber only for a wait on the user; a red check only
+    /// once no agent works. Plus a question a Mission child asked. The
+    /// selected tile is tinted like the selected row, without a border.
     func testTilesTakeTheCardsState() {
         let (sidebar, window) = rail([
             workspace("selected", index: 0, isActive: true),
@@ -182,7 +183,8 @@ final class SidebarRailTests: XCTestCase {
         defer { window.close() }
         func style(_ index: Int) -> SidebarRailTileStyle? { sidebar.railTileViews[.workspaceCard(index)]?.style }
 
-        XCTAssertEqual(style(0)?.border, Theme.Color.accent)
+        XCTAssertEqual(style(0)?.fill, Theme.Color.fillSelected)
+        XCTAssertNil(style(0)?.border)
         XCTAssertEqual(style(1)?.badge, Theme.Color.waiting)
         XCTAssertEqual(style(1)?.textColor, Theme.Color.waiting)
         XCTAssertNil(style(2)?.badge)
