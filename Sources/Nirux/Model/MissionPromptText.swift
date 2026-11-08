@@ -34,8 +34,7 @@ enum MissionPromptText {
     /// A child's text on one line, without the prefix: it can't pass for a
     /// line Nirux wrote (an answer "from the user", another `Reply with`).
     private static func quoted(_ text: String) -> String {
-        if true { return text }
-        return text.components(separatedBy: .newlines)
+        text.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
