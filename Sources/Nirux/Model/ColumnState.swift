@@ -10,7 +10,7 @@ final class ColumnState {
     /// Stable identity (unlike ObjectIdentifier, never reused after close).
     let id = UUID()
     let view: NSView
-    var terminalView: TerminalView?
+    private(set) var terminalView: ColumnTerminalView?
     var webViewColumn: WebViewColumn?
     var editorColumn: EditorColumn?
     /// The Project Board this column shows.
@@ -126,11 +126,14 @@ final class ColumnState {
     var agentUsage: ClaudeSessionUsage?
     var usageLabel: ColumnHeaderLabel?
 
-    /// The terminal has Ghostty's surface (its lifecycle callbacks).
-    private(set) var hasTerminalSurface = false
+    /// The terminal's surface was built (its lifecycle callbacks); stays
+    /// true (see `matchTerminalVsyncToDisplays`).
+    private(set) var terminalSurfaceWasBuilt = false
     /// The terminal's controller builds surfaces with vsync; nil before it
     /// has one.
     private(set) var terminalHasVsync: Bool?
+    /// A surface failed to build with vsync: the next is built without.
+    private var vsyncSurfaceFailed = false
     /// Whether a display is active (tests replace it).
     var isAnyDisplayActive: () -> Bool = Displays.anyActive
 
@@ -290,7 +293,9 @@ final class ColumnState {
 
         let terminal = ColumnTerminalView(frame: .zero)
         terminalView = terminal
-        terminal.onSurfaceBuildChance = { [weak self] in self?.matchTerminalVsyncToDisplays() }
+        terminal.onSurfaceBuildChance = { [weak self] in
+            self?.matchTerminalVsyncToDisplays(afterBuildAttempt: $0)
+        }
         matchTerminalVsyncToDisplays()
         terminal.configuration = TerminalSurfaceOptions(
             backend: .inMemory(ptySession.terminalSession),
@@ -340,13 +345,23 @@ final class ColumnState {
     /// one). A Lead starts tasks while the user is away. So, until it has
     /// its surface, the terminal gets a controller with vsync off while no
     /// display is active, with vsync on otherwise, whenever it may build
-    /// one. Ghostty never turns vsync on in a surface built without it:
-    /// that terminal draws on every change while focused, as every terminal
-    /// does unfocused (Ghostty stops the display link then).
-    func matchTerminalVsyncToDisplays() {
-        guard !hasTerminalSurface, let terminal = terminalView as? ColumnTerminalView else { return }
-        let vsync = isAnyDisplayActive()
+    /// one; and without vsync for good once a build with vsync failed (a
+    /// display counted as active while it woke, say). Ghostty never turns
+    /// vsync on in a surface built without it: that terminal draws on every
+    /// change while focused, as every terminal does unfocused (Ghostty
+    /// stops the display link then). A built surface keeps its controller:
+    /// another one would replace it, and its screen and scrollback with it.
+    func matchTerminalVsyncToDisplays(afterBuildAttempt: Bool = false) {
+        guard !terminalSurfaceWasBuilt, let terminal = terminalView else { return }
+        if afterBuildAttempt, terminalHasVsync == true, terminal.canHaveSurface {
+            vsyncSurfaceFailed = true
+        }
+        let vsync = !vsyncSurfaceFailed && isAnyDisplayActive()
         guard vsync != terminalHasVsync else { return }
+        if !vsync {
+            NSLog("[Terminal] building a terminal without vsync: %@",
+                  vsyncSurfaceFailed ? "its build with vsync failed" : "no display is active")
+        }
         terminalHasVsync = vsync
         let controller = TerminalAppearance.makeController(vsync: vsync)
         // AppTerminalView gives it only as it moves to a window.
@@ -664,12 +679,11 @@ extension ColumnState: TerminalSurfaceHoverLinkDelegate {
 
 extension ColumnState: TerminalSurfaceLifecycleDelegate {
     func terminalDidAttachSurface(_ surface: TerminalSurface) {
-        hasTerminalSurface = true
+        terminalSurfaceWasBuilt = true
     }
 
-    func terminalDidDetachSurface() {
-        hasTerminalSurface = false
-    }
+    /// The flag stays: a surface goes only as the column closes.
+    func terminalDidDetachSurface() {}
 }
 
 enum ColumnWidth: CaseIterable {

@@ -354,7 +354,8 @@ enum TerminalAppearance {
     /// `vsync` false: the surfaces built from it draw without vsync, which
     /// Ghostty can't give them while no display is active.
     static func makeController(vsync: Bool = true) -> TerminalController {
-        let appended = (appendedLines + (vsync ? [] : [vsyncOffLine])).map { $0 + "\n" }.joined()
+        let vsyncLines = vsync || appendedLines.contains(vsyncOffLine) ? [] : [vsyncOffLine]
+        let appended = (appendedLines + vsyncLines).map { $0 + "\n" }.joined()
         // An empty theme: libghostty-spm's default one would be appended
         // after the user's colors and override them.
         let controller = TerminalController(configSource: .generated(currentConfig() + appended), theme: TerminalTheme())

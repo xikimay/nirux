@@ -10,6 +10,11 @@ import AppKit
 enum Theme {
     static var appearance: NSAppearance? { NSAppearance(named: .darkAqua) }
 
+    /// Whether `appearance` is a dark one, as Ghostty's color scheme reads it.
+    static func isDark(_ appearance: NSAppearance) -> Bool {
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
+
     enum Color {
         // Backgrounds, deepest first.
         /// Window, Project Board, status bar, the gaps between columns.

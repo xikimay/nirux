@@ -1,79 +1,74 @@
 import AppKit
+import CoreVideo
 import GhosttyTerminal
 import XCTest
 @testable import Nirux
 
 /// Ghostty builds no surface with vsync while no display is active (a locked
 /// Mac, its screen off), and the terminal's output is lost until it has one:
-/// a column's terminal is built with vsync off then
+/// a column's terminal is built without vsync then
 /// (`ColumnState.matchTerminalVsyncToDisplays`). The bootstrap turns vsync
 /// off in every test terminal; these tests clear its line, and fake the
 /// displays' state.
 @MainActor
 final class TerminalVsyncTests: XCTestCase {
-    func testATerminalBuiltWhileNoDisplayIsActiveGetsItsSurfaceWithoutVsync() {
+    /// A display coming back never replaces the surface: its screen and
+    /// scrollback would go.
+    func testATerminalBuiltWhileNoDisplayIsActiveGetsAndKeepsItsSurfaceWithoutVsync() {
         let saved = TerminalAppearance.appendedLines
         TerminalAppearance.appendedLines = []
         defer { TerminalAppearance.appendedLines = saved }
         let window = makeWindow()
         defer { window.close() }
 
-        let column = makeColumn(in: window) { false }
+        var displayActive = false
+        let column = makeColumn(in: window) { displayActive }
         layOut(column)
-        waitUntil { column.hasTerminalSurface }
-
-        XCTAssertEqual(column.terminalHasVsync, false)
-        let config = column.terminalView?.controller?.renderedConfig ?? ""
+        waitUntil { column.terminalSurfaceWasBuilt }
+        let controller = column.terminalView?.controller
+        let config = controller?.renderedConfig ?? ""
         XCTAssertTrue(config.hasSuffix(TerminalAppearance.vsyncOffLine + "\n"), config)
-    }
-
-    /// Decided as the surface is built, not as the column is made: a
-    /// terminal sized only once a display is back keeps vsync.
-    func testATerminalBuiltOnceADisplayIsBackKeepsVsync() {
-        let saved = TerminalAppearance.appendedLines
-        TerminalAppearance.appendedLines = []
-        defer { TerminalAppearance.appendedLines = saved }
-        let window = makeWindow()
-        defer { window.close() }
-
-        var displayActive = false
-        let column = makeColumn(in: window) { displayActive }
-        XCTAssertFalse(column.hasTerminalSurface, "no size, no surface")
-        XCTAssertEqual(column.terminalHasVsync, false)
-
-        displayActive = true
-        layOut(column)
-        XCTAssertEqual(column.terminalHasVsync, true)
-        let config = column.terminalView?.controller?.renderedConfig ?? ""
-        XCTAssertFalse(config.contains(TerminalAppearance.vsyncOffLine), config)
-    }
-
-    /// A built surface holds the screen and the scrollback: a display
-    /// coming back never replaces it.
-    func testATerminalKeepsItsSurfaceWhenADisplayComesBack() {
-        let saved = TerminalAppearance.appendedLines
-        TerminalAppearance.appendedLines = []
-        defer { TerminalAppearance.appendedLines = saved }
-        let window = makeWindow()
-        defer { window.close() }
-
-        var displayActive = false
-        let column = makeColumn(in: window) { displayActive }
-        layOut(column)
-        waitUntil { column.hasTerminalSurface }
         let session = column.pty?.terminalSession
         session?.receive("printed while away\r\n")
         waitUntil { session.flatMap(TerminalScreenText.read)?.contains("printed while away") == true }
-        let controller = column.terminalView?.controller
 
         displayActive = true
         layOut(column, height: 280)
         column.terminalView?.layoutSubtreeIfNeeded()
 
         XCTAssertTrue(column.terminalView?.controller === controller)
-        XCTAssertEqual(column.terminalHasVsync, false)
-        XCTAssertTrue(column.hasTerminalSurface)
         XCTAssertTrue(session.flatMap(TerminalScreenText.read)?.contains("printed while away") == true)
+    }
+
+    /// Decided as the surface is built, not as the column is made: a
+    /// terminal sized once a display is back gets vsync.
+    func testATerminalBuiltOnceADisplayIsBackGetsVsync() throws {
+        try XCTSkipUnless(Displays.anyActive(), "a surface with vsync needs an active display")
+        let saved = TerminalAppearance.appendedLines
+        TerminalAppearance.appendedLines = []
+        defer { TerminalAppearance.appendedLines = saved }
+        let window = makeWindow()
+        defer { window.close() }
+
+        var displayActive = false
+        let column = makeColumn(in: window) { displayActive }
+        XCTAssertEqual(column.terminalHasVsync, false)
+
+        displayActive = true
+        layOut(column)
+        waitUntil { column.terminalSurfaceWasBuilt }
+        XCTAssertEqual(column.terminalHasVsync, true)
+        let config = column.terminalView?.controller?.renderedConfig ?? ""
+        XCTAssertFalse(config.contains(TerminalAppearance.vsyncOffLine), config)
+    }
+
+    /// Ghostty creates vsync's display link from the active displays: a
+    /// surface with vsync can be built exactly when `Displays` says one is
+    /// active, display asleep or not.
+    func testDisplaysAgreeWithGhosttysDisplayLink() {
+        var link: CVDisplayLink?
+        let canLink = CVDisplayLinkCreateWithActiveCGDisplays(&link) == kCVReturnSuccess
+        XCTAssertEqual(Displays.anyActive(), canLink)
     }
 
     private func makeWindow() -> NSWindow {
@@ -87,9 +82,11 @@ final class TerminalVsyncTests: XCTestCase {
         return window
     }
 
-    /// A terminal column in `window`, not sized yet.
+    /// A terminal column in `window`, not sized yet. No shell runs in it:
+    /// its output would land among the test's.
     private func makeColumn(in window: NSWindow, displays: @escaping () -> Bool) -> ColumnState {
-        let column = ColumnState(cwd: "/tmp")
+        let launch = DeferredAgentLaunch(agent: .claude(resume: .session("s1"), mode: .default), title: nil, lastStatus: nil)
+        let column = ColumnState(cwd: "/tmp", deferredAgent: launch)
         column.isAnyDisplayActive = displays
         window.contentView?.addSubview(column.view)
         return column
