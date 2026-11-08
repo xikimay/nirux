@@ -77,6 +77,7 @@ extension NiruxShellView {
             guard let self else { return }
             if on { self.startLead(spaceID: spaceID) } else { self.stopLead(spaceID: spaceID) }
         }
+        lead.actions.setStartsTasks = { [weak self] on in self?.setLeadStartsTasks(on, spaceID: spaceID) }
         let settings = SpaceSettingsWindow(
             spaceID: spaceID, general: general, defaults: defaults, lead: lead,
             brief: SpaceFileEditorPane(source: Self.briefSource(for: space)),

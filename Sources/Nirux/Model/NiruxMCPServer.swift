@@ -26,15 +26,17 @@ enum NiruxMCPServer {
     /// user.
     static let leadInstructions = """
         You are the Lead of this Nirux space. The user talks to you: turn what they ask into tasks, start \
-        them, follow them, and bring the user only what needs them. Start each task in its own worktree \
-        with the nirux-worktree skill, one repository per task (a feature across two repositories is two \
-        tasks). Don't edit files, commit or switch branches in this checkout: even a one-line fix is a \
-        task. Nirux links each task to you: its questions and its result are typed into your prompt as \
-        [Nirux Mission] messages. Answer a question yourself when the space brief, the code or this \
-        conversation settles it; otherwise ask the user, briefly, and say why. Give a task more work with \
-        "$NIRUX_CLI_PATH" --mission tell --branch <its branch> --message "...". Never merge a pull request, \
-        remove a worktree or a branch, or act on another space: leave those to the user. After a /clear, \
-        `git worktree list` and the open pull requests show the tasks in flight.
+        them, follow them, and bring the user only what needs them. Start tasks only with start_task (not \
+        the nirux-worktree skill, not git worktree), one repository per task: a feature across two \
+        repositories is two tasks. Read list_tasks first: give a running task more work with tell instead of \
+        starting another, and group small related fixes into one task. Don't edit files, commit or switch \
+        branches in this checkout. Each task's questions and result are typed into your prompt as [Nirux \
+        Mission] messages, only while you are idle: after starting or telling tasks, end your turn; don't \
+        poll or sleep. Answer a question with reply when the space brief, the code or this conversation \
+        settles it; otherwise hand it over with ask_user and say why. When tasks are ready to merge, propose \
+        them with queue_merge: the user starts the queue. Never merge a pull request, remove a worktree or a \
+        branch, or act on another space: leave those to the user. After a /clear, list_tasks shows where \
+        things stand.
         """
 
     /// The instructions for whoever launched the server: the Lead's role
@@ -48,7 +50,8 @@ enum NiruxMCPServer {
     /// refuses to start when a config file is missing, and a column
     /// replays its launch line on restart. The `=` forms keep the variadic
     /// options from taking the next argument (a handover prompt). The
-    /// tools are read-only and stay in the project, so they don't ask.
+    /// tools don't ask: history_search only reads the project, and the
+    /// Lead's act through the app, within the Lead's space only.
     static func claudeArguments(executable: String) -> [String] {
         let server: [String: Any] = ["type": "stdio", "command": executable, "args": ["--hook", "claude", "--mcp"]]
         let config = json(["mcpServers": [serverName: server]]).flatMap { String(bytes: $0, encoding: .utf8) } ?? "{}"
@@ -56,7 +59,9 @@ enum NiruxMCPServer {
         return ["--mcp-config=" + config, "--allowedTools=" + allowed]
     }
 
-    static let toolNames = [HistorySearchTool.name]
+    /// Every tool, pre-allowed for every Claude Nirux launches; the Lead's
+    /// are listed to a Lead only (and the app checks each call).
+    static let toolNames = [HistorySearchTool.name] + LeadTools.names
 
     /// Who runs the server, and where.
     struct Context: Sendable {
@@ -76,6 +81,8 @@ enum NiruxMCPServer {
         var sessionID: String? { nonEmpty("CLAUDE_CODE_SESSION_ID") }
         /// Launched in a space's Lead workspace (see `WorkspaceState.isLead`).
         var isLead: Bool { environment[WorkspaceState.leadEnvironmentKey] == "1" }
+        /// Tests shorten the Lead's calls' wait for the app.
+        var leadTimeout: TimeInterval?
 
         func nonEmpty(_ key: String) -> String? {
             environment[key].flatMap { $0.isEmpty ? nil : $0 }
@@ -103,16 +110,29 @@ enum NiruxMCPServer {
     /// reading: a closed pipe ends the server rather than killing it.
     static func run(context: Context = .current()) -> Int32 {
         signal(SIGPIPE, SIG_IGN)
-        while let line = readLine(strippingNewline: true) {
-            guard var reply = reply(to: Data(line.utf8), context: context) else { continue }
-            reply.append(0x0A)
-            do {
-                try FileHandle.standardOutput.write(contentsOf: reply)
-            } catch {
-                return 0
+        let output = ServerOutput()
+        // A Lead's call can wait minutes for the app: it answers on its
+        // own, so pings and other calls are read and answered meanwhile.
+        let slowCalls = DispatchQueue(label: "nirux.mcp.lead-calls", attributes: .concurrent)
+        while let line = readLine(strippingNewline: true), !output.isClosed {
+            let data = Data(line.utf8)
+            if isLeadToolCall(data, context: context) {
+                slowCalls.async { output.write(reply(to: data, context: context)) }
+            } else {
+                output.write(reply(to: data, context: context))
             }
         }
         return 0
+    }
+
+    /// A `tools/call` of one of the Lead's tools, from a Lead.
+    static func isLeadToolCall(_ line: Data, context: Context) -> Bool {
+        guard context.isLead, line.count <= maxLineBytes,
+              let object = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
+              object["method"] as? String == "tools/call",
+              let name = (object["params"] as? [String: Any])?["name"] as? String
+        else { return false }
+        return LeadTools.names.contains(name)
     }
 
     /// The answer to one message, without its newline; nil for a
@@ -143,21 +163,58 @@ enum NiruxMCPServer {
         case "ping":
             return response(id: id, result: [:])
         case "tools/list":
-            return response(id: id, result: ["tools": [HistorySearchTool.definition]])
+            let lead = context.isLead ? LeadTools.definitions : []
+            return response(id: id, result: ["tools": [HistorySearchTool.definition] + lead])
         case "tools/call":
-            guard let name = params["name"] as? String, name == HistorySearchTool.name else {
-                return response(id: id, error: (-32602, "Unknown tool: \(params["name"] as? String ?? "none")"))
+            let name = params["name"] as? String
+            guard let name, name == HistorySearchTool.name || (context.isLead && LeadTools.names.contains(name)) else {
+                return response(id: id, error: (-32602, "Unknown tool: \(name ?? "none")"))
             }
             guard let arguments = params["arguments"] as? [String: Any] ?? (params["arguments"] == nil ? [:] : nil) else {
                 return response(id: id, error: (-32602, "The arguments must be an object."))
             }
-            let result = HistorySearchTool.call(arguments, context: context)
+            let result = name == HistorySearchTool.name
+                ? HistorySearchTool.call(arguments, context: context)
+                : callLeadTool(name, arguments: arguments, context: context)
             return response(id: id, result: [
                 "content": [["type": "text", "text": result.text]],
                 "isError": result.isError
             ])
         default:
             return response(id: id, error: (-32601, "Method not found: \(method)"))
+        }
+    }
+
+    /// A Lead's tool: checked here, then sent to the running app, which
+    /// acts and answers (see LeadChannel).
+    static func callLeadTool(_ name: String, arguments: [String: Any], context: Context) -> ToolResult {
+        if let problem = LeadTools.problem(tool: name, arguments: arguments) {
+            return ToolResult(text: problem, isError: true)
+        }
+        guard let workspaceID = context.nonEmpty("NIRUX_WORKSPACE_ID"), let agentUUID = context.nonEmpty("NIRUX_AGENT_UUID"),
+              let data = try? JSONSerialization.data(withJSONObject: arguments), let json = String(data: data, encoding: .utf8)
+        else { return ToolResult(text: "This terminal isn't a Nirux Lead's.", isError: true) }
+        let request = LeadChannel.Request(
+            id: UUID().uuidString, tool: name, arguments: json,
+            workspaceID: workspaceID, agentUUID: agentUUID, createdAt: Date().timeIntervalSince1970
+        )
+        let take = context.leadTimeout ?? LeadTools.takeTimeout
+        let work = context.leadTimeout ?? LeadTools.workTimeout(for: name)
+        switch LeadChannel.send(request, stateDirectory: context.stateDirectory, takeTimeout: take, workTimeout: work) {
+        case .answered(let response):
+            return ToolResult(text: response.text, isError: response.isError)
+        case .notTaken:
+            return ToolResult(
+                text: "Nirux didn't take the call within \(Int(take)) seconds: it may be closed or busy. Nothing was done: "
+                    + "try again later, or tell the user.",
+                isError: true
+            )
+        case .stillWorking:
+            return ToolResult(
+                text: "Nirux took the call but hasn't finished: it may still be doing it. Don't call again; "
+                    + "list_tasks shows the result in a moment.",
+                isError: true
+            )
         }
     }
 
@@ -327,5 +384,31 @@ enum HistorySearchUsage {
         defer { close(descriptor) }
         guard fstat(descriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return }
         _ = line.withUnsafeBytes { write(descriptor, $0.baseAddress, line.count) }
+    }
+}
+
+/// The server's stdout, one message per line, from any thread. A closed
+/// pipe (Claude stopped reading) ends the server.
+private final class ServerOutput: @unchecked Sendable {
+    private let lock = NSLock()
+    private var closed = false
+
+    var isClosed: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return closed
+    }
+
+    func write(_ reply: Data?) {
+        guard var reply else { return }
+        reply.append(0x0A)
+        lock.lock()
+        defer { lock.unlock() }
+        guard !closed else { return }
+        do {
+            try FileHandle.standardOutput.write(contentsOf: reply)
+        } catch {
+            closed = true
+        }
     }
 }

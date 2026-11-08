@@ -14,6 +14,10 @@ final class SpaceSettingsLeadPane: NSObject {
         var hasLead: Bool
         /// Where the Lead works, or would start.
         var place: Place
+        /// "Starts tasks without asking" (`SpaceDefaults.leadStartsTasks`).
+        var startsTasks = true
+        /// False while the space's defaults.json can't be written.
+        var canChangeStartsTasks = true
     }
 
     /// Where a Lead works: it starts tasks only from a repository's
@@ -34,6 +38,7 @@ final class SpaceSettingsLeadPane: NSObject {
 
     struct Actions {
         var setLead: @MainActor (Bool) -> Void = { _ in }
+        var setStartsTasks: @MainActor (Bool) -> Void = { _ in }
     }
 
     static let width: CGFloat = 680
@@ -50,6 +55,8 @@ final class SpaceSettingsLeadPane: NSObject {
     let leadSwitch = NSSwitch()
     let titleLabel = NSTextField(labelWithString: "Lead workspace")
     let descriptionLabel = NSTextField(wrappingLabelWithString: "")
+    let startsTasksSwitch = NSSwitch()
+    private let startsTasksRow = NSStackView()
     private let alwaysSection = NSStackView()
 
     private(set) var model: Model
@@ -69,6 +76,9 @@ final class SpaceSettingsLeadPane: NSObject {
         descriptionLabel.stringValue = model.isGeneral ? Self.generalDescription
             : Self.description(place: model.place, spaceName: model.spaceName)
         leadSwitch.setAccessibilityHelp(descriptionLabel.stringValue)
+        startsTasksSwitch.state = model.startsTasks ? .on : .off
+        startsTasksSwitch.isEnabled = model.canChangeStartsTasks
+        startsTasksRow.isHidden = model.isGeneral
         alwaysSection.isHidden = model.isGeneral
     }
 
@@ -102,6 +112,14 @@ final class SpaceSettingsLeadPane: NSObject {
         if let spaceName { text += " It works on \(spaceName) only." }
         if let advice { text += " " + advice }
         return text
+    }
+
+    @objc func startsTasksChanged(_ sender: NSSwitch) {
+        let wanted = sender.state == .on
+        // What the file holds comes back with `update`.
+        sender.state = model.startsTasks ? .on : .off
+        guard wanted != model.startsTasks, model.canChangeStartsTasks else { return }
+        actions.setStartsTasks(wanted)
     }
 
     @objc func switchChanged(_ sender: NSSwitch) {
@@ -139,6 +157,31 @@ final class SpaceSettingsLeadPane: NSObject {
         switchRow.alignment = .top
         switchRow.spacing = 12
 
+        startsTasksSwitch.target = self
+        startsTasksSwitch.action = #selector(startsTasksChanged(_:))
+        startsTasksSwitch.setAccessibilityLabel("Starts tasks without asking")
+        let startsTitle = NSTextField(labelWithString: "Starts tasks without asking")
+        startsTitle.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        startsTitle.setAccessibilityElement(false)
+        let startsHint = NSTextField(wrappingLabelWithString: "Off: it proposes each task and you click Start in a sheet like ⌘N.")
+        startsHint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        startsHint.textColor = .secondaryLabelColor
+        startsHint.isSelectable = false
+        startsHint.setAccessibilityElement(false)
+        startsTasksSwitch.setAccessibilityHelp(startsHint.stringValue)
+        let startsTexts = NSStackView(views: [startsTitle, startsHint])
+        startsTexts.orientation = .vertical
+        startsTexts.alignment = .leading
+        startsTexts.spacing = 3
+        startsTasksRow.setViews([startsTasksSwitch, startsTexts], in: .leading)
+        startsTasksRow.orientation = .horizontal
+        startsTasksRow.alignment = .top
+        startsTasksRow.spacing = 12
+        let switches = NSStackView(views: [switchRow, startsTasksRow])
+        switches.orientation = .vertical
+        switches.alignment = .leading
+        switches.spacing = 16
+
         let header = NSTextField(labelWithString: "Always needs you")
         header.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
         alwaysSection.orientation = .vertical
@@ -156,7 +199,7 @@ final class SpaceSettingsLeadPane: NSObject {
         hint.preferredMaxLayoutWidth = Self.contentWidth
         alwaysSection.addArrangedSubview(hint)
 
-        let stack = NSStackView(views: [switchRow, alwaysSection])
+        let stack = NSStackView(views: [switches, alwaysSection])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 22

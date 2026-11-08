@@ -24,9 +24,12 @@ extension NiruxShellView {
         worktreeBranch: String? = nil,
         startedOutsideNirux: Bool = false,
         setupScript: URL? = nil,
-        isLead: Bool = false
+        isLead: Bool = false,
+        activate: Bool = true
     ) {
-        let snapshot: NSImageView? = {
+        // In the background (a task its Lead started): no selection, no
+        // focus, no slide; the user stays where they type.
+        let snapshot: NSImageView? = !activate ? nil : {
             guard let rep = viewport.bitmapImageRepForCachingDisplay(in: viewport.bounds) else { return nil }
             viewport.cacheDisplay(in: viewport.bounds, to: rep)
             let imageView = NSImageView(frame: viewport.bounds)
@@ -56,11 +59,11 @@ extension NiruxShellView {
             initialAgentUUID: initialAgentUUID
         )
         wireWorkspace(workspace)
-        workspaceStore.appendWorkspace(workspace)
+        workspaceStore.appendWorkspace(workspace, activate: activate)
         verticalStrip.addSubview(workspace.containerView)
         relayout(animated: false)
         updateSidebar()
-        focusActiveTerminal(in: window)
+        if activate { focusActiveTerminal(in: window) }
 
         // The setup script, then the agent, in the new workspace's terminal.
         // Never for a workspace opened from outside Nirux.

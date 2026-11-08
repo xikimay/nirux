@@ -156,9 +156,6 @@ extension MenuBarFlowTests {
             XCTAssertEqual(harness.agentLaunches.last.map { $0.contains("Lead · Client") }, true, "names the session")
             XCTAssertEqual(lead.columns.compactMap { $0.projectBoard?.projectID }, [space], "the Board beside Claude")
             XCTAssertEqual(lead.focusedIndex, 0, "Claude keeps the keyboard")
-            XCTAssertNotEqual(
-                AgentSkillsInstaller.status(of: NiruxShellView.agentSkills, home: harness.home), .missing, "its skill"
-            )
             let environment = lead.terminalEnvironment(agentUUID: UUID().uuidString)
             XCTAssertEqual(environment["NIRUX_LEAD"], "1")
             XCTAssertEqual(environment["NIRUX_MISSION_HANDOFFS"], "1", "its tasks report to it with handoffs off")

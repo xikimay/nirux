@@ -81,6 +81,9 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// The template picked, kept while another repository's info is read:
     /// templates are the space's, the same for each.
     private var pickedTemplateName: String?
+    /// The agent the task reports to (a Lead's proposal): carried into the
+    /// request (see `NewTask.Request.reportsTo`).
+    var reportsTo: NewTask.MissionParent?
 
     /// How Start's work ended.
     enum Outcome: Equatable {
@@ -227,6 +230,25 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         refresh()
     }
 
+    /// A Lead's proposal (`start_task` with "Starts tasks without asking"
+    /// off): its description, and its template, picked once the
+    /// repository's templates are read.
+    func prefill(description: String, templateName: String?) {
+        guard panel != nil else { return }
+        descriptionView.string = description
+        if let templateName { pickedTemplateName = templateName }
+        headingLabel.stringValue = "Proposed by the Lead · \(space.name)"
+        hideError()
+        updateBranchSuggestion()
+        refresh()
+        // It comes while the user types elsewhere: no field takes the keys,
+        // and neither Return nor Escape answers it until they edit
+        // something here (a click, or ⌘Return, still does).
+        panel?.makeFirstResponder(nil)
+        startButton.keyEquivalent = ""
+        cancelButton.keyEquivalent = ""
+    }
+
     /// The repository's info, read by the shell. Ignored when another
     /// repository was selected since.
     func update(repositoryKey: String?, info: ProjectInfo) {
@@ -243,7 +265,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
             templatePopup.menu?.addItem(NSMenuItem(title: template.name, action: nil, keyEquivalent: ""))
         }
         templatePopup.selectItem(at: previousTemplate.flatMap { name in
-            info.templates.firstIndex { $0.name == name }.map { $0 + 1 }
+            info.templates.firstIndex { $0.name.caseInsensitiveCompare(name) == .orderedSame }.map { $0 + 1 }
         } ?? 0)
         templatePopup.isEnabled = !isStarting
         updateBranchSuggestion()
@@ -375,7 +397,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         }
         return NewTask.Request(
             description: taskText, template: selectedTemplate, agent: selectedAgent,
-            projectID: space.id, branch: branch, target: target, fetchesFirst: !startsWithoutFetch
+            projectID: space.id, branch: branch, target: target, fetchesFirst: !startsWithoutFetch,
+            reportsTo: reportsTo
         )
     }
 

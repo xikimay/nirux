@@ -272,6 +272,7 @@ extension NiruxShellView {
     /// others wait for that agent's next turn end. Runs when a Mission event
     /// arrives and when a turn ends.
     func typeMissionMessages() {
+        typeLeadNotices()
         let handoffsEnabled = Self.currentMissionHandoffsEnabled()
         guard MissionStore.shared.pendingPromptDeliveries().contains(where: { $0.mission.isCarried(handoffsEnabled: handoffsEnabled) })
         else { return }
@@ -313,8 +314,48 @@ extension NiruxShellView {
         if typedAny { updateSidebar(snapshot: snapshot) }
     }
 
+    /// Types each Lead notice whose Lead's prompt is free; the others wait
+    /// for its next turn end, an hour at most. A Lead that is gone drops
+    /// its own.
+    func typeLeadNotices() {
+        guard !pendingLeadNotices.isEmpty else { return }
+        let snapshot = ProcessSnapshot()
+        let now = Date().timeIntervalSince1970
+        pendingLeadNotices = pendingLeadNotices.filter { notice in
+            guard now - notice.queuedAt < MissionEventCLI.parentMessageLifetime,
+                  let workspace = workspaces.first(where: { $0.id == notice.workspaceID && !$0.isClosing }),
+                  let column = workspace.columns.first(where: { $0.agentUUID == notice.agentUUID })
+            else { return false }
+            guard let pty = column.pty, pty.acceptsMissionMessage(runningSince: now, snapshot: snapshot),
+                  let input = RemotePromptSanitizer.terminalInput(for: notice.text)
+            else { return true }
+            pty.sendRaw(input)
+            return false
+        }
+    }
+
     static func currentMissionHandoffsEnabled() -> Bool {
         PersistedSettings.effective(Persistence.load()?.settings).missionHandoffsEnabled
+    }
+
+    /// A ⌘N task's Mission, reporting to `parent` (see
+    /// `NewTask.Request.reportsTo`); nil when that parent can't take one.
+    func createMission(
+        parent: NewTask.MissionParent, childWorkspaceID: String, childAgentUUID: String,
+        agent: NiruxApp.WorkspaceAgent, branch: String
+    ) -> Mission? {
+        guard let valid = validMissionParent(workspaceID: parent.workspaceID, agentUUID: parent.agentUUID) else { return nil }
+        let request = MissionCreationRequest(
+            id: UUID().uuidString,
+            parentWorkspaceID: valid.workspaceID,
+            parentAgentUUID: valid.agentUUID,
+            childWorkspaceID: childWorkspaceID,
+            childAgentUUID: childAgentUUID,
+            childAgentKind: agent.rawValue,
+            branch: branch,
+            reportsToLead: valid.isLead
+        )
+        return MissionStore.shared.create(request, enabled: Self.currentMissionHandoffsEnabled())
     }
 
     /// The parent a new worktree's Mission reports to: any agent's column
@@ -349,4 +390,13 @@ private enum DeliveredHandovers {
     static func workspaceID(for path: String) -> String? {
         workspaceByPath.last { $0.path == path }?.workspaceID
     }
+}
+
+/// A line for a Lead's prompt (see `NiruxShellView.pendingLeadNotices`).
+struct LeadNotice: Equatable {
+    let workspaceID: String
+    let agentUUID: String
+    let text: String
+    /// Epoch seconds.
+    let queuedAt: TimeInterval
 }

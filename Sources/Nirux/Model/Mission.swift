@@ -80,6 +80,9 @@ struct MissionEvent: Codable, Equatable {
     var expectsTypedAnswer: Bool?
     /// On a response: the user wrote it in Nirux, not the parent agent.
     var answeredByUser: Bool?
+    /// On a question: the parent (a space's Lead, `ask_user`) handed it to
+    /// the user, for this reason. Its row turns amber at once.
+    var handedToUserBecause: String?
 
     init(
         id: String,
@@ -394,6 +397,22 @@ final class MissionStore {
         )
         guard case let .accepted(accepted) = process(response, enabled: enabled, fromUser: true) else { return nil }
         return accepted
+    }
+
+    /// The Lead's `ask_user`: a question that still waits for an answer
+    /// goes to the user, with the Lead's reason. Nil when there is no such
+    /// question, or the ledger couldn't be saved.
+    func handToUser(questionID: String, because why: String, now: TimeInterval = Date().timeIntervalSince1970) -> Mission? {
+        guard ensureLoaded(),
+              let missionIndex = missions.firstIndex(where: { $0.events.contains { $0.id == questionID && $0.kind == .question } }),
+              missions[missionIndex].status == .active,
+              !missions[missionIndex].events.contains(where: { $0.kind == .response && $0.inReplyTo == questionID }),
+              let eventIndex = missions[missionIndex].events.firstIndex(where: { $0.id == questionID })
+        else { return nil }
+        var updated = missions
+        updated[missionIndex].events[eventIndex].handedToUserBecause = why
+        updated[missionIndex].updatedAt = now
+        return commit(updated) ? updated[missionIndex] : nil
     }
 
     func response(to questionID: String) -> MissionEvent? {

@@ -154,6 +154,15 @@ final class MergeQueueController {
         onChange?()
     }
 
+    /// A Lead's proposal (`queue_merge`): this list, in this order.
+    @discardableResult
+    func proposeSelection(_ numbers: [Int], repository: GitHubRepository) -> Bool {
+        guard !isRunning, !runsElsewhere, repository == queueRepository, !numbers.isEmpty else { return false }
+        setSelection(numbers, isNewOrder: true)
+        onChange?()
+        return true
+    }
+
     func removeFromSelection(_ number: Int) {
         guard !isRunning, !runsElsewhere, selection.contains(number) else { return }
         setSelection(selection.filter { $0 != number })

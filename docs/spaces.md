@@ -185,22 +185,44 @@ New flow, built on the guarded typing `tell` already uses
   over. Deleting its space makes it a plain workspace in General (its running
   shells keep `NIRUX_LEAD=1` until they restart).
 - **Its role** reaches its Claude through the Nirux MCP server's instructions:
-  its shells carry `NIRUX_LEAD=1` (blank in every other shell). Until its
-  tools land (S11b) it starts tasks with the `nirux-worktree` skill, which
-  Nirux installs if no copy is there, and which links them to it as Missions.
+  its shells carry `NIRUX_LEAD=1` (blank in every other shell). It starts
+  tasks only with its tools, reads `list_tasks` before starting one, and
+  ends its turn after starting or telling tasks: Nirux types their messages
+  into its prompt only while it is idle.
   Its folder is fixed when it starts: Space Settings › Lead says when it is
   none of the space's repositories any more, and turning it off and on moves
   it.
 - **Tools** (Nirux MCP server, given to the Lead's Claude only), limited to its
-  space and its anchors:
-  - `start_task(description, repo?, template?)`: the ⌘N path, reporting to the
-    Lead. With "Starts tasks without asking" off, it opens a pre-filled ⌘N sheet.
-  - `list_tasks()`: the board's rows and agent states.
-  - `tell(task, message)`, `reply(question, message)`: Missions.
-  - `ask_user(task, question, why)`: hands a question to the user (amber row,
-    popover showing why).
-  - `queue_merge(prs)`: opens the merge queue's confirmation sheet. It never
-    starts a queue.
+  space and its anchors (shipped with S11b):
+  - `start_task(description, repo?, template?)`: the ⌘N path (origin's base
+    fetched, else as last fetched; the space's agent; a branch from the
+    description's first line, `-2`… when it exists), reporting to the Lead as
+    a Mission, in the Lead's space. It opens behind what the user is doing:
+    no focus or space change. With "Starts tasks without asking" off (Space
+    Settings › Lead, on by default; an unreadable defaults.json counts as
+    off), it opens the New sheet filled in, titled "Proposed by the Lead",
+    without taking the keyboard or Return; the task reports to the Lead if
+    the user starts it. One sheet at a time: later proposals wait their turn.
+  - `list_tasks()`: the space's tasks (title, branch, agent state, pull request
+    and checks, the question waiting or the result) and repositories.
+  - `tell(task, message)`, `reply(question, message)`: Missions. A task is named
+    by its branch or title; the Lead reaches only the tasks it started that
+    are still in its space. A question typed into the Lead names `reply`.
+  - `ask_user(task, why)`: hands the question the task waits on to the user
+    (amber row at once, the popover saying why). The answer is typed into the
+    task, and a line into the Lead ("[Nirux Mission] The user answered …").
+    The question is the task's own: the Lead asks its own in its conversation.
+  - `queue_merge(prs, repo?)`: opens one repository's merge queue confirmation
+    sheet with those pull requests, in that order (one queue per repository),
+    once Board Settings allow it; only open pull requests, and never over a
+    list the user is preparing. It never starts a queue.
+- **The channel:** each call is a file in `<state dir>/lead/requests/`
+  (LeadChannel), answered in `lead/responses/`. The Nirux that has the
+  calling workspace claims it (a rename: another Nirux on the same state
+  leaves it), checks the column belongs to its space's Lead, and acts. A call
+  nobody claims within 15 s is taken back: nothing happens. A claimed one the
+  app hasn't finished within its wait may still happen, and the Lead is told
+  not to call again. Calls are answered off the server's read loop.
 - **No tool merges, removes a worktree or a branch, or reaches another space.**
 - **State lives in Nirux** (board, Missions), not in the Lead's conversation: a
   `/clear` or a restart loses nothing.

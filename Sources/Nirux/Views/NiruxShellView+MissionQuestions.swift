@@ -110,7 +110,7 @@ extension NiruxShellView {
                 questionID: question.id,
                 parentTitle: parentTitle,
                 text: question.message,
-                handOff: SidebarMissionQuestion.handOff(
+                handOff: question.handedToUserBecause.map { .lead(why: $0) } ?? SidebarMissionQuestion.handOff(
                     parent: parentState, askedAt: question.timestamp,
                     threshold: stuckAgentWaitThreshold ?? MissionEventCLI.parentMessageLifetime, now: now
                 )
@@ -133,13 +133,7 @@ extension NiruxShellView {
                 workspace.raiseNotification(.waiting)
                 workspace.onMetadataChanged?()
                 if !NSApp.isActive { NSApp.requestUserAttention(.informationalRequest) }
-                NiruxNotifier.shared.postMissionEvent(
-                    workspaceID: workspace.id,
-                    workspaceTitle: workspace.title,
-                    columnIndex: columnIndex,
-                    kind: .question,
-                    message: question.text
-                )
+                sideEffects.notifyMissionQuestion(workspace.id, workspace.title, columnIndex, question.text)
             }
         }
         for (questionID, workspaceID) in missionQuestionsHandedToUser where handedOff[questionID] == nil {
@@ -240,12 +234,22 @@ extension NiruxShellView {
             updateSidebar()
             return false
         }
+        // The Lead that handed it over hears the answer too.
+        if let question = accepted.mission.events.first(where: { $0.id == questionID }), question.handedToUserBecause != nil {
+            let childTitle = workspaces.first { $0.id == accepted.mission.childWorkspaceID }?.title ?? accepted.mission.branch
+            pendingLeadNotices.append(LeadNotice(
+                workspaceID: accepted.mission.parentWorkspaceID, agentUUID: accepted.mission.parentAgentUUID,
+                text: "\(MissionPromptText.prefix) The user answered “\(childTitle)”: \(reply)",
+                queuedAt: Date().timeIntervalSince1970
+            ))
+        }
         // Before the sidebar refresh, which would read it as answered by
         // someone else.
         closeMissionReply()
         if handleMissionEvent(accepted.mission, event: accepted.event) {
             store.markDelivered(eventID: accepted.event.id)
         }
+        typeLeadNotices()
         return true
     }
 

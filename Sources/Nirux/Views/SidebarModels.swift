@@ -105,6 +105,8 @@ struct SidebarMissionQuestion: Hashable {
         case parentDidNotAnswer
         /// Nobody answered within the stuck-agent threshold.
         case unanswered(minutes: Int)
+        /// The parent, a space's Lead, handed it over (`ask_user`), saying why.
+        case lead(why: String)
     }
 
     /// What the parent's column runs now.
@@ -153,6 +155,8 @@ struct SidebarMissionQuestion: Hashable {
         case .parentDidNotAnswer: return "“\(parentTitle)” ended its turn without answering, so the question comes to you."
         case .unanswered(let minutes):
             return "“\(parentTitle)” hasn’t answered in \(minutes) minutes. You can answer instead."
+        case .lead(let why):
+            return "The Lead passed this one to you: \(why)"
         case nil: return "Waiting for “\(parentTitle)” to answer. You can answer instead."
         }
     }

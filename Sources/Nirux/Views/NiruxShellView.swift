@@ -85,6 +85,17 @@ final class NiruxShellView: NSView {
     /// The reply popover, and the question it shows.
     var missionReplyPopover: NSPopover?
     var missionReplyQuestionID: String?
+    /// Lines for a Lead's prompt (the user answered a question it handed
+    /// over), typed once that prompt is free (`typeMissionMessages`).
+    var pendingLeadNotices: [LeadNotice] = []
+    /// A Lead's tasks waiting to be proposed in the New sheet, one sheet at
+    /// a time, and the timer that shows the next once no sheet is up.
+    var pendingLeadProposals: [LeadProposal] = []
+    var leadProposalTimer: Timer?
+    /// The list each repository's queue last got from a Lead
+    /// (`queue_merge`), by `<space id> <owner/name>`: a Lead may replace its
+    /// own, never the user's.
+    var leadQueueProposals: [String: [Int]] = [:]
     /// A stuck-agent alert went out (Telegram relays it): the reason, the
     /// workspace, the column's index, the column.
     var onStuckAgentAlert: ((AgentAttentionReason, WorkspaceState, Int, ColumnState) -> Void)?

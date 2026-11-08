@@ -30,7 +30,6 @@ extension NiruxShellView {
     func startLead(spaceID: String) {
         guard Self.spaceCanHaveLead(spaceID), profiles.contains(where: { $0.id == spaceID }) else { return }
         if let lead = leadWorkspace(inSpace: spaceID) { return focusLead(lead) }
-        installSkillsForTheLead()
         addWorkspace(
             title: Self.leadTitle,
             cwd: defaultFolder(forSpace: spaceID),
@@ -81,22 +80,6 @@ extension NiruxShellView {
         }
     }
 
-    /// The Lead starts tasks with the `nirux-worktree` skill: installed,
-    /// alone, when no copy is there (Nirux updates the ones it wrote at
-    /// launch, and leaves the others' copies alone).
-    private func installSkillsForTheLead() {
-        let home = sideEffects.homeDirectory()
-        let skill = ["nirux-worktree": Self.worktreeSkillContent]
-        guard AgentSkillsInstaller.status(of: skill, home: home) == .missing else { return }
-        do {
-            try AgentSkillsInstaller.install(skill, home: home)
-            showToast("Installed the nirux-worktree skill: the Lead starts tasks with it")
-        } catch {
-            showToast("Couldn’t install the nirux-worktree skill the Lead starts tasks with: \(error.localizedDescription)", tone: .error)
-        }
-        refreshOnboardingChecklist()
-    }
-
     /// The Lead's workspace, on its first terminal (where Claude runs).
     func focusLead(_ lead: WorkspaceState) {
         let column = lead.columns.firstIndex { $0.pty != nil && !$0.isClosing }
@@ -107,12 +90,52 @@ extension NiruxShellView {
 
     func spaceSettingsLeadModel(for space: WorkspaceProfile) -> SpaceSettingsLeadPane.Model {
         let lead = leadWorkspace(inSpace: space.id)
+        let defaults = SpaceDefaultsStore(spaceID: space.id)?.load()
         return SpaceSettingsLeadPane.Model(
             spaceName: space.name,
             isGeneral: !Self.spaceCanHaveLead(space.id),
             hasLead: lead != nil,
-            place: leadPlace(in: space, leadFolder: lead?.cwd)
+            place: leadPlace(in: space, leadFolder: lead?.cwd),
+            startsTasks: leadStartsTasksWithoutAsking(spaceID: space.id),
+            canChangeStartsTasks: defaults?.isWritable ?? false
         )
+    }
+
+    /// "Starts tasks without asking", saved in the space's defaults.json
+    /// (on is the default, so it writes nothing).
+    func setLeadStartsTasks(_ on: Bool, spaceID: String) {
+        guard let store = SpaceDefaultsStore(spaceID: spaceID) else { return }
+        let loaded = store.load()
+        var defaults = loaded.defaults
+        defaults.leadStartsTasks = on ? nil : false
+        // An unreadable file is replaced (set aside first) even with nothing
+        // to change: it reads as off until then.
+        if defaults != loaded.defaults || loaded.status == .unreadable,
+           case .failure(let error) = store.save(defaults, replacing: loaded) {
+            showToast(error.message, tone: .error)
+        }
+        // The Defaults tab shows the file as it is now, unless it holds
+        // variables being typed.
+        if let settings = spaceSettings, settings.spaceID == spaceID, !settings.defaults.hasUnsavedRows {
+            settings.defaults.show(store.load())
+        }
+        refreshSpaceSettingsLead()
+    }
+
+    /// Whether the space's Lead starts tasks itself. A defaults.json Nirux
+    /// can't read asks first: off is the safe side.
+    func leadStartsTasksWithoutAsking(spaceID: String) -> Bool {
+        guard let loaded = SpaceDefaultsStore(spaceID: spaceID)?.load() else { return false }
+        switch loaded.status {
+        case .missing, .loaded:
+            return loaded.defaults.leadStartsTasksWithoutAsking
+        case .unreadable, .readOnly(.notARegularFile), .readOnly(.tooLarge):
+            return false
+        case .readOnly:
+            if let value = loaded.defaults.leadStartsTasks { return value }
+            let raw = loaded.contents.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
+            return raw?["leadStartsTasks"] == nil
+        }
     }
 
     /// Where the running Lead works (`leadFolder`), else where a new one

@@ -207,6 +207,17 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         }
         missionEvents.start()
 
+        // The Lead's tools (see LeadChannel).
+        let leadRequests = LeadRequestCenter.shared
+        leadRequests.handler = { [weak shellView] request, answer in
+            guard let shellView else { return answer("Nirux is closing.", true) }
+            shellView.handleLeadRequest(request, answer: answer)
+        }
+        leadRequests.owns = { [weak shellView] request in
+            shellView?.workspaces.contains { $0.id == request.workspaceID } == true
+        }
+        leadRequests.start()
+
         // Focus first terminal
         shellView.focusActiveTerminal(in: window)
 
@@ -294,6 +305,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         AgentHookCenter.shared.approvalChannel().stopListening(for: ProcessInstance.running(pid: getpid()))
         AgentHookCenter.shared.stop()
         MissionEventCenter.shared.stop()
+        LeadRequestCenter.shared.stop()
     }
 
     // MARK: - URL Scheme

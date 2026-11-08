@@ -203,7 +203,7 @@ final class NiruxMCPServerTests: XCTestCase {
         let words = try XCTUnwrap(String(bytes: data, encoding: .utf8)).split(separator: "\n").map(String.init)
         XCTAssertEqual(words.count, 3, words.joined(separator: "\n"))
         XCTAssertEqual(words.last, "Go")
-        XCTAssertEqual(words[1], "--allowedTools=mcp__nirux__history_search")
+        XCTAssertEqual(words[1], "--allowedTools=" + NiruxMCPServer.toolNames.map { "mcp__nirux__\($0)" }.joined(separator: ","))
         let config = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(words[0].dropFirst("--mcp-config=".count).utf8)) as? [String: Any])
         let server = try XCTUnwrap((config["mcpServers"] as? [String: Any])?["nirux"] as? [String: Any])
         XCTAssertEqual(server["command"] as? String, executable)
