@@ -297,7 +297,7 @@ extension NiruxShellView {
         // Two of its tasks with that title: the branch says which.
         let byTitle = candidates.filter { $0.title.caseInsensitiveCompare(name) == .orderedSame }
             .compactMap { workspace in mission(of: workspace).map { (workspace, $0) } }
-        return byTitle.count == 1 ? byTitle[0] : nil
+        return byTitle.isEmpty ? nil : byTitle[0]
     }
 
     private func noLeadTask(_ name: String) -> String {
