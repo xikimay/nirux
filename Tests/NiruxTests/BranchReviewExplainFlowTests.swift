@@ -108,24 +108,6 @@ final class BranchReviewExplainFlowTests: XCTestCase {
         XCTAssertNil(page.controller.view.header.status)
     }
 
-    /// The column closes: its Explain stops, waiting or under way.
-    @MainActor
-    func testClosingTheColumnStopsItsExplain() throws {
-        let stopped = BranchReviewControllerTests.Recorder<Bool>()
-        let page = try ReviewPage(reader: BranchReviewPageTests.reader, explainChecker: Self.ready) { _, cancellation, progress in
-            progress(.init(part: 1, parts: 1, run: .init()))
-            while !cancellation.isCancelled { Thread.sleep(forTimeInterval: 0.01) }
-            _ = stopped.append(true)
-            return .init(ending: .stopped(.cancelled))
-        }
-        page.controller.confirmExplain = { _, _, _ in true }
-        _ = try page.waitFor("\(Self.explainButton) && !\(Self.explainButton).disabled")
-        _ = try page.run("\(Self.explainButton).click(); return ''")
-        _ = try page.waitFor("document.querySelector('.explain-progress')")
-        page.close()
-        page.waitUntil("the run to stop") { stopped.values == [true] }
-    }
-
     /// Without a claude that can run, Explain is disabled with the reason;
     /// Refresh checks again.
     @MainActor

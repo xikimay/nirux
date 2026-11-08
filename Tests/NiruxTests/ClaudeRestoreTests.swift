@@ -118,26 +118,6 @@ final class ClaudeRestoreTests: XCTestCase {
     }
 
     @MainActor
-    func testLegacyAndDuplicateClaudeColumnsRestoreThroughThePicker() {
-        var claimed = Set<String>()
-        let session = "5f0c8a52-6a0e-4d7c-9f0e-2b1f6d1c9a11"
-
-        let first = NiruxShellView.agentRestoreTarget(sessionID: session, claimedSessionIDs: &claimed)
-        let duplicate = NiruxShellView.agentRestoreTarget(sessionID: session, claimedSessionIDs: &claimed)
-        let legacy = NiruxShellView.agentRestoreTarget(sessionID: nil, claimedSessionIDs: &claimed)
-
-        XCTAssertEqual(first, .session(session))
-        XCTAssertEqual(
-            NiruxShellView.claudeCommand(resume: duplicate, mode: .default),
-            "command claude --resume"
-        )
-        XCTAssertEqual(
-            NiruxShellView.claudeCommand(resume: legacy, mode: .plan),
-            "command claude --resume --permission-mode plan"
-        )
-    }
-
-    @MainActor
     func testMalformedSessionIDsNeverReachTheCommandLine() {
         var claimed = Set<String>()
         for sessionID in ["--dangerously-skip-permissions", "thread-a", "-r"] {

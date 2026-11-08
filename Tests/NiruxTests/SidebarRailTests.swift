@@ -97,7 +97,7 @@ final class SidebarRailTests: XCTestCase {
         )
     }
 
-    /// The project, the active workspaces, the INACTIVE toggle (folded:
+    /// The project, the active workspaces, the Archived toggle (folded:
     /// only the inactive workspace on screen, and an amber one), then "+".
     func testRailListsTheProjectTheWorkspacesTheToggleAndPlus() throws {
         let (sidebar, window) = rail([
@@ -192,8 +192,7 @@ final class SidebarRailTests: XCTestCase {
         XCTAssertEqual(style(2)?.textColor, Theme.Color.textSecondary)
         XCTAssertEqual(style(3)?.badge, Theme.Color.error)
         XCTAssertEqual(style(4)?.badge, Theme.Color.working)
-        // The cards leave a Mission child's question to Activity, which
-        // the rail doesn't show.
+        // A question a Mission child asked.
         XCTAssertEqual(style(5)?.badge, Theme.Color.waiting)
     }
 

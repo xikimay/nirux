@@ -188,7 +188,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
     }
 
     /// The card's moves, in its Organize submenu: up and down the list, to
-    /// INACTIVE and back, to another space.
+    /// Archived and back, to another space.
     func testOrganizeMenuItems() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell

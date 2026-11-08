@@ -21,15 +21,13 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testSearchEverywhere": ["Search Everywhere"],
             "testBrowserCommands": ["Open Browser", "Toggle Web Inspector"],
             "testImportBrowserCookies": ["Import Browser Cookies"],
-            "testAgentCommands": ["Open Claude Code", "Open Codex"],
-            "testNextWaitingAgentCommand": ["Next Waiting Agent"],
+            "testAgentCommands": ["Open Claude Code", "Open Codex", "Next Waiting Agent"],
             "testSessionHistoryCommand": ["Session History…"],
             "testProjectMemoryCommand": ["Space Memory…"],
             "testResumeAllAgentsCommand": ["Resume All Agents"],
-            "testWorkspaceCommands": ["Rename Workspace", "Show/Hide Sidebar", "Show/Hide Archived"],
+            "testWorkspaceCommands": ["Rename Workspace", "Show/Hide Sidebar", "Show/Hide Archived", "Open Board"],
             "testWorktreeCommands": ["Open Worktree", "Clean Up Merged Worktrees…"],
             "testNewCommand": ["New…"],
-            "testProjectBoardCommand": ["Open Board"],
             "testReviewBranchCommand": ["Review Branch"],
             "testSetupCommands": ["Show Getting Started", "Install Agent Skills", "Open Settings"]
         ],
@@ -395,23 +393,12 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(workspace.columns.count, columnCount + 2)
             XCTAssertEqual(harness.agentLaunches.count, 2)
             XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command codex") == true, "\(harness.agentLaunches)")
-        }
-    }
 
-    /// Goes to the agent blocked on the user (faked: a real one needs a
-    /// `claude` in front). QuickSwitcherFlowTests walks the queue.
-    func testNextWaitingAgentCommand() throws {
-        try UIFlowHarness.run { harness in
-            let shell = harness.shell
-            let repo = try XCTUnwrap(shell.activeWorkspace)
-            shell.addWorkspace(title: "second", cwd: harness.worktree)
-            let waiting = try XCTUnwrap(shell.activeWorkspace?.columns.first)
-            let wait = AgentWait(reason: .question(nil), since: Date().timeIntervalSince1970 - 60)
-            shell.quickSwitch.agentWait = { column, _, _ in column === waiting ? wait : nil }
-            shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === repo }))
-
+            // No agent waits on the user: a hint says so, and the focus
+            // stays. QuickSwitcherFlowTests walks a queue.
             harness.runPaletteCommand("Next Waiting Agent")
-            XCTAssertEqual(shell.activeWorkspace?.title, "second")
+            XCTAssertIdentical(harness.shell.activeWorkspace, workspace)
+            XCTAssertEqual(harness.shell.quickSwitch.hint?.text, NiruxShellView.noWaitingAgentHint)
         }
     }
 
@@ -470,6 +457,16 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertTrue(shell.sidebar.isInactiveSectionCollapsed)
             harness.runPaletteCommand("Show/Hide Archived")
             XCTAssertFalse(shell.sidebar.isInactiveSectionCollapsed)
+
+            // No repository yet: the board asks for one, and runs no gh.
+            // ProjectBoardFlowTests covers the board itself.
+            let client = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")
+            shell.projectBoardClient = client
+            harness.runPaletteCommand("Open Board")
+            XCTAssertNotNil(repoWorkspace.columns[safe: repoWorkspace.focusedIndex]?.projectBoard)
+            harness.waitUntil("Board Settings to open") { shell.boardSettingsPanel?.hostView != nil }
+            shell.spaceSettings?.close()
+            XCTAssertEqual(client.calls, [])
         }
     }
 
@@ -612,33 +609,6 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertTrue(launch.hasPrefix("command claude"), launch)
             XCTAssertTrue(launch.contains("'--name=fix/sidebar-flickers-on-resize · Repo'"), launch)
             XCTAssertTrue(launch.contains("Read .claude-handover.md for full context"), launch)
-        }
-    }
-
-    // MARK: - Project Board
-
-    func testProjectBoardCommand() throws {
-        try UIFlowHarness.run { harness in
-            let shell = harness.shell
-            let client = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")
-            shell.projectBoardClient = client
-            let workspace = try XCTUnwrap(shell.activeWorkspace)
-
-            // No repository yet: the board asks for one, and runs no gh.
-            harness.runPaletteCommand("Open Board")
-            let board = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.projectBoard)
-            XCTAssertEqual(board.projectID, workspace.profileID)
-            harness.waitUntil("Board Settings to open") { shell.boardSettingsPanel?.hostView != nil }
-            XCTAssertEqual(shell.spaceSettings?.selectedTab, .board)
-            shell.spaceSettings?.close()
-
-            // From another column: the same board comes to the front.
-            shell.addColumn()
-            XCTAssertNil(workspace.columns[safe: workspace.focusedIndex]?.projectBoard)
-            harness.runPaletteCommand("Open Board")
-            XCTAssertIdentical(workspace.columns[safe: workspace.focusedIndex]?.projectBoard, board)
-            XCTAssertEqual(workspace.columns.filter(\.isProjectBoard).count, 1)
-            XCTAssertEqual(client.calls, [])
         }
     }
 

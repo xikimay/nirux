@@ -61,18 +61,4 @@ enum FuzzyMatch {
         score -= candidateLower.count / 8
         return score
     }
-
-    /// Filter + rank `items` against `query`. Empty query returns the input unchanged.
-    static func filter<T>(_ items: [T], query: String, key: (T) -> String) -> [T] {
-        if query.isEmpty { return items }
-        return items.enumerated()
-            .compactMap { index, item -> (item: T, score: Int, index: Int)? in
-                guard let score = score(query: query, candidate: key(item)) else { return nil }
-                return (item, score, index)
-            }
-            .sorted { lhs, rhs in
-                lhs.score != rhs.score ? lhs.score > rhs.score : lhs.index < rhs.index
-            }
-            .map { $0.item }
-    }
 }

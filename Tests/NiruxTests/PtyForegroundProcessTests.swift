@@ -26,7 +26,6 @@ final class PtyForegroundProcessTests: XCTestCase {
 
         XCTAssertEqual(process?.instance.pid, 30)
         XCTAssertEqual(process?.name, "codex")
-        XCTAssertEqual(process?.flagValue("--sandbox"), "read-only")
     }
 
     func testForegroundInstanceMatchesTheForegroundProcessWithoutItsArguments() {

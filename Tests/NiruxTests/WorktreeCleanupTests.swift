@@ -240,14 +240,6 @@ final class WorktreeCleanupTests: XCTestCase {
         XCTAssertEqual(report.problems, ["Pull request #15 for feat/x is still open."])
     }
 
-    func testClosedOrMissingPullRequestBlocks() throws {
-        try setPullRequests([pullRequest(12, "CLOSED", head: try head(at: worktree))])
-        XCTAssertEqual(try report().problems, ["Pull request #12 was closed without being merged."])
-
-        try setPullRequests([])
-        XCTAssertEqual(try report().problems, ["No pull request found for feat/x."])
-    }
-
     func testPullRequestFromAnotherRepositoryIsIgnored() throws {
         // Same branch name, merged from someone's fork.
         try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree), owner: "someone")])

@@ -23,12 +23,6 @@ struct ForegroundProcess: Equatable {
     func hasFlag(_ flag: String) -> Bool {
         arguments.contains(flag)
     }
-
-    func flagValue(_ flag: String) -> String? {
-        guard let index = arguments.firstIndex(of: flag),
-              arguments.indices.contains(index + 1) else { return nil }
-        return arguments[index + 1]
-    }
 }
 
 /// Single sysctl snapshot of the process table, shared across all terminals.

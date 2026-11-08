@@ -4,10 +4,11 @@ import Foundation
 /// handover after the task's description ("reproduce, write a failing test,
 /// fix"). They live next to the brief, in
 /// `<state dir>/projects/<space id>/task-templates.md`, one `## Name`
-/// section per template, and are edited as Markdown from the project's menu.
+/// section per template, and are edited as Markdown in Space Settings ›
+/// Templates.
 ///
-/// Until that file exists, the form offers `defaults`; the first Edit Task
-/// Templates… writes them to it.
+/// Until that file exists, the form offers `defaults`; the Templates pane
+/// opens on `template(spaceName:)`, which holds them.
 enum TaskTemplates {
     static let fileName = "task-templates.md"
 
@@ -61,21 +62,6 @@ enum TaskTemplates {
         case .notARegularFile, .tooLarge, .unreadableBytes: return []
         case .data(let data): return String(bytes: data, encoding: .utf8).map(parse) ?? []
         }
-    }
-
-    /// Creates the file with `defaults` and an explanatory comment when it
-    /// doesn't exist yet, and returns its URL.
-    static func ensureFile(
-        spaceID: String, spaceName: String, stateDirectory: URL = Persistence.stateDirectory
-    ) throws -> URL? {
-        guard let url = fileURL(spaceID: spaceID, stateDirectory: stateDirectory) else { return nil }
-        if !FileManager.default.fileExists(atPath: url.path) {
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(), withIntermediateDirectories: true
-            )
-            try Data(template(spaceName: spaceName).utf8).write(to: url, options: .atomic)
-        }
-        return url
     }
 
     /// The `## Name` sections of `text`, in order. HTML comments are dropped
