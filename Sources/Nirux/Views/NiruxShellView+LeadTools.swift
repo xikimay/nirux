@@ -237,7 +237,7 @@ extension NiruxShellView {
                 guard let text = Self.leadContextText(task.contextText(field)) else { continue }
                 let name = field == .nextStep ? "next step" : "blocker"
                 let owner = task.contextIsFromLead(field) ? "" : " (the user wrote it)"
-                line += "\n  \(name)\(owner): “\(text)”"
+                line += "\n  \(name)\(owner): \(text)"
             }
             lines.append(line)
         }
