@@ -3,7 +3,7 @@ import AppKit
 // MARK: - Board settings (see BoardConfig)
 
 extension NiruxShellView {
-    /// "Board Settings…" in a space's menu: Space Settings on its Board tab.
+    /// "Board Settings…" in the Board's ⋯ menu: Space Settings on its Board tab.
     func showBoardSettings(profileID: String) {
         showSpaceSettings(profileID: profileID, tab: .board)
     }

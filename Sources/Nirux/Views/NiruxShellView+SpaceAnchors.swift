@@ -90,7 +90,7 @@ extension NiruxShellView {
         return runModal(alert) == .alertFirstButtonReturn
     }
 
-    // MARK: Space menu
+    // MARK: Add Repository…
 
     /// "Add Repository…": picks a folder, anchors its repository to the
     /// space (or the folder, when it is in none and the user agrees), then

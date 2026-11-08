@@ -408,8 +408,7 @@ so.
 
 **Editing.**
 
-- "Edit Space Brief…" in the space menu opens Space Settings › Brief, a text
-  editor that shows the template until Save creates the file. It follows the
+- Space Settings › Brief is a text editor that shows the template until Save creates the file. It follows the
   file while nothing is typed (an agent editing it), and asks before Save
   replaces what changed on disk.
 - Terminals export `NIRUX_PROJECT_BRIEF`, the file's path, and the header tells

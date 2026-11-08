@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Space Memory (Space Settings › Memory; ⌘P › Space Memory…, the space's menu)
+// MARK: - Space Memory (Space Settings › Memory; ⌘P › Space Memory…)
 
 extension NiruxShellView {
     /// What a Project Memory read needs, kept for the reads after a write.

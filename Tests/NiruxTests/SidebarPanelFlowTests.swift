@@ -473,11 +473,6 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             harness.waitUntil("the folder anchored") { anchors().count == 2 }
             XCTAssertEqual(anchors().last, SpaceAnchor(kind: .folder(path: docs), name: "docs"))
             XCTAssertEqual(general.model.rows.map(\.anchor.name), ["notes", "docs"])
-            // The default space has no repositories, nor Delete Space….
-            shell.selectProfile(WorkspaceProfile.defaultID)
-            shell.showSpaceSettings(profileID: WorkspaceProfile.defaultID)
-            XCTAssertEqual(try XCTUnwrap(shell.spaceSettings?.general).model.isGeneral, true)
-            XCTAssertFalse(shell.sidebar.spacePickerMenu().items.contains { $0.title == "Delete Space…" })
         }
     }
 
