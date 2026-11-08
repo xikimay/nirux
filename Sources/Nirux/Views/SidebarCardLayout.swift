@@ -203,7 +203,8 @@ struct SidebarCardLayout {
         if isCompact {
             height = Metrics.compactRowHeight
         } else if workspace.isLead {
-            height = Metrics.leadRowHeight + Metrics.actionBlockHeight(actions)
+            // A block ends a row's padding above its edge, as on a task row.
+            height = Metrics.leadRowHeight + Metrics.actionBlockHeight(actions) + (actions.isEmpty ? 0 : Metrics.rowPaddingY)
         } else {
             var height = Metrics.rowPaddingY * 2 + Metrics.titleRowHeight + Metrics.statusGap + Metrics.statusRowHeight
             let lineCount = CGFloat(max(rows.count, links.isEmpty ? 0 : 1))

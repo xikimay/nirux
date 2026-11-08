@@ -228,5 +228,11 @@ final class SidebarTaskRowTests: XCTestCase {
         )
         askingLead.isLead = true
         XCTAssertEqual(askingLead.cardActions, [.missionQuestion(columnIndex: 1, question)])
+        XCTAssertEqual(
+            SidebarExpandedMetrics.workspaceHeight(for: askingLead, sidebarWidth: 260),
+            SidebarExpandedMetrics.leadRowHeight + SidebarExpandedMetrics.actionBlockHeight(askingLead.cardActions)
+                + SidebarExpandedMetrics.rowPaddingY,
+            "its block ends a row's padding above its edge"
+        )
     }
 }

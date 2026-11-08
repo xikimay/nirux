@@ -615,7 +615,12 @@ final class SidebarWorkspaceCardRenderer {
         ))
 
         let title = textLabel(workspace.title, font: Theme.Font.title, color: Theme.Color.textPrimary)
-        let status = layout.summary.status.text
+        // Its words only: the row has no link to press ("Paused", not
+        // "Paused · Resume": selecting the row resumes it).
+        var status = layout.summary.status.text
+        if let link = layout.summary.status.linkText, status.hasSuffix(" · \(link)") {
+            status = String(status.dropLast(" · \(link)".count))
+        }
         title.toolTip = "\(workspace.title)\n\(status)"
         title.setAccessibilityLabel("\(workspace.title), \(status)")
         let height = ceil(title.fittingSize.height)

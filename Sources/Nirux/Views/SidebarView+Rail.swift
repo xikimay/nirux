@@ -11,7 +11,8 @@ extension SidebarView {
     /// document's height.
     func buildRail() -> CGFloat {
         // Over every workspace, folded ones too: unfolding renumbers nothing.
-        let displayed = displayedWorkspaceInfos
+        // Not the Lead: its tile shows its sign.
+        let displayed = displayedWorkspaceInfos.filter { !$0.isLead }
         let initials = Dictionary(
             zip(displayed.map(\.id), SidebarRailInitials.initials(for: displayed.map(\.title))),
             uniquingKeysWith: { first, _ in first }
