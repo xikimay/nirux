@@ -13,31 +13,9 @@ permissions:
   contents: read
 
 jobs:
-  swiftpm-parallel:
-    runs-on: macos-15
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - uses: actions/cache@v4
-        with:
-          path: |
-            .build/artifacts
-            .build/checkouts
-            .build/repositories
-            .build/workspace-state.json
-          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}
-      - name: Machine
-        run: sysctl -n hw.activecpu hw.memsize; swift --version
-      - name: Build
-        run: swift build --build-tests
-      - name: swift test --parallel
-        run: swift test --skip-build --parallel
-
   class-queue:
     runs-on: macos-15
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
         with:
@@ -52,8 +30,17 @@ jobs:
           key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}
       - name: Build
         run: swift build --build-tests
-      - name: Class queue, 3 workers
-        run: scripts/run-tests.sh 3
-      - name: Class queue, 6 workers
+      - name: 6 workers, run 1
+        run: scripts/run-tests.sh 6
+      - name: 6 workers, run 2
         if: always()
         run: scripts/run-tests.sh 6
+      - name: 6 workers, run 3
+        if: always()
+        run: scripts/run-tests.sh 6
+      - name: 8 workers, run 1
+        if: always()
+        run: scripts/run-tests.sh 8
+      - name: 8 workers, run 2
+        if: always()
+        run: scripts/run-tests.sh 8
