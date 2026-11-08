@@ -7,7 +7,7 @@ extension NiruxShellView {
     /// question, before the question comes to the user: a `claude`
     /// restarted, a `reply` Nirux hasn't drained yet. In the background the
     /// stuck watch samples every 30 s, so it takes up to a minute there.
-    static let missionParentGrace: TimeInterval = 20
+    nonisolated static let missionParentGrace: TimeInterval = 20
 
     /// What Nirux saw of a question's parent across refreshes.
     struct MissionParentWatch: Equatable {
