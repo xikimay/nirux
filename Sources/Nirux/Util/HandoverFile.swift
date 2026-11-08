@@ -58,19 +58,6 @@ enum HandoverFile {
             && !path.hasSuffix("/")
     }
 
-    /// Create an empty handover file for an agent to fill (the in-app
-    /// worktree flow). Created here with O_EXCL under an unguessable name, so
-    /// another account can't plant a symlink that the agent's write would
-    /// follow; the agent then writes into a file the user already owns.
-    static func makeEmptySource(agent: String) -> String? {
-        let safeAgent = agent.filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
-        let path = "/tmp/\(filenamePrefix)\(safeAgent)-\(UUID().uuidString).md"
-        let descriptor = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard descriptor >= 0 else { return nil }
-        close(descriptor)
-        return path
-    }
-
     /// Move `source` to `destinationDirectory/filename`, and return what it
     /// held. On success the source is removed. On failure the source stays
     /// in place, but a stale entry at the destination may already have been

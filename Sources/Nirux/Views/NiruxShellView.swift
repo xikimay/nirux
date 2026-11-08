@@ -120,6 +120,9 @@ final class NiruxShellView: NSView {
     /// second click doesn't open a second form.
     var isReadingBoardSettings = false
     var newTaskPanel: NewTaskPanel?
+    /// ⌘N sheets closed while their task starts, set aside for a new one:
+    /// each comes back if its start fails.
+    var startingTaskPanels: [NewTaskPanel] = []
     var newSpacePanel: NewSpacePanel?
     /// The banner of a workspace that opened in the default space (see
     /// NiruxShellView+SpaceRouting), and a count that tells a pending
@@ -181,11 +184,11 @@ final class NiruxShellView: NSView {
         statusBar.onContentChange = { [weak self] in self?.relayout(animated: false) }
 
         let workspace = WorkspaceState(
+            title: NewTask.folderTitle(NSHomeDirectory(), home: NSHomeDirectory()),
             cwd: NSHomeDirectory(),
             profileID: activeProfileID,
             missionHandoffsEnabled: Self.currentMissionHandoffsEnabled()
         )
-        workspace.title = NewTask.folderTitle(workspace.cwd, home: NSHomeDirectory())
         wireWorkspace(workspace)
         workspaces.append(workspace)
         verticalStrip.addSubview(workspace.containerView)
@@ -626,9 +629,12 @@ extension NiruxShellView {
         guard let folder, let repoRoot = GitWorktree.repoRoot(at: folder)
         else { return showToast("Not in a git repository: \(folder?.abbreviatedPath() ?? "")") }
         let excluded = repositoryFolder == nil ? Self.comparablePath(repoRoot) : nil
-        // Not the active one: its folder is where it was opened, not where
-        // its terminal is now, and going back to it would do nothing.
-        let openWorkspaces = workspaces.filter { !$0.isClosing && $0 !== activeWorkspace }.map { (id: $0.id, cwd: $0.cwd) }
+        // From the focused terminal, not the active workspace: its folder is
+        // where it was opened, not where its terminal is now, and going back
+        // to it would do nothing. From the sheet it counts, so picking its
+        // worktree goes back to it rather than opening a second one.
+        let openWorkspaces = workspaces.filter { !$0.isClosing && (repositoryFolder != nil || $0 !== activeWorkspace) }
+            .map { (id: $0.id, cwd: $0.cwd) }
 
         // List worktrees on background thread, then show palette
         DispatchQueue.global(qos: .userInitiated).async {

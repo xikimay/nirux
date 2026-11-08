@@ -230,6 +230,9 @@ final class NiruxURLRequestTests: XCTestCase {
         XCTAssertEqual(text.message, "Create a worktree and start an agent?")
         XCTAssertTrue(text.details.contains("Repository: /Users/me/repo"))
         XCTAssertTrue(text.details.contains("Branch: feat/x"))
+        XCTAssertTrue(text.details.contains("starts from origin’s base branch, fetched first"))
+        XCTAssertTrue(try XCTUnwrap(parse("nirux://new-worktree?branch=x&repo=/r&from=head"))
+            .confirmation(claudeMode: .default, codexMode: .default).details.contains("starts from this checkout’s HEAD"))
         XCTAssertTrue(text.details.contains("Codex — \(CodexLaunchMode.fullAuto.displayName)"))
         XCTAssertTrue(text.details.contains("Handover: /tmp/nirux-handover-codex-feat-x.md"))
     }

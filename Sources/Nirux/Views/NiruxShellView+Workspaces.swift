@@ -42,16 +42,14 @@ extension NiruxShellView {
         let wsCwd = cwd ?? defaultFolder(forSpace: targetProfileID)
         let workspace = WorkspaceState(
             id: workspaceID,
-            title: title,
+            // Unnamed: its folder's name (docs/spaces.md, "One door: ⌘N").
+            title: title ?? NewTask.folderTitle(wsCwd, home: sideEffects.homeDirectory()),
             cwd: wsCwd,
             profileID: targetProfileID,
             missionID: missionID,
             missionHandoffsEnabled: Self.currentMissionHandoffsEnabled(),
             initialAgentUUID: initialAgentUUID
         )
-        // Unnamed: its folder's name until git reads its branch, which then
-        // names it (docs/spaces.md, "One door: ⌘N").
-        if title == nil { workspace.title = NewTask.folderTitle(wsCwd, home: sideEffects.homeDirectory()) }
         wireWorkspace(workspace)
         workspaceStore.appendWorkspace(workspace)
         verticalStrip.addSubview(workspace.containerView)

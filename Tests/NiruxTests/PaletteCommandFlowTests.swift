@@ -606,10 +606,11 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertTrue(handover.contains("## How to proceed (template “Bugfix”)\n\n1. Reproduce the bug first"), handover)
             // The repository ignores it: an agent's `git add -A` leaves it out.
             XCTAssertEqual(try UIFlowHarness.git(["status", "--porcelain"], at: workspace.cwd), "")
-            // Named after the branch (#39), told to read the handover.
+            // Named after the branch and its space (#39), told to read the
+            // handover.
             let launch = try XCTUnwrap(harness.agentLaunches.last)
             XCTAssertTrue(launch.hasPrefix("command claude"), launch)
-            XCTAssertTrue(launch.contains("'--name=fix/sidebar-flickers-on-resize'"), launch)
+            XCTAssertTrue(launch.contains("'--name=fix/sidebar-flickers-on-resize · Repo'"), launch)
             XCTAssertTrue(launch.contains("Read .claude-handover.md for full context"), launch)
         }
     }

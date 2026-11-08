@@ -76,15 +76,21 @@ extension GitWorktree {
     /// no tags, no submodules, never a credentials prompt, and given up after
     /// `timeout`. Nil once fetched, else why not.
     static func fetch(branch: String, from remote: String = "origin", repoRoot: String, timeout: TimeInterval = 10) -> String? {
-        let result = gitRunFull(
-            [
-                "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", remote,
-                "+refs/heads/\(branch):refs/remotes/\(remote)/\(branch)"
-            ],
-            cwd: repoRoot,
-            timeout: timeout,
-            environment: ["GIT_TERMINAL_PROMPT": "0"]
-        )
+        func run() -> GitResult {
+            gitRunFull(
+                [
+                    "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", remote,
+                    "+refs/heads/\(branch):refs/remotes/\(remote)/\(branch)"
+                ],
+                cwd: repoRoot,
+                timeout: timeout,
+                environment: ["GIT_TERMINAL_PROMPT": "0"]
+            )
+        }
+        var result = run()
+        // Another fetch of the same branch (a second task, an agent's
+        // worktree) updated the ref meanwhile: once more, now up to date.
+        if result.status != 0, result.stderr.contains("cannot lock ref") { result = run() }
         guard result.status != 0 else { return nil }
         let lines = result.stderr.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }

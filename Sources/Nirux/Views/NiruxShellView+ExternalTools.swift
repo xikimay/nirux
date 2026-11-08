@@ -240,9 +240,9 @@ extension NiruxShellView {
            ```
            A new branch starts from origin's base branch (the space's board setting, else origin's
            default branch), which Nirux fetches first; a branch that already exists opens as it is.
-           Only when the user wants to build on the current branch (a stacked branch), add
-           `&from=head` to the URL in step 4: the new branch then starts from the current checkout's
-           HEAD.
+           When the new work builds on the current branch — the user wants a stacked branch, or it
+           needs this branch's commits that aren't on origin yet — add `&from=head` to the URL in
+           step 4: the new branch then starts from the current checkout's HEAD.
         3. **Write a session handover** so the new workspace inherits context. First create the
            file with `mktemp`, using the current agent name (`claude` or `codex`); it prints the
            path. `mktemp` creates the file privately under a random name, so nothing else can

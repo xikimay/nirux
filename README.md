@@ -165,7 +165,7 @@ When a shell exits, its terminal shows a restart overlay — press `Enter` to re
 
 Column widths are freeform: drag the divider between columns to resize (double-click resets to half), or use `Cmd+E` to snap through presets. `Cmd+click` a web URL in a terminal to open it as a browser column in the same workspace; file links open in the editor, while other supported schemes use their macOS handler.
 
-A workspace made with `Cmd+N` is named after its task, or after its folder and then its branch for a plain shell. Double-click a workspace card in the sidebar, or use `Rename Workspace`, to change that name later.
+A workspace made with `Cmd+N` is named after its task, or after its folder for a plain shell. Double-click a workspace card in the sidebar, or use `Rename Workspace`, to change that name later.
 
 Use the `⋯` menu on a workspace card and choose `View/Edit Context…` to keep the longer purpose separate from its short title, choose an automatic or manual phase, and record the latest meaningful summary, next step, or blocker. The compact card always shows the effective phase and agent-activity recency, then adds the optional context rows you have populated. Automatic phase follows blocker, agent, archive, and pull-request state. Codex turn completions can update the summary until you edit it; clearing a manual summary resumes automatic updates. The same panel shows the focused path plus Git, diff, pull-request, and agent state as read-only live context. Context fields persist with the workspace across relaunches.
 
@@ -295,7 +295,7 @@ Nirux keeps these copies current. At launch, the installed app rewrites each cop
 
 `Cmd+N` (also `New…` in the command palette, the Workspaces menu and the sidebar's `+`) opens "New in <space>" for the current space. Describe the task, then pick the repository (shown when the space has two or more; its default one is selected), the agent (Claude Code or Codex) and a template. The first line of the description names the new workspace and suggests the branch: `fix/…` when the template is about a bug or the description starts with a word such as "Fix", "Bug" or "Crash", `feat/…` otherwise; `Edit` changes it. Return starts; Shift+Return adds a line to the description; Cmd+Return starts from anywhere in the sheet.
 
-With the description empty, `Start` opens a plain workspace instead: a shell in the repository's main checkout, or in your home folder when the space has none. It is named after its folder, then after its branch once git has read it.
+With the description empty, `Start` opens a plain workspace instead: a shell in the repository's main checkout, or in your home folder when the space has none, named after its folder (`~` for the home folder).
 
 With a description, `Start`:
 

@@ -252,6 +252,9 @@ struct NiruxURLRequest: Equatable, Sendable {
             var lines = [
                 "Repository: \(Self.displaySafe(request.repo))",
                 "Branch: \(Self.displaySafe(request.branch))",
+                request.startsFromHead
+                    ? "A new branch starts from this checkout’s HEAD."
+                    : "A new branch starts from origin’s base branch, fetched first (a network access).",
                 agentLine(request.agent)
             ]
             if let handover = request.handoverPath {

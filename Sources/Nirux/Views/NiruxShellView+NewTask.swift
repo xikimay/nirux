@@ -9,7 +9,17 @@ extension NiruxShellView {
     func showNewPanel() {
         guard let window else { return }
         if let panel = newTaskPanel {
-            if panel.isHidden { panel.reshow() } else { panel.focus() }
+            guard panel.isHidden else { return panel.focus() }
+            // Closed while its task starts: it comes back by itself if
+            // starting fails, and ⌘N opens a new sheet meanwhile.
+            startingTaskPanels.append(panel)
+            newTaskPanel = nil
+        }
+        // Another sheet is up (an alert, Board Settings): a second one
+        // would wait unseen behind it.
+        if let sheet = window.attachedSheet {
+            NSSound.beep()
+            sheet.makeKeyAndOrderFront(nil)
             return
         }
         let spaceID = activeProfileID
@@ -19,8 +29,14 @@ extension NiruxShellView {
         let stateDirectory = Persistence.stateDirectory
         // Capture lists in the inner closures too: they are @Sendable, and
         // Swift 6.1 rejects one reading a weak var it didn't capture itself.
-        panel.onRepositorySelected = { [weak panel] repository in
-            Self.readNewTaskInfo(spaceID: spaceID, folder: repository?.folder, stateDirectory: stateDirectory) { [weak panel] info in
+        panel.onRepositorySelected = { [weak self, weak panel] repository in
+            // The board is set up for the space's default repository: the
+            // others start from their origin's default branch.
+            let isDefault = repository != nil
+                && repository?.key == self?.profiles.first { $0.id == spaceID }?.anchors.defaultAnchor?.key
+            Self.readNewTaskInfo(
+                spaceID: spaceID, folder: repository?.folder, usesBoardBase: isDefault, stateDirectory: stateDirectory
+            ) { [weak panel] info in
                 panel?.update(repositoryKey: repository?.key, info: info)
             }
         }
@@ -44,6 +60,7 @@ extension NiruxShellView {
         panel.onDismiss = { [weak self, weak panel] in
             guard let self else { return }
             if self.newTaskPanel === panel { self.newTaskPanel = nil }
+            self.startingTaskPanels.removeAll { $0 === panel }
             self.focusActiveTerminal(in: self.window)
         }
         let repositories = newTaskRepositories(of: space)
@@ -202,11 +219,13 @@ extension NiruxShellView {
     nonisolated private static func readNewTaskInfo(
         spaceID: String,
         folder: String?,
+        usesBoardBase: Bool,
         stateDirectory: URL,
         completion: @escaping @MainActor @Sendable (NewTaskPanel.ProjectInfo) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let baseBranch = BoardConfigStore(spaceID: spaceID, stateDirectory: stateDirectory)?.load().config?.baseBranch
+            let baseBranch = usesBoardBase
+                ? BoardConfigStore(spaceID: spaceID, stateDirectory: stateDirectory)?.load().config?.baseBranch : nil
             let target = folder.flatMap { NewTask.resolveTarget(folder: $0, baseBranch: baseBranch) }
             let templates = TaskTemplates.load(spaceID: spaceID, stateDirectory: stateDirectory)
             DispatchQueue.main.async { @MainActor in

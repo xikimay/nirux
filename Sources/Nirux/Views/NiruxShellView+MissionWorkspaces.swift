@@ -30,13 +30,12 @@ extension NiruxShellView {
         let parentSpaceID = parentWorkspaceID.flatMap { id in workspaces.first { $0.id == id && !$0.isClosing }?.profileID }
         let stateDirectory = Persistence.stateDirectory
         DispatchQueue.global(qos: .userInitiated).async {
-            let start = startsFromHead ? nil : Self.newWorktreeStart(
-                branch: branch, repoRoot: repoRoot,
-                baseBranch: Self.baseBranch(
+            let start = startsFromHead ? nil : Self.newWorktreeStart(branch: branch, repoRoot: repoRoot) {
+                Self.baseBranch(
                     of: repoRoot, routesByAnchor: routesByAnchor, parentSpaceID: parentSpaceID,
                     requestedSpaceID: requestedProfileID, spaces: spaces, stateDirectory: stateDirectory
                 )
-            )
+            }
             let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot, newBranchStartPoint: start?.startPoint)
             // Read back from the checkout: the session is named after the
             // branch it will actually work on (see `SessionName`).
@@ -123,12 +122,22 @@ extension NiruxShellView {
                         worktreeBranch: checkedOutBranch
                     )
                     self.saveState()
-                    if decision.reason == .general {
-                        self.presentSpaceArrival(workspaceID: childWorkspaceID)
-                    } else if let start, let fetchError = start.fetchError {
+                    if decision.reason == .general { self.presentSpaceArrival(workspaceID: childWorkspaceID) }
+                    // Above the banner, when there is one.
+                    if let start, let fetchError = start.fetchError {
                         let from = start.startPoint == nil ? "the checkout’s HEAD" : "it as last fetched"
                         self.presentToast(
                             "Couldn’t fetch \(start.remoteBranchName): “\(branch)” starts from \(from). \(fetchError)", tone: .error
+                        )
+                    }
+                    // A new branch's worktree can exist although git failed
+                    // (a failing post-checkout hook): it opens, and git's
+                    // error says what may be missing.
+                    if let error {
+                        NSLog("[Worktree] git reported a problem creating \(branch): \(error)")
+                        self.presentProblem(
+                            "“\(branch)” is open, but git reported a problem",
+                            "The worktree may be incomplete.\n\n" + NewTaskPanel.lastLines(of: error, maxLines: 12)
                         )
                     }
                 } else {
@@ -168,7 +177,8 @@ extension NiruxShellView {
     }
 
     /// The board base branch of the space `repoRoot` goes to, decided as
-    /// for its workspace (docs/spaces.md, "Routing").
+    /// for its workspace (docs/spaces.md, "Routing"), when that board is
+    /// about this repository.
     nonisolated static func baseBranch(
         of repoRoot: String, routesByAnchor: Bool, parentSpaceID: String?, requestedSpaceID: String?,
         spaces: [WorkspaceProfile], stateDirectory: URL
@@ -177,17 +187,36 @@ extension NiruxShellView {
         let spaceID = SpaceRouting.route(
             identity: identity, parentSpaceID: parentSpaceID, startedFromSpaceID: requestedSpaceID, spaces: spaces
         ).spaceID
+        // The board is set up for one repository, the space's default one
+        // (a space anchored to none: its only one, as before anchors).
+        // General has none: whatever its board says is about no repository.
+        guard spaceID != WorkspaceProfile.defaultID else { return nil }
+        if let defaultKey = spaces.first(where: { $0.id == spaceID })?.anchors.defaultAnchor?.key,
+           identity?.anchor.key != defaultKey {
+            return nil
+        }
         return BoardConfigStore(spaceID: spaceID, stateDirectory: stateDirectory)?.load().config?.baseBranch
     }
 
     /// Origin's base branch (see `NewTask.resolveTarget`), fetched, for a
     /// branch that exists nowhere yet: one that exists opens as it is, with
-    /// no fetch. Nil without origin, or for a branch that exists: `create`
-    /// then works as before.
-    nonisolated static func newWorktreeStart(branch: String, repoRoot: String, baseBranch: String?) -> NewWorktreeStart? {
-        let existing = GitWorktree.existingBranch(branch, repoRoot: repoRoot)
-        guard !existing.local, !existing.remote,
-              let target = NewTask.resolveTarget(folder: repoRoot, baseBranch: baseBranch),
+    /// no fetch. Nil without origin, for a branch that exists, and for what
+    /// `create` refuses anyway: `create` then works as before.
+    /// `baseBranch` (the space's board setting) is read only when needed.
+    nonisolated static func newWorktreeStart(
+        branch: String, repoRoot: String, baseBranch: () -> String?
+    ) -> NewWorktreeStart? {
+        // From a URL: nothing reaches git, let alone the network, before
+        // `repoRoot` is a checkout's top level and `branch` a branch name
+        // (a leading "-" would be an option).
+        guard GitWorktree.repositoryTopLevelProblem(repoRoot) == nil,
+              GitWorktree.isValidBranchName(branch, repoRoot: repoRoot),
+              // Only a branch that exists nowhere, in any case: `create` would
+              // otherwise make `feat/x` next to `Feat/x`, which the filesystem
+              // takes for one, then delete that one as its own after git
+              // refuses (see `afterFailedNewBranch`).
+              GitWorktree.newBranchProblem(branch, repoRoot: repoRoot) == nil,
+              let target = NewTask.resolveTarget(folder: repoRoot, baseBranch: baseBranch()),
               let remoteBranch = target.remoteBranch, let name = target.remoteBranchName
         else { return nil }
         let fetchError = GitWorktree.fetch(branch: remoteBranch, repoRoot: target.repository)

@@ -143,8 +143,8 @@ enum NewTask {
         return String(words.prefix(maxTitleLength - 1)).trimmingCharacters(in: .whitespaces) + "…"
     }
 
-    /// A plain workspace's name until git names its branch: its folder's,
-    /// `~` for the home folder.
+    /// A plain workspace's name: its folder's, `~` for the home folder. Not
+    /// its branch, which would name every shell in a main checkout "main".
     static func folderTitle(_ path: String, home: String) -> String {
         let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
         guard standardized != URL(fileURLWithPath: home).standardizedFileURL.path else { return "~" }

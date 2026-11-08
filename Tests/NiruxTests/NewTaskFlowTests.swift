@@ -229,8 +229,8 @@ final class NewTaskFlowTests: UIFlowTestCase {
     }
 
     /// Return with nothing typed: a shell in the selected repository's main
-    /// checkout, or the home folder without one, named after its folder
-    /// until git names its branch. Never "ws N", and no agent.
+    /// checkout, or the home folder without one, named after its folder.
+    /// Never "ws N", and no agent.
     func testNothingTypedOpensAShell() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -255,9 +255,6 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertEqual(plain.cwd, harness.repo)
             XCTAssertEqual(plain.profileID, space.id)
             XCTAssertEqual(plain.title, "repo")
-            XCTAssertFalse(plain.titleIsManual)
-            shell.refreshGitContextNow(for: plain)
-            harness.waitUntil("its branch to name it") { plain.title == "main" }
             XCTAssertTrue(harness.agentLaunches.isEmpty)
             XCTAssertFalse(shell.workspaces.contains { $0.title.hasPrefix("ws ") })
         }
@@ -327,11 +324,14 @@ final class NewTaskFlowTests: UIFlowTestCase {
     }
 
     /// Existing Branch… lists the selected repository's worktrees, its main
-    /// checkout too.
+    /// checkout too, and goes back to the one the active workspace is in.
     func testExistingBranchListsTheRepositorysWorktrees() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             _ = try Self.anchoredSpace(harness)
+            let active = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertEqual(active.cwd, harness.repo)
+            let workspaceCount = shell.workspaces.count
             let sheet = try openSheet(harness)
             sheet.existingBranchButton.performClick(nil)
             XCTAssertNil(shell.newTaskPanel)
@@ -339,13 +339,21 @@ final class NewTaskFlowTests: UIFlowTestCase {
             harness.waitUntil("the worktree list") {
                 palette.isVisible && Set(palette.filteredActions.map(\.title)) == ["main", harness.worktreeBranch]
             }
+            let main = try XCTUnwrap(palette.filteredActions.first { $0.title == "main" })
+            XCTAssertTrue(main.subtitle.hasPrefix("Already open · "), main.subtitle)
+            harness.type("main", into: try XCTUnwrap(palette.searchField))
+            harness.press(.returnKey, in: palette.panel)
+            XCTAssertIdentical(shell.activeWorkspace, active)
+            XCTAssertEqual(shell.workspaces.count, workspaceCount)
         }
     }
 
     /// `nirux://new-worktree`: a new branch starts from origin's base
     /// branch, fetched, without tracking it; `from=head` from the
-    /// requesting checkout's HEAD; a branch that exists opens as it is; a
-    /// failed fetch says so and starts from origin's branch as last fetched.
+    /// requesting checkout's HEAD; a branch that exists opens as it is,
+    /// without a fetch; a failed fetch says so and starts from origin's
+    /// branch as last fetched; a failing hook says so; a branch that exists
+    /// in another case is never taken for a new one.
     func testAnAgentsWorktreeStartsFromOriginFetched() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -362,6 +370,13 @@ final class NewTaskFlowTests: UIFlowTestCase {
             try UIFlowHarness.git(["push", "-q", "origin", "\(ahead):refs/heads/main"], at: harness.repo)
             try UIFlowHarness.git(["update-ref", "refs/remotes/origin/main", local], at: harness.repo)
             try UIFlowHarness.git(["branch", "feat/existing"], at: harness.repo)
+            // The requesting checkout is a commit ahead of the main one.
+            try UIFlowHarness.git(
+                ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "stacked"],
+                at: harness.worktree
+            )
+            let requester = try UIFlowHarness.git(["rev-parse", "HEAD"], at: harness.worktree)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             @MainActor func openWorktree(_ branch: String, startsFromHead: Bool = false) throws -> WorkspaceState {
                 shell.createWorktreeWorkspace(
                     branch: branch, repoRoot: harness.worktree, agent: nil,
@@ -377,12 +392,45 @@ final class NewTaskFlowTests: UIFlowTestCase {
             let fresh = try openWorktree("feat/from-origin")
             XCTAssertEqual(try head(fresh), ahead)
             XCTAssertThrowsError(try UIFlowHarness.git(["rev-parse", "--abbrev-ref", "feat/from-origin@{upstream}"], at: harness.repo))
-            XCTAssertEqual(try head(try openWorktree("feat/stacked", startsFromHead: true)), local)
-            XCTAssertEqual(try head(try openWorktree("feat/existing")), local)
+            XCTAssertEqual(try head(try openWorktree("feat/stacked", startsFromHead: true)), requester)
 
             try UIFlowHarness.git(["remote", "set-url", "origin", harness.root + "/gone.git"], at: harness.repo)
+            XCTAssertEqual(try head(try openWorktree("feat/existing")), local)
+            XCTAssertNil(shell.toast, "no fetch for a branch that exists")
             XCTAssertEqual(try head(try openWorktree("feat/offline")), ahead, "origin/main as last fetched")
             XCTAssertEqual(shell.toast?.message.hasPrefix("Couldn’t fetch origin/main: “feat/offline” starts from it as last fetched."), true)
+
+            // A post-checkout hook that fails leaves the worktree: it opens,
+            // and git's error shows.
+            try UIFlowHarness.git(["remote", "set-url", "origin", origin], at: harness.repo)
+            let hooks = harness.root + "/hooks"
+            try FileManager.default.createDirectory(atPath: hooks, withIntermediateDirectories: true)
+            try "#!/bin/sh\necho hook-refused >&2\nexit 3\n".write(toFile: hooks + "/post-checkout", atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hooks + "/post-checkout")
+            try UIFlowHarness.git(["config", "core.hooksPath", hooks], at: harness.repo)
+            XCTAssertEqual(try head(try openWorktree("feat/hooked")), ahead)
+            @MainActor func texts(in view: NSView) -> [String] {
+                ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap(texts(in:))
+            }
+            harness.waitUntil("git's error") { harness.window.attachedSheet != nil }
+            let shown = texts(in: try XCTUnwrap(harness.window.attachedSheet?.contentView))
+            XCTAssertTrue(shown.contains("“feat/hooked” is open, but git reported a problem"), "\(shown)")
+            XCTAssertTrue(shown.contains { $0.contains("hook-refused") }, "\(shown)")
+            if let sheet = harness.window.attachedSheet { harness.window.endSheet(sheet) }
+            harness.waitUntil("no sheet") { harness.window.attachedSheet == nil }
+
+            // `Feat/Case` on origin's tip, asked for as `feat/case`: git
+            // refuses it (the filesystem ignores case), and the user's branch
+            // stays.
+            try UIFlowHarness.git(["config", "--unset", "core.hooksPath"], at: harness.repo)
+            try UIFlowHarness.git(["branch", "Feat/Case", ahead], at: harness.repo)
+            shell.createWorktreeWorkspace(branch: "feat/case", repoRoot: harness.worktree, agent: nil, profileID: WorkspaceProfile.defaultID)
+            harness.waitUntil("git's refusal") { harness.window.attachedSheet != nil }
+            XCTAssertEqual(
+                try UIFlowHarness.git(["rev-parse", "--verify", "refs/heads/Feat/Case"], at: harness.repo)
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                ahead
+            )
         }
     }
 }
