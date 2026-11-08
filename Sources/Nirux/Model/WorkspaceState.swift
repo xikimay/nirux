@@ -495,9 +495,22 @@ extension WorkspaceState {
         return true
     }
 
+    /// Whether an agent's alert reaches outside the app (Dock bounce,
+    /// notification): it waits on the user, or something broke. A finished
+    /// turn shows on its card; with a dozen agents at work, a banner for
+    /// each would bury the ones that need the user.
+    static func alertsOutsideTheApp(_ reason: AgentAttentionReason?) -> Bool {
+        AttentionSignal.of(reason) != .finished
+    }
+
     @discardableResult
     func recordAgentHookActivity(_ event: AgentHookEvent) -> Bool {
         switch event.name {
+        // Claude's reminder of a turn already over, and its compaction
+        // while idle: the card's age stays the agent's last real work.
+        case .notification where event.notificationType == "idle_prompt",
+             .sessionStart where event.source == "compact":
+            return false
         case .stop, .turnComplete:
             return recordAgentActivity(at: event.timestamp, automaticSummary: event.detail)
         case .notification, .permissionRequest, .sessionStart, .sessionEnd, .userPromptSubmit, .stopFailure:
@@ -551,7 +564,7 @@ extension WorkspaceState {
             self.raiseNotification(.finished)
             self.onMetadataChanged?()
             // Bounce dock icon when app is not active
-            if !NSApp.isActive {
+            if !NSApp.isActive, Self.alertsOutsideTheApp(reason) {
                 NSApp.requestUserAttention(.informationalRequest)
                 // Native notification with click-to-focus routing.
                 let processName: String

@@ -188,19 +188,25 @@ extension NiruxShellView {
         return signals.max()
     }
 
-    private func updateSidebarAttention(infos: [WorkspaceInfo], missionQuestions: [ObjectIdentifier: SidebarMissionQuestion]) {
-        // Dock badge: workspaces currently waiting for attention.
-        let attentionCount = workspaces.filter { workspace in
-            workspace.hasNotification
+    /// The Dock badge: workspaces where an agent waits on the user or
+    /// something broke. A finished turn asks nothing: its card says it.
+    static func dockBadgeCount(
+        workspaces: [WorkspaceState], missionQuestions: [ObjectIdentifier: SidebarMissionQuestion]
+    ) -> Int {
+        workspaces.filter { workspace in
+            (workspace.notification ?? .finished) > .finished
                 || workspace.columns.contains { column in
-                    let question = missionQuestions[ObjectIdentifier(column)]
-                    if question?.handOff != nil { return true }
+                    if missionQuestions[ObjectIdentifier(column)]?.handOff != nil { return true }
                     guard let pty = column.pty, pty.cachedAgentState == .needsAttention else { return false }
-                    // A child that asked its parent ended its turn to wait.
-                    return question == nil || AttentionSignal.of(pty.agentAttentionReason) != .finished
+                    return AttentionSignal.of(pty.agentAttentionReason) != .finished
                 }
         }.count
-        NiruxNotifier.shared.updateDockBadge(attentionCount: attentionCount)
+    }
+
+    private func updateSidebarAttention(infos: [WorkspaceInfo], missionQuestions: [ObjectIdentifier: SidebarMissionQuestion]) {
+        NiruxNotifier.shared.updateDockBadge(
+            attentionCount: Self.dockBadgeCount(workspaces: workspaces, missionQuestions: missionQuestions)
+        )
         // Same source, the other way: agents still working.
         updateKeepAwake()
 

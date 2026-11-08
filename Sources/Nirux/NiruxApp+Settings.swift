@@ -231,8 +231,9 @@ extension NiruxApp {
             [
                 SettingsForm.header("On this Mac"),
                 SettingsForm.hint(
-                    "Banners and sounds, shown while Nirux is in the background, follow System Settings › "
-                        + "Notifications › Nirux."
+                    "While Nirux is in the background, an agent that waits for you or stops on an error bounces "
+                        + "the Dock and posts a notification; a finished turn shows on its card. Banners and sounds "
+                        + "follow System Settings › Notifications › Nirux."
                 )
             ],
             [
