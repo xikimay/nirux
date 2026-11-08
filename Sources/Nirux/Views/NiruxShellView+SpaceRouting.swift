@@ -15,17 +15,17 @@ extension NiruxShellView {
         return folders.lazy.compactMap { $0 }.first(where: NiruxURLRequest.directoryExists) ?? sideEffects.homeDirectory()
     }
 
-    /// Decides the space of a workspace about to open on `folder`, then
-    /// calls `open` with it. Git names the folder's repository off the main
-    /// thread, and only once a space has an anchor: until then `open` runs
-    /// at once. The parent's space is read when deciding, so a parent moved
-    /// meanwhile counts where it is now.
     /// A space has a repository or folder: only then is git asked where a
     /// new workspace's folder belongs.
     var routesByAnchor: Bool {
         profiles.contains { $0.anchors.contains(where: \.isKnown) }
     }
 
+    /// Decides the space of a workspace about to open on `folder`, then
+    /// calls `open` with it. Git names the folder's repository off the main
+    /// thread, and only once a space has an anchor: until then `open` runs
+    /// at once. The parent's space is read when deciding, so a parent moved
+    /// meanwhile counts where it is now.
     func routeWorkspace(
         folder: String,
         parentWorkspaceID: String? = nil,

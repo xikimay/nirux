@@ -96,7 +96,9 @@ extension NiruxShellView {
     /// space (or the folder, when it is in none and the user agrees), then
     /// offers to move that repository's workspaces in.
     func addRepository(toSpace spaceID: String) {
-        guard spaceID != WorkspaceProfile.defaultID, profiles.contains(where: { $0.id == spaceID }) else { return }
+        guard spaceID != WorkspaceProfile.defaultID, profiles.contains(where: { $0.id == spaceID }),
+              canChangeAnchors()
+        else { return }
         sideEffects.chooseFolder("Add Repository", window) { [weak self] folder in
             guard let folder else { return }
             Self.pickAnchor(folder, asRepository: true) { [weak self] pick in
@@ -160,7 +162,9 @@ extension NiruxShellView {
     /// folder joins the space, and so does the workspace. A folder in no
     /// repository asks first, as "Add Repository…" does.
     func anchorWorkspaceFolder(workspaceID: String, toSpace spaceID: String) {
-        guard let workspace = workspaces.first(where: { $0.id == workspaceID && !$0.isClosing }) else { return }
+        guard let workspace = workspaces.first(where: { $0.id == workspaceID && !$0.isClosing }),
+              canChangeAnchors()
+        else { return }
         Self.pickAnchor(workspace.cwd, asRepository: true) { [weak self] pick in
             self?.runFromRunLoop { [weak self] in
                 self?.finishAddingRepository(pick, toSpace: spaceID, moving: workspaceID)
@@ -306,7 +310,9 @@ extension NiruxShellView {
         case .missing(let folder):
             panel.showError("That folder is gone: \(folder.abbreviatedPath())")
         case .notARepository(let folder):
-            panel.showError("\(folder.abbreviatedPath()) isn’t in a git repository. Add Folder… adds a plain folder.")
+            panel.showError(isTooBroadForAFolderAnchor(folder)
+                ? tooBroadFolderMessage(folder)
+                : "\(folder.abbreviatedPath()) isn’t in a git repository. Add Folder… adds a plain folder.")
         case .anchor(let anchor):
             // Already listed: nothing to ask.
             guard !panel.rows.contains(where: { $0.anchor.key == anchor.key }) else { return }
@@ -329,6 +335,7 @@ extension NiruxShellView {
         // The sheet adds none then; one taken from another space would come
         // back to it at the next launch.
         let anchors = projectStore.availability == .writable ? draft.anchors : []
+        if anchors.count != draft.anchors.count { showToast(Self.anchorsLockedMessage, tone: .error) }
         let spaceID: String
         if let empty = profiles.first(where: { space in
             space.id != WorkspaceProfile.defaultID && space.name == draft.name && space.anchors.isEmpty

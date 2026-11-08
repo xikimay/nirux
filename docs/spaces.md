@@ -79,8 +79,14 @@ struct SpaceAnchor: Codable, Equatable {
   space; the ones in General are preselected. A workspace counts when its
   folder, or its focused terminal's, now routes to the space.
 - **A space with anchors** opens a plain new workspace in its default anchor's
-  main checkout, never in `~`. A bare repository has no main checkout to find
+  main checkout, never in `~`. When that folder is gone, the first of its other
+  anchors' folders still there; a bare repository has no main checkout to find
   without git: `~` then.
+- **Never the home folder** (or a folder holding it) as a folder anchor: every
+  folder under it would join the space.
+- **Read-only:** while `projects.json` can't be written (a newer Nirux saved
+  it, or it is unreadable), anchors don't change, as spaces can't be deleted:
+  only that file keeps them.
 - **New Space…** (shipped) suggests the focused terminal's repository, already
   in the list and naming the space, unless another space has it. "Add
   Repository…" in the space menu anchors the repository holding the folder
@@ -104,9 +110,10 @@ right space with the right env:
    for 12 s or until a click elsewhere.
 
 A request from a Nirux terminal names its shell's space (`profile=`), which
-counts as rule 3. Routing waits at most 300 ms for git and runs it only once a
-space has an anchor; past that it routes as if the folder were in no
-repository.
+counts as rule 3. Routing runs git only once a space has an anchor, and waits
+for it at most 300 ms (3 s after a worktree was made off the main thread, for a
+`nirux://new-worktree` or New Task…); past that it routes as if the folder were
+in no repository.
 
 After that the assignment is sticky: only the user moves a workspace.
 
