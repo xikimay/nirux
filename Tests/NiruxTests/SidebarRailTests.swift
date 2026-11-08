@@ -164,7 +164,7 @@ final class SidebarRailTests: XCTestCase {
 
         let workspaceMenu = try menuTitles("1")
         XCTAssertTrue(workspaceMenu.contains("Close Workspace"))
-        XCTAssertTrue(workspaceMenu.contains("Move to Inactive"))
+        XCTAssertTrue(workspaceMenu.contains("Organize"))
         XCTAssertEqual(Array(try menuTitles("project").prefix(2)), ["p", "q"])
     }
 

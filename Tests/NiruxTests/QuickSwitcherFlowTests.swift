@@ -95,7 +95,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
             shell.addWorkspace(title: "parked", cwd: harness.worktree)
             let parked = try XCTUnwrap(shell.activeWorkspace)
             harness.perform(
-                ["Move to Inactive"],
+                ["Organize", "Move to Inactive"],
                 in: shell.sidebar.workspaceActionMenu(workspaceIndex: try index(of: parked, in: shell), columnIndex: nil)
             )
             shell.addWorkspace(title: "parking-lot", cwd: harness.worktree)
@@ -167,7 +167,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
             shell.addWorkspace(title: "parked", cwd: harness.worktree, profileID: WorkspaceProfile.defaultID)
             let parked = try XCTUnwrap(shell.activeWorkspace)
             harness.perform(
-                ["Move to Inactive"],
+                ["Organize", "Move to Inactive"],
                 in: shell.sidebar.workspaceActionMenu(workspaceIndex: try index(of: parked, in: shell), columnIndex: nil)
             )
 

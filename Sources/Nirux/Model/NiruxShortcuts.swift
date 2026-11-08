@@ -54,6 +54,7 @@ enum NiruxShortcuts: CaseIterable {
     case toggleEditorDiff
     case toggleSidebar
     case nextWaitingAgent
+    case board
     case settings
 
     var chord: KeyChord {
@@ -71,12 +72,12 @@ enum NiruxShortcuts: CaseIterable {
         case .toggleEditorDiff: KeyChord("d", [.command, .shift])
         case .toggleSidebar: KeyChord("s", [.command, .control])
         case .nextWaitingAgent: KeyChord("j")
+        case .board: KeyChord("b", [.command, .control])
         case .settings: KeyChord(",")
         }
     }
 
-    // Used by the sidebar's context menu and shortcut hints.
-    static let newWorkspaceKey = newWorkspace.chord.key
+    // Used by the sidebar's shortcut hints.
     static let newTerminalDisplay = newTerminal.chord.display
     static let newWorkspaceDisplay = newWorkspace.chord.display
 }

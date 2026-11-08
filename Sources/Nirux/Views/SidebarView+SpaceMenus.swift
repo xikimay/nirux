@@ -44,6 +44,13 @@ extension SidebarView {
         menu.addItem(.separator())
     }
 
+    /// The active space's items, for the menu bar's Space › Space Settings.
+    func addActiveSpaceSettings(to menu: NSMenu) {
+        guard let active = lastProfiles.first(where: \.isActive) else { return }
+        addSpaceManagementItems(to: menu, for: active)
+        if menu.items.last?.isSeparatorItem == true { menu.removeItem(at: menu.numberOfItems - 1) }
+    }
+
     /// "Add Repository…", then "Repositories": one submenu per repository
     /// or folder, "(Default)" after the default's name, with "Make Default"
     /// and "Remove from Space" (until Space Settings, docs/spaces.md S8).

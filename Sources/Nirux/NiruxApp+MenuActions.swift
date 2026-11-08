@@ -168,6 +168,8 @@ extension NiruxApp {
         NSApp.mainMenu = mainMenu
         // Lets AppKit list open windows and add its tiling items.
         NSApp.windowsMenu = mainMenu.item(withTag: Self.windowMenuTag)?.submenu
+        // Adds the search field that finds every menu item.
+        NSApp.helpMenu = mainMenu.item(withTag: Self.helpMenuTag)?.submenu
     }
 
     @MainActor
@@ -176,9 +178,12 @@ extension NiruxApp {
         mainMenu.addItem(applicationMenuItem())
         mainMenu.addItem(editMenuItem())
         mainMenu.addItem(viewMenuItem())
-        mainMenu.addItem(columnsMenuItem())
+        mainMenu.addItem(spaceMenuItem())
         mainMenu.addItem(workspacesMenuItem())
+        mainMenu.addItem(columnsMenuItem())
+        mainMenu.addItem(agentMenuItem())
         mainMenu.addItem(windowMenuItem())
+        mainMenu.addItem(helpMenuItem())
         return mainMenu
     }
 
@@ -321,6 +326,8 @@ extension NiruxApp {
         colMenu.addItem(NSMenuItem.separator())
         colMenu.addItem(withTitle: "New Terminal", action: #selector(newTerminalColumn(_:)), shortcut: .newTerminal)
         colMenu.addItem(withTitle: "Open Browser", action: #selector(openBrowser(_:)), shortcut: .openBrowser)
+        colMenu.addItem(withTitle: "Open Editor", action: #selector(openEditor(_:)), keyEquivalent: "")
+        colMenu.addItem(withTitle: "Import Browser Cookies", action: #selector(importBrowserCookies(_:)), keyEquivalent: "")
 
         // Cmd+1…9: jump straight to column N (iTerm-style tab switching).
         for number in 1...9 {
@@ -370,58 +377,12 @@ extension NiruxApp {
         return colItem
     }
 
-    @MainActor
-    private func workspacesMenuItem() -> NSMenuItem {
-        // Workspaces menu
-        let workspacesMenu = NSMenu(title: "Workspaces")
-        workspacesMenu.addItem(withTitle: "New Workspace", action: #selector(newWorkspace(_:)), shortcut: .newWorkspace)
-        workspacesMenu.addItem(withTitle: "Rename Workspace", action: #selector(renameWorkspace(_:)), keyEquivalent: "")
-        workspacesMenu.addItem(NSMenuItem.separator())
-        workspacesMenu.addItem(withTitle: "Resume All Agents", action: #selector(resumeAllAgents(_:)), keyEquivalent: "")
-        workspacesMenu.addItem(NSMenuItem.separator())
-
-        let workspaceUpItem = NSMenuItem(title: "Workspace Up", action: #selector(workspaceUp(_:)), keyEquivalent: "")
-        workspaceUpItem.keyEquivalent = "\u{F700}"
-        workspaceUpItem.keyEquivalentModifierMask = .command
-        workspacesMenu.addItem(workspaceUpItem)
-        workspacesMenu.addItem(Self.controlAlternate(of: workspaceUpItem))
-
-        let workspaceDownItem = NSMenuItem(title: "Workspace Down", action: #selector(workspaceDown(_:)), keyEquivalent: "")
-        workspaceDownItem.keyEquivalent = "\u{F701}"
-        workspaceDownItem.keyEquivalentModifierMask = .command
-        workspacesMenu.addItem(workspaceDownItem)
-        workspacesMenu.addItem(Self.controlAlternate(of: workspaceDownItem))
-
-        workspacesMenu.addItem(NSMenuItem.separator())
-
-        let previousSpaceItem = NSMenuItem(title: "Previous Space", action: #selector(previousSpace(_:)), keyEquivalent: "")
-        previousSpaceItem.keyEquivalent = "\u{F702}"
-        previousSpaceItem.keyEquivalentModifierMask = NSEvent.ModifierFlags([.command, .option])
-        workspacesMenu.addItem(previousSpaceItem)
-
-        let nextSpaceItem = NSMenuItem(title: "Next Space", action: #selector(nextSpace(_:)), keyEquivalent: "")
-        nextSpaceItem.keyEquivalent = "\u{F703}"
-        nextSpaceItem.keyEquivalentModifierMask = NSEvent.ModifierFlags([.command, .option])
-        workspacesMenu.addItem(nextSpaceItem)
-
-        workspacesMenu.addItem(NSMenuItem.separator())
-        workspacesMenu.addItem(
-            withTitle: "Next Waiting Agent",
-            action: #selector(jumpToNextWaitingAgent(_:)),
-            shortcut: .nextWaitingAgent
-        )
-
-        let workspacesItem = NSMenuItem()
-        workspacesItem.submenu = workspacesMenu
-        return workspacesItem
-    }
-
     /// `item` on Control+Cmd+Arrow, shown in its place while Control is
     /// held. Cmd+Arrow moves the caret while text has the keyboard (see
     /// WebContentKeyRouting.movesCaretToTextEdge); this chord navigates from
     /// anywhere.
     @MainActor
-    private static func controlAlternate(of item: NSMenuItem) -> NSMenuItem {
+    static func controlAlternate(of item: NSMenuItem) -> NSMenuItem {
         let alternate = NSMenuItem(title: item.title, action: item.action, keyEquivalent: item.keyEquivalent)
         alternate.keyEquivalentModifierMask = item.keyEquivalentModifierMask.union(.control)
         alternate.isAlternate = true
@@ -444,7 +405,7 @@ extension NiruxApp {
     }
 }
 
-private extension NSMenu {
+extension NSMenu {
     @discardableResult
     func addItem(withTitle title: String, action: Selector, shortcut: NiruxShortcuts) -> NSMenuItem {
         let item = addItem(withTitle: title, action: action, keyEquivalent: shortcut.chord.key)
