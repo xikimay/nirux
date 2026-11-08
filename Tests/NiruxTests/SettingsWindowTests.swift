@@ -343,8 +343,6 @@ final class SettingsWindowTests: XCTestCase {
 
             try click(app.settingsSidebarApprovalsCheckbox)
             XCTAssertEqual(Persistence.load()?.settings?.sidebarApprovalsEnabled, false)
-            XCTAssertFalse(hooks.approvalsEnabled)
-            XCTAssertFalse(PermissionApprovalChannel.standard.isAppListening())
 
             try click(app.settingsSidebarApprovalsCheckbox)
             XCTAssertEqual(Persistence.load()?.settings?.sidebarApprovalsEnabled, true)

@@ -134,18 +134,18 @@ final class MenuBarFlowTests: XCTestCase {
 extension MenuBarFlowTests {
     /// ⌃⌘L starts the space's Lead (none in General), comes back to it from
     /// elsewhere, and never makes a second one. The Lead stays on top of its
-    /// space, saves as the Lead, and closes from Space Settings › Lead only
-    /// once the user confirms.
+    /// space, keeps its Missions with handoffs off, saves as the Lead, and
+    /// closes from Space Settings › Lead only once the user confirms.
     func testLeadFromTheSpaceMenu() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let bar = MenuBar(shell: shell)
             shell.projectBoardClient = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")
             XCTAssertFalse(bar.isEnabled(["Space", "Lead"]), "General has no Lead")
+            XCTAssertTrue(Persistence.updateSettings(liveLayout: shell.persistedState()) { $0.missionHandoffsEnabled = false })
 
             shell.createSpace(NewSpacePanel.Draft(name: "Client", colorHex: WorkspaceProfile.palette[1].hex, anchors: []))
             let space = shell.activeProfileID
-            let plain = try XCTUnwrap(shell.activeWorkspace)
             // Validating names the item after what it does.
             XCTAssertTrue(bar.isEnabled(["Space", "Lead"]))
             bar.run(["Space", "Start a Lead"])
@@ -156,11 +156,21 @@ extension MenuBarFlowTests {
             XCTAssertEqual(harness.agentLaunches.last.map { $0.contains("Lead · Client") }, true, "names the session")
             XCTAssertEqual(lead.columns.compactMap { $0.projectBoard?.projectID }, [space], "the Board beside Claude")
             XCTAssertEqual(lead.focusedIndex, 0, "Claude keeps the keyboard")
-            XCTAssertEqual(lead.terminalEnvironment(agentUUID: UUID().uuidString)["NIRUX_LEAD"], "1")
-            XCTAssertNil(plain.terminalEnvironment(agentUUID: UUID().uuidString)["NIRUX_LEAD"])
+            XCTAssertNotEqual(
+                AgentSkillsInstaller.status(of: NiruxShellView.agentSkills, home: harness.home), .missing, "its skill"
+            )
+            let environment = lead.terminalEnvironment(agentUUID: UUID().uuidString)
+            XCTAssertEqual(environment["NIRUX_LEAD"], "1")
+            XCTAssertEqual(environment["NIRUX_MISSION_HANDOFFS"], "1", "its tasks report to it with handoffs off")
+            // The Board, without settings yet, doesn't open them over Claude.
+            RunLoop.main.run(until: Date().addingTimeInterval(1))
+            XCTAssertNil(shell.spaceSettings)
 
-            let index = { (workspace: WorkspaceState) in try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace }) }
-            shell.switchToWorkspace(try index(plain))
+            shell.addWorkspace(title: "plain", cwd: harness.repo, profileID: space)
+            let plain = try XCTUnwrap(shell.activeWorkspace)
+            let plainEnvironment = plain.terminalEnvironment(agentUUID: UUID().uuidString)
+            XCTAssertEqual(plainEnvironment["NIRUX_LEAD"], "", "blank, not inherited")
+            XCTAssertNil(plainEnvironment["NIRUX_MISSION_HANDOFFS"])
             XCTAssertTrue(bar.isEnabled(["Space", "Start a Lead"]))
             bar.run(["Space", "Lead"])
             XCTAssertTrue(shell.activeWorkspace === lead)
@@ -168,6 +178,7 @@ extension MenuBarFlowTests {
             XCTAssertEqual(shell.workspaces.filter(\.isLead).count, 1)
 
             // On top of its space, for good.
+            let index = { (workspace: WorkspaceState) in try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace }) }
             let store = shell.workspaceStore
             XCTAssertEqual(store.visibleWorkspaceIndices(in: space), [try index(lead), try index(plain)])
             XCTAssertFalse(store.moveWorkspace(at: try index(plain), delta: -1))
@@ -175,35 +186,61 @@ extension MenuBarFlowTests {
             XCTAssertFalse(store.setWorkspaceInactive(at: try index(lead), true))
             XCTAssertFalse(store.moveWorkspace(at: try index(lead), toProfile: WorkspaceProfile.defaultID))
             XCTAssertEqual(store.visibleWorkspaceIndices(in: space).first, try index(lead))
+            let menuTitles = { (workspace: WorkspaceState) in
+                shell.sidebar.workspaceActionMenu(workspaceIndex: try index(workspace), columnIndex: nil).items.map(\.title)
+            }
+            XCTAssertFalse(try menuTitles(lead).contains("Organize"))
+            XCTAssertTrue(try menuTitles(plain).contains("Organize"))
             XCTAssertEqual(shell.persistedState().workspaces.filter(\.isLead).map(\.id), [lead.id])
 
             // Off asks first: cancelled, the Lead stays.
             shell.showSpaceSettings(profileID: space, tab: .lead)
             let pane = try XCTUnwrap(shell.spaceSettings?.lead)
+            let flip = { (state: NSControl.StateValue) in
+                pane.leadSwitch.state = state
+                XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(pane.leadSwitch.action), to: pane.leadSwitch.target, from: pane.leadSwitch))
+            }
             XCTAssertEqual(pane.leadSwitch.state, .on)
-            pane.leadSwitch.state = .off
-            pane.switchChanged(pane.leadSwitch)
+            try flip(.off)
             XCTAssertEqual(harness.alerts.last, "Close workspace “Lead”?")
             XCTAssertNotNil(shell.leadWorkspace(inSpace: space))
             XCTAssertEqual(pane.leadSwitch.state, .on)
             harness.alertResponses = [.alertSecondButtonReturn]
-            pane.leadSwitch.state = .off
-            pane.switchChanged(pane.leadSwitch)
+            try flip(.off)
             XCTAssertNil(shell.leadWorkspace(inSpace: space))
             XCTAssertEqual(pane.leadSwitch.state, .off)
-            harness.waitUntil("the Lead's workspace to go") { !shell.workspaces.contains { $0 === lead } }
 
-            // On again: a new Lead. Deleting its space leaves a plain
-            // workspace in General.
-            pane.leadSwitch.state = .on
-            pane.switchChanged(pane.leadSwitch)
+            // On again at once: a new Lead, the only one saved while the
+            // first is still on its way out.
+            try flip(.on)
             let second = try XCTUnwrap(shell.leadWorkspace(inSpace: space))
             XCTAssertFalse(second === lead)
             XCTAssertEqual(pane.leadSwitch.state, .on)
+            XCTAssertEqual(shell.persistedState().workspaces.filter(\.isLead).map(\.id), [second.id])
+            harness.waitUntil("the first Lead's workspace to go") { !shell.workspaces.contains { $0 === lead } }
             shell.spaceSettings?.close()
+
+            // Deleting its space leaves a plain workspace in General.
             XCTAssertTrue(store.deleteProfile(id: space))
             XCTAssertFalse(second.isLead)
             XCTAssertEqual(second.profileID, WorkspaceProfile.defaultID)
+        }
+    }
+
+    /// An empty space offers its Lead; General doesn't.
+    func testEmptySpaceStartsItsLead() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.projectBoardClient = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")
+            shell.createSpace(NewSpacePanel.Draft(name: "Empty", colorHex: WorkspaceProfile.palette[2].hex, anchors: []))
+            let space = shell.activeProfileID
+            let view = shell.emptySpaceView
+            XCTAssertFalse(view.isHidden)
+            XCTAssertFalse(view.startLeadButton.isHidden)
+            view.startLeadButton.performClick(nil)
+            let lead = try XCTUnwrap(shell.leadWorkspace(inSpace: space))
+            XCTAssertTrue(shell.activeWorkspace === lead)
+            XCTAssertTrue(view.isHidden)
         }
     }
 
