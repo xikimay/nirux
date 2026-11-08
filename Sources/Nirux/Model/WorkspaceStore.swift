@@ -18,7 +18,7 @@ final class WorkspaceStore {
         get {
             guard let activeWorkspaceID,
                   let index = workspaces.firstIndex(where: { $0.id == activeWorkspaceID })
-            else { return -1 }
+            else { return workspaces.indices.first ?? 0 } // MUTATION M1
             return index
         }
         set { selectWorkspace(at: newValue) }
@@ -102,7 +102,7 @@ final class WorkspaceStore {
         guard profiles.contains(where: { $0.id == profileID }) else { return false }
         activeProfileID = profileID
         activeWorkspaceID = visibleWorkspaceIndices(in: profileID)
-            .first // MUTATION M4
+            .first { !workspaces[$0].isClosing }
             .map { workspaces[$0].id }
         return true
     }
@@ -317,7 +317,6 @@ final class WorkspaceStore {
         }
         profiles.remove(at: index)
         deletedProfileIDs.insert(id)
-        if activeProfileID == id { activeProfileID = WorkspaceProfile.defaultID } // MUTATION M3
         reconcileSelection(preferActiveProfile: true)
         return true
     }
@@ -368,7 +367,7 @@ final class WorkspaceStore {
         // An empty space on screen stays there while workspaces elsewhere
         // close or move, until one opens or moves in. Once it is deleted,
         // the selection goes where the work is.
-        if !activeSpaceIsGone, activeWorkspaceID == nil, !hasWorkspaces(in: activeProfileID) { return }
+        // MUTATION M2
 
         if preferActiveProfile,
            !hasWorkspaces(in: activeProfileID),
