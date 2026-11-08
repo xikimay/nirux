@@ -46,6 +46,8 @@ struct AgentStatusMachine {
     private(set) var lastEventAt: TimeInterval = 0
     /// Codex's last turnComplete: output before it is the finished turn's.
     private var turnEndedAt: TimeInterval = 0
+    /// Claude's last main-thread turn end (Stop, StopFailure).
+    private var mainTurnEndedAt: TimeInterval = 0
     /// Start of the current turn (epoch seconds): UserPromptSubmit, else
     /// the first turn event seen (a turn already running at launch). Nil
     /// between turns. Drives the "working · 12m" display.
@@ -341,6 +343,7 @@ struct AgentStatusMachine {
         }
         closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
         endTurn()
+        mainTurnEndedAt = now
         turnFailure = event.name == .stopFailure
             ? AgentTurnFailure(
                 kind: event.errorKind, detail: event.detail, failedAt: now,
@@ -504,9 +507,11 @@ struct AgentStatusMachine {
             closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
             guard hookTurnInFlight || hookWorking else { return }
             endTurn()
-            // Esc is a key: the user stopped it. Without one since the
-            // prompt, the turn's Stop got lost, and this is its end.
-            if lastInputAt > (lastPromptAt ?? 0) {
+            // Esc is a key: the user stopped it. Background subagents may
+            // have worked on after its Stop. Otherwise the turn's Stop got
+            // lost, and this is its end.
+            let promptAt = lastPromptAt ?? 0
+            if lastInputAt > promptAt || mainTurnEndedAt >= promptAt {
                 _ = block(for: .turnFinished, isUserFocused: isUserFocused, alert: false)
                 return
             }
@@ -636,8 +641,12 @@ struct AgentStatusMachine {
             return state
         }
         // Back in front after something else held the terminal (^Z and
-        // `fg`, Ctrl-G's $EDITOR): its hooks still drive it.
-        if claudeFiredHooks, fgName == "claude" { hookKind = "claude" }
+        // `fg`, Ctrl-G's $EDITOR): its hooks still drive it, and the turn
+        // it was in goes on.
+        if claudeFiredHooks, fgName == "claude", hookKind != "claude" {
+            hookKind = "claude"
+            hookWorking = hookTurnInFlight && openDialogs.isEmpty
+        }
 
         // Hook-authoritative path (Claude with installed hooks): events own
         // every transition; output silence mid-turn means nothing.
@@ -812,6 +821,7 @@ struct AgentStatusMachine {
         lastClosedDialogRequestedAt = 0
         lastEventAt = 0
         turnEndedAt = 0
+        mainTurnEndedAt = 0
         turnStartedAt = nil
         lastReadAt = 0
         lastInteractionAt = 0

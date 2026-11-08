@@ -396,6 +396,8 @@ final class AgentStatusMachineTests: XCTestCase {
     func testIdleReminderAfterAFinishedTurnSaysNothingNew() {
         startTurn()
         XCTAssertTrue(machine.apply(event(.stop, at: 10), isUserFocused: false).firedAttention)
+        // A background subagent works on after the Stop.
+        _ = machine.apply(event(.preToolUse, at: 20, tool: "Read", agent: "bg"), isUserFocused: false)
         var reminder = machine.apply(event(.notification, at: 70, type: "idle_prompt"), isUserFocused: false)
         XCTAssertNil(reminder.attention)
         XCTAssertFalse(reminder.firedAttention)
@@ -502,6 +504,11 @@ final class AgentStatusMachineTests: XCTestCase {
         XCTAssertEqual(machine.hookKind, "claude")
         machine.noteRead(now: t0 + 4_500)
         XCTAssertEqual(machine.tick(fgName: "claude", claudeFiredHooks: true, isUserFocused: false, now: t0 + 4_500.5), .idle)
+
+        // Suspended mid-turn: back in front, it is still at work.
+        _ = machine.apply(event(.userPromptSubmit, at: 4_600), isUserFocused: false)
+        _ = machine.tick(fgName: "zsh", isUserFocused: false, now: t0 + 4_610)
+        XCTAssertEqual(machine.tick(fgName: "claude", claudeFiredHooks: true, isUserFocused: false, now: t0 + 4_620), .working)
     }
 
     /// With Nirux in the background the heartbeat waits: a `claude` started
