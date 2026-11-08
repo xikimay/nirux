@@ -262,9 +262,6 @@ extension WorkspaceState {
     func setContextByLead(_ field: ContextField, _ text: String) -> LeadContextOutcome {
         let value = Self.normalizedContextText(text)
         let current = Self.normalizedContextText(contextText(field))
-        if let current, !contextIsFromLead(field) {
-            return value == current ? .unchanged : .keptUsers(current)
-        }
         guard value != current else { return .unchanged }
         setContext(field, value, fromLead: true)
         return value.map { .set($0) } ?? .cleared
