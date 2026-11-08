@@ -122,9 +122,11 @@ enum GitWorktree {
         }
         let msg = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
         let error = msg.isEmpty ? "git worktree add failed" : msg
-        return startCommit.map {
-            afterFailedNewBranch(branch, at: worktreePath, from: $0, repoRoot: repoRoot, error: error)
-        } ?? (nil, error)
+        guard let startCommit else { return (nil, error) }
+        let kept = afterFailedNewBranch(branch, at: worktreePath, from: startCommit, repoRoot: repoRoot, error: error)
+        // A worktree git left behind gets a handover too.
+        if kept.path != nil { ensureExcluded(NiruxShellView.excludedHandovers, repoRoot: repoRoot) }
+        return kept
     }
 
     /// Whether `branch` exists locally, else on a remote (`*/<branch>`):

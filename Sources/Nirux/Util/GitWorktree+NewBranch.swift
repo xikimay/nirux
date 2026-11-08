@@ -31,6 +31,16 @@ extension GitWorktree {
         return nil
     }
 
+    /// A local branch, or a worktree's (one not committed to yet has no
+    /// ref), named `branch` in any case: the filesystem ignores case, so git
+    /// takes them for one.
+    static func localBranchExistsIgnoringCase(_ branch: String, repoRoot: String) -> Bool {
+        let refs = gitRun(["for-each-ref", "--ignore-case", "--format=%(refname)", "refs/heads/\(branch)"], cwd: repoRoot)
+        guard refs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return true }
+        let lowered = branch.lowercased()
+        return list(repoRoot: repoRoot).contains { $0.branch?.lowercased() == lowered }
+    }
+
     /// The commit a new task's branch starts from, or why it can't start.
     static func newBranchStart(
         _ branch: String, from startPoint: String, repoRoot: String

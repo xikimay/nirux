@@ -8,19 +8,19 @@ extension NiruxShellView {
     /// (docs/spaces.md, "One door: ⌘N").
     func showNewPanel() {
         guard let window else { return }
+        // Another sheet is up (an alert, Board Settings): a second one would
+        // wait unseen behind it, and one waiting there would come up loose.
+        if let sheet = window.attachedSheet, sheet !== newTaskPanel?.panel {
+            NSSound.beep()
+            sheet.makeKeyAndOrderFront(nil)
+            return
+        }
         if let panel = newTaskPanel {
             guard panel.isHidden else { return panel.focus() }
             // Closed while its task starts: it comes back by itself if
             // starting fails, and ⌘N opens a new sheet meanwhile.
             startingTaskPanels.append(panel)
             newTaskPanel = nil
-        }
-        // Another sheet is up (an alert, Board Settings): a second one
-        // would wait unseen behind it.
-        if let sheet = window.attachedSheet {
-            NSSound.beep()
-            sheet.makeKeyAndOrderFront(nil)
-            return
         }
         let spaceID = activeProfileID
         guard let space = profiles.first(where: { $0.id == spaceID }) else { return }
@@ -30,12 +30,9 @@ extension NiruxShellView {
         // Capture lists in the inner closures too: they are @Sendable, and
         // Swift 6.1 rejects one reading a weak var it didn't capture itself.
         panel.onRepositorySelected = { [weak self, weak panel] repository in
-            // The board is set up for the space's default repository: the
-            // others start from their origin's default branch.
-            let isDefault = repository != nil
-                && repository?.key == self?.profiles.first { $0.id == spaceID }?.anchors.defaultAnchor?.key
+            let defaultAnchor = self?.profiles.first { $0.id == spaceID }?.anchors.defaultAnchor
             Self.readNewTaskInfo(
-                spaceID: spaceID, folder: repository?.folder, usesBoardBase: isDefault, stateDirectory: stateDirectory
+                spaceID: spaceID, folder: repository?.folder, defaultAnchor: defaultAnchor, stateDirectory: stateDirectory
             ) { [weak panel] info in
                 panel?.update(repositoryKey: repository?.key, info: info)
             }
@@ -226,11 +223,14 @@ extension NiruxShellView {
     nonisolated private static func readNewTaskInfo(
         spaceID: String,
         folder: String?,
-        usesBoardBase: Bool,
+        defaultAnchor: SpaceAnchor?,
         stateDirectory: URL,
         completion: @escaping @MainActor @Sendable (NewTaskPanel.ProjectInfo) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
+            // The board is set up for the default repository: the others
+            // start from their origin's default branch.
+            let usesBoardBase = folder.map { boardBaseApplies(to: $0, defaultAnchor: defaultAnchor) } ?? false
             let baseBranch = usesBoardBase
                 ? BoardConfigStore(spaceID: spaceID, stateDirectory: stateDirectory)?.load().config?.baseBranch : nil
             let target = folder.flatMap { NewTask.resolveTarget(folder: $0, baseBranch: baseBranch) }

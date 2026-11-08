@@ -299,6 +299,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
             return
         }
         guard let request = draftRequest() else { return }
+        restoreReturnKey()
         hideError()
         isStarting = true
         setControlsEnabled(false)

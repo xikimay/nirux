@@ -725,9 +725,6 @@ extension NiruxShellView {
                 return self.presentProblem("Couldn’t create worktree “\(branch)”", error ?? "git worktree add failed")
             }
             self.openRoutedWorkspace(title: branch, cwd: path, startedFromSpaceID: spaceID, worktreeBranch: checkedOutBranch)
-            if let error {
-                self.presentProblem("“\(branch)” is open, but git reported a problem", NewTaskPanel.lastLines(of: error, maxLines: 12))
-            }
         }
     }
 
@@ -738,6 +735,7 @@ extension NiruxShellView {
         completion: @escaping @MainActor @Sendable (String?, String?, String?) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
+            // An existing branch: a path, or an error, never both.
             let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot)
             let checkedOutBranch = path.flatMap(GitWorktree.currentBranch(at:))
             DispatchQueue.main.async { @MainActor in completion(path, checkedOutBranch, error) }

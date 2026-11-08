@@ -187,21 +187,32 @@ extension NiruxShellView {
         let spaceID = SpaceRouting.route(
             identity: identity, parentSpaceID: parentSpaceID, startedFromSpaceID: requestedSpaceID, spaces: spaces
         ).spaceID
-        // The board is set up for one repository, the space's default one
-        // (a space anchored to none: its only one, as before anchors).
-        // General has none: whatever its board says is about no repository.
-        guard spaceID != WorkspaceProfile.defaultID else { return nil }
-        if let defaultKey = spaces.first(where: { $0.id == spaceID })?.anchors.defaultAnchor?.key,
-           identity?.anchor.key != defaultKey {
-            return nil
-        }
+        // General has no repository: whatever its board says is about none.
+        guard spaceID != WorkspaceProfile.defaultID,
+              boardBaseApplies(to: repoRoot, defaultAnchor: spaces.first { $0.id == spaceID }?.anchors.defaultAnchor)
+        else { return nil }
         return BoardConfigStore(spaceID: spaceID, stateDirectory: stateDirectory)?.load().config?.baseBranch
+    }
+
+    /// A space's board is set up for one repository: its default anchor's
+    /// (a space anchored to none: its only one, as before anchors). True
+    /// when `folder` is in that repository. Runs git: off the main thread.
+    nonisolated static func boardBaseApplies(to folder: String, defaultAnchor: SpaceAnchor?) -> Bool {
+        guard let defaultAnchor else { return true }
+        let timeout = FolderIdentity.backgroundRoutingTimeout
+        guard let commonDir = FolderIdentity.identify(folder, timeout: timeout)?.commonDir else { return false }
+        switch defaultAnchor.kind {
+        case .gitRepository(let anchorCommonDir): return commonDir == anchorCommonDir
+        case .folder(let path): return FolderIdentity.identify(path, timeout: timeout)?.commonDir == commonDir
+        case .unknown: return false
+        }
     }
 
     /// Origin's base branch (see `NewTask.resolveTarget`), fetched, for a
     /// branch that exists nowhere yet: one that exists opens as it is, with
-    /// no fetch. Nil without origin, for a branch that exists, and for what
-    /// `create` refuses anyway: `create` then works as before.
+    /// no fetch. Nil without origin, for a branch `create` finds, one a
+    /// local branch or worktree has in another case, and what `create`
+    /// refuses anyway: `create` then works as before.
     /// `baseBranch` (the space's board setting) is read only when needed.
     nonisolated static func newWorktreeStart(
         branch: String, repoRoot: String, baseBranch: () -> String?
@@ -211,11 +222,11 @@ extension NiruxShellView {
         // (a leading "-" would be an option).
         guard GitWorktree.repositoryTopLevelProblem(repoRoot) == nil,
               GitWorktree.isValidBranchName(branch, repoRoot: repoRoot),
-              // Only a branch that exists nowhere, in any case: `create` would
-              // otherwise make `feat/x` next to `Feat/x`, which the filesystem
-              // takes for one, then delete that one as its own after git
-              // refuses (see `afterFailedNewBranch`).
-              GitWorktree.newBranchProblem(branch, repoRoot: repoRoot) == nil,
+              // Never `feat/x` next to a local `Feat/x`, which the filesystem
+              // takes for the same: git refuses it, and its cleanup would
+              // then delete that branch as its own (see `afterFailedNewBranch`).
+              !GitWorktree.localBranchExistsIgnoringCase(branch, repoRoot: repoRoot),
+              !GitWorktree.existingBranch(branch, repoRoot: repoRoot).remote,
               let target = NewTask.resolveTarget(folder: repoRoot, baseBranch: baseBranch()),
               let remoteBranch = target.remoteBranch, let name = target.remoteBranchName
         else { return nil }

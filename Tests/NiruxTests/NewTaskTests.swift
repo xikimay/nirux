@@ -162,6 +162,25 @@ final class NewTaskTests: XCTestCase {
         XCTAssertEqual(target?.subdirectory, "apps/web")
     }
 
+    /// A space's board is about its default repository, named by a
+    /// repository anchor or a folder of it; without anchors, its only one.
+    func testTheBoardBaseIsTheDefaultRepositorysOnly() throws {
+        let (root, repo) = try makeRepository()
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        try git(["worktree", "add", "-q", "-b", "feat/a", root + "/repo.feat-a"], at: repo)
+        try FileManager.default.createDirectory(atPath: repo + "/apps", withIntermediateDirectories: true)
+        let other = root + "/other"
+        try FileManager.default.createDirectory(atPath: other, withIntermediateDirectories: true)
+        try git(["init", "-q", "-b", "main"], at: other)
+        let repository = try XCTUnwrap(FolderIdentity.identify(repo, timeout: 10)).anchor
+
+        XCTAssertTrue(NiruxShellView.boardBaseApplies(to: root + "/repo.feat-a", defaultAnchor: repository))
+        XCTAssertFalse(NiruxShellView.boardBaseApplies(to: other, defaultAnchor: repository))
+        XCTAssertTrue(NiruxShellView.boardBaseApplies(to: root + "/repo.feat-a", defaultAnchor: .folder(repo + "/apps")))
+        XCTAssertFalse(NiruxShellView.boardBaseApplies(to: other, defaultAnchor: .folder(repo + "/apps")))
+        XCTAssertTrue(NiruxShellView.boardBaseApplies(to: other, defaultAnchor: nil))
+    }
+
     func testTheWorkspaceOpensInTheProjectsFolderOnlyInsideTheWorktree() throws {
         let (root, worktree) = try makeRepository()
         defer { try? FileManager.default.removeItem(atPath: root) }
