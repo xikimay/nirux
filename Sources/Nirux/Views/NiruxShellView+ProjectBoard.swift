@@ -60,6 +60,10 @@ extension NiruxShellView {
             guard let self, let board else { return [] }
             return self.projectWorkspaces(of: board.projectID).map(\.cwd)
         }
+        board.spaceAnchors = { [weak self, weak board] in
+            guard let self, let board else { return [] }
+            return self.profiles.first { $0.id == board.projectID }?.anchors ?? []
+        }
         board.isOnScreen = { [weak self, weak board] in
             guard let self, let board else { return false }
             return self.isProjectBoardOnScreen(board)
@@ -96,13 +100,13 @@ extension NiruxShellView {
             guard let self, let board else { return }
             self.performProjectBoardAction(action, board: board)
         }
-        board.view.onStartQueue = { [weak self, weak board] in
+        board.view.onStartQueue = { [weak self, weak board] section in
             guard let self, let board else { return }
-            self.requestMergeQueueStart(board: board)
+            self.requestMergeQueueStart(board: board, section: section)
         }
-        board.view.onStopQueue = { [weak self, weak board] in
+        board.view.onStopQueue = { [weak self, weak board] section in
             guard let self, let board else { return }
-            self.stopMergeQueue(projectID: board.projectID)
+            self.stopMergeQueue(board: board, section: section)
         }
         return board
     }
@@ -193,10 +197,46 @@ extension NiruxShellView {
         if let local = board.local, members.contains(where: { local.folders[$0.cwd] == nil }) {
             board.expireWorktrees()
         }
+        board.reloadIfAnchorsChanged()
         let projects = profiles.map { ProjectBoardView.Project(id: $0.id, name: $0.name) }
         var content = board.content(workspaces: inputs, projects: projects)
-        content.queue = projectBoardQueueState(board)
+        addQueues(to: &content, board: board)
         board.view.show(content)
+    }
+
+    /// Each section's queue for its rows, and the queue lines: one line on a
+    /// board with one repository, else one per repository with a queue and
+    /// one per queue left running on a repository no section has. The lines
+    /// don't depend on the rows: a board showing a message keeps every Stop
+    /// in reach.
+    private func addQueues(to content: inout ProjectBoardView.Content, board: ProjectBoardController) {
+        let orphans = projectBoardOrphanQueues(board)
+        var states: [String: ProjectBoard.QueueState] = [:]
+        for section in board.sections {
+            states[section.id] = projectBoardQueueState(board, section: section)
+        }
+        if case .sections(var sections, let others) = content.body {
+            for index in sections.indices { sections[index].queue = states[sections[index].id] }
+            content.body = .sections(sections, others: others)
+        }
+        // A one-repository board's cells read its own queue, whatever runs elsewhere.
+        content.queue = board.section(id: nil).flatMap { states[$0.id] }
+        guard board.sections.count > 1 || !orphans.isEmpty else { return }
+        content.queueLines = board.sections.compactMap { section in
+            states[section.id].map { state in
+                let repository = board.repository(of: section)?.name
+                let name = section.anchor == nil ? repository : board.displayNames[section.id]
+                return ProjectBoardView.QueueLine(
+                    id: section.id, title: name ?? repository ?? "Repository", tooltip: repository, queue: state
+                )
+            }
+        } + orphans.map { orphan in
+            ProjectBoardView.QueueLine(
+                id: Self.orphanSectionID(orphan), title: orphan.queueRepository.ownerAndName,
+                tooltip: "Its queue runs, but it isn’t one of this board’s repositories now.",
+                queue: orphanQueueState(orphan)
+            )
+        }
     }
 
     /// A worktree was cleaned up: the boards list their worktrees again.
@@ -262,14 +302,15 @@ extension NiruxShellView {
                   let column = workspace.columns.first(where: { $0.id == columnID && !$0.isClosing })
             else { return showToast("That agent’s column was closed") }
             resumeExitedAgent(in: workspace, column: column)
-        case .addToQueue(let number):
-            addToMergeQueue(number, board: board)
-        case .removeFromQueue(let number):
-            removeFromMergeQueue(number, board: board)
-        case .retarget(let number, let base):
+        case .addToQueue(let number, let section):
+            addToMergeQueue(number, board: board, section: section)
+        case .removeFromQueue(let number, let section):
+            removeFromMergeQueue(number, board: board, section: section)
+        case .retarget(let number, let base, let section):
             // Changes GitHub: never from a dry-run build, like the queue.
-            guard !mergeQueue(projectID: board.projectID).isDryRun else { return NSSound.beep() }
-            board.retarget(number, onto: base)
+            guard let target = board.section(id: section), let repository = board.repository(of: target)?.gitHub else { return }
+            guard !mergeQueue(projectID: board.projectID, repository: repository).isDryRun else { return NSSound.beep() }
+            board.retarget(number, onto: base, section: target.id)
         }
         renderProjectBoard(board)
     }

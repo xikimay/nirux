@@ -99,6 +99,9 @@ extension ProjectBoard {
         /// The main working tree (or the bare repository) first.
         let worktrees: [WorktreeCleanup.ListedWorktree]
         let remotes: [GitHubRepository]
+        /// Its common git dir, symlinks resolved, as a repository anchor
+        /// names it. Nil when git didn't say.
+        var commonDir: String?
     }
 
     /// A workspace of the project, active or inactive.
@@ -191,6 +194,11 @@ extension ProjectBoard {
         var workspaces: [Workspace] = []
         var openPullRequests: [PullRequest] = []
         var mergedPullRequests: [PullRequest] = []
+        /// Every repository of `local` is the project's (a section's, found
+        /// by its anchor), whatever its remotes: its worktrees get rows even
+        /// without a configured repository. Pull requests still match only
+        /// in a checkout a remote of which names that repository.
+        var localIsProjects = false
     }
 
     /// The rows, in board order (section 2):
@@ -225,21 +233,23 @@ extension ProjectBoard {
             let inside = members[index] ?? []
             // By owner and name: an SSH host alias (`git@github-work:…`)
             // points at github.com all the same.
-            let isProjects = sources.repository.map { configured in
+            let namesRepository = sources.repository.map { configured in
                 repository.remotes.contains { $0.owner == configured.owner && $0.name == configured.name }
             } ?? false
-            guard isProjects else {
+            guard sources.localIsProjects || namesRepository else {
                 if let first = inside.first {
                     foreign.append((first.order, row(.otherRepository, worktree: worktree, inside: inside, pullRequest: nil)))
                 }
                 continue
             }
-            // A merged pull request only if the worktree is still at its
+            // Only in a checkout that pushes to the configured repository:
+            // in another one, a branch of the same name is other work. A
+            // merged pull request only if the worktree is still at its
             // head: a branch name reused since has new work.
-            let pullRequest = worktree.branch.flatMap { branch in
+            let pullRequest = !namesRepository ? nil : worktree.branch.flatMap { branch in
                 open[branch] ?? merged[branch].flatMap { $0.headOid == worktree.head?.lowercased() ? $0 : nil }
             }
-            if let branch = worktree.branch { branchesWithWorktree.insert(branch) }
+            if namesRepository, let branch = worktree.branch { branchesWithWorktree.insert(branch) }
             let group: RowGroup
             if place.entry == 0 {
                 group = .main
@@ -278,6 +288,58 @@ extension ProjectBoard {
         return placed(byGroup[.main] ?? []) + withOpenPullRequest + withoutOpenPullRequest
             + (byGroup[.otherWorktree] ?? []).sorted(by: byName)
             + foreign.sorted { $0.order < $1.order }.map(\.row)
+    }
+
+    /// One repository of a board with several (docs/spaces.md, S12).
+    struct SectionSources {
+        let id: String
+        /// Its anchor's common git dir: the local repository it lists.
+        var commonDir: String?
+        /// The configured repository. Nil: its worktrees show, without
+        /// pull requests.
+        var repository: GitHubRepository?
+        var baseBranch: String?
+        var openPullRequests: [PullRequest] = []
+        var mergedPullRequests: [PullRequest] = []
+    }
+
+    /// The rows of each section, by id, then those of no section (group 4).
+    /// A local repository belongs to the section of its anchor, else to the
+    /// first whose configured repository a remote names; a workspace to the
+    /// worktree holding its folder, the innermost across every repository.
+    static func sectionRows(
+        _ sections: [SectionSources], local: [LocalRepository], workspaces: [Workspace]
+    ) -> (bySection: [String: [Row]], others: [Row]) {
+        let owners = local.map { repository -> Int? in
+            if let commonDir = repository.commonDir, let index = sections.firstIndex(where: { $0.commonDir == commonDir }) {
+                return index
+            }
+            return sections.firstIndex { section in
+                guard let configured = section.repository else { return false }
+                return repository.remotes.contains { $0.owner == configured.owner && $0.name == configured.name }
+            }
+        }
+        let places = self.places(in: local)
+        let (members, outside) = assign(workspaces, to: places)
+        var workspacesByOwner: [Int?: [Member]] = [:]
+        for (index, place) in places.enumerated() {
+            workspacesByOwner[owners[place.repository], default: []] += members[index] ?? []
+        }
+        var bySection: [String: [Row]] = [:]
+        for (index, section) in sections.enumerated() {
+            let repositories = local.indices.filter { owners[$0] == index }
+            let inside = (workspacesByOwner[index] ?? []).sorted { $0.order < $1.order }.map(\.workspace)
+            bySection[section.id] = rows(Sources(
+                repository: section.repository, baseBranch: section.baseBranch,
+                local: repositories.map { local[$0] }, workspaces: inside,
+                openPullRequests: section.openPullRequests, mergedPullRequests: section.mergedPullRequests,
+                localIsProjects: true
+            ))
+        }
+        let unowned = local.indices.filter { owners[$0] == nil }
+        let rest = ((workspacesByOwner[nil] ?? []) + outside).sorted { $0.order < $1.order }.map(\.workspace)
+        let others = rows(Sources(repository: nil, local: unowned.map { local[$0] }, workspaces: rest))
+        return (bySection, others)
     }
 
     /// A worktree a workspace can be in: listed, not bare, folder still there.

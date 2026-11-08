@@ -4,7 +4,9 @@ Status: design, validated by the user on 2026-09-27. B4 (the config), B1 (the
 read-only board), B2 (the merge queue's engine) and B3a (starting, following
 and stopping the queue) are implemented; B3b (the journal view and Ask Agent
 to Resolve) isn't. What B1, B2 and B3a decided along the way is in sections
-2.1, 3.7 and 3.8.
+2.1, 3.7 and 3.8. Since S12 ([spaces](spaces.md)), a space with several
+repositories has a section, a config and a merge queue per repository
+(sections 2.2 and 5.1).
 
 On the night of 2026-09-26, one Claude session coordinated about fifteen
 parallel pull requests by hand:
@@ -217,6 +219,37 @@ documented in B1's pull request:
 - **Clean Up** runs "Clean Up Worktree…" (#46) on the row's folder
   (`requestWorktreeCleanup(path:)`), with its checks and confirmation.
 
+### 2.2 Several repositories (S12)
+
+A space's repository anchors ([spaces](spaces.md)) each get a section; folder
+anchors don't appear. Decided with the user on 2026-11-08:
+
+- **A space without a repository anchor, or with one**, shows the board above:
+  one table, the queue line under the header.
+- **With several**, the header names the space. One queue line per
+  repository, named, stays fixed under it, so Stop is always in sight, even
+  while the board shows a message instead of its rows. The
+  rows scroll below, under a header per repository (its name, `owner/name`,
+  the post-merge run's pill or what went wrong reading it), the default
+  repository first, then "Other workspaces".
+- **A section's rows**: its anchor's local repository (known by its common git
+  dir, whatever its remotes), and any other local repository a remote of which
+  names the section's GitHub repository. Its main checkout and worktrees show
+  even with no workspace open there. A section without a GitHub repository
+  lists them without pull requests and says to set it in Board Settings…; with
+  no section set up at all, the board says so instead of listing rows.
+- **Reads** are each section's: its pull requests, merged ones and post-merge
+  run, on the schedule of section 6. The worktrees are listed once for all.
+  Adding, removing or making default a repository reads board.json again.
+- **A queue left running** on a repository no section has any more (Board
+  Settings changed, the anchor was removed) keeps a line of its own, and its
+  Stop; the rows keep the board's own queue.
+- **Pull requests match** a worktree only in a checkout a remote of which
+  names the section's repository: elsewhere, a branch of the same name is
+  other work. Its pull request then shows as not checked out.
+- **The queue's local checks** (unpushed commits, busy agents) cover the
+  repository anchors' checkouts too, not only the space's workspace folders.
+
 ## 3. Merge queue
 
 ### 3.1 Why not GitHub's merge queue or auto-merge
@@ -421,7 +454,8 @@ Rejected:
   - A manual dispatch of the workflow on the same commit can cancel the push
     run without moving `main`. The queue stops with "cancelled by a manual run".
 - **One queue per repository.** Another project's queue on the same
-  repository refuses to start. Across Nirux processes (the installed app, an
+  repository refuses to start. Queues on different repositories, of one
+  project or several, run side by side; a queue never mixes repositories. Across Nirux processes (the installed app, an
   older release left beside it, a build with `NIRUX_MERGE_QUEUE_LIVE=1`):
   - a live queue holds an exclusive `flock` on one file per repository in a
     fixed folder, `~/Library/Application Support/nirux/locks/`, which doesn't
@@ -493,14 +527,16 @@ The queue is a pure state machine: `(state, event) -> (state, [command])`.
   - It writes its own `queue.dry-run.log` and `queue-state.dry-run.json`, so it
     never touches a live queue's files.
 - **Restarts.** A queue never resumes by itself after a quit or a crash. Its
-  state is saved in `<state dir>/projects/<id>/queue-state.json`. At the next
+  state is saved in `<state dir>/projects/<id>/queues/<owner>/<name>/queue-state.json`
+  (before S12, `<state dir>/projects/<id>/queue-state.json`, which is still
+  read for its repository when it is the newer file, and never written). At the next
   launch the board shows "Interrupted while waiting for the nightly of #52",
   with the PRs re-read from GitHub. Start opens a new confirmation.
 
 ### 3.6 Owner
 
 - A running queue belongs to an app-level `MergeQueueController`, one per
-  project, owned by the shell. The board column only shows it.
+  project and repository, owned by the shell. The board column only shows it.
 - Closing the board, or the workspace that holds it, or cleaning up its
   worktree, doesn't stop the queue. Reopening the board shows it again.
 - While a queue runs, the status bar shows it ("Queue: #52 waiting for the
@@ -593,8 +629,8 @@ documented in B2's pull request:
   only when it changed. A queue interrupted, or stopped by failing reads, says
   when a merge or branch update was sent and GitHub didn't show its effect
   yet.
-- **For B3**, `MergeQueueController` (one per project, from
-  `NiruxShellView.mergeQueue(projectID:)`) offers `start(settings:entries:)`,
+- **For B3**, `MergeQueueController` (one per project and repository, from
+  `NiruxShellView.mergeQueue(projectID:repository:)`) offers `start(settings:entries:)`,
   which returns why it refuses, `stop()`, the engine with its entries and
   `statusText`, the saved queue and `reloadSaved()`, `isRunning`, `isDryRun`,
   `runsElsewhere` and `onChange`. `onChange` is a single closure: B3 fans it
@@ -616,8 +652,9 @@ pull request.
   go at its end, and an emptied list starts over by number. The list belongs
   to the project's `MergeQueueController`, in memory: closing the board keeps
   it, and a relaunch proposes what the saved queue didn't merge, in its order.
-  It is the list of one repository: once board.json names another, it is
-  empty, and the board no longer marks rows with the last queue's steps. A row
+  It is the list of its queue's repository: once board.json names another,
+  the board shows that one's, and no longer marks rows with the last queue's
+  steps. A row
   the queue would stop on at once (a draft, another base, a conflict, a busy
   agent) says why instead; the sheet checks the rest. The list doesn't change
   while a queue runs, here or in another Nirux, nor while the sheet is open or
@@ -710,7 +747,7 @@ pull request.
   (`expected_head_sha`, `--match-head-commit`). A push between the check and the
   merge makes GitHub refuse the merge, and the queue stops.
 - **Journal.** One JSON line per action in
-  `<state dir>/projects/<id>/queue.log`: time, PR, step, command, result. It
+  `<state dir>/projects/<id>/queues/<owner>/<name>/queue.log`: time, PR, step, command, result. It
   never holds tokens. The board shows it, copyable for an agent. It is capped at
   1 MB, keeping one previous file.
 - **`gh` limits.** REST allows 5,000 requests an hour and GraphQL 5,000 points,
@@ -783,7 +820,8 @@ and the journal:
 - **The queue starts only** when the file is writable and complete: a
   repository, a base branch, at least one required check, timeouts in range,
   and a post-merge workflow chosen, a file or `"none"`. B2 and B3 read
-  `BoardConfigStore(spaceID:).load().queueSettings`, which is nil otherwise
+  `BoardConfigStore(spaceID:).load().view(for: slot).queueSettings` (the
+  repository's place in the file, section 5.1), which is nil otherwise
   (`queueStartProblems` says why). Every value in it is set; a nil
   `postMergeWorkflow` there means None.
   - GitHub ignores case in `owner/name`: compare
@@ -809,6 +847,51 @@ and the journal:
   - Required checks go one per line: matrix job names hold commas.
   - A read-only file is shown as it is, without suggestions, and Save is
     disabled.
+
+### 5.1 One config per repository (S12)
+
+A space with several repository anchors keeps one config per anchor, in
+schema 2:
+
+```json
+{
+  "schemaVersion": 2,
+  "repositories": [
+    { "commonDir": "/Users/me/Code/front/.git", "repository": "acme/front", "baseBranch": "main", … },
+    { "commonDir": "/Users/me/Code/back/.git", "repository": "acme/back", "baseBranch": "main", … }
+  ]
+}
+```
+
+- Each entry holds schema 1's keys (but `schemaVersion`) and the anchor's
+  common git dir (`BoardSections`). An entry without one is a space's config
+  from before it had repository anchors.
+- **Migration** (with the user): schema 1's one config goes to the anchor a
+  remote of which names its repository, else to the default repository
+  anchor; only anchors without a config of their own take it.
+- **Schema 1 stays** while the file holds one config, the default
+  repository's, that rule places back there, so an older Nirux, which reads
+  schema 1 as the default repository's (S7), keeps using it. A second
+  config, or one for another repository, writes schema 2, which an older
+  build reads read-only (newer schema): it neither rewrites it nor starts a
+  queue.
+- Schema 1's config goes to no other anchor once the anchor whose remote
+  names it has a config of its own. Save refuses two repositories with one
+  GitHub repository (their queue would be one), and refuses while git can't
+  read the remotes of an anchor schema 1's config may belong to.
+- The rules above hold for each entry: unknown keys in one, or an unsupported
+  merge method, make the file read-only; an entry that isn't an object, a
+  `commonDir` that isn't an absolute path, or two entries for one anchor make
+  it unreadable. Save checks only the config it changes: the others stay as
+  read. A removed anchor's own config stays in the file, and comes back with
+  it.
+- **Board Settings** (with the user): a Repository pop-up above the form picks
+  the repository edited, the default one first; each form suggests from that
+  repository's checkout. Leaving one with values typed and not saved asks to
+  save them, or not.
+- **New tasks** and Mission worktrees start from their repository's base
+  branch; a repository the board doesn't set up starts from its origin's
+  default branch.
 
 ## 6. Data
 

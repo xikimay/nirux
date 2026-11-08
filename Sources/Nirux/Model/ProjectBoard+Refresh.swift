@@ -104,8 +104,9 @@ extension ProjectBoard {
         var missingFolders: Set<String> = []
     }
 
-    /// The repositories the project's folders are in, each listed once
-    /// (by its first entry). Runs git: call it off the main thread.
+    /// The repositories the project's folders are in (its workspaces', its
+    /// repository anchors'), each listed once (by its first entry). Runs
+    /// git: call it off the main thread.
     static func readLocal(folders: [String], tools: WorktreeCleanup.Tools = .installed) -> LocalSnapshot {
         var snapshot = LocalSnapshot()
         var listed: Set<String> = []
@@ -134,10 +135,15 @@ extension ProjectBoard {
                 return resolved
             }
             let remotes = WorktreeCleanup.git(["remote", "-v"], in: folder, tools: tools)
+            let commonDir = WorktreeCleanup.git(
+                ["rev-parse", "--path-format=absolute", "--git-common-dir"], in: folder, tools: tools
+            )
+            let commonDirPath = commonDir.stdout.trimmingCharacters(in: .newlines)
             listedPaths.formUnion(worktrees.map(\.path))
             snapshot.repositories.append(LocalRepository(
                 worktrees: worktrees,
-                remotes: remotes.status == 0 ? parseRemotes(remotes.stdout) : []
+                remotes: remotes.status == 0 ? parseRemotes(remotes.stdout) : [],
+                commonDir: commonDir.status == 0 && commonDirPath.hasPrefix("/") ? NiruxShellView.comparablePath(commonDirPath) : nil
             ))
         }
         return snapshot
