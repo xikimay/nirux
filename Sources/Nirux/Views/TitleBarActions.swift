@@ -38,6 +38,8 @@ final class TitleBarActions: NSTitlebarAccessoryViewController {
         }
     }
 
+    /// Search's identifier: the palette closes on a press on it.
+    static let searchButtonID = NSUserInterfaceItemIdentifier("nirux.titlebar.search")
     static let buttonSize = NSSize(width: 30, height: 22)
     static let capsulePadding: CGFloat = 2
     static let buttonGap: CGFloat = 2
@@ -75,8 +77,11 @@ final class TitleBarActions: NSTitlebarAccessoryViewController {
                 x: Self.capsulePadding + (Self.buttonSize.width + Self.buttonGap) * CGFloat(position), y: Self.capsulePadding,
                 width: Self.buttonSize.width, height: Self.buttonSize.height
             ))
-            button.image = NSImage(systemSymbolName: action.symbolName, accessibilityDescription: nil)?
+            // VoiceOver reads the cell, and the image's description.
+            button.image = NSImage(systemSymbolName: action.symbolName, accessibilityDescription: action.title)?
                 .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 14, weight: .regular))
+            button.cell?.setAccessibilityLabel(action.title)
+            if action == .search { button.identifier = Self.searchButtonID }
             button.target = self
             button.action = #selector(pressed(_:))
             button.toolTip = action.toolTip
@@ -101,9 +106,8 @@ final class TitleBarActions: NSTitlebarAccessoryViewController {
 
 /// A pill-shaped icon button of the capsule, filled from Theme while
 /// hovered or pressed (the system's accessory-bar bezel draws a grey
-/// rounded rectangle that crosses the capsule's ends). It acts on the
-/// first click, Nirux in the background, as a toolbar's buttons do, and
-/// leaves the keyboard where it was.
+/// rounded rectangle that crosses the capsule's ends). It leaves the
+/// keyboard where it was.
 private final class TitleBarButton: NSButton {
     private var isHovered = false {
         didSet { applyColors() }
@@ -130,7 +134,6 @@ private final class TitleBarButton: NSButton {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func updateTrackingAreas() {

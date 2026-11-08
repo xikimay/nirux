@@ -165,10 +165,15 @@ final class CommandPalette: NSObject {
     }
 
     var isVisible: Bool { panel?.isVisible ?? false }
-    /// `NSEvent.timestamp` of the click outside the panel that last closed
-    /// it: the title bar's Search button, pressed to close the palette,
-    /// closes it on mouse-down and must not open it again on mouse-up.
-    private(set) var lastClickDismissal: TimeInterval = -.infinity
+
+    /// A press on the title bar's Search button (`TitleBarActions`) while
+    /// the palette shows: it closes the palette here, on mouse-down, and
+    /// is consumed, or the button would open it again on mouse-up.
+    static func isSearchButtonPress(_ event: NSEvent) -> Bool {
+        guard let frameView = event.window?.contentView?.superview else { return false }
+        let hit = frameView.hitTest(frameView.convert(event.locationInWindow, from: nil))
+        return hit?.identifier == TitleBarActions.searchButtonID
+    }
 
     func dismiss() {
         removeMonitors()
@@ -272,8 +277,8 @@ final class CommandPalette: NSObject {
         clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
             guard let self, let panel = self.panel else { return event }
             if event.window !== panel {
-                self.lastClickDismissal = event.timestamp
                 self.dismiss()
+                if Self.isSearchButtonPress(event) { return nil }
             } else if let index = self.rowIndexAtEvent(event) {
                 self.handleMouseClick(index)
             }

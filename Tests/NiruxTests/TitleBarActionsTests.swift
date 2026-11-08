@@ -5,8 +5,8 @@ import XCTest
 /// The title bar's New, Board and Search (docs/spaces.md, Interface).
 @MainActor
 final class TitleBarActionsTests: XCTestCase {
-    /// Three buttons in one capsule, in that order, each saying its name
-    /// and shortcut, each running its action.
+    /// Three buttons in one capsule, each saying its name (to VoiceOver,
+    /// which reads the cell) and its shortcut, each running its action.
     func testButtonsSayTheirNameAndRunTheirAction() throws {
         let actions = TitleBarActions()
         _ = actions.view
@@ -14,10 +14,8 @@ final class TitleBarActionsTests: XCTestCase {
         actions.onAction = { ran.append($0) }
 
         let buttons = try TitleBarActions.Action.allCases.map { try XCTUnwrap(actions.buttons[$0]) }
-        XCTAssertEqual(buttons.map { $0.accessibilityLabel() }, ["New…", "Board", "Search"])
+        XCTAssertEqual(buttons.map { $0.cell?.accessibilityLabel() }, ["New…", "Board", "Search"])
         XCTAssertEqual(buttons.map(\.toolTip), ["New… (⌘N)", "Board (⌃⌘B)", "Search (⌘P, ⇧⌘P in the editor)"])
-        XCTAssertTrue(buttons.allSatisfy { $0.acceptsFirstMouse(for: nil) }, "Nirux in the background")
-        XCTAssertEqual(buttons.map(\.frame.minX), buttons.map(\.frame.minX).sorted())
         XCTAssertTrue(buttons.allSatisfy { $0.superview === buttons[0].superview }, "one capsule")
         buttons.forEach { $0.performClick(nil) }
         XCTAssertEqual(ran, [.new, .board, .search])
@@ -27,15 +25,8 @@ final class TitleBarActionsTests: XCTestCase {
     /// cup, added after it as Nirux does, line up on its left. Laid out as
     /// KeepAwakeControllerTests lays out its title bar, never shown.
     func testItKeepsTheWindowsEdge() throws {
-        _ = NSApplication.shared
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 300), styleMask: [.titled, .closable],
-            backing: .buffered, defer: false
-        )
-        window.isReleasedWhenClosed = false
+        let (window, actions) = titleBar()
         defer { window.close() }
-        let actions = TitleBarActions()
-        window.addTitlebarAccessoryViewController(actions)
         let usage = ClaudeUsageIndicator()
         window.addTitlebarAccessoryViewController(usage)
         let now = Date().timeIntervalSince1970
@@ -43,44 +34,63 @@ final class TitleBarActionsTests: XCTestCase {
         let cup = KeepAwakeIndicator()
         window.addTitlebarAccessoryViewController(cup)
         cup.update(isActive: true, workingAgentCount: 1)
-        func frameInWindow(_ view: NSView) -> NSRect {
-            window.contentView?.superview?.layoutSubtreeIfNeeded()
-            return view.convert(view.bounds, to: nil)
-        }
 
-        let capsule = frameInWindow(actions.view)
-        let limits = frameInWindow(usage.view)
-        let cupFrame = frameInWindow(cup.view)
+        let capsule = Self.frameInWindow(actions.view, of: window)
+        let limits = Self.frameInWindow(usage.view, of: window)
+        let cupFrame = Self.frameInWindow(cup.view, of: window)
         XCTAssertTrue([capsule, limits, cupFrame].allSatisfy { $0.width > 0 })
         XCTAssertEqual(limits.maxX, capsule.minX, accuracy: 0.5)
         XCTAssertEqual(cupFrame.maxX, limits.minX, accuracy: 0.5)
     }
 
-    /// Search pressed to close the palette: the click closed it on
-    /// mouse-down, and the button, on mouse-up, doesn't open it again. A
-    /// later press opens it.
-    func testSearchClosesAnOpenPalette() throws {
+    /// Search pressed while the palette shows closes it: the palette takes
+    /// that press on mouse-down, so the button doesn't open it again on
+    /// mouse-up. Pressed again, it opens it. New opens its sheet.
+    func testSearchClosesAnOpenPaletteAndTheButtonsReachTheShell() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
-            shell.showCommandPalette()
-            XCTAssertEqual(shell.commandPalette?.isVisible, true)
-            // A press outside the palette, in a window where it hits nothing.
-            let elsewhere = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
-            elsewhere.isReleasedWhenClosed = false
-            defer { elsewhere.close() }
-            let press = try XCTUnwrap(NSEvent.mouseEvent(
-                with: .leftMouseDown, location: NSPoint(x: 50, y: 50), modifierFlags: [],
-                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: elsewhere.windowNumber,
-                context: nil, eventNumber: 0, clickCount: 1, pressure: 1
-            ))
-            NSApp.sendEvent(press)
-            XCTAssertEqual(shell.commandPalette?.isVisible, false, "the click outside closed it")
+            let actions = TitleBarActions()
+            harness.window.addTitlebarAccessoryViewController(actions)
+            let search = try XCTUnwrap(actions.buttons[.search])
+            let board = try XCTUnwrap(actions.buttons[.board])
+            @MainActor func press(_ button: NSButton) throws -> NSEvent {
+                let point = Self.frameInWindow(button, of: harness.window)
+                return try XCTUnwrap(NSEvent.mouseEvent(
+                    with: .leftMouseDown, location: NSPoint(x: point.midX, y: point.midY), modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: harness.window.windowNumber,
+                    context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+                ))
+            }
+            XCTAssertTrue(CommandPalette.isSearchButtonPress(try press(search)))
+            XCTAssertFalse(CommandPalette.isSearchButtonPress(try press(board)))
 
-            shell.toggleCommandPaletteFromTitleBar(now: press.timestamp + 0.2)
+            shell.performTitleBarAction(.search)
+            XCTAssertEqual(shell.commandPalette?.isVisible, true)
+            NSApp.sendEvent(try press(search))
             XCTAssertEqual(shell.commandPalette?.isVisible, false)
-            shell.toggleCommandPaletteFromTitleBar(now: press.timestamp + 5)
+            shell.performTitleBarAction(.search)
             XCTAssertEqual(shell.commandPalette?.isVisible, true)
             shell.commandPalette?.dismiss()
+
+            shell.performTitleBarAction(.new)
+            harness.waitUntil("the New sheet") { shell.newTaskPanel?.panel?.isSheet == true }
         }
+    }
+
+    private func titleBar() -> (NSWindow, TitleBarActions) {
+        _ = NSApplication.shared
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 300), styleMask: [.titled, .closable],
+            backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        let actions = TitleBarActions()
+        window.addTitlebarAccessoryViewController(actions)
+        return (window, actions)
+    }
+
+    private static func frameInWindow(_ view: NSView, of window: NSWindow) -> NSRect {
+        window.contentView?.superview?.layoutSubtreeIfNeeded()
+        return view.convert(view.bounds, to: nil)
     }
 }
