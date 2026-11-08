@@ -190,4 +190,43 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(columns, ["1:2"])
         XCTAssertEqual(workspaces, [4])
     }
+
+    /// The space's Lead sits above the Tasks header, on one line: its sign,
+    /// its title, a dot for its state, no columns; a question it can't show
+    /// on that line gets one of its own.
+    func testLeadRowSitsAboveTasksOnOneLine() throws {
+        var lead = workspace([column(0, .working)], isActive: true)
+        lead = WorkspaceInfo(
+            id: "lead", index: 0, title: "Lead", profileID: WorkspaceProfile.defaultID, isInactive: false,
+            columnCount: 1, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: true, columns: lead.columns,
+            prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active, lastSummary: nil,
+            lastActivityAt: nil
+        )
+        lead.isLead = true
+        XCTAssertEqual(SidebarExpandedMetrics.workspaceHeight(for: lead, sidebarWidth: 260), SidebarExpandedMetrics.leadRowHeight)
+        let result = SidebarWorkspaceCardRenderer(workspace: lead, sidebarWidth: 260, yOffset: 500).render()
+        XCTAssertFalse(result.hitAreas.contains { if case .column = $0.region { true } else { false } }, "no chips")
+
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 600))
+        sidebar.isExpanded = true
+        sidebar.update(profiles: [], workspaces: [lead, workspace([column()])])
+        let leadRow = try XCTUnwrap(sidebar.hitAreas.first { if case .workspace(0) = $0.region { true } else { false } })
+        let taskRow = try XCTUnwrap(sidebar.hitAreas.first { if case .workspace(4) = $0.region { true } else { false } })
+        let tasks = try XCTUnwrap(sidebar.expandedViews.compactMap { $0 as? NSTextField }.first { $0.stringValue == "Tasks" })
+        XCTAssertGreaterThan(leadRow.frame.minY, tasks.frame.maxY)
+        XCTAssertLessThan(taskRow.frame.maxY, tasks.frame.minY)
+
+        var asked = column(1)
+        let question = SidebarMissionQuestion(questionID: "q", parentTitle: "you", text: "Ship it?", handOff: .parentClosed)
+        asked.missionQuestion = question
+        var askingLead = lead
+        askingLead = WorkspaceInfo(
+            id: "lead", index: 0, title: "Lead", profileID: WorkspaceProfile.defaultID, isInactive: false,
+            columnCount: 1, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: true, columns: [asked],
+            prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active, lastSummary: nil,
+            lastActivityAt: nil
+        )
+        askingLead.isLead = true
+        XCTAssertEqual(askingLead.cardActions, [.missionQuestion(columnIndex: 1, question)])
+    }
 }

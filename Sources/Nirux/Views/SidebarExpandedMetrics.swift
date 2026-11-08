@@ -42,6 +42,11 @@ enum SidebarExpandedMetrics {
     static let menuButtonWidth: CGFloat = 18
     static let menuButtonHeight: CGFloat = 16
 
+    /// The Lead's row: its sign, its title, its state; one line.
+    static let leadRowHeight: CGFloat = 32
+    /// Between the Lead's row and the Tasks header.
+    static let leadGap = Theme.Space.xs
+
     // An archived workspace that asks nothing: one line.
     static let compactRowHeight: CGFloat = 26
 

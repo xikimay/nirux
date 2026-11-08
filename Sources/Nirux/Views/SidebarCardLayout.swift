@@ -168,7 +168,8 @@ struct SidebarCardLayout {
         isCompact = workspace.showsCompactRow
         state = workspace.cardState
         summary = workspace.rowSummary
-        let showsColumns = workspace.isActive && !isCompact
+        // The Lead's row is one line, columns and all: ⌘1…⌘9 reach them.
+        let showsColumns = workspace.isActive && !isCompact && !workspace.isLead
         let rowWidth = sidebarWidth - Metrics.workspaceInsetX - Metrics.cardPaddingX - Metrics.textX
         // Too wide for the line: the diff goes first, then the feedback; the
         // pull request and its checks stay.
@@ -201,6 +202,8 @@ struct SidebarCardLayout {
 
         if isCompact {
             height = Metrics.compactRowHeight
+        } else if workspace.isLead {
+            height = Metrics.leadRowHeight + Metrics.actionBlockHeight(actions)
         } else {
             var height = Metrics.rowPaddingY * 2 + Metrics.titleRowHeight + Metrics.statusGap + Metrics.statusRowHeight
             let lineCount = CGFloat(max(rows.count, links.isEmpty ? 0 : 1))

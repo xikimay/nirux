@@ -25,7 +25,9 @@ extension SidebarView {
             return
         }
 
-        let activeInfos = displayedWorkspaceInfos.filter { !$0.isInactive }
+        // The space's Lead goes above the Tasks header (docs/spaces.md).
+        let leadInfos = displayedWorkspaceInfos.filter { !$0.isInactive && $0.isLead }
+        let activeInfos = displayedWorkspaceInfos.filter { !$0.isInactive && !$0.isLead }
         let inactiveInfos = displayedWorkspaceInfos.filter { $0.isInactive }
         let listedInactiveInfos = inactiveInfos.filter(listsWorkspace)
         let archivedListHeight = archivedListHeight(listedInactiveInfos)
@@ -34,6 +36,7 @@ extension SidebarView {
 
         let contentH = expandedContentHeight(
             hasPicker: activeProfile != nil,
+            leadInfos: leadInfos,
             activeInfos: activeInfos,
             archivedHeight: inactiveInfos.isEmpty ? nil : archivedListHeight,
             onboardingHeight: onboardingCard?.height
@@ -46,6 +49,10 @@ extension SidebarView {
         if let activeProfile {
             yOffset = buildSpacePicker(activeProfile, top: yOffset)
             yOffset -= SidebarExpandedMetrics.pickerBottomGap
+        }
+        if !leadInfos.isEmpty {
+            yOffset = buildWorkspaceGroup(leadInfos, yOffset: yOffset) + SidebarExpandedMetrics.workspaceGap
+            yOffset -= SidebarExpandedMetrics.leadGap
         }
         yOffset = buildTasksHeader(top: yOffset)
         yOffset = buildWorkspaceGroup(activeInfos, yOffset: yOffset)
@@ -95,11 +102,15 @@ extension SidebarView {
     /// `archivedHeight`: the archived list's (`archivedListHeight`), nil
     /// without an Archived row.
     private func expandedContentHeight(
-        hasPicker: Bool, activeInfos: [WorkspaceInfo], archivedHeight: CGFloat?, onboardingHeight: CGFloat?
+        hasPicker: Bool, leadInfos: [WorkspaceInfo], activeInfos: [WorkspaceInfo], archivedHeight: CGFloat?,
+        onboardingHeight: CGFloat?
     ) -> CGFloat {
         typealias Metrics = SidebarExpandedMetrics
         var height = Metrics.topPadding + Metrics.tasksHeaderHeight
             + Metrics.groupHeight(for: activeInfos, sidebarWidth: bounds.width)
+        if !leadInfos.isEmpty {
+            height += Metrics.groupHeight(for: leadInfos, sidebarWidth: bounds.width) - Metrics.workspaceGap + Metrics.leadGap
+        }
         if hasPicker { height += Metrics.pickerHeight + Metrics.pickerBottomGap }
         if let onboardingHeight { height += Metrics.onboardingCardGap + onboardingHeight }
         if let archivedHeight { height += Metrics.archivedGap + archivedHeight + Metrics.archivedRowHeight }
@@ -242,8 +253,7 @@ extension SidebarView {
 
     // MARK: - Tasks
 
-    /// "Tasks", and "+" for a new one. The Lead's row (docs/spaces.md)
-    /// will sit above it.
+    /// "Tasks", and "+" for a new one, under the Lead's row.
     private func buildTasksHeader(top: CGFloat) -> CGFloat {
         typealias Metrics = SidebarExpandedMetrics
         let rowY = top - Metrics.tasksHeaderHeight

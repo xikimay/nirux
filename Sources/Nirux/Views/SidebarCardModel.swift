@@ -199,7 +199,9 @@ extension WorkspaceInfo {
         var actions: [SidebarCardAction] = []
         let names = columns.map(SidebarRenderer.columnName)
         let summary = rowSummary
+        // The Lead's row has no status line: its question gets a line here.
         let questionShown: Int? = switch summary.status.action {
+        case _ where isLead: nil
         case .missionQuestion(let columnIndex)?: columnIndex
         default: summary.mark == .asking ? Self.questionColumn(in: columns)?.index : nil
         }
@@ -228,7 +230,7 @@ extension WorkspaceInfo {
         }
         // The status line says "Merged · Clean up" unless an agent's state
         // comes first: then a line of its own keeps it.
-        if let mergedCleanup, let prInfo, summary.mark != .merged {
+        if let mergedCleanup, let prInfo, summary.mark != .merged || isLead {
             actions.append(.cleanup(mergedCleanup, pullRequest: prInfo.number))
         }
         if isActive, let reviewBadges {

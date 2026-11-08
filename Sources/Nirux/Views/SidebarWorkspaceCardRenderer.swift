@@ -58,6 +58,8 @@ final class SidebarWorkspaceCardRenderer {
         append(cardHover)
         if layout.isCompact {
             buildCompactRow(frame: frame)
+        } else if workspace.isLead {
+            buildLeadRow(frame: frame)
         } else {
             buildRow(frame: frame)
         }
@@ -575,6 +577,54 @@ final class SidebarWorkspaceCardRenderer {
         views += block.views
         hitAreas += block.hitAreas
         approvalButtons.merge(block.buttons) { _, new in new }
+    }
+
+    // MARK: - Lead row
+
+    /// The space's Lead (docs/spaces.md, "The Lead"): its sign, its title,
+    /// and a dot for its state (green while it works, amber when it needs
+    /// you, red once it broke); then the action block, as any row.
+    private func buildLeadRow(frame: NSRect) {
+        let rowY = frame.maxY - Metrics.leadRowHeight
+        let midY = rowY + Metrics.leadRowHeight / 2
+        let icon = SidebarImageView(image: SidebarRenderer.symbol(Theme.Symbol.lead, color: Theme.Color.accent, pointSize: 13))
+        icon.frame = NSRect(x: Metrics.markCenterX - 8, y: midY - 8, width: 16, height: 16)
+        icon.setAccessibilityElement(false)
+        append(icon)
+
+        var maxX = layout.contentMaxX
+        let state: NSColor? = switch layout.summary.mark {
+        case .working: Theme.Color.working
+        case .needsYou: Theme.Color.waiting
+        case .error: Theme.Color.error
+        default: nil
+        }
+        if let state {
+            let size: CGFloat = 7
+            let dot = SidebarBackgroundView(frame: NSRect(x: maxX - size, y: midY - size / 2, width: size, height: size))
+            dot.wantsLayer = true
+            dot.layer?.cornerRadius = size / 2
+            dot.layer?.backgroundColor = state.cgColor
+            if layout.summary.mark == .working { Self.breathe(dot.layer) }
+            append(dot)
+            maxX = dot.frame.minX - Theme.Space.sm
+        }
+        let badge = menuButton(frame: NSRect(
+            x: maxX - Metrics.menuButtonWidth, y: midY - Metrics.menuButtonHeight / 2,
+            width: Metrics.menuButtonWidth, height: Metrics.menuButtonHeight
+        ))
+
+        let title = textLabel(workspace.title, font: Theme.Font.title, color: Theme.Color.textPrimary)
+        let status = layout.summary.status.text
+        title.toolTip = "\(workspace.title)\n\(status)"
+        title.setAccessibilityLabel("\(workspace.title), \(status)")
+        let height = ceil(title.fittingSize.height)
+        title.frame = NSRect(
+            x: layout.indentX, y: midY - height / 2,
+            width: max(0, badge.frame.minX - Theme.Space.sm - layout.indentX), height: height
+        )
+        append(title)
+        buildActionBlock(top: rowY)
     }
 
     // MARK: - Compact row
