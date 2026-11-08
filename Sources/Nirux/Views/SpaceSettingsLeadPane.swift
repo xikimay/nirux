@@ -76,6 +76,8 @@ final class SpaceSettingsLeadPane: NSObject {
     /// What a Lead is and where it works; New Space… says the same
     /// (`spaceName` nil: the space has no name yet).
     static func description(place: Place, spaceName: String?) -> String {
+        // The sheet adds repositories right above; Space Settings, in General.
+        let addOne = "It starts tasks only from a repository" + (spaceName == nil ? "." : ": add one in General.")
         let at: String
         var advice: String?
         switch place {
@@ -83,14 +85,14 @@ final class SpaceSettingsLeadPane: NSObject {
             at = "on \(name)’s main checkout"
         case .folder(let name):
             at = "in \(name)"
-            advice = "It starts tasks only from a repository: add one in General."
+            advice = addOne
         case .home:
             at = "in your home folder"
-            advice = "It starts tasks only from a repository: add one in General."
+            advice = addOne
         case .elsewhere(let path, let repository):
             at = "in \(path.abbreviatedPath())"
             advice = repository.map { "That is none of this space’s repositories: turn it off and on again to move it to \($0)." }
-                ?? "It starts tasks only from a repository: add one in General."
+                ?? addOne
         }
         var text = "A workspace pinned at the top, \(at), with Claude and the Board. You talk to it; it starts "
             + "tasks and follows them."
