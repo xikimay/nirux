@@ -129,7 +129,8 @@ A sheet titled "New in <space>":
   preselected. **Agent** (the space's default) and **Template** popups.
 - The suggested branch on one line, editable, "from origin/main".
 - **Report to the Lead** checkbox (with the Lead PR).
-- **Existing Branch…** opens an existing worktree (today's Open Worktree).
+- **Existing Branch…** opens an existing worktree (today's Open Worktree), or
+  a branch without one: its worktree is made, with a shell (shipped with S7).
 - Names come from the description's first line, else the branch, else the
   folder. Never "ws N".
 - The skill and the Lead start from `origin/<base>` too. The skill may ask for

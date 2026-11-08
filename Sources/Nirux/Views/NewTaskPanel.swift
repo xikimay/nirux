@@ -78,6 +78,9 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// The fetch failed and the user was told: the next Start goes from
     /// origin's branch as last fetched.
     private(set) var startsWithoutFetch = false
+    /// The template picked, kept while another repository's info is read:
+    /// templates are the space's, the same for each.
+    private var pickedTemplateName: String?
 
     /// How Start's work ended.
     enum Outcome: Equatable {
@@ -116,7 +119,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     static let addRepositoryTag = 2
 
     private let content = NewTaskFlippedView()
-    private let descriptionBox = NSView()
+    private let descriptionBox = NewTaskFlippedView()
     private let descriptionScroll = NSScrollView()
 
     private static let width: CGFloat = 620
@@ -228,8 +231,9 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// repository was selected since.
     func update(repositoryKey: String?, info: ProjectInfo) {
         guard panel != nil, repositoryKey == selectedRepositoryKey else { return }
-        let previousTemplate = selectedTemplate?.name
+        let previousTemplate = selectedTemplate?.name ?? pickedTemplateName
         self.info = info
+        hideError()
         startsWithoutFetch = false
         templatePopup.removeAllItems()
         // Menu items, not addItem(withTitle:), which drops a title already
@@ -266,19 +270,21 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         showError(message)
         if wasHidden {
             // It comes back while the user types elsewhere: no field takes
-            // the keys, and Return doesn't start the task until they edit
-            // something here (⌘Return and a click still do).
+            // the keys, and neither Return nor Escape answers it until they
+            // edit something here (⌘Return and a click still do).
             panel?.makeFirstResponder(nil)
             startButton.keyEquivalent = ""
+            cancelButton.keyEquivalent = ""
         } else {
             // The field being edited lost the focus when it was disabled.
             beginEditingBranch()
         }
     }
 
-    /// The user edits the sheet: Return starts again.
+    /// The user edits the sheet: Return starts and Escape cancels again.
     private func restoreReturnKey() {
         startButton.keyEquivalent = "\r"
+        cancelButton.keyEquivalent = "\u{1b}"
     }
 
     // MARK: - Actions
@@ -346,6 +352,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     }
 
     private func repositoryChanged() {
+        if info != nil { pickedTemplateName = selectedTemplate?.name }
+        hideError()
         info = nil
         startsWithoutFetch = false
         templatePopup.isEnabled = false
@@ -423,11 +431,11 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
             let shown = folder == homeFolder ? "~" : (folder as NSString).abbreviatingWithTildeInPath
             setLine("Nothing typed: Start opens a shell in \(shown).", secondary)
         } else if let reason = noTaskReason {
-            setLine(reason, Theme.Color.waiting)
+            setLine(reason, Theme.Color.error)
             showsNewSpace = space.isGeneral
         } else if let target = info?.target {
             let start = startText(target)
-            let color = target.remoteBranch == nil ? Theme.Color.waiting : secondary
+            let color = secondary
             if isEditingBranch {
                 showsField = true
                 fromLabel.stringValue = start
@@ -436,7 +444,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
                 showsEdit = true
                 let line = NSMutableAttributedString(
                     string: branch.isEmpty ? "No branch name" : branch,
-                    attributes: [.font: Theme.Font.code, .foregroundColor: branch.isEmpty ? Theme.Color.waiting : Theme.Color.textPrimary]
+                    attributes: [.font: Theme.Font.code, .foregroundColor: branch.isEmpty ? Theme.Color.error : Theme.Color.textPrimary]
                 )
                 line.append(NSAttributedString(string: "  ·  \(start)", attributes: [.font: Theme.Font.body, .foregroundColor: color]))
                 lineLabel.attributedStringValue = line
@@ -581,8 +589,10 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         y += 108 + 14
 
         var x = margin
-        for popup in [repositoryPopup, agentPopup, templatePopup] where !popup.isHidden {
-            let width = min(max(ceil(popup.fittingSize.width), 120), 240)
+        let popups = [repositoryPopup, agentPopup, templatePopup].filter { !$0.isHidden }
+        let widest = floor((inner - 6 * CGFloat(popups.count - 1)) / CGFloat(max(popups.count, 1)))
+        for popup in popups {
+            let width = min(max(ceil(popup.fittingSize.width), 120), 240, widest)
             popup.frame = NSRect(x: x - 2, y: y, width: width, height: 26)
             x += width + 6
         }
@@ -772,13 +782,13 @@ final class NewTaskSheet: NSPanel {
     var onCommandReturn: (() -> Void)?
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if Self.leavesToTextView(event, firstResponder: firstResponder, multilineView: multilineView) {
+            return false
+        }
         let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
         if modifiers == .command, event.charactersIgnoringModifiers == "\r" {
             onCommandReturn?()
             return true
-        }
-        if Self.leavesToTextView(event, firstResponder: firstResponder, multilineView: multilineView) {
-            return false
         }
         return super.performKeyEquivalent(with: event)
     }

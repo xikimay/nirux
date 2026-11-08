@@ -137,6 +137,28 @@ enum GitWorktree {
         return (local, remote)
     }
 
+    struct Branch: Equatable, Sendable {
+        let name: String
+        /// Only on origin: its worktree tracks `origin/<name>`.
+        let isRemote: Bool
+    }
+
+    /// The branches no worktree has checked out, most recent first: local
+    /// ones, then origin's that have no local branch of that name.
+    static func branchesWithoutWorktree(repoRoot: String, worktrees: [WorktreeEntry]) -> [Branch] {
+        let refs = gitRun(
+            ["for-each-ref", "--sort=-committerdate", "--format=%(refname)", "refs/heads", "refs/remotes/origin"],
+            cwd: repoRoot
+        ).split(separator: "\n").map(String.init)
+        let local = refs.compactMap { $0.hasPrefix("refs/heads/") ? String($0.dropFirst("refs/heads/".count)) : nil }
+        let remote = refs.compactMap { $0.hasPrefix("refs/remotes/origin/") ? String($0.dropFirst("refs/remotes/origin/".count)) : nil }
+        let checkedOut = Set(worktrees.compactMap(\.branch))
+        let localNames = Set(local)
+        return local.filter { !checkedOut.contains($0) }.map { Branch(name: $0, isRemote: false) }
+            + remote.filter { $0 != "HEAD" && !localNames.contains($0) && !checkedOut.contains($0) }
+                .map { Branch(name: $0, isRemote: true) }
+    }
+
     struct WorktreeEntry {
         let path: String
         let branch: String?  // nil for detached HEAD

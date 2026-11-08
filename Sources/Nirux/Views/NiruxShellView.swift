@@ -620,9 +620,10 @@ extension NiruxShellView {
 
     // MARK: - Worktree
 
-    /// "Open Worktree", and "Existing Branch…" in the ⌘N sheet: the
-    /// worktrees of `repositoryFolder`'s repository (a space's anchor), else
-    /// of the focused terminal's, that one left out.
+    /// "Open Worktree": the worktrees of the focused terminal's repository,
+    /// that one left out. "Existing Branch…" in the ⌘N sheet: those of
+    /// `repositoryFolder`'s repository (a space's anchor), then its
+    /// branches that have no worktree, which get one when picked.
     func showWorktreeListPalette(repositoryFolder: String? = nil) {
         guard let window else { return }
         let folder = repositoryFolder ?? activeWorkspace?.focusedWorkingDirectory
@@ -637,8 +638,10 @@ extension NiruxShellView {
             .map { (id: $0.id, cwd: $0.cwd) }
 
         // List worktrees on background thread, then show palette
+        let listsBranches = repositoryFolder != nil
         DispatchQueue.global(qos: .userInitiated).async {
             let worktrees = GitWorktree.list(repoRoot: repoRoot)
+            let branches = listsBranches ? GitWorktree.branchesWithoutWorktree(repoRoot: repoRoot, worktrees: worktrees) : []
             let comparablePaths = worktrees.map { Self.comparablePath($0.path) }
             // The worktree each workspace is open in (the main checkout may
             // hold the others), and whether at its root.
@@ -652,7 +655,9 @@ extension NiruxShellView {
                 guard let self else { return }
                 // Leave out the checkout the palette was opened from
                 let entries = zip(worktrees, comparablePaths).filter { _, path in path != excluded }
-                guard !entries.isEmpty else { return self.showToast("No other worktree found in this repository") }
+                guard !entries.isEmpty || !branches.isEmpty else {
+                    return self.showToast("No other worktree found in this repository")
+                }
 
                 // Build palette actions from worktree entries
                 let actions = entries.map { entry, comparablePath in
@@ -662,6 +667,13 @@ extension NiruxShellView {
                     let openID = open?.id
                     return PaletteAction(icon: .symbol("folder"), title: title, subtitle: subtitle, shortcut: nil) { [weak self] in
                         self?.openWorktree(path: entry.path, title: title, workspaceID: openID)
+                    }
+                } + branches.map { branch in
+                    PaletteAction(
+                        icon: .symbol(Theme.Symbol.branch), title: branch.name,
+                        subtitle: "No worktree yet · " + (branch.isRemote ? "origin/\(branch.name)" : "local branch"), shortcut: nil
+                    ) { [weak self] in
+                        self?.openBranchInNewWorktree(branch.name, repoRoot: repoRoot)
                     }
                 }
 
@@ -700,6 +712,36 @@ extension NiruxShellView {
               let space = profiles.first(where: { $0.id == workspace.profileID })
         else { return "Already open" }
         return "Already open in “\(space.name)”"
+    }
+
+    /// A branch without a worktree, picked in "Existing Branch…": its
+    /// worktree is made off the main thread (one of origin's tracks it),
+    /// then opens as a plain workspace.
+    private func openBranchInNewWorktree(_ branch: String, repoRoot: String) {
+        let spaceID = activeProfileID
+        Self.createBranchWorktree(branch, repoRoot: repoRoot) { [weak self] path, checkedOutBranch, error in
+            guard let self else { return }
+            guard let path else {
+                return self.presentProblem("Couldn’t create worktree “\(branch)”", error ?? "git worktree add failed")
+            }
+            self.openRoutedWorkspace(title: branch, cwd: path, startedFromSpaceID: spaceID, worktreeBranch: checkedOutBranch)
+            if let error {
+                self.presentProblem("“\(branch)” is open, but git reported a problem", NewTaskPanel.lastLines(of: error, maxLines: 12))
+            }
+        }
+    }
+
+    /// Off the main thread through a nonisolated function, so the closure
+    /// can't inherit this view's main-actor isolation (see NewTask).
+    nonisolated private static func createBranchWorktree(
+        _ branch: String, repoRoot: String,
+        completion: @escaping @MainActor @Sendable (String?, String?, String?) -> Void
+    ) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot)
+            let checkedOutBranch = path.flatMap(GitWorktree.currentBranch(at:))
+            DispatchQueue.main.async { @MainActor in completion(path, checkedOutBranch, error) }
+        }
     }
 
     private func openWorktree(path: String, title: String, workspaceID: String?) {

@@ -71,6 +71,22 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertTrue(panel.defaultButtonCell === sheet.startButton.cell)
             XCTAssertFalse(panel.performKeyEquivalent(with: shiftReturn))
             XCTAssertFalse(panel.performKeyEquivalent(with: returnKey))
+            // An input method composing text gets every key, ⌘Return too.
+            sheet.descriptionView.setMarkedText(
+                "か", selectedRange: NSRange(location: 1, length: 0), replacementRange: NSRange(location: NSNotFound, length: 0)
+            )
+            XCTAssertTrue(sheet.descriptionView.hasMarkedText())
+            for composing in [
+                try key("\u{1b}", code: 0x35, in: panel), try key("\r", code: 0x24, modifiers: .command, in: panel)
+            ] {
+                XCTAssertFalse(panel.performKeyEquivalent(with: composing))
+            }
+            XCTAssertFalse(sheet.isStarting)
+            XCTAssertIdentical(shell.newTaskPanel, sheet)
+            sheet.descriptionView.unmarkText()
+            describe("First line", in: sheet)
+            sheet.descriptionView.setSelectedRange(NSRange(location: sheet.descriptionView.string.count, length: 0))
+
             sheet.descriptionView.keyDown(with: shiftReturn)
             XCTAssertEqual(sheet.descriptionView.string.count, "First line".count + 1)
             XCTAssertEqual(sheet.descriptionView.string.last?.isNewline, true, sheet.descriptionView.string)
@@ -159,8 +175,10 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertNil(sheet.branchField.currentEditor())
             XCTAssertIdentical(sheet.panel?.firstResponder, sheet.panel)
             XCTAssertEqual(sheet.startButton.keyEquivalent, "")
+            XCTAssertEqual(sheet.cancelButton.keyEquivalent, "", "a stray Escape doesn't throw the error away")
             describe("Offline work", in: sheet)
             XCTAssertEqual(sheet.startButton.keyEquivalent, "\r")
+            XCTAssertEqual(sheet.cancelButton.keyEquivalent, "\u{1b}")
 
             sheet.startButton.performClick(nil)
             harness.waitUntil("the task's workspace") { shell.workspaces.contains { $0.title == "Offline work" } }
@@ -185,6 +203,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertEqual(sheet.repositoryPopup.titleOfSelectedItem, "repo")
             XCTAssertEqual(sheet.info?.target?.repository, harness.repo)
             describe("Why is the cache cold?", in: sheet)
+            select("Investigation (no code)", in: sheet.templatePopup)
 
             // A folder in no repository: no task, but a shell still opens.
             select("notes", in: sheet.repositoryPopup)
@@ -198,9 +217,11 @@ final class NewTaskFlowTests: UIFlowTestCase {
             XCTAssertEqual(sheet.info?.target?.repository, harness.repo)
             XCTAssertEqual(sheet.info?.target?.subdirectory, "docs")
             XCTAssertTrue(sheet.startButton.isEnabled)
+            // The space's templates, whatever the repository: the one
+            // picked stays.
+            XCTAssertEqual(sheet.templatePopup.titleOfSelectedItem, "Investigation (no code)")
 
             select("Codex", in: sheet.agentPopup)
-            select("Investigation (no code)", in: sheet.templatePopup)
             XCTAssertEqual(sheet.branch, "feat/why-is-the-cache-cold")
             // Closed while it starts: the workspace still opens.
             sheet.startButton.performClick(nil)
@@ -324,27 +345,50 @@ final class NewTaskFlowTests: UIFlowTestCase {
     }
 
     /// Existing Branch… lists the selected repository's worktrees, its main
-    /// checkout too, and goes back to the one the active workspace is in.
-    func testExistingBranchListsTheRepositorysWorktrees() throws {
+    /// checkout too, then its branches without one, local then origin's. It
+    /// goes back to the worktree the active workspace is in, and makes one
+    /// for a branch.
+    func testExistingBranchListsTheRepositorysWorktreesThenBranches() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
+            try UIFlowHarness.git(["branch", "feat/loose"], at: harness.repo)
+            try UIFlowHarness.git(["remote", "add", "origin", harness.root + "/origin.git"], at: harness.repo)
+            try UIFlowHarness.git(["update-ref", "refs/remotes/origin/feat/remote", "HEAD"], at: harness.repo)
+            try UIFlowHarness.git(["update-ref", "refs/remotes/origin/feat/loose", "HEAD"], at: harness.repo)
             _ = try Self.anchoredSpace(harness)
             let active = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertEqual(active.cwd, harness.repo)
             let workspaceCount = shell.workspaces.count
-            let sheet = try openSheet(harness)
-            sheet.existingBranchButton.performClick(nil)
-            XCTAssertNil(shell.newTaskPanel)
-            let palette = try XCTUnwrap(shell.commandPalette)
-            harness.waitUntil("the worktree list") {
-                palette.isVisible && Set(palette.filteredActions.map(\.title)) == ["main", harness.worktreeBranch]
+            @MainActor func openList() throws -> CommandPalette {
+                try openSheet(harness).existingBranchButton.performClick(nil)
+                XCTAssertNil(shell.newTaskPanel)
+                let palette = try XCTUnwrap(shell.commandPalette)
+                harness.waitUntil("the list") { palette.isVisible && palette.filteredActions.count == 4 }
+                return palette
             }
-            let main = try XCTUnwrap(palette.filteredActions.first { $0.title == "main" })
+            var palette = try openList()
+            XCTAssertEqual(palette.filteredActions.map(\.title), ["main", harness.worktreeBranch, "feat/loose", "feat/remote"])
+            XCTAssertEqual(palette.filteredActions.map(\.subtitle).suffix(2), ["No worktree yet · local branch", "No worktree yet · origin/feat/remote"])
+            let main = try XCTUnwrap(palette.filteredActions.first)
             XCTAssertTrue(main.subtitle.hasPrefix("Already open · "), main.subtitle)
             harness.type("main", into: try XCTUnwrap(palette.searchField))
             harness.press(.returnKey, in: palette.panel)
             XCTAssertIdentical(shell.activeWorkspace, active)
             XCTAssertEqual(shell.workspaces.count, workspaceCount)
+
+            palette = try openList()
+            harness.type("feat/remote", into: try XCTUnwrap(palette.searchField))
+            XCTAssertEqual(palette.filteredActions.first?.title, "feat/remote")
+            harness.press(.returnKey, in: palette.panel)
+            harness.waitUntil("the branch's worktree") { shell.workspaces.contains { $0.title == "feat/remote" } }
+            let opened = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertEqual(NiruxShellView.comparablePath(opened.cwd), NiruxShellView.comparablePath(harness.root + "/repo.feat-remote"))
+            XCTAssertEqual(
+                try UIFlowHarness.git(["rev-parse", "--abbrev-ref", "feat/remote@{upstream}"], at: harness.repo)
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                "origin/feat/remote"
+            )
+            XCTAssertTrue(harness.agentLaunches.isEmpty, "a shell, no agent")
         }
     }
 
