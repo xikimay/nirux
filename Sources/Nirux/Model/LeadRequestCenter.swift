@@ -65,8 +65,7 @@ final class LeadRequestCenter {
     func drain() {
         guard let stateDirectory else { return }
         for request in LeadChannel.waitingRequests(stateDirectory: stateDirectory)
-        where owns(request) && LeadChannel.claim(request, stateDirectory: stateDirectory) {
-            guard request.createdAt >= startedAt else { continue }
+        where LeadChannel.claim(request, stateDirectory: stateDirectory) {
             let answer: @MainActor (String, Bool) -> Void = { text, isError in
                 LeadChannel.respond(LeadChannel.Response(id: request.id, text: text, isError: isError), stateDirectory: stateDirectory)
             }

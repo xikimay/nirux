@@ -130,7 +130,7 @@ extension NiruxShellView {
         case .missing, .loaded:
             return loaded.defaults.leadStartsTasksWithoutAsking
         case .unreadable, .readOnly(.notARegularFile), .readOnly(.tooLarge):
-            return false
+            return true
         case .readOnly:
             if let value = loaded.defaults.leadStartsTasks { return value }
             let raw = loaded.contents.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }

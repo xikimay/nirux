@@ -112,7 +112,7 @@ enum LeadChannel {
                 // Taken back only if nobody claimed it meanwhile.
                 if unlink(requestFile.path) == 0 { return .notTaken }
             } else if taken, elapsed >= takeTimeout + workTimeout {
-                return take(Response.self, id: request.id, from: responses).map { .answered($0) } ?? .stillWorking
+                return take(Response.self, id: request.id, from: responses).map { .answered($0) } ?? .notTaken
             }
             Thread.sleep(forTimeInterval: interval)
             interval = min(0.5, interval * 1.5)
@@ -147,7 +147,7 @@ enum LeadChannel {
     static func claim(_ request: Request, stateDirectory: URL) -> Bool {
         let folder = requestsFolder(stateDirectory: stateDirectory)
         let claimed = folder.appendingPathComponent(".\(request.id).claimed-\(getpid())")
-        guard rename(folder.appendingPathComponent(request.id + ".json").path, claimed.path) == 0 else { return false }
+        _ = rename(folder.appendingPathComponent(request.id + ".json").path, claimed.path)
         try? FileManager.default.removeItem(at: claimed)
         return true
     }

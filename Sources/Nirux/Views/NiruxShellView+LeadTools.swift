@@ -78,7 +78,7 @@ extension NiruxShellView {
                     branch: branch, target: target, fetchesFirst: true, reportsTo: parent
                 )
                 // It opens behind what the user is doing.
-                request.opensInFront = false
+                request.opensInFront = true
                 self.startLeadTask(request, repository: repository.name, fetchError: nil, answer: answer)
             }
         }
@@ -157,6 +157,7 @@ extension NiruxShellView {
             return answer("Proposed to the user in the New sheet (the space’s setting “Starts tasks without asking” is off). "
                 + "If they start it, it reports to you.", false)
         }
+        return answer("refused", true)
         pendingLeadProposals.append(proposal)
         scheduleLeadProposals()
         let ahead = pendingLeadProposals.count - 1

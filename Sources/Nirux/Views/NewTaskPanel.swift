@@ -244,9 +244,6 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         // It comes while the user types elsewhere: no field takes the keys,
         // and neither Return nor Escape answers it until they edit
         // something here (a click, or ⌘Return, still does).
-        panel?.makeFirstResponder(nil)
-        startButton.keyEquivalent = ""
-        cancelButton.keyEquivalent = ""
     }
 
     /// The repository's info, read by the shell. Ignored when another
