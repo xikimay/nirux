@@ -6,7 +6,9 @@ extension NiruxShellView {
     /// Where a plain new workspace of a space opens: its default anchor's
     /// folder (a repository's main checkout), else the first of its other
     /// anchors' folders still there (the default one moved), else the home
-    /// folder. Also the home folder for a space that doesn't exist.
+    /// folder. Also the home folder for a space that doesn't exist. A stat
+    /// on the main thread, so a terminal never starts in a folder that is
+    /// gone: an anchor on a network volume that went away waits for it.
     func defaultFolder(forSpace spaceID: String) -> String {
         let space = profiles.first { $0.id == spaceID }
         let folders = [space?.defaultFolder] + (space?.anchors.map(\.folder) ?? [])
@@ -33,7 +35,7 @@ extension NiruxShellView {
         guard routesByAnchor else {
             return open(decideSpace(identity: nil, parentWorkspaceID: parentWorkspaceID, startedFromSpaceID: startedFromSpaceID))
         }
-        Self.identifyOffMain(folder) { [weak self] identity in
+        Self.identifyOffMain(folder, timeout: sideEffects.routingTimeout) { [weak self] identity in
             guard let self else { return }
             open(self.decideSpace(identity: identity, parentWorkspaceID: parentWorkspaceID, startedFromSpaceID: startedFromSpaceID))
         }

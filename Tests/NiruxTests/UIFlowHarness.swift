@@ -194,6 +194,8 @@ final class UIFlowHarness {
             self?.cookieImports.append(browser)
             return CookieImporter.ImportResult(imported: 2, failed: 0, browser: browser)
         }
+        // A busy CI machine: routing must not fall back for want of git.
+        shell.sideEffects.routingTimeout = 10
         shell.sideEffects.chooseFolder = { [weak self] _, _, completion in
             guard let self, !chosenFolders.isEmpty else { return completion(nil) }
             completion(chosenFolders.removeFirst())

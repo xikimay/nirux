@@ -273,7 +273,7 @@ extension NiruxShellView {
         }
         let colorHex = workspaceStore.unusedColorHex()
         guard let folder else { return panel.show(attachedTo: window, colorHex: colorHex, suggestion: nil) }
-        Self.identifyOffMain(folder, timeout: 1) { [weak self, weak panel] identity in
+        Self.identifyOffMain(folder, timeout: max(1, sideEffects.routingTimeout)) { [weak self, weak panel] identity in
             guard let self, let panel, self.newSpacePanel === panel else { return }
             guard let window = self.window else {
                 self.newSpacePanel = nil

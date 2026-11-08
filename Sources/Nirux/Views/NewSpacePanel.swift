@@ -41,6 +41,14 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
     private(set) var rowViews: [AnchorRowView] = []
 
     private let content = NewSpaceFlippedView()
+    private let heading = NSTextField(labelWithString: "New Space")
+    private let nameLabel = NSTextField(labelWithString: "Name")
+    private let colorLabel = NSTextField(labelWithString: "Color")
+    private let sectionLabel = NSTextField(labelWithString: "")
+    private let sectionHint = NSTextField(labelWithString: "Where this space’s work starts. Optional: a space can have none.")
+    private let note = NSTextField(wrappingLabelWithString:
+        "A repository belongs to one space: its worktrees open here, even when you are looking at another space.")
+    private let separator = NSBox()
     private static let width: CGFloat = 520
     private static let margin: CGFloat = 24
 
@@ -214,6 +222,30 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
         createButton.action = #selector(createAction(_:))
         createButton.keyEquivalent = "\r"
 
+        heading.font = Theme.Font.display
+        heading.textColor = Theme.Color.textPrimary
+        for label in [nameLabel, colorLabel, sectionHint] {
+            label.font = Theme.Font.caption
+            label.textColor = Theme.Color.textSecondary
+            label.lineBreakMode = .byTruncatingTail
+        }
+        sectionLabel.attributedStringValue = NSAttributedString(string: "REPOSITORIES", attributes: [
+            .font: Theme.Font.label, .foregroundColor: Theme.Color.textTertiary, .kern: Theme.Font.labelKern
+        ])
+        note.font = Theme.Font.caption
+        note.textColor = Theme.Color.textTertiary
+        separator.boxType = .custom
+        separator.borderWidth = 0
+        separator.fillColor = Theme.Color.line
+        // Added once: `layout` only moves them, so the field being edited
+        // keeps the keyboard.
+        content.subviews.forEach { $0.removeFromSuperview() }
+        let persistent: [NSView] = [
+            heading, nameLabel, nameField, colorLabel, sectionLabel, sectionHint, addRepositoryButton, addFolderButton,
+            note, errorLabel, separator, cancelButton, createButton
+        ] + swatches
+        persistent.forEach(content.addSubview)
+
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 400),
             styleMask: [.titled, .fullSizeContentView],
@@ -231,41 +263,29 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
     }
 
     /// Places everything from the top; the sheet takes the height it needs.
+    /// Only the rows are rebuilt.
     private func layout() {
         guard let panel else { return }
-        content.subviews.forEach { $0.removeFromSuperview() }
         let margin = Self.margin
         let inner = Self.width - margin * 2
         var y: CGFloat = 22
 
-        let heading = label("New Space", font: Theme.Font.display, color: Theme.Color.textPrimary)
         heading.frame = NSRect(x: margin, y: y, width: inner, height: 20)
-        content.addSubview(heading)
         y += 36
-
-        y = place(label("Name", font: Theme.Font.caption, color: Theme.Color.textSecondary), y: y, height: 14) + 6
+        y = place(nameLabel, y: y, height: 14) + 6
         nameField.frame = NSRect(x: margin, y: y, width: inner, height: 26)
-        content.addSubview(nameField)
         y += 26 + 18
 
-        y = place(label("Color", font: Theme.Font.caption, color: Theme.Color.textSecondary), y: y, height: 14) + 8
+        y = place(colorLabel, y: y, height: 14) + 8
         for (index, swatch) in swatches.enumerated() {
             swatch.frame = NSRect(x: margin + CGFloat(index) * 30, y: y, width: 22, height: 22)
-            content.addSubview(swatch)
         }
         y += 22 + 22
 
-        let section = label("Repositories".uppercased(), font: Theme.Font.label, color: Theme.Color.textTertiary)
-        section.attributedStringValue = NSAttributedString(string: "REPOSITORIES", attributes: [
-            .font: Theme.Font.label, .foregroundColor: Theme.Color.textTertiary, .kern: Theme.Font.labelKern
-        ])
-        y = place(section, y: y, height: 13) + 3
-        y = place(
-            label("Where this space’s work starts. Optional: a space can have none.",
-                  font: Theme.Font.caption, color: Theme.Color.textSecondary),
-            y: y, height: 15
-        ) + 10
+        y = place(sectionLabel, y: y, height: 13) + 3
+        y = place(sectionHint, y: y, height: 15) + 10
 
+        rowViews.forEach { $0.removeFromSuperview() }
         rowViews = rows.enumerated().map { index, row in
             let view = AnchorRowView(row: row)
             view.onRemove = { [weak self] in self?.remove(at: index) }
@@ -284,37 +304,18 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
         addFolderButton.frame = NSRect(
             x: addRepositoryButton.frame.maxX + 2, y: y, width: folderSize.width + 8, height: folderSize.height
         )
-        content.addSubview(addRepositoryButton)
-        content.addSubview(addFolderButton)
         y += repositorySize.height + 12
 
-        let note = wrapping(
-            "A repository belongs to one space: its worktrees open here, even when you are looking at another space.",
-            width: inner
-        )
-        note.frame.origin = NSPoint(x: margin, y: y)
-        content.addSubview(note)
-        y += note.frame.height + 14
+        y = place(note, y: y, height: Self.wrappedHeight(of: note, width: inner)) + 14
 
         if !errorLabel.isHidden {
-            errorLabel.preferredMaxLayoutWidth = inner
-            let height = ceil(errorLabel.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: inner, height: 1000)).height ?? 16)
-            errorLabel.frame = NSRect(x: margin, y: y, width: inner, height: height)
-            content.addSubview(errorLabel)
-            y += height + 10
+            y = place(errorLabel, y: y, height: Self.wrappedHeight(of: errorLabel, width: inner)) + 10
         }
 
-        let separator = NSBox()
-        separator.boxType = .custom
-        separator.borderWidth = 0
-        separator.fillColor = Theme.Color.line
         separator.frame = NSRect(x: 0, y: y, width: Self.width, height: 1)
-        content.addSubview(separator)
         y += 1 + 14
         createButton.frame = NSRect(x: Self.width - margin - 120, y: y, width: 120, height: 30)
         cancelButton.frame = NSRect(x: createButton.frame.minX - 8 - 96, y: y, width: 96, height: 30)
-        content.addSubview(cancelButton)
-        content.addSubview(createButton)
         y += 30 + 18
 
         panel.setContentSize(NSSize(width: Self.width, height: y))
@@ -324,26 +325,12 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
 
     private func place(_ view: NSView, y: CGFloat, height: CGFloat) -> CGFloat {
         view.frame = NSRect(x: Self.margin, y: y, width: Self.width - Self.margin * 2, height: height)
-        content.addSubview(view)
         return y + height
     }
 
-    private func label(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.font = font
-        label.textColor = color
-        label.lineBreakMode = .byTruncatingTail
-        return label
-    }
-
-    private func wrapping(_ text: String, width: CGFloat) -> NSTextField {
-        let label = NSTextField(wrappingLabelWithString: text)
-        label.font = Theme.Font.caption
-        label.textColor = Theme.Color.textTertiary
+    private static func wrappedHeight(of label: NSTextField, width: CGFloat) -> CGFloat {
         label.preferredMaxLayoutWidth = width
-        let height = ceil(label.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: 1000)).height ?? 16)
-        label.frame.size = NSSize(width: width, height: height)
-        return label
+        return ceil(label.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: 1000)).height ?? 16)
     }
 }
 

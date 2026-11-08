@@ -104,9 +104,9 @@ final class SpaceArrivalBanner: NSView {
             x: Theme.Space.md, y: ((bounds.height - labelHeight) / 2).rounded(),
             width: max(0, right - Theme.Space.md - Theme.Space.xs), height: labelHeight
         )
-        layer?.shadowPath = CGPath(
-            roundedRect: bounds, cornerWidth: Theme.Radius.card, cornerHeight: Theme.Radius.card, transform: nil
-        )
+        // CoreGraphics aborts on a radius over half a side.
+        let radius = min(Theme.Radius.card, bounds.width / 2, bounds.height / 2)
+        layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil)
     }
 
     @objc private func showMoveMenu(_ sender: NSButton) {

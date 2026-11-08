@@ -55,6 +55,10 @@ struct ShellSideEffects {
     /// (`claude --help`, `claude auth status`). Called off the main thread.
     var checkExplain: @Sendable () -> BranchReview.ExplainAvailability = { BranchReview.ExplainAvailability.check() }
 
+    /// How long routing a new workspace waits for git (see SpaceRouting).
+    /// Tests on a busy machine wait longer.
+    var routingTimeout: TimeInterval = FolderIdentity.routingTimeout
+
     /// Shows an app-modal alert and waits for its answer.
     var runModal: @MainActor (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }
 
