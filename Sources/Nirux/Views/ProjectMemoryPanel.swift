@@ -445,7 +445,7 @@ final class ProjectMemoryPanel: NSObject {
 
     @objc private func commit() {
         guard editing == nil, !isWriting, let file = selectedFile else { return NSSound.beep() }
-        dismiss()
+        // The main window comes forward; the tab keeps the list.
         actions.open(file.url, file.line)
     }
 

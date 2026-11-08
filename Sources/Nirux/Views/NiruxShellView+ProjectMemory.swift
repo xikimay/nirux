@@ -97,7 +97,8 @@ extension NiruxShellView {
         // workspace's.
         actions.open = { [weak self, weak workspace] url, line in
             guard let self else { return }
-            window?.makeKey()
+            // In front of Space Settings, which stays open behind it.
+            window?.makeKeyAndOrderFront(nil)
             let target = workspace.flatMap { workspace in
                 workspace.isClosing ? nil : workspaces.firstIndex { $0 === workspace }
             }

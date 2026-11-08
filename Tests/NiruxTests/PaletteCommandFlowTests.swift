@@ -316,7 +316,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(panel.summaryLabel?.stringValue, "3 of 5")
 
             harness.press(.returnKey, in: field.window)
-            XCTAssertFalse(panel.isVisible)
+            XCTAssertTrue(panel.isVisible, "Space Settings keeps the list, behind the editor")
             let editor = try XCTUnwrap(workspace.columns.compactMap(\.editorColumn).first)
             harness.waitUntil("the memory in the editor") { editor.activePath == memory + "/flow-rules.md" }
 
