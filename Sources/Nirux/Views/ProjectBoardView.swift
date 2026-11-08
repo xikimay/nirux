@@ -179,7 +179,7 @@ final class ProjectBoardView: NSView {
         appearance = Theme.appearance
 
         header.icon = .symbol(Theme.Symbol.projectBoard)
-        header.title = "Project Board"
+        header.title = "Board"
         refreshButton.target = self
         refreshButton.action = #selector(refreshClicked)
         header.trailingButtons = [refreshButton]
@@ -292,9 +292,9 @@ final class ProjectBoardView: NSView {
     /// the post-merge run or what went wrong, Refresh with when the board
     /// last read GitHub.
     private func applyHeader(_ content: Header) {
-        let projectName = content.projectIsMissing ? "Deleted project" : content.projectName
+        let projectName = content.projectIsMissing ? "Deleted space" : content.projectName
         header.context = content.repository ?? projectName
-        header.titleToolTip = "Project Board · \(projectName)"
+        header.titleToolTip = "Board · \(projectName)"
         if content.statusIsError, let message = content.status {
             header.status = ColumnHeaderView.Status(
                 content.errorTitle, tone: .error, symbol: Theme.Symbol.agentError, toolTip: message
@@ -310,7 +310,7 @@ final class ProjectBoardView: NSView {
     /// items. Built as it opens: a read landing meanwhile can't change it.
     private func headerMenu() -> NSMenu {
         let menu = NSMenu()
-        let projectItem = menu.addItem(withTitle: "Project", action: nil, keyEquivalent: "")
+        let projectItem = menu.addItem(withTitle: "Space", action: nil, keyEquivalent: "")
         projectItem.submenu = projectMenu()
         menu.addItem(withTitle: "Board Settings…", action: #selector(settingsClicked), keyEquivalent: "").target = self
         menu.addItem(.separator())
@@ -320,10 +320,10 @@ final class ProjectBoardView: NSView {
 
     /// The projects, the board's own checked; a deleted one first, checked.
     func projectMenu() -> NSMenu {
-        let menu = NSMenu(title: "Project")
+        let menu = NSMenu(title: "Space")
         guard let content = content?.header else { return menu }
         if content.projectIsMissing {
-            let deleted = menu.addItem(withTitle: "Deleted project", action: nil, keyEquivalent: "")
+            let deleted = menu.addItem(withTitle: "Deleted space", action: nil, keyEquivalent: "")
             deleted.state = .on
         }
         for project in content.projects {
@@ -558,7 +558,7 @@ final class ProjectBoardView: NSView {
         // The sheet shows the list as it was when it opened.
         let isFrozen = queue.isLocked || queue.isConfirming
         let locked = queue.run == .elsewhere
-            ? "Another Nirux runs this project’s queue: wait until it ends."
+            ? "Another Nirux runs this space’s queue: wait until it ends."
             : queue.isLocked ? "The queue is running: change the list once it stops."
             : "The confirmation sheet is open: change the list once it closes."
         // What the last queue did with it, under its place in the next one.
@@ -664,7 +664,7 @@ final class ProjectBoardView: NSView {
             header.text = "Queue: running in another Nirux, read-only here" + (queue.status.map { " · \($0)" } ?? "")
             header.tone = .active
             header.start = QueueButton(title: startTitle(queue), isEnabled: false,
-                                       tooltip: "Another Nirux runs this project’s queue: Start once it ends there.")
+                                       tooltip: "Another Nirux runs this space’s queue: Start once it ends there.")
             return header
         case .ended:
             header.text = "Queue: " + (queue.status ?? "ended") + (count > 0 ? " · \(queued)" : "")

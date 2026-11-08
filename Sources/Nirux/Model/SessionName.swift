@@ -18,14 +18,15 @@ enum SessionName {
     ///   - worktreeBranch: branch checked out in the worktree, read when the
     ///     workspace was created.
     ///   - spaceName: name of the space the workspace belongs to.
-    ///   - isDefaultSpace: the space is the built-in default one, whose
-    ///     default name ("main") would read like a branch.
+    ///   - isDefaultSpace: the space is the built-in default one. Its
+    ///     built-in name ("General", "main" before) adds nothing, and "main"
+    ///     would read like a branch.
     static func make(worktreeBranch: String?, spaceName: String?, isDefaultSpace: Bool) -> String? {
         guard let label = worktreeBranch.flatMap({ cleaned($0, maxLength: maxLabelLength) }) else {
             return nil
         }
         guard let space = spaceName.flatMap({ cleaned($0, maxLength: maxSpaceLength) }),
-              !(isDefaultSpace && space == WorkspaceProfile.defaultProfile.name),
+              !(isDefaultSpace && [WorkspaceProfile.defaultProfile.name, WorkspaceProfile.legacyDefaultName].contains(space)),
               space.caseInsensitiveCompare(label) != .orderedSame
         else { return label }
         // Distinctive part first, for the same truncation reason.

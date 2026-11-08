@@ -37,7 +37,7 @@ extension ProjectMemory {
     /// A file of rules: the brief, or one of the repository's.
     struct RuleFile: Equatable, Sendable {
         let url: URL
-        /// "Project brief", "CLAUDE.md"…, as the panel names it.
+        /// "Space brief", "CLAUDE.md"…, as the panel names it.
         let label: String
         let rules: [Rule]
     }
@@ -161,7 +161,7 @@ extension ProjectMemory {
     /// memory `location` finds. Call it off the main thread.
     static func knowledge(folder: String, brief: URL?, location: Location) -> Knowledge {
         let briefFile = brief.flatMap { url in
-            SpaceBrief.readBrief(at: url).map { RuleFile(url: url, label: "Project brief", rules: rules(in: $0)) }
+            SpaceBrief.readBrief(at: url).map { RuleFile(url: url, label: "Space brief", rules: rules(in: $0)) }
         }
         let checkout = URL(fileURLWithPath: AgentSessionRecord.checkoutRoot(containing: folder) ?? folder)
         let teamFiles = teamFileNames.compactMap { name -> RuleFile? in

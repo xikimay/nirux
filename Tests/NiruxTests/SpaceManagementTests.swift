@@ -153,4 +153,24 @@ final class SpaceManagementTests: XCTestCase {
         XCTAssertTrue(store.moveWorkspace(at: 2, toProfile: home.id))
         XCTAssertEqual(store.activeWorkspace?.id, "a", "not the inactive card that follows it in the array")
     }
+
+    @MainActor
+    func testGeneralComesFirstWhereverItWasStored() {
+        let store = WorkspaceStore()
+        let work = WorkspaceProfile(id: "work", name: "Work", colorHex: "#9ECE6A")
+        store.replaceProfiles([work, WorkspaceProfile.defaultProfile], activeProfileID: work.id)
+
+        XCTAssertEqual(store.profiles.map(\.id), [WorkspaceProfile.defaultID, work.id])
+    }
+
+    func testOnlyTheUntouchedDefaultNameBecomesGeneral() {
+        func renamed(_ spaces: [(String, String)]) -> [String] {
+            WorkspaceProfile.renamingLegacyDefault(
+                spaces.map { WorkspaceProfile(id: $0.0, name: $0.1, colorHex: "#7AA2F7") }
+            ).map(\.name)
+        }
+        XCTAssertEqual(renamed([("default", "Personal")]), ["Personal"], "a name the user chose")
+        XCTAssertEqual(renamed([("default", "main"), ("x", "general")]), ["main", "general"], "General is taken")
+        XCTAssertEqual(renamed([("x", "main")]), ["main"], "not the default space")
+    }
 }

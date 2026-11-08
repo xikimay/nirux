@@ -24,14 +24,14 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testAgentCommands": ["Open Claude Code", "Open Codex"],
             "testNextWaitingAgentCommand": ["Next Waiting Agent"],
             "testSessionHistoryCommand": ["Session History…"],
-            "testProjectMemoryCommand": ["Project Memory…"],
+            "testProjectMemoryCommand": ["Space Memory…"],
             "testResumeAllAgentsCommand": ["Resume All Agents"],
             "testWorkspaceCommands": [
                 "New Workspace", "Rename Workspace", "Show/Hide Sidebar", "Show/Hide Inactive Workspaces"
             ],
             "testWorktreeCommands": ["Open Worktree", "New Worktree", "Clean Up Merged Worktrees…"],
             "testNewTaskCommand": ["New Task…"],
-            "testProjectBoardCommand": ["Open Project Board"],
+            "testProjectBoardCommand": ["Open Board"],
             "testReviewBranchCommand": ["Review Branch"],
             "testSetupCommands": ["Show Getting Started", "Install Agent Skills", "Open Settings"]
         ],
@@ -289,7 +289,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
                 panel.rows.compactMap { panel.model?.knowledge.entries[safe: $0]?.title }
             }
 
-            harness.runPaletteCommand("Project Memory…")
+            harness.runPaletteCommand("Space Memory…")
             harness.waitUntil("the memory panel") { harness.shell.projectMemoryPanel?.isVisible == true }
             let panel = try XCTUnwrap(harness.shell.projectMemoryPanel)
             let field = try XCTUnwrap(panel.searchField)
@@ -297,7 +297,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(titles(panel), ["Flow fact", "Team rule", "Flow rules", "harness-notes", "Gone"])
             XCTAssertEqual(panel.model?.knowledge.entries.map(\.scope), [.always, .team, .whenRelevant, .whenRelevant, .whenRelevant])
             XCTAssertEqual(panel.summaryLabel?.stringValue, "1 always · 1 team · 3 when relevant")
-            XCTAssertEqual(panel.preview?.sourceLabel.stringValue, "Source: Project brief, line 2")
+            XCTAssertEqual(panel.preview?.sourceLabel.stringValue, "Source: Space brief, line 2")
 
             harness.type("flow", into: field)
             XCTAssertEqual(titles(panel), ["Flow fact", "Flow rules"])
@@ -630,7 +630,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             let workspace = try XCTUnwrap(shell.activeWorkspace)
 
             // No repository yet: the board asks for one, and runs no gh.
-            harness.runPaletteCommand("Open Project Board")
+            harness.runPaletteCommand("Open Board")
             let board = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.projectBoard)
             XCTAssertEqual(board.projectID, workspace.profileID)
             harness.waitUntil("Board Settings to open") { shell.boardSettingsPanel?.panel != nil }
@@ -639,7 +639,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             // From another column: the same board comes to the front.
             shell.addColumn()
             XCTAssertNil(workspace.columns[safe: workspace.focusedIndex]?.projectBoard)
-            harness.runPaletteCommand("Open Project Board")
+            harness.runPaletteCommand("Open Board")
             XCTAssertIdentical(workspace.columns[safe: workspace.focusedIndex]?.projectBoard, board)
             XCTAssertEqual(workspace.columns.filter(\.isProjectBoard).count, 1)
             XCTAssertEqual(client.calls, [])

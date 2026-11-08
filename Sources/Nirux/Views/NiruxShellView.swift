@@ -103,7 +103,7 @@ final class NiruxShellView: NSView {
     var globalSearchPanel: GlobalSearchPanel?
     var sessionHistoryPanel: SessionHistoryPanel?
     var projectMemoryPanel: ProjectMemoryPanel?
-    /// Counts "Project Memory…" requests: only the latest one's read shows.
+    /// Counts "Space Memory…" requests: only the latest one's read shows.
     var projectMemoryRequest = 0
     var worktreeCleanupPanel: WorktreeCleanupPanel?
     /// Worktrees a "Clean Up Worktree…" is checking or confirming, so a
@@ -616,7 +616,7 @@ extension NiruxShellView {
             self.updateSidebar()
             self.saveState()
         }
-        nameInputPanel?.show(relativeTo: window, currentValue: profile.name, placeholder: "Project name")
+        nameInputPanel?.show(relativeTo: window, currentValue: profile.name, placeholder: "Space name")
     }
 
     // MARK: - Worktree

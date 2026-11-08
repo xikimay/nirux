@@ -63,7 +63,7 @@ final class ProjectStore {
         hasLoaded = true
         let mirror = mirror.map(Self.deduplicated)
         let spaces = loadedSpaces(mirror: mirror, markerPresent: markerPresent)
-        return spaces + orphanedBriefSpaces(known: spaces)
+        return WorkspaceProfile.renamingLegacyDefault(spaces + orphanedBriefSpaces(known: spaces))
     }
 
     private func loadedSpaces(mirror: [WorkspaceProfile]?, markerPresent: Bool) -> [WorkspaceProfile] {
@@ -204,7 +204,7 @@ final class ProjectStore {
                   let text = SpaceBrief.readBrief(at: briefURL),
                   SpaceBrief.body(of: text) != nil
             else { continue }
-            let name = Self.uniqueName(Self.templateSpaceName(in: text) ?? "project", among: names)
+            let name = Self.uniqueName(Self.templateSpaceName(in: text) ?? "space", among: names)
             let color = WorkspaceProfile.palette.first { !used.contains($0.hex.uppercased()) }?.hex
                 ?? WorkspaceProfile.colorHex(for: known.count + adopted.count)
             adopted.append(WorkspaceProfile(id: id, name: name, colorHex: color))
@@ -215,9 +215,9 @@ final class ProjectStore {
     }
 
     /// The space name in a brief's template comment:
-    /// `Brief for the project "…"`, or `Brief for the space "…"` in briefs
-    /// written before the UI called spaces projects. The first one in the
-    /// text wins (the template comment comes first).
+    /// `Brief for the space "…"`, or `Brief for the project "…"` in briefs
+    /// written while the UI called spaces projects (October 2026). The
+    /// first one in the text wins (the template comment comes first).
     private static func templateSpaceName(in text: String) -> String? {
         let prefixes = ["Brief for the project \"", "Brief for the space \""]
         guard let start = prefixes.compactMap({ text.range(of: $0) }).min(by: { $0.lowerBound < $1.lowerBound }),
@@ -249,9 +249,10 @@ final class ProjectStore {
             let stored = try container.decodeIfPresent([StoredProject].self, forKey: .projects) ?? []
             projects = ProjectStore.deduplicated(stored.enumerated().compactMap { index, project in
                 guard let id = project.id, !id.isEmpty else { return nil }
+                let unnamed = id == WorkspaceProfile.defaultID ? WorkspaceProfile.defaultProfile.name : "space"
                 return WorkspaceProfile(
                     id: id,
-                    name: project.name ?? "project",
+                    name: project.name ?? unnamed,
                     colorHex: project.colorHex ?? WorkspaceProfile.colorHex(for: index)
                 )
             })
