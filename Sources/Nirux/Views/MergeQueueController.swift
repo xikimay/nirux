@@ -1,7 +1,9 @@
 import Foundation
 
-/// A project's merge queue (docs/project-board.md, section 3.6): one per
-/// project, owned by the shell, so closing the board doesn't stop it. It
+/// A project's merge queue on one repository (docs/project-board.md,
+/// section 3.6): one per project and GitHub repository, owned by the
+/// shell, so closing the board doesn't stop it, and a queue never mixes
+/// repositories. It
 /// runs the queue through a `MergeQueueDriver`, holds the repository's
 /// lock while a live queue runs, keeps App Nap from throttling its polls,
 /// journals every step and saves the queue after each one. The board's
@@ -19,6 +21,8 @@ final class MergeQueueController {
         /// Another Nirux runs a queue on the repository.
         case lockedElsewhere
         case noProjectFolder
+        /// Settings for another repository than this queue's.
+        case otherRepository
 
         var message: String {
             switch self {
@@ -30,11 +34,14 @@ final class MergeQueueController {
             case .lockedElsewhere:
                 return "Another Nirux is running a merge queue on this repository (or its lock can’t be taken)."
             case .noProjectFolder: return "This space has no folder for its queue’s files."
+            case .otherRepository: return "These settings are for another repository than this queue’s."
             }
         }
     }
 
     let projectID: String
+    /// The repository every queue of this controller merges into.
+    let queueRepository: GitHubRepository
     let client: any MergeQueueGitHub
     /// Nil for a project id that isn't a plain name.
     let files: MergeQueue.Files?
@@ -51,9 +58,8 @@ final class MergeQueueController {
     /// The pull requests the next Start proposes, in order: those added
     /// with "Add to Queue", or left over from the last queue. In memory:
     /// a relaunch proposes the saved queue's. Numbers of
-    /// `selectionRepository` only: see `selection(for:)`.
+    /// `queueRepository`'s pull requests.
     private(set) var selection: [Int] = []
-    private(set) var selectionRepository: GitHubRepository?
     /// The user's order from a confirmation sheet: additions go at the
     /// end, not by number.
     private var isSelectionReordered = false
@@ -83,16 +89,20 @@ final class MergeQueueController {
 
     init(
         projectID: String,
+        repository: GitHubRepository,
         client: any MergeQueueGitHub,
         local: MergeQueueLocalAccess,
         stateDirectory: URL = Persistence.stateDirectory,
         lockFolder: URL = MergeQueueLock.defaultFolder
     ) {
         self.projectID = projectID
+        queueRepository = repository
         self.client = client
         self.local = local
         self.lockFolder = lockFolder
-        files = MergeQueue.Files(projectID: projectID, stateDirectory: stateDirectory, dryRun: client.isDryRun)
+        files = MergeQueue.Files(
+            projectID: projectID, repository: repository, stateDirectory: stateDirectory, dryRun: client.isDryRun
+        )
         restore()
         takeLeftOver(saved)
         // Just read: the first look again waits its interval.
@@ -123,25 +133,22 @@ final class MergeQueueController {
     /// The pull requests a stopped queue didn't merge, in its order, for
     /// its repository.
     private func takeLeftOver(_ saved: MergeQueue.SavedQueue?) {
-        guard let saved, !saved.isRunning, let repository = GitHubRepository(ownerAndName: saved.repository) else { return }
-        setSelection(saved.entries.filter { $0.step != .done }.map(\.number), repository: repository, isNewOrder: true)
+        guard let saved, !saved.isRunning, GitHubRepository(ownerAndName: saved.repository) == queueRepository else { return }
+        setSelection(saved.entries.filter { $0.step != .done }.map(\.number), isNewOrder: true)
     }
 
     // MARK: The next Start's list
 
-    /// The list, if it is `repository`'s: pull request numbers mean nothing
-    /// in another repository (board.json changed since).
+    /// The list, if `repository` is this queue's: pull request numbers
+    /// mean nothing in another repository.
     func selection(for repository: GitHubRepository?) -> [Int] {
-        guard let repository, repository == selectionRepository else { return [] }
-        return selection
+        repository == queueRepository ? selection : []
     }
 
-    /// "Add to Queue": by number, oldest first, until the user reorders. A
-    /// list of another repository is dropped first.
+    /// "Add to Queue": by number, oldest first, until the user reorders.
+    /// Another repository's pull request is refused.
     func addToSelection(_ number: Int, repository: GitHubRepository) {
-        guard !isRunning, !runsElsewhere else { return }
-        if repository != selectionRepository { setSelection([], repository: repository, isNewOrder: true) }
-        guard !selection.contains(number) else { return }
+        guard !isRunning, !runsElsewhere, repository == queueRepository, !selection.contains(number) else { return }
         selection.append(number)
         if !isSelectionReordered { selection.sort() }
         onChange?()
@@ -149,16 +156,15 @@ final class MergeQueueController {
 
     func removeFromSelection(_ number: Int) {
         guard !isRunning, !runsElsewhere, selection.contains(number) else { return }
-        setSelection(selection.filter { $0 != number }, repository: selectionRepository)
+        setSelection(selection.filter { $0 != number })
         onChange?()
     }
 
     /// A new list (`isNewOrder`: its order is the user's if it isn't by
     /// number), or the list with pull requests removed: the user's order
     /// stays theirs until the list is empty, which starts over by number.
-    private func setSelection(_ numbers: [Int], repository: GitHubRepository?, isNewOrder: Bool = false) {
+    private func setSelection(_ numbers: [Int], isNewOrder: Bool = false) {
         selection = numbers
-        selectionRepository = repository
         if isNewOrder {
             isSelectionReordered = numbers != numbers.sorted()
         } else if numbers.isEmpty {
@@ -166,10 +172,22 @@ final class MergeQueueController {
         }
     }
 
+    /// The saved queue: this repository's file, or the space's older one if
+    /// it is about this repository and newer (an older Nirux still writes it).
+    private func loadSaved() -> MergeQueue.SavedQueue? {
+        guard let files else { return nil }
+        let own = MergeQueue.SavedQueue.load(from: files.state)
+        guard let legacy = MergeQueue.SavedQueue.load(from: files.legacyState),
+              GitHubRepository(ownerAndName: legacy.repository) == queueRepository,
+              legacy.savedAt > own?.savedAt ?? .distantPast
+        else { return own }
+        return legacy
+    }
+
     /// A queue saved as running when Nirux quit never resumes: it reads as
     /// interrupted, unless another Nirux still runs it.
     private func restore() {
-        guard let files, let saved = MergeQueue.SavedQueue.load(from: files.state) else { return }
+        guard files != nil, let saved = loadSaved() else { return }
         guard saved.isRunning, !saved.dryRun, let repository = GitHubRepository(ownerAndName: saved.repository) else {
             return settle(saved)
         }
@@ -182,7 +200,7 @@ final class MergeQueueController {
             self.saved = saved
             return
         }
-        settle(MergeQueue.SavedQueue.load(from: files.state) ?? saved)
+        settle(loadSaved() ?? saved)
         Self.waitForFiles()
         lock.release()
     }
@@ -207,6 +225,7 @@ final class MergeQueueController {
     @discardableResult
     func start(settings: BoardConfig.QueueSettings, entries: [MergeQueue.ConfirmedEntry]) -> StartRefusal? {
         guard !isRunning else { return .alreadyRunning }
+        guard settings.gitHubRepository == queueRepository else { return .otherRepository }
         guard files != nil else { return .noProjectFolder }
         guard !entries.isEmpty else { return .nothingToQueue }
         if let problem = Self.problem(with: entries) { return .invalidEntry(problem) }
@@ -238,7 +257,7 @@ final class MergeQueueController {
         }
         self.driver = driver
         // The list a sheet confirmed, in its order: what it left out leaves it.
-        setSelection(entries.map(\.number), repository: settings.gitHubRepository, isNewOrder: true)
+        setSelection(entries.map(\.number), isNewOrder: true)
         activity = beginActivity()
         driver.start()
         return nil
@@ -290,7 +309,7 @@ final class MergeQueueController {
         self.saved = saved
         let merged = Set(engine.entries.filter { $0.step == .done }.map(\.number))
         if selection.contains(where: merged.contains) {
-            setSelection(selection.filter { !merged.contains($0) }, repository: selectionRepository)
+            setSelection(selection.filter { !merged.contains($0) })
         }
         // The step's notes, then the call it just sent.
         write(lines: notes.map { MergeQueue.Journal.line($0, at: date) } + sentLines, saved: changed ? saved : nil)

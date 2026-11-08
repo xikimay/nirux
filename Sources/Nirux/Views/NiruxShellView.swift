@@ -158,16 +158,17 @@ final class NiruxShellView: NSView {
     /// `MergeQueue.client()`, a dry run unless Nirux is the notarized
     /// release on the real state. Tests set a fake first.
     var mergeQueueClient: (any MergeQueueGitHub)?
-    /// Each project's merge queue, by project id (see `mergeQueue(projectID:)`).
-    var mergeQueues: [String: MergeQueueController] = [:]
+    /// Each project's merge queues, one per repository (see
+    /// `mergeQueue(projectID:repository:)`).
+    var mergeQueues: [MergeQueueKey: MergeQueueController] = [:]
     /// Where live queues lock their repository. Tests use their own.
     var mergeQueueLockFolder = MergeQueueLock.defaultFolder
     /// The merge queue's confirmation sheet: one at a time.
     var mergeQueueConfirmation: MergeQueueConfirmationPanel?
     /// "Send N Comments to Agent", while it shows.
     var reviewSendPanel: ReviewSendPanel?
-    /// Projects whose ended queue the user dismissed from the status bar.
-    var dismissedMergeQueueNotices: Set<String> = []
+    /// Queues whose end the user dismissed from the status bar.
+    var dismissedMergeQueueNotices: Set<MergeQueueKey> = []
     /// A quit waiting on the running queues: asked, then waiting for them
     /// to stop (see `mergeQueueTerminateReply`).
     var mergeQueueQuit: MergeQueueQuit?
