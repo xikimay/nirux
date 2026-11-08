@@ -238,7 +238,6 @@ extension WorkspaceState {
     /// keeps what it holds now, which the Lead may have changed meanwhile.
     func setContextByHand(_ field: ContextField, _ text: String, presented: String?) {
         let value = Self.normalizedContextText(text)
-        guard value != Self.normalizedContextText(presented) else { return }
         setContext(field, value, fromLead: false)
     }
 
