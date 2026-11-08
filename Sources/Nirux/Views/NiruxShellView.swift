@@ -142,6 +142,9 @@ final class NiruxShellView: NSView {
     var spaceArrivalBanner: SpaceArrivalBanner?
     var spaceArrivalGeneration = 0
     var spaceArrivalShownAt: TimeInterval = 0
+    /// Over the viewport while the active space has no workspace (see
+    /// NiruxShellView+EmptySpace).
+    let emptySpaceView = EmptySpaceView()
     /// The Project Board's `gh` reads. Tests set a fake before a board opens.
     lazy var projectBoardClient: any ProjectBoardGitHub = GitHubCLIBoardClient.installed
     /// How Branch Review columns read their worktree: git and gh, or a
@@ -185,6 +188,7 @@ final class NiruxShellView: NSView {
         viewport.layer?.masksToBounds = true
         verticalStrip.wantsLayer = true
         viewport.addSubview(verticalStrip)
+        viewport.addSubview(emptySpaceView)
         addSubview(sidebar)
         addSubview(divider)
         addSubview(viewport)
@@ -234,6 +238,7 @@ final class NiruxShellView: NSView {
             self.openWebView(url: url, in: self.workspaces[index])
         }
         sidebar.onOnboardingAction = { [weak self] action in self?.handleOnboardingAction(action) }
+        wireEmptySpaceView()
         sidebar.onMissionQuestionClicked = { [weak self] wsIndex, colIndex, anchor in
             self?.showMissionReplyPopover(workspaceIndex: wsIndex, columnIndex: colIndex, anchor: anchor)
         }
@@ -360,6 +365,7 @@ final class NiruxShellView: NSView {
             targetY: (activePosition + 1) * viewportH - totalH, animated: animated
         ))
 
+        refreshEmptySpaceView()
         syncTerminalOcclusion()
         scheduleDeferredAgentsOnScreen()
         scheduleBranchReviewsOnScreen()
@@ -795,8 +801,13 @@ extension NiruxShellView {
     /// leaves the keyboard where the user types, and closing a panel later
     /// must not hand that editor the keys.
     func focusActiveTerminal(in window: NSWindow?, editorTakesKeyboard: Bool = false) {
-        guard let col = activeWorkspace?.columns[safe: activeWorkspace?.focusedIndex ?? 0],
-              let window else { return }
+        guard let window else { return }
+        guard let col = activeWorkspace?.columns[safe: activeWorkspace?.focusedIndex ?? 0] else {
+            // An empty space: its view takes the keyboard, so Return
+            // presses New… and no key reaches a terminal hidden behind it.
+            if activeWorkspace == nil { window.makeFirstResponder(emptySpaceView) }
+            return
+        }
         if col.isFindBarOpen {
             // An open find bar keeps the keyboard: text typed for it must
             // reach neither the agent nor the page's shortcuts. A click on
