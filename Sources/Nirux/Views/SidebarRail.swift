@@ -333,7 +333,8 @@ extension WorkspaceInfo {
             detail = prInfo.map { "#\($0.number) merged" } ?? "merged"
         case .idle:
             // As the row's status line: the blocker before a finished turn.
-            if let blocker = blockerText, !columns.contains(where: { $0.deferredAgent != nil }) {
+            if let blocker = blockerText, !columns.contains(where: { $0.deferredAgent != nil }),
+               Self.questionColumn(in: columns) == nil {
                 color = Theme.Color.textTertiary
                 detail = withAge("blocked")
                 note = blocker

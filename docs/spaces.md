@@ -222,10 +222,12 @@ New flow, built on the guarded typing `tell` already uses
     next step and blocker (View/Edit Context…), one line each, at most 200
     characters; an empty string clears one. Its role says when: after a
     task's question is answered, when it completes, when it notices a
-    blocker. A field the user typed stays theirs (the tool says so) until
+    blocker. A field the user changed stays theirs (the tool says so) until
     they clear it; one they didn't touch stays the Lead's, even one it
-    changed while the panel was open. `list_tasks` shows both, and who
-    wrote them.
+    changed while the panel was open. A pull request seen merged clears what
+    the Lead wrote (nothing tells it). A title two of its tasks share is
+    refused: the branch says which. `list_tasks` shows both for its tasks,
+    and who wrote them.
 - **The channel:** each call is a file in `<state dir>/lead/requests/`
   (LeadChannel), answered in `lead/responses/`. The Nirux that has the
   calling workspace claims it (a rename: another Nirux on the same state
@@ -260,10 +262,10 @@ Mockups were validated in the design session. What changes:
   waits; ⌥⌘1…⌥⌘9, since ⌘1…⌘9 focus columns), the Lead row, then task rows on two lines: title and time,
   then one status line ("Needs you · npm run migrate", "Asking the Lead",
   "Working", "#39 · checks passed"). No chips on every row. A blocker says
-  "Blocked · …" in grey after needs you, broken, asking and working, before
-  a finished turn and the pull request; the next step ("Next · …") takes the
-  branch's place, and the selected row prints it under a status line that
-  says something else (S13). INACTIVE becomes an
+  "Blocked · …" in grey after needs you, broken (failed checks too), asking,
+  working and "Paused · Resume", before a finished turn and the pull request;
+  the next step ("Next · …") takes the branch's place, and the selected row
+  prints it under a status line that says something else (S13). INACTIVE becomes an
   "Archived" row at the bottom, unfolding its list above it. The bottom dot switcher and Activity go. This
   replaces the three-line cards of the October visual system.
 - **Title bar:** three buttons: New, Board, Search.
