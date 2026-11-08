@@ -98,21 +98,23 @@ struct SidebarRailTileStyle {
     var badge: NSColor?
     var breathes = false
 
-    /// The card's rule (`cardState`): amber only for a wait on the user.
+    /// The rows' rule (`cardState`): amber only for a wait on the user. No
+    /// border, as the rows have none, but on the selected tile: tinted like
+    /// the selected row, and ringed so a waiting one still reads as
+    /// selected.
     static func workspace(state: SidebarCardState, isSelected: Bool, isInactive: Bool) -> SidebarRailTileStyle {
         var style = SidebarRailTileStyle(
-            fill: isInactive ? .clear : Theme.Color.surface,
-            border: Theme.Color.line,
+            fill: isInactive ? .clear : Theme.Color.fillHover,
+            // An archived tile has no fill: its outline keeps it a tile.
+            border: isInactive ? Theme.Color.line : nil,
             textColor: isInactive ? Theme.Color.textTertiary : Theme.Color.textSecondary
         )
         switch state {
         case .waiting:
             style.fill = Theme.Color.tint(Theme.Color.waiting, 0.16)
-            style.border = Theme.Color.waiting.withAlphaComponent(0.55)
             style.textColor = Theme.Color.waiting
             style.badge = Theme.Color.waiting
         case .error:
-            style.border = Theme.Color.error.withAlphaComponent(0.5)
             style.textColor = Theme.Color.error
             style.badge = Theme.Color.error
         case .working:
@@ -126,6 +128,7 @@ struct SidebarRailTileStyle {
         if isSelected {
             style.border = Theme.Color.accent
             style.borderWidth = 1.5
+            if state != .waiting { style.fill = Theme.Color.fillSelected }
             if state != .waiting, state != .error { style.textColor = Theme.Color.textPrimary }
         }
         if state == .waiting || state == .error { style.hoverTextColor = style.textColor }
@@ -311,7 +314,7 @@ extension WorkspaceInfo {
             if let waiting = asking(.waiting) {
                 (detail, note) = (withAge(waiting.headline), waiting.detail)
             } else {
-                (detail, note) = ("a child agent asked a question", "Answer from its card, in the expanded sidebar")
+                (detail, note) = ("a child agent asked a question", "Answer from its row, in the expanded sidebar")
             }
         case .error:
             color = Theme.Color.error

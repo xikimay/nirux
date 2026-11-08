@@ -11,7 +11,8 @@ extension SidebarView {
     /// document's height.
     func buildRail() -> CGFloat {
         // Over every workspace, folded ones too: unfolding renumbers nothing.
-        let displayed = displayedWorkspaceInfos
+        // Not the Lead: its tile shows its sign.
+        let displayed = displayedWorkspaceInfos.filter { !$0.isLead }
         let initials = Dictionary(
             zip(displayed.map(\.id), SidebarRailInitials.initials(for: displayed.map(\.title))),
             uniquingKeysWith: { first, _ in first }
@@ -57,10 +58,11 @@ extension SidebarView {
                 tile.onPress = { [weak self] in self?.toggleInactiveSection() }
                 addRailTile(tile, target: .railButton(.inactiveSection), region: .railButton(.inactiveSection), top: top)
             case .workspace(let info, let initials):
-                let tile = SidebarRailTileView(
-                    style: .workspace(state: info.railState, isSelected: info.isActive, isInactive: info.isInactive),
-                    text: initials
-                )
+                // The Lead's tile shows its sign, not initials.
+                let style = SidebarRailTileStyle.workspace(state: info.railState, isSelected: info.isActive, isInactive: info.isInactive)
+                let tile = info.isLead
+                    ? SidebarRailTileView(style: style, symbolName: Theme.Symbol.lead)
+                    : SidebarRailTileView(style: style, text: initials)
                 describe(tile, as: info.railTooltip)
                 tile.setAccessibilitySelected(info.isActive)
                 let index = info.index

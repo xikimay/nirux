@@ -139,6 +139,8 @@ enum Theme {
         static let checksRunning = "circle.dashed"
         static let sidebar = "sidebar.left"
         static let inactiveWorkspaces = "archivebox"
+        /// A space's Lead: its row and its rail tile.
+        static let lead = "sparkle"
         /// The sidebar's space picker.
         static let spacePicker = "chevron.up.chevron.down"
         /// General in the space picker's menu: what has no other space.

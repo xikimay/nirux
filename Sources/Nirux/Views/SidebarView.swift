@@ -131,6 +131,9 @@ final class SidebarView: NSView {
     /// `NSEvent.timestamp` of the release that last made an Allow / Deny /
     /// Resume act (see `isLeftoverPress`).
     var lastButtonActionAt: TimeInterval = -.infinity
+    /// The row a single press landed on, and when: the double-click's
+    /// second press renames it, wherever the rows moved meanwhile.
+    var lastRowPress: (workspaceIndex: Int, at: TimeInterval)?
 
     // Hover-highlight backing views registered per rebuild (workspace index
     // → view), plus the current target. Tinting is applied/cleared directly
@@ -315,6 +318,15 @@ final class SidebarView: NSView {
             hideRailTooltip()
         }
 
+        // A double-click renames the row its first click landed on: that
+        // click selected it, and the rows moved (the selected row is taller).
+        if event.clickCount == 2, let first = lastRowPress,
+           event.timestamp - first.at <= NSEvent.doubleClickInterval {
+            lastRowPress = nil
+            onWorkspaceClicked?(first.workspaceIndex)
+            onWorkspaceAction?(.rename, first.workspaceIndex)
+            return
+        }
         if let area = hitArea(at: docLocation) {
             // Workspace rows don't click on mouseDown: run the drag
             // tracking loop, which decides between click and reorder.
@@ -324,9 +336,11 @@ final class SidebarView: NSView {
                     onWorkspaceAction?(.rename, workspaceIndex)
                     return
                 }
+                lastRowPress = event.clickCount == 1 ? (workspaceIndex, event.timestamp) : nil
                 trackWorkspaceDrag(workspaceIndex: workspaceIndex, rowFrame: area.frame, startPoint: docLocation)
                 return
             }
+            lastRowPress = nil
             if Self.armedButtonKey(for: area.region) != nil {
                 trackApprovalClick(area.region, event: event)
                 return
@@ -434,6 +448,8 @@ final class SidebarView: NSView {
                 onDiffStatsClicked?(workspaceIndex)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.cleanupActionPrefix) {
                 onWorkspaceAction?(.cleanUpWorktree, workspaceIndex)
+            } else if let target = Self.resumeTarget(url) {
+                onDeferredAgentResume?(target.workspaceIndex, target.columnIndex, target.columnID)
             } else if let workspaceID = Self.prFeedbackActionWorkspaceID(url) {
                 prFeedbackMenu?(workspaceID)?.popUp(positioning: nil, at: convert(event.locationInWindow, from: nil), in: self)
             } else if let (workspaceIndex, url) = Self.openActionTarget(url),
@@ -613,10 +629,22 @@ final class SidebarView: NSView {
     }
 
     /// Under the text only, not under a link's icons.
+    /// Under the link's words when only some are ("Merged · Clean up":
+    /// the accent ones), else under all the text.
     private func applyUnderline(to label: NSTextField) {
         let attr = NSMutableAttributedString(attributedString: label.attributedStringValue)
-        attr.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attr.length)) { attachment, range, _ in
-            guard attachment == nil else { return }
+        let whole = NSRange(location: 0, length: attr.length)
+        var linkRanges: [NSRange] = []
+        attr.enumerateAttribute(.foregroundColor, in: whole) { color, range, _ in
+            if (color as? NSColor) == Theme.Color.accent { linkRanges.append(range) }
+        }
+        if linkRanges.isEmpty || linkRanges == [whole] {
+            attr.enumerateAttribute(.attachment, in: whole) { attachment, range, _ in
+                guard attachment == nil else { return }
+                linkRanges.append(range)
+            }
+        }
+        for range in linkRanges {
             attr.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
         }
         label.attributedStringValue = attr
@@ -645,6 +673,22 @@ final class SidebarView: NSView {
         let parts = value.dropFirst(missionQuestionActionPrefix.count).split(separator: ":")
         guard parts.count == 2, let workspaceIndex = Int(parts[0]), let columnIndex = Int(parts[1]) else { return nil }
         return (workspaceIndex, columnIndex)
+    }
+
+    private static let resumeActionPrefix = "action:resume:"
+
+    /// A row's "Paused · Resume": starts the restored agent of that column
+    /// without switching rows.
+    static func resumeActionURL(workspaceIndex: Int, columnIndex: Int, columnID: UUID) -> String {
+        resumeActionPrefix + "\(workspaceIndex):\(columnIndex):\(columnID.uuidString)"
+    }
+
+    private static func resumeTarget(_ value: String) -> (workspaceIndex: Int, columnIndex: Int, columnID: UUID)? {
+        guard value.hasPrefix(resumeActionPrefix) else { return nil }
+        let parts = value.dropFirst(resumeActionPrefix.count).split(separator: ":")
+        guard parts.count == 3, let workspaceIndex = Int(parts[0]), let columnIndex = Int(parts[1]),
+              let columnID = UUID(uuidString: String(parts[2])) else { return nil }
+        return (workspaceIndex, columnIndex, columnID)
     }
 
     static func diffActionURL(workspaceIndex: Int) -> String {

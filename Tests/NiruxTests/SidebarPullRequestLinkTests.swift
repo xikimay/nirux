@@ -15,7 +15,7 @@ final class SidebarPullRequestLinkTests: XCTestCase {
             focusedColumn: 0,
             gitBranch: "feat/\(index)",
             notification: nil,
-            isActive: index == 0,
+            isActive: index == 1,
             columns: [],
             prInfo: prInfo,
             diffStats: nil,
@@ -46,8 +46,9 @@ final class SidebarPullRequestLinkTests: XCTestCase {
         )
     }
 
-    /// Clicks every link of the second card, in order, and returns what the
-    /// sidebar asked to open, and where.
+    /// Clicks every link of the second row, the selected one, in order, and
+    /// returns what the sidebar asked to open, and where. Its status line
+    /// ("#42 · checks running") is no link: a click there selects a row.
     private func clickLinks(of prInfo: PRInfo) throws -> [(workspaceIndex: Int, url: String)] {
         _ = NSApplication.shared
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 660))

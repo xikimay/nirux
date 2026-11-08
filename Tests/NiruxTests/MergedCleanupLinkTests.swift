@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// The card's "merged · Clean up": shown only when the merged pull request
+/// The row's "Merged · Clean up": shown only when the merged pull request
 /// is the branch of the worktree the clean-up would remove, and a click
 /// runs the ⋯ menu's "Clean Up Worktree…".
 @MainActor
@@ -37,7 +37,7 @@ final class MergedCleanupLinkTests: XCTestCase {
 
             worktreeWorkspace.prInfo = pullRequest(state: "MERGED")
             shell.updateSidebar()
-            XCTAssertEqual(cleanupTexts(in: shell.sidebar), ["Clean up"])
+            XCTAssertEqual(cleanupTexts(in: shell.sidebar), ["Merged · Clean up"])
 
             let worktreeIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0 === worktreeWorkspace })
             let link = try XCTUnwrap(cleanupLink(in: shell.sidebar))
@@ -45,7 +45,7 @@ final class MergedCleanupLinkTests: XCTestCase {
             XCTAssertEqual(url, SidebarView.cleanupActionURL(workspaceIndex: worktreeIndex))
 
             try click(link.frame, in: shell.sidebar, window: harness.window)
-            XCTAssertEqual(cleanupTexts(in: shell.sidebar), ["Cleaning up…"])
+            XCTAssertEqual(cleanupTexts(in: shell.sidebar), ["Merged · cleaning up…"])
             XCTAssertNil(cleanupLink(in: shell.sidebar), "a second click does nothing")
             // No GitHub remote: the checks refuse, and nothing goes.
             harness.waitUntil("the clean-up verdict") { !harness.alerts.isEmpty && shell.worktreeCleanupsInFlight.isEmpty }
@@ -74,9 +74,9 @@ final class MergedCleanupLinkTests: XCTestCase {
         sidebar.expandedViews.compactMap { ($0 as? NSTextField)?.stringValue }
     }
 
-    /// What follows "#7 merged ·" on the cards.
+    /// The status lines that offer a clean-up or say one runs.
     private func cleanupTexts(in sidebar: SidebarView) -> [String] {
-        texts(in: sidebar).filter { $0 == "Clean up" || $0 == "Cleaning up…" }
+        texts(in: sidebar).filter { $0.hasSuffix("Clean up") || $0.hasSuffix("cleaning up…") }
     }
 
     private func cleanupLink(in sidebar: SidebarView) -> SidebarHitArea? {

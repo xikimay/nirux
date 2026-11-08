@@ -427,7 +427,7 @@ final class LazyRestoreTests: XCTestCase {
         XCTAssertTrue(SidebarColumnChip(info).toolTip.hasPrefix("claude · paused"))
         let workspace = WorkspaceInfo(
             id: "ws", index: 2, title: "t", profileID: WorkspaceProfile.defaultID, isInactive: false, columnCount: 1,
-            focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false, columns: [info], prInfo: nil,
+            focusedColumn: 0, gitBranch: nil, notification: nil, isActive: true, columns: [info], prInfo: nil,
             diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active, lastSummary: nil,
             lastActivityAt: nil
         )

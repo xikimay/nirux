@@ -38,8 +38,9 @@ struct ColumnInfo: Hashable {
     /// granularity it's *displayed* ("12m" via shortDuration), not raw
     /// seconds: the sidebar's render-signature gate would otherwise see a
     /// change on every 2s heartbeat while an agent merely gets older. The
-    /// terminal title and the cwd, which the card doesn't show, are left
-    /// out: a working agent's spinner retitles its column 4 times a second.
+    /// terminal title, which the row doesn't show, is left out: a working
+    /// agent's spinner retitles its column 4 times a second. The cwd counts:
+    /// a row without a branch shows it.
     /// Nothing in the first minute: a time in seconds would rebuild the
     /// sidebar (and drop its tooltips) every heartbeat.
     var elapsedDisplay: String? {
@@ -50,6 +51,7 @@ struct ColumnInfo: Hashable {
     static func == (lhs: ColumnInfo, rhs: ColumnInfo) -> Bool {
         lhs.index == rhs.index
             && lhs.processName == rhs.processName
+            && lhs.abbreviatedCwd == rhs.abbreviatedCwd
             && lhs.isFocused == rhs.isFocused
             && lhs.isWebView == rhs.isWebView
             && lhs.webTitle == rhs.webTitle
@@ -71,6 +73,7 @@ struct ColumnInfo: Hashable {
     func hash(into hasher: inout Hasher) {
         hasher.combine(index)
         hasher.combine(processName)
+        hasher.combine(abbreviatedCwd)
         hasher.combine(isFocused)
         hasher.combine(isWebView)
         hasher.combine(webTitle)
