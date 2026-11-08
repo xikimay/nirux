@@ -444,8 +444,13 @@ final class CommandPalette: NSObject {
         let height = row.frame.height
         let padding = Theme.Space.sm
 
-        // A 16 pt slot, drawn 20 wide so wide symbols (</>) aren't clipped.
-        row.addSubview(PaletteIconView(action.icon, frame: NSRect(x: padding - 2, y: (height - 20) / 2, width: 20, height: 20)))
+        // Centered on a 16 pt slot. Symbols draw at their own size, in a
+        // view 20 wide so wide ones (</>) aren't clipped; app icons scale to
+        // the slot.
+        let iconSide: CGFloat = if case .image = action.icon { 16 } else { 20 }
+        row.addSubview(PaletteIconView(action.icon, frame: NSRect(
+            x: padding + 8 - iconSide / 2, y: (height - iconSide) / 2, width: iconSide, height: iconSide
+        )))
         let textLeft = padding + 16 + Theme.Space.sm
         let titleFrame = NSRect(x: textLeft, y: (height - 18) / 2, width: 0, height: 18)
         // Labels draw from their top: one whose top sits a font's ascender
