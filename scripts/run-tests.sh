@@ -11,25 +11,24 @@
 # ran than `swift test list` names.
 set -euo pipefail
 
-# One class, run by a worker below. xargs and bash are protected binaries,
-# whose launch drops DYLD_* variables: they travel under other names and are
-# set again for xctest only.
+# One class, run by a worker below. xargs, bash and perl are protected
+# binaries, whose launch drops DYLD_* variables: they travel under other
+# names, and perl sets them again, then becomes xctest with an alarm, so a
+# class that hangs fails with its log instead of the job at its timeout.
 if [[ "${1:-}" == --class ]]; then
     class="$2"
     log="$NIRUX_TESTS_WORK/$class.log"
     start=$SECONDS
-    DYLD_FRAMEWORK_PATH="$NIRUX_TESTS_FRAMEWORK_PATH" DYLD_LIBRARY_PATH="$NIRUX_TESTS_LIBRARY_PATH" \
-        "$NIRUX_TESTS_XCTEST" -XCTest "$class" "$NIRUX_TESTS_BUNDLE" > "$log" 2>&1 &
-    pid=$!
-    # A class that hangs fails with its log, instead of the job at its
-    # timeout with none.
-    (sleep "$NIRUX_TESTS_CLASS_TIMEOUT" && kill -KILL "$pid" \
-        && echo "Killed after ${NIRUX_TESTS_CLASS_TIMEOUT}s." >> "$log") 2>/dev/null &
-    watchdog=$!
     status=0
-    wait "$pid" || status=$?
-    pkill -P "$watchdog" sleep 2>/dev/null || true
-    wait "$watchdog" 2>/dev/null || true
+    perl -e '$ENV{DYLD_FRAMEWORK_PATH} = $ENV{NIRUX_TESTS_FRAMEWORK_PATH};
+        $ENV{DYLD_LIBRARY_PATH} = $ENV{NIRUX_TESTS_LIBRARY_PATH};
+        alarm shift; exec { $ARGV[0] } @ARGV or die "exec $ARGV[0]: $!\n"' \
+        "$NIRUX_TESTS_CLASS_TIMEOUT" "$NIRUX_TESTS_XCTEST" -XCTest "$class" "$NIRUX_TESTS_BUNDLE" \
+        > "$log" 2>&1 || status=$?
+    # 128 + SIGALRM.
+    if [[ $status -eq 142 ]]; then
+        echo "Stopped after ${NIRUX_TESTS_CLASS_TIMEOUT}s." >> "$log"
+    fi
     elapsed=$((SECONDS - start))
     echo "$elapsed $class" >> "$NIRUX_TESTS_WORK/times"
     if [[ $status -eq 0 ]]; then
@@ -43,7 +42,7 @@ fi
 
 cpus=$(sysctl -n hw.activecpu)
 workers="${1:-$((cpus * 2 < 6 ? cpus * 2 : 6))}"
-script="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+script="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/$(basename -- "$0")"
 cd "$(dirname "$script")/.."
 
 work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/nirux-tests.XXXXXX")"
