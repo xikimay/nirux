@@ -120,7 +120,7 @@ enum HandoverFile {
         return .success(content)
     }
 
-    /// Writes a handover Nirux composed itself (New Task…) to
+    /// Writes a handover Nirux composed itself (a ⌘N task) to
     /// `directory/filename`, as `transfer` writes a moved one: a new private
     /// file, never written through a symlink.
     static func deliver(_ text: String, toDirectory directory: String, filename: String) -> Result<Void, TransferError> {

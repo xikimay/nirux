@@ -31,7 +31,7 @@ extension NiruxApp {
     }
 
     @objc func newWorkspace(_ sender: Any?) {
-        shell?.showNewWorkspacePanel()
+        shell?.showNewPanel()
     }
 
     @objc func resumeAllAgents(_ sender: Any?) {
@@ -374,7 +374,7 @@ extension NiruxApp {
     private func workspacesMenuItem() -> NSMenuItem {
         // Workspaces menu
         let workspacesMenu = NSMenu(title: "Workspaces")
-        workspacesMenu.addItem(withTitle: "New Workspace", action: #selector(newWorkspace(_:)), shortcut: .newWorkspace)
+        workspacesMenu.addItem(withTitle: "New…", action: #selector(newWorkspace(_:)), shortcut: .newWorkspace)
         workspacesMenu.addItem(withTitle: "Rename Workspace", action: #selector(renameWorkspace(_:)), keyEquivalent: "")
         workspacesMenu.addItem(NSMenuItem.separator())
         workspacesMenu.addItem(withTitle: "Resume All Agents", action: #selector(resumeAllAgents(_:)), keyEquivalent: "")

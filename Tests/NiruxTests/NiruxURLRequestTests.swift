@@ -57,6 +57,10 @@ final class NiruxURLRequestTests: XCTestCase {
             parentWorkspaceID: "W",
             parentAgentUUID: "A"
         ))
+        XCTAssertEqual(request?.startsFromHead, false)
+        // A stacked branch asks for the checkout's HEAD.
+        XCTAssertEqual(worktree("nirux://new-worktree?branch=x&repo=/r&from=head")?.startsFromHead, true)
+        XCTAssertEqual(worktree("nirux://new-worktree?branch=x&repo=/r&from=origin")?.startsFromHead, false)
     }
 
     func testNewWorktreeRequiresBranchAndAbsoluteRepo() {
@@ -405,38 +409,6 @@ final class NiruxURLRequestTests: XCTestCase {
         }
     }
 
-    // MARK: - In-app tickets
-
-    @MainActor
-    func testInAppTicketAuthorizesExactlyItsOwnWorktreeRequestOnce() throws {
-        let path = "/tmp/nirux-handover-claude-\(UUID().uuidString).md"
-        let issued = NiruxURLRequest.NewWorktree(
-            branch: "feat/x", repo: "/r", agent: .claude, handoverPath: path,
-            parentWorkspaceID: "W", parentAgentUUID: "A"
-        )
-        func request(_ worktree: NiruxURLRequest.NewWorktree, profile: String? = "p") throws -> NiruxURLRequest {
-            let url = NiruxShellView.inAppWorktreeURL(for: worktree, profileID: profile ?? "")
-                .replacingOccurrences(of: "${NIRUX_LAUNCH_ID}", with: "stale")
-            return try XCTUnwrap(NiruxURLRequest(url: try XCTUnwrap(URL(string: url))))
-        }
-        XCTAssertFalse(InAppWorktreeTickets.redeem(try request(issued), now: 0), "no ticket issued yet")
-
-        InAppWorktreeTickets.issue(for: issued, profileID: "p", now: 100)
-        var otherRepo = issued
-        otherRepo.repo = "/elsewhere"
-        var otherParent = issued
-        otherParent.parentAgentUUID = "B"
-        XCTAssertFalse(InAppWorktreeTickets.redeem(try request(otherRepo), now: 101))
-        XCTAssertFalse(InAppWorktreeTickets.redeem(try request(otherParent), now: 101))
-        XCTAssertFalse(InAppWorktreeTickets.redeem(try request(issued, profile: "q"), now: 101))
-        XCTAssertTrue(InAppWorktreeTickets.matches(try request(issued), now: 101))
-        XCTAssertTrue(InAppWorktreeTickets.redeem(try request(issued), now: 101))
-        XCTAssertFalse(InAppWorktreeTickets.redeem(try request(issued), now: 102), "one-time")
-
-        InAppWorktreeTickets.issue(for: issued, profileID: "p", now: 200)
-        XCTAssertFalse(InAppWorktreeTickets.redeem(try request(issued), now: 200 + InAppWorktreeTickets.lifetime + 1), "expired")
-    }
-
     // MARK: - Senders
 
     @MainActor
@@ -454,32 +426,6 @@ final class NiruxURLRequestTests: XCTestCase {
         let draft = NiruxShellView.draftSkillContent
         XCTAssertTrue(draft.contains("&launch=${NIRUX_LAUNCH_ID:-}"))
         XCTAssertTrue(draft.contains("mktemp -d \"${TMPDIR:-/tmp}/nirux-draft-XXXXXX\""))
-    }
-
-    func testInAppWorktreeURLIsAcceptedOnceTheShellExpandsTheLaunchID() throws {
-        let branch = "feat/a&agent=codex+x$(touch${IFS}/tmp/pwn)`id`\"'"
-        let sent = NiruxURLRequest.NewWorktree(
-            branch: branch,
-            repo: "/Users/me/My Repo",
-            agent: .claude,
-            handoverPath: "/tmp/nirux-handover-claude-1234.md",
-            parentWorkspaceID: "W",
-            parentAgentUUID: "A"
-        )
-        let raw = NiruxShellView.inAppWorktreeURL(for: sent, profileID: "p 1")
-        // Inert inside `open "…"`: the only shell syntax left is the launch placeholder.
-        let placeholder = "${NIRUX_LAUNCH_ID}"
-        XCTAssertTrue(raw.hasSuffix("&launch=" + placeholder))
-        let body = raw.replacingOccurrences(of: placeholder, with: "")
-        for character in ["$", "`", "\"", "\\", "'", "(", ")", ";", " "] {
-            XCTAssertFalse(body.contains(character), character)
-        }
-
-        let expanded = raw.replacingOccurrences(of: placeholder, with: "abc123")
-        let request = try XCTUnwrap(NiruxURLRequest(url: try XCTUnwrap(URL(string: expanded))))
-        XCTAssertEqual(request.disposition(expectedLaunchID: "abc123"), .perform)
-        XCTAssertEqual(request.profileID, "p 1")
-        XCTAssertEqual(request.action, .newWorktree(sent))
     }
 
     func testAgentIsOnlyToldToReadAHandoverThisRequestDelivered() {

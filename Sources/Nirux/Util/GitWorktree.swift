@@ -1,85 +1,9 @@
-import AppKit
+import Foundation
 
 struct GitResult {
     let status: Int32
     let stdout: String
     let stderr: String
-}
-
-/// Raycast-style floating panel for creating a git worktree + workspace
-@MainActor
-final class WorktreePanel {
-    /// (branch, worktreePath, repoRoot, branch read back from the checkout,
-    /// which names the Claude session; see `SessionName`).
-    var onCreated: ((String, String, String, String?) -> Void)?
-
-    private var panel: NSPanel?
-    private var field: NSTextField?
-    private var statusLabel: NSTextField?
-    private var repoRoot: String?
-
-    private static let size = NSSize(width: 520, height: 80)
-
-    func show(relativeTo window: NSWindow, repoRoot: String) {
-        self.repoRoot = repoRoot
-        if panel == nil { createPanel() }
-        guard let panel, let field, let statusLabel else { return }
-
-        field.stringValue = ""
-        statusLabel.stringValue = "Enter branch name — existing or new"
-        RaycastPanel.show(panel, relativeTo: window, size: Self.size)
-        panel.makeFirstResponder(field)
-    }
-
-    private func createPanel() {
-        // Taller panel: push the icon + field to the top half, reserve the
-        // bottom 14pt row for the status label.
-        let built = RaycastPanel.build(
-            RaycastPanel.Config(
-                width: Self.size.width, height: Self.size.height,
-                icon: "arrow.triangle.branch",
-                placeholder: "Branch name (e.g. feat/my-feature)",
-                iconY: Self.size.height - 36,
-                fieldY: Self.size.height - 38
-            ),
-            fieldTarget: self, fieldAction: #selector(fieldAction)
-        )
-
-        // Status label lives below the field in the reserved 14pt row.
-        let status = NSTextField(labelWithString: "Enter branch name — existing or new")
-        status.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-        status.textColor = NSColor.white.withAlphaComponent(0.4)
-        status.frame = NSRect(x: 42, y: 8, width: Self.size.width - 54, height: 14)
-        built.container.addSubview(status)
-
-        panel = built.panel
-        field = built.field
-        statusLabel = status
-    }
-
-    @objc private func fieldAction() {
-        guard let branch = field?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
-              !branch.isEmpty,
-              let repoRoot
-        else { return }
-
-        statusLabel?.stringValue = "Creating worktree..."
-        statusLabel?.textColor = Theme.Color.accent
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot)
-            let checkedOutBranch = path.flatMap(GitWorktree.currentBranch(at:))
-            DispatchQueue.main.async { [weak self] in
-                if let path {
-                    self?.panel?.orderOut(nil)
-                    self?.onCreated?(branch, path, repoRoot, checkedOutBranch)
-                } else {
-                    self?.statusLabel?.stringValue = error ?? "git worktree add failed"
-                    self?.statusLabel?.textColor = NSColor.systemRed.withAlphaComponent(0.9)
-                }
-            }
-        }
-    }
 }
 
 // MARK: - Git Worktree Operations
@@ -96,7 +20,7 @@ enum GitWorktree {
     /// the main checkout (see `mainWorktreeRoot(of:)`), but git runs in
     /// `repoRoot`, so a new branch starts from its HEAD.
     ///
-    /// With `newBranchFrom` (New Task…), `branch` must be new (see
+    /// With `newBranchFrom` (a ⌘N task), `branch` must be new (see
     /// `newBranchProblem`), so an agent is never handed work that already
     /// exists. It starts from that start point (a full ref name, or `HEAD`)
     /// without tracking it: the agent pushes it under its own name. When git
@@ -104,8 +28,12 @@ enum GitWorktree {
     /// worktree is returned along with git's error; when it fails after
     /// creating only the branch, the branch is deleted, so a retry can use
     /// the name. The other modes never return both a path and an error.
+    ///
+    /// With `newBranchStartPoint` (the `nirux-worktree` skill), a branch that
+    /// exists nowhere starts there instead of at `repoRoot`'s HEAD, without
+    /// tracking it; one that exists, here or on a remote, opens as without.
     static func create(
-        branch: String, repoRoot: String, newBranchFrom startPoint: String? = nil
+        branch: String, repoRoot: String, newBranchFrom startPoint: String? = nil, newBranchStartPoint: String? = nil
     ) -> (path: String?, error: String?) {
         if let problem = repositoryTopLevelProblem(repoRoot) {
             return (nil, problem)
@@ -164,14 +92,12 @@ enum GitWorktree {
             return (nil, "\(worktreePath) already exists on \(other.branch ?? "a detached HEAD"), not \(branch)")
         }
 
-        // Check if branch exists locally or remotely
-        let branchExists = gitRun(["branch", "--list", branch], cwd: repoRoot)
-            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        let remoteBranchExists = !branchExists && gitRun(["branch", "-r", "--list", "*/\(branch)"], cwd: repoRoot)
-            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        let existing = existingBranch(branch, repoRoot: repoRoot)
+        let branchExists = existing.local
+        let remoteBranchExists = existing.remote
 
-        // --quiet: no "Preparing worktree" line ahead of an error, which the
-        // panel's one-line status would show instead of the error.
+        // --quiet: no "Preparing worktree" line ahead of an error, which
+        // would come first in what the user is shown.
         let args: [String]
         if let startCommit {
             args = ["worktree", "add", "--quiet", "--no-track", "-b", branch, worktreePath, startCommit]
@@ -179,6 +105,12 @@ enum GitWorktree {
             args = ["worktree", "add", "--quiet", worktreePath, branch]
         } else if remoteBranchExists {
             args = ["worktree", "add", "--quiet", "--track", "-b", branch, worktreePath, "origin/\(branch)"]
+        } else if let newBranchStartPoint {
+            guard let commit = commitID(of: newBranchStartPoint, in: repoRoot) else {
+                return (nil, "\(newBranchStartPoint) isn’t a commit of \(repoRoot)")
+            }
+            startCommit = commit
+            args = ["worktree", "add", "--quiet", "--no-track", "-b", branch, worktreePath, commit]
         } else {
             args = ["worktree", "add", "--quiet", "-b", branch, worktreePath]
         }
@@ -193,6 +125,16 @@ enum GitWorktree {
         return startCommit.map {
             afterFailedNewBranch(branch, at: worktreePath, from: $0, repoRoot: repoRoot, error: error)
         } ?? (nil, error)
+    }
+
+    /// Whether `branch` exists locally, else on a remote (`*/<branch>`):
+    /// `create` then opens it rather than making a new one.
+    static func existingBranch(_ branch: String, repoRoot: String) -> (local: Bool, remote: Bool) {
+        let local = !gitRun(["branch", "--list", branch], cwd: repoRoot)
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let remote = !local && !gitRun(["branch", "-r", "--list", "*/\(branch)"], cwd: repoRoot)
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return (local, remote)
     }
 
     struct WorktreeEntry {

@@ -9,6 +9,10 @@ extension NiruxShellView {
     /// repository's space, else the parent's current space, else
     /// `requestedProfileID` (the space the requesting shell started in),
     /// else the default space, with the banner that says so.
+    ///
+    /// A new branch starts from origin's base branch, fetched first (see
+    /// `newWorktreeStart`), unless `startsFromHead` (a stacked branch): then
+    /// from `repoRoot`'s HEAD.
     func createWorktreeWorkspace(
         branch: String,
         repoRoot: String,
@@ -16,11 +20,24 @@ extension NiruxShellView {
         handoverPath: String? = nil,
         profileID requestedProfileID: String? = nil,
         parentWorkspaceID: String? = nil,
-        parentAgentUUID: String? = nil
+        parentAgentUUID: String? = nil,
+        startsFromHead: Bool = false
     ) {
         let routesByAnchor = routesByAnchor
+        // The space the repository goes to, decided as below, holds the
+        // base branch its tasks start from (its board's).
+        let spaces = workspaceStore.profiles
+        let parentSpaceID = parentWorkspaceID.flatMap { id in workspaces.first { $0.id == id && !$0.isClosing }?.profileID }
+        let stateDirectory = Persistence.stateDirectory
         DispatchQueue.global(qos: .userInitiated).async {
-            let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot)
+            let start = startsFromHead ? nil : Self.newWorktreeStart(
+                branch: branch, repoRoot: repoRoot,
+                baseBranch: Self.baseBranch(
+                    of: repoRoot, routesByAnchor: routesByAnchor, parentSpaceID: parentSpaceID,
+                    requestedSpaceID: requestedProfileID, spaces: spaces, stateDirectory: stateDirectory
+                )
+            )
+            let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot, newBranchStartPoint: start?.startPoint)
             // Read back from the checkout: the session is named after the
             // branch it will actually work on (see `SessionName`).
             let checkedOutBranch = path.flatMap(GitWorktree.currentBranch(at:))
@@ -106,7 +123,14 @@ extension NiruxShellView {
                         worktreeBranch: checkedOutBranch
                     )
                     self.saveState()
-                    if decision.reason == .general { self.presentSpaceArrival(workspaceID: childWorkspaceID) }
+                    if decision.reason == .general {
+                        self.presentSpaceArrival(workspaceID: childWorkspaceID)
+                    } else if let start, let fetchError = start.fetchError {
+                        let from = start.startPoint == nil ? "the checkout’s HEAD" : "it as last fetched"
+                        self.presentToast(
+                            "Couldn’t fetch \(start.remoteBranchName): “\(branch)” starts from \(from). \(fetchError)", tone: .error
+                        )
+                    }
                 } else {
                     NSLog("[Worktree] Failed to create worktree for \(branch): \(error ?? "unknown")")
                     self.presentProblem(
@@ -132,29 +156,45 @@ extension NiruxShellView {
         }
     }
 
-    /// `nirux://new-worktree` URL the in-app flow asks the running agent to
-    /// open. Values are percent-encoded down to unreserved ASCII, so the URL
-    /// is inert inside the double quotes of `open "…"`; the one shell
-    /// expansion left is `${NIRUX_LAUNCH_ID}`, which the agent's shell fills in.
-    nonisolated static func inAppWorktreeURL(for request: NiruxURLRequest.NewWorktree, profileID: String) -> String {
-        let unreserved = CharacterSet(
-            charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~/"
-        )
-        var query: [(String, String?)] = [
-            ("branch", request.branch),
-            ("repo", request.repo),
-            ("agent", request.agent?.rawValue),
-            ("handover", request.handoverPath),
-            ("profile", profileID),
-            ("parentWorkspace", request.parentWorkspaceID),
-            ("parentAgent", request.parentAgentUUID)
-        ]
-        query.removeAll { $0.1 == nil }
-        let encoded = query.map { name, value in
-            "\(name)=\(value?.addingPercentEncoding(withAllowedCharacters: unreserved) ?? "")"
-        }
-        return "nirux://new-worktree?" + encoded.joined(separator: "&")
-            + "&\(NiruxLaunchAuthorization.queryItemName)=${\(NiruxLaunchAuthorization.environmentKey)}"
+    /// Where a `nirux://new-worktree` branch starts.
+    struct NewWorktreeStart: Sendable {
+        /// `refs/remotes/origin/<base>`; nil when it is missing after a
+        /// failed fetch: the checkout's HEAD then.
+        let startPoint: String?
+        /// `origin/<base>`.
+        let remoteBranchName: String
+        /// Why origin's branch couldn't be fetched.
+        let fetchError: String?
+    }
+
+    /// The board base branch of the space `repoRoot` goes to, decided as
+    /// for its workspace (docs/spaces.md, "Routing").
+    nonisolated static func baseBranch(
+        of repoRoot: String, routesByAnchor: Bool, parentSpaceID: String?, requestedSpaceID: String?,
+        spaces: [WorkspaceProfile], stateDirectory: URL
+    ) -> String? {
+        let identity = routesByAnchor ? FolderIdentity.identify(repoRoot, timeout: FolderIdentity.backgroundRoutingTimeout) : nil
+        let spaceID = SpaceRouting.route(
+            identity: identity, parentSpaceID: parentSpaceID, startedFromSpaceID: requestedSpaceID, spaces: spaces
+        ).spaceID
+        return BoardConfigStore(spaceID: spaceID, stateDirectory: stateDirectory)?.load().config?.baseBranch
+    }
+
+    /// Origin's base branch (see `NewTask.resolveTarget`), fetched, for a
+    /// branch that exists nowhere yet: one that exists opens as it is, with
+    /// no fetch. Nil without origin, or for a branch that exists: `create`
+    /// then works as before.
+    nonisolated static func newWorktreeStart(branch: String, repoRoot: String, baseBranch: String?) -> NewWorktreeStart? {
+        let existing = GitWorktree.existingBranch(branch, repoRoot: repoRoot)
+        guard !existing.local, !existing.remote,
+              let target = NewTask.resolveTarget(folder: repoRoot, baseBranch: baseBranch),
+              let remoteBranch = target.remoteBranch, let name = target.remoteBranchName
+        else { return nil }
+        let fetchError = GitWorktree.fetch(branch: remoteBranch, repoRoot: target.repository)
+        // Never fetched (a board base origin doesn't have, say): from HEAD.
+        let startPoint = fetchError != nil && GitWorktree.commitID(of: target.startPoint, in: repoRoot) == nil
+            ? nil : target.startPoint
+        return NewWorktreeStart(startPoint: startPoint, remoteBranchName: name, fetchError: fetchError)
     }
 
     nonisolated static func handoverFilename(for agent: NiruxApp.WorkspaceAgent) -> String {

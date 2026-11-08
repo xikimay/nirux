@@ -36,20 +36,22 @@ extension NiruxShellView {
             return imageView
         }()
 
-        let wsTitle = title ?? "ws \(workspaces.count + 1)"
         let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
         // A space with anchors opens a plain workspace in its default
         // folder, never in the home folder (docs/spaces.md).
         let wsCwd = cwd ?? defaultFolder(forSpace: targetProfileID)
         let workspace = WorkspaceState(
             id: workspaceID,
-            title: wsTitle,
+            title: title,
             cwd: wsCwd,
             profileID: targetProfileID,
             missionID: missionID,
             missionHandoffsEnabled: Self.currentMissionHandoffsEnabled(),
             initialAgentUUID: initialAgentUUID
         )
+        // Unnamed: its folder's name until git reads its branch, which then
+        // names it (docs/spaces.md, "One door: ⌘N").
+        if title == nil { workspace.title = NewTask.folderTitle(wsCwd, home: sideEffects.homeDirectory()) }
         wireWorkspace(workspace)
         workspaceStore.appendWorkspace(workspace)
         verticalStrip.addSubview(workspace.containerView)
@@ -304,7 +306,7 @@ extension NiruxShellView {
             openBranchReview(in: workspaces[workspaceIndex])
             return
         case .newWorkspace:
-            addWorkspace()
+            showNewPanel()
             return
         case .closeColumn(let columnIndex):
             closeColumn(workspaceIndex: workspaceIndex, columnIndex: columnIndex)

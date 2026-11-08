@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-// MARK: - New branches (New Task…, see NewTask)
+// MARK: - New branches (⌘N tasks, see NewTask)
 
 extension GitWorktree {
     /// Why `branch` can't be a new task's branch, or nil:

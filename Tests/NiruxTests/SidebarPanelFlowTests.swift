@@ -18,7 +18,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
         tests: [
             "testWorkspaceMenuItems": [
                 "Focus Column", "Close Column", "Close Workspace", "Clean Up Worktree…", "View/Edit Context…",
-                "Rename Workspace", "New Workspace", "Move Up", "Move Down", "Move to Inactive", "Move to Active"
+                "Rename Workspace", "New…", "Move Up", "Move Down", "Move to Inactive", "Move to Active"
             ],
             "testCIFailureMenuItems": ["Ask Agent Why CI Failed", "Rerun Failed CI Jobs…"],
             "testReviewBranchMenuItem": ["Review Branch"],
@@ -121,9 +121,12 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             harness.perform(["Close Column"], in: try menu(for: workspace, column: 1))
             harness.waitUntil("the column to close") { workspace.columns.count == 1 }
 
-            // Opens one in the home folder, like ⌘N's default.
+            // ⌘N's sheet; Start with nothing typed opens a shell.
             let count = shell.workspaces.count
-            harness.perform(["New Workspace"], in: try menu(for: workspace))
+            harness.perform(["New…"], in: try menu(for: workspace))
+            let sheet = try XCTUnwrap(shell.newTaskPanel)
+            XCTAssertIdentical(harness.window.attachedSheet, sheet.panel)
+            sheet.startButton.performClick(nil)
             XCTAssertEqual(shell.workspaces.count, count + 1)
             let added = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertFalse(added === workspace)

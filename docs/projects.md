@@ -493,7 +493,7 @@ but:
 - Codex caps hook output at roughly 2,500 tokens.
 
 **Task templates.** The project's folder also holds `task-templates.md`, the
-templates New Task… offers (see the README). A template is how to work on one
+templates the ⌘N sheet offers (see the README). A template is how to work on one
 task, so it goes into that task's handover, never into the brief.
 
 **Optional claude.ai doc (deferred).** A project could also store the link to a

@@ -550,7 +550,7 @@ final class SidebarView: NSView {
             self?.onWorkspaceAction?(.rename, workspaceIndex)
         }
         menu.addItem(.separator())
-        menu.addClosureItem(title: "New Workspace", keyEquivalent: NiruxShortcuts.newWorkspaceKey) { [weak self] in
+        menu.addClosureItem(title: "New…", keyEquivalent: NiruxShortcuts.newWorkspaceKey) { [weak self] in
             self?.onWorkspaceAction?(.newWorkspace, workspaceIndex)
         }
         menu.addItem(.separator())

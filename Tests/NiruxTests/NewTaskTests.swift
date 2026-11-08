@@ -60,6 +60,13 @@ final class NewTaskTests: XCTestCase {
         XCTAssertEqual(long?.hasSuffix("…"), true)
     }
 
+    func testAPlainWorkspaceIsNamedAfterItsFolder() {
+        XCTAssertEqual(NewTask.folderTitle("/Users/me/Projects/nirux", home: "/Users/me"), "nirux")
+        XCTAssertEqual(NewTask.folderTitle("/Users/me/", home: "/Users/me"), "~")
+        XCTAssertEqual(NewTask.folderTitle("/Users/me", home: "/Users/me/"), "~")
+        XCTAssertEqual(NewTask.folderTitle("/", home: "/Users/me"), "/")
+    }
+
     // MARK: - Handover
 
     func testHandoverHoldsTheDescriptionThenTheTemplate() {
@@ -71,7 +78,7 @@ final class NewTaskTests: XCTestCase {
         XCTAssertEqual(text, """
         # Task: Fix the sidebar
 
-        The user started this session from Nirux (New Task…) for the task below, on the new branch \
+        The user started this session from Nirux (⌘N) for the task below, on the new branch \
         `fix/the-sidebar`, created from origin/main, fetched just before. This file is for you only: never commit it.
 
         ## Task
@@ -87,13 +94,13 @@ final class NewTaskTests: XCTestCase {
         """)
     }
 
-    func testHandoverSaysWhereTheBranchStartedAndWhereTheProjectIs() {
+    func testHandoverSaysWhereTheBranchStartedAndWhereTheSpaceWorks() {
         let stale = NewTask.handover(
             description: "Look", template: nil, branch: "feat/look", start: .lastFetched("origin/main"), subdirectory: "apps/web"
         )
         XCTAssertTrue(stale.contains(
             "created from origin/main as last fetched: Nirux couldn’t fetch it, so fetch and rebase before you push. "
-                + "The project lives in `apps/web` of this repository. This file is for you only"
+                + "The space works in `apps/web` of this repository. This file is for you only"
         ), stale)
         for template in [nil, TaskTemplates.Template(name: "Empty", body: "")] {
             let text = NewTask.handover(
@@ -128,34 +135,31 @@ final class NewTaskTests: XCTestCase {
         return (root, repo)
     }
 
-    private func folders(_ paths: String..., isWorkspaceFolder: Bool = true) -> [NewTask.Folder] {
-        paths.map { NewTask.Folder(path: $0, isWorkspaceFolder: isWorkspaceFolder) }
-    }
-
     func testTargetIsTheMainCheckoutFromAnyOfItsWorktrees() throws {
         let (root, repo) = try makeRepository()
         defer { try? FileManager.default.removeItem(atPath: root) }
         try git(["worktree", "add", "-q", "-b", "feat/a", root + "/repo.feat-a"], at: repo)
 
-        let target = try XCTUnwrap(NewTask.resolveTarget(folders: folders(root, root + "/repo.feat-a"), baseBranch: nil))
+        let target = try XCTUnwrap(NewTask.resolveTarget(folder: root + "/repo.feat-a", baseBranch: nil))
         XCTAssertEqual(target.repository, repo)
         // No remote: the checkout's HEAD.
         XCTAssertEqual(target.startPoint, "HEAD")
         XCTAssertNil(target.remoteBranch)
         XCTAssertEqual(target.checkoutBranch, "main")
         XCTAssertNil(target.subdirectory)
-        XCTAssertNil(NewTask.resolveTarget(folders: folders(root, root + "/missing"), baseBranch: nil))
+        XCTAssertNil(NewTask.resolveTarget(folder: root, baseBranch: nil), "in no repository")
+        XCTAssertNil(NewTask.resolveTarget(folder: root + "/missing", baseBranch: nil))
     }
 
-    func testTargetKeepsTheProjectsFolderInTheRepositoryButNotATerminals() throws {
+    /// A folder anchor inside a repository: its tasks open in that folder.
+    func testTargetKeepsTheSpacesFolderInTheRepository() throws {
         let (root, repo) = try makeRepository()
         defer { try? FileManager.default.removeItem(atPath: root) }
         try FileManager.default.createDirectory(atPath: repo + "/apps/web", withIntermediateDirectories: true)
 
-        XCTAssertEqual(NewTask.resolveTarget(folders: folders(repo + "/apps/web"), baseBranch: nil)?.subdirectory, "apps/web")
-        let terminal = NewTask.resolveTarget(folders: folders(repo + "/apps/web", isWorkspaceFolder: false), baseBranch: nil)
-        XCTAssertEqual(terminal?.repository, repo)
-        XCTAssertNil(terminal?.subdirectory)
+        let target = NewTask.resolveTarget(folder: repo + "/apps/web", baseBranch: nil)
+        XCTAssertEqual(target?.repository, repo)
+        XCTAssertEqual(target?.subdirectory, "apps/web")
     }
 
     func testTheWorkspaceOpensInTheProjectsFolderOnlyInsideTheWorktree() throws {
@@ -176,7 +180,7 @@ final class NewTaskTests: XCTestCase {
         let (root, repo) = try makeRepository()
         defer { try? FileManager.default.removeItem(atPath: root) }
         // Without an origin, the board's base branch has nowhere to come from.
-        XCTAssertEqual(try XCTUnwrap(NewTask.resolveTarget(folders: folders(repo), baseBranch: "main")).startPoint, "HEAD")
+        XCTAssertEqual(try XCTUnwrap(NewTask.resolveTarget(folder: repo, baseBranch: "main")).startPoint, "HEAD")
         try git(["remote", "add", "origin", root + "/origin.git"], at: repo)
         // Remote-tracking refs as a fetch leaves them, without a network.
         try git(["commit", "-q", "--allow-empty", "-m", "two"], at: repo)
@@ -185,24 +189,24 @@ final class NewTaskTests: XCTestCase {
         try git(["update-ref", "refs/remotes/origin/main", "HEAD"], at: repo)
 
         // origin/HEAD isn't set (a repository made with `git init`): main.
-        var target = try XCTUnwrap(NewTask.resolveTarget(folders: folders(repo), baseBranch: nil))
+        var target = try XCTUnwrap(NewTask.resolveTarget(folder: repo, baseBranch: nil))
         XCTAssertEqual(target.startPoint, "refs/remotes/origin/main")
         XCTAssertEqual(target.remoteBranch, "main")
         XCTAssertEqual(target.remoteBranchName, "origin/main")
         XCTAssertNil(target.checkoutBranch)
 
         try git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master"], at: repo)
-        target = try XCTUnwrap(NewTask.resolveTarget(folders: folders(repo), baseBranch: nil))
+        target = try XCTUnwrap(NewTask.resolveTarget(folder: repo, baseBranch: nil))
         XCTAssertEqual(target.remoteBranch, "master")
 
-        target = try XCTUnwrap(NewTask.resolveTarget(folders: folders(repo), baseBranch: "develop"))
+        target = try XCTUnwrap(NewTask.resolveTarget(folder: repo, baseBranch: "develop"))
         XCTAssertEqual(target.startPoint, "refs/remotes/origin/develop")
         // Never fetched here: the fetch at Start brings it.
-        XCTAssertEqual(try XCTUnwrap(NewTask.resolveTarget(folders: folders(repo), baseBranch: "release/2.0")).remoteBranch, "release/2.0")
+        XCTAssertEqual(try XCTUnwrap(NewTask.resolveTarget(folder: repo, baseBranch: "release/2.0")).remoteBranch, "release/2.0")
         // A base that isn't a branch name (develop~1 is a commit of origin):
         // its default branch.
         for base in ["develop~1", "develop^", "-x"] {
-            XCTAssertEqual(try XCTUnwrap(NewTask.resolveTarget(folders: folders(repo), baseBranch: base)).remoteBranch, "master")
+            XCTAssertEqual(try XCTUnwrap(NewTask.resolveTarget(folder: repo, baseBranch: base)).remoteBranch, "master")
         }
     }
 }

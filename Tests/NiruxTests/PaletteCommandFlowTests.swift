@@ -26,11 +26,9 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testSessionHistoryCommand": ["Session History…"],
             "testProjectMemoryCommand": ["Space Memory…"],
             "testResumeAllAgentsCommand": ["Resume All Agents"],
-            "testWorkspaceCommands": [
-                "New Workspace", "Rename Workspace", "Show/Hide Sidebar", "Show/Hide Inactive Workspaces"
-            ],
-            "testWorktreeCommands": ["Open Worktree", "New Worktree", "Clean Up Merged Worktrees…"],
-            "testNewTaskCommand": ["New Task…"],
+            "testWorkspaceCommands": ["Rename Workspace", "Show/Hide Sidebar", "Show/Hide Inactive Workspaces"],
+            "testWorktreeCommands": ["Open Worktree", "Clean Up Merged Worktrees…"],
+            "testNewCommand": ["New…"],
             "testProjectBoardCommand": ["Open Board"],
             "testReviewBranchCommand": ["Review Branch"],
             "testSetupCommands": ["Show Getting Started", "Install Agent Skills", "Open Settings"]
@@ -450,11 +448,8 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             let shell = harness.shell
             let repoWorkspace = try XCTUnwrap(shell.activeWorkspace)
 
-            harness.runPaletteCommand("New Workspace")
-            let nameField = try XCTUnwrap(harness.waitForField(placeholder: "Name this workspace for the task"))
-            harness.submit("second", into: nameField)
+            shell.addWorkspace(title: "second", cwd: harness.home)
             let second = try XCTUnwrap(shell.workspaces.first { $0.title == "second" })
-            XCTAssertIdentical(shell.activeWorkspace, second)
 
             shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === repoWorkspace }))
             harness.runPaletteCommand("Rename Workspace")
@@ -482,15 +477,11 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
 
-            // Outside a repository, both say so instead of doing nothing.
+            // Outside a repository, it says so instead of doing nothing.
             let repoWorkspace = try XCTUnwrap(shell.activeWorkspace)
             shell.addWorkspace(title: "home", cwd: harness.home)
-            for command in ["Open Worktree", "New Worktree"] {
-                shell.dismissToast()
-                harness.waitUntil("no toast") { shell.toast == nil }
-                harness.runPaletteCommand(command)
-                XCTAssertEqual(shell.toast?.message, "Not in a git repository: \(harness.home.abbreviatedPath())", command)
-            }
+            harness.runPaletteCommand("Open Worktree")
+            XCTAssertEqual(shell.toast?.message, "Not in a git repository: \(harness.home.abbreviatedPath())")
             shell.focusWorkspace(id: repoWorkspace.id)
 
             // Lists the worktrees off the main thread, then offers them in
@@ -540,11 +531,9 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(shell.workspaces.count, workspaceCount + 1)
             shell.focusWorkspace(id: repoWorkspace.id)
 
-            // Creates the worktree off the main thread, then opens it with an
-            // agent (the launch double).
-            harness.runPaletteCommand("New Worktree")
-            let branchField = try XCTUnwrap(harness.waitForField(placeholder: "Branch name (e.g. feat/my-feature)"))
-            harness.submit("feat/new-flow", into: branchField)
+            // One an agent asked for: created off the main thread, then
+            // opened with an agent (the launch double).
+            shell.createWorktreeWorkspace(branch: "feat/new-flow", repoRoot: harness.repo)
             harness.waitUntil("the new worktree's workspace") {
                 shell.workspaces.contains { $0.title == "feat/new-flow" }
             }
@@ -565,35 +554,40 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
         }
     }
 
-    /// Reads the project's repository and templates off the main thread,
-    /// then creates the worktree and writes the handover off it too (see
-    /// NewTaskFlowTests for the rest of the form).
-    func testNewTaskCommand() throws {
+    /// ⌘N's sheet on a space with a repository: reads where its tasks
+    /// branch from and its templates off the main thread, then creates the
+    /// worktree and writes the handover off it too (see NewTaskFlowTests for
+    /// the rest of the sheet).
+    func testNewCommand() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
-            harness.runPaletteCommand("New Task…")
-            harness.waitUntil("the new task sheet") { shell.newTaskPanel?.panel?.isSheet == true }
-            let form = try XCTUnwrap(shell.newTaskPanel)
-            XCTAssertIdentical(harness.window.attachedSheet, form.panel)
-            XCTAssertEqual(form.selectedProjectID, shell.activeProfileID)
-            harness.waitUntil("the project's repository") { form.info != nil }
-            XCTAssertEqual(form.info?.target?.repository, harness.repo)
-            XCTAssertEqual(form.info?.templates, TaskTemplates.defaults)
-            // No remote here: the checkout's HEAD.
+            let space = try NewTaskFlowTests.anchoredSpace(harness)
+            harness.runPaletteCommand("New…")
+            harness.waitUntil("the sheet") { shell.newTaskPanel?.panel?.isSheet == true }
+            let sheet = try XCTUnwrap(shell.newTaskPanel)
+            XCTAssertIdentical(harness.window.attachedSheet, sheet.panel)
+            XCTAssertEqual(sheet.headingLabel.stringValue, "New in Repo")
+            XCTAssertEqual(sheet.space.id, space.id)
+            // One repository: no popup to choose it.
+            XCTAssertTrue(sheet.repositoryPopup.isHidden)
+            harness.waitUntil("the repository's info") { sheet.info != nil }
+            XCTAssertEqual(sheet.info?.target?.repository, harness.repo)
+            XCTAssertEqual(sheet.info?.templates, TaskTemplates.defaults)
+
+            // The branch follows the description, then the template. No
+            // remote here: from the checkout's HEAD.
+            sheet.descriptionView.string = "Sidebar flickers on resize\n\nSeen with three columns."
+            sheet.descriptionView.didChangeText()
+            XCTAssertEqual(sheet.branch, "feat/sidebar-flickers-on-resize")
+            sheet.templatePopup.selectItem(withTitle: "Bugfix")
+            sheet.templatePopup.sendAction(sheet.templatePopup.action, to: sheet.templatePopup.target)
+            XCTAssertEqual(sheet.branch, "fix/sidebar-flickers-on-resize")
             XCTAssertEqual(
-                form.repositoryLabel.stringValue,
-                "\(harness.repo)\nStarts from this checkout’s HEAD (main): origin has no default branch Nirux knows of."
+                sheet.lineLabel.stringValue,
+                "fix/sidebar-flickers-on-resize  ·  from the checkout’s HEAD (main): origin has no default branch"
             )
 
-            // The branch follows the description, then the template.
-            form.descriptionView.string = "Sidebar flickers on resize\n\nSeen with three columns."
-            form.descriptionView.didChangeText()
-            XCTAssertEqual(form.branch, "feat/sidebar-flickers-on-resize")
-            form.templatePopup.selectItem(withTitle: "Bugfix")
-            form.templatePopup.sendAction(form.templatePopup.action, to: form.templatePopup.target)
-            XCTAssertEqual(form.branch, "fix/sidebar-flickers-on-resize")
-
-            form.startButton.performClick(nil)
+            sheet.startButton.performClick(nil)
             harness.waitUntil("the task's workspace") {
                 shell.workspaces.contains { $0.title == "Sidebar flickers on resize" }
             }
@@ -601,7 +595,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertNil(harness.window.attachedSheet)
             let workspace = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertEqual(workspace.title, "Sidebar flickers on resize")
-            XCTAssertEqual(workspace.profileID, WorkspaceProfile.defaultID)
+            XCTAssertEqual(workspace.profileID, space.id)
             XCTAssertEqual(
                 NiruxShellView.comparablePath(workspace.cwd),
                 NiruxShellView.comparablePath(harness.root + "/repo.fix-sidebar-flickers-on-resize")
