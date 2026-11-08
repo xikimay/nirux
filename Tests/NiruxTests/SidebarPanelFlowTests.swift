@@ -415,32 +415,27 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
         }
     }
 
-    /// ⌥⌘N goes to the space at that place in the picker; past the last
-    /// space its item is disabled and the chord does nothing.
+    /// ⌥⌘N, pressed from a terminal without ever opening the Space menu,
+    /// goes to the space at that place in the picker, a space created
+    /// meanwhile included; past the last space it does nothing.
     func testSpaceChordsSelectSpacesByPlace() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
-            shell.createSpace(NewSpacePanel.Draft(name: "Second", colorHex: WorkspaceProfile.palette[1].hex, anchors: []))
-            harness.waitUntil("the new space on screen") {
-                shell.profiles.first { $0.id == shell.activeProfileID }?.name == "Second"
-            }
-            let second = shell.activeProfileID
-            shell.updateSidebar()
-            let app = NiruxApp()
-            app.shell = shell
-            @MainActor func chord(_ number: Int) -> NSMenuItem {
-                let item = NSMenuItem(title: "", action: #selector(NiruxApp.selectSpaceByNumber(_:)), keyEquivalent: "")
-                item.tag = number
-                return item
-            }
+            try harness.withApp {
+                shell.createSpace(NewSpacePanel.Draft(name: "Second", colorHex: WorkspaceProfile.palette[1].hex, anchors: []))
+                harness.waitUntil("the new space on screen") {
+                    shell.profiles.first { $0.id == shell.activeProfileID }?.name == "Second"
+                }
+                let second = shell.activeProfileID
+                shell.updateSidebar()
 
-            XCTAssertEqual([1, 2, 3].map { app.validateMenuItem(chord($0)) }, [true, true, false])
-            app.selectSpaceByNumber(chord(1))
-            XCTAssertEqual(shell.activeProfileID, WorkspaceProfile.defaultID)
-            app.selectSpaceByNumber(chord(2))
-            XCTAssertEqual(shell.activeProfileID, second)
-            app.selectSpaceByNumber(chord(3))
-            XCTAssertEqual(shell.activeProfileID, second)
+                harness.press("1", keyCode: 0x12, [.command, .option])
+                XCTAssertEqual(shell.activeProfileID, WorkspaceProfile.defaultID)
+                harness.press("2", keyCode: 0x13, [.command, .option])
+                XCTAssertEqual(shell.activeProfileID, second)
+                harness.press("3", keyCode: 0x14, [.command, .option])
+                XCTAssertEqual(shell.activeProfileID, second)
+            }
         }
     }
 

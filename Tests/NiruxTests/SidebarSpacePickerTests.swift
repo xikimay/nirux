@@ -75,6 +75,24 @@ final class SidebarSpacePickerTests: XCTestCase {
         XCTAssertEqual(try pickerValue(), "General")
     }
 
+    /// The menu bar's Space menu hears of every change to the spaces, so
+    /// its chords are right before it ever opens.
+    func testSidebarAnnouncesSpaceChanges() {
+        let sidebar = SidebarView()
+        let counter = NotificationCounter()
+        NotificationCenter.default.addObserver(
+            counter, selector: #selector(NotificationCounter.count(_:)),
+            name: SidebarView.spacesDidChangeNotification, object: sidebar
+        )
+        defer { NotificationCenter.default.removeObserver(counter) }
+
+        sidebar.update(profiles: spaces, workspaces: [])
+        sidebar.update(profiles: spaces, workspaces: [])
+        XCTAssertEqual(counter.posted, 1)
+        sidebar.update(profiles: Array(spaces.prefix(2)), workspaces: [])
+        XCTAssertEqual(counter.posted, 2)
+    }
+
     /// The Tasks header's "+" opens New…, for VoiceOver too, and its hit
     /// area is under it.
     func testTasksHeaderPlusOpensNew() throws {
@@ -101,18 +119,18 @@ final class SidebarSpacePickerTests: XCTestCase {
         var profiles = spaces
         let menu = SpaceListMenu(title: "Space") { profiles }
         menu.addSpaceItems()
-        menu.menuNeedsUpdate(menu)
+        menu.refresh()
         XCTAssertEqual(menu.spaceItems.filter { !$0.isHidden }.map(\.title), ["General", "client  ●", "perso  ●"])
         XCTAssertEqual(menu.spaceItems.map(\.keyEquivalent), ["1", "2", "3", "", "", "", "", "", ""])
 
         // The items are reused: a mark that went away leaves no title behind.
         profiles[1] = space("client")
-        menu.menuNeedsUpdate(menu)
+        menu.refresh()
         XCTAssertNil(menu.spaceItems[1].attributedTitle)
         XCTAssertEqual(menu.spaceItems[1].title, "client")
 
         profiles = (0..<10).map { space("s\($0)", isActive: $0 == 0) }
-        menu.menuNeedsUpdate(menu)
+        menu.refresh()
         XCTAssertEqual(menu.spaceItems.map(\.title), (0..<9).map { "s\($0)" })
         XCTAssertFalse(menu.spaceItems.contains(where: \.isHidden))
         let spaceChords = Set(menu.spaceItems.map { KeyChord($0.keyEquivalent, $0.keyEquivalentModifierMask) })
@@ -129,5 +147,13 @@ final class SidebarSpacePickerTests: XCTestCase {
         let barSpaces = try XCTUnwrap(mainMenu.items.lazy.compactMap { $0.submenu as? SpaceListMenu }.first)
         XCTAssertEqual(barSpaces.spaceItems.map(\.tag), Array(1...9))
         XCTAssertTrue(barSpaces.spaceItems.allSatisfy { $0.action == #selector(NiruxApp.selectSpaceByNumber(_:)) })
+    }
+}
+
+private final class NotificationCounter: NSObject {
+    private(set) var posted = 0
+
+    @objc func count(_ notification: Notification) {
+        posted += 1
     }
 }

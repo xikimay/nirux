@@ -50,6 +50,13 @@ enum WebContentKeyRouting {
            modifiers == [.command] || modifiers == [.command, .shift] {
             return true
         }
+        // Option+Cmd+1…9 (with Shift where digits need it, AZERTY): web
+        // apps' headings (Google Docs, Notion). A page that leaves them
+        // unhandled hands them back, and the Space menu switches spaces.
+        if modifiers.subtracting(.shift) == [.command, .option],
+           [characters, charactersIgnoringModifiers].contains(where: { $0.map(isSpaceDigit) ?? false }) {
+            return true
+        }
         guard isEditor else { return false }
 
         // Cmd+P: Monaco rebinds it to the workspace file picker. The command
@@ -69,6 +76,11 @@ enum WebContentKeyRouting {
             return true
         }
         return false
+    }
+
+    /// "1"…"9": a space's place in the picker (⌥⌘1…⌥⌘9).
+    private static func isSpaceDigit(_ typed: String) -> Bool {
+        typed.count == 1 && ("1"..."9").contains(typed)
     }
 
     /// Whether a Cmd key event means `letter`, the way AppKit matches menu key

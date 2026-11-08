@@ -227,8 +227,10 @@ final class SidebarView: NSView {
         }
         let spaceChanged = profiles.first(where: \.isActive)?.id != lastProfiles.first(where: \.isActive)?.id
         if spaceChanged || !workspaces.contains(where: \.isInactive) { isInactiveSectionCollapsed = true }
+        let spacesChanged = profiles != lastProfiles
         lastProfiles = profiles
         lastInfos = workspaces
+        if spacesChanged { NotificationCenter.default.post(name: Self.spacesDidChangeNotification, object: self) }
         // The 2s heartbeat calls this even when nothing visible changed.
         // Rebuilding then is not just wasted work: it tears down every
         // row's tooltip tracking rect (the system tooltip delay never
@@ -479,6 +481,11 @@ final class SidebarView: NSView {
             positioning: nil, at: NSPoint(x: frame.minX, y: frame.minY - Theme.Space.xs), in: contentDocumentView
         )
     }
+
+    /// Posted when `lastProfiles` changes: the menu bar's Space menu
+    /// (`SpaceListMenu`) follows, so ⌥⌘1…⌥⌘9 match the picker before that
+    /// menu ever opens.
+    static let spacesDidChangeNotification = Notification.Name("NiruxSidebarSpacesDidChange")
 
     /// Shared with the menu bar's Space › New Space…, which runs the same
     /// `onCreateProfile`.

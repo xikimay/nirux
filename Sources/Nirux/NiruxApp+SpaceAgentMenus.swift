@@ -190,9 +190,10 @@ final class RebuiltMenu: NSMenu, NSMenuDelegate {
 }
 
 /// The menu bar's Space menu. Its spaces (⌥⌘1…⌥⌘9) are nine fixed items
-/// that follow the picker's list each time the menu opens or a key press
-/// searches it (no `menuHasKeyEquivalent`, so AppKit updates the menu
-/// first); those past the last space hide.
+/// that follow the picker's list whenever it changes (AppKit doesn't update
+/// a menu before matching its key equivalents) and when the menu opens;
+/// those past the last space hide.
+@MainActor
 final class SpaceListMenu: NSMenu, NSMenuDelegate {
     private let profiles: @MainActor () -> [ProfileInfo]
     private(set) var spaceItems: [NSMenuItem] = []
@@ -202,6 +203,13 @@ final class SpaceListMenu: NSMenu, NSMenuDelegate {
         self.profiles = profiles
         super.init(title: title)
         delegate = self
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(spacesDidChange(_:)), name: SidebarView.spacesDidChangeNotification, object: nil
+        )
+    }
+
+    @objc private func spacesDidChange(_ notification: Notification) {
+        refresh()
     }
 
     @available(*, unavailable)
@@ -216,10 +224,15 @@ final class SpaceListMenu: NSMenu, NSMenuDelegate {
             item.isHidden = true
             spaceItems.append(item)
         }
+        refresh()
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        // Every Command key press asks: draw the dots again only on a change.
+        refresh()
+    }
+
+    func refresh() {
+        // Draw the dots again only on a change.
         let profiles = profiles()
         guard profiles != describedProfiles else { return }
         describedProfiles = profiles
