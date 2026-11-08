@@ -75,9 +75,16 @@ final class SpaceRoutingFlowTests: XCTestCase {
             XCTAssertEqual(workspace("started")?.profileID, anchored.id, "offered unchecked")
 
             // A plain new workspace of a space with a repository opens in
-            // its main checkout.
+            // its main checkout; when its default folder is gone, in the
+            // next one still there.
             shell.addWorkspace(title: "plain", profileID: anchored.id)
             XCTAssertEqual(workspace("plain")?.cwd, harness.repo)
+            shell.workspaceStore.setAnchors(
+                [SpaceAnchor(kind: .folder(path: harness.root + "/gone"), name: "gone", isDefault: true), .folder(notes)],
+                forProfile: other.id
+            )
+            shell.addWorkspace(title: "fallback", profileID: other.id)
+            XCTAssertEqual(workspace("fallback")?.cwd, notes)
         }
     }
 }

@@ -183,5 +183,13 @@ final class SpaceRoutingTests: XCTestCase {
         )
         XCTAssertEqual(store.profile(anchoring: web.key!)?.id, "a")
         XCTAssertEqual(store.profiles[2].anchors, [SpaceAnchor(kind: docs.kind, name: "docs", isDefault: true)])
+
+        // The default space has none, even from a file that gives it some:
+        // it would claim them first, and no menu could remove them.
+        var general = WorkspaceProfile.defaultProfile
+        general.anchors = [web]
+        store.replaceProfiles([general, Self.space("a", web)], activeProfileID: nil)
+        XCTAssertEqual(store.profiles[0].anchors, [])
+        XCTAssertEqual(store.profile(anchoring: web.key!)?.id, "a")
     }
 }
