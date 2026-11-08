@@ -69,11 +69,18 @@ extension NiruxShellView {
             space: NewTaskPanel.Space(id: space.id, name: space.name, isGeneral: space.id == WorkspaceProfile.defaultID),
             repositories: repositories,
             selectedKey: space.anchors.defaultAnchor?.key,
+            agent: defaultTaskAgent(forSpace: space.id),
             homeFolder: sideEffects.homeDirectory()
         )
         if repositories.isEmpty, space.id != WorkspaceProfile.defaultID {
             suggestRepository(to: panel)
         }
+    }
+
+    /// The agent a space's tasks start with unless the sheet says otherwise.
+    /// Claude Code until spaces have their own defaults (S8).
+    func defaultTaskAgent(forSpace spaceID: String) -> NiruxApp.WorkspaceAgent {
+        .claude
     }
 
     /// The space's repositories and folders the sheet can start from: those

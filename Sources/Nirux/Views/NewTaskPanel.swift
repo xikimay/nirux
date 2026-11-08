@@ -128,8 +128,12 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         super.init()
     }
 
-    /// `selectedKey`: the space's default repository.
-    func show(attachedTo window: NSWindow, space: Space, repositories: [Repository], selectedKey: String?, homeFolder: String) {
+    /// `selectedKey`: the space's default repository; `agent`: the one its
+    /// tasks start by default.
+    func show(
+        attachedTo window: NSWindow, space: Space, repositories: [Repository], selectedKey: String?,
+        agent: NiruxApp.WorkspaceAgent, homeFolder: String
+    ) {
         parentWindow = window
         self.space = space
         self.repositories = repositories
@@ -137,6 +141,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         selectedRepositoryKey = repositories.contains { $0.key == selectedKey } ? selectedKey : repositories.first?.key
         let panel = buildPanel()
         self.panel = panel
+        agentPopup.selectItem(at: Self.agents.firstIndex { $0.agent == agent } ?? 0)
         headingLabel.stringValue = "New in \(space.name)"
         rebuildRepositoryPopup()
         // Laid out first: the sheet comes down at its size.
