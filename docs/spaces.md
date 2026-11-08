@@ -1,7 +1,7 @@
 # Spaces, anchors and the Lead
 
 Status: design validated by the user on 2026-11-08. Shipped: anchors and
-routing (S4), one ⌘N (S7). Where this document and
+routing (S4), one ⌘N (S7), a board per repository (S12). Where this document and
 [projects.md](projects.md) differ (management UI, routing, defaults), this
 one wins.
 
@@ -263,7 +263,8 @@ Notes per PR:
   and Ghostty bindings.
 - **S11.** See "The Lead". Adds the Lead tab, ⌘0 and the ⌘N checkbox.
 - **S12.** `board.json` gets one config per anchor; the current single
-  repository becomes the matching anchor's.
+  repository becomes the matching anchor's. Shipped: see
+  [project-board.md](project-board.md), sections 2.2 and 5.1.
 - **S13.** An MCP tool sets a task's next step and blocker; manual editing
   stays.
 
