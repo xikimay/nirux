@@ -58,7 +58,15 @@ final class SidebarView: NSView {
     /// position within its active/inactive group).
     var onWorkspaceReordered: ((Int, Int) -> Void)?
     var onProfileClicked: ((String) -> Void)?
+    /// "New Space…": the sheet (see NewSpacePanel).
     var onCreateProfile: (() -> Void)?
+    /// (space id): "Add Repository…".
+    var onAddRepository: ((String) -> Void)?
+    /// (space id, anchor key): the Repositories submenu.
+    var onMakeDefaultAnchor: ((String, String) -> Void)?
+    var onRemoveAnchor: ((String, String) -> Void)?
+    /// A space's repositories and folders, for its menu.
+    var spaceAnchors: ((String) -> [SpaceAnchor])?
     var onRenameProfile: ((String) -> Void)?
     var onEditProfileBrief: ((String) -> Void)?
     var onEditBoardSettings: ((String) -> Void)?
@@ -482,12 +490,12 @@ final class SidebarView: NSView {
         return menu
     }
 
-    /// The active space's options, then "New Space".
+    /// The active space's options, then "New Space…".
     func addSpaceOptions(to menu: NSMenu) {
         if let active = lastProfiles.first(where: { $0.isActive }) {
             addSpaceManagementItems(to: menu, for: active)
         }
-        menu.addClosureItem(title: "New Space") { [weak self] in
+        menu.addClosureItem(title: "New Space…") { [weak self] in
             self?.onCreateProfile?()
         }
     }

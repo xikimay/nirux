@@ -124,6 +124,13 @@ final class NiruxShellView: NSView {
     /// second click doesn't open a second form.
     var isReadingBoardSettings = false
     var newTaskPanel: NewTaskPanel?
+    var newSpacePanel: NewSpacePanel?
+    /// The banner of a workspace that opened in the default space (see
+    /// NiruxShellView+SpaceRouting), and a count that tells a pending
+    /// dismissal whether it still applies.
+    var spaceArrivalBanner: SpaceArrivalBanner?
+    var spaceArrivalGeneration = 0
+    var spaceArrivalShownAt: TimeInterval = 0
     /// The Project Board's `gh` reads. Tests set a fake before a board opens.
     lazy var projectBoardClient: any ProjectBoardGitHub = GitHubCLIBoardClient.installed
     /// How Branch Review columns read their worktree: git and gh, or a
@@ -193,7 +200,13 @@ final class NiruxShellView: NSView {
             self?.handleWorkspaceReorder(workspaceIndex: index, targetPosition: position)
         }
         sidebar.onProfileClicked = { [weak self] profileID in self?.selectProfile(profileID) }
-        sidebar.onCreateProfile = { [weak self] in self?.createProfileFromActiveContext() }
+        sidebar.onCreateProfile = { [weak self] in self?.showNewSpacePanel() }
+        sidebar.onAddRepository = { [weak self] profileID in self?.addRepository(toSpace: profileID) }
+        sidebar.onMakeDefaultAnchor = { [weak self] profileID, key in self?.makeDefaultSpaceAnchor(key: key, inSpace: profileID) }
+        sidebar.onRemoveAnchor = { [weak self] profileID, key in self?.removeSpaceAnchor(key: key, fromSpace: profileID) }
+        sidebar.spaceAnchors = { [weak self] profileID in
+            self?.profiles.first { $0.id == profileID }?.anchors.filter(\.isKnown) ?? []
+        }
         sidebar.onNewWorkspace = { [weak self] in self?.showNewWorkspacePanel() }
         sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }
         sidebar.onEditProfileBrief = { [weak self] profileID in self?.editSpaceBrief(profileID: profileID) }
@@ -650,15 +663,18 @@ extension NiruxShellView {
                     // into a file the user owns, never through a planted symlink.
                     guard let handoverPath = HandoverFile.makeEmptySource(agent: runningAgent.rawValue) else {
                         self.presentProblem("Couldn’t create a handover file in /tmp", "The worktree opens without one.")
-                        self.addWorkspace(
-                            title: branch, cwd: path, agent: runningAgent, worktreeBranch: checkedOutBranch
+                        self.openRoutedWorkspace(
+                            title: branch, cwd: path, agent: runningAgent, parentWorkspaceID: self.activeWorkspace?.id,
+                            startedFromSpaceID: self.activeProfileID, worktreeBranch: checkedOutBranch
                         )
                         return
                     }
                     let isMission = Self.currentMissionHandoffsEnabled()
+                    // The parent always, for routing; its agent only for a
+                    // Mission.
                     let request = NiruxURLRequest.NewWorktree(
                         branch: branch, repo: repoRoot, agent: runningAgent, handoverPath: handoverPath,
-                        parentWorkspaceID: isMission ? self.activeWorkspace?.id : nil,
+                        parentWorkspaceID: self.activeWorkspace?.id,
                         parentAgentUUID: isMission ? col?.agentUUID : nil
                     )
                     var expected = request
@@ -674,7 +690,10 @@ extension NiruxShellView {
                     col?.pty?.sendRaw(prompt)
                 } else {
                     // No agent — open workspace directly (worktree already created by panel)
-                    self.addWorkspace(title: branch, cwd: path, agent: .claude, worktreeBranch: checkedOutBranch)
+                    self.openRoutedWorkspace(
+                        title: branch, cwd: path, agent: .claude, parentWorkspaceID: self.activeWorkspace?.id,
+                        startedFromSpaceID: self.activeProfileID, worktreeBranch: checkedOutBranch
+                    )
                 }
             }
         }
@@ -761,7 +780,7 @@ extension NiruxShellView {
         if let workspaceID, workspaces.contains(where: { $0.id == workspaceID && !$0.isClosing }) {
             focusWorkspace(id: workspaceID)
         } else {
-            addWorkspace(title: title, cwd: path)
+            openRoutedWorkspace(title: title, cwd: path, startedFromSpaceID: activeProfileID)
         }
     }
 

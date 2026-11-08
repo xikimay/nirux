@@ -182,7 +182,7 @@ final class SidebarRailTests: XCTestCase {
         menu.performActionForItem(at: 1)
 
         XCTAssertEqual(selected, ["q"])
-        XCTAssertTrue(menu.items.contains { $0.title == "New Space" })
+        XCTAssertTrue(menu.items.contains { $0.title == "New Space…" })
     }
 
     /// The cards' rule: amber only for a wait on the user; a red check

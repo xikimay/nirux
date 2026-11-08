@@ -443,7 +443,11 @@ final class NiruxURLRequestTests: XCTestCase {
     func testSkillsPassTheLaunchIDAndCreateHandoversWithMktemp() {
         let worktree = NiruxShellView.worktreeSkillContent
         XCTAssertTrue(worktree.contains("launch_query=\"&launch=${NIRUX_LAUNCH_ID}\""))
-        XCTAssertTrue(worktree.contains("${launch_query}${profile_query}${mission_query}"))
+        XCTAssertTrue(worktree.contains("${launch_query}${profile_query}${parent_query}${mission_query}"))
+        // The parent goes with every request, for routing; only its agent
+        // waits for Mission handoffs.
+        XCTAssertTrue(worktree.contains("parent_query=\"&parentWorkspace=${NIRUX_WORKSPACE_ID}\""))
+        XCTAssertTrue(worktree.contains("mission_query=\"&parentAgent=${NIRUX_AGENT_UUID}\""))
         XCTAssertTrue(worktree.contains("mktemp /tmp/nirux-handover-<agent>-XXXXXX"))
         XCTAssertFalse(worktree.contains("cat > /tmp/"), "never write to a guessable /tmp name")
         XCTAssertTrue(NiruxShellView.showCodeSkillContent.contains("&launch=${NIRUX_LAUNCH_ID:-}"))
