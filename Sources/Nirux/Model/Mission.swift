@@ -22,8 +22,9 @@ struct Mission: Codable, Equatable {
     var events: [MissionEvent]
 }
 
-/// An explicit mailbox event. `deliveredAt` is set only after the event has
-/// been durably mirrored into the activity feed.
+/// An explicit mailbox event. `deliveredAt` is set once the app has acted
+/// on the event (a notification, the child's card, typing it into a prompt
+/// is then retried from the ledger), so a relaunch doesn't act twice.
 struct MissionEvent: Codable, Equatable {
     enum Kind: String, Codable {
         case question
@@ -50,14 +51,25 @@ struct MissionEvent: Codable, Equatable {
     let inReplyTo: String?
     let timestamp: TimeInterval
     var deliveredAt: TimeInterval?
-    /// Separate from Activity delivery: whether the parent agent CLI has
+    /// Separate from `deliveredAt`: whether the parent agent CLI has
     /// consumed this child event. UI display must not consume an agent inbox.
     var parentConsumedAt: TimeInterval?
-    /// Set on a response once the child's `ask` has printed it. Asking the
-    /// same question again replays the answer for a short window (a rerun
-    /// after a cut-off command), then starts a new exchange. Set on an
-    /// instruction once Nirux typed it into the child's prompt.
+    /// Set on a response once the child's `ask` has printed it, or Nirux
+    /// typed it into the child's prompt. Asking the same question again
+    /// replays the answer for a short window (a rerun after a cut-off
+    /// command), then starts a new exchange. Set on an instruction once
+    /// Nirux typed it into the child's prompt.
     var childConsumedAt: TimeInterval?
+    /// Set on a question or a completion once Nirux typed it into the
+    /// parent's prompt. Builds before it ignore the key.
+    var parentTypedAt: TimeInterval?
+    /// On a question: the child ended its turn after asking (a Claude Code
+    /// child), so Nirux types the answer into its prompt. A child whose
+    /// `ask` waits for the answer (Codex), or a question an older build
+    /// recorded, leaves it nil.
+    var expectsTypedAnswer: Bool?
+    /// On a response: the user wrote it in Nirux, not the parent agent.
+    var answeredByUser: Bool?
 
     init(
         id: String,
@@ -72,7 +84,10 @@ struct MissionEvent: Codable, Equatable {
         timestamp: TimeInterval,
         deliveredAt: TimeInterval? = nil,
         parentConsumedAt: TimeInterval? = nil,
-        childConsumedAt: TimeInterval? = nil
+        childConsumedAt: TimeInterval? = nil,
+        parentTypedAt: TimeInterval? = nil,
+        expectsTypedAnswer: Bool? = nil,
+        answeredByUser: Bool? = nil
     ) {
         self.id = id
         self.missionID = missionID
@@ -87,6 +102,9 @@ struct MissionEvent: Codable, Equatable {
         self.deliveredAt = deliveredAt
         self.parentConsumedAt = parentConsumedAt
         self.childConsumedAt = childConsumedAt
+        self.parentTypedAt = parentTypedAt
+        self.expectsTypedAnswer = expectsTypedAnswer
+        self.answeredByUser = answeredByUser
     }
 }
 
@@ -211,12 +229,15 @@ final class MissionStore {
 
     // This single transition keeps validation and its in-memory mutation
     // adjacent so persistence commits exactly one candidate Mission ledger.
-    func process(_ incoming: MissionEvent, enabled: Bool) -> ProcessingResult {
+    /// `fromUser` is the trusted UI path (`respond`): only it may mark a
+    /// response as the user's.
+    func process(_ incoming: MissionEvent, enabled: Bool, fromUser: Bool = false) -> ProcessingResult {
         guard ensureLoaded() else { return .persistenceFailed }
         guard enabled,
               incoming.deliveredAt == nil,
               incoming.parentConsumedAt == nil,
               incoming.childConsumedAt == nil,
+              incoming.parentTypedAt == nil,
               Self.isIdentifier(incoming.id),
               Self.isIdentifier(incoming.missionID),
               Self.isIdentifier(incoming.childWorkspaceID),
@@ -284,7 +305,9 @@ final class MissionStore {
             inReplyTo: incoming.inReplyTo,
             timestamp: incoming.timestamp,
             deliveredAt: nil,
-            parentConsumedAt: nil
+            parentConsumedAt: nil,
+            expectsTypedAnswer: incoming.kind == .question && incoming.expectsTypedAnswer == true ? true : nil,
+            answeredByUser: incoming.kind == .response && fromUser ? true : nil
         )
         updated[index].events.append(event)
         updated[index].updatedAt = event.timestamp
@@ -329,9 +352,9 @@ final class MissionStore {
         return commit(updated) ? .accepted(nil) : .persistenceFailed
     }
 
-    /// Trusted UI response path. It uses the same validation and persistence
-    /// as a parent-agent CLI response, then returns the accepted event so the
-    /// caller can mirror it into Activity.
+    /// Trusted UI response path: the user answers instead of the parent. It
+    /// uses the same validation and persistence as a parent-agent CLI
+    /// response, then returns the accepted event for the caller to act on.
     func respond(
         to questionID: String,
         message: String,
@@ -353,7 +376,8 @@ final class MissionStore {
             inReplyTo: questionID,
             timestamp: now
         )
-        return accept(response, enabled: enabled)
+        guard case let .accepted(accepted) = process(response, enabled: enabled, fromUser: true) else { return nil }
+        return accepted
     }
 
     func response(to questionID: String) -> MissionEvent? {
@@ -400,6 +424,87 @@ final class MissionStore {
             return commit(updated)
         }
         return false
+    }
+
+    /// Messages Nirux may type into an agent's prompt, oldest first: a
+    /// child's question or completion into its parent's, an answer or an
+    /// instruction into the child's. Questions and completions are typed
+    /// within `MissionEventCLI.parentMessageLifetime` (a parent busy longer
+    /// leaves the question to the user, see `waitingQuestion`), instructions
+    /// within `instructionLifetime`; an answer is typed whenever the child is
+    /// free, as long as its Mission is active, since the child ended its turn
+    /// to wait for it.
+    func pendingPromptDeliveries(now: TimeInterval = Date().timeIntervalSince1970) -> [AcceptedEvent] {
+        missions.flatMap { mission in
+            mission.events.compactMap { event -> AcceptedEvent? in
+                let pending: Bool
+                switch event.kind {
+                case .instruction:
+                    pending = event.childConsumedAt == nil && now - event.timestamp < MissionEventCLI.instructionLifetime
+                case .response:
+                    pending = mission.status == .active && event.childConsumedAt == nil
+                        && mission.events.contains {
+                            $0.id == event.inReplyTo && $0.kind == .question && $0.expectsTypedAnswer == true
+                        }
+                case .question:
+                    pending = mission.status == .active && event.parentTypedAt == nil && event.parentConsumedAt == nil
+                        && now - event.timestamp < MissionEventCLI.parentMessageLifetime
+                        && !mission.events.contains { $0.kind == .response && $0.inReplyTo == event.id }
+                case .completed:
+                    pending = event.parentTypedAt == nil && event.parentConsumedAt == nil
+                        && now - event.timestamp < MissionEventCLI.parentMessageLifetime
+                case .acknowledged:
+                    pending = false
+                }
+                return pending ? AcceptedEvent(mission: mission, event: event) : nil
+            }
+        }.sorted { $0.event.timestamp < $1.event.timestamp }
+    }
+
+    /// The message is in its recipient's prompt. Recorded before typing, so
+    /// a failed save never types it twice. A completion the parent read
+    /// this way is consumed, as if `receive` had printed it; a question
+    /// stays open until it is answered.
+    @discardableResult
+    func markTyped(
+        _ delivery: AcceptedEvent, at timestamp: TimeInterval = Date().timeIntervalSince1970
+    ) -> Bool {
+        let eventID = delivery.event.id
+        if delivery.event.kind == .instruction { return markInstructionTyped(eventID: eventID, at: timestamp) }
+        guard let missionIndex = missions.firstIndex(where: { $0.id == delivery.mission.id }),
+              let eventIndex = missions[missionIndex].events.firstIndex(where: { $0.id == eventID })
+        else { return false }
+        var updated = missions
+        switch delivery.event.kind {
+        case .response:
+            guard updated[missionIndex].events[eventIndex].childConsumedAt == nil else { return false }
+            updated[missionIndex].events[eventIndex].childConsumedAt = timestamp
+        case .question, .completed:
+            guard updated[missionIndex].events[eventIndex].parentTypedAt == nil else { return false }
+            updated[missionIndex].events[eventIndex].parentTypedAt = timestamp
+            if delivery.event.kind == .completed, updated[missionIndex].events[eventIndex].parentConsumedAt == nil {
+                updated[missionIndex].events[eventIndex].parentConsumedAt = timestamp
+            }
+        case .instruction, .acknowledged:
+            return false
+        }
+        return commit(updated)
+    }
+
+    /// The oldest question this child asked that nobody answered yet, in an
+    /// active Mission: the child waits for it.
+    func waitingQuestion(childWorkspaceID: String, childAgentUUID: String) -> AcceptedEvent? {
+        missions.lazy
+            .filter {
+                $0.status == .active && $0.childWorkspaceID == childWorkspaceID && $0.childAgentUUID == childAgentUUID
+            }
+            .flatMap { mission in
+                mission.events.lazy.filter { question in
+                    question.kind == .question && question.parentConsumedAt == nil
+                        && !mission.events.contains { $0.kind == .response && $0.inReplyTo == question.id }
+                }.map { AcceptedEvent(mission: mission, event: $0) }
+            }
+            .min { $0.event.timestamp < $1.event.timestamp }
     }
 
     @discardableResult

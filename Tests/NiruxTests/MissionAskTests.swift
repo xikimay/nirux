@@ -3,6 +3,7 @@ import XCTest
 
 /// Agent-facing Mission commands: bounded waits, idempotent `ask` retries,
 /// the child's receipt, and the exit statuses the instructions promise.
+/// A Codex child's `ask` waits; a Claude Code child's returns at once.
 @MainActor
 final class MissionAskTests: XCTestCase {
     private let missionID = "11111111-1111-4111-8111-111111111111"
@@ -19,7 +20,7 @@ final class MissionAskTests: XCTestCase {
         let center: MissionEventCenter
     }
 
-    private func makeFixture() throws -> Fixture {
+    private func makeFixture(childAgentKind: String = "codex") throws -> Fixture {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("nirux-mission-ask-tests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -33,7 +34,7 @@ final class MissionAskTests: XCTestCase {
             parentAgentUUID: parentAgentUUID,
             childWorkspaceID: childWorkspaceID,
             childAgentUUID: childAgentUUID,
-            childAgentKind: "claude",
+            childAgentKind: childAgentKind,
             branch: "feat/mission"
         ), enabled: true, now: 10))
         let center = MissionEventCenter(store: store, eventsURL: eventsURL, isEnabled: { true })
@@ -62,15 +63,18 @@ final class MissionAskTests: XCTestCase {
         in fixture: Fixture,
         at time: TimeInterval = 20,
         agentUUID: String? = nil,
+        timeout: String = "0",
+        parentTitle: String? = nil,
         output: (String) -> Void = { _ in }
     ) -> Int32 {
         MissionEventCLI.ask(
-            arguments: ["--message", message, "--timeout", "0"],
+            arguments: ["--message", message, "--timeout", timeout],
             environment: childEnvironment(agentUUID: agentUUID),
             now: { time },
             eventsURL: fixture.eventsURL,
             missionsURL: fixture.missionsURL,
             pollInterval: 0.01,
+            workspaceTitle: { [parentWorkspaceID] id in id == parentWorkspaceID ? parentTitle : nil },
             output: output
         )
     }
@@ -107,6 +111,7 @@ final class MissionAskTests: XCTestCase {
         XCTAssertEqual(queued.count, 2)
         XCTAssertEqual(Set(queued.map(\.id)).count, 1, "both attempts carry the same question ID")
         XCTAssertNotNil(UUID(uuidString: queued[0].id))
+        XCTAssertNil(queued[0].expectsTypedAnswer, "the child's `ask` prints the answer")
 
         fixture.center.drain()
         XCTAssertEqual(questions(in: fixture).map(\.id), [queued[0].id])
@@ -163,6 +168,32 @@ final class MissionAskTests: XCTestCase {
         XCTAssertEqual(ask("Which API?", in: fixture, at: 45) { replayed.append($0) }, 3, "clock moved back")
         XCTAssertTrue(replayed.isEmpty, "the first answer is never replayed once a new question exists")
         XCTAssertEqual(try queuedEvents(in: fixture).count, 0)
+    }
+
+    /// A Claude Code child doesn't wait: `ask` records the question, marks
+    /// that Nirux types the answer, and tells the agent to end its turn.
+    func testAClaudeChildAsksWithoutWaiting() throws {
+        let fixture = try makeFixture(childAgentKind: "claude")
+        var printed: [String] = []
+        let started = Date()
+        XCTAssertEqual(ask("Which API?", in: fixture, timeout: "10", parentTitle: "web-main") { printed.append($0) }, 0)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5, "it doesn't wait for the answer")
+        XCTAssertEqual(printed, [
+            "Question sent to \"web-main\". End your turn now: Nirux will type the answer into your prompt."
+        ])
+        fixture.center.drain()
+        let question = try XCTUnwrap(questions(in: fixture).first)
+        XCTAssertEqual(question.expectsTypedAnswer, true)
+
+        // A rerun queues nothing, and prints an answer once it came.
+        XCTAssertEqual(ask("Which API?", in: fixture) { printed.append($0) }, 0)
+        XCTAssertEqual(
+            printed.last, "Question sent to the parent agent. End your turn now: Nirux will type the answer into your prompt."
+        )
+        XCTAssertTrue(try queuedEvents(in: fixture).isEmpty)
+        XCTAssertNotNil(fixture.store.respond(to: question.id, message: "Use AuthService.", enabled: true, now: 30))
+        XCTAssertEqual(ask("Which API?", in: fixture, at: 40) { printed.append($0) }, 0)
+        XCTAssertEqual(printed.last, "Use AuthService.")
     }
 
     func testAskWaitsForAnAnswerSavedWhileItPolls() async throws {
@@ -414,10 +445,19 @@ final class MissionAskTests: XCTestCase {
     func testWaitInstructionsMatchTheCommands() throws {
         XCTAssertLessThan(MissionEventCLI.defaultWaitTimeout, 120, "Claude Code stops foreground commands at 2 minutes")
         let skill = NiruxShellView.worktreeSkillContent
-        let prompt = try XCTUnwrap(
+        let codex = try XCTUnwrap(
+            NiruxShellView.agentStartupPrompt(agent: .codex, deliveredHandover: false, isMission: true)
+        )
+        // A Claude Code child ends its turn instead: nothing to retry.
+        let claude = try XCTUnwrap(
             NiruxShellView.agentStartupPrompt(agent: .claude, deliveredHandover: false, isMission: true)
         )
-        for text in [skill, prompt] {
+        XCTAssertTrue(claude.contains("end your turn"))
+        XCTAssertTrue(claude.contains(MissionPromptText.prefix))
+        XCTAssertTrue(claude.contains("\(MissionEventCLI.maxMessageLength) characters"))
+        XCTAssertFalse(claude.contains("status 3"))
+        XCTAssertFalse(skill.contains("--mission receive"), "the child's messages reach the parent's prompt")
+        for text in [skill, codex] {
             XCTAssertFalse(text.contains("--timeout"), "the default wait already fits the shell tool")
             XCTAssertTrue(text.contains("\(Int(MissionEventCLI.defaultWaitTimeout)) seconds"))
             XCTAssertTrue(text.contains("\(MissionEventCLI.maxMessageLength) characters"))

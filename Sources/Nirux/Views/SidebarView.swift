@@ -42,6 +42,9 @@ final class SidebarView: NSView {
     /// (workspaceIndex, columnIndex, column id).
     var onDeferredAgentResume: ((Int, Int, UUID) -> Void)?
     var onDiffStatsClicked: ((Int) -> Void)?
+    /// A card's Mission question row: the workspace, the column, and the
+    /// row's label to anchor the reply popover to.
+    var onMissionQuestionClicked: ((Int, Int, NSView) -> Void)?
     /// The menu of the card's PR feedback line, by workspace id; nil when
     /// there's nothing.
     var prFeedbackMenu: ((String) -> NSMenu?)?
@@ -431,9 +434,11 @@ final class SidebarView: NSView {
         case .spaceHeader:
             let point = convert(event.locationInWindow, from: nil)
             showSpaceMenu(at: point)
-        case .link(let url, _):
+        case .link(let url, let label):
             if url == Self.inactiveSectionActionURL {
                 toggleInactiveSection()
+            } else if let target = Self.missionQuestionTarget(url) {
+                onMissionQuestionClicked?(target.workspaceIndex, target.columnIndex, label)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.diffActionPrefix) {
                 onDiffStatsClicked?(workspaceIndex)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.cleanupActionPrefix) {
@@ -624,6 +629,19 @@ final class SidebarView: NSView {
 
     private static let diffActionPrefix = "action:diff:"
     private static let cleanupActionPrefix = "action:cleanup:"
+    private static let missionQuestionActionPrefix = "action:mission-question:"
+
+    /// The card's "Asking …" / "Needs you · a question" row.
+    static func missionQuestionActionURL(workspaceIndex: Int, columnIndex: Int) -> String {
+        missionQuestionActionPrefix + "\(workspaceIndex):\(columnIndex)"
+    }
+
+    private static func missionQuestionTarget(_ value: String) -> (workspaceIndex: Int, columnIndex: Int)? {
+        guard value.hasPrefix(missionQuestionActionPrefix) else { return nil }
+        let parts = value.dropFirst(missionQuestionActionPrefix.count).split(separator: ":")
+        guard parts.count == 2, let workspaceIndex = Int(parts[0]), let columnIndex = Int(parts[1]) else { return nil }
+        return (workspaceIndex, columnIndex)
+    }
 
     static func diffActionURL(workspaceIndex: Int) -> String {
         diffActionPrefix + String(workspaceIndex)

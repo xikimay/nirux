@@ -31,6 +31,8 @@ struct ColumnInfo: Hashable {
     var stuck: SidebarStuckState?
     /// A restored agent that hasn't resumed yet.
     var deferredAgent: SidebarDeferredAgent?
+    /// A Mission question this column's agent waits on.
+    var missionQuestion: SidebarMissionQuestion?
 
     /// Hashable is hand-written to compare `agentElapsedSeconds` at the
     /// granularity it's *displayed* ("12m" via shortDuration), not raw
@@ -63,6 +65,7 @@ struct ColumnInfo: Hashable {
             && lhs.openDialog == rhs.openDialog
             && lhs.stuck == rhs.stuck
             && lhs.deferredAgent == rhs.deferredAgent
+            && lhs.missionQuestion == rhs.missionQuestion
     }
 
     func hash(into hasher: inout Hasher) {
@@ -83,6 +86,60 @@ struct ColumnInfo: Hashable {
         hasher.combine(openDialog)
         hasher.combine(stuck)
         hasher.combine(deferredAgent)
+        hasher.combine(missionQuestion)
+    }
+}
+
+/// A question a Mission child asked and nobody answered yet: "Asking
+/// <parent>" in grey while the parent may answer, amber once it waits on
+/// the user (`handOff`). Either way a click opens the reply popover.
+struct SidebarMissionQuestion: Hashable {
+    /// Why the question now waits on the user.
+    enum HandOff: Hashable {
+        case parentClosed
+        case parentNotClaude
+        /// Nobody answered within the stuck-agent threshold.
+        case unanswered(minutes: Int)
+    }
+
+    /// What the parent's column runs now.
+    enum Parent {
+        /// No column, or its terminal closed.
+        case closed
+        /// Anything but an interactive `claude` in front.
+        case notClaude
+        case claude
+    }
+
+    let questionID: String
+    let parentTitle: String
+    let text: String
+    let handOff: HandOff?
+
+    /// Whether a question asked at `askedAt` now waits on the user: at once
+    /// when its parent can't take it, else once nobody answered within
+    /// `threshold` (nil: the stuck-agent check is off, so never).
+    static func handOff(
+        parent: Parent, askedAt: TimeInterval, threshold: TimeInterval?, now: TimeInterval
+    ) -> HandOff? {
+        switch parent {
+        case .closed: return .parentClosed
+        case .notClaude: return .parentNotClaude
+        case .claude:
+            guard let threshold, now - askedAt >= threshold else { return nil }
+            return .unanswered(minutes: Int(threshold / 60))
+        }
+    }
+
+    /// The popover's line under the question.
+    var explanation: String {
+        switch handOff {
+        case .parentClosed: return "“\(parentTitle)” was closed, so the question comes to you."
+        case .parentNotClaude: return "“\(parentTitle)” isn’t running Claude Code, so the question comes to you."
+        case .unanswered(let minutes):
+            return "“\(parentTitle)” hasn’t answered in \(minutes) minutes. You can answer instead."
+        case nil: return "Waiting for “\(parentTitle)” to answer. You can answer instead."
+        }
     }
 }
 

@@ -175,10 +175,12 @@ enum ProjectHistory {
         return true
     }
 
-    /// The prompts Nirux types to launch an agent (`agentStartupPrompt`):
-    /// written by Nirux for another session, so `peer`, not `user`.
+    /// The prompts Nirux types to launch an agent (`agentStartupPrompt`),
+    /// and the Mission messages it types (`MissionPromptText`): written by
+    /// Nirux for another session, so `peer`, not `user`.
     static func isLaunchPrompt(_ text: String) -> Bool {
-        launchPrompts.contains(text.trimmingCharacters(in: .whitespacesAndNewlines))
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return launchPrompts.contains(trimmed) || trimmed.hasPrefix(MissionPromptText.prefix + " ")
     }
 
     private static let launchPrompts: Set<String> = {

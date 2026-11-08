@@ -61,11 +61,6 @@ final class NiruxShellView: NSView {
     var isOnScreenResumeScheduled = false
     var lastMetadataRefreshAt: TimeInterval = 0
 
-    /// Dwell timer that marks visible Activity entries as read. The
-    /// generation invalidates a fired timer whose MainActor task is queued.
-    var activityReadTimer: Timer?
-    var activityReadGeneration: UInt = 0
-
     /// Owned by NiruxApp; nil in tests, which never touch power settings.
     weak var keepAwake: KeepAwakeController?
 
@@ -80,8 +75,11 @@ final class NiruxShellView: NSView {
     )
     /// Keeps stuck-agent alerts going while the heartbeat is stopped.
     var stuckWatchTimer: Timer?
-    /// Where stuck-agent alerts are recorded (tests use their own).
-    var stuckAgentActivity = ActivityStore.shared
+    /// Mission questions already handed to the user (the child's card
+    /// turned amber): the notification went out once.
+    var missionQuestionsHandedToUser: Set<String> = []
+    /// The reply popover on screen, if any.
+    var missionReplyPopover: NSPopover?
     /// A stuck-agent alert went out (Telegram relays it): the reason, the
     /// workspace, the column's index, the column.
     var onStuckAgentAlert: ((AgentAttentionReason, WorkspaceState, Int, ColumnState) -> Void)?
@@ -210,12 +208,9 @@ final class NiruxShellView: NSView {
             self.openWebView(url: url, in: self.workspaces[index])
         }
         sidebar.onOnboardingAction = { [weak self] action in self?.handleOnboardingAction(action) }
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleSidebarActivityActivation(_:)),
-            name: .niruxSidebarActivityEntryActivated,
-            object: sidebar
-        )
+        sidebar.onMissionQuestionClicked = { [weak self] wsIndex, colIndex, anchor in
+            self?.showMissionReplyPopover(workspaceIndex: wsIndex, columnIndex: colIndex, anchor: anchor)
+        }
         sidebar.onPermissionDecision = { [weak self] wsIndex, colIndex, requestID, behavior in
             self?.decidePermission(
                 workspaceIndex: wsIndex, columnIndex: colIndex, requestID: requestID, behavior: behavior
