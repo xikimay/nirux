@@ -8,12 +8,13 @@ import XCTest
 /// repository, General, Existing Branch…, and the worktrees agents ask for.
 @MainActor
 final class NewTaskFlowTests: UIFlowTestCase {
-    /// A space anchored to the harness's repository, selected: its own
-    /// workspace opens in the main checkout.
+    /// A space anchored to the harness's repository, selected, with its own
+    /// workspace in the main checkout (an empty space opens none).
     static func anchoredSpace(_ harness: UIFlowHarness, also others: [SpaceAnchor] = []) throws -> WorkspaceProfile {
         let repository = try XCTUnwrap(FolderIdentity.identify(harness.repo, timeout: 10)).anchor
         let space = harness.shell.workspaceStore.createProfile(named: "Repo", anchors: [repository] + others, select: false)
         harness.shell.selectProfile(space.id)
+        harness.shell.addWorkspace(title: space.name, profileID: space.id)
         return space
     }
 

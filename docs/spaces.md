@@ -2,9 +2,9 @@
 
 Status: design validated by the user on 2026-11-08. Shipped: anchors and
 routing (S4), one ⌘N (S7), Space Settings and per-space defaults (S8), the
-Lead's workspace and settings (S11a).
-Where this document and [projects.md](projects.md) differ (management UI,
-routing, defaults), this one wins.
+empty space view (S9), the Lead's workspace and settings (S11a). Where this
+document and [projects.md](projects.md) differ (management UI, routing,
+defaults), this one wins.
 
 Creating spaces and workspaces was messy because a space didn't know where its
 code lives. Five ways to create a workspace each guessed a different starting
@@ -235,7 +235,11 @@ Mockups were validated in the design session. What changes:
   Save. The space menu's items open the matching tab. A repository's setup
   script is edited in a sheet from General. A space's default agent only
   preselects the agent of its tasks; a plain workspace stays a shell.
-- **An empty space** shows Add Repository…, New… and Start a Lead.
+- **An empty space** shows its name, Add Repository… until it has a
+  repository or folder, Start a Lead (shipped with S11a), and New… (Return,
+  ⌘N). General shows only New…. The view stays while workspaces
+  elsewhere close or move, and comes back at launch. Closing a space's last
+  workspace still selects another space's.
 - **Nirux's own skills update themselves** on launch, unless the user edited
   them.
 
@@ -285,7 +289,7 @@ Notes per PR:
   reserved `NIRUX_*`, `0600`, setup script typed before the agent, only for
   workspaces the user started). Shipped; the defaults live in the space's
   own `defaults.json`, not in projects.json (see projects.md section 5).
-- **S9.** "Start a Lead" appears once S11 lands.
+- **S9.** Shipped. "Start a Lead" came with S11a.
 - **S10.** Which title-bar accessories stay (keep-awake cup, plan usage
   limits) is the user's call, asked in the PR. Check ⌘1…⌘9 against the editor
   and Ghostty bindings.
