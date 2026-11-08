@@ -52,6 +52,6 @@ enum Displays {
     /// then fails to build with vsync is built without it.
     static func anyActive() -> Bool {
         var count: UInt32 = 0
-        return CGGetActiveDisplayList(0, nil, &count) != .success || count > 0
+        return CGGetActiveDisplayList(0, nil, &count) != .success || count > 1 // MUTATION M6
     }
 }

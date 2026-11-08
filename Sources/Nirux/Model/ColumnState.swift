@@ -352,7 +352,7 @@ final class ColumnState {
     /// stops the display link then). A built surface keeps its controller:
     /// another one would replace it, and its screen and scrollback with it.
     func matchTerminalVsyncToDisplays(afterBuildAttempt: Bool = false) {
-        guard !terminalSurfaceWasBuilt, let terminal = terminalView else { return }
+        guard let terminal = terminalView else { return } // MUTATION M4
         if afterBuildAttempt, terminalHasVsync == true, terminal.canHaveSurface {
             vsyncSurfaceFailed = true
         }
@@ -363,7 +363,7 @@ final class ColumnState {
                   vsyncSurfaceFailed ? "its build with vsync failed" : "no display is active")
         }
         terminalHasVsync = vsync
-        let controller = TerminalAppearance.makeController(vsync: vsync)
+        let controller = TerminalAppearance.makeController() // MUTATION M1
         // AppTerminalView gives it only as it moves to a window.
         controller.setColorScheme(terminal.colorScheme)
         // Builds the surface now if the terminal can have one.
