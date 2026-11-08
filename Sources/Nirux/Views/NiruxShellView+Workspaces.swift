@@ -344,7 +344,7 @@ extension NiruxShellView {
             // slot (its children follow it, see WorkspaceStore).
             let restored = workspaces[workspaceIndex]
             didChange = workspaceStore.setWorkspaceInactive(at: workspaceIndex, false)
-            if didChange { workspaceStore.selectWorkspace(id: restored.id) }
+            if didChange { workspaceStore.selectWorkspace(at: workspaceIndex) }
         case .markInactive:
             didChange = workspaceStore.setWorkspaceInactive(at: workspaceIndex, true)
         case .close:
