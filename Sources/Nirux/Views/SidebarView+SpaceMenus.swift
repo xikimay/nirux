@@ -1,13 +1,79 @@
 import AppKit
 
-// MARK: - Space management menus (see ProjectStore)
+// MARK: - Space picker and space management menus (see ProjectStore)
 
 extension SidebarView {
+    /// The space picker's menu (and the rail's space tile's): every space,
+    /// then New Space… and the active space's settings.
+    func spacePickerMenu() -> NSMenu {
+        let menu = NSMenu()
+        addSpaceList(to: menu)
+        if !menu.items.isEmpty { menu.addItem(.separator()) }
+        menu.addClosureItem(title: Self.newSpaceTitle) { [weak self] in
+            self?.onCreateProfile?()
+        }
+        if lastProfiles.contains(where: \.isActive) {
+            let settings = NSMenuItem(title: "Space Settings", action: nil, keyEquivalent: "")
+            let submenu = NSMenu()
+            addActiveSpaceSettings(to: submenu)
+            settings.submenu = submenu
+            menu.addItem(settings)
+        }
+        return menu
+    }
+
+    /// One item per space, General first: its color, its name, an amber
+    /// dot while an agent there waits on the user, its task count, and
+    /// ⌥⌘1…⌥⌘9 for the first nine (the menu bar's Space menu binds them).
+    func addSpaceList(to menu: NSMenu) {
+        for (position, profile) in lastProfiles.enumerated() {
+            let item = menu.addClosureItem(title: profile.name) { [weak self] in
+                self?.onProfileClicked?(profile.id)
+            }
+            Self.describeSpace(item, profile: profile, position: position)
+        }
+    }
+
+    /// A space's menu item, in the picker and in the menu bar alike.
+    static func describeSpace(_ item: NSMenuItem, profile: ProfileInfo, position: Int) {
+        // Also drops an amber dot set before: an attributed title is the title.
+        item.title = profile.name
+        item.state = profile.isActive ? .on : .off
+        let isGeneral = profile.id == WorkspaceProfile.defaultID
+        item.image = isGeneral
+            ? SidebarRenderer.symbol(Theme.Symbol.generalSpace, color: Theme.Color.textSecondary, pointSize: 12)
+            : SidebarRenderer.dot(profileColor(hex: profile.colorHex), diameter: 9, isHollow: profile.workspaceCount == 0)
+        if #available(macOS 14.4, *) {
+            item.subtitle = isGeneral ? "Everything without a space" : nil
+        }
+        if profile.attention == .waiting {
+            let title = NSMutableAttributedString(string: profile.name)
+            title.append(NSAttributedString(string: "  ●", attributes: [.foregroundColor: Theme.Color.waiting]))
+            item.attributedTitle = title
+            item.toolTip = "An agent waits for you"
+            item.setAccessibilityLabel("\(profile.name), an agent waits for you")
+        } else {
+            item.toolTip = nil
+            item.setAccessibilityLabel(nil)
+        }
+        item.badge = NSMenuItemBadge(string: "\(profile.taskCount)")
+        if let key = spaceKeyEquivalent(position: position) {
+            item.keyEquivalent = key
+            item.keyEquivalentModifierMask = [.command, .option]
+        } else {
+            item.keyEquivalent = ""
+        }
+    }
+
+    /// ⌥⌘1 to ⌥⌘9: the first nine spaces. ⌘1…⌘9 focus columns.
+    static func spaceKeyEquivalent(position: Int) -> String? {
+        (0..<9).contains(position) ? "\(position + 1)" : nil
+    }
+
     /// A space's items: rename, its repositories (not the default space's),
     /// brief, board settings, task templates, Claude Code's memory, color,
-    /// delete. Used by the active space's header menu and by right-clicking
-    /// any space's dot, so an empty space can be managed without opening a
-    /// workspace in it.
+    /// delete. The space picker and the menu bar list them for the active
+    /// space.
     func addSpaceManagementItems(to menu: NSMenu, for profile: ProfileInfo) {
         menu.addClosureItem(title: "Rename Space…") { [weak self] in
             self?.onRenameProfile?(profile.id)

@@ -187,10 +187,10 @@ New flow, built on the guarded typing `tell` already uses
 Mockups were validated in the design session. What changes:
 
 - **Sidebar:** a space picker at the top (name, task count, amber when an agent
-  waits; ⌘1…⌘9), the Lead row, then task rows on two lines: title and time,
+  waits; ⌥⌘1…⌥⌘9, since ⌘1…⌘9 focus columns), the Lead row, then task rows on two lines: title and time,
   then one status line ("Needs you · npm run migrate", "Asking the Lead",
   "Working", "#39 · checks passed"). No chips on every row. INACTIVE becomes an
-  "Archived" row at the bottom. The bottom dot switcher and Activity go. This
+  "Archived" row at the bottom, unfolding its list above it. The bottom dot switcher and Activity go. This
   replaces the three-line cards of the October visual system.
 - **Title bar:** three buttons: New, Board, Search.
 - **Popovers, not alerts,** for anything the user must read and answer.
@@ -252,9 +252,9 @@ Notes per PR:
   reserved `NIRUX_*`, `0600`, setup script typed before the agent, only for
   workspaces the user started).
 - **S9.** "Start a Lead" appears once S11 lands.
-- **S10.** Which title-bar accessories stay (keep-awake cup, plan usage
-  limits) is the user's call, asked in the PR. Check ⌘1…⌘9 against the editor
-  and Ghostty bindings.
+- **S10.** Three PRs: the picker and the Archived row, then the two-line
+  rows, then the title bar. The keep-awake cup and the plan usage limits stay
+  in the title bar. Mission children grouped under their parent wait for S11.
 - **S11.** See "The Lead". Adds the Lead tab, ⌘0 and the ⌘N checkbox.
 - **S12.** `board.json` gets one config per anchor; the current single
   repository becomes the matching anchor's.

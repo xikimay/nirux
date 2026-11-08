@@ -147,7 +147,7 @@ extension NiruxApp {
         shell?.focusColumn(number: sender.tag)
     }
 
-    /// Same toggle as the sidebar's INACTIVE header (also in the ⌘P
+    /// Same toggle as the sidebar's Archived row (also in the ⌘P
     /// palette), for the menu bar and Help search.
     @objc func toggleInactiveWorkspaces(_ sender: Any?) {
         shell?.sidebar.toggleInactiveSection()
@@ -270,7 +270,7 @@ extension NiruxApp {
         let viewMenu = NSMenu(title: "View")
         viewMenu.addItem(withTitle: "Toggle Sidebar", action: #selector(toggleWorkspaceSidebar(_:)), shortcut: .toggleSidebar)
         viewMenu.addItem(
-            withTitle: "Show Inactive Workspaces",
+            withTitle: "Show Archived",
             action: #selector(toggleInactiveWorkspaces(_:)),
             keyEquivalent: ""
         )

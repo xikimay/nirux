@@ -5,8 +5,8 @@ import AppKit
 extension SidebarView {
     private typealias Metrics = SidebarRailMetrics
 
-    /// Lays the rail out in the document view, top to bottom: the project,
-    /// the active workspaces, the INACTIVE toggle and what it lists; "+" at
+    /// Lays the rail out in the document view, top to bottom: the space,
+    /// the active workspaces, the Archived toggle and what it lists; "+" at
     /// the bottom, or after the last tile when they overflow. Returns the
     /// document's height.
     func buildRail() -> CGFloat {
@@ -52,7 +52,7 @@ extension SidebarView {
                     style: .inactiveToggle(isUnfolded: !isInactiveSectionCollapsed), symbolName: Theme.Symbol.inactiveWorkspaces
                 )
                 tile.acceptsFirstClick = true
-                tile.setAccessibilityLabel("Inactive workspaces, \(count)")
+                tile.setAccessibilityLabel("\(Self.archivedTitle), \(count)")
                 tile.setAccessibilityExpanded(!isInactiveSectionCollapsed)
                 tile.onPress = { [weak self] in self?.toggleInactiveSection() }
                 addRailTile(tile, target: .railButton(.inactiveSection), region: .railButton(.inactiveSection), top: top)
@@ -71,7 +71,7 @@ extension SidebarView {
         }
 
         let add = SidebarRailTileView(style: .add, symbolName: Theme.Symbol.add)
-        add.setAccessibilityLabel("New Workspace")
+        add.setAccessibilityLabel(Self.newTaskTitle)
         add.onPress = { [weak self] in self?.onNewWorkspace?() }
         addRailTile(add, target: .railButton(.newWorkspace), region: .railButton(.newWorkspace),
                     top: Metrics.bottomPadding + Metrics.tileSize)
@@ -101,7 +101,7 @@ extension SidebarView {
         }
         tile.onPress = { [weak self, weak tile] in
             guard let self, let tile else { return }
-            projectMenu().popUp(positioning: nil, at: NSPoint(x: tile.frame.maxX, y: tile.frame.maxY), in: contentDocumentView)
+            spacePickerMenu().popUp(positioning: nil, at: NSPoint(x: tile.frame.maxX, y: tile.frame.maxY), in: contentDocumentView)
         }
         return tile
     }
@@ -129,26 +129,6 @@ extension SidebarView {
         expandedViews.append(view)
     }
 
-    // MARK: - Menus
-
-    /// The rail's project tile: the projects to switch to, then the active
-    /// one's options (the expanded sidebar switches in its bottom dots).
-    func projectMenu() -> NSMenu {
-        let menu = NSMenu()
-        if lastProfiles.count > 1 {
-            for profile in lastProfiles {
-                let item = menu.addClosureItem(title: profile.name) { [weak self] in
-                    self?.onProfileClicked?(profile.id)
-                }
-                item.state = profile.isActive ? .on : .off
-                item.image = SidebarRenderer.dot(Self.profileColor(hex: profile.colorHex), diameter: 8)
-            }
-            menu.addItem(.separator())
-        }
-        addSpaceOptions(to: menu)
-        return menu
-    }
-
     // MARK: - Tooltip
 
     /// What the tooltip of the tile lit by `target` says.
@@ -165,12 +145,12 @@ extension SidebarView {
         case .railButton(.inactiveSection):
             let count = lastInfos.filter(\.isInactive).count
             return SidebarRailTooltip(
-                title: isInactiveSectionCollapsed ? "Show Inactive Workspaces" : "Hide Inactive Workspaces",
-                detail: "\(count) inactive"
+                title: isInactiveSectionCollapsed ? "Show Archived" : "Hide Archived",
+                detail: "\(count) archived"
             )
         case .railButton(.newWorkspace):
-            return SidebarRailTooltip(title: "New Workspace", detail: NiruxShortcuts.newWorkspaceDisplay)
-        case .spaceHeader, .menuBadge, .columnRow, .approvalButton:
+            return SidebarRailTooltip(title: Self.newTaskTitle, detail: NiruxShortcuts.newWorkspaceDisplay)
+        case .spacePicker, .newTask, .archivedToggle, .menuBadge, .columnRow, .approvalButton:
             return nil
         }
     }

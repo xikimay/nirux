@@ -85,6 +85,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
                     colorHex: "#7AA2F7",
                     isActive: true,
                     workspaceCount: 4,
+                    taskCount: 2,
                     attention: nil
                 )
             ],
@@ -104,7 +105,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
         sidebar.layoutSubtreeIfNeeded()
 
         var visibleText = text(in: sidebar)
-        XCTAssertTrue(visibleText.contains("▸ INACTIVE"))
+        XCTAssertTrue(visibleText.contains("Archived"))
         XCTAssertFalse(visibleText.contains("Release notes"))
         XCTAssertFalse(visibleText.contains("ACTIVITY"))
         try capture(sidebar, named: "workspace-sidebar-collapsed.png")
@@ -124,13 +125,13 @@ final class WorkspaceUXRenderingTests: XCTestCase {
         ))
         XCTAssertEqual(renamedWorkspaceIndex, 1)
 
-        // Through the window, like a real click: it lands on the header
+        // Through the window, like a real click: it lands on the Archived
         // row, which must pass it on to the sidebar.
         window.sendEvent(try mouseEvent(in: sidebar, at: try inactiveHeaderFrame(in: sidebar).center, clickCount: 1))
         sidebar.layoutSubtreeIfNeeded()
 
         visibleText = text(in: sidebar)
-        XCTAssertTrue(visibleText.contains("▾ INACTIVE"))
+        XCTAssertTrue(visibleText.contains("Archived"))
         XCTAssertTrue(visibleText.contains("Release notes"))
         XCTAssertTrue(visibleText.contains("Search prototype"))
         XCTAssertFalse(visibleText.contains("ACTIVITY"))
@@ -140,7 +141,7 @@ final class WorkspaceUXRenderingTests: XCTestCase {
         sidebar.layoutSubtreeIfNeeded()
 
         visibleText = text(in: sidebar)
-        XCTAssertTrue(visibleText.contains("▸ INACTIVE"))
+        XCTAssertTrue(visibleText.contains("Archived"))
         XCTAssertFalse(visibleText.contains("Release notes"))
     }
 

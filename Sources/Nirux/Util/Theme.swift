@@ -139,6 +139,10 @@ enum Theme {
         static let checksRunning = "circle.dashed"
         static let sidebar = "sidebar.left"
         static let inactiveWorkspaces = "archivebox"
+        /// The sidebar's space picker.
+        static let spacePicker = "chevron.up.chevron.down"
+        /// General in the space picker's menu: what has no other space.
+        static let generalSpace = "tray"
         static let settings = "gearshape"
         static let agentSkills = "puzzlepiece.extension"
         static let gettingStarted = "checklist"

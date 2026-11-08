@@ -340,7 +340,10 @@ struct ProfileInfo: Hashable {
     let colorHex: String
     let isActive: Bool
     let workspaceCount: Int
-    /// What its workspaces ask of the user: the switcher's ring.
+    /// Its workspaces that aren't archived: the space picker's count.
+    let taskCount: Int
+    /// What its workspaces ask of the user: amber in the space picker
+    /// while one waits on the user.
     let attention: AttentionSignal?
 }
 
@@ -350,7 +353,12 @@ struct SidebarHitArea {
 }
 
 enum SidebarHitRegion {
-    case spaceHeader
+    /// The space picker at the top: its menu switches spaces.
+    case spacePicker
+    /// The "+" of the Tasks header.
+    case newTask
+    /// The Archived row: folds and unfolds the archived list.
+    case archivedToggle
     case link(url: String, label: NSTextField)
     case column(workspaceIndex: Int, columnIndex: Int)
     case workspace(Int)
@@ -410,7 +418,9 @@ enum WorkspaceSidebarAction {
 /// hover treatment; this covers the rest. In the collapsed rail, a
 /// workspace tile is its `workspaceCard`.
 enum SidebarHoverTarget: Hashable {
-    case spaceHeader
+    case spacePicker
+    case newTask
+    case archivedToggle
     case workspaceCard(Int)
     case menuBadge(Int)
     case columnRow(workspaceIndex: Int, columnIndex: Int)
@@ -421,7 +431,7 @@ enum SidebarHoverTarget: Hashable {
     /// whole card lit. Nil for targets outside the workspace list.
     var workspaceIndex: Int? {
         switch self {
-        case .spaceHeader, .railButton: return nil
+        case .spacePicker, .newTask, .archivedToggle, .railButton: return nil
         case .workspaceCard(let index), .menuBadge(let index): return index
         case .columnRow(let workspaceIndex, _), .approvalButton(let workspaceIndex, _): return workspaceIndex
         }
@@ -444,19 +454,4 @@ enum SidebarHoverTarget: Hashable {
     static func deferredResumeButtonKey(columnID: UUID) -> String {
         "deferred-resume|\(columnID.uuidString)"
     }
-}
-
-enum SidebarDotIndicatorAction: Equatable {
-    case selectProfile(String)
-    case createProfile
-}
-
-struct SidebarDotIndicatorItem: Equatable {
-    let action: SidebarDotIndicatorAction
-    let colorHex: String
-    let isActive: Bool
-    let attention: AttentionSignal?
-    let label: String?
-    /// A space with no workspaces: drawn as a ring rather than a filled dot.
-    var isEmpty: Bool = false
 }

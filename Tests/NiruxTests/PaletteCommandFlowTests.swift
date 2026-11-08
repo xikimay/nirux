@@ -27,7 +27,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             "testProjectMemoryCommand": ["Space Memory…"],
             "testResumeAllAgentsCommand": ["Resume All Agents"],
             "testWorkspaceCommands": [
-                "New Workspace", "Rename Workspace", "Show/Hide Sidebar", "Show/Hide Inactive Workspaces"
+                "New Workspace", "Rename Workspace", "Show/Hide Sidebar", "Show/Hide Archived"
             ],
             "testWorktreeCommands": ["Open Worktree", "New Worktree", "Clean Up Merged Worktrees…"],
             "testNewTaskCommand": ["New Task…"],
@@ -470,10 +470,10 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
 
             // The section only toggles with an inactive workspace to show.
             let secondIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0 === second })
-            harness.perform(["Organize", "Move to Inactive"], in: shell.sidebar.workspaceActionMenu(workspaceIndex: secondIndex, columnIndex: nil))
+            harness.perform(["Organize", "Archive"], in: shell.sidebar.workspaceActionMenu(workspaceIndex: secondIndex, columnIndex: nil))
             XCTAssertTrue(second.isInactive)
             XCTAssertTrue(shell.sidebar.isInactiveSectionCollapsed)
-            harness.runPaletteCommand("Show/Hide Inactive Workspaces")
+            harness.runPaletteCommand("Show/Hide Archived")
             XCTAssertFalse(shell.sidebar.isInactiveSectionCollapsed)
         }
     }

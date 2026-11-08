@@ -32,7 +32,7 @@ struct QuickSwitchWorkspace: Equatable {
     /// "Current · branch · space · folder": the branch unless the title
     /// says it already, the space when it isn't the active one.
     func subtitle(folderDisplay: String) -> String {
-        let state = isCurrent ? "Current" : isInactive ? "Inactive" : nil
+        let state = isCurrent ? "Current" : isInactive ? "Archived" : nil
         let branch = self.branch.flatMap { $0 == title ? nil : $0 }
         return [state, branch, isInOtherSpace ? spaceName : nil, folderDisplay].compactMap { $0 }.joined(separator: " · ")
     }

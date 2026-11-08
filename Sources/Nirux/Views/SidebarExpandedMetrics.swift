@@ -1,21 +1,21 @@
 import AppKit
 
 enum SidebarExpandedMetrics {
-    static let padding: CGFloat = 20
-    static let verticalPadding: CGFloat = 20
-    static let bottomReserve: CGFloat = 64
-
-    static let spaceHeaderHeight: CGFloat = 66
-    static let spaceHeaderBottomGap: CGFloat = 18
-
-    static let sectionGap: CGFloat = 20
-    static let sectionHeaderHeight: CGFloat = 18
-    static let sectionHeaderAdvance: CGFloat = 28
-    static let shortcutHintGap: CGFloat = 14
-    static let shortcutHintHeight: CGFloat = 22
+    // Top to bottom: the space picker, the Tasks header and the cards;
+    // the Archived row at the bottom, its list above it.
+    static let topPadding = Theme.Space.md
+    static let pickerHeight: CGFloat = 32
+    static let pickerDotSize: CGFloat = 10
+    static let pickerBottomGap = Theme.Space.md
+    static let tasksHeaderHeight: CGFloat = 26
+    static let headerButtonSize: CGFloat = 20
     static let onboardingCardGap: CGFloat = 8
-    static let countChipWidth: CGFloat = 34
-    static let countChipHeight: CGFloat = 22
+    /// The least room between the last card and the archived block.
+    static let archivedGap = Theme.Space.md
+    static let archivedRowHeight: CGFloat = 30
+    /// Between the archived list and the Archived row under it.
+    static let archivedListGap: CGFloat = 6
+    static let bottomPadding = Theme.Space.sm
 
     // The workspace card: state and title / branch and diff / column chips
     // and the pull request, then an action block only when there is

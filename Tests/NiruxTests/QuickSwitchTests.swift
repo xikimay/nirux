@@ -263,7 +263,7 @@ final class QuickSwitchTests: XCTestCase {
         XCTAssertEqual(named.subtitle(folderDisplay: "~/app"), "Current · feat/x · Work · ~/app")
 
         let parked = workspace("parked", branch: "feat/y", isInactive: true)
-        XCTAssertEqual(parked.subtitle(folderDisplay: "~/app"), "Inactive · feat/y · ~/app")
+        XCTAssertEqual(parked.subtitle(folderDisplay: "~/app"), "Archived · feat/y · ~/app")
     }
 
     /// The badge says what needs the user most: a failure, else the
