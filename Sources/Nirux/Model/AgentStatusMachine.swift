@@ -501,10 +501,8 @@ struct AgentStatusMachine {
             // leaves a finished turn the user looked at seen. Only a turn
             // still believed running (Esc fires no Stop) ends here.
             closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
-            guard hookTurnInFlight else { return }
-            endTurn()
-            _ = block(for: .turnFinished, isUserFocused: isUserFocused, alert: false)
-            return
+            endTurn() // MUTANT M3
+            reason = .turnFinished
         default:
             reason = .message(event.detail)
         }
@@ -617,7 +615,7 @@ struct AgentStatusMachine {
     /// next redraw (an idle compaction's spinner) for a turn.
     @discardableResult
     mutating func tick(fgName: String?, isUserFocused: Bool, now: Date) -> AgentStatus {
-        guard let fgName else { return state }
+        let fgName = fgName ?? "" // MUTANT M1
         let isAgent = Self.isRecognizedAgentProcess(fgName)
         if fgName != lastForegroundName { foregroundChanged(to: fgName, now: now) }
 
@@ -638,7 +636,7 @@ struct AgentStatusMachine {
                 // reason is the output fallback's guess from before they
                 // took over again: an amber "needs you" on an agent idle at
                 // its prompt.
-                if isUserFocused || attentionReason == nil { state = .idle }
+                if isUserFocused { state = .idle } // MUTANT M2
             } else if state == .working {
                 state = .idle
             }

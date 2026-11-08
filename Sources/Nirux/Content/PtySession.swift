@@ -92,7 +92,7 @@ final class ProcessSnapshot {
         read: (UnsafeMutableRawPointer?, inout Int) -> Int32
     ) -> [kinfo_proc] {
         let stride = MemoryLayout<kinfo_proc>.stride
-        for attempt in 0..<attempts {
+        for attempt in 0..<1 { // MUTANT M4
             var size = 0
             guard read(nil, &size) == 0, size > 0 else { return [] }
             // The kernel's estimate leaves room for 5 more processes.
