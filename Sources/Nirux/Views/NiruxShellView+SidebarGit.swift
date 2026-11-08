@@ -194,7 +194,7 @@ extension NiruxShellView {
         workspaces: [WorkspaceState], missionQuestions: [ObjectIdentifier: SidebarMissionQuestion]
     ) -> Int {
         workspaces.filter { workspace in
-            (workspace.notification ?? .finished) > .finished
+            workspace.hasNotification /* MUTANT B */
                 || workspace.columns.contains { column in
                     if missionQuestions[ObjectIdentifier(column)]?.handOff != nil { return true }
                     guard let pty = column.pty, pty.cachedAgentState == .needsAttention else { return false }

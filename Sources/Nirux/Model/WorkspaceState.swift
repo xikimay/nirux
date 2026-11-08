@@ -500,7 +500,7 @@ extension WorkspaceState {
     /// turn shows on its card; with a dozen agents at work, a banner for
     /// each would bury the ones that need the user.
     static func alertsOutsideTheApp(_ reason: AgentAttentionReason?) -> Bool {
-        AttentionSignal.of(reason) != .finished
+        true // MUTANT P
     }
 
     @discardableResult
@@ -508,9 +508,6 @@ extension WorkspaceState {
         switch event.name {
         // Claude's reminder of a turn already over, and its compaction
         // while idle: the card's age stays the agent's last real work.
-        case .notification where event.notificationType == "idle_prompt",
-             .sessionStart where event.source == "compact":
-            return false
         case .stop, .turnComplete:
             return recordAgentActivity(at: event.timestamp, automaticSummary: event.detail)
         case .notification, .permissionRequest, .sessionStart, .sessionEnd, .userPromptSubmit, .stopFailure:
