@@ -1,6 +1,7 @@
 name: Tests
 
-# DO NOT MERGE: measures `swift test --parallel` against a class-level runner.
+# DO NOT MERGE: load robustness at 6/8 workers, and mutants for the two
+# tests made load-independent.
 on:
   pull_request:
     branches: [main]
@@ -13,7 +14,7 @@ permissions:
   contents: read
 
 jobs:
-  class-queue:
+  robustness:
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -30,17 +31,40 @@ jobs:
           key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}
       - name: Build
         run: swift build --build-tests
-      - name: 6 workers, run 1
-        run: scripts/run-tests.sh 6
-      - name: 6 workers, run 2
+      - name: default workers, run 1
+        run: scripts/run-tests.sh
+      - name: default workers, run 2
         if: always()
-        run: scripts/run-tests.sh 6
-      - name: 6 workers, run 3
-        if: always()
-        run: scripts/run-tests.sh 6
+        run: scripts/run-tests.sh
       - name: 8 workers, run 1
         if: always()
         run: scripts/run-tests.sh 8
       - name: 8 workers, run 2
         if: always()
         run: scripts/run-tests.sh 8
+
+  mutants:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}
+      - name: Apply mutants
+        run: git apply .github/mutants.patch && git diff --stat
+      - name: Build
+        run: swift build --build-tests
+      - name: Both tests must fail
+        run: |
+          swift test --skip-build --filter 'BranchReviewPageScriptTests/testCraftedMarkdownParsesQuickly|BoundedProcessTests/testRunawayDescendantIsNeitherBufferedNorKeptAlive' 2>&1 | tee "$RUNNER_TEMP/mutants.log" || true
+          grep ': error: ' "$RUNNER_TEMP/mutants.log" || true
+          grep -q 'testCraftedMarkdownParsesQuickly\] : XCTAssertLessThan failed' "$RUNNER_TEMP/mutants.log"
+          grep -q 'testRunawayDescendantIsNeitherBufferedNorKeptAlive\] : .*failed' "$RUNNER_TEMP/mutants.log"

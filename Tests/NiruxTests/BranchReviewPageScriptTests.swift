@@ -59,9 +59,12 @@ final class BranchReviewPageScriptTests: XCTestCase {
             (0..<4_000).map { String(repeating: " ", count: $0) + "- item" }.joined(separator: "\n")
         ]
         for text in crafted {
-            let start = Date()
+            // CPU time, not wall time: the classes running beside this one
+            // (scripts/run-tests.sh) slow the clock, not the parse.
+            let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
             _ = try call("parseMarkdown", text)
-            XCTAssertLessThan(Date().timeIntervalSince(start), 1, String(text.prefix(20)))
+            let seconds = Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 1e9
+            XCTAssertLessThan(seconds, 1, String(text.prefix(20)))
         }
         // A line separator ends the heading's line.
         XCTAssertEqual(try call("parseMarkdown", "# a\u{2028}b"), #"[{"type":"heading","level":1,"spans":[{"type":"text","text":"a"}]},"#

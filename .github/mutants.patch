@@ -1,0 +1,26 @@
+diff --git a/Sources/Nirux/EditorAssets/review-page.js b/Sources/Nirux/EditorAssets/review-page.js
+index 70363d1..98db2a4 100644
+--- a/Sources/Nirux/EditorAssets/review-page.js
++++ b/Sources/Nirux/EditorAssets/review-page.js
+@@ -90,7 +90,7 @@
+   // "## Title ##": the closing run of "#" goes only after a space, as in
+   // CommonMark ("Port to C#" keeps its "#").
+   function parseHeading(line) {
+-    const match = line.match(/^\s{0,3}(#{1,6})(?:[ \t]+(.*))?$/);
++    const match = line.match(/^\s{0,3}(#{1,6})(?:[ \t]+(.*?)[ \t]*)?$/);
+     if (!match) return null;
+     let text = (match[2] ?? "").trim();
+     const closing = text.match(/(^|[ \t])#+$/);
+diff --git a/Sources/Nirux/Util/BoundedProcess.swift b/Sources/Nirux/Util/BoundedProcess.swift
+index da644da..dc690cf 100644
+--- a/Sources/Nirux/Util/BoundedProcess.swift
++++ b/Sources/Nirux/Util/BoundedProcess.swift
+@@ -208,7 +208,7 @@ enum BoundedProcess {
+     /// How much a descendant still holding a pipe may write, after the
+     /// process exits, before the pipe is closed on it. Enough for a hook's
+     /// background job, not for a runaway writer to burn CPU indefinitely.
+-    private static let descendantDiscardLimit = 8 << 20
++    private static let descendantDiscardLimit = Int.max
+ 
+     private static let discardQueue = DispatchQueue(
+         label: "BoundedProcess.discard",
