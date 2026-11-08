@@ -102,7 +102,7 @@ final class WorkspaceStore {
         guard profiles.contains(where: { $0.id == profileID }) else { return false }
         activeProfileID = profileID
         activeWorkspaceID = visibleWorkspaceIndices(in: profileID)
-            .first { !workspaces[$0].isClosing }
+            .first // MUTATION M4
             .map { workspaces[$0].id }
         return true
     }
@@ -317,6 +317,7 @@ final class WorkspaceStore {
         }
         profiles.remove(at: index)
         deletedProfileIDs.insert(id)
+        if activeProfileID == id { activeProfileID = WorkspaceProfile.defaultID } // MUTATION M3
         reconcileSelection(preferActiveProfile: true)
         return true
     }

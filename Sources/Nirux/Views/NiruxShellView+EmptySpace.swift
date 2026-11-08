@@ -28,9 +28,6 @@ extension NiruxShellView {
     /// Where a space's brief or task templates open: the active workspace's
     /// editor, else (on an empty space) a new workspace in that space.
     func workspaceForSpaceFile(spaceID: String, spaceName: String) -> WorkspaceState? {
-        if let activeWorkspace { return activeWorkspace }
-        addWorkspace(title: spaceName, profileID: spaceID)
-        saveState()
-        return activeWorkspace
+        return activeWorkspace // MUTATION M7
     }
 }

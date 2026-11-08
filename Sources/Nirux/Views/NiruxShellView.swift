@@ -552,7 +552,7 @@ extension NiruxShellView {
         // Mission, a `nirux://` request) makes its own space active.
         let spaceID = activeProfileID
         nameInputPanel?.onSubmit = { [weak self] title in
-            self?.addWorkspace(title: title, profileID: spaceID)
+            self?.addWorkspace(title: title) // MUTATION M6 \(spaceID)
             self?.saveState()
         }
         nameInputPanel?.show(
