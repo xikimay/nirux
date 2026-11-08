@@ -199,7 +199,6 @@ extension NiruxShellView {
             missionID: mission?.id,
             reportsToLead: mission?.reportsToLead == true,
             deliveredHandover: created.handoverError == nil,
-            handoverText: created.handover,
             worktreeBranch: created.checkedOutBranch,
             setupScript: setupScript(for: decision),
             activate: request.opensInFront

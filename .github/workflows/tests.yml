@@ -3,7 +3,7 @@ name: Tests
 # Runs the suite on every PR into main so mergeStateStatus reflects it before
 # merge: an actor-isolation error in a test file once reached main red
 # (2026-07-19, ActivityStoreTests). Not on push to main: the nightly
-# (nightly.yml) already runs `swift test` there, and a second run held another
+# (nightly.yml) already runs the tests there, and a second run held another
 # macOS runner on every merge.
 on:
   pull_request:
@@ -19,6 +19,9 @@ permissions:
 jobs:
   test:
     runs-on: macos-15
+    # A serial run took 13 minutes: a hung test fails the job instead of
+    # holding the runner for GitHub's six hours.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
         with:
@@ -27,5 +30,25 @@ jobs:
           # than first in the nightly.
           fetch-depth: 0
 
+      # The dependencies' clones and binaries (GhosttyKit's download sometimes
+      # fails to connect), per toolchain: a new runner image's SwiftPM starts
+      # afresh. A pull request reads the cache the nightly saves on main;
+      # build products aren't cached (a stale one once crashed tests).
+      - name: Toolchain
+        id: toolchain
+        run: echo "swift=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
+
+      - name: Build
+        run: swift build --build-tests
+
       - name: Run tests
-        run: swift test
+        run: scripts/run-tests.sh

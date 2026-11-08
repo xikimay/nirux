@@ -46,9 +46,7 @@ extension NiruxShellView {
     /// Its shells keep the old NIRUX_PROFILE_ID until they restart.
     func moveWorkspaceToSpace(workspaceID: String, profileID: String) {
         guard let index = workspaces.firstIndex(where: { $0.id == workspaceID }) else { return }
-        let oldProfileID = workspaces[index].profileID
         guard workspaceStore.moveWorkspace(at: index, toProfile: profileID) else { return }
-        projectHistoryWorkspacesMoved([workspaceID], from: oldProfileID, to: profileID)
         refreshAfterWorkspaceMutation()
     }
 
@@ -57,9 +55,7 @@ extension NiruxShellView {
         guard !mergeQueues(of: profileID).contains(where: \.isRunning) else {
             return showToast("A merge queue started in this space: stop it before deleting the space")
         }
-        let moved = Set(workspaces.filter { $0.profileID == profileID }.map(\.id))
         guard workspaceStore.deleteProfile(id: profileID) else { return }
-        projectHistoryWorkspacesMoved(moved, from: profileID, to: WorkspaceProfile.defaultID)
         projectStore.markDeleted(profileID)
         SpaceDefaultsStore.removeFiles(ofSpace: profileID)
         refreshAfterWorkspaceMutation()

@@ -20,7 +20,6 @@ extension NiruxShellView {
         missionID: String? = nil,
         reportsToLead: Bool = false,
         deliveredHandover: Bool = false,
-        handoverText: String? = nil,
         worktreeBranch: String? = nil,
         startedOutsideNirux: Bool = false,
         setupScript: URL? = nil,
@@ -70,7 +69,7 @@ extension NiruxShellView {
         let setupScript = startedOutsideNirux ? nil : setupScript
         if let agent {
             launchAgent(
-                agent, in: workspace, deliveredHandover: deliveredHandover, handoverText: handoverText,
+                agent, in: workspace, deliveredHandover: deliveredHandover,
                 worktreeBranch: worktreeBranch, setupScript: setupScript
             )
         } else if let setupScript, let column = workspace.columns.first {
@@ -144,7 +143,6 @@ extension NiruxShellView {
         _ agent: NiruxApp.WorkspaceAgent,
         in workspace: WorkspaceState,
         deliveredHandover: Bool,
-        handoverText: String?,
         worktreeBranch: String?,
         setupScript: URL?
     ) {
@@ -156,12 +154,6 @@ extension NiruxShellView {
         )
 
         let brief = spaceBriefInjection(for: workspace)
-        if agent == .claude, deliveredHandover, let handoverText {
-            // What Nirux wrote, not the file: the agent may change it.
-            projectHistory.handoverDelivered(
-                spaceID: workspace.profileID, name: Self.handoverFilename(for: agent), text: handoverText, branch: worktreeBranch
-            )
-        }
         let cmd: String
         switch agent {
         case .claude:

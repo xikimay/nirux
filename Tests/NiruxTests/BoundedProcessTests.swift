@@ -108,8 +108,11 @@ final class BoundedProcessTests: XCTestCase {
 
     func testRunawayDescendantIsNeitherBufferedNorKeptAlive() throws {
         let pidFile = directory.appendingPathComponent("descendant.pid")
+        // The descendant starts writing once the script is gone: what it
+        // writes while the script still runs is the script's output, and
+        // how much that is depends on how busy the machine is.
         let script = try makeScript("""
-        yes &
+        (sleep 0.5; exec yes) &
         printf '%s' "$!" > '\(pidFile.path)'
         printf out
         exit 0

@@ -1,5 +1,10 @@
 # Project Memory Tree
 
+**2026-11-08: the journal and everything built on it were removed (#180).
+Nothing ever turned them on, and the user chose to drop them; the decision
+extraction of #139 was abandoned with them. What follows is the design as it
+stood, kept for reference.**
+
 Status: design, revised on 2026-10-06. **The user's call that day, relayed by
 the orchestrating session: the decisions are the product, the tree comes
 second.** The journal (section 2) has shipped (#128, #129, #133). What ships

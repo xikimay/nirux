@@ -87,7 +87,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
     }
 
     /// Opening an inactive workspace brings it on screen, alone under the
-    /// folded INACTIVE header (#50): it stays inactive, the section folded.
+    /// folded Archived header (#50): it stays inactive, the section folded.
     func testOpeningAnInactiveWorkspaceLeavesItInactive() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell

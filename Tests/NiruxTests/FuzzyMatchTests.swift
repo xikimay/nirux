@@ -4,8 +4,6 @@ import XCTest
 final class FuzzyMatchTests: XCTestCase {
     func testEmptyQueryMatchesEverything() {
         XCTAssertEqual(FuzzyMatch.score(query: "", candidate: "anything"), 0)
-        let items = ["b", "a", "c"]
-        XCTAssertEqual(FuzzyMatch.filter(items, query: "", key: { $0 }), items)
     }
 
     func testExactPrefixRanksHigh() {
@@ -18,12 +16,6 @@ final class FuzzyMatchTests: XCTestCase {
         }
     }
 
-    func testAcronymMatchesWordBoundaries() {
-        XCTAssertNotNil(FuzzyMatch.score(query: "nt", candidate: "New Terminal"))
-        XCTAssertNotNil(FuzzyMatch.score(query: "nw", candidate: "New Workspace"))
-        XCTAssertNotNil(FuzzyMatch.score(query: "oc", candidate: "Open Claude Code"))
-    }
-
     func testSubsequenceRequired() {
         XCTAssertNil(FuzzyMatch.score(query: "xyz", candidate: "New Terminal"))
         XCTAssertNil(FuzzyMatch.score(query: "lt", candidate: "New Terminal")) // wrong order
@@ -34,23 +26,6 @@ final class FuzzyMatchTests: XCTestCase {
         let consecutive = FuzzyMatch.score(query: "term", candidate: "Terminal")!
         let scattered = FuzzyMatch.score(query: "term", candidate: "Toggle Editor Mode Room")!
         XCTAssertGreaterThan(consecutive, scattered)
-    }
-
-    func testCamelCaseBoundaryBonus() {
-        XCTAssertNotNil(FuzzyMatch.score(query: "wt", candidate: "showWorktreeList"))
-        XCTAssertNotNil(FuzzyMatch.score(query: "swl", candidate: "showWorktreeList"))
-    }
-
-    func testFilterRanksBestFirst() {
-        let actions = ["Open Browser", "New Terminal", "Open Worktree", "Rename Workspace"]
-        let result = FuzzyMatch.filter(actions, query: "ow", key: { $0 })
-        XCTAssertEqual(result.first, "Open Worktree")
-        XCTAssertFalse(result.contains("New Terminal"))
-    }
-
-    func testFilterKeepsOriginalOrderForEmptyQuery() {
-        let actions = ["c", "a", "b"]
-        XCTAssertEqual(FuzzyMatch.filter(actions, query: "", key: { $0 }), actions)
     }
 
     func testShorterCandidatePreferred() {

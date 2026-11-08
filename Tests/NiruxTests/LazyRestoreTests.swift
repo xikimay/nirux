@@ -109,18 +109,26 @@ final class LazyRestoreTests: XCTestCase {
         defer {
             // What the shell deferred (a metadata refresh) runs on the
             // throwaway state.
-            settle()
+            settle(shell)
             window.close()
         }
         XCTAssertTrue(Persistence.save(state))
         shell.restoreState()
-        settle()
+        settle(shell)
         try body(shell, recorder)
     }
 
-    /// Long enough for the columns on screen to resume.
-    private func settle() {
+    /// Long enough for the columns on screen to resume: the resume's wait,
+    /// then until the resume ran, which a busy machine (classes run side by
+    /// side, scripts/run-tests.sh) does late. One still waiting 3 s later
+    /// keeps restarting its wait: that fails.
+    private func settle(_ shell: NiruxShellView, file: StaticString = #filePath, line: UInt = #line) {
         RunLoop.main.run(until: Date().addingTimeInterval(NiruxShellView.onScreenResumeDelay + 0.15))
+        let deadline = Date().addingTimeInterval(3)
+        while shell.isOnScreenResumeScheduled, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        XCTAssertFalse(shell.isOnScreenResumeScheduled, "the resume kept waiting", file: file, line: line)
     }
 
     private func column(_ shell: NiruxShellView, _ workspace: Int, _ column: Int) throws -> ColumnState {
@@ -146,14 +154,14 @@ final class LazyRestoreTests: XCTestCase {
             XCTAssertEqual(saved.workspaces[0].columns[2].lastAgentStatus, .working)
 
             shell.switchToWorkspace(1)
-            settle()
+            settle(shell)
             XCTAssertEqual(recorder.commands.last, "command codex resume '\(Self.thread)'")
 
             shell.switchToWorkspace(0)
-            settle()
+            settle(shell)
             XCTAssertEqual(recorder.launches.count, 3, "agents resume once")
             shell.focusColumnByIndex(2)
-            settle()
+            settle(shell)
             XCTAssertEqual(recorder.launches.last, Launch(
                 column: ObjectIdentifier(try column(shell, 0, 2)), command: Self.resume(Self.sessionC)
             ))
@@ -169,7 +177,7 @@ final class LazyRestoreTests: XCTestCase {
             shell.switchToWorkspace(1)
             shell.switchToWorkspace(2)
             XCTAssertEqual(recorder.launches.count, 2, "not before the column stayed on screen")
-            settle()
+            settle(shell)
             XCTAssertEqual(recorder.commands.last, "command claude --permission-mode auto")
             XCTAssertTrue(try column(shell, 1, 0).isAwaitingResume, "the workspace passed through")
         }
@@ -259,7 +267,7 @@ final class LazyRestoreTests: XCTestCase {
         try withRestoredShell(state) { shell, recorder in
             XCTAssertEqual(recorder.commands, ["command claude --resume --permission-mode auto"])
             shell.switchToWorkspace(0)
-            settle()
+            settle(shell)
             XCTAssertEqual(recorder.commands.last, Self.resume(Self.sessionA))
         }
     }

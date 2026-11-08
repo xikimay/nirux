@@ -3,7 +3,7 @@ import Foundation
 /// The text Nirux types into an agent's prompt for a Mission message (see
 /// `MissionStore.pendingPromptDeliveries`). Instructions (`tell`) go in raw,
 /// so a slash command stays one; everything else starts with `prefix`, so
-/// the agent, and Project History, can tell Nirux from the user.
+/// the agent can tell Nirux from the user.
 enum MissionPromptText {
     static let prefix = "[Nirux Mission]"
 

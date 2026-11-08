@@ -99,8 +99,41 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "Building $VERSION (build $BUILD_NUMBER, release $RELEASE_TAG)"
 
+      # Same cache as tests.yml. Saving it here, on main, is what lets pull
+      # requests read it: right after the build, so a later failure or a
+      # newer push cancelling this run doesn't lose it.
+      - name: Toolchain
+        id: toolchain
+        run: echo "swift=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore SwiftPM dependencies
+        id: swiftpm
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
+
+      - name: Build tests
+        run: swift build --build-tests
+
+      - name: Save SwiftPM dependencies
+        if: steps.swiftpm.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: ${{ steps.swiftpm.outputs.cache-primary-key }}
+
       - name: Run tests
-        run: swift test
+        timeout-minutes: 30
+        run: scripts/run-tests.sh
 
       - name: Build release
         run: swift build -c release

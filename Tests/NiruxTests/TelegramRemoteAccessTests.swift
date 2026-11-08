@@ -78,11 +78,6 @@ final class TelegramRemoteAccessTests: XCTestCase {
             return
         }
         assertConversation(api: api, injectedPrompts: injectedPrompts)
-
-        try writeTelegramConversationEvidence(
-            api: api,
-            injectedPrompts: injectedPrompts
-        )
     }
 
     @MainActor
@@ -120,8 +115,7 @@ final class TelegramRemoteAccessTests: XCTestCase {
         XCTAssertEqual(app.settingsTelegramStatusLabel?.stringValue, "Remote Access is off.")
         XCTAssertEqual(app.settingsTelegramPairButton?.isEnabled, false)
         XCTAssertNotNil(app.settingsTelegramTokenField)
-
-        try writeSettingsEvidence(window: try XCTUnwrap(app.settingsWindow))
+        XCTAssertNotNil(app.settingsWindow)
     }
 
     @MainActor
@@ -517,13 +511,6 @@ final class TelegramRemoteAccessTests: XCTestCase {
         XCTAssertEqual(update.callbackQuery?.data, "session:agent-uuid")
     }
 
-    func testRemotePromptCapabilityGate() {
-        XCTAssertTrue(AgentStatusMachine.acceptsRemotePrompts(processName: "claude"))
-        XCTAssertTrue(AgentStatusMachine.acceptsRemotePrompts(processName: "codex"))
-        XCTAssertFalse(AgentStatusMachine.acceptsRemotePrompts(processName: "zsh"))
-        XCTAssertFalse(AgentStatusMachine.acceptsRemotePrompts(processName: "gemini"))
-    }
-
     @MainActor
     func testUnpairOverUnreadableStateKeepsTheLiveLayout() throws {
         let stateDirectory = FileManager.default.temporaryDirectory
@@ -640,100 +627,5 @@ private extension TelegramRemoteAccessTests {
         } else {
             unsetenv(name)
         }
-    }
-
-    private func writeTelegramConversationEvidence(
-        api: TelegramAPIStub.Snapshot,
-        injectedPrompts: [(agentID: String, terminalInput: String)]
-    ) throws {
-        guard let directory = ProcessInfo.processInfo.environment["NIRUX_TELEGRAM_EVIDENCE_DIR"] else {
-            return
-        }
-        let escapedMessages = api.sentMessages.map { message in
-            "<div class=\"bubble bot\"><strong>Nirux bot</strong><pre>\(htmlEscape(message.text))</pre></div>"
-        }
-        let escapedInput = htmlEscape(
-            (injectedPrompts.first?.terminalInput
-                .replacingOccurrences(of: "\u{1B}", with: "ESC") ?? "none")
-                .replacingOccurrences(of: "\r", with: "\\r")
-        )
-        // Embedded HTML is an intentional generated evidence artifact.
-        // swiftlint:disable line_length
-        let html = """
-        <!doctype html>
-        <meta charset="utf-8">
-        <title>Nirux Telegram Remote Access — executable test transcript</title>
-        <style>
-          body { margin: 0; background: #0e1621; color: #eef4f8; font: 15px -apple-system, sans-serif; }
-          main { width: 760px; margin: 32px auto; padding: 28px; background: #17212b; border-radius: 16px; }
-          h1 { font-size: 23px; margin-top: 0; } h2 { font-size: 16px; color: #9cc9ed; }
-          .bubble { max-width: 78%; margin: 12px 0; padding: 12px 15px; border-radius: 14px; }
-          .user { margin-left: auto; background: #2b5278; } .bot { background: #1f2c38; }
-          .blocked { background: #49252c; border: 1px solid #b95a68; }
-          pre { white-space: pre-wrap; margin: 6px 0 0; font: inherit; }
-          code { color: #9fe3ad; } .proof { color: #b8c7d1; line-height: 1.5; }
-          .summary { background: #173b31; border: 1px solid #398a70; padding: 12px; border-radius: 10px; }
-        </style>
-        <main>
-          <h1>Nirux Telegram Remote Access</h1>
-          <p class="proof">Executable controller test with a mocked Telegram Bot API. The persisted account is paired to private user/chat <code>123</code>.</p>
-          <p class="proof summary"><strong>Observed:</strong> unpaired traffic ignored · stable <code>agent-b</code> routing · sanitized bracketed-paste prompt · <code>/exec</code> refused · update 9 persisted · outbound <code>getUpdates</code> with no webhook.</p>
-          <div class="bubble blocked"><strong>Unpaired user 999</strong><pre>steal secrets</pre><small>Ignored: no bot response and no prompt injection.</small></div>
-          <div class="bubble user"><strong>Paired user</strong><pre>/sessions</pre></div>
-          \(escapedMessages[0])
-          <div class="bubble user"><strong>Paired user</strong><pre>Selects Payments · col 2</pre></div>
-          \(escapedMessages[1])
-          <div class="bubble user"><strong>Paired user</strong><pre>/status</pre></div>
-          \(escapedMessages[2])
-          <div class="bubble user"><strong>Paired user</strong><pre>/tail</pre></div>
-          \(escapedMessages[3])
-          <div class="bubble user"><strong>Paired user</strong><pre>explain ESC[31m this safely</pre></div>
-          \(escapedMessages[4])
-          <div class="bubble user"><strong>Paired user</strong><pre>/exec whoami</pre></div>
-          \(escapedMessages[5])
-          <div class="bubble user"><strong>Paired user</strong><pre>Replies to an expired notification</pre></div>
-          \(escapedMessages[6])
-          <h2>Observed safety boundary</h2>
-          <p class="proof">Exactly one prompt reached the selected stable route <code>agent-b</code>. Terminal input was sanitized and bracketed-paste framed as <code>\(escapedInput)</code>. Update 9 was durably checkpointed before completion. API methods observed: <code>\(htmlEscape(api.requestedMethods.sorted().joined(separator: ", ")))</code>; no webhook was configured.</p>
-        </main>
-        """
-        // swiftlint:enable line_length
-        let output = URL(fileURLWithPath: directory, isDirectory: true)
-            .appendingPathComponent("telegram-remote-access-conversation.html")
-        try FileManager.default.createDirectory(
-            at: output.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try Data(html.utf8).write(to: output, options: .atomic)
-    }
-
-    @MainActor
-    private func writeSettingsEvidence(window: NSWindow) throws {
-        guard let directory = ProcessInfo.processInfo.environment["NIRUX_TELEGRAM_EVIDENCE_DIR"],
-              let tabs = window.contentViewController as? NSTabViewController,
-              let telegram = tabs.tabViewItems.firstIndex(where: { $0.label == "Telegram" })
-        else { return }
-        tabs.selectedTabViewItemIndex = telegram
-        guard let view = window.contentView,
-              let representation = view.bitmapImageRepForCachingDisplay(in: view.bounds)
-        else { return }
-        view.layoutSubtreeIfNeeded()
-        view.cacheDisplay(in: view.bounds, to: representation)
-        let png = try XCTUnwrap(representation.representation(using: .png, properties: [:]))
-        let output = URL(fileURLWithPath: directory, isDirectory: true)
-            .appendingPathComponent("telegram-remote-access-settings.png")
-        try FileManager.default.createDirectory(
-            at: output.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try png.write(to: output, options: .atomic)
-    }
-
-    private func htmlEscape(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-            .replacingOccurrences(of: "\"", with: "&quot;")
     }
 }

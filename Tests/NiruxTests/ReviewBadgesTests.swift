@@ -123,7 +123,7 @@ final class ReviewBadgesTests: XCTestCase {
     }
 
     /// The selected card shows the passes under its chips; the others keep
-    /// three lines.
+    /// two lines.
     func testSelectedCardShowsTheRow() throws {
         let badges = ReviewBadges(
             runs: [.codeReview: ReviewRun(head: "aaa", at: 0), .premortem: ReviewRun(head: "old1234567", at: 0)],

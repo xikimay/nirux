@@ -21,24 +21,14 @@ final class TaskTemplatesTests: XCTestCase {
         return url
     }
 
-    func testDefaultsUntilTheFileExistsThenTheFileWritesThemOut() throws {
+    func testDefaultsUntilTheFileExistsThenTheTemplateWritesThemOut() throws {
         XCTAssertEqual(TaskTemplates.load(spaceID: "space-1", stateDirectory: stateDirectory), TaskTemplates.defaults)
         XCTAssertEqual(TaskTemplates.defaults.map(\.name), ["Bugfix", "Feature (full review cycle)", "Investigation (no code)"])
 
-        let url = try XCTUnwrap(TaskTemplates.ensureFile(spaceID: "space-1", spaceName: "Nirux", stateDirectory: stateDirectory))
+        let url = try writeFile(TaskTemplates.template(spaceName: "Nirux"))
         XCTAssertEqual(url.path, stateDirectory.appendingPathComponent("projects/space-1/task-templates.md").path)
         // The comment explaining the file isn't a template.
         XCTAssertEqual(TaskTemplates.load(spaceID: "space-1", stateDirectory: stateDirectory), TaskTemplates.defaults)
-    }
-
-    func testEnsureFileKeepsWhatTheUserWrote() throws {
-        let url = try writeFile("## Mine\n\nDo it my way.\n")
-        _ = try TaskTemplates.ensureFile(spaceID: "space-1", spaceName: "Nirux", stateDirectory: stateDirectory)
-        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "## Mine\n\nDo it my way.\n")
-        XCTAssertEqual(
-            TaskTemplates.load(spaceID: "space-1", stateDirectory: stateDirectory),
-            [TaskTemplates.Template(name: "Mine", body: "Do it my way.")]
-        )
     }
 
     func testAnEmptiedFileOffersNoTemplate() throws {
@@ -103,10 +93,9 @@ final class TaskTemplatesTests: XCTestCase {
     }
 
     func testProjectNameCannotCloseTheTemplateComment() throws {
-        let url = try XCTUnwrap(TaskTemplates.ensureFile(
-            spaceID: "space-1", spaceName: "evil -->\n## Injected", stateDirectory: stateDirectory
-        ))
-        XCTAssertTrue(try String(contentsOf: url, encoding: .utf8).contains("\n## Injected"))
+        let template = TaskTemplates.template(spaceName: "evil -->\n## Injected")
+        XCTAssertTrue(template.contains("\n## Injected"))
+        _ = try writeFile(template)
         XCTAssertEqual(TaskTemplates.load(spaceID: "space-1", stateDirectory: stateDirectory), TaskTemplates.defaults)
     }
 

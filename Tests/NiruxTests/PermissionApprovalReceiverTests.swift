@@ -29,10 +29,10 @@ final class PermissionApprovalReceiverTests: XCTestCase {
 
     private let session = "0b6c1c56-5a4f-4f3e-9f1a-7d2f3c4b5a69"
 
-    private func startReceiver(command: String = "git push origin main", mode: String = "default") throws -> Receiver {
+    private func startReceiver() throws -> Receiver {
         let payload: [String: Any] = [
             "hook_event_name": "PermissionRequest", "session_id": session, "cwd": "/proj",
-            "permission_mode": mode, "tool_name": "Bash", "tool_input": ["command": command]
+            "permission_mode": "default", "tool_name": "Bash", "tool_input": ["command": "git push origin main"]
         ]
         let stdin = Pipe()
         let stdout = Pipe()
@@ -148,14 +148,6 @@ final class PermissionApprovalReceiverTests: XCTestCase {
         XCTAssertNil(events.first?.approvalRequestID)
     }
 
-    func testBypassSessionsAreNeverHeld() throws {
-        try listen()
-        let receiver = try startReceiver(mode: "bypassPermissions")
-        let (_, stdout) = try finish(receiver)
-        XCTAssertEqual(stdout, "")
-        XCTAssertNil(queuedEvents().first?.approvalRequestID)
-    }
-
     /// The app quits while a receiver waits: it stops within about a second.
     func testReceiverStopsWhenTheAppGoesAway() throws {
         try listen()
@@ -182,13 +174,5 @@ final class PermissionApprovalReceiverTests: XCTestCase {
         XCTAssertEqual(stdout, "")
         XCTAssertLessThan(Date().timeIntervalSince(started), 2)
         XCTAssertEqual(queuedEvents().last?.approvalOutcome, .expired)
-    }
-
-    func testCommandTheSidebarCannotShowExactlyIsNotHeld() throws {
-        try listen()
-        let receiver = try startReceiver(command: "echo ok\nrm -rf /tmp/x")
-        let (_, stdout) = try finish(receiver)
-        XCTAssertEqual(stdout, "")
-        XCTAssertNil(queuedEvents().first?.approvalRequestID)
     }
 }

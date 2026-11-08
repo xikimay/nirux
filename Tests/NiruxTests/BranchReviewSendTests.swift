@@ -52,7 +52,9 @@ final class BranchReviewSendTests: XCTestCase {
         var outcome: PtySession.PasteOutcome?
         let started = Date()
         pty.pasteInBackground(text, keepingInFront: nil, cancelled: { false }) { outcome = $0 }
-        XCTAssertLessThan(Date().timeIntervalSince(started), 0.2, "the app isn't held while the agent doesn't read")
+        // A paste that waited would take 0.7 s at least (the reader starts
+        // a second after the terminal); a busy machine takes some too.
+        XCTAssertLessThan(Date().timeIntervalSince(started), 0.5, "the app isn't held while the agent doesn't read")
         let done = try await waitUntil { outcome != nil }
         XCTAssertTrue(done)
         XCTAssertEqual(outcome, .pasted)

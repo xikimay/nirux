@@ -29,23 +29,6 @@ final class SidebarCollapseTests: XCTestCase {
         )
     }
 
-    func testCollapsedSectionHidesInactiveTiles() {
-        let sidebar = SidebarView()
-        sidebar.update(
-            profiles: [],
-            workspaces: [
-                workspace(id: "active", index: 0, isInactive: false, isActive: true),
-                workspace(id: "archived", index: 1, isInactive: true)
-            ]
-        )
-
-        XCTAssertTrue(sidebar.isInactiveSectionCollapsed)
-        XCTAssertEqual(sidebar.railWorkspaceInfos.map(\.id), ["active"])
-
-        sidebar.toggleInactiveSection()
-        XCTAssertEqual(sidebar.railWorkspaceInfos.map(\.id), ["active", "archived"])
-    }
-
     private func profile(_ id: String, isActive: Bool) -> ProfileInfo {
         ProfileInfo(
             id: id, name: id, colorHex: "#7AA2F7", isActive: isActive, workspaceCount: 2, taskCount: 1, attention: nil

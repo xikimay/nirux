@@ -364,6 +364,12 @@ Run tests:
 swift test
 ```
 
+Or as CI does, one process per test class, several at a time:
+
+```bash
+swift build --build-tests && scripts/run-tests.sh
+```
+
 Run from SwiftPM, on a state of its own:
 
 ```bash

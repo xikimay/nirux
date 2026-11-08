@@ -4,7 +4,9 @@ Status: decided with the user on 2026-10-05. The list shipped first, read-only;
 changing it (section 4) came second. On 2026-10-06 the user chose to keep
 their decisions, read from the project's sessions, as memories here (section
 5), designed in `project-memory-tree.md`, section 3.8. The History tab,
-greyed for now, is optional and designed there too.
+greyed for now, is optional and designed there too. On 2026-11-08 the
+project history journal that section 5 builds on was removed (#180), never
+having been turned on: section 5 is a design, not a feature.
 
 Agents learn about a repository from several files: the Nirux space brief,
 the repository's `CLAUDE.md` and `AGENTS.md`, and the auto-memory Claude Code

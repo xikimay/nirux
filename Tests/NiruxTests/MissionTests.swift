@@ -253,7 +253,7 @@ final class MissionTests: XCTestCase {
         store.markDelivered(eventID: question.id, at: 25)
         XCTAssertNil(
             store.missions[0].events[0].parentConsumedAt,
-            "showing Activity must not consume the parent agent inbox"
+            "marking it delivered must not consume the parent agent inbox"
         )
 
         let forged = MissionEvent(
