@@ -25,12 +25,14 @@ extension SidebarView {
         switch target {
         case .workspaceCard, .railButton:
             break
-        case .spaceHeader:
-            // The whole header is one menu trigger, so its "⋯" brightens
-            // together with the background tint.
-            spaceHeaderHoverView?.layer?.backgroundColor =
+        case .spacePicker:
+            spacePickerHoverView?.layer?.backgroundColor =
                 on ? Theme.Color.fillHover.cgColor : NSColor.clear.cgColor
-            spaceHeaderBadge?.isHovered = on
+        case .archivedToggle:
+            archivedRowHoverView?.layer?.backgroundColor =
+                on ? Theme.Color.fillHover.cgColor : NSColor.clear.cgColor
+        case .newTask:
+            newTaskButton?.isHovered = on
         case .menuBadge(let workspaceIndex):
             menuBadgeViews[workspaceIndex]?.isHovered = on
         case .columnRow(let workspaceIndex, let columnIndex):
@@ -38,6 +40,16 @@ extension SidebarView {
                 on ? Theme.Color.fillHover.cgColor : NSColor.clear.cgColor
         case .approvalButton(_, let key):
             approvalButtonViews[key]?.isHovered = on
+        }
+    }
+
+    /// The hover target of a region that lights as a whole.
+    static func hoverTarget(of region: SidebarHitRegion) -> SidebarHoverTarget? {
+        switch region {
+        case .spacePicker: return .spacePicker
+        case .newTask: return .newTask
+        case .archivedToggle: return .archivedToggle
+        default: return nil
         }
     }
 
@@ -63,8 +75,8 @@ extension SidebarView {
         let point = contentDocumentView.convert(windowPoint, from: nil)
         guard let area = hitArea(at: point) else { return }
         switch area.region {
-        case .spaceHeader:
-            setHoverTarget(.spaceHeader)
+        case .spacePicker, .newTask, .archivedToggle:
+            setHoverTarget(Self.hoverTarget(of: area.region))
         case .workspace(let workspaceIndex):
             setHoverTarget(.workspaceCard(workspaceIndex))
         case .workspaceMenu(let workspaceIndex):

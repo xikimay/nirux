@@ -166,6 +166,31 @@ final class CommandPalette: NSObject {
 
     var isVisible: Bool { panel?.isVisible ?? false }
 
+    /// The drag and release of a press the palette took: AppKit would hand
+    /// them to the view of the window's last click (a terminal would read
+    /// a release it never saw pressed). A monitor of its own (`dismiss`
+    /// removes the palette's), gone at the release, or at the next press
+    /// should the release never come.
+    static func swallowRestOfClick() {
+        var monitor: Any?
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp, .leftMouseDown]) { event in
+            if event.type != .leftMouseDragged, let installed = monitor {
+                NSEvent.removeMonitor(installed)
+                monitor = nil
+            }
+            return event.type == .leftMouseDown ? event : nil
+        }
+    }
+
+    /// A press on the title bar's Search button (`TitleBarActions`) while
+    /// the palette shows: it closes the palette here, on mouse-down, and
+    /// is consumed, or the button would open it again on mouse-up.
+    static func isSearchButtonPress(_ event: NSEvent) -> Bool {
+        guard let frameView = event.window?.contentView?.superview else { return false }
+        let hit = frameView.hitTest(frameView.convert(event.locationInWindow, from: nil))
+        return hit?.identifier == TitleBarActions.searchButtonID
+    }
+
     func dismiss() {
         removeMonitors()
         panel?.orderOut(nil)
@@ -269,6 +294,10 @@ final class CommandPalette: NSObject {
             guard let self, let panel = self.panel else { return event }
             if event.window !== panel {
                 self.dismiss()
+                if Self.isSearchButtonPress(event) {
+                    Self.swallowRestOfClick()
+                    return nil
+                }
             } else if let index = self.rowIndexAtEvent(event) {
                 self.handleMouseClick(index)
             }

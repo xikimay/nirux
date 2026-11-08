@@ -1,44 +1,53 @@
 import AppKit
 
 enum SidebarExpandedMetrics {
-    static let padding: CGFloat = 20
-    static let verticalPadding: CGFloat = 20
-    static let bottomReserve: CGFloat = 64
-
-    static let spaceHeaderHeight: CGFloat = 66
-    static let spaceHeaderBottomGap: CGFloat = 18
-
-    static let sectionGap: CGFloat = 20
-    static let sectionHeaderHeight: CGFloat = 18
-    static let sectionHeaderAdvance: CGFloat = 28
-    static let shortcutHintGap: CGFloat = 14
-    static let shortcutHintHeight: CGFloat = 22
+    // Top to bottom: the space picker, the Tasks header and the cards;
+    // the Archived row at the bottom, its list above it.
+    static let topPadding = Theme.Space.md
+    static let pickerHeight: CGFloat = 32
+    static let pickerDotSize: CGFloat = 10
+    static let pickerBottomGap = Theme.Space.md
+    static let tasksHeaderHeight: CGFloat = 26
+    static let headerButtonSize: CGFloat = 20
     static let onboardingCardGap: CGFloat = 8
-    static let countChipWidth: CGFloat = 34
-    static let countChipHeight: CGFloat = 22
+    /// The least room between the last card and the archived block.
+    static let archivedGap = Theme.Space.md
+    static let archivedRowHeight: CGFloat = 30
+    /// Between the archived list and the Archived row under it.
+    static let archivedListGap: CGFloat = 6
+    static let bottomPadding = Theme.Space.sm
 
-    // The workspace card: state and title / branch and diff / column chips
-    // and the pull request, then an action block only when there is
+    // A task row: the state mark and title, the status line; the selected
+    // row adds its columns; then an action block only when there is
     // something to do.
     static let workspaceInsetX: CGFloat = 8
-    static let workspaceGap: CGFloat = 6
+    static let workspaceGap: CGFloat = 2
     static let cardPaddingX: CGFloat = 10
-    static let cardPaddingY = Theme.Space.sm
-    static let cardRowGap = Theme.Space.xs
-    /// Lines 2 and 3 start under the title, past the state dot.
-    static let cardIndent = Theme.Space.lg
+    static let rowPaddingY: CGFloat = 7
     static let titleRowHeight: CGFloat = 16
-    static let branchRowHeight: CGFloat = 14
-    /// Extra space above the chips.
-    static let chipRowTopGap: CGFloat = 2
+    static let statusGap: CGFloat = 2
+    static let statusRowHeight: CGFloat = 15
+    /// Above the selected row's columns.
+    static let columnsGap: CGFloat = 6
     static let chipHeight: CGFloat = 20
     static let chipGap = Theme.Space.xs
     static let chipPaddingX: CGFloat = 6
     static let stateDotSize: CGFloat = 8
+    /// Where row text starts, past the state dot: titles, status lines,
+    /// columns, the space picker's name, the Archived row's.
+    static var textX: CGFloat { workspaceInsetX + cardPaddingX + stateDotSize + Theme.Space.sm }
+    /// The middle of the state marks' column, where the picker's dot and the
+    /// Archived row's icon center.
+    static var markCenterX: CGFloat { workspaceInsetX + cardPaddingX + stateDotSize / 2 }
     static let menuButtonWidth: CGFloat = 18
     static let menuButtonHeight: CGFloat = 16
 
-    // An INACTIVE workspace that asks nothing: one line.
+    /// The Lead's row: its sign, its title, its state; one line.
+    static let leadRowHeight: CGFloat = 32
+    /// Between the Lead's row and the Tasks header.
+    static let leadGap = Theme.Space.xs
+
+    // An archived workspace that asks nothing: one line.
     static let compactRowHeight: CGFloat = 26
 
     // The action block: rows separated by `actionRowGap`; a line above it

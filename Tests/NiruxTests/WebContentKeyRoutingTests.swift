@@ -57,6 +57,20 @@ final class WebContentKeyRoutingTests: XCTestCase {
         XCTAssertFalse(typesW("z", "z", 0x0D)) // AZERTY: Z sits at the ANSI W position
     }
 
+    /// ⌥⌘1…⌥⌘9 make headings in web apps: the page gets them first and
+    /// hands back what it leaves (then the Space menu switches spaces).
+    /// ⌘1…⌘9 still focus columns.
+    func testOptionCommandDigitsReachThePageFirst() {
+        for editor in [true, false] {
+            // ⌥ types "¡" on the US layout; the digit is in the other field.
+            XCTAssertTrue(passes(editor: editor, "¡", [.command, .option], ignoringModifiers: "1"))
+            // AZERTY: digits need Shift.
+            XCTAssertTrue(passes(editor: editor, "", [.command, .option, .shift], ignoringModifiers: "9"))
+            XCTAssertFalse(passes(editor: editor, "1", .command))
+            XCTAssertFalse(passes(editor: editor, "0", [.command, .option]))
+        }
+    }
+
     func testWordWrapChordStillReachesTheMenu() {
         XCTAssertFalse(passes(editor: true, "z", [.command, .option]))
         XCTAssertFalse(passes(editor: true, "z", [.command, .control]))

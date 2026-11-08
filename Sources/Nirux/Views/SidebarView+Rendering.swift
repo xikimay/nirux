@@ -25,56 +25,46 @@ extension SidebarView {
             return
         }
 
-        rebuildBottomIndicators()
-
-        let padding = SidebarExpandedMetrics.padding
-        let activeInfos = displayedWorkspaceInfos.filter { !$0.isInactive }
+        // The space's Lead goes above the Tasks header (docs/spaces.md).
+        let leadInfos = displayedWorkspaceInfos.filter { !$0.isInactive && $0.isLead }
+        let activeInfos = displayedWorkspaceInfos.filter { !$0.isInactive && !$0.isLead }
         let inactiveInfos = displayedWorkspaceInfos.filter { $0.isInactive }
         let listedInactiveInfos = inactiveInfos.filter(listsWorkspace)
-        let hasWorkspaces = !activeInfos.isEmpty || !inactiveInfos.isEmpty
+        let archivedListHeight = archivedListHeight(listedInactiveInfos)
         let activeProfile = lastProfiles.first(where: { $0.isActive })
         let onboardingCard = preparedOnboardingCard()
 
         let contentH = expandedContentHeight(
+            hasPicker: activeProfile != nil,
+            leadInfos: leadInfos,
             activeInfos: activeInfos,
-            inactiveInfos: inactiveInfos,
-            listedInactiveInfos: listedInactiveInfos,
+            archivedHeight: inactiveInfos.isEmpty ? nil : archivedListHeight,
             onboardingHeight: onboardingCard?.height
         )
 
         let docHeight = max(bounds.height, contentH)
         contentDocumentView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: docHeight)
 
-        var yOffset = docHeight - SidebarExpandedMetrics.verticalPadding
-
+        var yOffset = docHeight - SidebarExpandedMetrics.topPadding
         if let activeProfile {
-            yOffset = buildSpaceHeader(activeProfile, padding: padding, yOffset: yOffset)
-            yOffset -= SidebarExpandedMetrics.spaceHeaderBottomGap
+            yOffset = buildSpacePicker(activeProfile, top: yOffset)
+            yOffset -= SidebarExpandedMetrics.pickerBottomGap
         }
-
-        if !activeInfos.isEmpty {
-            yOffset = buildSectionHeader("active", count: activeInfos.count, padding: padding, yOffset: yOffset)
-            yOffset = buildWorkspaceGroup(activeInfos, padding: padding, yOffset: yOffset)
+        if !leadInfos.isEmpty {
+            yOffset = buildWorkspaceGroup(leadInfos, yOffset: yOffset) + SidebarExpandedMetrics.workspaceGap
+            yOffset -= SidebarExpandedMetrics.leadGap
         }
-        if !inactiveInfos.isEmpty {
-            yOffset -= SidebarExpandedMetrics.sectionGap
-            yOffset = buildSectionHeader(
-                "inactive", count: inactiveInfos.count, padding: padding,
-                yOffset: yOffset, isCollapsed: isInactiveSectionCollapsed
-            )
-            yOffset = buildWorkspaceGroup(listedInactiveInfos, padding: padding, yOffset: yOffset)
-        }
-        // The checklist teaches the same chords as the hint, and more.
+        yOffset = buildTasksHeader(top: yOffset)
+        yOffset = buildWorkspaceGroup(activeInfos, yOffset: yOffset)
         if let onboardingCard {
             yOffset -= SidebarExpandedMetrics.onboardingCardGap
             onboardingCard.frame.origin = NSPoint(
                 x: SidebarExpandedMetrics.workspaceInsetX,
                 y: yOffset - onboardingCard.height
             )
-            yOffset -= onboardingCard.height
-        } else if hasWorkspaces {
-            yOffset -= SidebarExpandedMetrics.shortcutHintGap
-            yOffset = buildShortcutHint(padding: padding, yOffset: yOffset)
+        }
+        if !inactiveInfos.isEmpty {
+            buildArchivedBlock(count: inactiveInfos.count, listed: listedInactiveInfos, listHeight: archivedListHeight)
         }
 
         refreshHoverTargetFromMouse()
@@ -106,31 +96,34 @@ extension SidebarView {
         }
     }
 
-    /// Size the scrollable document so content is top-anchored and never
-    /// hides behind the bottom space switcher.
+    /// Everything the expanded sidebar stacks, so the document view holds
+    /// it all: the picker, the Tasks header and the cards (with the
+    /// checklist) from the top, the archived block from the bottom.
+    /// `archivedHeight`: the archived list's (`archivedListHeight`), nil
+    /// without an Archived row.
     private func expandedContentHeight(
-        activeInfos: [WorkspaceInfo], inactiveInfos: [WorkspaceInfo], listedInactiveInfos: [WorkspaceInfo],
+        hasPicker: Bool, leadInfos: [WorkspaceInfo], activeInfos: [WorkspaceInfo], archivedHeight: CGFloat?,
         onboardingHeight: CGFloat?
     ) -> CGFloat {
-        var height = SidebarExpandedMetrics.verticalPadding
-            + SidebarExpandedMetrics.spaceHeaderHeight
-            + SidebarExpandedMetrics.spaceHeaderBottomGap
-            + SidebarExpandedMetrics.bottomReserve
-        if !activeInfos.isEmpty {
-            height += SidebarExpandedMetrics.sectionHeaderAdvance
-            height += SidebarExpandedMetrics.groupHeight(for: activeInfos, sidebarWidth: bounds.width)
+        typealias Metrics = SidebarExpandedMetrics
+        var height = Metrics.topPadding + Metrics.tasksHeaderHeight
+            + Metrics.groupHeight(for: activeInfos, sidebarWidth: bounds.width)
+        if !leadInfos.isEmpty {
+            height += Metrics.groupHeight(for: leadInfos, sidebarWidth: bounds.width) - Metrics.workspaceGap + Metrics.leadGap
         }
-        if !inactiveInfos.isEmpty {
-            height += SidebarExpandedMetrics.sectionGap
-            height += SidebarExpandedMetrics.sectionHeaderAdvance
-            height += SidebarExpandedMetrics.groupHeight(for: listedInactiveInfos, sidebarWidth: bounds.width)
-        }
-        if let onboardingHeight {
-            height += SidebarExpandedMetrics.onboardingCardGap + onboardingHeight
-        } else if !activeInfos.isEmpty || !inactiveInfos.isEmpty {
-            height += SidebarExpandedMetrics.shortcutHintGap + SidebarExpandedMetrics.shortcutHintHeight
-        }
-        return height
+        if hasPicker { height += Metrics.pickerHeight + Metrics.pickerBottomGap }
+        if let onboardingHeight { height += Metrics.onboardingCardGap + onboardingHeight }
+        if let archivedHeight { height += Metrics.archivedGap + archivedHeight + Metrics.archivedRowHeight }
+        return height + Metrics.bottomPadding
+    }
+
+    /// The archived workspaces listed above the Archived row, with the line
+    /// above them and the gap under them; 0 when none is listed.
+    private func archivedListHeight(_ listed: [WorkspaceInfo]) -> CGFloat {
+        guard !listed.isEmpty else { return 0 }
+        return 1 + SidebarExpandedMetrics.workspaceGap
+            + SidebarExpandedMetrics.groupHeight(for: listed, sidebarWidth: bounds.width)
+            - SidebarExpandedMetrics.workspaceGap + SidebarExpandedMetrics.archivedListGap
     }
 
     /// Tear down every view and state snapshot from the previous render
@@ -138,15 +131,14 @@ extension SidebarView {
     private func resetRenderState() {
         expandedViews.forEach { $0.removeFromSuperview() }
         expandedViews.removeAll()
-        profileIndicatorView?.removeFromSuperview()
-        profileIndicatorView = nil
         hitAreas.removeAll()
         cardHoverViews.removeAll()
         menuBadgeViews.removeAll()
         columnHoverViews.removeAll()
         approvalButtonViews.removeAll()
-        spaceHeaderHoverView = nil
-        spaceHeaderBadge = nil
+        spacePickerHoverView = nil
+        newTaskButton = nil
+        archivedRowHoverView = nil
         railTileViews.removeAll()
         hoveredTarget = nil
         hideRailTooltip()
@@ -168,95 +160,86 @@ extension SidebarView {
         }?.frame
     }
 
-    // MARK: - Space header
+    // MARK: - Space picker
 
-    private func buildSpaceHeader(_ profile: ProfileInfo, padding: CGFloat, yOffset: CGFloat) -> CGFloat {
-        let headerFrame = NSRect(
-            x: padding,
-            y: yOffset - SidebarExpandedMetrics.spaceHeaderHeight,
-            width: bounds.width - padding * 2,
-            height: SidebarExpandedMetrics.spaceHeaderHeight
-        )
-        hitAreas.append(SidebarHitArea(frame: headerFrame, region: .spaceHeader))
+    /// The active space's color, its name and a chevron: a click lists the
+    /// spaces (`spacePickerMenu`). A small amber dot before the chevron
+    /// says an agent waits on the user in another space, which the
+    /// sidebar doesn't show.
+    private func buildSpacePicker(_ profile: ProfileInfo, top: CGFloat) -> CGFloat {
+        typealias Metrics = SidebarExpandedMetrics
+        let frame = spacePickerFrame(top: top)
+        hitAreas.append(SidebarHitArea(frame: frame, region: .spacePicker))
 
-        // Initially-clear hover backing behind the space name/subtitle —
-        // tinted while hovered so the header reads as a clickable menu.
-        let hover = SidebarBackgroundView(frame: NSRect(
-            x: padding - 8,
-            y: headerFrame.minY + 8,
-            width: headerFrame.width + 16,
-            height: headerFrame.height - 8
-        ))
-        hover.wantsLayer = true
-        hover.layer?.cornerRadius = 8
-        addSubviewDoc(hover)
-        expandedViews.append(hover)
-        spaceHeaderHoverView = hover
+        spacePickerHoverView = addRowHover(frame: frame)
 
+        let dotSize = Metrics.pickerDotSize
         let dot = SidebarBackgroundView(frame: NSRect(
-            x: padding,
-            y: yOffset - 28,
-            width: 9,
-            height: 9
+            x: Metrics.markCenterX - dotSize / 2, y: frame.midY - dotSize / 2, width: dotSize, height: dotSize
         ))
         dot.wantsLayer = true
         dot.layer?.backgroundColor = Self.profileColor(hex: profile.colorHex).cgColor
-        dot.layer?.cornerRadius = 4.5
-        addSubviewDoc(dot)
-        expandedViews.append(dot)
+        dot.layer?.cornerRadius = dotSize / 2
+        addExpandedView(dot)
 
-        let title = textLabel(profile.name, font: Theme.Font.display, color: Theme.Color.textPrimary)
-        title.frame = NSRect(x: padding + 16, y: yOffset - 33, width: bounds.width - padding * 2 - 16 - 40, height: 20)
-        addSubviewDoc(title)
-        expandedViews.append(title)
+        var maxX = frame.maxX - Metrics.cardPaddingX
+        let chevron = SidebarImageView(image: SidebarRenderer.symbol(
+            Theme.Symbol.spacePicker, color: Theme.Color.textSecondary, pointSize: 11
+        ))
+        chevron.frame = NSRect(x: maxX - 12, y: frame.midY - 7, width: 12, height: 14)
+        chevron.setAccessibilityElement(false)
+        addExpandedView(chevron)
+        maxX = chevron.frame.minX - Theme.Space.sm
 
-        // "⋯" space-options badge — same affordance language as the
-        // workspace cards; brightens with the header hover.
-        let badge = SidebarBadgeView(
-            text: "", textColor: Theme.Color.textSecondary, fillColor: Theme.Color.fillHover, font: Theme.Font.caption
-        )
-        badge.symbolName = Theme.Symbol.more
-        badge.hoverTextColor = Theme.Color.textPrimary
-        badge.hoverFillColor = Theme.Color.fillPressed
-        badge.frame = NSRect(
-            x: bounds.width - padding - SidebarExpandedMetrics.countChipWidth,
-            y: yOffset - 34,
-            width: SidebarExpandedMetrics.countChipWidth,
-            height: SidebarExpandedMetrics.countChipHeight
-        )
-        badge.toolTip = "Space options"
-        addSubviewDoc(badge)
-        expandedViews.append(badge)
-        spaceHeaderBadge = badge
+        let waitingElsewhere = spacesWaitingElsewhere
+        if !waitingElsewhere.isEmpty {
+            let amber = SidebarBackgroundView(frame: NSRect(x: maxX - 7, y: frame.midY - 3.5, width: 7, height: 7))
+            amber.wantsLayer = true
+            amber.layer?.backgroundColor = Theme.Color.waiting.cgColor
+            amber.layer?.cornerRadius = 3.5
+            addExpandedView(amber)
+            maxX = amber.frame.minX - Theme.Space.sm
+        }
 
-        let subtitle = NSTextField.sidebarLine(spaceSubtitle(profile))
-        subtitle.frame = NSRect(x: padding, y: yOffset - 54, width: bounds.width - padding * 2, height: 16)
-        addSubviewDoc(subtitle)
-        expandedViews.append(subtitle)
+        let nameX = Metrics.textX
+        let name = textLabel(profile.name, font: Theme.Font.display, color: Theme.Color.textPrimary)
+        let nameHeight = ceil(name.fittingSize.height)
+        name.frame = NSRect(x: nameX, y: frame.midY - nameHeight / 2, width: max(0, maxX - nameX), height: nameHeight)
+        name.setAccessibilityElement(false)
+        addExpandedView(name)
 
-        let separator = SidebarBackgroundView(frame: NSRect(x: padding, y: headerFrame.minY, width: bounds.width - padding * 2, height: 1))
-        separator.wantsLayer = true
-        separator.layer?.backgroundColor = Theme.Color.line.cgColor
-        addSubviewDoc(separator)
-        expandedViews.append(separator)
-
-        return yOffset - SidebarExpandedMetrics.spaceHeaderHeight
+        // A pull-down: spaces and commands. VoiceOver reads "Space", the
+        // space's name, and the wait elsewhere the amber dot shows.
+        let button = SidebarSectionToggleView(frame: frame)
+        button.acceptsFirstClick = false
+        button.role = .menuButton
+        button.setAccessibilityLabel("Space")
+        var value = profile.name
+        if !waitingElsewhere.isEmpty {
+            let note = "An agent waits for you in \(ListFormatter.localizedString(byJoining: waitingElsewhere.map(\.name)))"
+            value += ". \(note)"
+            button.toolTip = note
+        }
+        button.setAccessibilityValue(value)
+        button.onPress = { [weak self] in self?.showSpacePicker() }
+        addExpandedView(button)
+        return frame.minY
     }
 
-    /// "6 workspaces · 2 waiting": the waiting count in amber, when any.
-    private func spaceSubtitle(_ profile: ProfileInfo) -> NSAttributedString {
-        let font = Theme.Font.caption
-        let text = NSMutableAttributedString(string: Self.workspaceCountText(profile.workspaceCount), attributes: [
-            .font: font, .foregroundColor: Theme.Color.textTertiary
-        ])
-        let waiting = lastInfos.filter { $0.cardState == .waiting }.count
-        if waiting > 0 {
-            text.append(NSAttributedString(string: " · ", attributes: [.font: font, .foregroundColor: Theme.Color.textTertiary]))
-            text.append(NSAttributedString(string: "\(waiting) waiting", attributes: [
-                .font: font, .foregroundColor: Theme.Color.waiting
-            ]))
-        }
-        return text
+    /// The other spaces where an agent waits on the user: the sidebar
+    /// lists only the active space's, so the picker (and the rail's space
+    /// tile) marks them.
+    var spacesWaitingElsewhere: [ProfileInfo] {
+        lastProfiles.filter { !$0.isActive && $0.attention == .waiting }
+    }
+
+    /// The picker's row, as wide as the cards.
+    private func spacePickerFrame(top: CGFloat) -> NSRect {
+        let inset = SidebarExpandedMetrics.workspaceInsetX
+        return NSRect(
+            x: inset, y: top - SidebarExpandedMetrics.pickerHeight,
+            width: bounds.width - inset * 2, height: SidebarExpandedMetrics.pickerHeight
+        )
     }
 
     /// "1 workspace", "6 workspaces".
@@ -268,142 +251,119 @@ extension SidebarView {
         NSColor.niruxColor(hex: hex) ?? Theme.Color.accent
     }
 
-    // MARK: - Bottom spaces
+    // MARK: - Tasks
 
-    private func rebuildBottomIndicators() {
-        var items = lastProfiles.map { profile in
-            SidebarDotIndicatorItem(
-                action: .selectProfile(profile.id),
-                colorHex: profile.colorHex,
-                isActive: profile.isActive,
-                attention: profile.attention,
-                label: nil,
-                isEmpty: profile.workspaceCount == 0
-            )
-        }
-        items.append(SidebarDotIndicatorItem(
-            action: .createProfile,
-            colorHex: "#FFFFFF",
-            isActive: false,
-            attention: nil,
-            label: "+"
-        ))
-        let view = SidebarDotIndicatorView(
-            frame: NSRect(x: 0, y: 0, width: bounds.width, height: 54),
-            items: items,
-            tooltip: "Spaces"
+    /// "Tasks", and "+" for a new one, under the Lead's row.
+    private func buildTasksHeader(top: CGFloat) -> CGFloat {
+        typealias Metrics = SidebarExpandedMetrics
+        let rowY = top - Metrics.tasksHeaderHeight
+        let x = Metrics.workspaceInsetX + Metrics.cardPaddingX
+        let label = textLabel("Tasks", font: Theme.Font.captionEmphasized, color: Theme.Color.textTertiary)
+        let labelHeight = ceil(label.fittingSize.height)
+        label.frame = NSRect(x: x, y: rowY + (Metrics.tasksHeaderHeight - labelHeight) / 2, width: 120, height: labelHeight)
+        label.setAccessibilityRole(.staticText)
+        addExpandedView(label)
+
+        let size = Metrics.headerButtonSize
+        let buttonFrame = NSRect(
+            x: bounds.width - Metrics.workspaceInsetX - Metrics.cardPaddingX + (Theme.Space.xs + 2) - size,
+            y: rowY + (Metrics.tasksHeaderHeight - size) / 2, width: size, height: size
         )
-        view.menuProvider = { [weak self] action in
-            guard case .selectProfile(let profileID) = action,
-                  let profile = self?.lastProfiles.first(where: { $0.id == profileID })
-            else { return nil }
-            let menu = NSMenu()
-            self?.addSpaceManagementItems(to: menu, for: profile)
-            return menu
-        }
-        view.onSelect = { [weak self] action in
-            switch action {
-            case .createProfile:
-                self?.onCreateProfile?()
-            case .selectProfile(let profileID):
-                self?.onProfileClicked?(profileID)
-            }
-        }
-        addSubview(view)
-        view.refreshHoverFromMouse()
-        profileIndicatorView = view
+        let button = SidebarBadgeView(text: "", textColor: Theme.Color.textSecondary, fillColor: .clear, font: Theme.Font.caption)
+        button.symbolName = Theme.Symbol.add
+        button.hoverTextColor = Theme.Color.textPrimary
+        button.hoverFillColor = Theme.Color.fillPressed
+        button.frame = buttonFrame
+        button.toolTip = "\(Self.newTaskTitle) (\(NiruxShortcuts.newWorkspaceDisplay))"
+        button.setAccessibilityElement(true)
+        button.setAccessibilityRole(.button)
+        button.setAccessibilityLabel(Self.newTaskTitle)
+        button.onPress = { [weak self] in self?.onNewWorkspace?() }
+        addExpandedView(button)
+        newTaskButton = button
+        hitAreas.append(SidebarHitArea(frame: buttonFrame.insetBy(dx: -4, dy: -3), region: .newTask))
+        return rowY
     }
 
-    // MARK: - Sections
+    /// What the Tasks header's "+" and the rail's "+" open: ⌘N's sheet.
+    static let newTaskTitle = "New…"
 
-    private func buildSectionHeader(
-        _ title: String, count: Int, padding: CGFloat, yOffset: CGFloat,
-        isCollapsed: Bool? = nil
-    ) -> CGFloat {
-        let headerFrame = NSRect(
-            x: padding,
-            y: yOffset - SidebarExpandedMetrics.sectionHeaderHeight,
-            width: bounds.width - padding * 2,
-            height: SidebarExpandedMetrics.sectionHeaderHeight
-        )
-        let heading = isCollapsed.map { "\($0 ? "▸" : "▾") \(title)" } ?? title
-        let label = NSTextField.sidebarLine(NSAttributedString(string: heading.uppercased(), attributes: [
-            .font: Theme.Font.label, .kern: Theme.Font.labelKern, .foregroundColor: Theme.Color.textTertiary
-        ]))
-        label.frame = headerFrame
-        addSubviewDoc(label)
-        expandedViews.append(label)
-        if let isCollapsed {
-            // The whole row, as wide as the cards and down to the first
-            // one, not just the text band.
-            let inset = SidebarExpandedMetrics.workspaceInsetX
-            let rowFrame = NSRect(
-                x: inset,
-                y: yOffset - SidebarExpandedMetrics.sectionHeaderAdvance,
-                width: bounds.width - inset * 2,
-                height: SidebarExpandedMetrics.sectionHeaderAdvance
-            )
-            hitAreas.append(SidebarHitArea(
-                frame: rowFrame,
-                region: .link(url: SidebarView.inactiveSectionActionURL, label: label)
-            ))
-            let toggle = SidebarSectionToggleView(frame: rowFrame)
-            toggle.setAccessibilityLabel("\(title.capitalized) workspaces, \(count)")
-            toggle.setAccessibilityExpanded(!isCollapsed)
-            toggle.onPress = { [weak self] in self?.toggleInactiveSection() }
-            label.setAccessibilityElement(false)
-            addSubviewDoc(toggle)
-            expandedViews.append(toggle)
-        }
-
-        let countChip = SidebarBadgeView(
-            text: "\(count)", textColor: Theme.Color.textTertiary, fillColor: Theme.Color.fillHover, font: Theme.Font.label
-        )
-        countChip.cornerRadius = Theme.Radius.chip
-        let labelWidth = ceil(label.attributedStringValue.size().width)
-        let countWidth = ceil(("\(count)" as NSString).size(withAttributes: [.font: Theme.Font.label]).width)
-        countChip.frame = NSRect(
-            x: padding + labelWidth + 6,
-            y: yOffset - 15,
-            width: max(18, countWidth + 10),
-            height: 14
-        )
-        countChip.setAccessibilityRole(.staticText)
-        countChip.setAccessibilityLabel("\(count)")
-        // The toggle button already says it.
-        countChip.setAccessibilityElement(isCollapsed == nil)
-        addSubviewDoc(countChip)
-        expandedViews.append(countChip)
-
-        return yOffset - SidebarExpandedMetrics.sectionHeaderAdvance
-    }
-
-    private func buildWorkspaceGroup(_ infos: [WorkspaceInfo], padding: CGFloat, yOffset: CGFloat) -> CGFloat {
+    private func buildWorkspaceGroup(_ infos: [WorkspaceInfo], yOffset: CGFloat) -> CGFloat {
         var currentY = yOffset
         for workspace in infos {
-            currentY = buildWorkspaceSection(workspace: workspace, padding: padding, yOffset: currentY)
+            currentY = buildWorkspaceSection(workspace: workspace, yOffset: currentY)
             currentY -= SidebarExpandedMetrics.workspaceGap
         }
         return currentY
     }
 
-    static let shortcutHints = [
-        SidebarShortcutHint(key: NiruxShortcuts.newWorkspaceDisplay, label: "new"),
-        SidebarShortcutHint(key: NiruxShortcuts.newTerminalDisplay, label: "column")
-    ]
+    // MARK: - Archived
 
-    private func buildShortcutHint(padding: CGFloat, yOffset: CGFloat) -> CGFloat {
-        let hint = SidebarShortcutHintView(hints: Self.shortcutHints)
-        hint.frame = NSRect(
-            x: padding,
-            y: yOffset - SidebarExpandedMetrics.shortcutHintHeight,
-            width: bounds.width - padding * 2,
-            height: SidebarExpandedMetrics.shortcutHintHeight
+    /// The Archived row at the bottom, and above it, after a line, the
+    /// archived workspaces it lists: all of them unfolded; folded, the one
+    /// on screen and those asking the user (`listsWorkspace`). The row
+    /// keeps its place when the list opens, so the same click folds it.
+    private func buildArchivedBlock(count: Int, listed: [WorkspaceInfo], listHeight: CGFloat) {
+        typealias Metrics = SidebarExpandedMetrics
+        let inset = Metrics.workspaceInsetX
+        let rowFrame = NSRect(
+            x: inset, y: Metrics.bottomPadding, width: bounds.width - inset * 2, height: Metrics.archivedRowHeight
         )
-        addSubviewDoc(hint)
-        expandedViews.append(hint)
-        return yOffset - SidebarExpandedMetrics.shortcutHintHeight
+        buildArchivedRow(count: count, frame: rowFrame)
+        guard !listed.isEmpty else { return }
+
+        let listTop = rowFrame.maxY + listHeight - 1
+        let line = SidebarBackgroundView(frame: NSRect(
+            x: inset + Metrics.cardPaddingX, y: listTop, width: rowFrame.width - Metrics.cardPaddingX * 2, height: 1
+        ))
+        line.wantsLayer = true
+        line.layer?.backgroundColor = Theme.Color.line.cgColor
+        addExpandedView(line)
+        _ = buildWorkspaceGroup(listed, yOffset: listTop - Metrics.workspaceGap)
     }
+
+    private func buildArchivedRow(count: Int, frame: NSRect) {
+        typealias Metrics = SidebarExpandedMetrics
+        hitAreas.append(SidebarHitArea(frame: frame, region: .archivedToggle))
+        archivedRowHoverView = addRowHover(frame: frame)
+
+        let icon = SidebarImageView(image: SidebarRenderer.symbol(
+            Theme.Symbol.inactiveWorkspaces, color: Theme.Color.textSecondary, pointSize: 12
+        ))
+        icon.frame = NSRect(x: Metrics.markCenterX - 7, y: frame.midY - 7, width: 14, height: 14)
+        icon.setAccessibilityElement(false)
+        addExpandedView(icon)
+
+        let countLabel = textLabel("\(count)", font: Theme.Font.caption, color: Theme.Color.textSecondary)
+        countLabel.alignment = .right
+        let countSize = countLabel.fittingSize
+        countLabel.frame = NSRect(
+            x: frame.maxX - Metrics.cardPaddingX - countSize.width, y: frame.midY - ceil(countSize.height) / 2,
+            width: countSize.width, height: ceil(countSize.height)
+        )
+        countLabel.setAccessibilityElement(false)
+        addExpandedView(countLabel)
+
+        let titleX = Metrics.textX
+        let title = textLabel(Self.archivedTitle, font: Theme.Font.body, color: Theme.Color.textSecondary)
+        let titleHeight = ceil(title.fittingSize.height)
+        title.frame = NSRect(
+            x: titleX, y: frame.midY - titleHeight / 2,
+            width: max(0, countLabel.frame.minX - Theme.Space.sm - titleX), height: titleHeight
+        )
+        title.setAccessibilityElement(false)
+        addExpandedView(title)
+
+        // Takes the first click on a window in the background, and is what
+        // VoiceOver sees.
+        let toggle = SidebarSectionToggleView(frame: frame)
+        toggle.setAccessibilityLabel("\(Self.archivedTitle), \(count)")
+        toggle.setAccessibilityExpanded(!isInactiveSectionCollapsed)
+        toggle.onPress = { [weak self] in self?.toggleInactiveSection() }
+        addExpandedView(toggle)
+    }
+
+    static let archivedTitle = "Archived"
 
     // MARK: - Getting Started checklist
 
@@ -457,25 +417,48 @@ extension SidebarView {
 
     // MARK: - Workspace section
 
-    private func buildWorkspaceSection(workspace: WorkspaceInfo, padding: CGFloat, yOffset: CGFloat) -> CGFloat {
+    private func buildWorkspaceSection(workspace: WorkspaceInfo, yOffset: CGFloat) -> CGFloat {
         let result = SidebarWorkspaceCardRenderer(
             workspace: workspace,
             sidebarWidth: bounds.width,
             yOffset: yOffset
         ).render()
-        for view in result.views {
-            addSubviewDoc(view)
-            expandedViews.append(view)
-        }
+        result.views.forEach(addExpandedView)
         hitAreas.append(contentsOf: result.hitAreas)
         cardHoverViews[workspace.index] = result.cardHoverView
-        if let badge = result.menuBadge { menuBadgeViews[workspace.index] = badge }
+        if let badge = result.menuBadge {
+            menuBadgeViews[workspace.index] = badge
+            // VoiceOver's press: the menu a click on it opens.
+            let index = workspace.index
+            badge.onPress = { [weak self, weak badge] in
+                guard let self, let badge else { return }
+                workspaceActionMenu(workspaceIndex: index, columnIndex: nil)
+                    .popUp(positioning: nil, at: NSPoint(x: badge.frame.minX, y: badge.frame.minY), in: contentDocumentView)
+            }
+        }
         columnHoverViews[workspace.index] = result.columnHoverViews
         approvalButtonViews.merge(result.approvalButtons) { _, new in new }
         return result.bottomY
     }
 
     // MARK: - Small controls
+
+    /// Clear until hovered (`applyHover` tints it), so a row that acts as
+    /// one control reads as one: the picker, the Archived row.
+    private func addRowHover(frame: NSRect) -> NSView {
+        let hover = SidebarBackgroundView(frame: frame)
+        hover.wantsLayer = true
+        hover.layer?.cornerRadius = Theme.Radius.card
+        addExpandedView(hover)
+        return hover
+    }
+
+    /// A view of this render, in the document view; the next render tears
+    /// it down.
+    private func addExpandedView(_ view: NSView) {
+        addSubviewDoc(view)
+        expandedViews.append(view)
+    }
 
     private func textLabel(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
         let label = NSTextField(labelWithString: text)

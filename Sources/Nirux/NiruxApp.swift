@@ -132,6 +132,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         shellView.autoresizingMask = [.width, .height]
         window.contentView = shellView
         shell = shellView
+        setUpTitleBarActions(window: window)
         setUpUsageLimits(window: window)
         setUpKeepAwake(window: window, shell: shellView)
         setupStatusBarNotices()
@@ -327,6 +328,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         }
         if menuItem.action == #selector(importBrowserCookies(_:)) {
             return shell.map { !$0.sideEffects.cookieBrowsers().isEmpty } ?? false
+        }
+        if menuItem.action == #selector(selectSpaceByNumber(_:)) {
+            return menuItem.tag <= (shell?.sidebar.lastProfiles.count ?? 0)
         }
         if menuItem.action == #selector(toggleInactiveWorkspaces(_:)) {
             guard let shell else { return false }

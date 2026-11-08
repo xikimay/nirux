@@ -48,7 +48,7 @@ final class SidebarCollapseTests: XCTestCase {
 
     private func profile(_ id: String, isActive: Bool) -> ProfileInfo {
         ProfileInfo(
-            id: id, name: id, colorHex: "#7AA2F7", isActive: isActive, workspaceCount: 2, attention: nil
+            id: id, name: id, colorHex: "#7AA2F7", isActive: isActive, workspaceCount: 2, taskCount: 1, attention: nil
         )
     }
 
@@ -138,9 +138,9 @@ final class SidebarCollapseTests: XCTestCase {
         XCTAssertTrue(sidebar.isInactiveSectionCollapsed)
     }
 
-    /// The whole header row toggles, not just the label's text band, and
-    /// it takes the first click on a window in the background.
-    func testWholeHeaderRowIsClickable() throws {
+    /// The Archived row sits at the bottom, as wide as the cards; all of it
+    /// toggles, and it takes the first click on a window in the background.
+    func testWholeArchivedRowIsClickable() throws {
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 660))
         sidebar.isExpanded = true
         sidebar.update(
@@ -150,23 +150,17 @@ final class SidebarCollapseTests: XCTestCase {
                 workspace(id: "archived", index: 1, isInactive: true)
             ]
         )
-        let header = try XCTUnwrap(sidebar.hitAreas.first {
-            if case .link(let url, _) = $0.region { return url == SidebarView.inactiveSectionActionURL }
-            return false
-        })
-        guard case .link(_, let label) = header.region else { return XCTFail("header is not a link") }
+        let row = try XCTUnwrap(sidebar.inactiveSectionHeaderFrame)
+        XCTAssertEqual(row.height, SidebarExpandedMetrics.archivedRowHeight)
+        XCTAssertEqual(row.minY, SidebarExpandedMetrics.bottomPadding)
+        XCTAssertEqual(row.width, 260 - SidebarExpandedMetrics.workspaceInsetX * 2)
 
-        XCTAssertEqual(header.frame.height, SidebarExpandedMetrics.sectionHeaderAdvance)
-        // Under the label's text band, just above where the first card goes,
-        // and left of the "▸", where the cards start.
-        let underLabel = NSPoint(x: header.frame.midX, y: label.frame.minY - 5)
-        let leftOfLabel = NSPoint(x: label.frame.minX - 6, y: label.frame.midY)
         let document = sidebar.contentDocumentView
-        for point in [underLabel, leftOfLabel, NSPoint(x: label.frame.midX, y: label.frame.midY)] {
-            guard case .link(let url, _) = sidebar.hitArea(at: point)?.region else {
-                return XCTFail("\(point) on the header row is not clickable")
+        let corners = [NSPoint(x: row.minX + 2, y: row.minY + 2), NSPoint(x: row.maxX - 2, y: row.maxY - 2)]
+        for point in corners + [NSPoint(x: row.midX, y: row.midY)] {
+            guard case .archivedToggle = sidebar.hitArea(at: point)?.region else {
+                return XCTFail("\(point) on the Archived row is not clickable")
             }
-            XCTAssertEqual(url, SidebarView.inactiveSectionActionURL)
             let hitView = document.hitTest(document.convert(point, to: document.superview))
             XCTAssertEqual(hitView?.acceptsFirstMouse(for: nil), true)
         }
@@ -197,13 +191,24 @@ final class SidebarCollapseTests: XCTestCase {
         sidebar.toggleInactiveSection()
         XCTAssertEqual(cardIndices(sidebar).count, 12)
         XCTAssertEqual(try headerOnScreen().minY, before.minY, accuracy: 0.5)
+        // The list opens above the row, under the active cards.
+        let header = try XCTUnwrap(sidebar.inactiveSectionHeaderFrame)
+        let cards = sidebar.hitAreas.compactMap { area -> (Int, NSRect)? in
+            if case .workspace(let index) = area.region { return (index, area.frame) }
+            return nil
+        }
+        let lowestActive = try XCTUnwrap(cards.filter { $0.0 < 2 }.map(\.1.minY).min())
+        for (index, frame) in cards where index >= 2 {
+            XCTAssertGreaterThan(frame.minY, header.maxY, "w\(index)")
+            XCTAssertLessThan(frame.maxY, lowestActive, "w\(index)")
+        }
 
         sidebar.toggleInactiveSection()
         XCTAssertEqual(try headerOnScreen().minY, before.minY, accuracy: 0.5)
     }
 
-    /// VoiceOver reaches the toggle as a button on the header row.
-    func testHeaderIsAnAccessibleToggle() throws {
+    /// VoiceOver reaches the toggle as a button on the Archived row.
+    func testArchivedRowIsAnAccessibleToggle() throws {
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 660))
         sidebar.isExpanded = true
         sidebar.update(
@@ -214,7 +219,9 @@ final class SidebarCollapseTests: XCTestCase {
             ]
         )
         func toggle() throws -> SidebarSectionToggleView {
-            try XCTUnwrap(sidebar.contentDocumentView.subviews.lazy.compactMap { $0 as? SidebarSectionToggleView }.first)
+            try XCTUnwrap(sidebar.contentDocumentView.subviews.lazy.compactMap { $0 as? SidebarSectionToggleView }.first {
+                $0.accessibilityLabel() == "Archived, 1"
+            })
         }
 
         XCTAssertEqual(try toggle().accessibilityRole(), .button)

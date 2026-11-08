@@ -216,11 +216,6 @@ extension NiruxShellView {
         }
     }
 
-    /// "Edit Task Templates…": Space Settings › Templates.
-    func editTaskTemplates(profileID: String) {
-        showSpaceSettings(profileID: profileID, tab: .templates)
-    }
-
     struct CreatedTaskWorktree: Sendable {
         let path: String
         /// The worktree, or the space's folder in it (`Target.subdirectory`).

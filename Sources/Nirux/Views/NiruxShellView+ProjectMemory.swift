@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Space Memory (Space Settings › Memory; ⌘P › Space Memory…, the space's menu)
+// MARK: - Space Memory (Space Settings › Memory; ⌘P › Space Memory…)
 
 extension NiruxShellView {
     /// What a Project Memory read needs, kept for the reads after a write.
@@ -196,7 +196,7 @@ extension NiruxShellView {
         return true
     }
 
-    /// The project's brief, created on first use as "Edit Space Brief…"
+    /// The project's brief, created on first use as Space Settings › Brief
     /// does; nil with a toast when it can't be.
     private func ensureProjectBrief(spaceID: String) -> URL? {
         let name = workspaceStore.profiles.first { $0.id == spaceID }?.name ?? spaceID

@@ -6,17 +6,19 @@ final class SidebarBackgroundView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
-/// Laid over the INACTIVE section header's row. It takes the first click
-/// on a window in the background, so that click toggles instead of only
-/// bringing the window forward, and hands mouse events on up the
-/// responder chain to the sidebar's hit regions. VoiceOver sees it as the
-/// header's toggle button.
+/// Laid over a sidebar row that acts as one control: the Archived row,
+/// the space picker. It hands mouse events on up the responder chain to
+/// the sidebar's hit regions; VoiceOver sees it as the row's button. The
+/// Archived row's takes the first click on a window in the background, so
+/// that click toggles instead of only bringing the window forward.
 final class SidebarSectionToggleView: NSView {
     var onPress: (() -> Void)?
+    var acceptsFirstClick = true
+    var role: NSAccessibility.Role = .button
 
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { acceptsFirstClick }
     override func isAccessibilityElement() -> Bool { true }
-    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    override func accessibilityRole() -> NSAccessibility.Role? { role }
     override func accessibilityPerformPress() -> Bool {
         onPress?()
         return true
@@ -60,16 +62,8 @@ final class SidebarView: NSView {
     var onProfileClicked: ((String) -> Void)?
     /// "New Space…": the sheet (see NewSpacePanel).
     var onCreateProfile: (() -> Void)?
-    /// (space id): "Add Repository…".
-    var onAddRepository: ((String) -> Void)?
-    /// (space id): Space Settings.
+    /// (space id): Space Settings….
     var onShowSpaceSettings: ((String) -> Void)?
-    var onRenameProfile: ((String) -> Void)?
-    var onEditProfileBrief: ((String) -> Void)?
-    var onEditBoardSettings: ((String) -> Void)?
-    var onEditTaskTemplates: ((String) -> Void)?
-    var onShowProjectMemory: ((String) -> Void)?
-    var onRecolorProfile: ((String, String) -> Void)?
     var onDeleteProfile: ((String) -> Void)?
     /// (workspace id, space id). By id: a close that finishes while the menu
     /// is open can leave a card's index stale.
@@ -104,17 +98,16 @@ final class SidebarView: NSView {
     var onboardingCardView: OnboardingChecklistView?
     /// Set by `revealOnboardingCard()` while the card isn't laid out yet.
     var revealsOnboardingCardOnNextBuild = false
-    /// Inactive workspaces are finished work: the section starts folded at
-    /// every launch and only `toggleInactiveSection` (the header, View ▸
-    /// Show Inactive Workspaces, ⌘P) unfolds it — not the workspace on screen
-    /// (see `listsWorkspace`), not a refresh. Unfolding is a look at this
-    /// space's section: `update` folds it back on a space switch or once
-    /// the section is empty, so it never reappears unfolded. Not saved.
+    /// Archived (inactive) workspaces are finished work: their list starts
+    /// folded at every launch and only `toggleInactiveSection` (the Archived
+    /// row, View ▸ Show Archived, ⌘P) unfolds it — not the workspace on
+    /// screen (see `listsWorkspace`), not a refresh. Unfolding is a look at
+    /// this space's list: `update` folds it back on a space switch or once
+    /// the list is empty, so it never reappears unfolded. Not saved.
     private(set) var isInactiveSectionCollapsed = true
     /// The last render's views, the cards' or the rail's: the next one
     /// tears them down.
     var expandedViews: [NSView] = []
-    var profileIndicatorView: SidebarDotIndicatorView?
     var hitAreas: [SidebarHitArea] = []
 
     // Workspace drag-reorder state; the tracking logic lives in
@@ -138,6 +131,9 @@ final class SidebarView: NSView {
     /// `NSEvent.timestamp` of the release that last made an Allow / Deny /
     /// Resume act (see `isLeftoverPress`).
     var lastButtonActionAt: TimeInterval = -.infinity
+    /// The row a single press landed on, and when: the double-click's
+    /// second press renames it, wherever the rows moved meanwhile.
+    var lastRowPress: (workspaceIndex: Int, at: TimeInterval)?
 
     // Hover-highlight backing views registered per rebuild (workspace index
     // → view), plus the current target. Tinting is applied/cleared directly
@@ -148,9 +144,9 @@ final class SidebarView: NSView {
     var approvalButtonViews: [String: SidebarBadgeView] = [:]
     /// Kept across rebuilds: see `refreshApprovalArming`.
     var approvalButtonArming: [String: SidebarApprovalButtonArming] = [:]
-    var spaceHeaderHoverView: NSView?
-    /// "⋯" badge in the space header — brightens with the header hover.
-    var spaceHeaderBadge: SidebarBadgeView?
+    var spacePickerHoverView: NSView?
+    var newTaskButton: SidebarBadgeView?
+    var archivedRowHoverView: NSView?
     var hoveredTarget: SidebarHoverTarget?
 
     /// The rail's tiles, by the hover target that lights them.
@@ -223,8 +219,10 @@ final class SidebarView: NSView {
         }
         let spaceChanged = profiles.first(where: \.isActive)?.id != lastProfiles.first(where: \.isActive)?.id
         if spaceChanged || !workspaces.contains(where: \.isInactive) { isInactiveSectionCollapsed = true }
+        let spacesChanged = profiles != lastProfiles
         lastProfiles = profiles
         lastInfos = workspaces
+        if spacesChanged { NotificationCenter.default.post(name: Self.spacesDidChangeNotification, object: self) }
         // The 2s heartbeat calls this even when nothing visible changed.
         // Rebuilding then is not just wasted work: it tears down every
         // row's tooltip tracking rect (the system tooltip delay never
@@ -320,6 +318,15 @@ final class SidebarView: NSView {
             hideRailTooltip()
         }
 
+        // A double-click renames the row its first click landed on: that
+        // click selected it, and the rows moved (the selected row is taller).
+        if event.clickCount == 2, let first = lastRowPress,
+           event.timestamp - first.at <= NSEvent.doubleClickInterval {
+            lastRowPress = nil
+            onWorkspaceClicked?(first.workspaceIndex)
+            onWorkspaceAction?(.rename, first.workspaceIndex)
+            return
+        }
         if let area = hitArea(at: docLocation) {
             // Workspace rows don't click on mouseDown: run the drag
             // tracking loop, which decides between click and reorder.
@@ -329,9 +336,11 @@ final class SidebarView: NSView {
                     onWorkspaceAction?(.rename, workspaceIndex)
                     return
                 }
+                lastRowPress = event.clickCount == 1 ? (workspaceIndex, event.timestamp) : nil
                 trackWorkspaceDrag(workspaceIndex: workspaceIndex, rowFrame: area.frame, startPoint: docLocation)
                 return
             }
+            lastRowPress = nil
             if Self.armedButtonKey(for: area.region) != nil {
                 trackApprovalClick(area.region, event: event)
                 return
@@ -359,16 +368,6 @@ final class SidebarView: NSView {
     override func mouseMoved(with event: NSEvent) {
         isRailTooltipSuppressed = false
         defer { if !isExpanded { updateRailTooltip() } }
-        // The bottom space switcher tracks its own hover — keep the pointing
-        // hand (its cursor rect would otherwise be overridden below) and drop
-        // any list highlight while the pointer is there.
-        if let indicator = profileIndicatorView,
-           indicator.frame.contains(convert(event.locationInWindow, from: nil)) {
-            clearHover()
-            setHoverTarget(nil)
-            NSCursor.pointingHand.set()
-            return
-        }
         let point = contentDocumentView.convert(event.locationInWindow, from: nil)
 
         // The checklist's buttons track their own hover and cursor.
@@ -396,9 +395,9 @@ final class SidebarView: NSView {
                 applyUnderline(to: label)
                 hoveredLabel = label
             }
-        case .spaceHeader:
+        case .spacePicker, .newTask, .archivedToggle:
             clearHover()
-            setHoverTarget(.spaceHeader)
+            setHoverTarget(Self.hoverTarget(of: area.region))
             NSCursor.pointingHand.set()
         case .workspace(let workspaceIndex):
             clearHover()
@@ -436,18 +435,21 @@ final class SidebarView: NSView {
 
     private func handleHit(_ region: SidebarHitRegion, event: NSEvent) {
         switch region {
-        case .spaceHeader:
-            let point = convert(event.locationInWindow, from: nil)
-            showSpaceMenu(at: point)
+        case .spacePicker:
+            showSpacePicker()
+        case .newTask:
+            onNewWorkspace?()
+        case .archivedToggle:
+            toggleInactiveSection()
         case .link(let url, let label):
-            if url == Self.inactiveSectionActionURL {
-                toggleInactiveSection()
-            } else if let target = Self.missionQuestionTarget(url) {
+            if let target = Self.missionQuestionTarget(url) {
                 onMissionQuestionClicked?(target.workspaceIndex, target.columnIndex, label)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.diffActionPrefix) {
                 onDiffStatsClicked?(workspaceIndex)
             } else if let workspaceIndex = Self.actionWorkspaceIndex(url, prefix: Self.cleanupActionPrefix) {
                 onWorkspaceAction?(.cleanUpWorktree, workspaceIndex)
+            } else if let target = Self.resumeTarget(url) {
+                onDeferredAgentResume?(target.workspaceIndex, target.columnIndex, target.columnID)
             } else if let workspaceID = Self.prFeedbackActionWorkspaceID(url) {
                 prFeedbackMenu?(workspaceID)?.popUp(positioning: nil, at: convert(event.locationInWindow, from: nil), in: self)
             } else if let (workspaceIndex, url) = Self.openActionTarget(url),
@@ -467,7 +469,7 @@ final class SidebarView: NSView {
         case .railButton(.project):
             let point = convert(event.locationInWindow, from: nil)
             setHoverTarget(nil) // the tooltip would stay beside the menu
-            projectMenu().popUp(positioning: nil, at: point, in: self)
+            spacePickerMenu().popUp(positioning: nil, at: point, in: self)
         case .railButton(.inactiveSection):
             toggleInactiveSection()
         case .railButton(.newWorkspace):
@@ -475,43 +477,36 @@ final class SidebarView: NSView {
         }
     }
 
-    private func showSpaceMenu(at point: NSPoint) {
-        spaceOptionsMenu().popUp(positioning: nil, at: point, in: self)
+    /// Pops the space picker's menu up under the picker, left-aligned with
+    /// it, as a pull-down does.
+    func showSpacePicker() {
+        guard let frame = hitAreas.first(where: { if case .spacePicker = $0.region { true } else { false } })?.frame
+        else { return }
+        spacePickerMenu().popUp(
+            positioning: nil, at: NSPoint(x: frame.minX, y: frame.minY - Theme.Space.xs), in: contentDocumentView
+        )
     }
 
-    /// Space options only — switching spaces lives in the bottom dot
-    /// switcher (and ⌥⌘←/→), so the header menu doesn't duplicate it.
-    func spaceOptionsMenu() -> NSMenu {
-        let menu = NSMenu()
-        addSpaceOptions(to: menu)
-        return menu
-    }
+    /// Posted when `lastProfiles` changes: the menu bar's Space menu
+    /// (`SpaceListMenu`) follows, so ⌥⌘1…⌥⌘9 match the picker before that
+    /// menu ever opens.
+    static let spacesDidChangeNotification = Notification.Name("NiruxSidebarSpacesDidChange")
 
     /// Shared with the menu bar's Space › New Space…, which runs the same
     /// `onCreateProfile`.
     static let newSpaceTitle = "New Space…"
 
-    /// The active space's options, then "New Space…".
-    func addSpaceOptions(to menu: NSMenu) {
-        if let active = lastProfiles.first(where: { $0.isActive }) {
-            addSpaceManagementItems(to: menu, for: active)
-        }
-        menu.addClosureItem(title: Self.newSpaceTitle) { [weak self] in
-            self?.onCreateProfile?()
-        }
-    }
-
     override func menu(for event: NSEvent) -> NSMenu? {
-        // Right-click on the space header (or the rail's project) mirrors
-        // its left-click menu — every region that advertises a menu
+        // Right-click on the space picker (or the rail's space tile)
+        // mirrors its left-click menu — every region that advertises a menu
         // answers both buttons.
         let docLocation = contentDocumentView.convert(event.locationInWindow, from: nil)
         switch hitArea(at: docLocation)?.region {
-        case .spaceHeader?:
-            return spaceOptionsMenu()
+        case .spacePicker?:
+            return spacePickerMenu()
         case .railButton(.project)?:
             setHoverTarget(nil)
-            return projectMenu()
+            return spacePickerMenu()
         default:
             break
         }
@@ -571,7 +566,7 @@ final class SidebarView: NSView {
         return menu
     }
 
-    /// The card's moves: up, down, to another space, to INACTIVE and back.
+    /// The card's moves: up, down, to another space, to Archived and back.
     private func organizeItem(workspaceIndex: Int, isInactive: Bool) -> NSMenuItem {
         let submenu = NSMenu()
         submenu.addClosureItem(title: "Move Up") { [weak self] in
@@ -583,11 +578,11 @@ final class SidebarView: NSView {
         if let item = moveToSpaceItem(workspaceIndex: workspaceIndex) { submenu.addItem(item) }
         submenu.addItem(.separator())
         if isInactive {
-            submenu.addClosureItem(title: "Move to Active") { [weak self] in
+            submenu.addClosureItem(title: "Unarchive") { [weak self] in
                 self?.onWorkspaceAction?(.markActive, workspaceIndex)
             }
         } else {
-            submenu.addClosureItem(title: "Move to Inactive") { [weak self] in
+            submenu.addClosureItem(title: "Archive") { [weak self] in
                 self?.onWorkspaceAction?(.markInactive, workspaceIndex)
             }
         }
@@ -621,7 +616,7 @@ final class SidebarView: NSView {
             case .workspace(let workspaceIndex), .workspaceMenu(let workspaceIndex),
                  .actionBlock(let workspaceIndex):
                 return MenuTarget(workspaceIndex: workspaceIndex, columnIndex: nil)
-            case .spaceHeader, .link, .railButton:
+            case .spacePicker, .newTask, .archivedToggle, .link, .railButton:
                 continue
             }
         }
@@ -634,10 +629,22 @@ final class SidebarView: NSView {
     }
 
     /// Under the text only, not under a link's icons.
+    /// Under the link's words when only some are ("Merged · Clean up":
+    /// the accent ones), else under all the text.
     private func applyUnderline(to label: NSTextField) {
         let attr = NSMutableAttributedString(attributedString: label.attributedStringValue)
-        attr.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attr.length)) { attachment, range, _ in
-            guard attachment == nil else { return }
+        let whole = NSRange(location: 0, length: attr.length)
+        var linkRanges: [NSRange] = []
+        attr.enumerateAttribute(.foregroundColor, in: whole) { color, range, _ in
+            if (color as? NSColor) == Theme.Color.accent { linkRanges.append(range) }
+        }
+        if linkRanges.isEmpty || linkRanges == [whole] {
+            attr.enumerateAttribute(.attachment, in: whole) { attachment, range, _ in
+                guard attachment == nil else { return }
+                linkRanges.append(range)
+            }
+        }
+        for range in linkRanges {
             attr.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
         }
         label.attributedStringValue = attr
@@ -668,6 +675,22 @@ final class SidebarView: NSView {
         return (workspaceIndex, columnIndex)
     }
 
+    private static let resumeActionPrefix = "action:resume:"
+
+    /// A row's "Paused · Resume": starts the restored agent of that column
+    /// without switching rows.
+    static func resumeActionURL(workspaceIndex: Int, columnIndex: Int, columnID: UUID) -> String {
+        resumeActionPrefix + "\(workspaceIndex):\(columnIndex):\(columnID.uuidString)"
+    }
+
+    private static func resumeTarget(_ value: String) -> (workspaceIndex: Int, columnIndex: Int, columnID: UUID)? {
+        guard value.hasPrefix(resumeActionPrefix) else { return nil }
+        let parts = value.dropFirst(resumeActionPrefix.count).split(separator: ":")
+        guard parts.count == 3, let workspaceIndex = Int(parts[0]), let columnIndex = Int(parts[1]),
+              let columnID = UUID(uuidString: String(parts[2])) else { return nil }
+        return (workspaceIndex, columnIndex, columnID)
+    }
+
     static func diffActionURL(workspaceIndex: Int) -> String {
         diffActionPrefix + String(workspaceIndex)
     }
@@ -685,8 +708,6 @@ final class SidebarView: NSView {
     static func openActionURL(workspaceIndex: Int, url: String) -> String {
         "action:open:\(workspaceIndex):\(url)"
     }
-
-    static let inactiveSectionActionURL = "action:inactive-section-toggle"
 
     private static func actionWorkspaceIndex(_ value: String, prefix: String) -> Int? {
         guard value.hasPrefix(prefix) else { return nil }
@@ -708,13 +729,13 @@ final class SidebarView: NSView {
     }
 }
 
-// MARK: - Inactive section
+// MARK: - Archived list
 
 extension SidebarView {
-    /// Whether the sidebar lists a workspace. The folded section still
-    /// lists the inactive workspace on screen, alone, until the user moves
-    /// to another one, and those whose agent waits on the user or broke
-    /// (`asksUser`) — the section itself stays folded.
+    /// Whether the sidebar lists a workspace. The folded archived list
+    /// still lists the archived workspace on screen, alone, until the user
+    /// moves to another one, and those whose agent waits on the user or
+    /// broke (`asksUser`) — the list itself stays folded.
     func listsWorkspace(isInactive: Bool, isActive: Bool, asksUser: Bool = false) -> Bool {
         !isInactive || isActive || asksUser || !isInactiveSectionCollapsed
     }
@@ -725,13 +746,12 @@ extension SidebarView {
 
     var hasInactiveWorkspaces: Bool { lastInfos.contains(where: \.isInactive) }
 
-    /// The header row's hit area (the rail's toggle tile), in document
+    /// The Archived row's hit area (the rail's toggle tile), in document
     /// coordinates.
     var inactiveSectionHeaderFrame: NSRect? {
         hitAreas.first {
             switch $0.region {
-            case .link(let url, _): return url == Self.inactiveSectionActionURL
-            case .railButton(.inactiveSection): return true
+            case .archivedToggle, .railButton(.inactiveSection): return true
             default: return false
             }
         }?.frame
@@ -748,15 +768,19 @@ extension SidebarView {
             rebuildContent()
             return
         }
-        // Keep the header under the pointer for the next click. Only rows
-        // below it change, but the document view isn't flipped, so a
-        // rebuild keeps the distance to the bottom: keep the one to the top.
+        // Keep the toggle under the pointer for the next click. The
+        // document view isn't flipped, so a rebuild keeps the distance to
+        // the bottom: right for the Archived row, at the bottom with its
+        // list growing above it. The rail's tile has its list below it:
+        // keep the distance to the top.
         let clip = contentScrollView.contentView
         let visibleTopFromDocumentTop = contentDocumentView.frame.height - clip.bounds.maxY
         rebuildContent()
-        let highestOrigin = max(0, contentDocumentView.frame.height - clip.bounds.height)
-        let originY = contentDocumentView.frame.height - visibleTopFromDocumentTop - clip.bounds.height
-        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(max(0, originY), highestOrigin)))
+        if !isExpanded {
+            let highestOrigin = max(0, contentDocumentView.frame.height - clip.bounds.height)
+            let originY = contentDocumentView.frame.height - visibleTopFromDocumentTop - clip.bounds.height
+            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(max(0, originY), highestOrigin)))
+        }
         contentScrollView.reflectScrolledClipView(clip)
         // From the menu or ⌘P the header may be out of view.
         if let header = inactiveSectionHeaderFrame { contentDocumentView.scrollToVisible(header) }

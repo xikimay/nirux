@@ -177,23 +177,34 @@ extension WorkspaceInfo {
         return (columns.compactMap(\.attention) + [away].compactMap { $0 }).max()
     }
 
-    /// An agent waits on the user or broke: the folded INACTIVE section
+    /// An agent waits on the user or broke: the folded archived list
     /// lists the workspace anyway.
     var asksUser: Bool {
         columns.contains { $0.attention == .waiting || $0.attention == .error }
     }
 
-    /// One line in the INACTIVE section: parked work that asks nothing and
-    /// isn't on screen.
+    /// One line in the archived list: parked work that asks nothing, offers
+    /// no clean-up and isn't on screen.
     var showsCompactRow: Bool {
-        isInactive && !isActive && !cardActions.contains { !$0.isQuiet }
+        isInactive && !isActive && !cardActions.contains { !$0.isQuiet } && mergedCleanup == nil
             && ![.waiting, .error, .working].contains(cardState)
     }
 
-    /// The card's action block, top to bottom; empty hides it.
+    /// The block under a row's two lines, top to bottom; empty hides it.
+    /// "Clean up" and a Mission question are the status line's
+    /// (`rowSummary`) when it shows them; when it says something else first
+    /// they get a line here, so every question opens and every clean-up
+    /// shows.
     var cardActions: [SidebarCardAction] {
         var actions: [SidebarCardAction] = []
         let names = columns.map(SidebarRenderer.columnName)
+        let summary = rowSummary
+        // The Lead's row has no status line: its question gets a line here.
+        let questionShown: Int? = switch summary.status.action {
+        case _ where isLead: nil
+        case .missionQuestion(let columnIndex)?: columnIndex
+        default: summary.mark == .asking ? Self.questionColumn(in: columns)?.index : nil
+        }
         for column in columns {
             if let approval = column.permissionApproval {
                 // Two agents of a name: which one asks.
@@ -206,7 +217,7 @@ extension WorkspaceInfo {
                     columnIndex: column.index, kind: kind, detail: detail, failedAt: failedAt, resume: resume
                 ))
             }
-            if let question = column.missionQuestion {
+            if let question = column.missionQuestion, column.index != questionShown {
                 actions.append(.missionQuestion(columnIndex: column.index, question))
             }
         }
@@ -217,7 +228,9 @@ extension WorkspaceInfo {
                 actions.append(.next(nextStep))
             }
         }
-        if let mergedCleanup, let prInfo {
+        // The status line says "Merged · Clean up" unless an agent's state
+        // comes first: then a line of its own keeps it.
+        if let mergedCleanup, let prInfo, summary.mark != .merged || isLead {
             actions.append(.cleanup(mergedCleanup, pullRequest: prInfo.number))
         }
         if isActive, let reviewBadges {
@@ -236,12 +249,13 @@ enum SidebarCardAction: Hashable {
         columnIndex: Int, kind: String?, detail: String?, failedAt: TimeInterval, resume: SidebarStuckState.Resume
     )
     case blocker(String)
-    /// "Clean up" a merged pull request's worktree.
+    /// "Clean up" a merged pull request's worktree, when the status line
+    /// says something else.
     case cleanup(MergedCleanupOffer, pullRequest: Int)
     case reviewBadges(ReviewBadges)
-    /// The next step, on the selected card.
+    /// The next step, on the selected row.
     case next(String)
-    /// A Mission question the column's agent waits on: a click opens the
+    /// A Mission question the status line doesn't show: a click opens the
     /// reply popover.
     case missionQuestion(columnIndex: Int, SidebarMissionQuestion)
 

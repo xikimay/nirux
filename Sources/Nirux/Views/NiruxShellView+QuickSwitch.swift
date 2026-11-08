@@ -107,9 +107,9 @@ extension NiruxShellView {
         }
     }
 
-    /// A workspace picked in ⌘P comes on screen. An inactive one stays
-    /// inactive: the sidebar lists it alone under the folded INACTIVE
-    /// header, which stays folded (#50).
+    /// A workspace picked in ⌘P comes on screen. An archived one stays
+    /// archived: the sidebar lists it alone above the folded Archived row,
+    /// which stays folded (#50).
     func openWorkspace(id: String) {
         guard let index = workspaces.firstIndex(where: { $0.id == id && !$0.isClosing }) else { return }
         switchToWorkspace(index)

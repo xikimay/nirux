@@ -95,7 +95,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
             shell.addWorkspace(title: "parked", cwd: harness.worktree)
             let parked = try XCTUnwrap(shell.activeWorkspace)
             harness.perform(
-                ["Organize", "Move to Inactive"],
+                ["Organize", "Archive"],
                 in: shell.sidebar.workspaceActionMenu(workspaceIndex: try index(of: parked, in: shell), columnIndex: nil)
             )
             shell.addWorkspace(title: "parking-lot", cwd: harness.worktree)
@@ -110,7 +110,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
             XCTAssertEqual(palette.filteredActions.prefix(2).map(\.title), ["parking-lot", "parked"])
             let row = palette.filteredActions[1]
             XCTAssertTrue(row.isDimmed)
-            XCTAssertTrue(row.subtitle.hasPrefix("Inactive · "), row.subtitle)
+            XCTAssertTrue(row.subtitle.hasPrefix("Archived · "), row.subtitle)
             harness.press(.down, in: palette.panel)
             harness.press(.returnKey, in: palette.panel)
 
@@ -193,7 +193,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
             shell.addWorkspace(title: "parked", cwd: harness.worktree, profileID: WorkspaceProfile.defaultID)
             let parked = try XCTUnwrap(shell.activeWorkspace)
             harness.perform(
-                ["Organize", "Move to Inactive"],
+                ["Organize", "Archive"],
                 in: shell.sidebar.workspaceActionMenu(workspaceIndex: try index(of: parked, in: shell), columnIndex: nil)
             )
 

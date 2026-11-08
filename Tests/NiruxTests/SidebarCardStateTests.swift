@@ -2,9 +2,9 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// What a workspace card says before how it looks: its state, the signal
-/// the project switcher and the collapsed rail show, its one-line form,
-/// its action block.
+/// What a task row says before how it looks: its state, the signal the
+/// space picker and the collapsed rail show, its one-line form, its action
+/// block, the selected row's columns.
 @MainActor
 final class SidebarCardStateTests: XCTestCase {
     private func column(
@@ -186,7 +186,7 @@ final class SidebarCardStateTests: XCTestCase {
             .resume(columnIndex: 0, kind: "rate_limit", detail: nil, failedAt: 1, resume: .offered),
             .blocker("Blocker: API access"),
             .cleanup(.available, pullRequest: 7)
-        ])
+        ], "the status line says the error: Clean up keeps a line")
         let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 900).render()
         XCTAssertEqual(
             900 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: info, sidebarWidth: 260), accuracy: 0.5,
@@ -195,16 +195,20 @@ final class SidebarCardStateTests: XCTestCase {
         XCTAssertEqual(result.approvalButtons.count, 1, "Resume")
     }
 
-    /// A restored agent's chip is its Resume button: after every launch the
-    /// cards keep their size, the parked ones their single line.
+    /// A restored agent's chip, on the selected row, is its Resume button:
+    /// after every launch the rows keep their size, the parked ones their
+    /// single line, and another row says "Paused".
     func testRestoredAgentResumesFromItsChip() throws {
         let deferred = SidebarDeferredAgent(processName: "codex", summary: "codex session", columnID: UUID())
         let resting = ColumnInfo(
             index: 2, processName: nil, abbreviatedCwd: nil, isFocused: false, isWebView: false, webTitle: nil,
             terminalTitle: nil, agentStatus: .idle, isEditor: false, editorFileName: nil, deferredAgent: deferred
         )
-        let card = workspace([column(0), resting])
+        let card = workspace([column(0), resting], isActive: true)
         XCTAssertEqual(card.cardActions, [])
+        XCTAssertEqual(workspace([column(0), resting]).rowSummary.status, SidebarStatusLine(
+            text: "Paused · Resume", tone: .neutral, action: .resume(columnIndex: 2, columnID: deferred.columnID), linkText: "Resume"
+        ))
         XCTAssertEqual(SidebarColumnChip(resting).style, .resume)
         XCTAssertTrue(workspace([resting], isInactive: true).showsCompactRow)
 
@@ -219,7 +223,7 @@ final class SidebarCardStateTests: XCTestCase {
         XCTAssertFalse(icon.frame.intersects(resume.frame), "the icon focuses the column, as the row did")
         XCTAssertEqual(
             500 - result.bottomY,
-            SidebarExpandedMetrics.workspaceHeight(for: workspace([column(0), column(2)]), sidebarWidth: 260)
+            SidebarExpandedMetrics.workspaceHeight(for: workspace([column(0), column(2)], isActive: true), sidebarWidth: 260)
         )
     }
 
@@ -236,8 +240,8 @@ final class SidebarCardStateTests: XCTestCase {
     // MARK: - Chips
 
     func testChipsWrapInsteadOfOverflowing() {
-        let one = workspace([column(0)])
-        let many = workspace((0..<9).map { column($0, status: .working) })
+        let one = workspace([column(0)], isActive: true)
+        let many = workspace((0..<9).map { column($0, status: .working) }, isActive: true)
         let oneHeight = SidebarExpandedMetrics.workspaceHeight(for: one, sidebarWidth: 260)
         let manyLayout = SidebarCardLayout(workspace: many, sidebarWidth: 260)
         XCTAssertGreaterThan(manyLayout.chipRows.count, 1)
@@ -254,11 +258,12 @@ final class SidebarCardStateTests: XCTestCase {
 
     // MARK: - "⋯"
 
-    func testMenuButtonShowsOnTheSelectedCardAndOnHover() throws {
+    /// The "⋯" shows on the row under the pointer, the selected one too.
+    func testMenuButtonShowsOnHover() throws {
         let selected = SidebarWorkspaceCardRenderer(
             workspace: workspace([column()], isActive: true), sidebarWidth: 260, yOffset: 500
         ).render()
-        XCTAssertEqual(selected.menuBadge?.hidesUntilHover, false)
+        XCTAssertEqual(selected.menuBadge?.hidesUntilHover, true)
 
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 600))
         sidebar.isExpanded = true
@@ -278,7 +283,7 @@ final class SidebarCardStateTests: XCTestCase {
         var info = workspace([stuck, column(1)], pullRequest: PRInfo(
             number: 12345, state: "OPEN", isDraft: false, ciStatus: "FAILURE", checks: [], reviewDecision: nil,
             mergeable: nil, url: "https://example.test/pull/12345", additions: nil, deletions: nil, changedFiles: nil
-        ))
+        ), isActive: true)
         info.prFeedback = SidebarPRFeedback(humans: 12, bots: 34)
         let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 500).render()
         let links = result.hitAreas.filter { if case .link = $0.region { return true }; return false }
@@ -290,7 +295,7 @@ final class SidebarCardStateTests: XCTestCase {
         XCTAssertEqual(500 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: info, sidebarWidth: 260))
     }
 
-    /// The folded INACTIVE section still shows an agent that waits on the
+    /// The folded archived list still shows an agent that waits on the
     /// user or broke; the rest stays folded.
     func testFoldedSectionListsWaitingWorkspaces() {
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 600))
@@ -326,26 +331,5 @@ final class SidebarCardStateTests: XCTestCase {
         let field = try XCTUnwrap(result.views.compactMap { $0 as? NSTextField }.first { $0.stringValue.hasPrefix("WWW") })
         let needed = try XCTUnwrap(field.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: 1000, height: field.frame.height)))
         XCTAssertLessThanOrEqual(needed.width, field.frame.width)
-    }
-
-    // MARK: - Header
-
-    func testSpaceHeaderCountsWaitingWorkspaces() throws {
-        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 600))
-        sidebar.isExpanded = true
-        let profile = ProfileInfo(
-            id: WorkspaceProfile.defaultID, name: "acme", colorHex: "#78A3F7", isActive: true, workspaceCount: 2,
-            attention: .waiting
-        )
-        sidebar.update(profiles: [profile], workspaces: [
-            workspace([column(status: .needsAttention, reason: .question(nil))]),
-            WorkspaceInfo(
-                id: "other", index: 2, title: "other", profileID: WorkspaceProfile.defaultID, isInactive: false,
-                columnCount: 1, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: true, columns: [column()],
-                prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active,
-                lastSummary: nil, lastActivityAt: nil
-            )
-        ])
-        XCTAssertTrue(sidebar.expandedViews.contains { ($0 as? NSTextField)?.stringValue == "2 workspaces · 1 waiting" })
     }
 }

@@ -58,7 +58,7 @@ extension SidebarView {
     /// `mouseDownCanMoveWindow == true`.
     func trackWorkspaceDrag(workspaceIndex: Int, rowFrame: NSRect, startPoint: NSPoint) {
         guard let window else {
-            onWorkspaceClicked?(workspaceIndex)
+            clickRow(workspaceIndex)
             return
         }
         guard var drag = makeWorkspaceDrag(workspaceIndex: workspaceIndex, rowFrame: rowFrame, startPoint: startPoint)
@@ -161,12 +161,14 @@ extension SidebarView {
     /// press-to-switch behavior.
     private func deliverDrop(_ drag: SidebarWorkspaceDrag) {
         guard let currentIndex = lastInfos.first(where: { $0.id == drag.workspaceID })?.index else { return }
+        // A reorder is no first click of a double-click.
+        if drag.isDragging { lastRowPress = nil }
         if drag.isDragging,
            let slot = drag.currentSlot,
            let target = SidebarDragMath.targetPosition(slot: slot, draggedPosition: drag.position) {
             onWorkspaceReordered?(currentIndex, target)
         } else {
-            onWorkspaceClicked?(currentIndex)
+            clickRow(currentIndex)
         }
     }
 
@@ -178,8 +180,20 @@ extension SidebarView {
         consumeGestureUntilMouseUp(window)
         if let clickedID {
             if let current = lastInfos.first(where: { $0.id == clickedID })?.index {
-                onWorkspaceClicked?(current)
+                clickRow(current)
             }
+        } else {
+            clickRow(workspaceIndex)
+        }
+    }
+
+    /// A click on a row: the workspace, on the column that waits on the
+    /// user or broke when another row was selected (its chips only show
+    /// once it is), else on its focused column.
+    func clickRow(_ workspaceIndex: Int) {
+        if let info = lastInfos.first(where: { $0.index == workspaceIndex }), !info.isActive,
+           let column = info.rowSummary.focusColumn {
+            onColumnClicked?(workspaceIndex, column)
         } else {
             onWorkspaceClicked?(workspaceIndex)
         }
@@ -249,12 +263,13 @@ extension SidebarView {
         title.font = Theme.Font.title
         title.textColor = Theme.Color.textPrimary
         title.lineBreakMode = .byTruncatingTail
-        let inset = SidebarExpandedMetrics.cardPaddingX + SidebarExpandedMetrics.cardIndent
+        // At the row's title, in the ghost's coordinates.
+        let inset = SidebarExpandedMetrics.textX - SidebarExpandedMetrics.workspaceInsetX
         let height = min(SidebarExpandedMetrics.titleRowHeight + 1, drag.rowFrame.height)
         title.frame = NSRect(
             x: inset,
-            // At the card's title; centered on a one-line row.
-            y: drag.rowFrame.height - min(SidebarExpandedMetrics.cardPaddingY, (drag.rowFrame.height - height) / 2) - height,
+            // Centered on a one-line row.
+            y: drag.rowFrame.height - min(SidebarExpandedMetrics.rowPaddingY, (drag.rowFrame.height - height) / 2) - height,
             width: drag.rowFrame.width - inset - SidebarExpandedMetrics.cardPaddingX,
             height: height
         )
