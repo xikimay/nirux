@@ -763,6 +763,19 @@ extension NiruxShellView {
         commandPalette?.show(relativeTo: window, sections: paletteSections())
     }
 
+    /// A title bar button: New…, Board (a beep where no workspace can
+    /// hold it, an empty space), Search (the palette; a press while it
+    /// shows closes it: `CommandPalette.isSearchButtonPress`).
+    func performTitleBarAction(_ action: TitleBarActions.Action) {
+        switch action {
+        case .new: showNewPanel()
+        case .board:
+            guard activeWorkspace != nil else { return NSSound.beep() }
+            openProjectBoard()
+        case .search: showCommandPalette()
+        }
+    }
+
     func showCommandPalette(prefilter: String) {
         if commandPalette?.isVisible == true {
             commandPalette?.dismiss()

@@ -291,8 +291,9 @@ Notes per PR:
   own `defaults.json`, not in projects.json (see projects.md section 5).
 - **S9.** Shipped. "Start a Lead" came with S11a.
 - **S10.** Three PRs: the picker and the Archived row, then the two-line
-  rows, then the title bar. The keep-awake cup and the plan usage limits stay
-  in the title bar. Mission children grouped under their parent wait for S11.
+  rows, then the title bar (New, Board, Search; Search opens ⌘P). The
+  keep-awake cup and the plan usage limits stay, left of the buttons.
+  Mission children grouped under their parent wait for S11.
 - **S11.** See "The Lead". Three PRs: S11a the Lead's workspace, the New
   Space switch, the Lead tab, ⌃⌘L, Missions and sidebar answers on by
   default; S11b its MCP tools; S11c the ⌘N checkbox and Mission children

@@ -132,6 +132,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         shellView.autoresizingMask = [.width, .height]
         window.contentView = shellView
         shell = shellView
+        setUpTitleBarActions(window: window)
         setUpUsageLimits(window: window)
         setUpKeepAwake(window: window, shell: shellView)
         setupStatusBarNotices()
