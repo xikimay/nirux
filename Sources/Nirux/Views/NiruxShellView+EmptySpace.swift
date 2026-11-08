@@ -30,6 +30,7 @@ extension NiruxShellView {
     func workspaceForSpaceFile(spaceID: String, spaceName: String) -> WorkspaceState? {
         if let activeWorkspace { return activeWorkspace }
         addWorkspace(title: spaceName, profileID: spaceID)
+        saveState()
         return activeWorkspace
     }
 }
