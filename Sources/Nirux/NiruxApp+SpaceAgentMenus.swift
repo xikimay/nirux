@@ -26,14 +26,6 @@ extension NiruxApp {
 
     // MARK: Workspaces
 
-    @objc func newTask(_ sender: Any?) {
-        shell?.showNewTaskPanel()
-    }
-
-    @objc func newWorktree(_ sender: Any?) {
-        shell?.showWorktreePanel()
-    }
-
     @objc func openWorktree(_ sender: Any?) {
         shell?.showWorktreeListPalette()
     }
@@ -110,9 +102,7 @@ extension NiruxApp {
     @MainActor
     func workspacesMenuItem() -> NSMenuItem {
         let menu = NSMenu(title: "Workspaces")
-        menu.addItem(withTitle: "New Workspace", action: #selector(newWorkspace(_:)), shortcut: .newWorkspace)
-        menu.addItem(withTitle: "New Task…", action: #selector(newTask(_:)), keyEquivalent: "")
-        menu.addItem(withTitle: "New Worktree…", action: #selector(newWorktree(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "New…", action: #selector(newWorkspace(_:)), shortcut: .newWorkspace)
         menu.addItem(withTitle: "Open Worktree…", action: #selector(openWorktree(_:)), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Rename Workspace", action: #selector(renameWorkspace(_:)), keyEquivalent: "")

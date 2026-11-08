@@ -36,14 +36,14 @@ extension NiruxShellView {
             return imageView
         }()
 
-        let wsTitle = title ?? "ws \(workspaces.count + 1)"
         let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
         // A space with anchors opens a plain workspace in its default
         // folder, never in the home folder (docs/spaces.md).
         let wsCwd = cwd ?? defaultFolder(forSpace: targetProfileID)
         let workspace = WorkspaceState(
             id: workspaceID,
-            title: wsTitle,
+            // Unnamed: its folder's name (docs/spaces.md, "One door: ⌘N").
+            title: title ?? NewTask.folderTitle(wsCwd, home: sideEffects.homeDirectory()),
             cwd: wsCwd,
             profileID: targetProfileID,
             missionID: missionID,

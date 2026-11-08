@@ -98,7 +98,6 @@ final class NiruxShellView: NSView {
     // Panel references (stored properties must live in main class declaration)
     var nameInputPanel: NameInputPanel?
     var workspaceContextPanel: WorkspaceContextPanel?
-    var worktreePanel: WorktreePanel?
     var commandPalette: CommandPalette?
     var urlPanel: URLInputPanel?
     var filePickerPanel: FilePickerPanel?
@@ -124,6 +123,9 @@ final class NiruxShellView: NSView {
     /// second click doesn't open a second form.
     var isReadingBoardSettings = false
     var newTaskPanel: NewTaskPanel?
+    /// ⌘N sheets closed while their task starts, set aside for a new one:
+    /// each comes back if its start fails.
+    var startingTaskPanels: [NewTaskPanel] = []
     var newSpacePanel: NewSpacePanel?
     /// The banner of a workspace that opened in the default space (see
     /// NiruxShellView+SpaceRouting), and a count that tells a pending
@@ -186,7 +188,7 @@ final class NiruxShellView: NSView {
         statusBar.onContentChange = { [weak self] in self?.relayout(animated: false) }
 
         let workspace = WorkspaceState(
-            title: "ws 1",
+            title: NewTask.folderTitle(NSHomeDirectory(), home: NSHomeDirectory()),
             cwd: NSHomeDirectory(),
             profileID: activeProfileID,
             missionHandoffsEnabled: Self.currentMissionHandoffsEnabled()
@@ -208,7 +210,7 @@ final class NiruxShellView: NSView {
         sidebar.spaceAnchors = { [weak self] profileID in
             self?.profiles.first { $0.id == profileID }?.anchors.filter(\.isKnown) ?? []
         }
-        sidebar.onNewWorkspace = { [weak self] in self?.showNewWorkspacePanel() }
+        sidebar.onNewWorkspace = { [weak self] in self?.showNewPanel() }
         sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }
         sidebar.onEditProfileBrief = { [weak self] profileID in self?.editSpaceBrief(profileID: profileID) }
         sidebar.onEditBoardSettings = { [weak self] profileID in self?.showBoardSettings(profileID: profileID) }
@@ -538,22 +540,6 @@ extension NiruxShellView {
 
     // MARK: - Workspace naming
 
-    func showNewWorkspacePanel() {
-        guard let window else { return }
-        if nameInputPanel == nil {
-            nameInputPanel = NameInputPanel()
-        }
-        nameInputPanel?.onSubmit = { [weak self] title in
-            self?.addWorkspace(title: title)
-            self?.saveState()
-        }
-        nameInputPanel?.show(
-            relativeTo: window,
-            currentValue: "",
-            placeholder: "Name this workspace for the task"
-        )
-    }
-
     func showWorkspaceContextPanel(workspaceIndex: Int) {
         guard let window, let workspace = workspaces[safe: workspaceIndex] else { return }
         if workspaceContextPanel == nil {
@@ -635,85 +621,28 @@ extension NiruxShellView {
 
     // MARK: - Worktree
 
-    func showWorktreePanel() {
+    /// "Open Worktree": the worktrees of the focused terminal's repository,
+    /// that one left out. "Existing Branch…" in the ⌘N sheet: those of
+    /// `repositoryFolder`'s repository (a space's anchor), then its
+    /// branches that have no worktree, which get one when picked.
+    func showWorktreeListPalette(repositoryFolder: String? = nil) {
         guard let window else { return }
-        guard let cwd = activeWorkspace?.focusedWorkingDirectory,
-              let repoRoot = GitWorktree.repoRoot(at: cwd)
-        else { return showToast("Not in a git repository: \(activeWorkspace?.focusedWorkingDirectory.abbreviatedPath() ?? "")") }
-
-        if worktreePanel == nil {
-            worktreePanel = WorktreePanel()
-            worktreePanel?.onCreated = { [weak self] branch, path, repoRoot, checkedOutBranch in
-                guard let self else { return }
-                let col = self.activeWorkspace?.columns[safe: self.activeWorkspace?.focusedIndex ?? 0]
-                let snapshot = ProcessSnapshot()
-                let fgName = col?.pty?.foregroundProcessName(snapshot: snapshot)
-
-                // If an agent is running, ask it to write a session handover then open via URL scheme
-                // (same flow as the nirux-worktree skill).
-                let runningAgent: NiruxApp.WorkspaceAgent?
-                if fgName == "claude" {
-                    runningAgent = .claude
-                } else if fgName == "codex" {
-                    runningAgent = .codex
-                } else {
-                    runningAgent = nil
-                }
-                if let runningAgent {
-                    // Pre-created (O_EXCL, unguessable name) so the agent writes
-                    // into a file the user owns, never through a planted symlink.
-                    guard let handoverPath = HandoverFile.makeEmptySource(agent: runningAgent.rawValue) else {
-                        self.presentProblem("Couldn’t create a handover file in /tmp", "The worktree opens without one.")
-                        self.openRoutedWorkspace(
-                            title: branch, cwd: path, agent: runningAgent, parentWorkspaceID: self.activeWorkspace?.id,
-                            startedFromSpaceID: self.activeProfileID, worktreeBranch: checkedOutBranch
-                        )
-                        return
-                    }
-                    let isMission = Self.currentMissionHandoffsEnabled()
-                    // The parent always, for routing; its agent only for a
-                    // Mission.
-                    let request = NiruxURLRequest.NewWorktree(
-                        branch: branch, repo: repoRoot, agent: runningAgent, handoverPath: handoverPath,
-                        parentWorkspaceID: self.activeWorkspace?.id,
-                        parentAgentUUID: isMission ? col?.agentUUID : nil
-                    )
-                    var expected = request
-                    expected.repo = repoRoot.realPath ?? repoRoot
-                    InAppWorktreeTickets.issue(
-                        for: expected, profileID: self.activeProfileID, now: ProcessInfo.processInfo.systemUptime
-                    )
-                    let url = Self.inAppWorktreeURL(for: request, profileID: self.activeProfileID)
-                    let prompt = "Write a concise session handover into \(handoverPath) "
-                        + "(sections: Goal, Context, Done so far, Next steps; Nirux created the file empty). "
-                        + "Nirux will move it into the new worktree as \(Self.handoverFilename(for: runningAgent)). "
-                        + "Then run: open \"\(url)\"\n"
-                    col?.pty?.sendRaw(prompt)
-                } else {
-                    // No agent — open workspace directly (worktree already created by panel)
-                    self.openRoutedWorkspace(
-                        title: branch, cwd: path, agent: .claude, parentWorkspaceID: self.activeWorkspace?.id,
-                        startedFromSpaceID: self.activeProfileID, worktreeBranch: checkedOutBranch
-                    )
-                }
-            }
-        }
-        worktreePanel?.show(relativeTo: window, repoRoot: repoRoot)
-    }
-
-    func showWorktreeListPalette() {
-        guard let window else { return }
-        guard let cwd = activeWorkspace?.focusedWorkingDirectory,
-              let repoRoot = GitWorktree.repoRoot(at: cwd)
-        else { return showToast("Not in a git repository: \(activeWorkspace?.focusedWorkingDirectory.abbreviatedPath() ?? "")") }
-        // Not the active one: its folder is where it was opened, not where
-        // its terminal is now, and going back to it would do nothing.
-        let openWorkspaces = workspaces.filter { !$0.isClosing && $0 !== activeWorkspace }.map { (id: $0.id, cwd: $0.cwd) }
+        let folder = repositoryFolder ?? activeWorkspace?.focusedWorkingDirectory
+        guard let folder, let repoRoot = GitWorktree.repoRoot(at: folder)
+        else { return showToast("Not in a git repository: \(folder?.abbreviatedPath() ?? "")") }
+        let excluded = repositoryFolder == nil ? Self.comparablePath(repoRoot) : nil
+        // From the focused terminal, not the active workspace: its folder is
+        // where it was opened, not where its terminal is now, and going back
+        // to it would do nothing. From the sheet it counts, so picking its
+        // worktree goes back to it rather than opening a second one.
+        let openWorkspaces = workspaces.filter { !$0.isClosing && (repositoryFolder != nil || $0 !== activeWorkspace) }
+            .map { (id: $0.id, cwd: $0.cwd) }
 
         // List worktrees on background thread, then show palette
+        let listsBranches = repositoryFolder != nil
         DispatchQueue.global(qos: .userInitiated).async {
             let worktrees = GitWorktree.list(repoRoot: repoRoot)
-            let current = Self.comparablePath(repoRoot)
+            let branches = listsBranches ? GitWorktree.branchesWithoutWorktree(repoRoot: repoRoot, worktrees: worktrees) : []
             let comparablePaths = worktrees.map { Self.comparablePath($0.path) }
             // The worktree each workspace is open in (the main checkout may
             // hold the others), and whether at its root.
@@ -726,8 +655,10 @@ extension NiruxShellView {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 // Leave out the checkout the palette was opened from
-                let entries = zip(worktrees, comparablePaths).filter { _, path in path != current }
-                guard !entries.isEmpty else { return self.showToast("No other worktree found in this repository") }
+                let entries = zip(worktrees, comparablePaths).filter { _, path in path != excluded }
+                guard !entries.isEmpty || !branches.isEmpty else {
+                    return self.showToast("No other worktree found in this repository")
+                }
 
                 // Build palette actions from worktree entries
                 let actions = entries.map { entry, comparablePath in
@@ -737,6 +668,13 @@ extension NiruxShellView {
                     let openID = open?.id
                     return PaletteAction(icon: .symbol("folder"), title: title, subtitle: subtitle, shortcut: nil) { [weak self] in
                         self?.openWorktree(path: entry.path, title: title, workspaceID: openID)
+                    }
+                } + branches.map { branch in
+                    PaletteAction(
+                        icon: .symbol(Theme.Symbol.branch), title: branch.name,
+                        subtitle: "No worktree yet · " + (branch.isRemote ? "origin/\(branch.name)" : "local branch"), shortcut: nil
+                    ) { [weak self] in
+                        self?.openBranchInNewWorktree(branch.name, repoRoot: repoRoot)
                     }
                 }
 
@@ -775,6 +713,34 @@ extension NiruxShellView {
               let space = profiles.first(where: { $0.id == workspace.profileID })
         else { return "Already open" }
         return "Already open in “\(space.name)”"
+    }
+
+    /// A branch without a worktree, picked in "Existing Branch…": its
+    /// worktree is made off the main thread (one of origin's tracks it),
+    /// then opens as a plain workspace.
+    private func openBranchInNewWorktree(_ branch: String, repoRoot: String) {
+        let spaceID = activeProfileID
+        Self.createBranchWorktree(branch, repoRoot: repoRoot) { [weak self] path, checkedOutBranch, error in
+            guard let self else { return }
+            guard let path else {
+                return self.presentProblem("Couldn’t create worktree “\(branch)”", error ?? "git worktree add failed")
+            }
+            self.openRoutedWorkspace(title: branch, cwd: path, startedFromSpaceID: spaceID, worktreeBranch: checkedOutBranch)
+        }
+    }
+
+    /// Off the main thread through a nonisolated function, so the closure
+    /// can't inherit this view's main-actor isolation (see NewTask).
+    nonisolated private static func createBranchWorktree(
+        _ branch: String, repoRoot: String,
+        completion: @escaping @MainActor @Sendable (String?, String?, String?) -> Void
+    ) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            // An existing branch: a path, or an error, never both.
+            let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot)
+            let checkedOutBranch = path.flatMap(GitWorktree.currentBranch(at:))
+            DispatchQueue.main.async { @MainActor in completion(path, checkedOutBranch, error) }
+        }
     }
 
     private func openWorktree(path: String, title: String, workspaceID: String?) {

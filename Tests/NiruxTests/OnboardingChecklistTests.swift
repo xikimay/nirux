@@ -212,12 +212,12 @@ final class OnboardingChecklistTests: XCTestCase {
 
     func testShortcutsUseAppVocabulary() {
         XCTAssertEqual(OnboardingChecklist.shortcuts.map(\.key), ["⌘P", "⌘T", "⌘N"])
-        XCTAssertEqual(OnboardingChecklist.shortcuts.map(\.label), ["palette", "column", "workspace"])
+        XCTAssertEqual(OnboardingChecklist.shortcuts.map(\.label), ["palette", "column", "new"])
     }
 
     @MainActor
     func testSidebarHintSaysColumnNotPane() {
-        XCTAssertEqual(SidebarView.shortcutHints.map(\.label), ["workspace", "column"])
+        XCTAssertEqual(SidebarView.shortcutHints.map(\.label), ["new", "column"])
         XCTAssertEqual(SidebarView.shortcutHints.map(\.key), ["⌘N", "⌘T"])
     }
 }

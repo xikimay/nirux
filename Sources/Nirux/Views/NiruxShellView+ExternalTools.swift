@@ -234,10 +234,15 @@ extension NiruxShellView {
            `feat/short-description` or `fix/short-description` if no convention is apparent.
         2. **Detect the git repo root** — the top level of the current checkout, even inside a
            linked worktree. Nirux still places the new worktree next to the main checkout, named
-           after it, and a new branch starts from the current checkout's HEAD:
+           after it:
            ```bash
            git rev-parse --show-toplevel
            ```
+           A new branch starts from origin's base branch (the space's board setting, else origin's
+           default branch), which Nirux fetches first; a branch that already exists opens as it is.
+           When the new work builds on the current branch — the user wants a stacked branch, or it
+           needs this branch's commits that aren't on origin yet — add `&from=head` to the URL in
+           step 4: the new branch then starts from the current checkout's HEAD.
         3. **Write a session handover** so the new workspace inherits context. First create the
            file with `mktemp`, using the current agent name (`claude` or `codex`); it prints the
            path. `mktemp` creates the file privately under a random name, so nothing else can
@@ -292,7 +297,8 @@ extension NiruxShellView {
            open "nirux://new-worktree?branch=<url-encoded-branch>&repo=<url-encoded-repo-root>\
         &agent=<claude-or-codex>&handover=<path-printed-by-mktemp>${launch_query}${profile_query}${parent_query}${mission_query}"
            ```
-           Nirux moves the handover file into the worktree on launch; no manual cleanup is needed.
+           For a stacked branch, put `&from=head` right after the handover parameter. Nirux moves
+           the handover file into the worktree on launch; no manual cleanup is needed.
 
         When `mission_query` is present, Nirux records the parent/child link and starts the child
         with Mission instructions. Nirux types the messages between the two agents into their

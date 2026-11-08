@@ -71,7 +71,7 @@ extension SidebarView {
         }
 
         let add = SidebarRailTileView(style: .add, symbolName: Theme.Symbol.add)
-        add.setAccessibilityLabel("New Workspace")
+        add.setAccessibilityLabel("New…")
         add.onPress = { [weak self] in self?.onNewWorkspace?() }
         addRailTile(add, target: .railButton(.newWorkspace), region: .railButton(.newWorkspace),
                     top: Metrics.bottomPadding + Metrics.tileSize)
@@ -169,7 +169,7 @@ extension SidebarView {
                 detail: "\(count) inactive"
             )
         case .railButton(.newWorkspace):
-            return SidebarRailTooltip(title: "New Workspace", detail: NiruxShortcuts.newWorkspaceDisplay)
+            return SidebarRailTooltip(title: "New…", detail: NiruxShortcuts.newWorkspaceDisplay)
         case .spaceHeader, .menuBadge, .columnRow, .approvalButton:
             return nil
         }

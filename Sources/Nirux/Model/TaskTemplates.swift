@@ -1,6 +1,6 @@
 import Foundation
 
-/// A project's task templates: ways of working that New Task… adds to the
+/// A space's task templates: ways of working that a ⌘N task adds to the
 /// handover after the task's description ("reproduce, write a failing test,
 /// fix"). They live next to the brief, in
 /// `<state dir>/projects/<space id>/task-templates.md`, one `## Name`
@@ -50,7 +50,7 @@ enum TaskTemplates {
         SpaceBrief.directory(spaceID: spaceID, stateDirectory: stateDirectory)?.appendingPathComponent(fileName)
     }
 
-    /// The templates New Task… offers for a space: the file's, or `defaults`
+    /// The templates the ⌘N sheet offers for a space: the file's, or `defaults`
     /// while it doesn't exist. A file that can't be read (not a regular file,
     /// larger than `SpaceBrief.maxFileBytes`, not UTF-8) offers none: its
     /// owner meant to replace the defaults. Reads the disk: call it off the main thread.
@@ -130,7 +130,7 @@ enum TaskTemplates {
         let sections = defaults.map { "## \($0.name)\n\n\($0.body)\n" }.joined(separator: "\n")
         return """
         <!--
-        Task templates for the space "\(name)". New Task… (Cmd+P) offers each
+        Task templates for the space "\(name)". The New sheet (Cmd+N) offers each
         "## Name" section below; the one picked goes into the new workspace's
         handover, after the task's description. Add, edit or delete sections
         freely. Text inside this comment is ignored.
