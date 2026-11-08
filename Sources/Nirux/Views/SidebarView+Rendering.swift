@@ -268,8 +268,8 @@ extension SidebarView {
         return rowY
     }
 
-    /// What the Tasks header's "+" and the rail's "+" open.
-    static let newTaskTitle = "New Workspace"
+    /// What the Tasks header's "+" and the rail's "+" open: ⌘N's sheet.
+    static let newTaskTitle = "New…"
 
     private func buildWorkspaceGroup(_ infos: [WorkspaceInfo], yOffset: CGFloat) -> CGFloat {
         var currentY = yOffset

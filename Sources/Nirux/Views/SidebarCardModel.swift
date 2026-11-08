@@ -177,13 +177,13 @@ extension WorkspaceInfo {
         return (columns.compactMap(\.attention) + [away].compactMap { $0 }).max()
     }
 
-    /// An agent waits on the user or broke: the folded INACTIVE section
+    /// An agent waits on the user or broke: the folded archived list
     /// lists the workspace anyway.
     var asksUser: Bool {
         columns.contains { $0.attention == .waiting || $0.attention == .error }
     }
 
-    /// One line in the INACTIVE section: parked work that asks nothing and
+    /// One line in the archived list: parked work that asks nothing and
     /// isn't on screen.
     var showsCompactRow: Bool {
         isInactive && !isActive && !cardActions.contains { !$0.isQuiet }

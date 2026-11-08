@@ -38,7 +38,7 @@ enum SidebarExpandedMetrics {
     static let menuButtonWidth: CGFloat = 18
     static let menuButtonHeight: CGFloat = 16
 
-    // An INACTIVE workspace that asks nothing: one line.
+    // An archived workspace that asks nothing: one line.
     static let compactRowHeight: CGFloat = 26
 
     // The action block: rows separated by `actionRowGap`; a line above it
