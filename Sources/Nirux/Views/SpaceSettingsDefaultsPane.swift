@@ -150,6 +150,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
             bannerLabel.isHidden = true
             showProblems()
         case .failure(let error):
+            writeFailed = true
             show(actions.reload(), message: error.message)
         }
     }
@@ -188,12 +189,17 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
     /// Variables typed and not written (a problem holds them back).
     var hasUnsavedRows: Bool { rows != loaded.defaults.environment }
 
-    /// Writes the typed variables; false while a problem holds them back.
+    /// Writes the typed variables; false while a problem holds them back,
+    /// or when the write failed (the pane then says why).
     func saveRows() -> Bool {
+        writeFailed = false
         view.window?.makeFirstResponder(nil)
         commitEnvironment()
-        return !hasUnsavedRows
+        return !writeFailed && !hasUnsavedRows
     }
+
+    /// The last write failed: the pane shows the file again, with why.
+    private var writeFailed = false
 
     /// Writes the list unless a variable has a problem; an empty row goes.
     func commitEnvironment() {

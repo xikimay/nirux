@@ -82,8 +82,8 @@ enum SpaceSetupScript {
         return """
         # Setup for new worktrees of \(name). Nirux runs it once per worktree it
         # makes for you, with /bin/sh -e in the worktree's folder, before the
-        # agent starts: the first failing command stops it, and nothing can be
-        # typed into it (a command that asks a question gets no answer).
+        # agent starts: the first failing command stops it, and it reads no
+        # input (a command asking a question gets no answer).
         # Keep it idempotent. If it fails, the agent still starts and Nirux
         # tells you. Lines starting with # are comments; a script with only
         # comments doesn't run. For example:

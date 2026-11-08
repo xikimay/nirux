@@ -9,6 +9,8 @@ extension NiruxShellView {
     func showSpaceSettings(profileID: String, tab: SpaceSettingsWindow.Tab = .general) {
         guard let space = profiles.first(where: { $0.id == profileID }) else { return }
         if let open = spaceSettings, open.spaceID != profileID {
+            // A name or a value still being typed counts.
+            open.panel?.makeFirstResponder(nil)
             guard !open.hasUnsavedChanges else {
                 open.show(tab: open.selectedTab ?? .general, title: Self.spaceSettingsTitle(open.spaceID, in: profiles))
                 return showToast("Save or revert the changes in this Space Settings first")

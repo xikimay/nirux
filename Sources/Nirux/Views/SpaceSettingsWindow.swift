@@ -97,12 +97,18 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
         if let form = boardForm, form.isDirty {
             parts.append(UnsavedPart(name: "board settings", tab: .board, save: { form.save() }))
         }
-        if let memory = memoryPanel, memory.shows(in: memoryHost), memory.hasUnsavedEdit {
-            // The write runs on; a failure says so once the window is gone.
-            parts.append(UnsavedPart(name: "memory item", tab: .memory, save: {
-                memory.saveEditing()
-                return memory.editing == nil || memory.isWriting
-            }))
+        if let memory = memoryPanel, memory.shows(in: memoryHost) {
+            if memory.hasUnsavedEdit {
+                // The write takes a moment: the window stays until it ends
+                // (an agent may have changed the file, which it then says).
+                parts.append(UnsavedPart(name: "memory item", tab: .memory, save: {
+                    memory.saveEditing()
+                    return memory.editing == nil
+                }))
+            }
+            if memory.addSheet != nil {
+                parts.append(UnsavedPart(name: "new memory item", tab: .memory, save: { false }))
+            }
         }
         if defaults.hasUnsavedRows {
             parts.append(UnsavedPart(name: "environment variables", tab: .defaults, save: { [defaults] in defaults.saveRows() }))

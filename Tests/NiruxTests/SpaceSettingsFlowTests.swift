@@ -226,6 +226,7 @@ final class SpaceSettingsFlowTests: XCTestCase {
             settings.select(.defaults)
             XCTAssertEqual(pane.rows.map(\.name), ["API_URL", "NIRUX_PROFILE_ID"])
             XCTAssertEqual(settings.unsavedParts.map(\.name), ["environment variables"])
+            XCTAssertEqual(pane.tableView.numberOfRows, 2)
             guard pane.tableView.numberOfRows == 2 else { return }
             pane.tableView.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
             pane.removeButton.performClick(nil)
@@ -262,6 +263,13 @@ final class SpaceSettingsFlowTests: XCTestCase {
             XCTAssertIdentical(shell.spaceSettings, settings)
             XCTAssertEqual(settings.spaceID, first.id)
             XCTAssertTrue(shell.toast?.message.contains("Save or revert") == true)
+
+            // The main window's close button quits: it stays until the
+            // question is answered.
+            var quitRequests = 0
+            shell.sideEffects.requestQuit = { quitRequests += 1 }
+            XCTAssertFalse(shell.mainWindowShouldClose())
+            XCTAssertEqual(quitRequests, 1)
 
             // Quitting asks too: Cancel keeps Nirux running.
             harness.alertResponses = [.alertSecondButtonReturn]

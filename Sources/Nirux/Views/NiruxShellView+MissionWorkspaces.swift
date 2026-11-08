@@ -24,7 +24,9 @@ extension NiruxShellView {
             let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot)
             // A worktree an agent already works in (the branch was checked
             // out) never runs the setup script again.
-            let firstSetup = path.map(SpaceSetupScript.claimFirstRun(worktree:)) ?? false
+            // One opened from outside Nirux runs none, and leaves it to a
+            // later request from Nirux.
+            let firstSetup = !startedOutsideNirux && (path.map(SpaceSetupScript.claimFirstRun(worktree:)) ?? false)
             // Read back from the checkout: the session is named after the
             // branch it will actually work on (see `SessionName`).
             let checkedOutBranch = path.flatMap(GitWorktree.currentBranch(at:))
