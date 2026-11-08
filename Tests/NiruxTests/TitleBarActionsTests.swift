@@ -53,10 +53,10 @@ final class TitleBarActionsTests: XCTestCase {
             harness.window.addTitlebarAccessoryViewController(actions)
             let search = try XCTUnwrap(actions.buttons[.search])
             let board = try XCTUnwrap(actions.buttons[.board])
-            @MainActor func press(_ button: NSButton) throws -> NSEvent {
+            @MainActor func press(_ button: NSButton, _ type: NSEvent.EventType = .leftMouseDown) throws -> NSEvent {
                 let point = Self.frameInWindow(button, of: harness.window)
                 return try XCTUnwrap(NSEvent.mouseEvent(
-                    with: .leftMouseDown, location: NSPoint(x: point.midX, y: point.midY), modifierFlags: [],
+                    with: type, location: NSPoint(x: point.midX, y: point.midY), modifierFlags: [],
                     timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: harness.window.windowNumber,
                     context: nil, eventNumber: 0, clickCount: 1, pressure: 1
                 ))
@@ -66,7 +66,14 @@ final class TitleBarActionsTests: XCTestCase {
 
             shell.performTitleBarAction(.search)
             XCTAssertEqual(shell.commandPalette?.isVisible, true)
+            // The release queued first: a button that took the press would
+            // end its tracking on it (and open the palette again) instead
+            // of waiting forever.
+            NSApp.postEvent(try press(search, .leftMouseUp), atStart: false)
             NSApp.sendEvent(try press(search))
+            while let queued = NSApp.nextEvent(matching: .any, until: Date(), inMode: .default, dequeue: true) {
+                NSApp.sendEvent(queued)
+            }
             XCTAssertEqual(shell.commandPalette?.isVisible, false)
             shell.performTitleBarAction(.search)
             XCTAssertEqual(shell.commandPalette?.isVisible, true)
