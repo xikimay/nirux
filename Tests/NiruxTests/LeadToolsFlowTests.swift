@@ -197,6 +197,20 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(store.setWorkspaceInactive(at: try index(task), true))
             XCTAssertEqual(titles(), ["Lead", "other", "sub", "lead's task", "task"], "let go where it was listed")
             XCTAssertTrue(store.nestedWorkspaceIndices(in: lead.space).isEmpty)
+
+            // Back among the active ones it takes its children back, and the
+            // one restored is the one selected.
+            XCTAssertTrue(store.moveWorkspace(at: try index(sub), delta: -1))
+            shell.updateSidebar()
+            shell.handleWorkspaceSidebarAction(.markActive, workspaceIndex: try index(task))
+            XCTAssertTrue(shell.activeWorkspace === task)
+            XCTAssertEqual(titles(), ["Lead", "other", "task", "sub", "lead's task"])
+
+            // A deleted space's former Lead never takes its tasks under it.
+            XCTAssertTrue(store.deleteProfile(id: lead.space))
+            XCTAssertEqual(
+                store.nestedWorkspaceIndices(in: WorkspaceProfile.defaultID).map { shell.workspaces[$0].title }, ["sub"]
+            )
             _ = other
         }
     }

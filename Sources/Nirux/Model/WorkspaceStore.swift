@@ -341,6 +341,7 @@ final class WorkspaceStore {
         }
         profiles.remove(at: index)
         deletedProfileIDs.insert(id)
+        keepTreeOrder(in: WorkspaceProfile.defaultID)
         reconcileSelection(preferActiveProfile: true)
         return true
     }
@@ -376,6 +377,7 @@ final class WorkspaceStore {
         workspace.profileID = profileID
         workspaces.remove(at: index)
         workspaces.append(workspace)
+        keepTreeOrder(in: profileID)
         if wasActive { selectWorkspace(id: neighbourID ?? workspace.id) }
         reconcileSelection(preferActiveProfile: true)
         return true
