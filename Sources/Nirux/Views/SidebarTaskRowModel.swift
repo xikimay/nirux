@@ -120,9 +120,6 @@ extension WorkspaceInfo {
                 trailing: age
             )
         }
-        if let blocker = blockerText {
-            return row(.blocked, "Blocked · \(blocker)", .neutral)
-        }
         // A finished turn the user hasn't looked at yet: until then, before
         // the pull request's lasting line.
         if columns.contains(where: { $0.attention == .finished }) {
