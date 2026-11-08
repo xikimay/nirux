@@ -2,10 +2,10 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// "Board Settings…" from a space's menu to board.json: what the form shows,
-/// what Save writes, and what it refuses. Clicks are hit-tested by hand,
-/// since a window that is never shown (CI) drops events sent with
-/// `sendEvent`.
+/// "Board Settings…" from a space's menu to board.json, through Space
+/// Settings' Board tab: what the form shows, what Save writes, and what it
+/// refuses. Clicks are hit-tested by hand, since a window that is never
+/// shown (CI) drops events sent with `sendEvent`.
 final class BoardSettingsPanelTests: XCTestCase {
     private var root: String!
 
@@ -50,7 +50,7 @@ final class BoardSettingsPanelTests: XCTestCase {
             XCTAssertNil(form.bannerLabel.superview, "no banner")
             XCTAssertFalse(FileManager.default.fileExists(atPath: try store(space).fileURL.path))
 
-            try click(form.cancelButton)
+            shell.spaceSettings?.close()
             XCTAssertNil(shell.boardSettingsPanel)
             XCTAssertFalse(FileManager.default.fileExists(atPath: try store(space).fileURL.path))
         }
@@ -75,7 +75,8 @@ final class BoardSettingsPanelTests: XCTestCase {
             form.postMergeTimeoutField.stringValue = "20"
             try click(form.saveButton)
 
-            XCTAssertNil(shell.boardSettingsPanel, "Save closes the form")
+            let saved = try savedForm(shell, after: form)
+            XCTAssertEqual(saved.checksView.string, "test\nCodeQL / Analyze (swift)", "the file, read again")
             let loaded = try store(space).load()
             XCTAssertEqual(loaded.status, .loaded)
             XCTAssertEqual(loaded.config, BoardConfig(
@@ -113,9 +114,10 @@ final class BoardSettingsPanelTests: XCTestCase {
             XCTAssertEqual(form.repositoryField.stringValue, "acme/front", "from its own checkout")
             try choose(.noWorkflow, in: form)
             try click(form.saveButton)
-            XCTAssertEqual(try store(space).load().entries.map(\.slot), [.legacy], "one config its remote places: schema 1")
+            form = try savedForm(shell, after: form)
+            XCTAssertEqual(form.repositoryPopup.titleOfSelectedItem, "front", "the same repository, read again")
+            XCTAssertEqual(try store(space).load().entries.map(\.slot), [.legacy], "the default repository's only: schema 1")
 
-            form = try open(shell, space)
             form = try pick("back", in: form, shell: shell)
             XCTAssertEqual(form.repositoryField.stringValue, "acme/back")
             XCTAssertEqual(form.repositoryPopup.titleOfSelectedItem, "back")
@@ -139,6 +141,7 @@ final class BoardSettingsPanelTests: XCTestCase {
             try choose(.noWorkflow, in: form)
             form = try pick("front", in: form, shell: shell)
             XCTAssertEqual(form.repositoryField.stringValue, "acme/front")
+            XCTAssertEqual(form.repositoryPopup.titleOfSelectedItem, "front")
             let loaded = try store(space).load()
             XCTAssertEqual(loaded.status, .loaded)
             XCTAssertEqual(loaded.entries.map(\.config.repository), ["acme/front", "acme/back"])
@@ -151,22 +154,18 @@ final class BoardSettingsPanelTests: XCTestCase {
             // Two repositories of the space can't share a GitHub repository.
             form = try pick("back", in: form, shell: shell)
             form.repositoryField.stringValue = "Acme/Front"
-            form.askToSaveChanges = { _, answer in answer(.discard) }
             let saved = try Data(contentsOf: try store(space).fileURL)
             try click(form.saveButton)
             XCTAssertTrue(form.errorLabel.stringValue.contains("“front” of this space already uses acme/front"),
                           form.errorLabel.stringValue)
             XCTAssertEqual(try Data(contentsOf: try store(space).fileURL), saved)
-            form = try pick("front", in: form, shell: shell)
+            XCTAssertTrue(shell.boardSettingsPanel === form, "the form stays")
 
             // Typed and let go: nothing written.
-            form.checksTimeoutField.stringValue = "99"
             form.askToSaveChanges = { _, answer in answer(.discard) }
-            let before = try Data(contentsOf: try store(space).fileURL)
-            form = try pick("back", in: form, shell: shell)
-            XCTAssertEqual(try Data(contentsOf: try store(space).fileURL), before)
-            XCTAssertEqual(form.baseBranchField.stringValue, "develop")
-            try click(form.cancelButton)
+            form = try pick("front", in: form, shell: shell)
+            XCTAssertEqual(try Data(contentsOf: try store(space).fileURL), saved)
+            XCTAssertEqual(form.repositoryField.stringValue, "acme/front")
         }
     }
 
@@ -175,13 +174,7 @@ final class BoardSettingsPanelTests: XCTestCase {
     private func pick(_ title: String, in form: BoardSettingsPanel, shell: NiruxShellView) throws -> BoardSettingsPanel {
         form.repositoryPopup.selectItem(withTitle: title)
         form.repositoryPopup.sendAction(form.repositoryPopup.action, to: form.repositoryPopup.target)
-        let deadline = Date().addingTimeInterval(30)
-        while shell.boardSettingsPanel === form || shell.boardSettingsPanel?.panel == nil, Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
-        }
-        let next = try XCTUnwrap(shell.boardSettingsPanel)
-        XCTAssertFalse(next === form, "a new form for \(title)")
-        return next
+        return try waitForForm(shell, replacing: form)
     }
 
     @MainActor
@@ -196,7 +189,7 @@ final class BoardSettingsPanelTests: XCTestCase {
 
             try click(form.saveButton)
 
-            XCTAssertNil(shell.boardSettingsPanel)
+            _ = try savedForm(shell, after: form)
             let loaded = try store(space).load()
             XCTAssertEqual(loaded.config?.postMergeWorkflow, .unset)
             XCTAssertFalse(loaded.canStartQueue)
@@ -225,7 +218,7 @@ final class BoardSettingsPanelTests: XCTestCase {
             try click(form.saveButton)
             XCTAssertEqual(try store(space).load().config?.postMergeWorkflow, .workflow("release.yaml"))
 
-            let reopened = try open(shell, space)
+            let reopened = try savedForm(shell, after: form)
             XCTAssertEqual(reopened.selectedWorkflowChoice, .other)
             XCTAssertEqual(reopened.workflowNameField.stringValue, "release.yaml")
             XCTAssertEqual(reopened.repositoryField.stringValue, "acme/widgets", "the saved value")
@@ -233,6 +226,36 @@ final class BoardSettingsPanelTests: XCTestCase {
             XCTAssertFalse(reopened.workflowNameField.isEnabled)
             try click(reopened.saveButton)
             XCTAssertEqual(try store(space).load().config?.postMergeWorkflow, .noWorkflow)
+        }
+    }
+
+    /// Values typed and not saved: closing asks, another space's window
+    /// waits, and Save from that question writes them.
+    @MainActor
+    func testUnsavedValuesAreNotLostSilently() throws {
+        try withShell { shell, space in
+            let form = try open(shell, space)
+            let settings = try XCTUnwrap(shell.spaceSettings)
+            XCTAssertFalse(form.isDirty)
+            XCTAssertEqual(settings.unsavedParts.map(\.name), [])
+            form.repositoryField.stringValue = "acme/widgets"
+            form.baseBranchField.stringValue = "main"
+            XCTAssertTrue(form.isDirty)
+            XCTAssertEqual(settings.unsavedParts.map(\.name), ["board settings"])
+
+            let other = shell.workspaceStore.createProfile(named: "Other", select: false)
+            shell.showSpaceSettings(profileID: other.id)
+            XCTAssertIdentical(shell.spaceSettings, settings, "kept for its changes")
+
+            var questions: [String] = []
+            settings.askInSheet = { alert, _, reply in
+                questions.append(alert.messageText)
+                reply(.alertFirstButtonReturn)
+            }
+            XCTAssertFalse(settings.windowShouldClose(try XCTUnwrap(settings.panel)))
+            XCTAssertEqual(questions, ["Save the changes to the board settings?"])
+            XCTAssertNil(shell.spaceSettings, "saved, then closed")
+            XCTAssertEqual(try store(space).load().config?.repository, "acme/widgets")
         }
     }
 
@@ -254,7 +277,6 @@ final class BoardSettingsPanelTests: XCTestCase {
             XCTAssertEqual(lines.count, 4, form.errorLabel.stringValue)
             XCTAssertTrue(lines[0].contains("owner/name"))
             XCTAssertFalse(FileManager.default.fileExists(atPath: try store(space).fileURL.path))
-            try click(form.cancelButton)
         }
     }
 
@@ -266,7 +288,7 @@ final class BoardSettingsPanelTests: XCTestCase {
             form.baseBranchField.stringValue = "main"
             try click(form.saveButton)
 
-            XCTAssertNil(shell.boardSettingsPanel)
+            _ = try savedForm(shell, after: form)
             XCTAssertEqual(try store(space).load().config?.repository, "Acme/Widgets")
         }
     }
@@ -286,21 +308,25 @@ final class BoardSettingsPanelTests: XCTestCase {
             XCTAssertTrue(shell.boardSettingsPanel === form)
             XCTAssertTrue(form.errorLabel.stringValue.contains("changed since"), form.errorLabel.stringValue)
             XCTAssertEqual(try store(space).load().config, theirs)
-            try click(form.cancelButton)
+
+            // Revert shows what the file holds now.
+            try click(form.revertButton)
+            let reverted = try waitForForm(shell, replacing: form)
+            XCTAssertEqual(reverted.repositoryField.stringValue, "acme/theirs")
+            XCTAssertEqual(reverted.statusLabel.stringValue, "")
         }
     }
 
-    /// On a short window the fields scroll and the buttons stay in view;
-    /// every problem shows between them.
+    /// The fields scroll in the tab and the buttons stay in view; every
+    /// problem shows between them.
     @MainActor
-    func testTheSheetFitsTheWindowAndShowsEveryProblem() throws {
-        try withShell(height: 560) { shell, space in
+    func testTheFormFitsItsTabAndShowsEveryProblem() throws {
+        try withShell { shell, space in
             let form = try open(shell, space)
-            let panel = try XCTUnwrap(form.panel)
-            let window = try XCTUnwrap(shell.window)
-            XCTAssertLessThanOrEqual(panel.frame.height, window.contentLayoutRect.height)
-            let content = try XCTUnwrap(panel.contentView)
+            let content = try XCTUnwrap(form.saveButton.superview)
+            XCTAssertEqual(content.frame.size, BoardSettingsPanel.hostSize)
             XCTAssertTrue(content.bounds.contains(form.saveButton.frame))
+            XCTAssertTrue(content.bounds.contains(form.revertButton.frame))
 
             form.repositoryField.stringValue = String(repeating: "not a repository ", count: 12)
             form.baseBranchField.stringValue = ""
@@ -319,7 +345,6 @@ final class BoardSettingsPanelTests: XCTestCase {
             )
             XCTAssertFalse(form.errorLabel.frame.intersects(form.saveButton.frame))
             XCTAssertTrue(content.bounds.contains(form.saveButton.frame))
-            try click(form.cancelButton)
         }
     }
 
@@ -331,20 +356,20 @@ final class BoardSettingsPanelTests: XCTestCase {
             _ = try open(shell, space)
             shell.deleteSpace(profileID: space.id)
             XCTAssertNil(shell.boardSettingsPanel)
+            XCTAssertNil(shell.spaceSettings)
         }
     }
 
     /// Save is the default button, which answers Return in the fields; in
-    /// the checks list Return adds a line, so the sheet never hands it to
+    /// the checks list Return adds a line, so the window never hands it to
     /// Save as a key equivalent. (A window that is never shown doesn't press
     /// its default button, so the rule is checked rather than a key press.)
     @MainActor
     func testReturnInTheChecksListIsLeftToTheList() throws {
         try withShell { shell, space in
             let form = try open(shell, space)
-            let panel = try XCTUnwrap(form.panel as? BoardSettingsSheet)
+            let panel = try XCTUnwrap(shell.spaceSettings?.panel)
             XCTAssertTrue(panel.defaultButtonCell === form.saveButton.cell, "Save is the default button")
-            XCTAssertTrue(panel.multilineView === form.checksView)
             // Read here: the nested function's XCTUnwrap autoclosure isn't
             // on the main actor for CI's Swift 6.1.
             let windowNumber = panel.windowNumber
@@ -356,7 +381,7 @@ final class BoardSettingsPanelTests: XCTestCase {
                     isARepeat: false, keyCode: keyCode
                 ))
             }
-            let rule = BoardSettingsSheet.leavesToTextView
+            let rule = MultilineReturn.leavesToTextView
             XCTAssertTrue(rule(try key("\r", 36), form.checksView, form.checksView))
             XCTAssertTrue(rule(try key("\u{3}", 76), form.checksView, form.checksView))
             XCTAssertFalse(rule(try key("\r", 36), form.baseBranchField, form.checksView), "a field saves")
@@ -366,7 +391,7 @@ final class BoardSettingsPanelTests: XCTestCase {
             panel.makeFirstResponder(form.checksView)
             XCTAssertFalse(panel.performKeyEquivalent(with: try key("\r", 36)))
             XCTAssertTrue(shell.boardSettingsPanel === form, "not saved")
-            try click(form.cancelButton)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: try store(space).fileURL.path))
         }
     }
 
@@ -390,11 +415,11 @@ final class BoardSettingsPanelTests: XCTestCase {
             XCTAssertFalse(form.checksView.isEditable)
             XCTAssertFalse(form.workflowPopup.isEnabled)
 
+            XCTAssertFalse(form.revertButton.isEnabled)
             try click(form.saveButton)
             form.saveAction(nil)
             XCTAssertTrue(shell.boardSettingsPanel === form)
             XCTAssertEqual(try String(contentsOf: try store(space).fileURL, encoding: .utf8), original)
-            try click(form.cancelButton)
         }
     }
 
@@ -413,8 +438,7 @@ final class BoardSettingsPanelTests: XCTestCase {
             XCTAssertEqual(form.repositoryField.stringValue, "")
             XCTAssertEqual(form.baseBranchField.stringValue, "")
             XCTAssertEqual(form.checksView.string, "build")
-            XCTAssertEqual(form.cancelButton.title, "Close")
-            try click(form.cancelButton)
+            XCTAssertFalse(form.revertButton.isEnabled)
         }
     }
 
@@ -426,7 +450,6 @@ final class BoardSettingsPanelTests: XCTestCase {
             XCTAssertEqual(form.mergeMethodPopup.titleOfSelectedItem, "rebase (not supported)")
             XCTAssertFalse(form.mergeMethodPopup.isEnabled)
             XCTAssertFalse(form.saveButton.isEnabled)
-            try click(form.cancelButton)
         }
     }
 
@@ -442,7 +465,7 @@ final class BoardSettingsPanelTests: XCTestCase {
             form.baseBranchField.stringValue = "main"
             try click(form.saveButton)
 
-            XCTAssertNil(shell.boardSettingsPanel)
+            _ = try savedForm(shell, after: form)
             let folder = try store(space).fileURL.deletingLastPathComponent()
             let copies = try FileManager.default.contentsOfDirectory(atPath: folder.path)
                 .filter { $0.hasPrefix("board.corrupt.") }
@@ -483,7 +506,7 @@ final class BoardSettingsPanelTests: XCTestCase {
         window.isReleasedWhenClosed = false
         window.contentView = shell
         defer {
-            shell.boardSettingsPanel?.dismiss()
+            shell.spaceSettings?.close()
             window.close()
         }
         // Its own space: the first workspace, in the home folder, stays out.
@@ -513,20 +536,38 @@ final class BoardSettingsPanelTests: XCTestCase {
         return menu
     }
 
-    /// Picks "Board Settings…" in the space's menu and waits for the form.
+    /// Picks "Board Settings…" in the space's menu and waits for the form
+    /// in Space Settings' Board tab.
     @MainActor
     private func open(_ shell: NiruxShellView, _ space: WorkspaceProfile) throws -> BoardSettingsPanel {
         let menu = try spaceMenu(shell, space)
         let index = menu.indexOfItem(withTitle: "Board Settings…")
         XCTAssertGreaterThanOrEqual(index, 0)
         menu.performActionForItem(at: index)
+        XCTAssertEqual(shell.spaceSettings?.selectedTab, .board)
+        return try waitForForm(shell, replacing: nil)
+    }
+
+    /// The form shown once one other than `previous` fills the Board tab.
+    @MainActor
+    private func waitForForm(_ shell: NiruxShellView, replacing previous: BoardSettingsPanel?) throws -> BoardSettingsPanel {
         let deadline = Date().addingTimeInterval(30)
-        while shell.boardSettingsPanel?.panel == nil, Date() < deadline {
+        while shell.boardSettingsPanel == nil || shell.boardSettingsPanel === previous || shell.boardSettingsPanel?.hostView == nil,
+              Date() < deadline {
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         }
         let form = try XCTUnwrap(shell.boardSettingsPanel)
-        XCTAssertNotNil(form.panel)
+        XCTAssertFalse(form === previous)
+        XCTAssertTrue(form.hostView === shell.spaceSettings?.boardHost)
         return form
+    }
+
+    /// After a save: a new form, read from the file, says it was saved.
+    @MainActor
+    private func savedForm(_ shell: NiruxShellView, after form: BoardSettingsPanel) throws -> BoardSettingsPanel {
+        let saved = try waitForForm(shell, replacing: form)
+        XCTAssertEqual(saved.statusLabel.stringValue, "Saved.")
+        return saved
     }
 
     /// As a pick in the pop-up menu: selects the item and sends its action.
@@ -545,6 +586,7 @@ final class BoardSettingsPanelTests: XCTestCase {
     private func click(_ button: NSButton) throws {
         let window = try XCTUnwrap(button.window)
         let contentView = try XCTUnwrap(window.contentView)
+        contentView.layoutSubtreeIfNeeded()
         let frameView = try XCTUnwrap(contentView.superview)
         let location = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
         let hitView = try XCTUnwrap(contentView.hitTest(frameView.convert(location, from: nil)))

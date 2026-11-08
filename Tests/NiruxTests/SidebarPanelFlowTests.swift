@@ -24,10 +24,10 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             "testCIFailureMenuItems": ["Ask Agent Why CI Failed", "Rerun Failed CI Jobs…"],
             "testReviewBranchMenuItem": ["Review Branch"],
             "testSpaceMenuItems": [
-                "New Space…", "Rename Space…", "Space Color", "Edit Space Brief…", "Edit Task Templates…",
+                "New Space…", "Space Settings…", "Rename Space…", "Space Color", "Edit Space Brief…", "Edit Task Templates…",
                 "Space Memory…", "Board Settings…", "Delete Space…"
             ],
-            "testSpaceRepositoryMenuItems": ["Add Repository…", "Repositories"]
+            "testSpaceRepositoryMenuItems": ["Add Repository…"]
         ],
         exemptions: [:]
     )
@@ -283,11 +283,22 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertIdentical(spaceWorkspace, repoWorkspace)
             XCTAssertEqual(spaceWorkspace.profileID, space.id)
 
+            // Space Settings opens on General; Rename Space… there too, the
+            // name field focused.
+            harness.perform(["Space Settings…"], in: shell.sidebar.spaceOptionsMenu())
+            let settings = try XCTUnwrap(shell.spaceSettings)
+            XCTAssertEqual(settings.spaceID, space.id)
+            XCTAssertEqual(settings.selectedTab, .general)
+            XCTAssertEqual(settings.panel?.title, "repo Settings")
+            XCTAssertEqual(settings.general.model.rows.map(\.anchor.name), ["repo"])
             harness.perform(["Rename Space…"], in: shell.sidebar.spaceOptionsMenu())
+            XCTAssertIdentical(shell.spaceSettings, settings, "the same window")
             let nameField = try XCTUnwrap(harness.waitForField(placeholder: "Space name"))
+            XCTAssertIdentical(nameField, settings.general.nameField)
             XCTAssertEqual(nameField.stringValue, space.name)
             harness.submit("Flow Space", into: nameField)
             XCTAssertEqual(try activeSpace().name, "Flow Space")
+            XCTAssertEqual(settings.panel?.title, "Flow Space Settings")
 
             let color = try XCTUnwrap(WorkspaceProfile.palette.first {
                 $0.hex.caseInsensitiveCompare(space.colorHex) != .orderedSame
@@ -295,21 +306,31 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             harness.perform(["Space Color", color.name], in: shell.sidebar.spaceOptionsMenu())
             XCTAssertEqual(try activeSpace().colorHex.uppercased(), color.hex.uppercased())
 
-            // The brief opens in the workspace's editor, from the state folder.
+            // The brief's tab shows its template until Save writes it, in
+            // the state folder.
             harness.perform(["Edit Space Brief…"], in: shell.sidebar.spaceOptionsMenu())
+            XCTAssertEqual(settings.selectedTab, .brief)
             let brief = try XCTUnwrap(SpaceBrief.briefURL(spaceID: space.id)).path
             XCTAssertTrue(brief.hasPrefix(harness.stateDirectory + "/"), brief)
-            let editor = try XCTUnwrap(spaceWorkspace.columns.compactMap(\.editorColumn).first)
-            harness.waitUntil("the brief in the editor") { editor.activePath == brief }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: brief))
+            XCTAssertTrue(settings.brief.textView.string.contains("Brief for the space \"Flow Space\""))
+            settings.brief.textView.string += "Ship small PRs.\n"
+            settings.brief.textDidChange(Notification(name: NSText.didChangeNotification))
+            XCTAssertTrue(settings.brief.isDirty)
+            settings.brief.saveButton.performClick(nil)
+            XCTAssertFalse(settings.brief.isDirty)
+            XCTAssertEqual(SpaceBrief.readBrief(at: URL(fileURLWithPath: brief)).flatMap(SpaceBrief.body(of:)), "Ship small PRs.")
+            XCTAssertTrue(spaceWorkspace.columns.compactMap(\.editorColumn).isEmpty, "no editor column")
 
-            // Written with the default templates on first use, then opened
-            // in the same editor.
+            // The templates' tab shows the defaults; saving them keeps them.
             harness.perform(["Edit Task Templates…"], in: shell.sidebar.spaceOptionsMenu())
+            XCTAssertEqual(settings.selectedTab, .templates)
             let templates = try XCTUnwrap(TaskTemplates.fileURL(spaceID: space.id)).path
             XCTAssertTrue(templates.hasPrefix(harness.stateDirectory + "/"), templates)
-            harness.waitUntil("the templates in the editor") { editor.activePath == templates }
+            XCTAssertEqual(TaskTemplates.parse(settings.templates.textView.string), TaskTemplates.defaults)
+            settings.templates.saveButton.performClick(nil)
             XCTAssertEqual(TaskTemplates.load(spaceID: space.id), TaskTemplates.defaults)
-            XCTAssertEqual(spaceWorkspace.columns.compactMap(\.editorColumn).count, 1)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: templates))
 
             // Nothing known yet about the project's repository: no brief
             // rule, no CLAUDE.md, no memory in the test's home folder, where
@@ -317,6 +338,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             try FileManager.default.createDirectory(atPath: harness.home + "/.claude", withIntermediateDirectories: true)
             try #"{"autoMemoryEnabled": false}"#.write(toFile: harness.home + "/.claude/settings.json", atomically: true, encoding: .utf8)
             harness.perform(["Space Memory…"], in: shell.sidebar.spaceOptionsMenu())
+            XCTAssertEqual(settings.selectedTab, .memory)
             harness.waitUntil("the memory panel") { shell.projectMemoryPanel?.isVisible == true }
             let memory = try XCTUnwrap(shell.projectMemoryPanel)
             XCTAssertEqual(memory.model?.location.projectRoot, harness.repo)
@@ -324,22 +346,24 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 memory.model?.location.directory.path,
                 harness.home + "/.claude/projects/" + ProjectMemory.encodedProjectName(harness.repo) + "/memory"
             )
-            XCTAssertEqual(memory.rows, [])
-            XCTAssertTrue(memory.preview?.textView.string.contains("Agents know nothing about repo yet.") == true)
+            XCTAssertEqual(memory.rows.count, 1, "the brief's rule")
             XCTAssertEqual(memory.noticeRow?.isHidden, false)
             XCTAssertEqual(memory.noticeLabel?.stringValue.hasPrefix("Auto-memory is off (autoMemoryEnabled is false in ~/.claude/settings.json)"), true)
-            memory.dismiss()
 
             // board.json and the checkouts are read off the main thread,
-            // then the form opens as a sheet; Cancel writes nothing.
+            // then the form fills the Board tab; closing writes nothing.
             harness.perform(["Board Settings…"], in: shell.sidebar.spaceOptionsMenu())
-            harness.waitUntil("the board settings sheet") { shell.boardSettingsPanel?.panel?.isSheet == true }
+            XCTAssertEqual(settings.selectedTab, .board)
+            XCTAssertFalse(memory.isVisible, "another tab")
+            harness.waitUntil("the board settings form") { shell.boardSettingsPanel?.hostView != nil }
             let board = try XCTUnwrap(shell.boardSettingsPanel)
-            XCTAssertIdentical(harness.window.attachedSheet, board.panel)
+            XCTAssertIdentical(board.hostView, settings.boardHost)
             XCTAssertEqual(board.spaceID, space.id)
-            board.cancelButton.performClick(nil)
-            XCTAssertNil(shell.boardSettingsPanel)
             XCTAssertNil(harness.window.attachedSheet)
+            settings.close()
+            XCTAssertNil(shell.spaceSettings)
+            XCTAssertNil(shell.boardSettingsPanel)
+            XCTAssertFalse(memory.isVisible)
             XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(BoardConfigStore(spaceID: space.id)).fileURL.path))
 
             // Deleting asks first: Cancel keeps the space, confirming moves
@@ -359,8 +383,9 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
     /// linked worktree here: the repository is named after its main
     /// checkout), offers its workspaces, and a plain workspace then opens in
     /// its main checkout. A folder in no repository is added as a folder
-    /// once the user agrees, never the home folder. "Repositories" makes one
-    /// the default and removes one.
+    /// once the user agrees, never the home folder. Space Settings › General
+    /// lists them, adds a folder of its own, makes one the default, removes
+    /// one, and edits a repository's setup script.
     func testSpaceRepositoryMenuItems() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -400,10 +425,50 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertEqual(harness.alerts.last, "“notes” isn’t in a git repository")
             XCTAssertEqual(anchors().last, SpaceAnchor(kind: .folder(path: notes), name: "notes"))
 
-            harness.perform(["Repositories", "notes", "Make Default"], in: shell.sidebar.spaceOptionsMenu())
+            shell.showSpaceSettings(profileID: space.id)
+            let general = try XCTUnwrap(shell.spaceSettings?.general)
+            XCTAssertEqual(general.model.rows.map(\.anchor.name), ["repo", "notes"])
+            XCTAssertEqual(general.tableView.numberOfRows, 2)
+            @MainActor func cell<View: NSView>(_ column: Int, _ row: Int, as type: View.Type) throws -> View {
+                let view = try XCTUnwrap(general.tableView.view(atColumn: column, row: row, makeIfNecessary: true))
+                return try XCTUnwrap(UIFlowHarness.descendant(of: view, as: type))
+            }
+
+            // A repository's setup script: a sheet on Space Settings, saved
+            // 0600 in the state folder, then the row says Edit….
+            let addScript = try cell(1, 0, as: NSButton.self)
+            XCTAssertEqual(addScript.title, "Add…")
+            addScript.performClick(nil)
+            let sheet = try XCTUnwrap(shell.setupScriptSheet)
+            XCTAssertIdentical(shell.spaceSettings?.panel?.attachedSheet, sheet.panel)
+            XCTAssertTrue(sheet.editor.textView.string.hasPrefix("# Setup for new worktrees of repo."))
+            sheet.editor.textView.string += "npm ci\n"
+            sheet.editor.saveButton.performClick(nil)
+            XCTAssertNil(shell.setupScriptSheet)
+            let script = try XCTUnwrap(SpaceSetupScript.scriptToRun(spaceID: space.id, anchor: anchors()[0]))
+            XCTAssertTrue(script.path.hasPrefix(harness.stateDirectory + "/"), script.path)
+            let mode = try FileManager.default.attributesOfItem(atPath: script.path)[.posixPermissions] as? Int
+            XCTAssertEqual(mode, 0o600)
+            XCTAssertEqual(general.model.rows.first?.hasScript, true)
+            XCTAssertEqual(try cell(1, 0, as: NSButton.self).title, "Edit…")
+
+            // The default, then Remove.
+            try cell(3, 1, as: NSButton.self).performClick(nil)
             XCTAssertEqual(anchors().map(\.isDefault), [false, true])
-            harness.perform(["Repositories", "repo", "Remove from Space"], in: shell.sidebar.spaceOptionsMenu())
+            general.tableView.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+            XCTAssertTrue(general.removeButton.isEnabled)
+            general.removeButton.performClick(nil)
             XCTAssertEqual(anchors(), [SpaceAnchor(kind: .folder(path: notes), name: "notes", isDefault: true)])
+            XCTAssertEqual(general.model.rows.map(\.anchor.name), ["notes"])
+
+            // Add Folder… anchors the folder itself, even inside a repository.
+            let docs = harness.repo + "/docs"
+            try FileManager.default.createDirectory(atPath: docs, withIntermediateDirectories: true)
+            harness.chosenFolders = [docs]
+            general.addFolderButton.performClick(nil)
+            harness.waitUntil("the folder anchored") { anchors().count == 2 }
+            XCTAssertEqual(anchors().last, SpaceAnchor(kind: .folder(path: docs), name: "docs"))
+            XCTAssertEqual(general.model.rows.map(\.anchor.name), ["notes", "docs"])
             // The default space has no repositories.
             shell.selectProfile(WorkspaceProfile.defaultID)
             XCTAssertFalse(shell.sidebar.spaceOptionsMenu().items.contains { $0.title == "Add Repository…" })

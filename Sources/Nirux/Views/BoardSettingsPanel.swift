@@ -1,15 +1,15 @@
 import AppKit
 
-/// "Board Settings…" in a space's menu: the Project Board's config for that
-/// space (see BoardConfig), in a sheet on the main window. Each field shows
-/// what board.json holds, else what the space's checkouts suggest
-/// (BoardConfigSuggestions), else the default. Nothing is written before
-/// Save, and Save refuses invalid values. The post-merge workflow is never
-/// preselected: it stays unset until the user picks a file or None. A file
-/// this build must not rewrite is shown read-only, with the reason, and
-/// Save disabled. A space with several repositories (docs/spaces.md, S12)
-/// picks the one it edits in a Repository pop-up; leaving one with unsaved
-/// values asks first.
+/// Space Settings › Board: the Project Board's config for that space (see
+/// BoardConfig), in the tab's view. Each field shows what board.json
+/// holds, else what the space's checkouts suggest (BoardConfigSuggestions),
+/// else the default. Nothing is written before Save, and Save refuses
+/// invalid values; Revert reads the file again. The post-merge workflow is
+/// never preselected: it stays unset until the user picks a file or None.
+/// A file this build must not rewrite is shown read-only, with the reason,
+/// and Save disabled. A space with several repositories (docs/spaces.md,
+/// S12) picks the one it edits in a Repository pop-up; leaving one with
+/// unsaved values asks first.
 @MainActor
 final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     struct Content {
@@ -47,17 +47,22 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
 
     /// Writes the config. Returns nil once it is saved, else what to show.
     var onSave: ((BoardConfig) -> String?)?
+    /// Revert: the shell reads the file again and shows a new form.
+    var onRevert: (() -> Void)?
     var onDismiss: (() -> Void)?
     /// The pop-up picked another repository: the shell shows its form.
     var onSelectRepository: ((String) -> Void)?
     /// Asks whether to save the values typed for the repository named, before
-    /// leaving it. An alert on the sheet; tests answer for the user.
+    /// leaving it. An alert on the window; tests answer for the user.
     lazy var askToSaveChanges: (String, @escaping (ChangesAnswer) -> Void) -> Void = { [weak self] name, answer in
         self?.askToSave(name, answer: answer)
     }
 
-    private(set) var panel: NSPanel?
-    private weak var parentWindow: NSWindow?
+    /// The tab's view the form fills; nil once dismissed.
+    private(set) weak var hostView: NSView?
+    private var container: NSView?
+    /// The values as shown: anything else typed isn't saved.
+    private var shownConfig: BoardConfig?
     private(set) var spaceID: String?
     private(set) var isWritable = true
 
@@ -66,8 +71,6 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     private(set) var repositoryChoices: [Repository] = []
     /// The one shown, which the pop-up goes back to when leaving is cancelled.
     private var shownRepository: String?
-    /// The values as shown: anything else typed isn't saved.
-    private var shownConfig: BoardConfig?
     let repositoryField = NSTextField()
     let baseBranchField = NSTextField()
     let checksView = NSTextView()
@@ -78,19 +81,20 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     let postMergeTimeoutField = NSTextField()
     let bannerLabel = NSTextField(wrappingLabelWithString: "")
     let errorLabel = NSTextField(wrappingLabelWithString: "")
+    let statusLabel = NSTextField(labelWithString: "")
     let saveButton = NSButton(title: "Save", target: nil, action: nil)
-    let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
+    let revertButton = NSButton(title: "Revert", target: nil, action: nil)
     /// The choice behind each item of `workflowPopup`, by index; nil for a
     /// separator.
     private(set) var workflowChoices: [WorkflowChoice?] = []
 
     private let scrollView = NSScrollView()
-    /// The fields' height: the sheet is as tall, up to `maxHeight`, and they
-    /// scroll beyond it.
+    /// The fields' height: they scroll beyond the tab's.
     private var documentHeight: CGFloat = 0
-    private var maxHeight: CGFloat = .greatestFiniteMagnitude
 
-    private static let width: CGFloat = 620
+    /// The tab's size: the fields scroll inside it.
+    static let hostSize = NSSize(width: 620, height: 600)
+    private static let width: CGFloat = hostSize.width
     private static let labelX: CGFloat = 24
     private static let fieldX: CGFloat = 184
     private static var fieldWidth: CGFloat { width - fieldX - 24 }
@@ -103,34 +107,30 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         super.init()
     }
 
-    func show(attachedTo window: NSWindow, content: Content) {
-        parentWindow = window
+    /// Fills `host` (a Space Settings tab) with the form. `status` shows
+    /// next to the buttons ("Saved." after a save, which shows a new form).
+    func show(in host: NSView, content: Content, status: String? = nil) {
+        hostView = host
         spaceID = content.spaceID
         isWritable = content.loaded.isWritable
-        // A sheet hangs from the top of the window's content: it must end
-        // above the window's bottom and above the Dock, or Save ends up
-        // out of reach.
-        let top = window.frame.minY + window.contentLayoutRect.maxY
-        let visibleBottom = (window.screen ?? NSScreen.main)?.visibleFrame.minY ?? window.frame.minY
-        maxHeight = max(320, top - max(window.frame.minY, visibleBottom) - 40)
-        let panel = buildPanel(content)
-        self.panel = panel
+        let container = buildContainer(content)
+        self.container = container
+        // The host is held at this size; it may not be laid out yet, and
+        // resizing masks would add its first size to the container's.
+        container.frame = NSRect(origin: .zero, size: Self.hostSize)
+        host.addSubview(container)
         shownConfig = draftConfig()
         shownRepository = content.selectedRepository
+        statusLabel.stringValue = status ?? ""
         layoutPanel()
-        window.beginSheet(panel)
-        panel.makeFirstResponder(isWritable ? repositoryField : cancelButton)
-    }
-
-    func focus() {
-        panel?.makeKeyAndOrderFront(nil)
+        if host.window != nil, isWritable { host.window?.makeFirstResponder(repositoryField) }
     }
 
     func dismiss() {
-        guard let panel else { return }
-        parentWindow?.endSheet(panel)
-        panel.orderOut(nil)
-        self.panel = nil
+        guard let container else { return }
+        container.removeFromSuperview()
+        self.container = nil
+        hostView = nil
         onDismiss?()
     }
 
@@ -178,12 +178,12 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     // MARK: - Actions
 
     /// Values typed and not saved.
-    var isDirty: Bool { isWritable && panel != nil && draftConfig() != shownConfig }
+    var isDirty: Bool { isWritable && container != nil && draftConfig() != shownConfig }
 
     /// Saves what is typed; false with the reason shown when it can't.
     @discardableResult
     func save() -> Bool {
-        guard isWritable, panel != nil else { return false }
+        guard isWritable, container != nil else { return false }
         let config = draftConfig()
         let problems = config.problems
         guard problems.isEmpty else {
@@ -198,7 +198,11 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     }
 
     @objc func saveAction(_ sender: Any?) {
-        if save() { dismiss() }
+        save()
+    }
+
+    @objc func revertAction(_ sender: Any?) {
+        onRevert?()
     }
 
     /// Another repository: its form, once what was typed here is saved or
@@ -210,7 +214,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         guard isDirty else { return onSelectRepository?(target) ?? () }
         let name = repositoryChoices.first { $0.id == shownRepository }?.title ?? "this repository"
         askToSaveChanges(name) { [weak self] answer in
-            guard let self, self.panel != nil else { return }
+            guard let self, self.container != nil else { return }
             // A save refused says why, and the form stays.
             if answer == .discard || (answer == .save && self.save()) {
                 self.onSelectRepository?(target)
@@ -221,14 +225,14 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     }
 
     private func askToSave(_ name: String, answer: @escaping (ChangesAnswer) -> Void) {
-        guard let panel else { return answer(.cancel) }
+        guard let window = hostView?.window else { return answer(.cancel) }
         let alert = NSAlert()
         alert.messageText = "Save the changes to “\(name)”?"
         alert.informativeText = "They are lost if you show another repository without saving them."
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Don’t Save")
-        alert.beginSheetModal(for: panel) { response in
+        alert.beginSheetModal(for: window) { response in
             switch response {
             case .alertFirstButtonReturn: answer(.save)
             case .alertThirdButtonReturn: answer(.discard)
@@ -237,46 +241,44 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         }
     }
 
-    @objc func cancelAction(_ sender: Any?) {
-        dismiss()
-    }
-
     @objc func workflowChanged(_ sender: Any?) {
         let isOther = selectedWorkflowChoice == .other
         workflowNameField.isEnabled = isWritable && isOther
-        if isOther { panel?.makeFirstResponder(workflowNameField) }
+        if isOther { hostView?.window?.makeFirstResponder(workflowNameField) }
     }
 
     private func showError(_ message: String) {
+        statusLabel.stringValue = ""
         errorLabel.stringValue = message
         errorLabel.isHidden = false
         layoutPanel()
     }
 
     /// The fields scroll above the buttons; an error shows between them,
-    /// whole, and the sheet grows for it while it fits.
+    /// whole.
     private func layoutPanel() {
-        guard let panel else { return }
+        guard let container else { return }
+        let size = container.bounds.size
         let errorHeight = errorLabel.isHidden ? 0 : Self.wrappedHeight(of: errorLabel, width: Self.width - 48)
         let bottom = Self.buttonsHeight + (errorLabel.isHidden ? 0 : errorHeight + 8)
-        let height = min(documentHeight + bottom, max(maxHeight, bottom + 120))
-        panel.setContentSize(NSSize(width: Self.width, height: height))
-        scrollView.frame = NSRect(x: 0, y: bottom, width: Self.width, height: height - bottom)
+        scrollView.frame = NSRect(x: 0, y: bottom, width: size.width, height: max(120, size.height - bottom))
         // No sideways scrolling when scroll bars take room of their own.
         scrollView.documentView?.setFrameSize(NSSize(width: scrollView.contentSize.width, height: documentHeight))
+        scrollView.documentView?.scroll(.zero)
         errorLabel.frame = NSRect(x: 24, y: Self.buttonsHeight - 4, width: Self.width - 48, height: errorHeight)
-        cancelButton.frame = NSRect(x: Self.width - 222, y: 18, width: 96, height: 30)
+        revertButton.frame = NSRect(x: Self.width - 222, y: 18, width: 96, height: 30)
         saveButton.frame = NSRect(x: Self.width - 120, y: 18, width: 96, height: 30)
+        statusLabel.frame = NSRect(x: 24, y: 24, width: Self.width - 260, height: 18)
     }
 
     /// Tab leaves the checks list instead of typing a tab into it.
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         switch commandSelector {
         case #selector(NSResponder.insertTab(_:)):
-            panel?.selectNextKeyView(nil)
+            textView.window?.selectNextKeyView(nil)
             return true
         case #selector(NSResponder.insertBacktab(_:)):
-            panel?.selectPreviousKeyView(nil)
+            textView.window?.selectPreviousKeyView(nil)
             return true
         default:
             return false
@@ -285,7 +287,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
 
     // MARK: - Construction
 
-    private func buildPanel(_ content: Content) -> NSPanel {
+    private func buildContainer(_ content: Content) -> NSView {
         let saved = content.loaded.config
         let suggestions = content.suggestions
         // A read-only file shows what it holds and nothing else: suggestions
@@ -294,14 +296,6 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         let suggested = content.loaded.isWritable ? suggestions : nil
         let view = FlippedView(frame: NSRect(x: 0, y: 0, width: Self.width, height: 100))
         var y: CGFloat = 20
-
-        let heading = NSTextField(labelWithString: "Board Settings · \(content.spaceName)")
-        heading.font = .systemFont(ofSize: 16, weight: .semibold)
-        heading.textColor = NSColor.white.withAlphaComponent(0.94)
-        heading.lineBreakMode = .byTruncatingTail
-        heading.frame = NSRect(x: 24, y: y, width: Self.width - 48, height: 22)
-        view.addSubview(heading)
-        y += 28
 
         let path = (content.filePath as NSString).abbreviatingWithTildeInPath
         y = addWrappingLabel(
@@ -400,7 +394,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         view.setFrameSize(NSSize(width: Self.width, height: y))
         documentHeight = y
 
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: Self.width, height: y + Self.buttonsHeight))
+        let container = NSView(frame: NSRect(origin: .zero, size: Self.hostSize))
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
@@ -415,34 +409,22 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         errorLabel.isHidden = true
         container.addSubview(errorLabel)
 
-        cancelButton.title = isWritable ? "Cancel" : "Close"
-        cancelButton.bezelStyle = .rounded
-        cancelButton.target = self
-        cancelButton.action = #selector(cancelAction(_:))
-        cancelButton.keyEquivalent = "\u{1b}"
-        container.addSubview(cancelButton)
+        statusLabel.font = .systemFont(ofSize: 11.5)
+        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.lineBreakMode = .byTruncatingTail
+        container.addSubview(statusLabel)
+        revertButton.bezelStyle = .rounded
+        revertButton.target = self
+        revertButton.action = #selector(revertAction(_:))
+        revertButton.isEnabled = isWritable
+        container.addSubview(revertButton)
         saveButton.bezelStyle = .rounded
         saveButton.target = self
         saveButton.action = #selector(saveAction(_:))
         saveButton.keyEquivalent = "\r"
         saveButton.isEnabled = isWritable
         container.addSubview(saveButton)
-
-        let panel = BoardSettingsSheet(
-            contentRect: container.frame,
-            styleMask: [.titled, .fullSizeContentView],
-            backing: .buffered,
-            defer: false
-        )
-        panel.titlebarAppearsTransparent = true
-        panel.titleVisibility = .hidden
-        panel.appearance = Theme.appearance
-        panel.backgroundColor = Theme.Color.base
-        panel.isReleasedWhenClosed = false
-        panel.autorecalculatesKeyViewLoop = true
-        panel.contentView = container
-        panel.multilineView = checksView
-        return panel
+        return container
     }
 
     private func addLabel(_ text: String, y: CGFloat, in view: NSView) -> CGFloat {
@@ -649,25 +631,6 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         case .merge: return "Merge commit"
         case .squash: return "Squash"
         }
-    }
-}
-
-/// Return in the checks list adds a line: the Save button, the default
-/// button that answers Return in the other fields, mustn't take it first
-/// when AppKit offers Return as a key equivalent.
-final class BoardSettingsSheet: NSPanel {
-    weak var multilineView: NSTextView?
-
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if Self.leavesToTextView(event, firstResponder: firstResponder, multilineView: multilineView) { return false }
-        return super.performKeyEquivalent(with: event)
-    }
-
-    /// Return or Enter, without modifiers, while `multilineView` has the focus.
-    static func leavesToTextView(_ event: NSEvent, firstResponder: NSResponder?, multilineView: NSTextView?) -> Bool {
-        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
-        guard let multilineView, firstResponder === multilineView, modifiers.isEmpty else { return false }
-        return event.charactersIgnoringModifiers == "\r" || event.charactersIgnoringModifiers == "\u{3}"
     }
 }
 

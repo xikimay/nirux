@@ -123,7 +123,7 @@ enum TaskTemplates {
         return result + rest
     }
 
-    private static func template(spaceName: String) -> String {
+    static func template(spaceName: String) -> String {
         // A "-->" in the name would end the comment.
         var name = spaceName
         while name.contains("--") { name = name.replacingOccurrences(of: "--", with: "-") }

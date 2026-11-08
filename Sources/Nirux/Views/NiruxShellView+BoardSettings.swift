@@ -3,8 +3,8 @@ import AppKit
 // MARK: - Board settings (see BoardConfig)
 
 extension NiruxShellView {
-    /// What Board Settings shows: board.json, the space's repositories
-    /// and the one picked, with suggestions from its checkouts.
+    /// What the Board tab shows: board.json, the space's repositories and
+    /// the one picked, with suggestions from its checkout.
     struct BoardSettingsRead: Sendable {
         let loaded: BoardConfigStore.Loaded
         let context: BoardSections.Context
@@ -13,36 +13,53 @@ extension NiruxShellView {
         let suggestions: BoardConfigSuggestions
     }
 
-    /// "Board Settings…" in a space's menu, on the repository with this id
-    /// (else the default one). Reads board.json and runs git in the
-    /// repository's checkout (the space's workspace folders, for a space
-    /// without repository anchors) off the main thread, then opens the form.
-    func showBoardSettings(profileID: String, repository: String? = nil) {
-        guard window != nil else { return }
+    /// "Board Settings…" in a space's menu: Space Settings on its Board tab.
+    func showBoardSettings(profileID: String) {
+        showSpaceSettings(profileID: profileID, tab: .board)
+    }
+
+    /// Fills the Board tab, on `repository` (a section's id) when given,
+    /// else the one it showed, else the default one: reads board.json and
+    /// runs git in that repository's checkout (the space's workspace
+    /// folders, for a space without repository anchors) off the main
+    /// thread, then shows the form, with `status` by its buttons. Asked
+    /// while it reads, it reads again once that read lands.
+    func loadBoardTab(spaceID: String, repository: String? = nil, status: String? = nil) {
+        guard let settings = spaceSettings, settings.spaceID == spaceID else { return }
+        if let repository { settings.boardRepository = repository }
         guard !isReadingBoardSettings else {
-            showToast("Board settings are still loading")
+            settings.pendingBoardReload = .some(status)
             return
         }
-        if let panel = boardSettingsPanel {
-            if panel.spaceID == profileID {
-                panel.focus()
-            } else {
-                showToast("Another space’s board settings are open: close them first")
-            }
+        guard let store = BoardConfigStore(spaceID: spaceID) else {
+            settings.showBoardPlaceholder("Couldn’t find this space’s board settings.")
             return
         }
-        guard let store = BoardConfigStore(spaceID: profileID) else {
-            showToast("Couldn’t find this space’s board settings", tone: .error)
-            return
-        }
-        // Inactive workspaces belong to the project too.
-        let folders = workspaces.filter { $0.profileID == profileID && !$0.isClosing }.map(\.cwd)
-        let anchors = profiles.first { $0.id == profileID }?.anchors ?? []
+        // Inactive workspaces belong to the space too.
+        let folders = workspaces.filter { $0.profileID == spaceID && !$0.isClosing }.map(\.cwd)
+        let anchors = profiles.first { $0.id == spaceID }?.anchors ?? []
+        boardSettingsPanel?.dismiss()
+        settings.showBoardPlaceholder("Reading the board settings…")
         isReadingBoardSettings = true
-        Self.readBoardSettings(store: store, anchors: anchors, workspaceFolders: folders, repository: repository) { [weak self] read in
+        Self.readBoardSettings(
+            store: store, anchors: anchors, workspaceFolders: folders, repository: settings.boardRepository
+        ) { [weak self] read in
             guard let self else { return }
             self.isReadingBoardSettings = false
-            self.presentBoardSettings(profileID: profileID, store: store, read: read)
+            guard let current = self.spaceSettings, current.spaceID == spaceID else {
+                // Another space's window opened meanwhile, on its Board tab:
+                // its read was refused while this one ran.
+                if let current = self.spaceSettings, current.selectedTab == .board,
+                   self.boardSettingsPanel?.spaceID != current.spaceID {
+                    self.loadBoardTab(spaceID: current.spaceID)
+                }
+                return
+            }
+            if let pending = current.pendingBoardReload {
+                current.pendingBoardReload = nil
+                return self.loadBoardTab(spaceID: spaceID, status: pending ?? status)
+            }
+            self.presentBoardSettings(profileID: spaceID, store: store, read: read, status: status)
         }
     }
 
@@ -62,9 +79,9 @@ extension NiruxShellView {
             let sections = BoardSections.sections(loaded.status == .unreadable ? [] : loaded.entries, context: context)
             let section = sections.first { $0.id == repository } ?? sections[0]
             let shown = loaded.view(for: section.slot).config
-            let folders = section.checkoutFolder.map { [$0] } ?? workspaceFolders
             let suggestions = BoardConfigSuggestions.read(
-                workspaceFolders: folders, repository: shown?.repository, baseBranch: shown?.baseBranch
+                workspaceFolders: section.checkoutFolder.map { [$0] } ?? workspaceFolders,
+                repository: shown?.repository, baseBranch: shown?.baseBranch
             )
             let read = BoardSettingsRead(
                 loaded: loaded, context: context, sections: sections, section: section, suggestions: suggestions
@@ -75,45 +92,40 @@ extension NiruxShellView {
         }
     }
 
-    private func presentBoardSettings(profileID: String, store: BoardConfigStore, read: BoardSettingsRead) {
+    private func presentBoardSettings(profileID: String, store: BoardConfigStore, read: BoardSettingsRead, status: String?) {
         // The space may have been deleted, or the window closed, meanwhile.
-        guard let window, boardSettingsPanel == nil,
+        guard let settings = spaceSettings, settings.spaceID == profileID,
               let profile = profiles.first(where: { $0.id == profileID })
         else { return }
+        settings.hideBoardPlaceholder()
+        boardSettingsPanel?.dismiss()
+        // A repository removed since: the default one shows.
+        settings.boardRepository = read.section.id
         let panel = BoardSettingsPanel()
         boardSettingsPanel = panel
-        panel.onSave = { config in
+        settings.boardForm = panel
+        panel.onSave = { [weak self] config in
+            if let refusal = Self.boardSaveRefusal(config, read: read) { return refusal }
             // The other repositories' configs stay as read; refused if
             // another Nirux saved the file since it was read.
             let kept = read.loaded.status == .unreadable ? [] : read.loaded.entries
-            // Which repository schema 1's config belongs to rests on every
-            // anchor's remotes.
-            if kept.contains(where: { $0.slot == .legacy }), let unread = read.context.unread.first {
-                let name = read.sections.first { $0.commonDir == unread }?.name ?? (unread as NSString).deletingLastPathComponent
-                return "Nirux couldn’t read the remotes of “\(name)”, so it can’t tell which repository the board’s "
-                    + "current settings belong to. Close the form and try again once that repository can be read."
-            }
-            // A queue never mixes repositories, and two sections' would be one.
-            if let repository = config.gitHubRepository,
-               let other = read.sections.first(where: { $0.id != read.section.id && $0.config?.gitHubRepository == repository }) {
-                return "“\(other.name ?? "Another repository")” of this space already uses \(repository.ownerAndName): "
-                    + "each repository needs its own GitHub repository."
-            }
             let entries = BoardSections.entries(saving: config, as: read.section, in: kept, context: read.context)
             switch store.save(entries: entries, replacing: read.loaded) {
-            case .success: return nil
-            case .failure(let error): return error.message
+            case .success:
+                // A new form from the file: the next save compares with it.
+                self?.loadBoardTab(spaceID: profileID, status: "Saved.")
+                return nil
+            case .failure(let error):
+                return error.message
             }
         }
-        panel.onSelectRepository = { [weak self, weak panel] repository in
-            guard let self, let panel else { return }
-            panel.dismiss()
-            self.showBoardSettings(profileID: profileID, repository: repository)
+        panel.onRevert = { [weak self] in self?.loadBoardTab(spaceID: profileID) }
+        panel.onSelectRepository = { [weak self] repository in
+            self?.loadBoardTab(spaceID: profileID, repository: repository)
         }
         panel.onDismiss = { [weak self, weak panel] in
             guard let self else { return }
             if self.boardSettingsPanel === panel { self.boardSettingsPanel = nil }
-            self.focusActiveTerminal(in: self.window)
         }
         var content = BoardSettingsPanel.Content(
             spaceID: profileID, spaceName: profile.name, filePath: store.fileURL.path,
@@ -126,6 +138,25 @@ extension NiruxShellView {
             }
             content.selectedRepository = read.section.id
         }
-        panel.show(attachedTo: window, content: content)
+        panel.show(in: settings.boardHost, content: content, status: status)
+    }
+
+    /// Why Save can't write `config` as the shown repository's, if it can't.
+    private static func boardSaveRefusal(_ config: BoardConfig, read: BoardSettingsRead) -> String? {
+        // A queue never mixes repositories, and two sections' would be one.
+        if let repository = config.gitHubRepository,
+           let other = read.sections.first(where: { $0.id != read.section.id && $0.config?.gitHubRepository == repository }) {
+            return "“\(other.name ?? "Another repository")” of this space already uses \(repository.ownerAndName): "
+                + "each repository needs its own GitHub repository."
+        }
+        // Which repository schema 1's config belongs to rests on every
+        // anchor's remotes.
+        let kept = read.loaded.status == .unreadable ? [] : read.loaded.entries
+        if kept.contains(where: { $0.slot == .legacy }), let unread = read.context.unread.first {
+            let name = read.sections.first { $0.commonDir == unread }?.name ?? (unread as NSString).deletingLastPathComponent
+            return "Nirux couldn’t read the remotes of “\(name)”, so it can’t tell which repository the board’s "
+                + "current settings belong to. Try again once that repository can be read."
+        }
+        return nil
     }
 }

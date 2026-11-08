@@ -571,6 +571,8 @@ struct PersistedWorkspace: Codable {
     /// `ReviewPass` raw values: a pass this build doesn't know is dropped
     /// on load, never a reason to fail the workspace.
     var reviewRuns: [String: ReviewRun]?
+    /// See `WorkspaceState.startedOutsideNirux`. Written only when true.
+    var startedOutsideNirux: Bool
 
     init(
         id: String? = nil,
@@ -589,7 +591,8 @@ struct PersistedWorkspace: Codable {
         lastActivityAt: TimeInterval? = nil,
         nextStep: String? = nil,
         blocker: String? = nil,
-        reviewRuns: [String: ReviewRun]? = nil
+        reviewRuns: [String: ReviewRun]? = nil,
+        startedOutsideNirux: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -608,12 +611,13 @@ struct PersistedWorkspace: Codable {
         self.nextStep = nextStep
         self.blocker = blocker
         self.reviewRuns = reviewRuns
+        self.startedOutsideNirux = startedOutsideNirux
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID
         case purpose, phase, lastSummary, lastSummaryIsManual, lastActivityAt
-        case nextStep, blocker, reviewRuns
+        case nextStep, blocker, reviewRuns, startedOutsideNirux
     }
 
     init(from decoder: Decoder) throws {
@@ -637,6 +641,7 @@ struct PersistedWorkspace: Codable {
         blocker = try container.decodeIfPresent(String.self, forKey: .blocker)
         // Only badges: a shape this build can't read never fails the state.
         reviewRuns = (try? container.decodeIfPresent([String: ReviewRun].self, forKey: .reviewRuns)) ?? nil
+        startedOutsideNirux = (try? container.decodeIfPresent(Bool.self, forKey: .startedOutsideNirux)) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -660,6 +665,7 @@ struct PersistedWorkspace: Codable {
         try container.encodeIfPresent(nextStep, forKey: .nextStep)
         try container.encodeIfPresent(blocker, forKey: .blocker)
         try container.encodeIfPresent(reviewRuns, forKey: .reviewRuns)
+        if startedOutsideNirux { try container.encode(true, forKey: .startedOutsideNirux) }
     }
 }
 

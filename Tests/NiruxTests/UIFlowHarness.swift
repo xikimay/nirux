@@ -56,6 +56,8 @@ final class UIFlowHarness {
     /// Folders the folder picker double returns, in order; Cancel once
     /// empty.
     var chosenFolders: [String] = []
+    /// Workspaces whose setup script failure was notified.
+    private(set) var setupFailures: [String] = []
     /// Browsers the cookie double reports as installed.
     var cookieBrowsers: [CookieImporter.Browser] = []
     /// Browsers the cookie double was asked to import from.
@@ -156,10 +158,9 @@ final class UIFlowHarness {
         shell.searchPanel?.dismiss()
         shell.globalSearchPanel?.dismiss()
         shell.sessionHistoryPanel?.dismiss()
-        shell.projectMemoryPanel?.dismiss()
+        shell.spaceSettings?.close()
         shell.filePickerPanel?.dismiss()
         shell.worktreeCleanupPanel?.dismiss()
-        shell.boardSettingsPanel?.dismiss()
         shell.newTaskPanel?.dismiss()
         shell.newSpacePanel?.dismiss()
         for other in NSApp.windows where other !== window && !windowsBefore.contains(ObjectIdentifier(other)) {
@@ -179,6 +180,8 @@ final class UIFlowHarness {
             self?.restoredAgentLaunches.append(command)
         }
         shell.sideEffects.homeDirectory = { [home] in home }
+        // Never UNUserNotificationCenter in xctest.
+        shell.sideEffects.notifySetupFailure = { [weak self] workspaceID, _ in self?.setupFailures.append(workspaceID) }
         // The real Trash never gets a test's file.
         shell.sideEffects.trash = { url in try FileManager.default.removeItem(at: url) }
         shell.sideEffects.claudeManagedSettings = { [root] in
