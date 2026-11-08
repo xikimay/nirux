@@ -11,7 +11,11 @@ enum LeadTools {
     static let reply = "reply"
     static let askUser = "ask_user"
     static let queueMerge = "queue_merge"
-    static let names = [startTask, listTasks, tell, reply, askUser, queueMerge]
+    static let setTaskContext = "set_task_context"
+    static let names = [startTask, listTasks, tell, reply, askUser, queueMerge, setTaskContext]
+
+    /// A next step or blocker: one line on the task's row.
+    static let maxContextLength = 200
 
     /// How long a call waits for a Nirux to take it: a running app takes
     /// it at once.
@@ -45,7 +49,8 @@ enum LeadTools {
                 description: """
                     The space's tasks and repositories: each task's title, branch, repository, agent state (working, \
                     needs the user, asking you, idle, done), pull request and checks, and the question or result it \
-                    sent you. Read it again after a /clear: Nirux keeps the state, your conversation doesn't.
+                    sent you, its next step and blocker. Read it again after a /clear: Nirux keeps the state, your \
+                    conversation doesn't.
                     """,
                 properties: [:], required: [], readOnly: true
             ),
@@ -94,6 +99,26 @@ enum LeadTools {
                     "repo": ["type": "string", "description": "The repository's name in this space, or owner/name; needed when the space has several."]
                 ],
                 required: ["prs"]
+            ),
+            definition(
+                setTaskContext, title: "Set a task's next step and blocker",
+                description: """
+                    Keep a task's next step and blocker current: the user reads them on its row in the sidebar. \
+                    Pass one or both; an empty string clears one. A field the user wrote by hand stays theirs: \
+                    Nirux says so, and leaves it.
+                    """,
+                properties: [
+                    "task": ["type": "string", "description": "The task's branch, or its title."],
+                    "next_step": [
+                        "type": "string", "maxLength": maxContextLength,
+                        "description": "What happens next, and who does it, in a few words (\"user reviews #39\", \"write the import side\")."
+                    ],
+                    "blocker": [
+                        "type": "string", "maxLength": maxContextLength,
+                        "description": "What keeps the task from going on (\"waits for #212 to merge\"); empty once it is gone."
+                    ]
+                ],
+                required: ["task"]
             )
         ]
     }
@@ -118,6 +143,16 @@ enum LeadTools {
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed
         }
+    }
+
+    /// A next step or blocker as given: nil when left out (or null), ""
+    /// to clear it; whitespace runs folded to one space, invisible
+    /// characters dropped. `.some(nil)` when it isn't a string.
+    static func contextText(_ arguments: [String: Any], _ key: String) -> String?? {
+        guard let value = arguments[key], !(value is NSNull) else { return nil }
+        guard let text = value as? String else { return .some(nil) }
+        // Past the limit either way: cut, so a huge one isn't copied whole.
+        return .some(AgentText.clean(text, maxLength: maxContextLength * 4) ?? "")
     }
 
     /// Whole positive numbers, as JSON gives them; nil for anything else.
@@ -152,6 +187,16 @@ enum LeadTools {
             return string(arguments, "why") == nil ? "why must say why you can't answer it yourself." : nil
         case queueMerge:
             return pullRequestNumbers(arguments) == nil ? "prs must list pull request numbers." : nil
+        case setTaskContext:
+            guard string(arguments, "task") != nil else { return "task is missing." }
+            let fields = ["next_step", "blocker"].map { ($0, contextText(arguments, $0)) }
+            guard fields.contains(where: { $0.1 != nil }) else { return "Pass next_step, blocker or both (an empty string clears one)." }
+            for (key, value) in fields {
+                guard let value else { continue }
+                guard let text = value else { return "\(key) must be a string." }
+                guard text.count <= maxContextLength else { return "\(key) must hold at most \(maxContextLength) characters." }
+            }
+            return nil
         default:
             return "Unknown tool: \(tool)"
         }

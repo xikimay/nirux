@@ -3,7 +3,7 @@
 Status: design validated by the user on 2026-11-08. Shipped: anchors and
 routing (S4), one ⌘N (S7), Space Settings and per-space defaults (S8), the
 empty space view (S9), the Lead's workspace and settings (S11a), a board per
-repository (S12). Where this document and [projects.md](projects.md) differ
+repository (S12), the Lead's task context (S13). Where this document and [projects.md](projects.md) differ
 (management UI, routing, defaults), this one wins.
 
 Creating spaces and workspaces was messy because a space didn't know where its
@@ -218,6 +218,14 @@ New flow, built on the guarded typing `tell` already uses
     sheet with those pull requests, in that order (one queue per repository),
     once Board Settings allow it; only open pull requests, and never over a
     list the user is preparing. It never starts a queue.
+  - `set_task_context(task, next_step?, blocker?)` (shipped with S13): a task's
+    next step and blocker (View/Edit Context…), one line each, at most 200
+    characters; an empty string clears one. Its role says when: after a
+    task's question is answered, when it completes, when it notices a
+    blocker. A field the user typed stays theirs (the tool says so) until
+    they clear it; one they didn't touch stays the Lead's, even one it
+    changed while the panel was open. `list_tasks` shows both, and who
+    wrote them.
 - **The channel:** each call is a file in `<state dir>/lead/requests/`
   (LeadChannel), answered in `lead/responses/`. The Nirux that has the
   calling workspace claims it (a rename: another Nirux on the same state
@@ -251,7 +259,11 @@ Mockups were validated in the design session. What changes:
 - **Sidebar:** a space picker at the top (name, task count, amber when an agent
   waits; ⌥⌘1…⌥⌘9, since ⌘1…⌘9 focus columns), the Lead row, then task rows on two lines: title and time,
   then one status line ("Needs you · npm run migrate", "Asking the Lead",
-  "Working", "#39 · checks passed"). No chips on every row. INACTIVE becomes an
+  "Working", "#39 · checks passed"). No chips on every row. A blocker says
+  "Blocked · …" in grey after needs you, broken, asking and working, before
+  a finished turn and the pull request; the next step ("Next · …") takes the
+  branch's place, and the selected row prints it under a status line that
+  says something else (S13). INACTIVE becomes an
   "Archived" row at the bottom, unfolding its list above it. The bottom dot switcher and Activity go. This
   replaces the three-line cards of the October visual system.
 - **Title bar:** three buttons: New, Board, Search.
@@ -335,7 +347,7 @@ Notes per PR:
   repository becomes the matching anchor's. Shipped: see
   [project-board.md](project-board.md), sections 2.2 and 5.1.
 - **S13.** An MCP tool sets a task's next step and blocker; manual editing
-  stays.
+  stays. Shipped: see the Lead's tools and the Interface section.
 
 ## Out of scope
 

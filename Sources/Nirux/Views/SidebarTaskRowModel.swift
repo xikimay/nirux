@@ -35,7 +35,7 @@ struct SidebarStatusLine: Hashable {
 
 /// The sign before a row's title, in the state dots' column.
 enum SidebarRowMark: Hashable {
-    case needsYou, error, working, asking, readyToMerge, merged, idle
+    case needsYou, error, working, asking, blocked, readyToMerge, merged, idle
 }
 
 /// A task row's two lines, before any view exists.
@@ -68,8 +68,9 @@ struct SidebarRowSummary: Hashable {
 @MainActor
 extension WorkspaceInfo {
     /// Needs you, then broken, then a Mission question the parent may still
-    /// answer, then work, then the pull request, then a finished turn, else
-    /// the branch.
+    /// answer, then work, then the blocker (grey: it doesn't ask the user),
+    /// then a finished turn, then the pull request, then the next step,
+    /// else the branch.
     var rowSummary: SidebarRowSummary {
         let age = lastActivityAt.map { SidebarRowSummary.Trailing.age(SidebarView.cardAge(since: $0)) }
         func row(_ mark: SidebarRowMark, _ text: String, _ tone: SidebarStatusLine.Tone,
@@ -107,6 +108,9 @@ extension WorkspaceInfo {
         if let answered = question?.missionQuestion {
             return row(.asking, SidebarWorkspaceCardRenderer.answeredText(answered), .neutral)
         }
+        if let blocker = blockerText {
+            return row(.blocked, "Blocked · \(blocker)", .neutral)
+        }
         // A restored agent that hasn't resumed: selecting the row resumes it
         // too.
         if let paused = columns.first(where: { $0.deferredAgent != nil }), let agent = paused.deferredAgent {
@@ -128,8 +132,16 @@ extension WorkspaceInfo {
            let summary = Self.pullRequestRow(pullRequest, cleanup: mergedCleanup, hasFeedback: prFeedback != nil, age: age) {
             return summary
         }
+        if let next = nextStepText {
+            return row(.idle, Self.nextStepLine(next), .neutral)
+        }
         let place = gitBranch ?? columns.first(where: \.isFocused)?.abbreviatedCwd ?? columns.first?.abbreviatedCwd
         return row(.idle, place ?? "No activity yet", place == nil ? .neutral : .branch)
+    }
+
+    /// The next step on the status line: "Next · write the import side".
+    static func nextStepLine(_ text: String) -> String {
+        "Next · \(text)"
     }
 
     /// The column whose Mission question the status line shows: one still

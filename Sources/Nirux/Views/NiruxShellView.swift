@@ -570,6 +570,8 @@ extension NiruxShellView {
         }
 
         let presentedSummary = WorkspaceState.normalizedContextText(workspace.lastSummary)
+        let presentedNextStep = workspace.nextStep
+        let presentedBlocker = workspace.blocker
         workspaceContextPanel?.onSave = { [weak self, weak workspace] values in
             guard let self, let workspace,
                   self.workspaces.contains(where: { $0 === workspace }) else { return }
@@ -578,8 +580,9 @@ extension NiruxShellView {
             if values.phase != nil {
                 workspace.unknownPhaseRawValue = nil
             }
-            workspace.nextStep = WorkspaceState.normalizedContextText(values.nextStep)
-            workspace.blocker = WorkspaceState.normalizedContextText(values.blocker)
+            // What the user typed is theirs: the Lead leaves it.
+            workspace.setContextByHand(.nextStep, values.nextStep, presented: presentedNextStep)
+            workspace.setContextByHand(.blocker, values.blocker, presented: presentedBlocker)
 
             let savedSummary = WorkspaceState.normalizedContextText(values.lastSummary)
             if savedSummary != presentedSummary {
@@ -601,6 +604,10 @@ extension NiruxShellView {
             lastActivityAt: workspace.lastActivityAt,
             nextStep: workspace.nextStep,
             blocker: workspace.blocker,
+            contextHelp: WorkspaceContextPanel.contextHelp(
+                nextStepIsFromLead: workspace.nextStepIsFromLead, blockerIsFromLead: workspace.blockerIsFromLead,
+                reportsToLead: workspace.reportsToLead
+            ),
             gitBranch: workspace.gitBranch,
             diffStats: workspace.diffStats,
             prInfo: workspace.prInfo,

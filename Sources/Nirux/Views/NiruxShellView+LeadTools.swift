@@ -27,6 +27,7 @@ extension NiruxShellView {
         case LeadTools.reply: leadReply(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.askUser: leadAskUser(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.queueMerge: leadQueueMerge(arguments, in: space, answer: answer)
+        case LeadTools.setTaskContext: leadSetTaskContext(arguments, in: space, lead: lead.id, answer: answer)
         default: answer("Unknown tool: \(request.tool)", true)
         }
     }
@@ -231,6 +232,12 @@ extension NiruxShellView {
                     line += "\n  completed: \(MissionPromptText.quoted(result.message))"
                 }
             }
+            for field in WorkspaceState.ContextField.allCases {
+                guard let text = WorkspaceState.normalizedContextText(task.contextText(field)) else { continue }
+                let name = field == .nextStep ? "next step" : "blocker"
+                let owner = task.contextIsFromLead(field) ? "" : " (the user wrote it)"
+                line += "\n  \(name)\(owner): \(MissionPromptText.quoted(text))"
+            }
             lines.append(line)
         }
         let repositories = space.anchors.filter(\.isKnown).map { anchor in
@@ -366,6 +373,43 @@ extension NiruxShellView {
         updateSidebar()
         answer("Handed to the user: “\(workspace.title)”’s row is amber with your reason. Their answer goes to the task, "
             + "and a line comes to you.", false)
+    }
+
+    // MARK: set_task_context
+
+    /// The next step and blocker of a task of the Lead's: what the user
+    /// wrote by hand stays theirs.
+    private func leadSetTaskContext(
+        _ arguments: [String: Any], in space: WorkspaceProfile, lead leadID: String, answer: @escaping LeadAnswer
+    ) {
+        let name = LeadTools.string(arguments, "task") ?? ""
+        guard let (workspace, _) = leadTask(name, in: space, lead: leadID) else { return answer(noLeadTask(name), true) }
+        var done: [String] = []
+        var kept: [String] = []
+        var changed = false
+        for (field, key, label) in [(WorkspaceState.ContextField.nextStep, "next_step", "next step"), (.blocker, "blocker", "blocker")] {
+            guard case let text?? = LeadTools.contextText(arguments, key) else { continue }
+            let outcome = workspace.setContextByLead(field, text)
+            if case .set = outcome { changed = true }
+            if case .cleared = outcome { changed = true }
+            switch outcome {
+            case .set(let value): done.append("\(label) set to “\(MissionPromptText.quoted(value))”")
+            case .cleared: done.append("\(label) cleared")
+            case .unchanged: done.append("\(label) unchanged")
+            case .keptUsers(let value): kept.append("\(label) (“\(MissionPromptText.quoted(value))”)")
+            }
+        }
+        if changed {
+            updateSidebar()
+            saveState()
+        }
+        let title = MissionPromptText.quoted(workspace.title)
+        var text = done.isEmpty ? "" : "“\(title)”: " + done.joined(separator: ", ") + "."
+        if !kept.isEmpty {
+            text += (text.isEmpty ? "" : " ") + "The user wrote “\(title)”’s " + kept.joined(separator: " and ")
+                + " by hand: Nirux keeps theirs until they clear it. If it's out of date, tell them here."
+        }
+        answer(text, done.isEmpty)
     }
 
     // MARK: queue_merge

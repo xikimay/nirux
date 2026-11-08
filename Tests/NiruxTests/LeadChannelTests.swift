@@ -158,6 +158,21 @@ final class LeadChannelTests: XCTestCase {
         for name in LeadTools.names { XCTAssertEqual(allowed?.contains("mcp__nirux__\(name)"), true) }
     }
 
+    /// set_task_context needs one field at least, a string within the
+    /// limit; "" clears one, null leaves it out. One line on the row.
+    func testTaskContextArgumentsAreCheckedBeforeTheApp() {
+        let problem = { (arguments: [String: Any]) in LeadTools.problem(tool: LeadTools.setTaskContext, arguments: arguments) }
+        let longest = String(repeating: "x", count: LeadTools.maxContextLength)
+        XCTAssertNil(problem(["task": "a", "blocker": ""]), "an empty string clears it")
+        XCTAssertNil(problem(["task": "a", "next_step": longest, "blocker": NSNull()]))
+        XCTAssertNotNil(problem(["task": "a", "next_step": longest + "x"]))
+        XCTAssertNotNil(problem(["task": "a"]))
+        XCTAssertNotNil(problem(["task": "a", "blocker": NSNull()]), "null is left out")
+        XCTAssertNotNil(problem(["task": "a", "next_step": 3]))
+        XCTAssertNotNil(problem(["next_step": "x"]))
+        XCTAssertEqual(LeadTools.contextText(["next_step": " write\n\tthe import\u{202E} side "], "next_step"), .some("write the import side"))
+    }
+
     /// A call is checked here first, then carried to the app and back.
     func testALeadsCallReachesTheAppAndComesBack() throws {
         let missing = try XCTUnwrap(try call(LeadTools.startTask, [:], context: context(lead: true))["result"] as? [String: Any])

@@ -103,9 +103,11 @@ final class WorkspaceState {
     private var reportedRedChecks: (branch: String?, keys: Set<String>)?
     var diffStats: String?
 
-    // Workspace context. Purpose/next step/blocker are always human-owned.
-    // `phase` is a manual override (nil means derive from live state), while
-    // automatic agent summaries are allowed only until the user edits one.
+    // Workspace context. The purpose is the user's. `phase` is a manual
+    // override (nil means derive from live state), while automatic agent
+    // summaries are allowed only until the user edits one. The next step
+    // and blocker are the user's, or the Lead's (`set_task_context`) until
+    // the user writes one by hand: see `setContextByLead`.
     var purpose: String?
     var phase: WorkspacePhase?
     var lastSummary: String?
@@ -113,6 +115,10 @@ final class WorkspaceState {
     var lastActivityAt: TimeInterval?
     var nextStep: String?
     var blocker: String?
+    /// The Lead wrote `nextStep` (or `blocker`), not the user: its next
+    /// update may replace it. False for an empty field.
+    var nextStepIsFromLead = false
+    var blockerIsFromLead = false
     var unknownPhaseRawValue: String?
     /// Each review pass's latest run (docs/review-badges.md).
     var reviewRuns: [ReviewPass: ReviewRun] = [:]
@@ -189,6 +195,67 @@ extension WorkspaceState {
         guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               !trimmed.isEmpty else { return nil }
         return trimmed
+    }
+
+    /// The next step and blocker, which the Lead keeps for its tasks.
+    enum ContextField: CaseIterable {
+        case nextStep, blocker
+    }
+
+    func contextText(_ field: ContextField) -> String? {
+        switch field {
+        case .nextStep: return nextStep
+        case .blocker: return blocker
+        }
+    }
+
+    func contextIsFromLead(_ field: ContextField) -> Bool {
+        switch field {
+        case .nextStep: return nextStepIsFromLead
+        case .blocker: return blockerIsFromLead
+        }
+    }
+
+    private func setContext(_ field: ContextField, _ text: String?, fromLead: Bool) {
+        switch field {
+        case .nextStep:
+            nextStep = text
+            nextStepIsFromLead = fromLead && text != nil
+        case .blocker:
+            blocker = text
+            blockerIsFromLead = fromLead && text != nil
+        }
+    }
+
+    /// A field saved from View/Edit Context…: one the user changed from
+    /// what the panel showed (`presented`) is theirs, and the Lead leaves
+    /// it; one they cleared goes back to the Lead. One they didn't touch
+    /// keeps what it holds now, which the Lead may have changed meanwhile.
+    func setContextByHand(_ field: ContextField, _ text: String, presented: String?) {
+        let value = Self.normalizedContextText(text)
+        guard value != Self.normalizedContextText(presented) else { return }
+        setContext(field, value, fromLead: false)
+    }
+
+    enum LeadContextOutcome: Equatable {
+        case set(String)
+        case cleared
+        case unchanged
+        /// The user wrote it by hand: theirs stays.
+        case keptUsers(String)
+    }
+
+    /// The Lead's update of a field: empty clears it. A field the user
+    /// wrote by hand stays theirs until they clear it.
+    func setContextByLead(_ field: ContextField, _ text: String) -> LeadContextOutcome {
+        let value = Self.normalizedContextText(text)
+        let current = Self.normalizedContextText(contextText(field))
+        if let current, !contextIsFromLead(field) {
+            return value == current ? .unchanged : .keptUsers(current)
+        }
+        guard value != current else { return .unchanged }
+        setContext(field, value, fromLead: true)
+        return value.map { .set($0) } ?? .cleared
     }
 
     static func resolveWorkingDirectory(

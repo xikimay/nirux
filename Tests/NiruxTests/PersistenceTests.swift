@@ -179,6 +179,7 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertNil(decoded.lastActivityAt)
         XCTAssertNil(decoded.nextStep)
         XCTAssertNil(decoded.blocker)
+        XCTAssertFalse(decoded.nextStepIsFromLead, "written before the Lead: the user's")
     }
 
     func testWorkspaceContextRoundTripsThroughJSON() throws {
@@ -200,7 +201,8 @@ final class PersistedStateCodingTests: XCTestCase {
             lastSummaryIsManual: true,
             lastActivityAt: 1_725_000_000,
             nextStep: "Run the test suite",
-            blocker: "Waiting on design feedback"
+            blocker: "Waiting on design feedback",
+            nextStepIsFromLead: true
         )
 
         let data = try JSONEncoder().encode(original)
@@ -213,6 +215,8 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(decoded.lastActivityAt, original.lastActivityAt)
         XCTAssertEqual(decoded.nextStep, original.nextStep)
         XCTAssertEqual(decoded.blocker, original.blocker)
+        XCTAssertTrue(decoded.nextStepIsFromLead)
+        XCTAssertFalse(decoded.blockerIsFromLead)
     }
 
     func testUnknownWorkspacePhaseSurvivesReencoding() throws {

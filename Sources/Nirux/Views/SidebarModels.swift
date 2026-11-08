@@ -320,15 +320,10 @@ struct WorkspaceInfo: Hashable {
     /// its siblings only, never dragged.
     var isNested = false
 
-    var sidebarAction: (text: String, isBlocker: Bool)? {
-        if let blocker = normalizedContextText(blocker) {
-            return ("Blocker: \(blocker)", true)
-        }
-        if let nextStep = normalizedContextText(nextStep) {
-            return ("Next: \(nextStep)", false)
-        }
-        return nil
-    }
+    /// The blocker and the next step (the user's, or the Lead's), trimmed;
+    /// nil when empty.
+    var blockerText: String? { normalizedContextText(blocker) }
+    var nextStepText: String? { normalizedContextText(nextStep) }
 
     private func normalizedContextText(_ value: String?) -> String? {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),

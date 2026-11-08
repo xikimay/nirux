@@ -184,9 +184,8 @@ final class SidebarCardStateTests: XCTestCase {
         )
         XCTAssertEqual(info.cardActions, [
             .resume(columnIndex: 0, kind: "rate_limit", detail: nil, failedAt: 1, resume: .offered),
-            .blocker("Blocker: API access"),
             .cleanup(.available, pullRequest: 7)
-        ], "the status line says the error: Clean up keeps a line")
+        ], "the status line says the error: Clean up keeps a line, the blocker waits behind it")
         let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 900).render()
         XCTAssertEqual(
             900 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: info, sidebarWidth: 260), accuracy: 0.5,

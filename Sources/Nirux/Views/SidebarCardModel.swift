@@ -186,7 +186,7 @@ extension WorkspaceInfo {
     /// One line in the archived list: parked work that asks nothing, offers
     /// no clean-up and isn't on screen.
     var showsCompactRow: Bool {
-        isInactive && !isActive && !cardActions.contains { !$0.isQuiet } && mergedCleanup == nil
+        isInactive && !isActive && !cardActions.contains { !$0.isQuiet } && mergedCleanup == nil && blockerText == nil
             && ![.waiting, .error, .working].contains(cardState)
     }
 
@@ -221,12 +221,11 @@ extension WorkspaceInfo {
                 actions.append(.missionQuestion(columnIndex: column.index, question))
             }
         }
-        if let action = sidebarAction {
-            if action.isBlocker {
-                actions.append(.blocker(action.text))
-            } else if isActive, let nextStep = nextStep?.trimmingCharacters(in: .whitespacesAndNewlines) {
-                actions.append(.next(nextStep))
-            }
+        // The blocker is the status line's, or waits behind what comes
+        // first (the tooltip has it). The selected row adds the next step
+        // when its status line says something else.
+        if isActive, let next = nextStepText, summary.status.text != Self.nextStepLine(next) {
+            actions.append(.next(next))
         }
         // The status line says "Merged · Clean up" unless an agent's state
         // comes first: then a line of its own keeps it.
@@ -248,7 +247,6 @@ enum SidebarCardAction: Hashable {
     case resume(
         columnIndex: Int, kind: String?, detail: String?, failedAt: TimeInterval, resume: SidebarStuckState.Resume
     )
-    case blocker(String)
     /// "Clean up" a merged pull request's worktree, when the status line
     /// says something else.
     case cleanup(MergedCleanupOffer, pullRequest: Int)
@@ -264,7 +262,7 @@ enum SidebarCardAction: Hashable {
         switch self {
         case .next, .reviewBadges: return true
         case .missionQuestion(_, let question): return question.handOff == nil
-        case .approval, .resume, .blocker, .cleanup: return false
+        case .approval, .resume, .cleanup: return false
         }
     }
 }

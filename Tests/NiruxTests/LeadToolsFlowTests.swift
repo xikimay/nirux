@@ -115,6 +115,82 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// set_task_context keeps a task's next step and blocker, shown on its
+    /// row and in list_tasks. What the user types in View/Edit Context…
+    /// stays theirs (a field they didn't touch stays the Lead's, even one
+    /// it changed while the panel was open) until they clear it.
+    func testTheLeadKeepsATasksNextStepAndBlocker() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            let workspaceID = UUID().uuidString
+            let agentUUID = UUID().uuidString
+            let mission = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: workspaceID, childAgentUUID: agentUUID, childAgentKind: "claude",
+                branch: "feat/export", reportsToLead: true
+            ), enabled: true))
+            shell.addWorkspace(
+                title: "Export CSV", cwd: harness.repo, profileID: lead.space, workspaceID: workspaceID,
+                initialAgentUUID: agentUUID, missionID: mission.id, reportsToLead: true
+            )
+            let task = try XCTUnwrap(shell.workspaces.first { $0.id == workspaceID })
+            @MainActor func setContext(_ arguments: [String: Any]) throws -> (text: String, isError: Bool) {
+                try call(LeadTools.setTaskContext, arguments.merging(["task": "Export CSV"]) { $1 }, lead: lead, in: harness)
+            }
+            @MainActor func status() throws -> String {
+                shell.updateSidebar()
+                return try XCTUnwrap(shell.sidebar.displayedWorkspaceInfos.first { $0.id == workspaceID }).rowSummary.status.text
+            }
+
+            let first = try setContext(["next_step": "write the import side", "blocker": "waits for #212 to merge"])
+            XCTAssertFalse(first.isError, first.text)
+            XCTAssertEqual(task.nextStep, "write the import side")
+            XCTAssertTrue(task.nextStepIsFromLead && task.blockerIsFromLead)
+            XCTAssertEqual(try status(), "Blocked · waits for #212 to merge")
+            let list = try call(LeadTools.listTasks, lead: lead, in: harness).text
+            XCTAssertTrue(list.contains("next step: “write the import side”"), list)
+            XCTAssertTrue(list.contains("blocker: “waits for #212 to merge”"), list)
+            XCTAssertFalse(try setContext(["blocker": ""]).isError)
+            XCTAssertNil(task.blocker)
+            XCTAssertEqual(try status(), "Next · write the import side")
+
+            // The user types a blocker; the Lead changes the next step while
+            // the panel is open.
+            let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === task })
+            shell.showWorkspaceContextPanel(workspaceIndex: index)
+            defer { shell.workspaceContextPanel?.purposeEditor?.window?.orderOut(nil) }
+            XCTAssertFalse(try setContext(["next_step": "user reviews #39"]).isError)
+            let save = try XCTUnwrap(shell.workspaceContextPanel?.onSave)
+            save(WorkspaceContextValues(purpose: "", phase: nil, lastSummary: "", nextStep: "write the import side", blocker: "no API key"))
+            XCTAssertEqual(task.nextStep, "user reviews #39", "untouched: the Lead's newer one stays")
+            XCTAssertTrue(task.nextStepIsFromLead)
+            XCTAssertEqual(task.blocker, "no API key")
+            XCTAssertFalse(task.blockerIsFromLead)
+
+            let refused = try setContext(["blocker": "something else"])
+            XCTAssertTrue(refused.isError)
+            XCTAssertTrue(refused.text.contains("by hand"), refused.text)
+            XCTAssertEqual(task.blocker, "no API key")
+            let partly = try setContext(["next_step": "merge #39", "blocker": ""])
+            XCTAssertFalse(partly.isError, "the next step changed")
+            XCTAssertTrue(partly.text.contains("blocker (“no API key”)"), partly.text)
+            XCTAssertEqual(task.nextStep, "merge #39")
+            XCTAssertTrue(try call(LeadTools.listTasks, lead: lead, in: harness).text.contains("blocker (the user wrote it): “no API key”"))
+
+            // Cleared by hand: the Lead's again.
+            shell.showWorkspaceContextPanel(workspaceIndex: index)
+            try XCTUnwrap(shell.workspaceContextPanel?.onSave)(
+                WorkspaceContextValues(purpose: "", phase: nil, lastSummary: "", nextStep: "merge #39", blocker: " ")
+            )
+            XCTAssertNil(task.blocker)
+            XCTAssertFalse(try setContext(["blocker": "CI is red on main"]).isError)
+            XCTAssertTrue(task.blockerIsFromLead)
+
+            XCTAssertTrue(try call(LeadTools.setTaskContext, ["task": "nope", "blocker": "x"], lead: lead, in: harness).isError)
+        }
+    }
+
     /// ⌘N in a space with a Lead offers "Report to the Lead", checked: the
     /// task then reports to it. Unchecked, it reports to nobody; a space
     /// without a Lead doesn't offer it.

@@ -19,6 +19,8 @@ struct WorkspaceContextPanelConfiguration {
     let lastActivityAt: TimeInterval?
     let nextStep: String?
     let blocker: String?
+    /// Who keeps the next step and blocker (`contextHelp`); empty hides it.
+    var contextHelp = ""
     let gitBranch: String?
     let diffStats: String?
     let prInfo: PRInfo?
@@ -46,6 +48,7 @@ final class WorkspaceContextPanel {
     private var summaryHelpLabel: NSTextField?
     private var nextStepField: NSTextField?
     private var blockerField: NSTextField?
+    private var contextHelpLabel: NSTextField?
     private var liveContextLabel: NSTextField?
     private var editorUndoStacks: [EditorUndoStack] = []
 
@@ -62,6 +65,7 @@ final class WorkspaceContextPanel {
         summaryEditor?.string = configuration.lastSummary ?? ""
         nextStepField?.stringValue = configuration.nextStep ?? ""
         blockerField?.stringValue = configuration.blocker ?? ""
+        contextHelpLabel?.stringValue = configuration.contextHelp
         summaryHelpLabel?.stringValue = configuration.lastSummaryIsManual
             ? "User-owned summary — automatic agent updates will not replace it. Clear it to resume automatic summaries."
             : "Agent turn completions update this automatically until you edit it."
@@ -149,6 +153,12 @@ final class WorkspaceContextPanel {
         let blocker = makeSingleLineField(frame: NSRect(x: 36 + halfWidth, y: 210, width: halfWidth, height: 28))
         blocker.placeholderString = "What is preventing progress?"
         container.addSubview(blocker)
+        let contextHelp = NSTextField(labelWithString: "")
+        contextHelp.font = .systemFont(ofSize: 10, weight: .regular)
+        contextHelp.textColor = NSColor.white.withAlphaComponent(0.34)
+        contextHelp.lineBreakMode = .byTruncatingTail
+        contextHelp.frame = NSRect(x: 24, y: 194, width: Self.size.width - 48, height: 14)
+        container.addSubview(contextHelp)
 
         container.addSubview(fieldLabel("Live context", y: 179))
         let liveBackground = NSView(frame: NSRect(x: 24, y: 61, width: Self.size.width - 48, height: 112))
@@ -184,6 +194,7 @@ final class WorkspaceContextPanel {
         summaryHelpLabel = summaryHelp
         nextStepField = nextStep
         blockerField = blocker
+        contextHelpLabel = contextHelp
         liveContextLabel = live
         installShortcutMonitor(for: panel)
     }
@@ -316,6 +327,20 @@ final class WorkspaceContextPanel {
         )
         panel?.orderOut(nil)
         onSave?(values)
+    }
+
+    /// Under the next step and blocker: which ones the Lead wrote, and
+    /// that what the user types stays theirs. Nothing for a workspace no
+    /// Lead follows.
+    static func contextHelp(nextStepIsFromLead: Bool, blockerIsFromLead: Bool, reportsToLead: Bool) -> String {
+        let written: String? = switch (nextStepIsFromLead, blockerIsFromLead) {
+        case (true, true): "The Lead wrote both."
+        case (true, false): "The Lead wrote the next step."
+        case (false, true): "The Lead wrote the blocker."
+        case (false, false): nil
+        }
+        if let written { return written + " What you type here stays yours; clear a field to hand it back." }
+        return reportsToLead ? "The Lead keeps these up to date, except what you type here: clear a field to hand it back." : ""
     }
 
     static func liveContextText(_ configuration: WorkspaceContextPanelConfiguration) -> String {
