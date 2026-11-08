@@ -95,6 +95,8 @@ The parent can also give a Claude Code child more work, even after it completed:
 
 Mission completion is always reported explicitly by the child agent. Nirux does not infer completion from a stopped turn, and answers to a child's `ask` are never typed into its terminal. Worktrees opened without Mission metadata keep the existing handover behavior.
 
+Every command palette action also has a menu bar item, so the Help menu's search finds it with its shortcut: the Space menu holds New Space, the space's settings, Board, Session History… and Clean Up Merged Worktrees…; the Workspaces menu New Workspace, New Task…, the worktrees, Rename and the context; the Agent menu New Claude Code, New Codex, Next Waiting Agent, Resume All Agents, Review Branch and Install Agent Skills; Help, Getting Started.
+
 Typical command palette actions:
 
 - Install Agent Skills
@@ -140,6 +142,7 @@ Useful shortcuts:
 | `Ctrl+Cmd+Up` / `Ctrl+Cmd+Down` | Switch workspace, also from text |
 | `Alt+Cmd+Left` / `Alt+Cmd+Right` | Switch to the previous or next space (the workspace group named in the sidebar header) |
 | `Cmd+J` | Next waiting agent: the Claude agent blocked on you the longest, then the next at each press |
+| `Ctrl+Cmd+B` | Board of the current space |
 | `Ctrl+Cmd+S` | Toggle sidebar |
 | `Ctrl+Cmd+F` | Enter or exit full screen |
 | `Cmd+M` | Minimize the window |

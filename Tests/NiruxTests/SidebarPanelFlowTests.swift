@@ -18,13 +18,14 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
         tests: [
             "testWorkspaceMenuItems": [
                 "Focus Column", "Close Column", "Close Workspace", "Clean Up Worktree…", "View/Edit Context…",
-                "Rename Workspace", "New Workspace", "Move Up", "Move Down", "Move to Inactive", "Move to Active"
+                "Rename Workspace"
             ],
+            "testOrganizeMenuItems": ["Organize"],
             "testCIFailureMenuItems": ["Ask Agent Why CI Failed", "Rerun Failed CI Jobs…"],
             "testReviewBranchMenuItem": ["Review Branch"],
             "testSpaceMenuItems": [
                 "New Space", "Rename Space…", "Space Color", "Edit Space Brief…", "Edit Task Templates…",
-                "Space Memory…", "Board Settings…", "Move to Space", "Delete Space…"
+                "Space Memory…", "Board Settings…", "Delete Space…"
             ]
         ],
         exemptions: [:]
@@ -59,6 +60,14 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             Self.menuCoverage.checkEveryItemIsCovered(
                 offered: Array(Set(titles)), testNames: UIFlowCoverage.testNames(of: Self.self)
             )
+            // What the workspace's state offers first, then Organize, then
+            // Rename, its context and Close.
+            XCTAssertEqual(menus[0].items.map(\.title), [
+                "Focus Column", "Close Column", "",
+                "Review Branch", "Ask Agent Why CI Failed", "Rerun Failed CI Jobs…", "Clean Up Worktree…", "",
+                "Organize", "",
+                "Rename Workspace", "View/Edit Context…", "Close Workspace"
+            ])
         }
     }
 
@@ -115,23 +124,9 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             harness.perform(["Close Column"], in: try menu(for: workspace, column: 1))
             harness.waitUntil("the column to close") { workspace.columns.count == 1 }
 
-            // Opens one in the home folder, like ⌘N's default.
-            let count = shell.workspaces.count
-            harness.perform(["New Workspace"], in: try menu(for: workspace))
-            XCTAssertEqual(shell.workspaces.count, count + 1)
+            shell.addWorkspace()
             let added = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertFalse(added === workspace)
-            @MainActor func position(_ workspace: WorkspaceState) -> Int? { shell.visibleWorkspaceIndices.firstIndex { shell.workspaces[$0] === workspace } }
-            let before = try XCTUnwrap(position(added))
-            harness.perform(["Move Up"], in: try menu(for: added))
-            XCTAssertEqual(position(added), before - 1)
-            harness.perform(["Move Down"], in: try menu(for: added))
-            XCTAssertEqual(position(added), before)
-
-            harness.perform(["Move to Inactive"], in: try menu(for: added))
-            XCTAssertTrue(added.isInactive)
-            harness.perform(["Move to Active"], in: try menu(for: added))
-            XCTAssertFalse(added.isInactive)
             // No agent runs in it: it closes without asking.
             harness.perform(["Close Workspace"], in: try menu(for: added))
             harness.waitUntil("the workspace to close") { !shell.workspaces.contains { $0 === added } }
@@ -158,6 +153,43 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 !shell.workspaces.contains { $0 === goneWorkspace }
             }
             XCTAssertEqual(harness.alerts.last, "The folder of “gone” is gone")
+        }
+    }
+
+    /// The card's moves, in its Organize submenu: up and down the list, to
+    /// INACTIVE and back, to another space.
+    func testOrganizeMenuItems() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.addWorkspace(title: "moving", cwd: harness.repo)
+            let moving = try XCTUnwrap(shell.activeWorkspace)
+            @MainActor func menu() throws -> NSMenu {
+                let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === moving })
+                return shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil)
+            }
+            @MainActor func position() -> Int? { shell.visibleWorkspaceIndices.firstIndex { shell.workspaces[$0] === moving } }
+
+            let before = try XCTUnwrap(position())
+            harness.perform(["Organize", "Move Up"], in: try menu())
+            XCTAssertEqual(position(), before - 1)
+            harness.perform(["Organize", "Move Down"], in: try menu())
+            XCTAssertEqual(position(), before)
+            harness.perform(["Organize", "Move to Inactive"], in: try menu())
+            XCTAssertTrue(moving.isInactive)
+            harness.perform(["Organize", "Move to Active"], in: try menu())
+            XCTAssertFalse(moving.isInactive)
+
+            // With a second space to move to; the default space stays in front.
+            shell.createProfileFromActiveContext()
+            let space = shell.activeProfileID
+            XCTAssertNotEqual(space, WorkspaceProfile.defaultID)
+            shell.selectProfile(WorkspaceProfile.defaultID)
+            let organize = try XCTUnwrap(try menu().items.first { $0.title == "Organize" }?.submenu)
+            XCTAssertEqual(organize.items.map(\.title), ["Move Up", "Move Down", "Move to Space", "", "Move to Inactive"])
+            let spaceName = try XCTUnwrap(shell.profiles.first { $0.id == space }).name
+            harness.perform(["Organize", "Move to Space", spaceName], in: try menu())
+            XCTAssertEqual(moving.profileID, space)
+            XCTAssertEqual(shell.activeProfileID, WorkspaceProfile.defaultID)
         }
     }
 
@@ -265,19 +297,6 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertNil(shell.boardSettingsPanel)
             XCTAssertNil(harness.window.attachedSheet)
             XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(BoardConfigStore(spaceID: space.id)).fileURL.path))
-
-            // A second workspace moves back to the default space; the first
-            // keeps the space from being empty.
-            shell.addWorkspace(title: "moving", cwd: harness.repo)
-            let moving = try XCTUnwrap(shell.activeWorkspace)
-            let movingIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0 === moving })
-            let defaultName = try XCTUnwrap(shell.profiles.first { $0.id == WorkspaceProfile.defaultID }).name
-            harness.perform(
-                ["Move to Space", defaultName],
-                in: shell.sidebar.workspaceActionMenu(workspaceIndex: movingIndex, columnIndex: nil)
-            )
-            XCTAssertEqual(moving.profileID, WorkspaceProfile.defaultID)
-            XCTAssertEqual(shell.activeProfileID, space.id)
 
             // Deleting asks first: Cancel keeps the space, confirming moves
             // its workspace to the default space.

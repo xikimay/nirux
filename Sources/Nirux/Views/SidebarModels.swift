@@ -321,7 +321,7 @@ struct SidebarUpdatePayload {
 
 enum WorkspaceSidebarAction {
     case moveUp, moveDown, markActive, markInactive
-    case close, rename, editContext, newWorkspace, reviewBranch
+    case close, rename, editContext, reviewBranch
     case closeColumn(columnIndex: Int)
     case cleanUpWorktree
     case askWhyCIFailed, rerunFailedCI

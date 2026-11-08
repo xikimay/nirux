@@ -40,6 +40,13 @@ extension SidebarView {
         menu.addItem(.separator())
     }
 
+    /// The active space's items, for the menu bar's Space › Space Settings.
+    func addActiveSpaceSettings(to menu: NSMenu) {
+        guard let active = lastProfiles.first(where: \.isActive) else { return }
+        addSpaceManagementItems(to: menu, for: active)
+        if menu.items.last?.isSeparatorItem == true { menu.removeItem(at: menu.numberOfItems - 1) }
+    }
+
     /// "Move to Space" for a workspace card. Cards list the active space's
     /// workspaces, so every other space is a target. Nil with no other space.
     func moveToSpaceItem(workspaceIndex: Int) -> NSMenuItem? {

@@ -317,9 +317,6 @@ extension NiruxShellView {
         case .reviewBranch:
             openBranchReview(in: workspaces[workspaceIndex])
             return
-        case .newWorkspace:
-            addWorkspace()
-            return
         case .closeColumn(let columnIndex):
             closeColumn(workspaceIndex: workspaceIndex, columnIndex: columnIndex)
             return

@@ -97,7 +97,22 @@ final class MenuShortcutTests: XCTestCase {
         XCTAssertTrue(windowMenu?.items.contains { $0.action == #selector(NSWindow.performMiniaturize(_:)) } == true)
     }
 
+    /// setupMenus hands this submenu to NSApp.helpMenu, which adds the
+    /// search field that finds every menu item.
+    @MainActor
+    func testHelpMenuIsTaggedForNSApp() {
+        let help = NiruxApp().makeMainMenu().item(withTag: NiruxApp.helpMenuTag)?.submenu
+        XCTAssertEqual(help?.title, "Help")
+        XCTAssertTrue(help?.items.contains { $0.action == #selector(NiruxApp.showGettingStarted(_:)) } == true)
+    }
+
     // MARK: - Nirux chords
+
+    @MainActor
+    func testBoardUsesControlCommandB() {
+        let board = items(withAction: #selector(NiruxApp.openBoard(_:)))
+        XCTAssertEqual(board.compactMap(chord(of:)), [KeyChord("b", [.command, .control])])
+    }
 
     /// ⌘S belongs to Monaco's save; no menu item may take it back.
     @MainActor
