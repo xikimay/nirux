@@ -183,14 +183,16 @@ enum ProjectHistory {
         return launchPrompts.contains(trimmed) || trimmed.hasPrefix(MissionPromptText.prefix + " ")
     }
 
+    /// Every agent and mission text, including the waiting one Claude
+    /// Code children got before Nirux typed answers: their transcripts stay.
     private static let launchPrompts: Set<String> = {
         var prompts = Set<String>()
         for agent in [NiruxApp.WorkspaceAgent.claude, .codex] {
-            for (handover, mission) in [(true, false), (true, true), (false, true)] {
-                if let prompt = NiruxShellView.agentStartupPrompt(
-                    agent: agent, deliveredHandover: handover, isMission: mission
-                ) {
-                    prompts.insert(prompt)
+            for mission in [nil, NiruxShellView.typedAnswerMission, NiruxShellView.waitingMission] {
+                for handover in [true, false] {
+                    if let prompt = NiruxShellView.startupPrompt(agent: agent, deliveredHandover: handover, mission: mission) {
+                        prompts.insert(prompt)
+                    }
                 }
             }
         }

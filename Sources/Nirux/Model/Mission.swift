@@ -306,7 +306,10 @@ final class MissionStore {
             timestamp: incoming.timestamp,
             deliveredAt: nil,
             parentConsumedAt: nil,
-            expectsTypedAnswer: incoming.kind == .question && incoming.expectsTypedAnswer == true ? true : nil,
+            // A Claude Code child's `ask` ends its turn (MissionEventCLI.ask):
+            // the store decides from the recorded child, not from the queue.
+            expectsTypedAnswer: incoming.kind == .question
+                && missions[index].childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue ? true : nil,
             answeredByUser: incoming.kind == .response && fromUser ? true : nil
         )
         updated[index].events.append(event)
@@ -394,19 +397,6 @@ final class MissionStore {
         }.sorted { $0.event.timestamp < $1.event.timestamp }
     }
 
-    /// Instructions to type into their child's prompt, oldest first: not
-    /// typed yet, and within `MissionEventCLI.instructionLifetime`.
-    func pendingInstructions(now: TimeInterval = Date().timeIntervalSince1970) -> [AcceptedEvent] {
-        missions.flatMap { mission in
-            mission.events.compactMap { event in
-                event.kind == .instruction && event.childConsumedAt == nil
-                    && now - event.timestamp < MissionEventCLI.instructionLifetime
-                    ? AcceptedEvent(mission: mission, event: event)
-                    : nil
-            }
-        }.sorted { $0.event.timestamp < $1.event.timestamp }
-    }
-
     /// The instruction is in the child's prompt: the child has work again,
     /// so its Mission is active, even after `completed`.
     @discardableResult
@@ -432,33 +422,51 @@ final class MissionStore {
     /// within `MissionEventCLI.parentMessageLifetime` (a parent busy longer
     /// leaves the question to the user, see `waitingQuestion`), instructions
     /// within `instructionLifetime`; an answer is typed whenever the child is
-    /// free, as long as its Mission is active, since the child ended its turn
-    /// to wait for it.
+    /// free, since the child ended its turn to wait for it.
     func pendingPromptDeliveries(now: TimeInterval = Date().timeIntervalSince1970) -> [AcceptedEvent] {
         missions.flatMap { mission in
             mission.events.compactMap { event -> AcceptedEvent? in
-                let pending: Bool
-                switch event.kind {
-                case .instruction:
-                    pending = event.childConsumedAt == nil && now - event.timestamp < MissionEventCLI.instructionLifetime
-                case .response:
-                    pending = mission.status == .active && event.childConsumedAt == nil
-                        && mission.events.contains {
-                            $0.id == event.inReplyTo && $0.kind == .question && $0.expectsTypedAnswer == true
-                        }
-                case .question:
-                    pending = mission.status == .active && event.parentTypedAt == nil && event.parentConsumedAt == nil
-                        && now - event.timestamp < MissionEventCLI.parentMessageLifetime
-                        && !mission.events.contains { $0.kind == .response && $0.inReplyTo == event.id }
-                case .completed:
-                    pending = event.parentTypedAt == nil && event.parentConsumedAt == nil
-                        && now - event.timestamp < MissionEventCLI.parentMessageLifetime
-                case .acknowledged:
-                    pending = false
-                }
-                return pending ? AcceptedEvent(mission: mission, event: event) : nil
+                Self.isPendingDelivery(event, in: mission, now: now) ? AcceptedEvent(mission: mission, event: event) : nil
             }
         }.sorted { $0.event.timestamp < $1.event.timestamp }
+    }
+
+    /// The answer waiting to be typed into this child's prompt, if any.
+    func pendingAnswer(childWorkspaceID: String, childAgentUUID: String) -> AcceptedEvent? {
+        missions.lazy
+            .filter { $0.childWorkspaceID == childWorkspaceID && $0.childAgentUUID == childAgentUUID }
+            .flatMap { mission in
+                mission.events.lazy.filter {
+                    $0.kind == .response && Self.isPendingDelivery($0, in: mission, now: 0)
+                }.map { AcceptedEvent(mission: mission, event: $0) }
+            }
+            .first
+    }
+
+    private static func isPendingDelivery(_ event: MissionEvent, in mission: Mission, now: TimeInterval) -> Bool {
+        switch event.kind {
+        case .instruction:
+            return event.childConsumedAt == nil && now - event.timestamp < MissionEventCLI.instructionLifetime
+        case .response:
+            // Not once the child completed after asking: a `tell` may have
+            // reopened the Mission since, for other work.
+            guard mission.status == .active, event.childConsumedAt == nil,
+                  let question = mission.events.first(where: { $0.id == event.inReplyTo && $0.kind == .question }),
+                  question.expectsTypedAnswer == true
+            else { return false }
+            return !mission.events.contains { $0.kind == .completed && $0.timestamp > question.timestamp }
+        case .question:
+            return mission.status == .active && event.parentTypedAt == nil && event.parentConsumedAt == nil
+                && now - event.timestamp < MissionEventCLI.parentMessageLifetime
+                && !mission.events.contains { $0.kind == .response && $0.inReplyTo == event.id }
+        case .completed:
+            // Not once the parent sent the child more work: it moved on.
+            return event.parentTypedAt == nil && event.parentConsumedAt == nil
+                && now - event.timestamp < MissionEventCLI.parentMessageLifetime
+                && !mission.events.contains { $0.kind == .instruction && $0.timestamp > event.timestamp }
+        case .acknowledged:
+            return false
+        }
     }
 
     /// The message is in its recipient's prompt. Recorded before typing, so

@@ -125,6 +125,7 @@ enum MissionEventCLI {
         eventsURL: URL = MissionEventCenter.defaultEventsURL,
         missionsURL: URL = MissionStore.defaultFileURL,
         pollInterval: TimeInterval = 0.2,
+        confirmationTimeout: TimeInterval = 5,
         workspaceTitle: (String) -> String? = savedWorkspaceTitle,
         output: (String) -> Void = writeStandardOutput
     ) -> Int32 {
@@ -156,14 +157,16 @@ enum MissionEventCLI {
                 childAgentUUID: context.agentUUID,
                 kind: .question,
                 message: message,
-                timestamp: now(),
-                expectsTypedAnswer: typesAnswer ? true : nil
+                timestamp: now()
             )
             guard append(question, to: eventsURL) else { return 1 }
         }
 
+        // A Claude Code child waits only until Nirux recorded the question,
+        // like `reply`: ending its turn on a question nobody has would
+        // leave it idle for good.
         let outcome = waitForLedger(
-            &ledger, timeout: typesAnswer ? 0 : timeout, pollInterval: pollInterval
+            &ledger, timeout: typesAnswer ? confirmationTimeout : timeout, pollInterval: pollInterval
         ) { missions -> AskOutcome? in
             guard let mission = missions.first(where: { $0.id == context.missionID }) else {
                 return nil
@@ -173,7 +176,8 @@ enum MissionEventCLI {
             }) {
                 return .answered(response)
             }
-            return mission.status == .active ? nil : .missionCompleted
+            guard mission.status == .active else { return .missionCompleted }
+            return typesAnswer && mission.events.contains(where: { $0.id == questionID }) ? .recorded : nil
         }
         switch outcome {
         case let .answered(response):
@@ -185,10 +189,15 @@ enum MissionEventCLI {
         case .missionCompleted:
             writeStandardError("This Mission completed before the question was answered.")
             return 4
-        case nil where typesAnswer:
+        case .recorded:
             let parent = workspaceTitle(mission.parentWorkspaceID).map { "\"\($0)\"" } ?? "the parent agent"
             output("Question sent to \(parent). End your turn now: Nirux will type the answer into your prompt.")
             return 0
+        case nil where typesAnswer:
+            writeStandardError(
+                "Nirux has not recorded the question yet. Run the exact same command again; it does not ask twice."
+            )
+            return 3
         case nil:
             writeStandardError(
                 "No answer yet; the question stays queued for the parent agent, or the user in Nirux. "
@@ -206,6 +215,8 @@ enum MissionEventCLI {
     private enum AskOutcome {
         case answered(MissionEvent)
         case missionCompleted
+        /// Nirux has the question; it types the answer into the prompt.
+        case recorded
     }
 
     private enum ChildMission {
@@ -250,13 +261,19 @@ enum MissionEventCLI {
             ])
         }
         let recorded = Set(mission.events.lazy.filter { $0.kind == .question }.map(\.id))
-        let settled = Set(mission.events.compactMap { event -> String? in
+        let answered = Set(mission.events.compactMap { $0.kind == .response ? $0.inReplyTo : nil })
+        var settled = Set(mission.events.compactMap { event -> String? in
             guard event.kind == .response,
                   let receivedAt = event.childConsumedAt,
                   now - receivedAt >= answerReplayWindow
             else { return nil }
             return event.inReplyTo
         })
+        // A question the child's `completed` retired unanswered: asked again
+        // after a `tell` reopened the Mission, it is a new question.
+        settled.formUnion(mission.events.lazy
+            .filter { $0.kind == .question && $0.parentConsumedAt != nil && !answered.contains($0.id) }
+            .map(\.id))
         // A later generation also closes an earlier one, so a clock moved
         // back never reopens an old question and replays its answer.
         var current = derivedID(0)

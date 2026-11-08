@@ -167,6 +167,7 @@ extension NiruxShellView {
         MissionEventCenter.shared.drain()
         let snapshot = ProcessSnapshot()
         let now = Date().timeIntervalSince1970
+        var typedAny = false
         for delivery in MissionStore.shared.pendingPromptDeliveries(now: now) {
             let mission = delivery.mission
             let childWorkspace = workspaces.first { $0.id == mission.childWorkspaceID }
@@ -190,8 +191,10 @@ extension NiruxShellView {
                   MissionStore.shared.markTyped(delivery, at: now)
             else { continue }
             pty.sendRaw(input)
+            typedAny = true
         }
-        updateSidebar(snapshot: snapshot)
+        // The cards' "Asking …" and "Answer … ready" rows follow.
+        if typedAny { updateSidebar(snapshot: snapshot) }
     }
 
     static func currentMissionHandoffsEnabled() -> Bool {

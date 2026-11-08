@@ -437,6 +437,13 @@ extension WorkspaceState {
     private func setupAgentAttentionTracking(for col: ColumnState) {
         col.onAgentAttention = { [weak self, weak col] reason in
             guard let self else { return }
+            // A Mission child ends its turn after asking: it waits on its
+            // parent, not on the user.
+            if reason == .turnFinished, let uuid = col?.agentUUID,
+               MissionStore.shared.waitingQuestion(childWorkspaceID: self.id, childAgentUUID: uuid) != nil {
+                self.onMetadataChanged?()
+                return
+            }
             // Its columns show a wait or an error while it lasts, not after.
             self.raiseNotification(.finished)
             self.onMetadataChanged?()

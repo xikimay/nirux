@@ -75,11 +75,16 @@ final class NiruxShellView: NSView {
     )
     /// Keeps stuck-agent alerts going while the heartbeat is stopped.
     var stuckWatchTimer: Timer?
-    /// Mission questions already handed to the user (the child's card
-    /// turned amber): the notification went out once.
-    var missionQuestionsHandedToUser: Set<String> = []
-    /// The reply popover on screen, if any.
+    /// Mission questions handed to the user (the child's card turned
+    /// amber), by question ID: the child workspace whose notification they
+    /// raised, once.
+    var missionQuestionsHandedToUser: [String: String] = [:]
+    /// Since when a question's parent stopped running Claude, by question ID
+    /// (see `missionParentGrace`).
+    var missionParentAbsentSince: [String: TimeInterval] = [:]
+    /// The reply popover, and the question it shows.
     var missionReplyPopover: NSPopover?
+    var missionReplyQuestionID: String?
     /// A stuck-agent alert went out (Telegram relays it): the reason, the
     /// workspace, the column's index, the column.
     var onStuckAgentAlert: ((AgentAttentionReason, WorkspaceState, Int, ColumnState) -> Void)?

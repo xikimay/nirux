@@ -621,6 +621,11 @@ final class PtySession: @unchecked Sendable {
         )
     }
 
+    /// See `AgentStatusMachine.finishedTurn(afterTypingAt:)`.
+    func finishedTurn(afterTypingAt typedAt: TimeInterval) -> Bool {
+        state.machine.finishedTurn(afterTypingAt: typedAt)
+    }
+
     /// The user's login shell ($SHELL) when it's a mainstream
     /// POSIX-compatible one, else zsh. Restricted to an allowlist because
     /// command-backed columns launch it with zsh-style `-i -l -c` flags

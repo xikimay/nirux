@@ -98,35 +98,45 @@ struct SidebarMissionQuestion: Hashable {
     enum HandOff: Hashable {
         case parentClosed
         case parentNotClaude
+        /// The parent took the question and ended its turn without `reply`.
+        case parentDidNotAnswer
         /// Nobody answered within the stuck-agent threshold.
         case unanswered(minutes: Int)
     }
 
     /// What the parent's column runs now.
     enum Parent {
-        /// No column, or its terminal closed.
+        /// No workspace or column any more.
         case closed
-        /// Anything but an interactive `claude` in front.
+        /// Anything but an interactive `claude` in front, or no terminal yet
+        /// (a restored agent that hasn't resumed).
         case notClaude
+        /// Its `claude` took the question and ended its turn, no answer.
+        case stoppedWithoutAnswer
         case claude
     }
 
     let questionID: String
     let parentTitle: String
+    /// The question, or the answer once `isAnswered`.
     let text: String
     let handOff: HandOff?
+    /// Answered, the answer not typed into the child's prompt yet: a
+    /// `claude` restarted since takes it only after one prompt.
+    var isAnswered = false
 
     /// Whether a question asked at `askedAt` now waits on the user: at once
     /// when its parent can't take it, else once nobody answered within
-    /// `threshold` (nil: the stuck-agent check is off, so never).
+    /// `threshold`.
     static func handOff(
-        parent: Parent, askedAt: TimeInterval, threshold: TimeInterval?, now: TimeInterval
+        parent: Parent, askedAt: TimeInterval, threshold: TimeInterval, now: TimeInterval
     ) -> HandOff? {
         switch parent {
         case .closed: return .parentClosed
         case .notClaude: return .parentNotClaude
+        case .stoppedWithoutAnswer: return .parentDidNotAnswer
         case .claude:
-            guard let threshold, now - askedAt >= threshold else { return nil }
+            guard now - askedAt >= threshold else { return nil }
             return .unanswered(minutes: Int(threshold / 60))
         }
     }
@@ -136,6 +146,7 @@ struct SidebarMissionQuestion: Hashable {
         switch handOff {
         case .parentClosed: return "“\(parentTitle)” was closed, so the question comes to you."
         case .parentNotClaude: return "“\(parentTitle)” isn’t running Claude Code, so the question comes to you."
+        case .parentDidNotAnswer: return "“\(parentTitle)” read it but didn’t answer, so the question comes to you."
         case .unanswered(let minutes):
             return "“\(parentTitle)” hasn’t answered in \(minutes) minutes. You can answer instead."
         case nil: return "Waiting for “\(parentTitle)” to answer. You can answer instead."

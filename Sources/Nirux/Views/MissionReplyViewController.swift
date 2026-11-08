@@ -65,12 +65,16 @@ final class MissionReplyViewController: NSViewController {
         view = stack
     }
 
+    /// The popover's window takes the keyboard, so typing reaches the field
+    /// and not the terminal underneath.
     func focusReplyField() {
         guard let replyView else { return }
+        view.window?.makeKey()
         view.window?.makeFirstResponder(replyView)
     }
 
-    /// Esc in the answer field closes the popover.
+    /// Esc closes the popover; the answer field forwards it (an NSTextView
+    /// would open its completion list).
     override func cancelOperation(_ sender: Any?) {
         popover?.performClose(sender)
     }
@@ -119,7 +123,13 @@ final class MissionReplyViewController: NSViewController {
         scroll.layer?.borderColor = Theme.Color.accent.cgColor
         scroll.heightAnchor.constraint(equalToConstant: 76).isActive = true
 
-        let text = MissionReplyTextView()
+        // Sized like a scrollable text view: without a large maxSize it can't
+        // grow past its first frame, and text below it would be clipped.
+        let text = MissionReplyTextView(frame: NSRect(x: 0, y: 0, width: Self.width - 2 * Theme.Space.lg, height: 76))
+        text.minSize = NSSize(width: 0, height: 76)
+        text.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        text.isHorizontallyResizable = false
+        text.textContainer?.containerSize = NSSize(width: text.frame.width, height: CGFloat.greatestFiniteMagnitude)
         text.isRichText = false
         text.allowsUndo = true
         text.isAutomaticQuoteSubstitutionEnabled = false
@@ -134,6 +144,7 @@ final class MissionReplyViewController: NSViewController {
         text.textContainer?.widthTracksTextView = true
         text.setAccessibilityLabel("Your answer")
         text.onCommandReturn = { [weak self] in self?.send() }
+        text.onCancel = { [weak self] in self?.cancelOperation(nil) }
         scroll.documentView = text
         replyView = text
         return scroll
@@ -152,7 +163,7 @@ final class MissionReplyViewController: NSViewController {
         send.bezelColor = Theme.Color.accent
         send.keyEquivalent = "\r"
         send.keyEquivalentModifierMask = .command
-        send.toolTip = "Nirux types the answer into the child’s prompt"
+        send.toolTip = "Send the answer to the agent that asks"
         sendButton = send
 
         let spacer = NSView()
@@ -184,9 +195,15 @@ final class MissionReplyViewController: NSViewController {
     }
 }
 
-/// The answer field: ⌘↩ sends instead of making a new line.
+/// The answer field: ⌘↩ sends instead of making a new line, Esc closes.
 final class MissionReplyTextView: NSTextView {
     var onCommandReturn: (() -> Void)?
+    var onCancel: (() -> Void)?
+
+    override func cancelOperation(_ sender: Any?) {
+        guard let onCancel else { return super.cancelOperation(sender) }
+        onCancel()
+    }
 
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)

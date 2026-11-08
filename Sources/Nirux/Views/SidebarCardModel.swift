@@ -82,7 +82,9 @@ extension ColumnInfo {
                 headline: "needs you · a question", detail: AgentText.clean(question.text, maxLength: 300)
             ))
         }
-        if agentStatus == .needsAttention {
+        // A child that asked its parent ended its turn to wait: not "done".
+        let waitsOnParent = missionQuestion.map { $0.handOff == nil } ?? false
+        if agentStatus == .needsAttention, !(waitsOnParent && AttentionSignal.of(attentionReason) == .finished) {
             let signal = AttentionSignal.of(attentionReason)
             causes.append(AttentionCause(
                 signal: signal, label: attentionReason?.chipLabel ?? (signal == .waiting ? "needs you" : "done"),

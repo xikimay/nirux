@@ -309,6 +309,11 @@ extension NiruxShellView {
           ```bash
           "$NIRUX_CLI_PATH" --mission completed --message "<concise result>"
           ```
+        - Nirux types only into Claude Code. A Codex parent waits for the child's question or
+          result instead, then answers a question with `reply` as above:
+          ```bash
+          "$NIRUX_CLI_PATH" --mission receive
+          ```
 
         To give a Claude Code child more work (a follow-up, `/code-review`), even after it
         completed, name it by branch. Nirux types the message and Enter into the child's prompt,
@@ -320,11 +325,12 @@ extension NiruxShellView {
 
         Messages hold at most \(MissionEventCLI.maxMessageLength) characters. `tell` waits at most
         \(Int(MissionEventCLI.defaultWaitTimeout)) seconds for Nirux to type the message, and a Codex
-        child's `ask` as long for the answer, under the default 2-minute limit of the Claude Code shell
-        tool; if your shell tool takes a timeout, allow at least 120 seconds. Exit statuses:
+        child's `ask` and `receive` as long for an event, under the default 2-minute limit of the Claude
+        Code shell tool; if your shell tool takes a timeout, allow at least 120 seconds. Exit statuses:
 
         - 0: done. The output says what happens next (for a Claude Code child's `ask`: end your turn
-          now), or is the answer, even if the shell tool also reported a timeout.
+          now), or is the answer or (for `receive`) one JSON event, even if the shell tool also
+          reported a timeout.
         - 3: nothing yet. Run the exact same command again to keep waiting, and do the same if the
           shell tool stops the command before it prints anything. An identical `ask` resumes the
           same question instead of sending it twice, and prints the answer if it arrived meanwhile.

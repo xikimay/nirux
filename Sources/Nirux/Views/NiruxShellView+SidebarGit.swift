@@ -186,8 +186,12 @@ extension NiruxShellView {
         // Dock badge: workspaces currently waiting for attention.
         let attentionCount = workspaces.filter { workspace in
             workspace.hasNotification
-                || workspace.columns.contains {
-                    $0.pty?.cachedAgentState == .needsAttention || missionQuestions[ObjectIdentifier($0)]?.handOff != nil
+                || workspace.columns.contains { column in
+                    let question = missionQuestions[ObjectIdentifier(column)]
+                    if question?.handOff != nil { return true }
+                    guard let pty = column.pty, pty.cachedAgentState == .needsAttention else { return false }
+                    // A child that asked its parent ended its turn to wait.
+                    return question == nil || AttentionSignal.of(pty.agentAttentionReason) != .finished
                 }
         }.count
         NiruxNotifier.shared.updateDockBadge(attentionCount: attentionCount)
@@ -401,9 +405,11 @@ extension NiruxShellView {
         case .acknowledged:
             return false
         case .response:
-            // Answered: whatever the question raised on the child is over.
-            workspace?.notification = nil
+            // Answered: the question handed to the user is over.
+            if workspace?.notification == .waiting { workspace?.notification = nil }
         case .completed:
+            // So are its open questions.
+            if workspace?.notification == .waiting { workspace?.notification = nil }
             NiruxNotifier.shared.postMissionEvent(
                 workspaceID: mission.childWorkspaceID,
                 workspaceTitle: workspace?.title ?? mission.branch,
