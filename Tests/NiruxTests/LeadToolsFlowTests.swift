@@ -78,6 +78,7 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(started.text.contains("feat/add-a-date-filter"), started.text)
             let task = try XCTUnwrap(shell.workspaces.first { $0.title == "Add a date filter" })
             XCTAssertEqual(task.profileID, lead.space)
+            XCTAssertTrue(shell.activeWorkspace === lead.workspace, "it opens behind what the user is doing")
             let mission = try XCTUnwrap(MissionStore.shared.missions.first { $0.childWorkspaceID == task.id })
             XCTAssertEqual(mission.reportsToLead, true)
             XCTAssertEqual(mission.parentWorkspaceID, lead.workspace.id)
@@ -111,6 +112,19 @@ final class LeadToolsFlowTests: XCTestCase {
             let instructions = MissionStore.shared.missions.first { $0.id == mission.id }?.events.filter { $0.kind == .instruction }
             XCTAssertEqual(instructions?.map(\.message), ["/code-review"])
             XCTAssertTrue(try call(LeadTools.tell, ["task": "nope", "message": "hi"], lead: lead, in: harness).isError)
+        }
+    }
+
+    /// A defaults.json Nirux can't read asks first: the Lead proposes.
+    func testAnUnreadableSettingAsksFirst() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            XCTAssertTrue(shell.leadStartsTasksWithoutAsking(spaceID: lead.space), "on by default")
+            let file = try XCTUnwrap(SpaceDefaultsStore(spaceID: lead.space)).fileURL
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("{ not json".utf8).write(to: file)
+            XCTAssertFalse(shell.leadStartsTasksWithoutAsking(spaceID: lead.space))
         }
     }
 
