@@ -344,11 +344,11 @@ final class ColumnState {
     /// that terminal draws on every change while focused, as every terminal
     /// does unfocused (Ghostty stops the display link then).
     func matchTerminalVsyncToDisplays() {
-        guard !hasTerminalSurface, let terminal = terminalView as? ColumnTerminalView else { return }
+        guard let terminal = terminalView as? ColumnTerminalView else { return } // MUTATION M4
         let vsync = isAnyDisplayActive()
         guard vsync != terminalHasVsync else { return }
         terminalHasVsync = vsync
-        let controller = TerminalAppearance.makeController(vsync: vsync)
+        let controller = TerminalAppearance.makeController() // MUTATION M1
         // AppTerminalView gives it only as it moves to a window.
         controller.setColorScheme(terminal.colorScheme)
         // Builds the surface now if the terminal can have one.
