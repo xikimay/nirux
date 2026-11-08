@@ -1,7 +1,7 @@
 import AppKit
 
-/// Space Memory (⌘P › Space Memory…, the space's menu): what agents
-/// know about the workspace's repository, in one list (see
+/// Space Settings › Memory (⌘P › Space Memory…, the space's menu): what
+/// agents know about the space's repository, in one list (see
 /// ProjectMemory.Knowledge): the project brief's rules apply always, the
 /// repository's CLAUDE.md and AGENTS.md are the team's, Claude Code's
 /// memory is read when relevant. Filtered by text and scope; on the right,
@@ -33,7 +33,9 @@ final class ProjectMemoryPanel: NSObject {
         let knowledge: ProjectMemory.Knowledge
     }
 
-    private var panel: NSPanel?
+    /// The Space Settings tab's view the list fills, and what fills it.
+    private weak var host: NSView?
+    private var background: NSView?
     private(set) var searchField: NSTextField?
     private(set) var scopeControl: NSSegmentedControl?
     private(set) var summaryLabel: NSTextField?
@@ -83,9 +85,12 @@ final class ProjectMemoryPanel: NSObject {
     private(set) var cancelButton: NSButton?
 
     private var keyMonitor: Any?
-    private var clickMonitor: Any?
 
-    var isVisible: Bool { panel?.isVisible == true }
+    /// On screen: its tab is the one picked in a window shown.
+    var isVisible: Bool { background?.window?.isVisible == true }
+
+    /// The window it shows in, while its tab is picked.
+    private var window: NSWindow? { background?.window }
 
     /// The scopes the control offers after "All": team rules apply always.
     static let scopes: [ProjectMemory.Scope] = [.always, .whenRelevant]
@@ -95,9 +100,9 @@ final class ProjectMemoryPanel: NSObject {
         return model?.knowledge.entries[safe: index]
     }
 
-    /// Shows `model` over `window`, filters cleared, the first item
-    /// selected.
-    func show(relativeTo window: NSWindow, model: Model, actions: Actions) {
+    /// Shows `model` in `host` (Space Settings' Memory tab), filters
+    /// cleared, the first item selected.
+    func show(in host: NSView, model: Model, actions: Actions) {
         self.model = model
         self.actions = actions
         // A write that ended after a close never reported to this opening.
@@ -109,8 +114,8 @@ final class ProjectMemoryPanel: NSObject {
         errorLabel?.stringValue = ""
         preview?.endEditing()
         setFiltersEnabled(true)
-        if panel == nil { createPanel() }
-        guard let panel, let searchField else { return }
+        if background == nil || self.host !== host { createContent(in: host) }
+        guard let searchField else { return }
         searchField.stringValue = ""
         searchField.placeholderString = Self.placeholder(repository: model.repository)
         scopeControl?.selectedSegment = 0
@@ -120,31 +125,23 @@ final class ProjectMemoryPanel: NSObject {
         noticeRow?.isHidden = notice == nil
         layoutBody(noticeShown: notice != nil)
 
-        let frame = window.frame
-        panel.setFrame(
-            NSRect(
-                x: frame.origin.x + (frame.width - Self.panelSize.width) / 2,
-                y: frame.origin.y + max(frame.height * 0.55 - Self.panelSize.height / 2, 0),
-                width: Self.panelSize.width,
-                height: Self.panelSize.height
-            ),
-            display: true
-        )
         installMonitors()
-        panel.makeKeyAndOrderFront(nil)
-        panel.makeFirstResponder(searchField)
+        window?.makeFirstResponder(searchField)
         reload()
     }
 
+    /// Its window closed: an edit or an addition in progress is dropped.
     func dismiss() {
-        if let sheet = addSheet?.window { panel?.endSheet(sheet) }
+        if let sheet = addSheet?.window { sheet.sheetParent?.endSheet(sheet) }
         addSheet = nil
         editing = nil
         freshModel = nil
         preview?.endEditing()
         setFiltersEnabled(true)
         removeMonitors()
-        panel?.orderOut(nil)
+        background?.removeFromSuperview()
+        background = nil
+        host = nil
     }
 
     /// Shows `model` again after a write, the filters kept, the first item
@@ -382,10 +379,10 @@ final class ProjectMemoryPanel: NSObject {
     }
 
     private func showAddSheet(filledWith item: ProjectMemoryAddSheet.Item?) {
-        guard !isWriting, editing == nil, let panel, let model else { return NSSound.beep() }
+        guard !isWriting, editing == nil, let window, let model else { return NSSound.beep() }
         let sheet = ProjectMemoryAddSheet()
         addSheet = sheet
-        sheet.begin(on: panel, memoryFolder: model.location.directory, allowsMemory: model.location.disabledBy == nil, filledWith: item) { [weak self] item in
+        sheet.begin(on: window, memoryFolder: model.location.directory, allowsMemory: model.location.disabledBy == nil, filledWith: item) { [weak self] item in
             guard let self else { return }
             addSheet = nil
             pendingAdd = item
@@ -453,25 +450,15 @@ final class ProjectMemoryPanel: NSObject {
             guard let self else { return event }
             return self.handleKey(event)
         }
-        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
-            guard let self, let panel = self.panel else { return event }
-            // Its own sheet and its alerts keep it open, and so does an edit:
-            // it would go with it.
-            if event.window !== panel, event.window?.sheetParent !== panel, NSApp.modalWindow == nil,
-               self.editing == nil, !self.isWriting {
-                self.dismiss()
-            }
-            return event
-        }
     }
 
     private func removeMonitors() {
         if let monitor = keyMonitor { NSEvent.removeMonitor(monitor); keyMonitor = nil }
-        if let monitor = clickMonitor { NSEvent.removeMonitor(monitor); clickMonitor = nil }
     }
 
+    /// Only while its tab is picked, in its window, with no sheet over it.
     private func handleKey(_ event: NSEvent) -> NSEvent? {
-        guard event.window === panel else { return event }
+        guard let window, event.window === window, window.attachedSheet == nil else { return event }
         // An input method composing in the field keeps its keys.
         if (searchField?.currentEditor() as? NSTextView)?.hasMarkedText() == true { return event }
         if editing != nil {
@@ -482,9 +469,6 @@ final class ProjectMemoryPanel: NSObject {
             return event
         }
         switch event.keyCode {
-        case 0x35: // Escape
-            if !isWriting { dismiss() }
-            return nil
         case 0x24, 0x4C: // Return / Enter
             commit()
             return nil
@@ -507,9 +491,9 @@ final class ProjectMemoryPanel: NSObject {
 
     /// The keyboard back in the field, the caret at its end.
     private func focusField() {
-        guard let panel, let searchField else { return }
-        if let editor = searchField.currentEditor(), panel.firstResponder === editor { return }
-        panel.makeFirstResponder(searchField)
+        guard let window, let searchField else { return }
+        if let editor = searchField.currentEditor(), window.firstResponder === editor { return }
+        window.makeFirstResponder(searchField)
         let end = (searchField.stringValue as NSString).length
         searchField.currentEditor()?.selectedRange = NSRange(location: end, length: 0)
     }
@@ -523,30 +507,13 @@ final class ProjectMemoryPanel: NSObject {
     private static let footerHeight: CGFloat = 48
     private static var headerHeight: CGFloat { tabRowHeight + fieldRowHeight + filterRowHeight }
 
-    private func createPanel() {
+    private func createContent(in host: NSView) {
+        background?.removeFromSuperview()
         let size = Self.panelSize
-        let panel = NSPanel(
-            contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.titled, .fullSizeContentView],
-            backing: .buffered, defer: false
-        )
-        panel.titlebarAppearsTransparent = true
-        panel.titleVisibility = .hidden
-        panel.isMovable = false
-        panel.level = .floating
-        panel.backgroundColor = .clear
-        panel.isOpaque = false
-        panel.hasShadow = true
-        panel.appearance = Theme.appearance
-        panel.becomesKeyOnlyIfNeeded = false
-        panel.isReleasedWhenClosed = false
-
+        // The host is held at this size (see SpaceSettingsWindow).
         let background = NSView(frame: NSRect(origin: .zero, size: size))
         background.wantsLayer = true
-        background.layer?.cornerRadius = Theme.Radius.panel
         background.layer?.backgroundColor = Theme.Color.base.cgColor
-        background.layer?.borderWidth = 1
-        background.layer?.borderColor = Theme.Color.lineStrong.cgColor
         background.layer?.masksToBounds = true
         addTabRow(to: background)
         addFieldRow(to: background)
@@ -554,13 +521,14 @@ final class ProjectMemoryPanel: NSObject {
         addNoticeRow(to: background)
         addFooter(to: background)
         addBody(to: background)
-        panel.contentView = background
-        self.panel = panel
+        host.addSubview(background)
+        self.background = background
+        self.host = host
         layoutBody(noticeShown: false)
     }
 
-    /// The panel's name and its tabs: "What agents know", and "History",
-    /// greyed until it exists.
+    /// Its tabs: "What agents know", and "History", greyed until it exists.
+    /// The window's toolbar names it.
     private func addTabRow(to background: NSView) {
         let size = Self.panelSize
         let row = NSView(frame: NSRect(x: 0, y: size.height - Self.tabRowHeight, width: size.width, height: Self.tabRowHeight))
@@ -575,8 +543,7 @@ final class ProjectMemoryPanel: NSObject {
             row.addSubview(label)
             return label
         }
-        let title = label(Self.title, font: Theme.Font.display, color: Theme.Color.textPrimary, x: Theme.Space.lg)
-        let current = label(Self.tabs[0], font: Theme.Font.bodyEmphasized, color: Theme.Color.textPrimary, x: title.frame.maxX + Theme.Space.xl)
+        let current = label(Self.tabs[0], font: Theme.Font.bodyEmphasized, color: Theme.Color.textPrimary, x: Theme.Space.lg)
         let underline = NSView(frame: NSRect(x: current.frame.minX, y: 0, width: current.frame.width, height: 2))
         underline.wantsLayer = true
         underline.layer?.backgroundColor = Theme.Color.accent.cgColor

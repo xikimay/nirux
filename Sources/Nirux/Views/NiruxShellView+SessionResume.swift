@@ -261,8 +261,8 @@ extension NiruxShellView {
         _ record: AgentSessionRecord, in workspace: WorkspaceState, column: ColumnState, directory: String
     ) {
         let agent: DeferredAgentLaunch.Agent = switch record.agent {
-        case .claude: .claude(resume: .session(record.sessionID), mode: Self.currentClaudeLaunchMode())
-        case .codex: .codex(resume: .session(record.sessionID), mode: Self.currentCodexLaunchMode())
+        case .claude: .claude(resume: .session(record.sessionID), mode: Self.claudeLaunchMode(for: workspace))
+        case .codex: .codex(resume: .session(record.sessionID), mode: Self.codexLaunchMode(for: workspace))
         }
         sideEffects.launchAgent(column, resumeLaunchCommand(agent, workingDirectory: directory, in: workspace, column: column))
         updateSidebar()

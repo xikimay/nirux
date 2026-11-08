@@ -95,11 +95,11 @@ extension NiruxShellView {
     /// "Add Repository…": picks a folder, anchors its repository to the
     /// space (or the folder, when it is in none and the user agrees), then
     /// offers to move that repository's workspaces in.
-    func addRepository(toSpace spaceID: String) {
+    func addRepository(toSpace spaceID: String, presentingIn presenting: NSWindow? = nil) {
         guard spaceID != WorkspaceProfile.defaultID, profiles.contains(where: { $0.id == spaceID }),
               canChangeAnchors()
         else { return }
-        sideEffects.chooseFolder("Add Repository", window) { [weak self] folder in
+        sideEffects.chooseFolder("Add Repository", presenting ?? window) { [weak self] folder in
             guard let folder else { return }
             Self.pickAnchor(folder, asRepository: true) { [weak self] pick in
                 self?.runFromRunLoop { [weak self] in self?.finishAddingRepository(pick, toSpace: spaceID) }
@@ -143,6 +143,7 @@ extension NiruxShellView {
         if let workspaceID { moveWorkspaceToSpace(workspaceID: workspaceID, profileID: spaceID) }
         updateSidebar()
         saveState()
+        spaceSettingsSpacesChanged()
         offerToMoveWorkspaces(into: spaceID) {}
     }
 
@@ -150,12 +151,14 @@ extension NiruxShellView {
         guard canChangeAnchors(), workspaceStore.removeAnchor(key: key, fromProfile: spaceID) else { return }
         updateSidebar()
         saveState()
+        spaceSettingsSpacesChanged()
     }
 
     func makeDefaultSpaceAnchor(key: String, inSpace spaceID: String) {
         guard canChangeAnchors(), workspaceStore.makeDefaultAnchor(key: key, inProfile: spaceID) else { return }
         updateSidebar()
         saveState()
+        spaceSettingsSpacesChanged()
     }
 
     /// The banner's "Anchor to…": the repository holding the workspace's

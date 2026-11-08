@@ -59,11 +59,8 @@ final class SidebarView: NSView {
     var onCreateProfile: (() -> Void)?
     /// (space id): "Add Repository…".
     var onAddRepository: ((String) -> Void)?
-    /// (space id, anchor key): the Repositories submenu.
-    var onMakeDefaultAnchor: ((String, String) -> Void)?
-    var onRemoveAnchor: ((String, String) -> Void)?
-    /// A space's repositories and folders, for its menu.
-    var spaceAnchors: ((String) -> [SpaceAnchor])?
+    /// (space id): Space Settings.
+    var onShowSpaceSettings: ((String) -> Void)?
     var onRenameProfile: ((String) -> Void)?
     var onEditProfileBrief: ((String) -> Void)?
     var onEditBoardSettings: ((String) -> Void)?

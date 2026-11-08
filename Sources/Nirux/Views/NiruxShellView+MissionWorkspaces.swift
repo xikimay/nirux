@@ -16,7 +16,8 @@ extension NiruxShellView {
         handoverPath: String? = nil,
         profileID requestedProfileID: String? = nil,
         parentWorkspaceID: String? = nil,
-        parentAgentUUID: String? = nil
+        parentAgentUUID: String? = nil,
+        startedOutsideNirux: Bool = false
     ) {
         let routesByAnchor = routesByAnchor
         DispatchQueue.global(qos: .userInitiated).async {
@@ -103,7 +104,9 @@ extension NiruxShellView {
                         missionID: missionID,
                         deliveredHandover: deliveredHandover,
                         handoverText: handoverText,
-                        worktreeBranch: checkedOutBranch
+                        worktreeBranch: checkedOutBranch,
+                        startedOutsideNirux: startedOutsideNirux,
+                        setupScript: self.setupScript(for: decision)
                     )
                     self.saveState()
                     if decision.reason == .general { self.presentSpaceArrival(workspaceID: childWorkspaceID) }

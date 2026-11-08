@@ -178,9 +178,11 @@ first step changed is how they are stored and managed:
   a workspace in it. ⌘⌥←/→ skips empty spaces, so cycling doesn't open
   workspaces.
 - **Space menu**, on the header or on right-clicking any space's dot:
-  "Rename Space…", "Edit Space Brief…", "Board Settings…", "Edit Task
-  Templates…", "Space Memory…" (see [project-memory.md](project-memory.md)),
-  "Space Color" and "Delete Space…". With the sidebar
+  "Space Settings…", then "Rename Space…", "Edit Space Brief…", "Board
+  Settings…", "Edit Task Templates…" and "Space Memory…" (see
+  [project-memory.md](project-memory.md)), which open Space Settings on the
+  matching tab ([spaces.md](spaces.md), S8), then "Space Color" and "Delete
+  Space…". With the sidebar
   collapsed, the space's tile at the top of the rail opens it, the spaces
   to switch to listed first.
   Right-clicking lets you manage an empty space without opening a workspace in
@@ -410,9 +412,10 @@ so.
 
 **Editing.**
 
-- "Edit Space Brief…" in the space menu creates the file on first use. It
-  opens the file as a tab in the workspace's usual editor. An editor rooted at
-  the brief's folder would make that folder the workspace's working directory.
+- "Edit Space Brief…" in the space menu opens Space Settings › Brief, a text
+  editor that shows the template until Save creates the file. It follows the
+  file while nothing is typed (an agent editing it), and asks before Save
+  replaces what changed on disk.
 - Terminals export `NIRUX_PROJECT_BRIEF`, the file's path, and the header tells
   agents where it is. An agent edits it only when the user asks, which also
   works from the phone through any Remote Control session. Like
@@ -503,6 +506,33 @@ Since any agent can already edit the brief on request, including from the
 phone, this option is deferred. The local file stays the source of truth.
 
 ## 5. Defaults
+
+**Shipped (S8 of [spaces.md](spaces.md)):** agent, Claude and Codex modes,
+environment and setup scripts, edited in Space Settings. Pinned URLs aren't.
+What shipped differs from the proposal below in these ways:
+
+- **Storage.** Each space keeps its defaults in
+  `projects/<space id>/defaults.json` (schema version 1, written `0600` from
+  the start and replaced atomically), next to its brief and `board.json`,
+  not in `projects.json`. So secrets never reach `state.json`'s mirror, and
+  an older Nirux, which never reads the file, can't drop them; one that finds
+  a newer schema or keys it doesn't know uses what it can read and never
+  writes it.
+- **Agent.** The space's agent is the one its tasks preselect (New Task…,
+  ⌘N); a plain new workspace stays a shell.
+- **Setup scripts** are per repository (anchor), in `projects/<space
+  id>/setup/<name>-<hash>.sh`, run with `/bin/sh` only in worktrees Nirux
+  makes for the user (New Task…, the worktree skill, New Worktree), not in an
+  existing worktree it opens. A script with only comments doesn't run. The
+  failure report is spelled `'<Nirux>' --hook codex --setup-failed <workspace
+  id>`: an older Nirux at the same path (a rollback) reads it as a Codex hook
+  payload it can't parse and exits, instead of opening a second window on the
+  same state. It reaches the running Nirux as a distributed notification
+  naming its state folder; the workspace's card turns red, with a native
+  notification and the Telegram alert.
+- **From outside Nirux.** A workspace opened by a `nirux://` request the
+  user confirmed (no launch ID) is marked so in `state.json`: its shells
+  never get the space's environment, nor its first agent the setup script.
 
 | Default | Applied when | How |
 | --- | --- | --- |

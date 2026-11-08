@@ -633,8 +633,9 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             harness.runPaletteCommand("Open Board")
             let board = try XCTUnwrap(workspace.columns[safe: workspace.focusedIndex]?.projectBoard)
             XCTAssertEqual(board.projectID, workspace.profileID)
-            harness.waitUntil("Board Settings to open") { shell.boardSettingsPanel?.panel != nil }
-            shell.boardSettingsPanel?.dismiss()
+            harness.waitUntil("Board Settings to open") { shell.boardSettingsPanel?.hostView != nil }
+            XCTAssertEqual(shell.spaceSettings?.selectedTab, .board)
+            shell.spaceSettings?.close()
 
             // From another column: the same board comes to the front.
             shell.addColumn()

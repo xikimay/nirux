@@ -34,7 +34,9 @@ extension NiruxShellView {
         }
         panel.show(
             attachedTo: window,
-            projects: profiles.map { NewTaskPanel.Project(id: $0.id, name: $0.name) },
+            projects: profiles.map {
+                NewTaskPanel.Project(id: $0.id, name: $0.name, agent: SpaceDefaultsStore.defaults(forSpace: $0.id).taskAgent)
+            },
             selectedProjectID: activeProfileID
         )
     }
@@ -89,7 +91,8 @@ extension NiruxShellView {
             profileID: decision.spaceID,
             deliveredHandover: created.handoverError == nil,
             handoverText: created.handover,
-            worktreeBranch: created.checkedOutBranch
+            worktreeBranch: created.checkedOutBranch,
+            setupScript: setupScript(for: decision)
         )
         saveState()
         // A hook prints its reason last.
@@ -110,20 +113,9 @@ extension NiruxShellView {
         }
     }
 
-    /// "Edit Task Templates…" in a project's menu: opens its templates in an
-    /// editor column, creating the file with the default ones on first use.
+    /// "Edit Task Templates…": Space Settings › Templates.
     func editTaskTemplates(profileID: String) {
-        let projectName = workspaceStore.profiles.first { $0.id == profileID }?.name ?? profileID
-        do {
-            guard let url = try TaskTemplates.ensureFile(spaceID: profileID, spaceName: projectName) else {
-                NSSound.beep()
-                return
-            }
-            openInEditorColumn(path: url.path)
-        } catch {
-            NiruxDebugLog.log("TaskTemplates: could not create the templates file: \(error)")
-            NSSound.beep()
-        }
+        showSpaceSettings(profileID: profileID, tab: .templates)
     }
 
     struct CreatedTaskWorktree: Sendable {

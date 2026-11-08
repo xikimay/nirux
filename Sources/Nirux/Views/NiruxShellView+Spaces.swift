@@ -7,6 +7,7 @@ extension NiruxShellView {
         guard workspaceStore.setProfileColor(id: profileID, colorHex: colorHex) else { return }
         updateSidebar()
         saveState()
+        spaceSettingsSpacesChanged()
     }
 
     /// Asks, then deletes a space: its workspaces move to the default space.
@@ -57,8 +58,8 @@ extension NiruxShellView {
         guard workspaceStore.deleteProfile(id: profileID) else { return }
         projectHistoryWorkspacesMoved(moved, from: profileID, to: WorkspaceProfile.defaultID)
         projectStore.markDeleted(profileID)
-        // Opened while the confirmation was up: its space is gone.
-        if boardSettingsPanel?.spaceID == profileID { boardSettingsPanel?.dismiss() }
         refreshAfterWorkspaceMutation()
+        // Opened while the confirmation was up: its space is gone.
+        spaceSettingsSpacesChanged()
     }
 }

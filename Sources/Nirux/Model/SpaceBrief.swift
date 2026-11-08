@@ -176,7 +176,7 @@ enum SpaceBrief {
             .appendingPathComponent(spaceID, isDirectory: true)
     }
 
-    private static func template(spaceName: String) -> String {
+    static func template(spaceName: String) -> String {
         // A "-->" in the name would end the comment and send the rest.
         var name = spaceName
         while name.contains("--") { name = name.replacingOccurrences(of: "--", with: "-") }

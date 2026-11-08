@@ -48,7 +48,7 @@ final class NewTaskFlowTests: UIFlowTestCase {
             // Return from it in the description, as Board Settings does.
             let returnKey = try key("\r", code: 0x24, in: sheet)
             XCTAssertTrue(sheet.defaultButtonCell === form.startButton.cell)
-            XCTAssertTrue(BoardSettingsSheet.leavesToTextView(
+            XCTAssertTrue(MultilineReturn.leavesToTextView(
                 returnKey, firstResponder: sheet.firstResponder, multilineView: sheet.multilineView
             ))
             XCTAssertFalse(sheet.performKeyEquivalent(with: returnKey))

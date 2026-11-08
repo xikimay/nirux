@@ -85,6 +85,8 @@ final class NiruxShellView: NSView {
     /// A stuck-agent alert went out (Telegram relays it): the reason, the
     /// workspace, the column's index, the column.
     var onStuckAgentAlert: ((AgentAttentionReason, WorkspaceState, Int, ColumnState) -> Void)?
+    /// A new worktree's setup script failed in that column (Telegram).
+    var onSetupScriptFailed: ((WorkspaceState, Int, ColumnState) -> Void)?
     /// ⌘P's workspace rows and Next Waiting Agent (⌘J).
     let quickSwitch = QuickSwitchState()
 
@@ -116,10 +118,17 @@ final class NiruxShellView: NSView {
     var toast: ToastView?
     var toastGeneration = 0
     var toastShownAt: TimeInterval = 0
+    /// The Board tab's form (see NiruxShellView+BoardSettings).
     var boardSettingsPanel: BoardSettingsPanel?
-    /// A "Board Settings…" reading board.json and the checkouts, so a
-    /// second click doesn't open a second form.
+    /// The Board tab reading board.json and the checkouts: one read at a
+    /// time.
     var isReadingBoardSettings = false
+    /// Space Settings, for one space at a time (see
+    /// NiruxShellView+SpaceSettings), its setup script sheet, and the
+    /// GitHub repositories read for its rows, by anchor key.
+    var spaceSettings: SpaceSettingsWindow?
+    var setupScriptSheet: (panel: NSPanel, editor: SpaceFileEditorPane)?
+    var spaceSettingsGitHub: [String: String] = [:]
     var newTaskPanel: NewTaskPanel?
     var newSpacePanel: NewSpacePanel?
     /// The banner of a workspace that opened in the default space (see
@@ -199,11 +208,7 @@ final class NiruxShellView: NSView {
         sidebar.onProfileClicked = { [weak self] profileID in self?.selectProfile(profileID) }
         sidebar.onCreateProfile = { [weak self] in self?.showNewSpacePanel() }
         sidebar.onAddRepository = { [weak self] profileID in self?.addRepository(toSpace: profileID) }
-        sidebar.onMakeDefaultAnchor = { [weak self] profileID, key in self?.makeDefaultSpaceAnchor(key: key, inSpace: profileID) }
-        sidebar.onRemoveAnchor = { [weak self] profileID, key in self?.removeSpaceAnchor(key: key, fromSpace: profileID) }
-        sidebar.spaceAnchors = { [weak self] profileID in
-            self?.profiles.first { $0.id == profileID }?.anchors.filter(\.isKnown) ?? []
-        }
+        sidebar.onShowSpaceSettings = { [weak self] profileID in self?.showSpaceSettings(profileID: profileID) }
         sidebar.onNewWorkspace = { [weak self] in self?.showNewWorkspacePanel() }
         sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }
         sidebar.onEditProfileBrief = { [weak self] profileID in self?.editSpaceBrief(profileID: profileID) }
@@ -616,20 +621,11 @@ extension NiruxShellView {
         nameInputPanel?.show(relativeTo: window, currentValue: workspace.title, placeholder: "Workspace name")
     }
 
+    /// "Rename Space…": Space Settings › General, the name selected.
     func showRenameSpacePanel(profileID: String) {
-        guard let window,
-              let profile = profiles.first(where: { $0.id == profileID })
-        else { return }
-        if nameInputPanel == nil {
-            nameInputPanel = NameInputPanel()
-        }
-        nameInputPanel?.onSubmit = { [weak self] newName in
-            guard let self else { return }
-            guard self.workspaceStore.renameProfile(id: profileID, to: newName) else { return }
-            self.updateSidebar()
-            self.saveState()
-        }
-        nameInputPanel?.show(relativeTo: window, currentValue: profile.name, placeholder: "Space name")
+        showSpaceSettings(profileID: profileID, tab: .general)
+        guard spaceSettings?.spaceID == profileID else { return }
+        spaceSettings?.general.focusName()
     }
 
     // MARK: - Worktree
@@ -665,7 +661,7 @@ extension NiruxShellView {
                         self.presentProblem("Couldn’t create a handover file in /tmp", "The worktree opens without one.")
                         self.openRoutedWorkspace(
                             title: branch, cwd: path, agent: runningAgent, parentWorkspaceID: self.activeWorkspace?.id,
-                            startedFromSpaceID: self.activeProfileID, worktreeBranch: checkedOutBranch
+                            startedFromSpaceID: self.activeProfileID, worktreeBranch: checkedOutBranch, isNewWorktree: true
                         )
                         return
                     }
@@ -692,7 +688,7 @@ extension NiruxShellView {
                     // No agent — open workspace directly (worktree already created by panel)
                     self.openRoutedWorkspace(
                         title: branch, cwd: path, agent: .claude, parentWorkspaceID: self.activeWorkspace?.id,
-                        startedFromSpaceID: self.activeProfileID, worktreeBranch: checkedOutBranch
+                        startedFromSpaceID: self.activeProfileID, worktreeBranch: checkedOutBranch, isNewWorktree: true
                     )
                 }
             }

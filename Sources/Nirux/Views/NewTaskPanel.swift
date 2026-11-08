@@ -12,6 +12,9 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     struct Project: Equatable {
         let id: String
         let name: String
+        /// Preselected while the user hasn't picked one (the space's
+        /// default, see SpaceDefaults).
+        var agent: NiruxApp.WorkspaceAgent = .claude
     }
 
     /// What the shell found for a project: where its tasks branch from
@@ -64,6 +67,10 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
 
     static let agents: [(agent: NiruxApp.WorkspaceAgent, title: String)] = [(.claude, "Claude Code"), (.codex, "Codex")]
+
+    /// The user picked an agent: another space's default no longer
+    /// replaces it.
+    private(set) var agentPicked = false
 
     private let scrollView = NSScrollView()
     private var documentHeight: CGFloat = 0
@@ -228,12 +235,19 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
 
     @objc func projectChanged(_ sender: Any?) {
         guard let projectID = selectedProjectID else { return }
+        if !agentPicked, let agent = projects[safe: projectPopup.indexOfSelectedItem]?.agent {
+            agentPopup.selectItem(at: Self.agents.firstIndex { $0.agent == agent } ?? 0)
+        }
         info = nil
         repositoryLabel.stringValue = "Looking for the space’s repository…"
         repositoryLabel.textColor = NSColor.white.withAlphaComponent(0.5)
         templatePopup.isEnabled = false
         updateStartButton()
         onProjectSelected?(projectID)
+    }
+
+    @objc func agentChanged(_ sender: Any?) {
+        agentPicked = true
     }
 
     @objc func templateChanged(_ sender: Any?) {
@@ -442,6 +456,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
 
         y = addLabel("Agent", y: y, in: view)
         agentPopup.addItems(withTitles: Self.agents.map(\.title))
+        agentPopup.target = self
+        agentPopup.action = #selector(agentChanged(_:))
         y = addPopup(agentPopup, y: y, in: view) + 6
 
         y = addLabel("Space", y: y, in: view)
@@ -570,7 +586,7 @@ final class NewTaskSheet: NSPanel {
             onCommandReturn?()
             return true
         }
-        if BoardSettingsSheet.leavesToTextView(event, firstResponder: firstResponder, multilineView: multilineView) {
+        if MultilineReturn.leavesToTextView(event, firstResponder: firstResponder, multilineView: multilineView) {
             return false
         }
         return super.performKeyEquivalent(with: event)

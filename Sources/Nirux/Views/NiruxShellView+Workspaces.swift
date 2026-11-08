@@ -22,7 +22,9 @@ extension NiruxShellView {
         missionID: String? = nil,
         deliveredHandover: Bool = false,
         handoverText: String? = nil,
-        worktreeBranch: String? = nil
+        worktreeBranch: String? = nil,
+        startedOutsideNirux: Bool = false,
+        setupScript: URL? = nil
     ) {
         let snapshot: NSImageView? = {
             guard let rep = viewport.bitmapImageRepForCachingDisplay(in: viewport.bounds) else { return nil }
@@ -48,6 +50,7 @@ extension NiruxShellView {
             profileID: targetProfileID,
             missionID: missionID,
             missionHandoffsEnabled: Self.currentMissionHandoffsEnabled(),
+            startedOutsideNirux: startedOutsideNirux,
             initialAgentUUID: initialAgentUUID
         )
         wireWorkspace(workspace)
@@ -57,11 +60,16 @@ extension NiruxShellView {
         updateSidebar()
         focusActiveTerminal(in: window)
 
-        // Launch agent in the new workspace's terminal
+        // The setup script, then the agent, in the new workspace's terminal.
+        // Never for a workspace opened from outside Nirux.
+        let setupScript = startedOutsideNirux ? nil : setupScript
         if let agent {
             launchAgent(
-                agent, in: workspace, deliveredHandover: deliveredHandover, handoverText: handoverText, worktreeBranch: worktreeBranch
+                agent, in: workspace, deliveredHandover: deliveredHandover, handoverText: handoverText,
+                worktreeBranch: worktreeBranch, setupScript: setupScript
             )
+        } else if let setupScript, let column = workspace.columns.first {
+            sideEffects.launchAgent(column, setupCommand(setupScript, in: workspace, then: nil))
         }
 
         if let snapshot {
@@ -113,7 +121,8 @@ extension NiruxShellView {
         in workspace: WorkspaceState,
         deliveredHandover: Bool,
         handoverText: String?,
-        worktreeBranch: String?
+        worktreeBranch: String?,
+        setupScript: URL?
     ) {
         guard let col = workspace.columns[safe: workspace.focusedIndex] else { return }
         let handoverPrompt = Self.agentStartupPrompt(
@@ -129,11 +138,12 @@ extension NiruxShellView {
                 spaceID: workspace.profileID, name: Self.handoverFilename(for: agent), text: handoverText, branch: worktreeBranch
             )
         }
+        let defaults = SpaceDefaultsStore.defaults(forSpace: workspace.profileID)
         let cmd: String
         switch agent {
         case .claude:
             cmd = NiruxShellView.claudeCommand(
-                mode: NiruxShellView.currentClaudeLaunchMode(),
+                mode: defaults.claudeMode(settings: NiruxShellView.currentClaudeLaunchMode()),
                 sessionName: SessionName.make(
                     worktreeBranch: worktreeBranch,
                     spaceName: workspaceStore.profiles.first { $0.id == workspace.profileID }?.name,
@@ -144,13 +154,20 @@ extension NiruxShellView {
             )
         case .codex:
             cmd = NiruxShellView.codexCommand(
-                mode: NiruxShellView.currentCodexLaunchMode(),
+                mode: defaults.codexMode(settings: NiruxShellView.currentCodexLaunchMode()),
                 briefFile: NiruxShellView.codexBriefFile(from: brief, launchDirectory: workspace.cwd),
                 handoverPrompt: handoverPrompt
             )
         }
 
-        sideEffects.launchAgent(col, cmd)
+        sideEffects.launchAgent(col, setupScript.map { setupCommand($0, in: workspace, then: cmd) } ?? cmd)
+    }
+
+    /// The setup script's line (see SpaceSetupScript), then `agentCommand`.
+    private func setupCommand(_ script: URL, in workspace: WorkspaceState, then agentCommand: String?) -> String {
+        SpaceSetupScript.command(
+            script: script.path, executable: Self.niruxExecutable, workspaceID: workspace.id, then: agentCommand
+        )
     }
 
     func focusWorkspace(_ dir: VDir) {
