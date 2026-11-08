@@ -371,7 +371,7 @@ final class MissionDeliveryTests: XCTestCase {
         XCTAssertEqual(sent, ["Yes, until v3."])
         XCTAssertEqual(controller.sendButton?.keyEquivalentModifierMask, .command)
 
-        // Esc closes, though an NSTextView would open its completion list.
+        // Esc in the field closes the popover.
         let popover = RecordingPopover()
         controller.popover = popover
         field.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
