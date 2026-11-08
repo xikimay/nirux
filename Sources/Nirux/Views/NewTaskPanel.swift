@@ -530,7 +530,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     private func setControlsEnabled(_ enabled: Bool) {
         descriptionView.isEditable = enabled
         descriptionView.textColor = enabled ? Theme.Color.textPrimary : Theme.Color.textTertiary
-        for control in [repositoryPopup, agentPopup, templatePopup, branchField, existingBranchButton] as [NSControl] {
+        for control in [repositoryPopup, agentPopup, templatePopup, branchField, existingBranchButton, reportCheckbox] as [NSControl] {
             control.isEnabled = enabled
         }
         if enabled { templatePopup.isEnabled = info != nil }
@@ -650,7 +650,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         y += max(22, lineHeight + 4) + 12
 
         if !reportCheckbox.isHidden {
-            reportCheckbox.frame = NSRect(x: margin - 2, y: y, width: inner, height: 18)
+            // Its own width: a click beside it doesn't toggle it.
+            reportCheckbox.frame = NSRect(x: margin - 2, y: y, width: min(inner, ceil(reportCheckbox.fittingSize.width)), height: 18)
             let hintHeight = Self.wrappedHeight(of: reportHint, width: inner - 20)
             reportHint.frame = NSRect(x: margin + 18, y: y + 20, width: inner - 20, height: hintHeight)
             y += 20 + hintHeight + 12

@@ -67,6 +67,8 @@ extension NiruxShellView {
             self.focusActiveTerminal(in: self.window)
         }
         let repositories = newTaskRepositories(of: space)
+        // Before it shows: the sheet comes down at its size.
+        panel.lead = leadMissionParent(inSpace: space.id)
         panel.show(
             attachedTo: window,
             space: NewTaskPanel.Space(id: space.id, name: space.name, isGeneral: space.id == WorkspaceProfile.defaultID),
@@ -78,16 +80,20 @@ extension NiruxShellView {
         if repositories.isEmpty, space.id != WorkspaceProfile.defaultID {
             suggestRepository(to: panel)
         }
-        panel.lead = leadMissionParent(inSpace: space.id)
         return panel
     }
 
     /// The space's Lead as a Mission parent: its workspace and the column
-    /// its Claude runs in (its first terminal).
+    /// its Claude runs in (or will, once a restored one resumes), else its
+    /// first terminal.
     func leadMissionParent(inSpace spaceID: String) -> NewTask.MissionParent? {
-        guard let lead = leadWorkspace(inSpace: spaceID),
-              let agentUUID = lead.columns.first(where: { $0.pty != nil && !$0.isClosing })?.agentUUID
-        else { return nil }
+        guard let lead = leadWorkspace(inSpace: spaceID) else { return nil }
+        let snapshot = ProcessSnapshot()
+        let terminals = lead.columns.filter { !$0.isClosing && $0.agentUUID != nil && ($0.pty != nil || $0.deferredAgent != nil) }
+        let claude = terminals.first { column in
+            column.deferredAgent?.processName == "claude" || column.pty?.foregroundProcessName(snapshot: snapshot) == "claude"
+        }
+        guard let agentUUID = (claude ?? terminals.first)?.agentUUID else { return nil }
         return NewTask.MissionParent(workspaceID: lead.id, agentUUID: agentUUID)
     }
 
@@ -170,7 +176,8 @@ extension NiruxShellView {
         // A task a Lead starts comes from its space's repository: it opens
         // in that space, as its parent, even when another space anchors its
         // folder (its setup script then doesn't run).
-        if let lead = request.reportsTo.flatMap({ parent in workspaces.first { $0.id == parent.workspaceID && $0.isLead } }),
+        if request.startedByLead,
+           let lead = request.reportsTo.flatMap({ parent in workspaces.first { $0.id == parent.workspaceID && $0.isLead } }),
            decision.spaceID != lead.profileID {
             decision = decideSpace(identity: nil, parentWorkspaceID: lead.id, startedFromSpaceID: lead.profileID)
         }

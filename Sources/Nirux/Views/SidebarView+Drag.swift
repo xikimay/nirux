@@ -121,12 +121,24 @@ extension SidebarView {
         // on either is a click. A card drags among the cards with no parent.
         guard let dragged = lastInfos.first(where: { $0.index == workspaceIndex }), !dragged.isLead, !dragged.isNested
         else { return nil }
-        let group = displayedWorkspaceInfos.filter { $0.isInactive == dragged.isInactive && !$0.isLead && !$0.isNested }
-        let frames = group.compactMap { info in
-            hitAreas.first { area in
+        let section = displayedWorkspaceInfos.filter { $0.isInactive == dragged.isInactive && !$0.isLead }
+        let group = section.filter { !$0.isNested }
+        let frameOf = { (info: WorkspaceInfo) in
+            self.hitAreas.first { area in
                 if case .workspace(let index) = area.region { return index == info.index }
                 return false
             }?.frame
+        }
+        // A card and the children listed under it are one drop target: the
+        // line between two cards falls below the first one's children.
+        var frames: [NSRect] = []
+        for info in section {
+            guard let frame = frameOf(info) else { continue }
+            if info.isNested, let last = frames.popLast() {
+                frames.append(last.union(frame))
+            } else if !info.isNested {
+                frames.append(frame)
+            }
         }
         guard frames.count == group.count,
               let position = group.firstIndex(where: { $0.index == workspaceIndex })

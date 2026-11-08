@@ -175,7 +175,7 @@ final class SidebarWorkspaceCardRenderer {
     /// something broken, a breathing green dot for work, a speech bubble
     /// for a question to the parent, a check, the merge sign, else grey.
     private func buildMark(_ mark: SidebarRowMark, centerY: CGFloat) {
-        let centerX = Metrics.markCenterX
+        let centerX = (Metrics.markCenterX + layout.nestIndent)
         // The status line says it to VoiceOver.
         func symbol(_ name: String, _ color: NSColor, _ label: String?) {
             let icon = SidebarImageView(image: SidebarRenderer.symbol(name, color: color, pointSize: 11))
@@ -588,7 +588,7 @@ final class SidebarWorkspaceCardRenderer {
         let rowY = frame.maxY - Metrics.leadRowHeight
         let midY = rowY + Metrics.leadRowHeight / 2
         let icon = SidebarImageView(image: SidebarRenderer.symbol(Theme.Symbol.lead, color: Theme.Color.accent, pointSize: 13))
-        icon.frame = NSRect(x: Metrics.markCenterX - 8, y: midY - 8, width: 16, height: 16)
+        icon.frame = NSRect(x: (Metrics.markCenterX + layout.nestIndent) - 8, y: midY - 8, width: 16, height: 16)
         icon.setAccessibilityElement(false)
         append(icon)
 

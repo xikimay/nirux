@@ -122,7 +122,7 @@ final class LeadToolsFlowTests: XCTestCase {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let lead = try makeLead(harness)
-            func start(_ description: String, reporting: Bool) throws -> WorkspaceState {
+            @MainActor func start(_ description: String, reporting: Bool) throws -> WorkspaceState {
                 let sheet = try XCTUnwrap(shell.showNewPanel(spaceID: lead.space))
                 XCTAssertFalse(sheet.reportCheckbox.isHidden)
                 XCTAssertEqual(sheet.reportCheckbox.state, .on, "checked by default")
@@ -149,21 +149,33 @@ final class LeadToolsFlowTests: XCTestCase {
 
     /// A task's own Mission children list right under it, indented, and
     /// move among themselves; the Lead's tasks stay the space's list. A
-    /// parent archived lets its children go.
+    /// parent archived lets its children go, where they were listed.
     func testMissionChildrenListUnderTheirParent() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let lead = try makeLead(harness)
-            func open(_ title: String) throws -> WorkspaceState {
-                shell.addWorkspace(title: title, cwd: harness.repo, profileID: lead.space)
+            @MainActor func open(_ title: String, reportingTo parent: WorkspaceState? = nil) throws -> WorkspaceState {
+                let workspaceID = UUID().uuidString
+                let agentUUID = UUID().uuidString
+                let mission = try parent.map { parent in
+                    try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                        id: UUID().uuidString, parentWorkspaceID: parent.id,
+                        parentAgentUUID: try XCTUnwrap(parent.columns.first?.agentUUID),
+                        childWorkspaceID: workspaceID, childAgentUUID: agentUUID, childAgentKind: "claude",
+                        branch: "feat/\(title)", reportsToLead: parent.isLead
+                    ), enabled: true))
+                }
+                shell.addWorkspace(
+                    title: title, cwd: harness.repo, profileID: lead.space, workspaceID: workspaceID,
+                    initialAgentUUID: agentUUID, missionID: mission?.id, reportsToLead: parent?.isLead == true
+                )
                 return try XCTUnwrap(shell.activeWorkspace)
             }
             let task = try open("task")
             let other = try open("other")
-            let sub = try open("sub")
-            let leadsTask = try open("lead's task")
-            let parents = [sub.id: task.id, leadsTask.id: lead.workspace.id]
-            shell.workspaceStore.missionParentID = { parents[$0.id] }
+            _ = try open("lead's task", reportingTo: lead.workspace)
+            // Opened last: the store still lists it under its parent.
+            let sub = try open("sub", reportingTo: task)
             let store = shell.workspaceStore
             let titles = { store.visibleWorkspaceIndices(in: lead.space).map { shell.workspaces[$0].title } }
             let index = { (workspace: WorkspaceState) in try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace }) }
@@ -183,8 +195,9 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(titles(), ["Lead", "other", "task", "sub", "lead's task"], "its children follow it")
 
             XCTAssertTrue(store.setWorkspaceInactive(at: try index(task), true))
-            XCTAssertEqual(titles(), ["Lead", "other", "sub", "lead's task", "task"])
+            XCTAssertEqual(titles(), ["Lead", "other", "sub", "lead's task", "task"], "let go where it was listed")
             XCTAssertTrue(store.nestedWorkspaceIndices(in: lead.space).isEmpty)
+            _ = other
         }
     }
 

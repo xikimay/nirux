@@ -170,8 +170,10 @@ struct SidebarCardLayout {
         summary = workspace.rowSummary
         // The Lead's row is one line, columns and all: ⌘1…⌘9 reach them.
         let showsColumns = workspace.isActive && !isCompact && !workspace.isLead
-        let rowWidth = sidebarWidth - Metrics.workspaceInsetX - Metrics.cardPaddingX - Metrics.textX
-            - (workspace.isNested ? Metrics.nestIndent : 0)
+        // A row asking the user (an approval) keeps its full width: the
+        // request text is never cut.
+        nestIndent = workspace.isNested && workspace.cardActions.isEmpty ? Metrics.nestIndent : 0
+        let rowWidth = sidebarWidth - Metrics.workspaceInsetX - Metrics.cardPaddingX - Metrics.textX - nestIndent
         // Too wide for the line: the diff goes first, then the feedback; the
         // pull request and its checks stay.
         var links = showsColumns ? Self.links(for: workspace) : []
@@ -217,7 +219,7 @@ struct SidebarCardLayout {
     }
 
     /// A Mission child's row sits further right, under its parent's.
-    var nestIndent: CGFloat { workspace.isNested ? Metrics.nestIndent : 0 }
+    let nestIndent: CGFloat
     var cardX: CGFloat { Metrics.workspaceInsetX + nestIndent }
     var cardWidth: CGFloat { sidebarWidth - Metrics.workspaceInsetX * 2 - nestIndent }
     var contentX: CGFloat { cardX + Metrics.cardPaddingX }

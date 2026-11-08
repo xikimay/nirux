@@ -10,10 +10,11 @@ final class WorkspaceStore {
     /// id in NIRUX_PROFILE_ID, so a request naming one goes to the default
     /// space, where their workspaces moved.
     var deletedProfileIDs: Set<String> = []
-    /// The workspace a Mission child reports to (its Mission's parent), or
-    /// nil; the shell reads MissionStore. Children list under their parent
-    /// (see `visibleWorkspaceIndices(in:)`).
-    var missionParentID: @MainActor (WorkspaceState) -> String? = { _ in nil }
+    /// Each Mission's parent workspace, by Mission id, read once per pass
+    /// (the shell reads MissionStore). A Lead's tasks are left out: they
+    /// are the space's list itself. Children list under their parent (see
+    /// `visibleWorkspaceIndices(in:)`).
+    var missionParents: @MainActor () -> [String: String] = { [:] }
 
     /// -1 while no workspace is active: the active space is empty and
     /// shows `EmptySpaceView`. Keys, ⌘W and notifications then reach no
@@ -60,11 +61,13 @@ final class WorkspaceStore {
 
     func replaceWorkspaces(_ newWorkspaces: [WorkspaceState]) {
         workspaces = newWorkspaces
+        for profileID in Set(workspaces.map(\.profileID)) { keepTreeOrder(in: profileID) }
         reconcileSelection(preferActiveProfile: true)
     }
 
     func appendWorkspace(_ workspace: WorkspaceState, activate: Bool = true) {
         workspaces.append(workspace)
+        keepTreeOrder(in: workspace.profileID)
         if activate { selectWorkspace(id: workspace.id) }
     }
 
@@ -178,6 +181,8 @@ final class WorkspaceStore {
         let adjustedTarget = workspaces.firstIndex { $0 === targetWorkspace } ?? workspaces.count
         let insertIndex = delta > 0 ? adjustedTarget + 1 : adjustedTarget
         workspaces.insert(workspace, at: min(insertIndex, workspaces.count))
+        // Its children follow it.
+        keepTreeOrder(in: workspace.profileID)
         reconcileSelection(preferActiveProfile: true)
         return true
     }
@@ -218,6 +223,7 @@ final class WorkspaceStore {
         // The top card takes over, not the Lead above the cards: keys typed
         // next would go into its prompt.
         let isActiveCard = { (candidate: Int) in !self.workspaces[candidate].isInactive }
+        keepTreeOrder(in: workspaces[index].profileID)
         if activeWorkspaceIndex == index,
            isInactive,
            let firstActive = visibleWorkspaceIndices.first(where: { isActiveCard($0) && !self.workspaces[$0].isLead })
@@ -398,13 +404,31 @@ final class WorkspaceStore {
             workspaces[$0].profileID == profileID && !workspaces[$0].isLead && !workspaces[$0].isInactive
         }
         let byID = Dictionary(active.map { (workspaces[$0].id, $0) }, uniquingKeysWith: { first, _ in first })
+        let missionParents = missionParents()
         var parents: [Int: Int] = [:]
         for index in active {
-            if let parentID = missionParentID(workspaces[index]), let parent = byID[parentID], parent != index {
+            if let missionID = workspaces[index].missionID, let parentID = missionParents[missionID],
+               let parent = byID[parentID], parent != index {
                 parents[index] = parent
             }
         }
-        return parents
+        // A loop of parents (a hand-edited ledger) lists at the top level.
+        let tree = treeOrder(active, parents: parents)
+        let nested = Set(tree.filter(\.nested).map(\.index))
+        return parents.filter { nested.contains($0.key) }
+    }
+
+    /// The store keeps a space's active workspaces in the sidebar's order,
+    /// each followed by its children: a child its parent lets go (closed,
+    /// archived, moved away) stays where it was listed.
+    private func keepTreeOrder(in profileID: String) {
+        let active = workspaces.indices.filter {
+            workspaces[$0].profileID == profileID && !workspaces[$0].isLead && !workspaces[$0].isInactive
+        }
+        let order = treeOrder(active, parents: activeParents(in: profileID)).map(\.index)
+        guard order != active else { return }
+        let reordered = order.map { workspaces[$0] }
+        for (slot, index) in active.enumerated() { workspaces[index] = reordered[slot] }
     }
 
     /// Roots in store order, each followed by its children, depth first. A
