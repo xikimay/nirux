@@ -55,7 +55,7 @@ final class WorkspaceState {
     /// Lead's, its shells get the Mission variables whatever the setting.
     let reportsToLead: Bool
     /// Whether new shells get the Mission variables.
-    var carriesMissions: Bool { missionHandoffsEnabled || isLead || reportsToLead }
+    var carriesMissions: Bool { missionHandoffsEnabled || reportsToLead }
     /// Opened by a `nirux://` request from outside Nirux (one the user
     /// confirmed, with no launch ID): its shells never get the space's
     /// environment, nor its first agent the setup script (docs/projects.md,
@@ -540,7 +540,7 @@ extension WorkspaceState {
         }
         // Blank elsewhere: a Nirux started from a Lead's shell must not
         // pass the role on to every terminal it opens.
-        environment[Self.leadEnvironmentKey] = isLead ? "1" : ""
+        if isLead { environment[Self.leadEnvironmentKey] = "1" }
         guard !startedOutsideNirux else {
             // Its agents' nirux:// requests ask first, as its own did: they
             // come from outside Nirux too.

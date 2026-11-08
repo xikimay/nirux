@@ -213,8 +213,7 @@ final class WorkspaceStore {
         let isActiveCard = { (candidate: Int) in !self.workspaces[candidate].isInactive }
         if activeWorkspaceIndex == index,
            isInactive,
-           let firstActive = visibleWorkspaceIndices.first(where: { isActiveCard($0) && !self.workspaces[$0].isLead })
-               ?? visibleWorkspaceIndices.first(where: isActiveCard) {
+           let firstActive = visibleWorkspaceIndices.first(where: isActiveCard) {
             activeWorkspaceID = workspaces[firstActive].id
         }
         reconcileSelection(preferActiveProfile: true)

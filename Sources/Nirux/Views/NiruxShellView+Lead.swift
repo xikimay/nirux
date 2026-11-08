@@ -30,7 +30,6 @@ extension NiruxShellView {
     func startLead(spaceID: String) {
         guard Self.spaceCanHaveLead(spaceID), profiles.contains(where: { $0.id == spaceID }) else { return }
         if let lead = leadWorkspace(inSpace: spaceID) { return focusLead(lead) }
-        installSkillsForTheLead()
         addWorkspace(
             title: Self.leadTitle,
             cwd: defaultFolder(forSpace: spaceID),
@@ -46,7 +45,7 @@ extension NiruxShellView {
             // Not `openProjectBoard`: a space without board settings would
             // open Space Settings › Board over the Lead and take Claude's
             // keyboard. The Board asks for them when the user clicks it.
-            let board = makeProjectBoard(projectID: spaceID, offersSettings: false)
+            let board = makeProjectBoard(projectID: spaceID, offersSettings: true)
             lead.addProjectBoardColumn(board)
             // Claude keeps the keyboard; the Board sits to its right.
             lead.focusedIndex = 0
@@ -127,7 +126,7 @@ extension NiruxShellView {
             return .folder(anchor.name, repository: firstRepository)
         }
         let start = defaultFolderAnchor(forSpace: space.id)
-        guard let leadFolder else { return start.map(place(of:)) ?? .home }
+        guard let leadFolder, leadFolder.isEmpty else { return start.map(place(of:)) ?? .home }
         let standardized = { (path: String) in URL(fileURLWithPath: path).standardizedFileURL.path }
         if let anchor = space.anchors.first(where: { $0.folder.map(standardized) == standardized(leadFolder) }) {
             return place(of: anchor)

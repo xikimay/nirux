@@ -26,7 +26,7 @@ extension NiruxShellView {
         emptySpaceView.show(EmptySpaceView.Content(
             spaceName: space.name,
             offersAddRepository: space.id != WorkspaceProfile.defaultID && !space.anchors.contains(where: \.isKnown),
-            offersLead: Self.spaceCanHaveLead(space.id)
+            offersLead: false
         ))
     }
 }

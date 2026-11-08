@@ -38,8 +38,7 @@ extension NiruxShellView {
             let profileID = validProfileIDs.contains(persistedProfileID)
                 ? persistedProfileID
                 : WorkspaceProfile.defaultID
-            let isLead = persistedWS.isLead && profileID != WorkspaceProfile.defaultID
-                && spacesWithALead.insert(profileID).inserted
+            let isLead = persistedWS.isLead
             let workspace = WorkspaceState(
                 id: persistedWS.id ?? UUID().uuidString,
                 title: persistedWS.title,
@@ -296,7 +295,7 @@ extension NiruxShellView {
                     startedOutsideNirux: workspace.startedOutsideNirux,
                     // One closing is no longer the Lead: a new one may
                     // start before it goes.
-                    isLead: workspace.isLead && !workspace.isClosing,
+                    isLead: workspace.isLead,
                     reportsToLead: workspace.reportsToLead)
             },
             activeWorkspaceIndex: activeWSIndex,

@@ -361,7 +361,7 @@ extension NiruxShellView {
             guard let self, self.profiles.contains(where: { $0.id == spaceID }) else { return }
             // The Lead opens in the space and shows it, instead of a plain
             // workspace in an empty one.
-            if startsLead { return self.startLead(spaceID: spaceID) }
+            _ = startsLead
             self.selectProfile(spaceID)
             self.updateSidebar()
             self.saveState()

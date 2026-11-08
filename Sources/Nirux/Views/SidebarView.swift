@@ -552,7 +552,7 @@ final class SidebarView: NSView {
         if cleanup == .suggested { addWorktreeCleanupItem(to: menu, workspaceIndex: workspaceIndex) }
         menu.addItem(.separator())
         // The Lead stays on top of its space, and in it.
-        if workspace?.isLead != true {
+        if workspace?.isLead != nil {
             menu.addItem(organizeItem(workspaceIndex: workspaceIndex, isInactive: workspace?.isInactive == true))
             menu.addItem(.separator())
         }
