@@ -29,7 +29,6 @@ final class EmptySpaceFlowTests: XCTestCase {
             XCTAssertEqual(view.titleLabel.stringValue, "Empty")
             XCTAssertEqual(view.accessibilityLabel(), "Empty")
             XCTAssertFalse(view.addRepositoryButton.isHidden)
-            XCTAssertEqual(view.newButton.keyEquivalent, "\r")
             XCTAssertIdentical(harness.window.firstResponder, view)
 
             // A workspace closing in another space leaves it on screen.
@@ -51,7 +50,6 @@ final class EmptySpaceFlowTests: XCTestCase {
             XCTAssertEqual(first.title, "first")
             XCTAssertEqual(first.profileID, empty.id)
             XCTAssertTrue(view.isHidden)
-            XCTAssertEqual(view.newButton.keyEquivalent, "", "hidden, New… takes no Return a page left unhandled")
         }
     }
 

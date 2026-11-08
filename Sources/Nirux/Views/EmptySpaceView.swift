@@ -6,9 +6,11 @@ import AppKit
 /// shows this view instead of opening a workspace.
 ///
 /// "Add Repository…" shows until the space has a repository or folder
-/// (never in General, which has none). "New…" does what ⌘N does and is the
-/// default button: Return presses it. The Lead (S11) adds "Start a Lead"
-/// to `Content`.
+/// (never in General, which has none). "New…" does what ⌘N does; it looks
+/// like the default button and Return presses it while the view has the
+/// keyboard. It has no key equivalent: a window's default button takes
+/// Returns from anywhere, a hidden view must take none. The Lead (S11)
+/// adds "Start a Lead" to `Content`.
 @MainActor
 final class EmptySpaceView: NSView {
     struct Content: Equatable {
@@ -48,7 +50,7 @@ final class EmptySpaceView: NSView {
         }
         addRepositoryButton.action = #selector(addRepository(_:))
         newButton.action = #selector(new(_:))
-        newButton.keyEquivalent = "\r"
+        newButton.bezelColor = .controlAccentColor
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
     }
@@ -65,17 +67,11 @@ final class EmptySpaceView: NSView {
         needsLayout = true
     }
 
-    /// Return is New…'s only while the view shows: hidden, it must not
-    /// take a Return a page or a field in a workspace left unhandled.
-    override var isHidden: Bool {
-        didSet { newButton.keyEquivalent = isHidden ? "" : "\r" }
-    }
-
     /// The view itself takes the keyboard: a button only can with Full
     /// Keyboard Access on.
     override var acceptsFirstResponder: Bool { true }
 
-    /// Return and Enter press New…, wherever the window sends them.
+    /// Return and Enter press New…, from the view or one of its buttons.
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
         guard modifiers.isEmpty, event.keyCode == 0x24 || event.keyCode == 0x4C else { return super.keyDown(with: event) }
