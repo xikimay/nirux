@@ -1,10 +1,6 @@
 name: Tests
 
-# Runs the suite on every PR into main so mergeStateStatus reflects it before
-# merge: an actor-isolation error in a test file once reached main red
-# (2026-07-19, ActivityStoreTests). Not on push to main: the nightly
-# (nightly.yml) already runs `swift test` there, and a second run held another
-# macOS runner on every merge.
+# DO NOT MERGE: measures `swift test --parallel` against a class-level runner.
 on:
   pull_request:
     branches: [main]
@@ -17,15 +13,47 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  swiftpm-parallel:
     runs-on: macos-15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
         with:
-          # The whole history, as the nightly has it: a test that reads a
-          # merged pull request's commits runs here, before merge, rather
-          # than first in the nightly.
           fetch-depth: 0
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}
+      - name: Machine
+        run: sysctl -n hw.activecpu hw.memsize; swift --version
+      - name: Build
+        run: swift build --build-tests
+      - name: swift test --parallel
+        run: swift test --skip-build --parallel
 
-      - name: Run tests
-        run: swift test
+  class-queue:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}
+      - name: Build
+        run: swift build --build-tests
+      - name: Class queue, 3 workers
+        run: scripts/run-tests.sh 3
+      - name: Class queue, 6 workers
+        if: always()
+        run: scripts/run-tests.sh 6
