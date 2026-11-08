@@ -2,7 +2,7 @@ import AppKit
 
 /// Horizontal dot strip at the bottom of the viewport showing columns of the active workspace
 final class ColumnIndicatorView: NSView {
-    private var columnCount: Int = 0
+    private(set) var columnCount: Int = 0
     private var focusedIndex: Int = 0
     /// What each column asks while the user looks elsewhere.
     private var columnSignals: [AttentionSignal?] = []

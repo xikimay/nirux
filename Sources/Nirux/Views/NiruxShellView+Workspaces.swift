@@ -10,8 +10,6 @@ extension NiruxShellView {
 
     var activeVisibleWorkspacePosition: Int? { workspaceStore.activeVisibleWorkspacePosition }
 
-    private var activeProfile: WorkspaceProfile { workspaceStore.activeProfile }
-
     func addWorkspace(
         title: String? = nil,
         cwd: String? = nil,
@@ -237,11 +235,18 @@ extension NiruxShellView {
     }
 
     func refreshAfterWorkspaceSelection(animated: Bool, editorTakesKeyboard: Bool = true) {
-        guard workspaces.indices.contains(activeWSIndex) else { return }
-        workspaces[activeWSIndex].notification = nil
         quickSwitch.focusMoved()
+        guard let workspace = activeWorkspace else {
+            // An empty space: its view shows and takes the keyboard (see
+            // EmptySpaceView).
+            relayout(animated: animated)
+            updateSidebar()
+            focusActiveTerminal(in: window)
+            return
+        }
+        workspace.notification = nil
         relayout(animated: animated)
-        refreshGitContextNow(for: workspaces[activeWSIndex])
+        refreshGitContextNow(for: workspace)
         // Headers of a workspace off screen weren't refreshed: bring
         // them (and their agent usage) up to date now, not on the next
         // heartbeat. Also refreshes the sidebar.
@@ -281,13 +286,9 @@ extension NiruxShellView {
         guard profileAlreadySelected || workspaceStore.selectProfile(profileID) else { return }
         guard profileAlreadySelected || previousProfileID != activeProfileID else { return }
 
-        // An empty space (spaces persist) gets a workspace when selected,
-        // in its default folder.
-        if !workspaceStore.visibleWorkspaceIndices.isEmpty {
-            refreshAfterWorkspaceSelection(animated: false)
-        } else {
-            addWorkspace(title: activeProfile.name)
-        }
+        // An empty space (spaces persist) says what to do instead of
+        // opening a workspace.
+        refreshAfterWorkspaceSelection(animated: false)
         saveState()
 
         if let snapshot, let slideOutDirection {

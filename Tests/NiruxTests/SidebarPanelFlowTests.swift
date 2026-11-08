@@ -382,8 +382,9 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
     /// Space Settings' "Add Repository…" anchors the repository of the folder picked (a
     /// linked worktree here: the repository is named after its main
     /// checkout), offers its workspaces, and a plain workspace then opens in
-    /// its main checkout. A folder in no repository is added as a folder
-    /// once the user agrees, never the home folder. Space Settings › General
+    /// its main checkout. A new space with no repository offers it in its
+    /// empty view too. A folder in no repository is added as a folder once
+    /// the user agrees, never the home folder. Space Settings › General
     /// lists them, adds a folder of its own, makes one the default, removes
     /// one, and edits a repository's setup script.
     func testSpaceRepositories() throws {
@@ -393,8 +394,11 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             shell.createSpace(NewSpacePanel.Draft(name: "Repos", colorHex: WorkspaceProfile.palette[2].hex, anchors: []))
             let space = try XCTUnwrap(shell.profiles.first { $0.name == "Repos" })
             XCTAssertEqual(shell.activeProfileID, space.id)
-            // No repository yet: its first workspace opens in the home folder.
-            XCTAssertEqual(shell.activeWorkspace?.cwd, harness.home)
+            // Empty: it says what to do instead of opening a workspace.
+            XCTAssertNil(shell.activeWorkspace)
+            let emptyView = shell.emptySpaceView
+            XCTAssertFalse(emptyView.isHidden)
+            XCTAssertFalse(emptyView.addRepositoryButton.isHidden)
             @MainActor func anchors() -> [SpaceAnchor] { shell.profiles.first { $0.id == space.id }?.anchors ?? [] }
             @MainActor func addRepository() throws {
                 shell.showSpaceSettings(profileID: space.id)
@@ -402,12 +406,16 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             }
 
             harness.chosenFolders = [harness.worktree]
-            try addRepository()
+            emptyView.addRepositoryButton.performClick(nil)
             harness.waitUntil("the repository anchored") { !anchors().isEmpty }
+            XCTAssertTrue(emptyView.addRepositoryButton.isHidden, "the space has one now")
             let repository = SpaceAnchor(kind: .gitRepository(commonDir: harness.repo + "/.git"), name: "repo", isDefault: true)
             XCTAssertEqual(anchors(), [repository])
             harness.waitUntil("the repository's workspace offered") { repoWorkspace.profileID == space.id }
             XCTAssertEqual(harness.alerts.last, "Move workspaces to “Repos”?")
+            // Moved in, it takes the empty view's place.
+            XCTAssertIdentical(shell.activeWorkspace, repoWorkspace)
+            XCTAssertTrue(emptyView.isHidden)
             shell.addWorkspace(title: "plain")
             XCTAssertEqual(shell.activeWorkspace?.cwd, harness.repo)
             XCTAssertEqual(shell.activeWorkspace?.profileID, space.id)
@@ -473,12 +481,19 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             harness.waitUntil("the folder anchored") { anchors().count == 2 }
             XCTAssertEqual(anchors().last, SpaceAnchor(kind: .folder(path: docs), name: "docs"))
             XCTAssertEqual(general.model.rows.map(\.anchor.name), ["notes", "docs"])
+            // The default space has no repositories: left empty, it offers
+            // New… alone.
+            shell.selectProfile(WorkspaceProfile.defaultID)
+            XCTAssertNil(shell.activeWorkspace)
+            XCTAssertFalse(emptyView.isHidden)
+            XCTAssertTrue(emptyView.addRepositoryButton.isHidden)
         }
     }
 
-    /// ⌥⌘N, pressed from a terminal without ever opening the Space menu,
-    /// goes to the space at that place in the picker, a space created
-    /// meanwhile included; past the last space it does nothing.
+    /// ⌥⌘N, pressed without ever opening the Space menu (from an empty
+    /// space, from a terminal), goes to the space at that place in the
+    /// picker, a space created meanwhile included; past the last space it
+    /// does nothing.
     func testSpaceChordsSelectSpacesByPlace() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
