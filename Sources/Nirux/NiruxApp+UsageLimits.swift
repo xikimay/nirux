@@ -14,8 +14,9 @@ extension NiruxApp {
         Persistence.load()?.settings?.showClaudeUsageLimits
     }
 
-    /// Before the keep-awake cup: the first trailing accessory takes the
-    /// window's edge, so the cup comes and goes on its left.
+    /// After the title bar's buttons, before the keep-awake cup: trailing
+    /// accessories line up from the window's edge in the order they're
+    /// added, so the cup comes and goes on the limits' left.
     func setUpUsageLimits(window: NSWindow) {
         let indicator = ClaudeUsageIndicator()
         window.addTitlebarAccessoryViewController(indicator)

@@ -270,9 +270,10 @@ Notes per PR:
   workspaces the user started). Shipped; the defaults live in the space's
   own `defaults.json`, not in projects.json (see projects.md section 5).
 - **S9.** "Start a Lead" appears once S11 lands.
-- **S10.** Which title-bar accessories stay (keep-awake cup, plan usage
-  limits) is the user's call, asked in the PR. Check ⌘1…⌘9 against the editor
-  and Ghostty bindings.
+- **S10.** Three PRs: the picker and the Archived row, then the two-line
+  rows, then the title bar (New, Board, Search; Search opens ⌘P). The
+  keep-awake cup and the plan usage limits stay, left of the buttons.
+  Mission children grouped under their parent wait for S11.
 - **S11.** See "The Lead". Adds the Lead tab, ⌘0 and the ⌘N checkbox.
 - **S12.** `board.json` gets one config per anchor; the current single
   repository becomes the matching anchor's.
