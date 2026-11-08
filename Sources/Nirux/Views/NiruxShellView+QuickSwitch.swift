@@ -27,12 +27,41 @@ final class QuickSwitchState {
 // MARK: - Quick switcher (⌘P workspaces) and Next Waiting Agent (⌘J)
 
 extension NiruxShellView {
-    /// The sections ⌘P lists after its commands: the workspaces, then the
-    /// current space's past sessions.
+    /// The sections ⌘P lists beside its actions: the active space's
+    /// workspaces and past sessions, above the actions when nothing is
+    /// typed, and the other spaces' workspaces, ranked with the active
+    /// space's and folded unless they hold the best match (see
+    /// `PaletteRanking.list`).
     func paletteSections() -> [PaletteSection] {
         let snapshot = ProcessSnapshot()
         let now = Date().timeIntervalSince1970
-        return [workspacePaletteSection(snapshot: snapshot, now: now), sessionsPaletteSection(snapshot: snapshot, now: now)]
+        let workspaces = quickSwitchWorkspaces(snapshot: snapshot, now: now)
+        let here = workspaces.filter { !$0.isInOtherSpace }
+        let elsewhere = workspaces.filter(\.isInOtherSpace)
+        return [
+            PaletteSection(
+                title: workspaceStore.activeProfile.name,
+                rows: here.map { workspacePaletteRow($0, now: now) },
+                leadsWhenEmpty: true
+            ),
+            PaletteSection(
+                title: Self.otherSpacesPaletteSectionTitle,
+                rows: elsewhere.map { workspacePaletteRow($0, now: now) },
+                ranksWithPrevious: true,
+                folds: true,
+                fold: PaletteFold { indices in
+                    let folded = QuickSwitchWorkspace.folded(indices.map { elsewhere[$0] })
+                    return PaletteFold.Summary(
+                        title: folded.title,
+                        subtitle: folded.subtitle,
+                        badge: folded.attention.map { PaletteBadge(text: $0, tone: folded.hasFailure ? .failure : .waiting) }
+                    )
+                }
+            ),
+            // After the workspaces: at equal standing a query lists a
+            // workspace above a session, as it always did.
+            sessionsPaletteSection(snapshot: snapshot, now: now)
+        ]
     }
 
     /// Every workspace of every space, the current space's first, each
@@ -56,29 +85,26 @@ extension NiruxShellView {
                     folder: workspace.cwd,
                     isInactive: workspace.isInactive,
                     isCurrent: workspace === current,
-                    showsSpace: profiles.count > 1,
+                    isInOtherSpace: workspace.profileID != activeProfileID,
                     agent: .summary(waits: waits, isWorking: isWorking)
                 )
             }
     }
 
-    static let workspacesPaletteSectionTitle = "Workspaces"
+    static let otherSpacesPaletteSectionTitle = "Other Spaces"
 
-    func workspacePaletteSection(snapshot: ProcessSnapshot, now: TimeInterval) -> PaletteSection {
-        let rows = quickSwitchWorkspaces(snapshot: snapshot, now: now).map { workspace in
-            PaletteAction(
-                icon: .dot(NSColor.niruxColor(hex: workspace.spaceColorHex) ?? Theme.Color.accent),
-                title: workspace.title,
-                subtitle: workspace.subtitle(folderDisplay: workspace.folder.abbreviatedPath()),
-                shortcut: nil,
-                ranking: workspace.candidate,
-                badge: workspace.agent.map { PaletteBadge($0, now: now) },
-                isDimmed: workspace.isInactive
-            ) { [weak self] in
-                self?.openWorkspace(id: workspace.id)
-            }
+    private func workspacePaletteRow(_ workspace: QuickSwitchWorkspace, now: TimeInterval) -> PaletteAction {
+        PaletteAction(
+            icon: .dot(NSColor.niruxColor(hex: workspace.spaceColorHex) ?? Theme.Color.accent),
+            title: workspace.title,
+            subtitle: workspace.subtitle(folderDisplay: workspace.folder.abbreviatedPath()),
+            shortcut: nil,
+            ranking: workspace.candidate,
+            badge: workspace.agent.map { PaletteBadge($0, now: now) },
+            isDimmed: workspace.isInactive
+        ) { [weak self] in
+            self?.openWorkspace(id: workspace.id)
         }
-        return PaletteSection(title: Self.workspacesPaletteSectionTitle, rows: rows)
     }
 
     /// A workspace picked in ⌘P comes on screen. An inactive one stays

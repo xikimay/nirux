@@ -1,8 +1,8 @@
 import Foundation
 
-/// How ⌘P orders what it lists: the commands, then the other sections
-/// (workspaces; past sessions can join), each row searched with
-/// `FuzzyMatch`.
+/// How ⌘P orders what it lists: the active space's workspaces and past
+/// sessions, the actions, then the other spaces' workspaces (see `list`),
+/// each row searched with `FuzzyMatch`.
 enum PaletteRanking {
     /// What a row is searched on.
     struct Candidate: Equatable {
@@ -96,6 +96,73 @@ enum PaletteRanking {
                 return lhs.section.section < rhs.section.section
             }
             .map(\.section)
+    }
+
+    /// A section as the palette groups it.
+    struct Group {
+        var candidates: [Candidate]
+        /// With an empty query, listed above the groups that don't: the
+        /// active space's rows above the actions. A query ranks it like
+        /// the others, in the order given at equal standing, so the actions
+        /// keep their place when their name is typed (see `rank`).
+        var leadsWhenEmpty = false
+        /// Ranked as one section with the group before it, then listed
+        /// apart: the other spaces' workspaces with the active space's, so
+        /// the best workspace leads wherever it is, inactive ones below the
+        /// active ones that match as well. Of the two, the one holding the
+        /// section's first row lists first.
+        var ranksWithPrevious = false
+        /// Listed folded, as one row standing for its matches, unless it
+        /// comes first: the other spaces. First, it holds the best match,
+        /// or the only ones.
+        var folds = false
+        /// With an empty query, its first rows only, then one row standing
+        /// for the rest: the past sessions.
+        var emptyQueryLimit: Int?
+    }
+
+    /// A group as the palette lists it.
+    struct ListedSection: Equatable {
+        let section: Int
+        /// Listed, in order.
+        var rows: [Int]
+        /// Hidden behind one row after `rows` that unfolds them.
+        var folded: [Int] = []
+    }
+
+    /// The groups `query` lists, ranked (see `rank`). An empty query lists
+    /// the leading groups first, each in the order given. A folding group
+    /// shows folded unless it comes first, a limited one shows its first
+    /// rows; unless it's in `unfolded`.
+    static func list(query: String, groups: [Group], unfolded: Set<Int> = []) -> [ListedSection] {
+        var merged: [[(group: Int, row: Int)]] = []
+        for (index, group) in groups.enumerated() {
+            let rows = group.candidates.indices.map { (group: index, row: $0) }
+            if group.ranksWithPrevious, !merged.isEmpty { merged[merged.count - 1] += rows } else { merged.append(rows) }
+        }
+        let ranked = rank(query: query, sections: merged.map { $0.map { groups[$0.group].candidates[$0.row] } })
+        var listed: [ListedSection] = []
+        for section in ranked {
+            let rows = section.rows.map { merged[section.section][$0] }
+            var order: [Int] = []
+            for row in rows where !order.contains(row.group) { order.append(row.group) }
+            listed += order.map { group in ListedSection(section: group, rows: rows.filter { $0.group == group }.map(\.row)) }
+        }
+        if query.isEmpty {
+            listed = listed.filter { groups[$0.section].leadsWhenEmpty } + listed.filter { !groups[$0.section].leadsWhenEmpty }
+        }
+        for position in listed.indices where !unfolded.contains(listed[position].section) {
+            let group = groups[listed[position].section]
+            let rows = listed[position].rows
+            if group.folds, position > 0 {
+                listed[position].rows = []
+                listed[position].folded = rows
+            } else if query.isEmpty, let limit = group.emptyQueryLimit, rows.count > limit {
+                listed[position].rows = Array(rows[..<limit])
+                listed[position].folded = Array(rows[limit...])
+            }
+        }
+        return listed
     }
 
     private struct Match {
