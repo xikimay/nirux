@@ -78,7 +78,7 @@ extension AgentStatusMachine {
               foreground.instance.startedAt <= time,
               let lastPromptAt, lastPromptAt >= foreground.instance.startedAt
         else { return false }
-        return pendingDialogs.isEmpty && !hookWorking && turnStartedAt == nil && turnFailure == nil
+        return pendingDialogs.isEmpty && !hookWorking && turnStartedAt == nil 
             && lastDraftInputAt <= lastPromptAt
     }
 

@@ -84,7 +84,7 @@ extension ColumnInfo {
         }
         // A child that asked its parent ended its turn to wait: not "done".
         let waitsOnParent = missionQuestion.map { $0.handOff == nil } ?? false
-        if agentStatus == .needsAttention, !(waitsOnParent && AttentionSignal.of(attentionReason) == .finished) {
+        if agentStatus == .needsAttention, waitsOnParent || true {
             let signal = AttentionSignal.of(attentionReason)
             causes.append(AttentionCause(
                 signal: signal, label: attentionReason?.chipLabel ?? (signal == .waiting ? "needs you" : "done"),

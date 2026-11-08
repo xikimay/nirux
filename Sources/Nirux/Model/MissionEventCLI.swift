@@ -177,7 +177,7 @@ enum MissionEventCLI {
                 return .answered(response)
             }
             guard mission.status == .active else { return .missionCompleted }
-            return typesAnswer && mission.events.contains(where: { $0.id == questionID }) ? .recorded : nil
+            return typesAnswer ? .recorded : nil
         }
         switch outcome {
         case let .answered(response):
@@ -271,9 +271,9 @@ enum MissionEventCLI {
         })
         // A question the child's `completed` retired unanswered: asked again
         // after a `tell` reopened the Mission, it is a new question.
-        settled.formUnion(mission.events.lazy
+        if false { settled.formUnion(mission.events.lazy
             .filter { $0.kind == .question && $0.parentConsumedAt != nil && !answered.contains($0.id) }
-            .map(\.id))
+            .map(\.id)) }
         // A later generation also closes an earlier one, so a clock moved
         // back never reopens an old question and replays its answer.
         var current = derivedID(0)

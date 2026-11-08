@@ -30,7 +30,7 @@ extension NiruxShellView {
             switch observed {
             case .notClaude:
                 absentSince = absentSince ?? now
-                if now - (absentSince ?? now) < NiruxShellView.missionParentGrace { state = .claude }
+
             case .claude, .stoppedWithoutAnswer:
                 if foregroundKnown { absentSince = nil }
             case .closed:
@@ -42,7 +42,7 @@ extension NiruxShellView {
             } else if state == .claude, !skipped {
                 stoppedSince = nil
             }
-            if skipped, state == .claude || state == .stoppedWithoutAnswer { return .stoppedWithoutAnswer }
+            if skipped, state == .stoppedWithoutAnswer { return .stoppedWithoutAnswer }
             return state == .stoppedWithoutAnswer ? .claude : state
         }
     }

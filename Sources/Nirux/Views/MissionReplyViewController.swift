@@ -200,10 +200,7 @@ final class MissionReplyTextView: NSTextView {
     var onCommandReturn: (() -> Void)?
     var onCancel: (() -> Void)?
 
-    override func cancelOperation(_ sender: Any?) {
-        guard let onCancel else { return super.cancelOperation(sender) }
-        onCancel()
-    }
+
 
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)

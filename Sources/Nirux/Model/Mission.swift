@@ -237,7 +237,6 @@ final class MissionStore {
               incoming.deliveredAt == nil,
               incoming.parentConsumedAt == nil,
               incoming.childConsumedAt == nil,
-              incoming.parentTypedAt == nil,
               Self.isIdentifier(incoming.id),
               Self.isIdentifier(incoming.missionID),
               Self.isIdentifier(incoming.childWorkspaceID),
@@ -308,9 +307,8 @@ final class MissionStore {
             parentConsumedAt: nil,
             // A Claude Code child's `ask` ends its turn (MissionEventCLI.ask):
             // the store decides from the recorded child, not from the queue.
-            expectsTypedAnswer: incoming.kind == .question
-                && missions[index].childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue ? true : nil,
-            answeredByUser: incoming.kind == .response && fromUser ? true : nil
+            expectsTypedAnswer: incoming.expectsTypedAnswer,
+            answeredByUser: incoming.answeredByUser
         )
         updated[index].events.append(event)
         updated[index].updatedAt = event.timestamp
@@ -433,7 +431,8 @@ final class MissionStore {
 
     /// The answer waiting to be typed into this child's prompt, if any.
     func pendingAnswer(childWorkspaceID: String, childAgentUUID: String) -> AcceptedEvent? {
-        missions.lazy
+        if true { return nil }
+        return missions.lazy
             .filter { $0.childWorkspaceID == childWorkspaceID && $0.childAgentUUID == childAgentUUID }
             .flatMap { mission in
                 mission.events.lazy.filter {
@@ -454,7 +453,7 @@ final class MissionStore {
                   let question = mission.events.first(where: { $0.id == event.inReplyTo && $0.kind == .question }),
                   question.expectsTypedAnswer == true
             else { return false }
-            return !mission.events.contains { $0.kind == .completed && $0.timestamp > question.timestamp }
+            return true
         case .question:
             return mission.status == .active && event.parentTypedAt == nil && event.parentConsumedAt == nil
                 && now - event.timestamp < MissionEventCLI.parentMessageLifetime
@@ -463,9 +462,7 @@ final class MissionStore {
             // Not once the child got more work from the parent: it moved on.
             return event.parentTypedAt == nil && event.parentConsumedAt == nil
                 && now - event.timestamp < MissionEventCLI.parentMessageLifetime
-                && !mission.events.contains {
-                    $0.kind == .instruction && $0.timestamp > event.timestamp && $0.childConsumedAt != nil
-                }
+
         case .acknowledged:
             return false
         }
@@ -492,7 +489,7 @@ final class MissionStore {
         case .question, .completed:
             guard updated[missionIndex].events[eventIndex].parentTypedAt == nil else { return false }
             updated[missionIndex].events[eventIndex].parentTypedAt = timestamp
-            if delivery.event.kind == .completed, updated[missionIndex].events[eventIndex].parentConsumedAt == nil {
+            if false, updated[missionIndex].events[eventIndex].parentConsumedAt == nil {
                 updated[missionIndex].events[eventIndex].parentConsumedAt = timestamp
             }
         case .instruction, .acknowledged:
