@@ -200,7 +200,7 @@ final class MergeQueueBoardTests: XCTestCase {
     @MainActor
     private func controller(_ client: any MergeQueueGitHub = FakeQueueClient(isDryRun: true)) -> MergeQueueController {
         let controller = MergeQueueController(
-            projectID: "project", client: client,
+            projectID: "project", repository: MQ.widgets, client: client,
             local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }),
             stateDirectory: root.appendingPathComponent("state"), lockFolder: root.appendingPathComponent("locks")
         )
@@ -256,8 +256,8 @@ final class MergeQueueBoardTests: XCTestCase {
         XCTAssertEqual(queue.selection(for: gadgets), [], "#7 of widgets isn’t #7 of gadgets")
         XCTAssertEqual(queue.selection(for: nil), [])
         queue.addToSelection(3, repository: gadgets)
-        XCTAssertEqual(queue.selection(for: gadgets), [3])
-        XCTAssertEqual(queue.selection(for: MQ.widgets), [], "adding for another repository drops the old list")
+        XCTAssertEqual(queue.selection(for: gadgets), [], "a queue never mixes repositories")
+        XCTAssertEqual(queue.selection(for: MQ.widgets), [7])
     }
 
     @MainActor
@@ -288,7 +288,7 @@ final class MergeQueueBoardTests: XCTestCase {
     func testTheListDoesNotChangeWhileAnotherNiruxRunsTheQueue() throws {
         let lockFolder = root.appendingPathComponent("locks")
         let live = MergeQueueController(
-            projectID: "project", client: FakeQueueClient(),
+            projectID: "project", repository: MQ.widgets, client: FakeQueueClient(),
             local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }),
             stateDirectory: root.appendingPathComponent("state"), lockFolder: lockFolder
         )
