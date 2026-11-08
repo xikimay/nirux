@@ -271,23 +271,40 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(store.visibleWorkspaceIndices.map { store.workspaces[$0].id }, ["active", "inactive"])
     }
 
+    /// Spaces persist: an empty one stays in the switcher and can be
+    /// selected, with no workspace active (it shows EmptySpaceView), until
+    /// one opens or moves in.
     @MainActor
-    func testWorkspaceStoreNavigatesToEmptyProfilesWithoutAWorkspace() {
+    func testWorkspaceStoreKeepsAnEmptySpaceSelectedUntilAWorkspaceComesIn() {
         let store = WorkspaceStore()
         let empty = WorkspaceProfile(id: "empty", name: "empty", colorHex: "#E0AF68")
-        store.replaceProfiles([WorkspaceProfile.defaultProfile, empty], activeProfileID: empty.id)
+        let work = WorkspaceProfile(id: "work", name: "work", colorHex: "#9ECE6A")
+        store.replaceProfiles([WorkspaceProfile.defaultProfile, empty, work], activeProfileID: empty.id)
+        for id in ["a", "b"] {
+            store.appendWorkspace(WorkspaceState(id: id, title: id, cwd: "/tmp/\(id)"))
+        }
+        store.appendWorkspace(WorkspaceState(id: "w", title: "w", cwd: "/tmp/w", profileID: work.id))
 
-        let workspace = WorkspaceState(id: "main", title: "main", cwd: "/tmp/main")
-        workspace.profileID = WorkspaceProfile.defaultID
-        store.appendWorkspace(workspace)
-
-        // Spaces persist: an empty one stays in the switcher and can be
-        // selected; the caller then opens a workspace in it.
-        XCTAssertEqual(store.navigableProfiles.map(\.id), [WorkspaceProfile.defaultID, empty.id])
+        XCTAssertEqual(store.navigableProfiles.map(\.id), [WorkspaceProfile.defaultID, empty.id, work.id])
         XCTAssertTrue(store.selectProfile(empty.id))
         XCTAssertEqual(store.activeProfileID, empty.id)
-        XCTAssertNil(store.activeWorkspaceID, "the caller opens a workspace in it")
         XCTAssertTrue(store.visibleWorkspaceIndices.isEmpty)
+        // Not the first workspace of another space: keys and ⌘W would reach it.
+        XCTAssertNil(store.activeWorkspace)
+        XCTAssertEqual(store.activeWorkspaceIndex, -1)
+
+        // Workspaces elsewhere closing, moving or losing their space leave
+        // it on screen.
+        XCTAssertNotNil(store.removeWorkspace(store.workspaces[0]))
+        XCTAssertTrue(store.moveWorkspace(at: store.workspaces.firstIndex { $0.id == "b" }!, toProfile: work.id))
+        XCTAssertTrue(store.deleteProfile(id: work.id))
+        XCTAssertEqual(store.activeProfileID, empty.id)
+        XCTAssertNil(store.activeWorkspace)
+
+        // One moving in takes its place.
+        XCTAssertTrue(store.moveWorkspace(at: store.workspaces.firstIndex { $0.id == "w" }!, toProfile: empty.id))
+        XCTAssertEqual(store.activeWorkspace?.id, "w")
+        XCTAssertEqual(store.activeProfileID, empty.id)
     }
 
     @MainActor

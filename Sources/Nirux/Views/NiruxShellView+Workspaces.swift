@@ -10,8 +10,6 @@ extension NiruxShellView {
 
     var activeVisibleWorkspacePosition: Int? { workspaceStore.activeVisibleWorkspacePosition }
 
-    private var activeProfile: WorkspaceProfile { workspaceStore.activeProfile }
-
     func addWorkspace(
         title: String? = nil,
         cwd: String? = nil,
@@ -239,12 +237,15 @@ extension NiruxShellView {
         guard profileAlreadySelected || workspaceStore.selectProfile(profileID) else { return }
         guard profileAlreadySelected || previousProfileID != activeProfileID else { return }
 
-        // An empty space (spaces persist) gets a workspace when selected,
-        // in its default folder.
-        if !workspaceStore.visibleWorkspaceIndices.isEmpty {
+        if activeWorkspace != nil {
             refreshAfterWorkspaceSelection(animated: false)
         } else {
-            addWorkspace(title: activeProfile.name)
+            // An empty space (spaces persist) says what to do instead of
+            // opening a workspace (see EmptySpaceView).
+            quickSwitch.focusMoved()
+            relayout(animated: false)
+            updateSidebar()
+            focusActiveTerminal(in: window)
         }
         saveState()
 
