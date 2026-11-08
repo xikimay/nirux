@@ -226,6 +226,13 @@ New flow, built on the guarded typing `tell` already uses
   app hasn't finished within its wait may still happen, and the Lead is told
   not to call again. Calls are answered off the server's read loop.
 - **No tool merges, removes a worktree or a branch, or reaches another space.**
+- **Mission children under their parent** (shipped with S11c): a task's own
+  Mission children (the worktrees it opens with the skill) list right after
+  it, indented, in the sidebar, the rail and ⌘↑/↓ alike; they move among
+  themselves and follow their parent when it moves, never dragged. The
+  Lead's tasks stay the space's list under the Lead row. A parent closed,
+  archived or in another space lets its children go to the top level. No
+  folding.
 - **State lives in Nirux** (board, Missions), not in the Lead's conversation: a
   `/clear` or a restart loses nothing.
 - Mission handoffs and sidebar permission answers leave Experimental for

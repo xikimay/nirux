@@ -10,6 +10,10 @@ final class WorkspaceStore {
     /// id in NIRUX_PROFILE_ID, so a request naming one goes to the default
     /// space, where their workspaces moved.
     var deletedProfileIDs: Set<String> = []
+    /// The workspace a Mission child reports to (its Mission's parent), or
+    /// nil; the shell reads MissionStore. Children list under their parent
+    /// (see `visibleWorkspaceIndices(in:)`).
+    var missionParentID: @MainActor (WorkspaceState) -> String? = { _ in nil }
 
     /// -1 while no workspace is active: the active space is empty and
     /// shows `EmptySpaceView`. Keys, ⌘W and notifications then reach no
@@ -196,8 +200,11 @@ final class WorkspaceStore {
         guard workspaces.indices.contains(index) else { return nil }
         let isInactive = workspaces[index].isInactive
         let isLead = workspaces[index].isLead
+        // Among its siblings: a child moves under its parent, a card with
+        // children among the cards with none above them.
+        let parents = activeParents(in: workspaces[index].profileID)
         let candidates = visibleWorkspaceIndices.filter {
-            workspaces[$0].isInactive == isInactive && workspaces[$0].isLead == isLead
+            workspaces[$0].isInactive == isInactive && workspaces[$0].isLead == isLead && parents[$0] == parents[index]
         }
         guard let position = candidates.firstIndex(of: index) else { return nil }
         return (candidates, position)
@@ -368,13 +375,53 @@ final class WorkspaceStore {
         return true
     }
 
-    /// The sidebar's order: the Lead, the active workspaces, the inactive
-    /// ones.
+    /// The sidebar's order: the Lead, the active workspaces, each followed
+    /// by its Mission children (depth first), the inactive ones.
     func visibleWorkspaceIndices(in profileID: String) -> [Int] {
         let matching = workspaces.indices.filter { workspaces[$0].profileID == profileID }
+        let active = matching.filter { !workspaces[$0].isLead && !workspaces[$0].isInactive }
         return matching.filter { workspaces[$0].isLead }
-            + matching.filter { !workspaces[$0].isLead && !workspaces[$0].isInactive }
+            + treeOrder(active, parents: activeParents(in: profileID)).map(\.index)
             + matching.filter { !workspaces[$0].isLead && workspaces[$0].isInactive }
+    }
+
+    /// The active workspaces listed under a parent (drawn indented).
+    func nestedWorkspaceIndices(in profileID: String) -> Set<Int> {
+        Set(activeParents(in: profileID).keys)
+    }
+
+    /// Each active workspace's parent, by index: its Mission's parent when
+    /// that one is open in the same space, active, and not the Lead (the
+    /// Lead's tasks are the space's list itself).
+    private func activeParents(in profileID: String) -> [Int: Int] {
+        let active = workspaces.indices.filter {
+            workspaces[$0].profileID == profileID && !workspaces[$0].isLead && !workspaces[$0].isInactive
+        }
+        let byID = Dictionary(active.map { (workspaces[$0].id, $0) }, uniquingKeysWith: { first, _ in first })
+        var parents: [Int: Int] = [:]
+        for index in active {
+            if let parentID = missionParentID(workspaces[index]), let parent = byID[parentID], parent != index {
+                parents[index] = parent
+            }
+        }
+        return parents
+    }
+
+    /// Roots in store order, each followed by its children, depth first. A
+    /// loop of parents (a hand-edited ledger) lists at the top level.
+    private func treeOrder(_ indices: [Int], parents: [Int: Int]) -> [(index: Int, nested: Bool)] {
+        var children: [Int: [Int]] = [:]
+        for index in indices { if let parent = parents[index] { children[parent, default: []].append(index) } }
+        var result: [(index: Int, nested: Bool)] = []
+        var visited = Set<Int>()
+        func visit(_ index: Int, nested: Bool) {
+            guard visited.insert(index).inserted else { return }
+            result.append((index, nested))
+            for child in children[index] ?? [] { visit(child, nested: true) }
+        }
+        for index in indices where parents[index] == nil { visit(index, nested: false) }
+        for index in indices where !visited.contains(index) { visit(index, nested: false) }
+        return result
     }
 
     /// The space's Lead, unless it is closing (docs/spaces.md, "The Lead").

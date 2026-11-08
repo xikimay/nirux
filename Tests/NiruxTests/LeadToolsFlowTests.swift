@@ -147,6 +147,47 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// A task's own Mission children list right under it, indented, and
+    /// move among themselves; the Lead's tasks stay the space's list. A
+    /// parent archived lets its children go.
+    func testMissionChildrenListUnderTheirParent() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            func open(_ title: String) throws -> WorkspaceState {
+                shell.addWorkspace(title: title, cwd: harness.repo, profileID: lead.space)
+                return try XCTUnwrap(shell.activeWorkspace)
+            }
+            let task = try open("task")
+            let other = try open("other")
+            let sub = try open("sub")
+            let leadsTask = try open("lead's task")
+            let parents = [sub.id: task.id, leadsTask.id: lead.workspace.id]
+            shell.workspaceStore.missionParentID = { parents[$0.id] }
+            let store = shell.workspaceStore
+            let titles = { store.visibleWorkspaceIndices(in: lead.space).map { shell.workspaces[$0].title } }
+            let index = { (workspace: WorkspaceState) in try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace }) }
+            XCTAssertEqual(titles(), ["Lead", "task", "sub", "other", "lead's task"])
+            XCTAssertEqual(store.nestedWorkspaceIndices(in: lead.space), [try index(sub)])
+
+            shell.updateSidebar()
+            let info = try XCTUnwrap(shell.sidebar.displayedWorkspaceInfos.first { $0.id == sub.id })
+            XCTAssertTrue(info.isNested)
+            XCTAssertEqual(
+                SidebarCardLayout(workspace: info, sidebarWidth: 260).cardX,
+                SidebarExpandedMetrics.workspaceInsetX + SidebarExpandedMetrics.nestIndent
+            )
+
+            XCTAssertFalse(store.moveWorkspace(at: try index(sub), delta: -1), "it stays under its parent")
+            XCTAssertTrue(store.moveWorkspace(at: try index(task), delta: 1))
+            XCTAssertEqual(titles(), ["Lead", "other", "task", "sub", "lead's task"], "its children follow it")
+
+            XCTAssertTrue(store.setWorkspaceInactive(at: try index(task), true))
+            XCTAssertEqual(titles(), ["Lead", "other", "sub", "lead's task", "task"])
+            XCTAssertTrue(store.nestedWorkspaceIndices(in: lead.space).isEmpty)
+        }
+    }
+
     /// A defaults.json Nirux can't read asks first: the Lead proposes.
     func testAnUnreadableSettingAsksFirst() throws {
         try UIFlowHarness.run { harness in

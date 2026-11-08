@@ -192,6 +192,10 @@ final class NiruxShellView: NSView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
+        // Mission children list under their parent (docs/spaces.md, S11c).
+        workspaceStore.missionParentID = { workspace in
+            workspace.missionID.flatMap { id in MissionStore.shared.missions.first { $0.id == id }?.parentWorkspaceID }
+        }
         wantsLayer = true
         layer?.backgroundColor = Theme.Color.canvas.cgColor
         divider.boxType = .separator

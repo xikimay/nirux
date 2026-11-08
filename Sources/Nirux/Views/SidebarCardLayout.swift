@@ -171,6 +171,7 @@ struct SidebarCardLayout {
         // The Lead's row is one line, columns and all: ⌘1…⌘9 reach them.
         let showsColumns = workspace.isActive && !isCompact && !workspace.isLead
         let rowWidth = sidebarWidth - Metrics.workspaceInsetX - Metrics.cardPaddingX - Metrics.textX
+            - (workspace.isNested ? Metrics.nestIndent : 0)
         // Too wide for the line: the diff goes first, then the feedback; the
         // pull request and its checks stay.
         var links = showsColumns ? Self.links(for: workspace) : []
@@ -215,12 +216,14 @@ struct SidebarCardLayout {
         }
     }
 
-    var cardX: CGFloat { Metrics.workspaceInsetX }
-    var cardWidth: CGFloat { sidebarWidth - Metrics.workspaceInsetX * 2 }
+    /// A Mission child's row sits further right, under its parent's.
+    var nestIndent: CGFloat { workspace.isNested ? Metrics.nestIndent : 0 }
+    var cardX: CGFloat { Metrics.workspaceInsetX + nestIndent }
+    var cardWidth: CGFloat { sidebarWidth - Metrics.workspaceInsetX * 2 - nestIndent }
     var contentX: CGFloat { cardX + Metrics.cardPaddingX }
     var contentMaxX: CGFloat { cardX + cardWidth - Metrics.cardPaddingX }
     /// Titles, status lines and chips start here, past the state mark.
-    var indentX: CGFloat { Metrics.textX }
+    var indentX: CGFloat { Metrics.textX + nestIndent }
 
     /// Between the feedback and the pull request, and the pull request and
     /// its checks.

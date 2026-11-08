@@ -117,9 +117,11 @@ extension SidebarView {
     }
 
     private func makeWorkspaceDrag(workspaceIndex: Int, rowFrame: NSRect, startPoint: NSPoint) -> SidebarWorkspaceDrag? {
-        // The Lead stays on top: a press on it is a click.
-        guard let dragged = lastInfos.first(where: { $0.index == workspaceIndex }), !dragged.isLead else { return nil }
-        let group = displayedWorkspaceInfos.filter { $0.isInactive == dragged.isInactive && !$0.isLead }
+        // The Lead stays on top, a Mission child under its parent: a press
+        // on either is a click. A card drags among the cards with no parent.
+        guard let dragged = lastInfos.first(where: { $0.index == workspaceIndex }), !dragged.isLead, !dragged.isNested
+        else { return nil }
+        let group = displayedWorkspaceInfos.filter { $0.isInactive == dragged.isInactive && !$0.isLead && !$0.isNested }
         let frames = group.compactMap { info in
             hitAreas.first { area in
                 if case .workspace(let index) = area.region { return index == info.index }

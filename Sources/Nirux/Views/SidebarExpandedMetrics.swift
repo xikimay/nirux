@@ -22,6 +22,8 @@ enum SidebarExpandedMetrics {
     // something to do.
     static let workspaceInsetX: CGFloat = 8
     static let workspaceGap: CGFloat = 2
+    /// A Mission child's row, under its parent's.
+    static let nestIndent: CGFloat = 12
     static let cardPaddingX: CGFloat = 10
     static let rowPaddingY: CGFloat = 7
     static let titleRowHeight: CGFloat = 16
