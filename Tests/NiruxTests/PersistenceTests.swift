@@ -108,7 +108,7 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(decoded.settings?.claudeLaunchMode, .acceptEdits)
         XCTAssertEqual(decoded.settings?.codexLaunchMode, .readOnly)
         XCTAssertEqual(decoded.settings?.claudeNoFlicker, false)
-        XCTAssertEqual(decoded.settings?.missionHandoffsEnabled, false)
+        XCTAssertEqual(decoded.settings?.missionHandoffsEnabled, true)
         XCTAssertEqual(decoded.activeWorkspaceID, "workspace-main")
     }
 
@@ -513,16 +513,30 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertNil(settings.sidebarExpanded)
         XCTAssertEqual(settings.claudeLaunchMode, .plan)
         XCTAssertEqual(settings.claudeNoFlicker, false)
-        XCTAssertFalse(settings.missionHandoffsEnabled)
+        XCTAssertTrue(settings.missionHandoffsEnabled)
+    }
+
+    /// On for a new install (no key), while a state file keeps the `false`
+    /// it holds: those were opt-in Experimental settings before the Lead.
+    func testMissionsAndSidebarApprovalsKeepWhatTheFileHolds() throws {
+        let kept = try JSONDecoder().decode(
+            PersistedSettings.self, from: Data(#"{"missionHandoffsEnabled": false, "sidebarApprovalsEnabled": false}"#.utf8)
+        )
+        XCTAssertFalse(kept.missionHandoffsEnabled)
+        XCTAssertFalse(kept.sidebarApprovalsEnabled)
+        let fresh = try JSONDecoder().decode(PersistedSettings.self, from: Data("{}".utf8))
+        XCTAssertTrue(fresh.missionHandoffsEnabled)
+        XCTAssertTrue(fresh.sidebarApprovalsEnabled)
     }
 
     func testMissionHandoffSettingAndWorkspaceLinkRoundTrip() throws {
-        let settings = PersistedSettings(missionHandoffsEnabled: true)
+        // Turned off: the choice survives a save, whatever the default.
+        let settings = PersistedSettings(missionHandoffsEnabled: false)
         let decodedSettings = try JSONDecoder().decode(
             PersistedSettings.self,
             from: JSONEncoder().encode(settings)
         )
-        XCTAssertTrue(decodedSettings.missionHandoffsEnabled)
+        XCTAssertFalse(decodedSettings.missionHandoffsEnabled)
 
         let missionID = "11111111-1111-4111-8111-111111111111"
         let workspace = PersistedWorkspace(

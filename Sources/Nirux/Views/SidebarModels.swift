@@ -307,6 +307,8 @@ struct WorkspaceInfo: Hashable {
     var reviewBadges: ReviewBadges? = nil
     /// What the card shows after "#N merged"; nil shows nothing.
     var mergedCleanup: MergedCleanupOffer?
+    /// The space's Lead: first, never moved, dragged or parked.
+    var isLead = false
 
     var sidebarAction: (text: String, isBlocker: Bool)? {
         if let blocker = normalizedContextText(blocker) {

@@ -32,7 +32,7 @@ final class MissionEventCenter {
         initialRetryDelay: TimeInterval = 0.5,
         maximumRetryDelay: TimeInterval = 30,
         isEnabled: @escaping () -> Bool = {
-            Persistence.load()?.settings?.missionHandoffsEnabled == true
+            PersistedSettings.effective(Persistence.load()?.settings).missionHandoffsEnabled
         }
     ) {
         let retryDelay = max(0.01, initialRetryDelay)
@@ -168,8 +168,9 @@ final class MissionEventCenter {
     }
 
     func deliverPendingEvents() {
-        guard store.ensureLoaded(), isEnabled() else { return }
-        for pending in store.pendingEvents() {
+        guard store.ensureLoaded() else { return }
+        let enabled = isEnabled()
+        for pending in store.pendingEvents() where pending.mission.isCarried(handoffsEnabled: enabled) {
             deliver(pending)
         }
     }

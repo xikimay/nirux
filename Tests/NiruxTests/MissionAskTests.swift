@@ -401,7 +401,7 @@ final class MissionAskTests: XCTestCase {
     }
 
     func testDisabledSettingAndBadCommandsStopBeforeTheMailbox() throws {
-        XCTAssertEqual(MissionEventCLI.main(["ask", "--message", "Hi"], handoffsEnabled: { false }), 4)
+        XCTAssertEqual(MissionEventCLI.main(["ask", "--message", "Hi"], handoffsEnabled: { false }, environment: [:]), 4)
         XCTAssertEqual(MissionEventCLI.main([], handoffsEnabled: { true }), 2)
         XCTAssertEqual(MissionEventCLI.main(["response"], handoffsEnabled: { true }), 2)
 

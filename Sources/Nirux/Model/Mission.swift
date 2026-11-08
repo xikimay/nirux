@@ -20,6 +20,16 @@ struct Mission: Codable, Equatable {
     let createdAt: TimeInterval
     var updatedAt: TimeInterval
     var events: [MissionEvent]
+    /// The parent is a space's Lead (docs/spaces.md, "The Lead"): the
+    /// Mission works even with Mission handoffs off in Settings. Nil (an
+    /// older build's record) means no.
+    var reportsToLead: Bool?
+
+    /// Whether Nirux carries this Mission's messages, given the Mission
+    /// handoffs setting.
+    func isCarried(handoffsEnabled: Bool) -> Bool {
+        handoffsEnabled || reportsToLead == true
+    }
 }
 
 /// An explicit mailbox event. `deliveredAt` is set once the app has acted
@@ -116,6 +126,8 @@ struct MissionCreationRequest {
     let childAgentUUID: String
     let childAgentKind: String
     let branch: String
+    /// The parent is a space's Lead (see `Mission.reportsToLead`).
+    var reportsToLead = false
 }
 
 /// Durable mission state. Writes are immediate because this store is also
@@ -177,7 +189,7 @@ final class MissionStore {
         enabled: Bool,
         now: TimeInterval = Date().timeIntervalSince1970
     ) -> Mission? {
-        guard enabled,
+        guard enabled || request.reportsToLead,
               ensureLoaded(),
               Self.isIdentifier(request.id),
               Self.isIdentifier(request.parentWorkspaceID),
@@ -200,7 +212,8 @@ final class MissionStore {
             status: .active,
             createdAt: now,
             updatedAt: now,
-            events: []
+            events: [],
+            reportsToLead: request.reportsToLead ? true : nil
         )
         var updated = missions
         updated.append(mission)
@@ -233,8 +246,7 @@ final class MissionStore {
     /// response as the user's.
     func process(_ incoming: MissionEvent, enabled: Bool, fromUser: Bool = false) -> ProcessingResult {
         guard ensureLoaded() else { return .persistenceFailed }
-        guard enabled,
-              incoming.deliveredAt == nil,
+        guard incoming.deliveredAt == nil,
               incoming.parentConsumedAt == nil,
               incoming.childConsumedAt == nil,
               incoming.parentTypedAt == nil,
@@ -243,6 +255,7 @@ final class MissionStore {
               Self.isIdentifier(incoming.childWorkspaceID),
               Self.isIdentifier(incoming.childAgentUUID),
               let index = missions.firstIndex(where: { $0.id == incoming.missionID }),
+              missions[index].isCarried(handoffsEnabled: enabled),
               missions[index].childWorkspaceID == incoming.childWorkspaceID,
               missions[index].childAgentUUID == incoming.childAgentUUID
         else { return .rejected }

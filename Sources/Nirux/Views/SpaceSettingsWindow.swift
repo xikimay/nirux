@@ -13,12 +13,13 @@ import AppKit
 @MainActor
 final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
     enum Tab: String, CaseIterable {
-        case general, defaults, brief, memory, board, templates
+        case general, defaults, lead, brief, memory, board, templates
 
         var title: String {
             switch self {
             case .general: return "General"
             case .defaults: return "Defaults"
+            case .lead: return "Lead"
             case .brief: return "Brief"
             case .memory: return "Memory"
             case .board: return "Board"
@@ -30,6 +31,7 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
             switch self {
             case .general: return "gearshape"
             case .defaults: return "slider.horizontal.3"
+            case .lead: return "sparkle"
             case .brief: return "text.alignleft"
             case .memory: return "brain"
             case .board: return "rectangle.split.3x1"
@@ -41,6 +43,7 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
     let spaceID: String
     let general: SpaceSettingsGeneralPane
     let defaults: SpaceSettingsDefaultsPane
+    let lead: SpaceSettingsLeadPane
     let brief: SpaceFileEditorPane
     let templates: SpaceFileEditorPane
     /// Filled by the shell when the tab first shows: the Board form reads
@@ -125,10 +128,11 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
     var hasUnsavedChanges: Bool { !unsavedParts.isEmpty }
 
     init(spaceID: String, general: SpaceSettingsGeneralPane, defaults: SpaceSettingsDefaultsPane,
-         brief: SpaceFileEditorPane, templates: SpaceFileEditorPane) {
+         lead: SpaceSettingsLeadPane, brief: SpaceFileEditorPane, templates: SpaceFileEditorPane) {
         self.spaceID = spaceID
         self.general = general
         self.defaults = defaults
+        self.lead = lead
         self.brief = brief
         self.templates = templates
         super.init()
@@ -170,7 +174,7 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
         // The window keeps the space's name as its title.
         tabs.canPropagateSelectedChildViewControllerTitle = false
         let views: [Tab: NSView] = [
-            .general: general.view, .defaults: defaults.view, .brief: brief.view,
+            .general: general.view, .defaults: defaults.view, .lead: lead.view, .brief: brief.view,
             .memory: memoryHost, .board: boardHost, .templates: templates.view
         ]
         for tab in Tab.allCases {

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Answering a Claude permission dialog from the Nirux sidebar (Settings →
-/// Experimental, off by default).
+/// Agents, on by default).
 ///
 /// Contract (Claude Code 2.1.283, read in its source): the interactive
 /// dialog of the main thread and of foreground subagents does not wait for

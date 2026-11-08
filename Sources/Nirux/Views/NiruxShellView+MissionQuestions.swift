@@ -62,7 +62,7 @@ extension NiruxShellView {
         let store = MissionStore.shared
         for mission in store.missions where mission.status == .active {
             guard let workspace = workspaces.first(where: { $0.id == mission.childWorkspaceID }),
-                  workspace.missionHandoffsEnabled,
+                  workspace.carriesMissions,
                   let column = workspace.columns.first(where: { $0.agentUUID == mission.childAgentUUID }),
                   result[ObjectIdentifier(column)] == nil
             else { continue }
@@ -217,12 +217,15 @@ extension NiruxShellView {
             showToast("Answers are limited to \(MissionEventCLI.maxMessageLength) characters")
             return false
         }
+        let store = MissionStore.shared
         let enabled = Self.currentMissionHandoffsEnabled()
-        guard enabled else {
+        // A Lead's task is answered whatever the setting.
+        guard enabled || store.missions.contains(where: { mission in
+            mission.reportsToLead == true && mission.events.contains { $0.id == questionID }
+        }) else {
             showToast("Mission handoffs are off in Settings")
             return false
         }
-        let store = MissionStore.shared
         guard let accepted = store.respond(to: questionID, message: reply, enabled: enabled) else {
             let stillWaiting = store.response(to: questionID) == nil && store.missions.contains { mission in
                 mission.status == .active && mission.events.contains { $0.id == questionID && $0.kind == .question }

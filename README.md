@@ -86,9 +86,9 @@ After the skill is installed, supported agents know how to hand work back to Nir
 
 That leaves your main workspace on the original checkout while each isolated branch gets its own Nirux workspace.
 
-### Mission handoffs (experimental)
+### Mission handoffs
 
-Mission handoffs add an explicit, durable mailbox between the agent that delegates a worktree task and the agent launched in that worktree. The feature is disabled by default. Enable `Settings` → `Experimental` → `Mission handoffs`; the setting applies to new terminals.
+Mission handoffs add an explicit, durable mailbox between the agent that delegates a worktree task and the agent launched in that worktree. `Settings` → `Agents` → `Mission handoffs` turns them on or off for new terminals (on for a new install). A space's Lead and the tasks it starts always have them.
 
 With Mission handoffs enabled, the two agents talk through their prompts. A Claude Code child asks with `"$NIRUX_CLI_PATH" --mission ask --message "..."` and ends its turn. Nirux types the question into the parent's prompt as a `[Nirux Mission] Question from …` message ending with the `--mission reply` command to answer it, and types the answer into the child's prompt the same way; the child's `--mission completed` result reaches the parent's prompt as a one-line notice. Nirux types only once the agent's `claude` is in front, its turn is over, no dialog is listed and nothing was typed at its prompt since its last prompt went in; otherwise the message waits for that agent's next turn end. A Codex child's `ask` still waits for the answer, at most 90 seconds at a time (under the default 2-minute limit of Claude Code's shell tool), then exits with status 3 and resumes the same question when run again. Once a Mission has ended, `ask` and `completed` exit with status 4 so the child stops retrying.
 
@@ -148,7 +148,7 @@ Useful shortcuts:
 | `Ctrl+Cmd+S` | Toggle sidebar |
 | `Ctrl+Cmd+F` | Enter or exit full screen |
 | `Cmd+M` | Minimize the window |
-| `Cmd+,` | Settings (General, Agents, Notifications, Experimental, Telegram); a change applies at once |
+| `Cmd+,` | Settings (General, Agents, Notifications, Telegram); a change applies at once |
 | `Cmd+Z` / `Shift+Cmd+Z` | Undo / redo in the editor and in panel text fields (palette, rename, settings) |
 | `Shift+Cmd+F` | Search workspace |
 | `Alt+Cmd+F` | Search Everywhere: text in the scrollback of every terminal, across workspaces and spaces; picking a match opens its terminal's find bar on it. A full-screen program (vim, less, Claude Code in its no-flicker mode) shows no scrollback: only its screen is searched. Then the transcripts of the Claude sessions the history knows (running or past, only what you typed and Claude answered, read in place within a time budget); picking one of their matches resumes the session, or goes to its column |

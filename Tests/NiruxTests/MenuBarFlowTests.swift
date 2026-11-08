@@ -129,6 +129,207 @@ final class MenuBarFlowTests: XCTestCase {
     }
 }
 
+// MARK: - The Lead (docs/spaces.md, "The Lead")
+
+extension MenuBarFlowTests {
+    /// ⌃⌘L starts the space's Lead (none in General), comes back to it from
+    /// elsewhere, and never makes a second one. The Lead stays on top of its
+    /// space, keeps its Missions with handoffs off, saves as the Lead, and
+    /// closes from Space Settings › Lead only once the user confirms.
+    func testLeadFromTheSpaceMenu() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let bar = MenuBar(shell: shell)
+            shell.projectBoardClient = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")
+            XCTAssertFalse(bar.isEnabled(["Space", "Lead"]), "General has no Lead")
+            XCTAssertTrue(Persistence.updateSettings(liveLayout: shell.persistedState()) { $0.missionHandoffsEnabled = false })
+
+            shell.createSpace(NewSpacePanel.Draft(name: "Client", colorHex: WorkspaceProfile.palette[1].hex, anchors: []))
+            let space = shell.activeProfileID
+            // Validating names the item after what it does.
+            XCTAssertTrue(bar.isEnabled(["Space", "Lead"]))
+            bar.run(["Space", "Start a Lead"])
+            let lead = try XCTUnwrap(shell.leadWorkspace(inSpace: space))
+            XCTAssertTrue(shell.activeWorkspace === lead)
+            XCTAssertEqual(lead.title, "Lead")
+            XCTAssertEqual(harness.agentLaunches.last.map { $0.hasPrefix("command claude") }, true)
+            XCTAssertEqual(harness.agentLaunches.last.map { $0.contains("Lead · Client") }, true, "names the session")
+            XCTAssertEqual(lead.columns.compactMap { $0.projectBoard?.projectID }, [space], "the Board beside Claude")
+            XCTAssertEqual(lead.focusedIndex, 0, "Claude keeps the keyboard")
+            XCTAssertNotEqual(
+                AgentSkillsInstaller.status(of: NiruxShellView.agentSkills, home: harness.home), .missing, "its skill"
+            )
+            let environment = lead.terminalEnvironment(agentUUID: UUID().uuidString)
+            XCTAssertEqual(environment["NIRUX_LEAD"], "1")
+            XCTAssertEqual(environment["NIRUX_MISSION_HANDOFFS"], "1", "its tasks report to it with handoffs off")
+            // The Board, without settings yet, doesn't open them over Claude.
+            RunLoop.main.run(until: Date().addingTimeInterval(1))
+            XCTAssertNil(shell.spaceSettings)
+
+            shell.addWorkspace(title: "plain", cwd: harness.repo, profileID: space)
+            let plain = try XCTUnwrap(shell.activeWorkspace)
+            let plainEnvironment = plain.terminalEnvironment(agentUUID: UUID().uuidString)
+            XCTAssertEqual(plainEnvironment["NIRUX_LEAD"], "", "blank, not inherited")
+            XCTAssertNil(plainEnvironment["NIRUX_MISSION_HANDOFFS"])
+            XCTAssertTrue(bar.isEnabled(["Space", "Start a Lead"]))
+            bar.run(["Space", "Lead"])
+            XCTAssertTrue(shell.activeWorkspace === lead)
+            shell.startLead(spaceID: space)
+            XCTAssertEqual(shell.workspaces.filter(\.isLead).count, 1)
+
+            // On top of its space, for good.
+            let index = { (workspace: WorkspaceState) in try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace }) }
+            let store = shell.workspaceStore
+            XCTAssertEqual(store.visibleWorkspaceIndices(in: space), [try index(lead), try index(plain)])
+            XCTAssertFalse(store.moveWorkspace(at: try index(plain), delta: -1))
+            XCTAssertFalse(store.moveWorkspace(at: try index(lead), delta: 1))
+            XCTAssertFalse(store.setWorkspaceInactive(at: try index(lead), true))
+            XCTAssertFalse(store.moveWorkspace(at: try index(lead), toProfile: WorkspaceProfile.defaultID))
+            XCTAssertEqual(store.visibleWorkspaceIndices(in: space).first, try index(lead))
+            let menuTitles = { (workspace: WorkspaceState) in
+                shell.sidebar.workspaceActionMenu(workspaceIndex: try index(workspace), columnIndex: nil).items.map(\.title)
+            }
+            XCTAssertFalse(try menuTitles(lead).contains("Organize"))
+            XCTAssertTrue(try menuTitles(plain).contains("Organize"))
+            XCTAssertEqual(shell.persistedState().workspaces.filter(\.isLead).map(\.id), [lead.id])
+
+            // Off asks first: cancelled, the Lead stays.
+            shell.showSpaceSettings(profileID: space, tab: .lead)
+            let pane = try XCTUnwrap(shell.spaceSettings?.lead)
+            let flip = { (state: NSControl.StateValue) in
+                pane.leadSwitch.state = state
+                XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(pane.leadSwitch.action), to: pane.leadSwitch.target, from: pane.leadSwitch))
+            }
+            XCTAssertEqual(pane.leadSwitch.state, .on)
+            try flip(.off)
+            XCTAssertEqual(harness.alerts.last, "Close workspace “Lead”?")
+            XCTAssertNotNil(shell.leadWorkspace(inSpace: space))
+            XCTAssertEqual(pane.leadSwitch.state, .on)
+            harness.alertResponses = [.alertSecondButtonReturn]
+            try flip(.off)
+            XCTAssertNil(shell.leadWorkspace(inSpace: space))
+            XCTAssertEqual(pane.leadSwitch.state, .off)
+
+            // On again at once: a new Lead, the only one saved while the
+            // first is still on its way out.
+            try flip(.on)
+            let second = try XCTUnwrap(shell.leadWorkspace(inSpace: space))
+            XCTAssertFalse(second === lead)
+            XCTAssertEqual(pane.leadSwitch.state, .on)
+            XCTAssertEqual(shell.persistedState().workspaces.filter(\.isLead).map(\.id), [second.id])
+            harness.waitUntil("the first Lead's workspace to go") { !shell.workspaces.contains { $0 === lead } }
+            shell.spaceSettings?.close()
+
+            // Deleting its space leaves a plain workspace in General.
+            XCTAssertTrue(store.deleteProfile(id: space))
+            XCTAssertFalse(second.isLead)
+            XCTAssertEqual(second.profileID, WorkspaceProfile.defaultID)
+        }
+    }
+
+    /// An empty space offers its Lead; General doesn't.
+    func testEmptySpaceStartsItsLead() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.projectBoardClient = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")
+            shell.createSpace(NewSpacePanel.Draft(name: "Empty", colorHex: WorkspaceProfile.palette[2].hex, anchors: []))
+            let space = shell.activeProfileID
+            let view = shell.emptySpaceView
+            XCTAssertFalse(view.isHidden)
+            XCTAssertFalse(view.startLeadButton.isHidden)
+            view.startLeadButton.performClick(nil)
+            let lead = try XCTUnwrap(shell.leadWorkspace(inSpace: space))
+            XCTAssertTrue(shell.activeWorkspace === lead)
+            XCTAssertTrue(view.isHidden)
+        }
+    }
+
+    /// Space Settings › Lead says where the running Lead works, not where a
+    /// new one would; parking the active card hands over to the next card,
+    /// not to the Lead above them.
+    func testWhereTheLeadWorksAndParkingPastIt() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.projectBoardClient = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")
+            shell.createSpace(NewSpacePanel.Draft(name: "Where", colorHex: WorkspaceProfile.palette[3].hex, anchors: []))
+            let space = shell.activeProfileID
+            shell.startLead(spaceID: space)
+            let lead = try XCTUnwrap(shell.leadWorkspace(inSpace: space))
+            let place = { shell.spaceSettingsLeadModel(for: try XCTUnwrap(shell.profiles.first { $0.id == space })).place }
+            XCTAssertEqual(try place(), .home)
+            let repository = SpaceAnchor(kind: .gitRepository(commonDir: harness.repo + "/.git"), name: "repo")
+            XCTAssertTrue(shell.workspaceStore.addAnchor(repository, toProfile: space))
+            XCTAssertEqual(try place(), .elsewhere(path: lead.cwd, repository: "repo"), "still in the home folder")
+
+            shell.addWorkspace(title: "first", cwd: harness.repo, profileID: space)
+            let first = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "second", cwd: harness.repo, profileID: space)
+            let second = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertTrue(shell.workspaceStore.setWorkspaceInactive(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === second }), true))
+            XCTAssertTrue(shell.activeWorkspace === first)
+        }
+    }
+
+    /// "Start a Lead" in the New Space sheet: the space opens on its Lead,
+    /// with no plain workspace beside it.
+    func testNewSpaceSheetStartsTheLead() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let bar = MenuBar(shell: shell)
+            shell.projectBoardClient = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")
+            bar.run(["Space", "New Space…"])
+            harness.waitUntil("the New Space sheet") { shell.newSpacePanel?.panel?.isSheet == true }
+            let sheet = try XCTUnwrap(shell.newSpacePanel)
+            XCTAssertEqual(sheet.leadSwitch.state, .off, "opt-in")
+            // Without the suggested repository: nothing to offer to move.
+            while !sheet.rows.isEmpty { sheet.remove(at: 0) }
+            sheet.nameField.stringValue = "Led"
+            sheet.leadSwitch.state = .on
+            sheet.createButton.performClick(nil)
+            let space = shell.activeProfileID
+            XCTAssertEqual(shell.profiles.first { $0.id == space }?.name, "Led")
+            let lead = try XCTUnwrap(shell.leadWorkspace(inSpace: space))
+            XCTAssertTrue(shell.activeWorkspace === lead)
+            XCTAssertEqual(shell.workspaceStore.visibleWorkspaceIndices(in: space).count, 1)
+        }
+    }
+
+    /// A restored state keeps one Lead per space, none in General, and
+    /// never a parked one.
+    func testRestoreKeepsOneLeadPerSpace() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.createSpace(NewSpacePanel.Draft(name: "Client", colorHex: WorkspaceProfile.palette[1].hex, anchors: []))
+            let space = shell.activeProfileID
+            shell.saveState()
+            var state = try XCTUnwrap(Persistence.load())
+            func workspace(_ id: String, in spaceID: String, lead: Bool, inactive: Bool = false) -> PersistedWorkspace {
+                PersistedWorkspace(
+                    id: id, title: id, cwd: harness.repo,
+                    columns: [PersistedColumn(
+                        widthPreset: 0.5, cwd: harness.repo, columnType: .terminal, webViewURL: nil,
+                        claudeLaunchMode: nil, codexLaunchMode: nil
+                    )],
+                    focusedColumnIndex: 0, profileID: spaceID, isInactive: inactive, isLead: lead
+                )
+            }
+            state.workspaces = [
+                workspace("plain", in: space, lead: false),
+                workspace("first", in: space, lead: true, inactive: true),
+                workspace("second", in: space, lead: true),
+                workspace("general", in: WorkspaceProfile.defaultID, lead: true)
+            ]
+            state.activeWorkspaceIndex = 0
+            state.activeWorkspaceID = nil
+            XCTAssertTrue(Persistence.save(state))
+            shell.restoreState()
+            XCTAssertEqual(shell.workspaces.filter(\.isLead).map(\.id), ["first"])
+            XCTAssertEqual(shell.leadWorkspace(inSpace: space)?.isInactive, false)
+            XCTAssertEqual(shell.workspaceStore.visibleWorkspaceIndices(in: space).map { shell.workspaces[$0].id }, ["first", "plain", "second"])
+        }
+    }
+}
+
 /// The main menu of a NiruxApp bound to `shell`, run the way AppKit does:
 /// a nil-target item goes to the app once it validates, a closure item to
 /// its own target.

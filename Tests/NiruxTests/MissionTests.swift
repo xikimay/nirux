@@ -50,6 +50,35 @@ final class MissionTests: XCTestCase {
         )
     }
 
+    /// A space's Lead and its tasks keep their Missions with handoffs off:
+    /// the record says so, its events pass, the CLI lets the Lead's own
+    /// terminal and its tasks' through. Another Mission stays refused.
+    func testALeadsMissionWorksWithHandoffsOff() throws {
+        let fileURL = try makeDirectory().appendingPathComponent("missions.json")
+        let store = MissionStore(fileURL: fileURL)
+        var leads = request()
+        leads.reportsToLead = true
+        let mission = try XCTUnwrap(store.create(leads, enabled: false, now: 10))
+        XCTAssertEqual(mission.reportsToLead, true)
+        if case .accepted(let accepted) = store.process(event(), enabled: false) {
+            XCTAssertEqual(accepted?.event.kind, .question)
+        } else {
+            XCTFail("the Lead's task asks with handoffs off")
+        }
+        XCTAssertNil(store.create(request(id: "77777777-7777-4777-8777-777777777777"), enabled: false, now: 11))
+
+        // Past the setting's gate: the usage error says the command ran.
+        let tell = ["tell", "--message", "Hi"]
+        XCTAssertEqual(MissionEventCLI.main(tell, handoffsEnabled: { false }, environment: [:], missionsURL: fileURL), 4)
+        XCTAssertEqual(
+            MissionEventCLI.main(tell, handoffsEnabled: { false }, environment: ["NIRUX_LEAD": "1"], missionsURL: fileURL), 2
+        )
+        let ask = ["ask", "--message", "Hi"]
+        XCTAssertEqual(
+            MissionEventCLI.main(ask, handoffsEnabled: { false }, environment: ["NIRUX_MISSION_ID": missionID], missionsURL: fileURL), 2
+        )
+    }
+
     func testMissionCreationIsDisabledByDefaultAndRejectsMalformedIdentifiers() throws {
         let fileURL = try makeDirectory().appendingPathComponent("missions.json")
         let store = MissionStore(fileURL: fileURL)

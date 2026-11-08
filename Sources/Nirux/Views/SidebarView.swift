@@ -530,8 +530,11 @@ final class SidebarView: NSView {
         addCIFailureItems(to: menu, pullRequest: workspace?.prInfo, workspaceIndex: workspaceIndex)
         if cleanup == .suggested { addWorktreeCleanupItem(to: menu, workspaceIndex: workspaceIndex) }
         menu.addItem(.separator())
-        menu.addItem(organizeItem(workspaceIndex: workspaceIndex, isInactive: workspace?.isInactive == true))
-        menu.addItem(.separator())
+        // The Lead stays on top of its space, and in it.
+        if workspace?.isLead != true {
+            menu.addItem(organizeItem(workspaceIndex: workspaceIndex, isInactive: workspace?.isInactive == true))
+            menu.addItem(.separator())
+        }
         menu.addClosureItem(title: "Rename Workspace") { [weak self] in
             self?.onWorkspaceAction?(.rename, workspaceIndex)
         }

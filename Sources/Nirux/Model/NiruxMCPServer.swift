@@ -21,6 +21,28 @@ enum NiruxMCPServer {
         history_search: a feature or branch name, a PR number, a distinctive word.
         """
 
+    /// The Lead's role (docs/spaces.md, "The Lead"), for the Claude of a
+    /// space's Lead workspace: what it may do, and what it hands to the
+    /// user.
+    static let leadInstructions = """
+        You are the Lead of this Nirux space. The user talks to you: turn what they ask into tasks, start \
+        them, follow them, and bring the user only what needs them. Start each task in its own worktree \
+        with the nirux-worktree skill, one repository per task (a feature across two repositories is two \
+        tasks). Don't edit files, commit or switch branches in this checkout: even a one-line fix is a \
+        task. Nirux links each task to you: its questions and its result are typed into your prompt as \
+        [Nirux Mission] messages. Answer a question yourself when the space brief, the code or this \
+        conversation settles it; otherwise ask the user, briefly, and say why. Give a task more work with \
+        "$NIRUX_CLI_PATH" --mission tell --branch <its branch> --message "...". Never merge a pull request, \
+        remove a worktree or a branch, or act on another space: leave those to the user. After a /clear, \
+        `git worktree list` and the open pull requests show the tasks in flight.
+        """
+
+    /// The instructions for whoever launched the server: the Lead's role
+    /// comes first in its workspace (`NIRUX_LEAD=1`).
+    static func instructions(for context: Context) -> String {
+        context.isLead ? leadInstructions + "\n\n" + instructions : instructions
+    }
+
     /// `--mcp-config=<this server>` and `--allowedTools=<its tools>` for
     /// `claude`, unquoted. The config goes inline, not in a file: Claude
     /// refuses to start when a config file is missing, and a column
@@ -52,6 +74,8 @@ enum NiruxMCPServer {
         /// Claude's session: the one that started the server. Claude sets
         /// it once, so after `/clear` or `/resume` it names the previous one.
         var sessionID: String? { nonEmpty("CLAUDE_CODE_SESSION_ID") }
+        /// Launched in a space's Lead workspace (see `WorkspaceState.isLead`).
+        var isLead: Bool { environment[WorkspaceState.leadEnvironmentKey] == "1" }
 
         func nonEmpty(_ key: String) -> String? {
             environment[key].flatMap { $0.isEmpty ? nil : $0 }
@@ -114,7 +138,7 @@ enum NiruxMCPServer {
                     "name": serverName, "title": "Nirux",
                     "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
                 ],
-                "instructions": instructions
+                "instructions": instructions(for: context)
             ])
         case "ping":
             return response(id: id, result: [:])
