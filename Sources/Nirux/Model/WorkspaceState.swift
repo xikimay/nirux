@@ -501,8 +501,7 @@ extension WorkspaceState {
         // Claude's reminder of a turn already over, and its compactions
         // (mostly its own, while idle): the card's age stays the agent's
         // last real work.
-        case .notification where event.notificationType == "idle_prompt",
-             .sessionStart where event.source == "compact":
+        case .notification, .sessionStart: // MUTANT: every one skipped
             return false
         case .stop, .turnComplete:
             return recordAgentActivity(at: event.timestamp, automaticSummary: event.detail)
