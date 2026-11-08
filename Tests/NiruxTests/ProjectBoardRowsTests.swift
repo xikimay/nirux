@@ -272,4 +272,43 @@ final class ProjectBoardRowsTests: XCTestCase {
         local\t/srv/git/widgets.git (fetch)
         """), [widgets, GitHubRepository(owner: "me", name: "widgets")])
     }
+    // MARK: - Several repositories (docs/spaces.md, S12)
+
+    /// Each anchor's repository in its section, by common git dir even when
+    /// no remote names the configured repository; a repository of no anchor
+    /// whose remote names a section's joins it; the rest, and workspaces in
+    /// none, go last. A section without a repository lists its worktrees,
+    /// without pull requests.
+    func testEachRepositoryHasItsSection() {
+        let front = ProjectBoard.LocalRepository(worktrees: [
+            worktree("/p/front", branch: "main"), worktree("/p/front.login", branch: "feat/login")
+        ], remotes: [], commonDir: "/p/front/.git")
+        let back = ProjectBoard.LocalRepository(worktrees: [
+            worktree("/p/back", branch: "main"), worktree("/p/back.api", branch: "feat/api")
+        ], remotes: [], commonDir: "/p/back/.git")
+        let clone = ProjectBoard.LocalRepository(worktrees: [
+            worktree("/p/widgets-clone", branch: "main")
+        ], remotes: [widgets], commonDir: "/p/widgets-clone/.git")
+        let scratch = ProjectBoard.LocalRepository(worktrees: [worktree("/p/scratch", branch: "main")], remotes: [])
+        let sections = [
+            ProjectBoard.SectionSources(
+                id: "front", commonDir: "/p/front/.git", repository: widgets, baseBranch: "main",
+                openPullRequests: [pullRequest(12, "feat/login"), pullRequest(14, "feat/cloud")]
+            ),
+            ProjectBoard.SectionSources(id: "back", commonDir: "/p/back/.git", repository: nil)
+        ]
+        let result = ProjectBoard.sectionRows(sections, local: [front, back, clone, scratch], workspaces: [
+            workspace("login", "/p/front.login"),
+            workspace("api", "/p/back.api"),
+            workspace("clone", "/p/widgets-clone"),
+            workspace("scratch", "/p/scratch"),
+            workspace("home", "/Users/me")
+        ])
+        XCTAssertEqual(summary(result.bySection["front"] ?? []), [
+            "main main", "main clone [clone]", "active login #12 [login]", "active feat/cloud #14"
+        ])
+        XCTAssertEqual(summary(result.bySection["back"] ?? []), ["main main", "active api [api]"])
+        XCTAssertEqual(summary(result.others), ["otherRepository scratch [scratch]", "otherRepository home [home]"])
+    }
 }
+

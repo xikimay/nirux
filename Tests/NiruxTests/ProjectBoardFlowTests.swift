@@ -31,11 +31,15 @@ final class ProjectBoardFlowTests: XCTestCase {
         let openPullRequests: String
         let mergedPullRequests: String
         let runs: String
+        /// Open pull requests by `owner/name`, for a board with several
+        /// repositories; the others get `openPullRequests`.
+        let openByRepository: [String: String]
 
-        init(openPullRequests: String, mergedPullRequests: String = "[]", runs: String) {
+        init(openPullRequests: String, mergedPullRequests: String = "[]", runs: String, openByRepository: [String: String] = [:]) {
             self.openPullRequests = openPullRequests
             self.mergedPullRequests = mergedPullRequests
             self.runs = runs
+            self.openByRepository = openByRepository
         }
 
         var calls: [FakeGitHubCall] {
@@ -52,7 +56,8 @@ final class ProjectBoardFlowTests: XCTestCase {
 
         func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, ProjectBoard.FetchError> {
             record("pr \(state) \(repository)")
-            return .success(Data((state == .open ? openPullRequests : mergedPullRequests).utf8))
+            let open = openByRepository[repository] ?? openPullRequests
+            return .success(Data((state == .open ? open : mergedPullRequests).utf8))
         }
 
         func postMergeRuns(repository: String, workflow: String, branch: String) -> Result<Data, ProjectBoard.FetchError> {
@@ -314,6 +319,84 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(workspace.columns.count, 3, "the second board came back as a terminal")
             XCTAssertNotNil(workspace.columns.last?.pty)
             XCTAssertEqual(shell.projectBoardLocation(projectID: spaceID)?.board.projectID, spaceID)
+        }
+    }
+
+    /// A space with two repositories (docs/spaces.md, S12): a section and a
+    /// queue line for each, each read on its own repository, and a pull
+    /// request queued and started in its own repository's queue only.
+    @MainActor
+    func testEachRepositoryOfTheSpaceHasItsSectionAndItsQueue() throws {
+        let pullRequest = { (number: Int, branch: String, repository: String) in
+            """
+            [{"number": \(number), "state": "OPEN", "headRefName": "\(branch)", "headRefOid": "\(String(repeating: "a", count: 40))",
+              "headRepository": {"name": "\(repository)"}, "headRepositoryOwner": {"login": "acme"}, "baseRefName": "main",
+              "isDraft": false, "mergeable": "MERGEABLE", "url": "https://github.com/acme/\(repository)/pull/\(number)",
+              "statusCheckRollup": []}]
+            """
+        }
+        let client = FakeGitHub(openPullRequests: "[]", runs: "[]", openByRepository: [
+            "acme/front": pullRequest(12, "feat/login", "front"),
+            "acme/back": pullRequest(21, "feat/api", "back")
+        ])
+        try withShell(client: client) { shell, space in
+            shell.mergeQueueClient = FakeQueueClient(isDryRun: true)
+            shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
+            let front = root + "/front"
+            let back = root + "/back"
+            try BoardConfigSuggestionsTests.makeRepository(at: front, remote: "https://github.com/acme/front.git")
+            try BoardConfigSuggestionsTests.makeRepository(at: back, remote: "git@github.com:acme/back.git")
+            try git(["worktree", "add", "-q", "-b", "feat/login", root + "/front.login"], at: front)
+            try git(["worktree", "add", "-q", "-b", "feat/api", root + "/back.api"], at: back)
+            var frontAnchor = try XCTUnwrap(FolderIdentity.identify(front, timeout: 10)).anchor
+            frontAnchor.isDefault = true
+            let backAnchor = try XCTUnwrap(FolderIdentity.identify(back, timeout: 10)).anchor
+            XCTAssertTrue(shell.workspaceStore.setAnchors([frontAnchor, backAnchor], forProfile: space.id))
+            let config = { (name: String) in
+                BoardConfig(repository: "acme/\(name)", baseBranch: "main", requiredChecks: ["test"], postMergeWorkflow: .noWorkflow)
+            }
+            let store = try XCTUnwrap(BoardConfigStore(spaceID: space.id))
+            XCTAssertNoThrow(try store.save(entries: [
+                BoardConfigStore.Entry(slot: .anchor(commonDir: try XCTUnwrap(BoardSections.commonDir(of: frontAnchor))), config: config("front")),
+                BoardConfigStore.Entry(slot: .anchor(commonDir: try XCTUnwrap(BoardSections.commonDir(of: backAnchor))), config: config("back"))
+            ]).get())
+
+            shell.addWorkspace(title: "login", cwd: root + "/front.login", profileID: space.id)
+            shell.addWorkspace(title: "api", cwd: root + "/back.api", profileID: space.id)
+            try select("login", in: shell)
+            try runPaletteAction("Open Board", in: shell)
+            let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
+            dropWorkspaceSnapshots(shell)
+
+            try waitUntil("both repositories read") {
+                guard case .sections(let sections, _)? = board.view.content?.body else { return false }
+                return sections.map { $0.rows.compactMap(\.pullRequest?.number) } == [[12], [21]]
+            }
+            guard case .sections(let sections, let others)? = board.view.content?.body else { return XCTFail("no sections") }
+            XCTAssertEqual(sections.map(\.title), ["front", "back"], "the default repository first")
+            XCTAssertEqual(sections.map(\.repository), ["acme/front", "acme/back"])
+            XCTAssertEqual(sections[1].rows.map(\.name), ["main", "api"], "its main checkout too, without a workspace")
+            XCTAssertEqual(others, [])
+            XCTAssertEqual(board.view.header.context, space.name, "the header names the space, not one repository")
+            XCTAssertEqual(board.view.queueLines.map(\.name.stringValue), ["front", "back"])
+            XCTAssertTrue(board.view.queueLabel.isHidden, "no single queue line")
+            XCTAssertTrue(client.calls.contains { $0.what == "pr open acme/back" })
+
+            // Add #21 on back's row: back's queue only.
+            let api = try XCTUnwrap(board.view.rowViews.first { $0.row.pullRequest?.number == 21 })
+            XCTAssertEqual(api.section, sections[1].id)
+            try click(try XCTUnwrap(api.queueButton))
+            let backRepository = GitHubRepository(owner: "acme", name: "back")
+            let frontRepository = GitHubRepository(owner: "acme", name: "front")
+            XCTAssertEqual(shell.mergeQueue(projectID: space.id, repository: backRepository).selection, [21])
+            XCTAssertEqual(shell.mergeQueue(projectID: space.id, repository: frontRepository).selection, [])
+            try waitUntil("back's line offers Start") { board.view.queueLines.last?.startButton.isEnabled == true }
+            XCTAssertFalse(try XCTUnwrap(board.view.queueLines.first).startButton.isEnabled, "front has nothing queued")
+
+            try click(try XCTUnwrap(board.view.queueLines.last).startButton)
+            let sheet = try XCTUnwrap(shell.mergeQueueConfirmation)
+            XCTAssertEqual(sheet.repository, backRepository)
+            sheet.dismiss()
         }
     }
 
