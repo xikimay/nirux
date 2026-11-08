@@ -115,6 +115,38 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// ⌘N in a space with a Lead offers "Report to the Lead", checked: the
+    /// task then reports to it. Unchecked, it reports to nobody; a space
+    /// without a Lead doesn't offer it.
+    func testReportToTheLeadFromTheNewSheet() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            func start(_ description: String, reporting: Bool) throws -> WorkspaceState {
+                let sheet = try XCTUnwrap(shell.showNewPanel(spaceID: lead.space))
+                XCTAssertFalse(sheet.reportCheckbox.isHidden)
+                XCTAssertEqual(sheet.reportCheckbox.state, .on, "checked by default")
+                if !reporting { sheet.reportCheckbox.performClick(nil) }
+                sheet.descriptionView.string = description
+                sheet.textDidChange(Notification(name: NSText.didChangeNotification, object: sheet.descriptionView))
+                harness.waitUntil("the repository's info") { sheet.info?.target != nil }
+                sheet.startButton.performClick(nil)
+                harness.waitUntil("the task to open") { shell.workspaces.contains { $0.title == description } }
+                return try XCTUnwrap(shell.workspaces.first { $0.title == description })
+            }
+            let reporting = try start("Reports to the Lead", reporting: true)
+            XCTAssertEqual(MissionStore.shared.missions.first { $0.childWorkspaceID == reporting.id }?.parentWorkspaceID, lead.workspace.id)
+            XCTAssertTrue(shell.activeWorkspace === reporting, "a task the user starts comes to the front")
+            let alone = try start("Reports to nobody", reporting: false)
+            XCTAssertNil(MissionStore.shared.missions.first { $0.childWorkspaceID == alone.id })
+
+            let plain = shell.workspaceStore.createProfile(named: "No Lead", select: true).id
+            let sheet = try XCTUnwrap(shell.showNewPanel(spaceID: plain))
+            XCTAssertTrue(sheet.reportCheckbox.isHidden)
+            sheet.cancelButton.performClick(nil)
+        }
+    }
+
     /// A defaults.json Nirux can't read asks first: the Lead proposes.
     func testAnUnreadableSettingAsksFirst() throws {
         try UIFlowHarness.run { harness in

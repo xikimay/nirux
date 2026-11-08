@@ -83,7 +83,22 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     private var pickedTemplateName: String?
     /// The agent the task reports to (a Lead's proposal): carried into the
     /// request (see `NewTask.Request.reportsTo`).
-    var reportsTo: NewTask.MissionParent?
+    var reportsTo: NewTask.MissionParent? {
+        didSet { if let reportsTo, lead == nil { lead = reportsTo } }
+    }
+    /// The space's Lead: "Report to the Lead" shows, checked (docs/spaces.md,
+    /// "One door: ⌘N"). Nil: no Lead, no checkbox.
+    var lead: NewTask.MissionParent? {
+        didSet {
+            reportCheckbox.isHidden = lead == nil
+            reportHint.isHidden = lead == nil
+            if lead != nil, oldValue == nil { reportCheckbox.state = .on }
+            layout()
+        }
+    }
+    let reportCheckbox = NSButton(checkboxWithTitle: "Report to the Lead", target: nil, action: nil)
+    private let reportHint = NSTextField(wrappingLabelWithString:
+        "The Lead follows this task and answers its questions. Only what needs you reaches you, in amber.")
 
     /// How Start's work ended.
     enum Outcome: Equatable {
@@ -398,7 +413,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         return NewTask.Request(
             description: taskText, template: selectedTemplate, agent: selectedAgent,
             projectID: space.id, branch: branch, target: target, fetchesFirst: !startsWithoutFetch,
-            reportsTo: reportsTo
+            reportsTo: lead != nil && reportCheckbox.state == .on ? (reportsTo ?? lead) : nil
         )
     }
 
@@ -634,6 +649,13 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         fromLabel.frame = NSRect(x: margin + fieldWidth + 10, y: y + 3, width: inner - fieldWidth - 10, height: 18)
         y += max(22, lineHeight + 4) + 12
 
+        if !reportCheckbox.isHidden {
+            reportCheckbox.frame = NSRect(x: margin - 2, y: y, width: inner, height: 18)
+            let hintHeight = Self.wrappedHeight(of: reportHint, width: inner - 20)
+            reportHint.frame = NSRect(x: margin + 18, y: y + 20, width: inner - 20, height: hintHeight)
+            y += 20 + hintHeight + 12
+        }
+
         if !errorLabel.isHidden {
             let height = Self.wrappedHeight(of: errorLabel, width: inner)
             errorLabel.frame = NSRect(x: margin, y: y, width: inner, height: height)
@@ -758,9 +780,17 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         content.subviews.forEach { $0.removeFromSuperview() }
         let views: [NSView] = [
             headingLabel, descriptionBox, repositoryPopup, agentPopup, templatePopup, lineLabel, editBranchButton,
-            branchField, fromLabel, newSpaceButton, errorLabel, existingBranchButton, cancelButton, startButton
+            branchField, fromLabel, newSpaceButton, reportCheckbox, reportHint, errorLabel, existingBranchButton,
+            cancelButton, startButton
         ]
         views.forEach(content.addSubview)
+        reportHint.font = Theme.Font.caption
+        reportHint.textColor = Theme.Color.textSecondary
+        reportHint.isSelectable = false
+        reportHint.setAccessibilityElement(false)
+        reportCheckbox.setAccessibilityHelp(reportHint.stringValue)
+        reportCheckbox.isHidden = lead == nil
+        reportHint.isHidden = lead == nil
 
         let panel = NewTaskSheet(
             contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 320),

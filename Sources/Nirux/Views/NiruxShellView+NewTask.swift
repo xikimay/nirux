@@ -78,7 +78,17 @@ extension NiruxShellView {
         if repositories.isEmpty, space.id != WorkspaceProfile.defaultID {
             suggestRepository(to: panel)
         }
+        panel.lead = leadMissionParent(inSpace: space.id)
         return panel
+    }
+
+    /// The space's Lead as a Mission parent: its workspace and the column
+    /// its Claude runs in (its first terminal).
+    func leadMissionParent(inSpace spaceID: String) -> NewTask.MissionParent? {
+        guard let lead = leadWorkspace(inSpace: spaceID),
+              let agentUUID = lead.columns.first(where: { $0.pty != nil && !$0.isClosing })?.agentUUID
+        else { return nil }
+        return NewTask.MissionParent(workspaceID: lead.id, agentUUID: agentUUID)
     }
 
     /// The agent a space's tasks start with unless the sheet says otherwise:

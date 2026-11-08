@@ -131,7 +131,9 @@ A sheet titled "New in <space>":
 - **Repository** popup, shown only with two or more anchors, the default
   preselected. **Agent** (the space's default) and **Template** popups.
 - The suggested branch on one line, editable, "from origin/main".
-- **Report to the Lead** checkbox (with the Lead PR).
+- **Report to the Lead** checkbox, shown when the space has a Lead, checked by
+  default: the task's Mission reports to the Lead's Claude (shipped with
+  S11c). A Lead's proposal comes with it checked.
 - **Existing Branch…** opens an existing worktree (today's Open Worktree), or
   a branch without one: its worktree is made, with a shell (shipped with S7).
 - Names come from the description's first line, else the branch, else the
