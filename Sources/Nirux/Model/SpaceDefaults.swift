@@ -18,6 +18,12 @@ struct SpaceDefaults: Equatable, Sendable {
     /// As listed in Space Settings. `effectiveEnvironment` is what shells
     /// get.
     var environment: [EnvironmentVariable] = []
+    /// Space Settings › Lead, "Starts tasks without asking". Nil: on. Off,
+    /// the Lead's `start_task` opens the New sheet for the user to start.
+    var leadStartsTasks: Bool?
+
+    /// Whether the space's Lead starts its tasks itself.
+    var leadStartsTasksWithoutAsking: Bool { leadStartsTasks ?? true }
 
     struct EnvironmentVariable: Equatable, Sendable {
         var name: String
@@ -113,13 +119,14 @@ struct SpaceDefaults: Equatable, Sendable {
 // MARK: - Storage
 
 /// `{"schemaVersion": 1, "agent": "codex", "claudeLaunchMode": "plan",
-/// "codexLaunchMode": "readOnly", "environment": [{"name": …, "value": …}]}`,
+/// "codexLaunchMode": "readOnly", "environment": [{"name": …, "value": …}],
+/// "leadStartsTasks": false}`,
 /// every key optional, nothing written for what isn't set. Unknown keys and
 /// values are read-only reasons (see SpaceDefaultsStore), not decoding
 /// errors.
 extension SpaceDefaults: Codable {
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case schemaVersion, agent, claudeLaunchMode, codexLaunchMode, environment
+        case schemaVersion, agent, claudeLaunchMode, codexLaunchMode, environment, leadStartsTasks
     }
 
     private struct StoredVariable: Codable {
@@ -136,6 +143,7 @@ extension SpaceDefaults: Codable {
             .flatMap(CodexLaunchMode.init(rawValue:))
         environment = ((try? container.decodeIfPresent([StoredVariable].self, forKey: .environment)) ?? nil)?
             .map { EnvironmentVariable(name: $0.name, value: $0.value) } ?? []
+        leadStartsTasks = (try? container.decodeIfPresent(Bool.self, forKey: .leadStartsTasks)) ?? nil
     }
 
     func encode(to encoder: Encoder) throws {
@@ -147,5 +155,6 @@ extension SpaceDefaults: Codable {
         if !environment.isEmpty {
             try container.encode(environment.map { StoredVariable(name: $0.name, value: $0.value) }, forKey: .environment)
         }
+        try container.encodeIfPresent(leadStartsTasks, forKey: .leadStartsTasks)
     }
 }

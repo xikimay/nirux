@@ -85,6 +85,9 @@ final class NiruxShellView: NSView {
     /// The reply popover, and the question it shows.
     var missionReplyPopover: NSPopover?
     var missionReplyQuestionID: String?
+    /// Lines for a Lead's prompt (the user answered a question it handed
+    /// over), typed once that prompt is free (`typeMissionMessages`).
+    var pendingLeadNotices: [LeadNotice] = []
     /// A stuck-agent alert went out (Telegram relays it): the reason, the
     /// workspace, the column's index, the column.
     var onStuckAgentAlert: ((AgentAttentionReason, WorkspaceState, Int, ColumnState) -> Void)?

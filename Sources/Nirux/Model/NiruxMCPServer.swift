@@ -26,15 +26,14 @@ enum NiruxMCPServer {
     /// user.
     static let leadInstructions = """
         You are the Lead of this Nirux space. The user talks to you: turn what they ask into tasks, start \
-        them, follow them, and bring the user only what needs them. Start each task in its own worktree \
-        with the nirux-worktree skill, one repository per task (a feature across two repositories is two \
-        tasks). Don't edit files, commit or switch branches in this checkout: even a one-line fix is a \
-        task. Nirux links each task to you: its questions and its result are typed into your prompt as \
-        [Nirux Mission] messages. Answer a question yourself when the space brief, the code or this \
-        conversation settles it; otherwise ask the user, briefly, and say why. Give a task more work with \
-        "$NIRUX_CLI_PATH" --mission tell --branch <its branch> --message "...". Never merge a pull request, \
-        remove a worktree or a branch, or act on another space: leave those to the user. After a /clear, \
-        `git worktree list` and the open pull requests show the tasks in flight.
+        them with start_task, follow them with list_tasks, and bring the user only what needs them. One \
+        repository per task: a feature across two repositories is two tasks. Don't edit files, commit or \
+        switch branches in this checkout: even a one-line fix is a task. Each task's questions and result \
+        are typed into your prompt as [Nirux Mission] messages: answer with reply when the space brief, the \
+        code or this conversation settles it; otherwise hand it over with ask_user and say why. Give a task \
+        more work with tell. When tasks are ready to merge, propose them with queue_merge: the user starts \
+        the queue. Never merge a pull request, remove a worktree or a branch, or act on another space: \
+        leave those to the user. After a /clear, list_tasks shows where things stand.
         """
 
     /// The instructions for whoever launched the server: the Lead's role
@@ -48,7 +47,8 @@ enum NiruxMCPServer {
     /// refuses to start when a config file is missing, and a column
     /// replays its launch line on restart. The `=` forms keep the variadic
     /// options from taking the next argument (a handover prompt). The
-    /// tools are read-only and stay in the project, so they don't ask.
+    /// tools don't ask: history_search only reads the project, and the
+    /// Lead's act through the app, within the Lead's space only.
     static func claudeArguments(executable: String) -> [String] {
         let server: [String: Any] = ["type": "stdio", "command": executable, "args": ["--hook", "claude", "--mcp"]]
         let config = json(["mcpServers": [serverName: server]]).flatMap { String(bytes: $0, encoding: .utf8) } ?? "{}"
@@ -56,7 +56,9 @@ enum NiruxMCPServer {
         return ["--mcp-config=" + config, "--allowedTools=" + allowed]
     }
 
-    static let toolNames = [HistorySearchTool.name]
+    /// Every tool, pre-allowed for every Claude Nirux launches; the Lead's
+    /// are listed to a Lead only (and the app checks each call).
+    static let toolNames = [HistorySearchTool.name] + LeadTools.names
 
     /// Who runs the server, and where.
     struct Context: Sendable {
@@ -76,6 +78,8 @@ enum NiruxMCPServer {
         var sessionID: String? { nonEmpty("CLAUDE_CODE_SESSION_ID") }
         /// Launched in a space's Lead workspace (see `WorkspaceState.isLead`).
         var isLead: Bool { environment[WorkspaceState.leadEnvironmentKey] == "1" }
+        /// Tests shorten the Lead's calls' wait for the app.
+        var leadTimeout: TimeInterval?
 
         func nonEmpty(_ key: String) -> String? {
             environment[key].flatMap { $0.isEmpty ? nil : $0 }
@@ -143,15 +147,19 @@ enum NiruxMCPServer {
         case "ping":
             return response(id: id, result: [:])
         case "tools/list":
-            return response(id: id, result: ["tools": [HistorySearchTool.definition]])
+            let lead = context.isLead ? LeadTools.definitions : []
+            return response(id: id, result: ["tools": [HistorySearchTool.definition] + lead])
         case "tools/call":
-            guard let name = params["name"] as? String, name == HistorySearchTool.name else {
-                return response(id: id, error: (-32602, "Unknown tool: \(params["name"] as? String ?? "none")"))
+            let name = params["name"] as? String
+            guard let name, name == HistorySearchTool.name || (context.isLead && LeadTools.names.contains(name)) else {
+                return response(id: id, error: (-32602, "Unknown tool: \(name ?? "none")"))
             }
             guard let arguments = params["arguments"] as? [String: Any] ?? (params["arguments"] == nil ? [:] : nil) else {
                 return response(id: id, error: (-32602, "The arguments must be an object."))
             }
-            let result = HistorySearchTool.call(arguments, context: context)
+            let result = name == HistorySearchTool.name
+                ? HistorySearchTool.call(arguments, context: context)
+                : callLeadTool(name, arguments: arguments, context: context)
             return response(id: id, result: [
                 "content": [["type": "text", "text": result.text]],
                 "isError": result.isError
@@ -159,6 +167,29 @@ enum NiruxMCPServer {
         default:
             return response(id: id, error: (-32601, "Method not found: \(method)"))
         }
+    }
+
+    /// A Lead's tool: checked here, then sent to the running app, which
+    /// acts and answers (see LeadChannel).
+    static func callLeadTool(_ name: String, arguments: [String: Any], context: Context) -> ToolResult {
+        if let problem = LeadTools.problem(tool: name, arguments: arguments) {
+            return ToolResult(text: problem, isError: true)
+        }
+        guard let workspaceID = context.nonEmpty("NIRUX_WORKSPACE_ID"), let agentUUID = context.nonEmpty("NIRUX_AGENT_UUID"),
+              let data = try? JSONSerialization.data(withJSONObject: arguments), let json = String(data: data, encoding: .utf8)
+        else { return ToolResult(text: "This terminal isn't a Nirux Lead's.", isError: true) }
+        let request = LeadChannel.Request(
+            id: UUID().uuidString, tool: name, arguments: json,
+            workspaceID: workspaceID, agentUUID: agentUUID, createdAt: Date().timeIntervalSince1970
+        )
+        let timeout = context.leadTimeout ?? LeadTools.timeout(for: name)
+        guard let response = LeadChannel.send(request, stateDirectory: context.stateDirectory, timeout: timeout) else {
+            return ToolResult(
+                text: "Nirux didn't answer within \(Int(timeout)) seconds: it may be closed or busy. Try again, or tell the user.",
+                isError: true
+            )
+        }
+        return ToolResult(text: response.text, isError: response.isError)
     }
 
     /// A string or a finite number: not a boolean, which JSONSerialization

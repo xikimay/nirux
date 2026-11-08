@@ -81,6 +81,9 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// The template picked, kept while another repository's info is read:
     /// templates are the space's, the same for each.
     private var pickedTemplateName: String?
+    /// The agent the task reports to (a Lead's proposal): carried into the
+    /// request (see `NewTask.Request.reportsTo`).
+    var reportsTo: NewTask.MissionParent?
 
     /// How Start's work ended.
     enum Outcome: Equatable {
@@ -225,6 +228,16 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         suggestion = anchor
         rebuildRepositoryPopup()
         refresh()
+    }
+
+    /// A Lead's proposal (`start_task` with "Starts tasks without asking"
+    /// off): its description, and its template, picked once the
+    /// repository's templates are read.
+    func prefill(description: String, templateName: String?) {
+        guard panel != nil else { return }
+        descriptionView.string = description
+        if let templateName { pickedTemplateName = templateName }
+        textDidChange(Notification(name: NSText.didChangeNotification, object: descriptionView))
     }
 
     /// The repository's info, read by the shell. Ignored when another
@@ -375,7 +388,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         }
         return NewTask.Request(
             description: taskText, template: selectedTemplate, agent: selectedAgent,
-            projectID: space.id, branch: branch, target: target, fetchesFirst: !startsWithoutFetch
+            projectID: space.id, branch: branch, target: target, fetchesFirst: !startsWithoutFetch,
+            reportsTo: reportsTo
         )
     }
 

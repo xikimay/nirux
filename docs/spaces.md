@@ -192,15 +192,28 @@ New flow, built on the guarded typing `tell` already uses
   none of the space's repositories any more, and turning it off and on moves
   it.
 - **Tools** (Nirux MCP server, given to the Lead's Claude only), limited to its
-  space and its anchors:
-  - `start_task(description, repo?, template?)`: the ⌘N path, reporting to the
-    Lead. With "Starts tasks without asking" off, it opens a pre-filled ⌘N sheet.
-  - `list_tasks()`: the board's rows and agent states.
-  - `tell(task, message)`, `reply(question, message)`: Missions.
-  - `ask_user(task, question, why)`: hands a question to the user (amber row,
-    popover showing why).
-  - `queue_merge(prs)`: opens the merge queue's confirmation sheet. It never
-    starts a queue.
+  space and its anchors (shipped with S11b):
+  - `start_task(description, repo?, template?)`: the ⌘N path (origin's base
+    fetched, the space's agent, a branch from the description's first line,
+    `-2`… when it exists), reporting to the Lead as a Mission. With "Starts
+    tasks without asking" off (Space Settings › Lead, on by default), it opens
+    the New sheet filled in, the task reporting to the Lead if the user starts
+    it; one sheet at a time.
+  - `list_tasks()`: the space's tasks (title, branch, agent state, pull request
+    and checks, the question waiting or the result) and repositories.
+  - `tell(task, message)`, `reply(question, message)`: Missions. A task is named
+    by its branch or title; the Lead reaches only the tasks that report to a
+    Lead of its space. A question typed into the Lead names `reply`.
+  - `ask_user(task, why)`: hands the question the task waits on to the user
+    (amber row at once, the popover saying why). The answer is typed into the
+    task, and a line into the Lead ("[Nirux Mission] The user answered …").
+    The question is the task's own: the Lead asks its own in its conversation.
+  - `queue_merge(prs, repo?)`: opens one repository's merge queue confirmation
+    sheet with those pull requests, in that order (one queue per repository).
+    It never starts a queue.
+- **The channel:** each call is a file in `<state dir>/lead/requests/`
+  (LeadChannel), answered in `lead/responses/`. The app checks that the
+  calling column belongs to its space's Lead before acting.
 - **No tool merges, removes a worktree or a branch, or reaches another space.**
 - **State lives in Nirux** (board, Missions), not in the Lead's conversation: a
   `/clear` or a restart loses nothing.

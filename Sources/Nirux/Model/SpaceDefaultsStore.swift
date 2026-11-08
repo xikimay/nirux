@@ -136,6 +136,7 @@ struct SpaceDefaultsStore: Sendable {
         if top["codexLaunchMode"].map({ !($0 is NSNull) }) == true, decoded.codexLaunchMode == nil {
             unknown.insert("codexLaunchMode")
         }
+        if let value = top["leadStartsTasks"], !(value is NSNull), decoded.leadStartsTasks == nil { unknown.insert("leadStartsTasks") }
         if let variables = top["environment"], !(variables is NSNull) {
             let entries = variables as? [Any] ?? []
             let readable = entries.allSatisfy { entry in

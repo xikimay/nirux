@@ -6,24 +6,30 @@ extension NiruxShellView {
     /// ⌘N, the sidebar's "+" and "New…" in the palette: the sheet opens on
     /// the active space, its default repository selected
     /// (docs/spaces.md, "One door: ⌘N").
-    func showNewPanel() {
-        guard let window else { return }
+    /// `spaceID` and `selectedKey` (a Lead's proposal) override the active
+    /// space and its default repository.
+    @discardableResult
+    func showNewPanel(spaceID requestedSpaceID: String? = nil, selectedKey: String? = nil) -> NewTaskPanel? {
+        guard let window else { return nil }
         // Another sheet is up (an alert, Board Settings): a second one would
         // wait unseen behind it, and one waiting there would come up loose.
         if let sheet = window.attachedSheet, sheet !== newTaskPanel?.panel {
             NSSound.beep()
             sheet.makeKeyAndOrderFront(nil)
-            return
+            return nil
         }
         if let panel = newTaskPanel {
-            guard panel.isHidden else { return panel.focus() }
+            guard panel.isHidden else {
+                panel.focus()
+                return nil
+            }
             // Closed while its task starts: it comes back by itself if
             // starting fails, and ⌘N opens a new sheet meanwhile.
             startingTaskPanels.append(panel)
             newTaskPanel = nil
         }
-        let spaceID = activeProfileID
-        guard let space = profiles.first(where: { $0.id == spaceID }) else { return }
+        let spaceID = requestedSpaceID ?? activeProfileID
+        guard let space = profiles.first(where: { $0.id == spaceID }) else { return nil }
         let panel = NewTaskPanel()
         newTaskPanel = panel
         let stateDirectory = Persistence.stateDirectory
@@ -65,13 +71,14 @@ extension NiruxShellView {
             attachedTo: window,
             space: NewTaskPanel.Space(id: space.id, name: space.name, isGeneral: space.id == WorkspaceProfile.defaultID),
             repositories: repositories,
-            selectedKey: space.anchors.defaultAnchor?.key,
+            selectedKey: selectedKey ?? space.anchors.defaultAnchor?.key,
             agent: defaultTaskAgent(forSpace: space.id),
             homeFolder: sideEffects.homeDirectory()
         )
         if repositories.isEmpty, space.id != WorkspaceProfile.defaultID {
             suggestRepository(to: panel)
         }
+        return panel
     }
 
     /// The agent a space's tasks start with unless the sheet says otherwise:
@@ -147,12 +154,26 @@ extension NiruxShellView {
     /// In the space its repository belongs to, else the sheet's
     /// (docs/spaces.md, "Routing").
     private func openTaskWorkspace(_ request: NewTask.Request, _ created: CreatedTaskWorktree) {
-        let decision = decideSpace(identity: created.identity, parentWorkspaceID: nil, startedFromSpaceID: request.projectID)
+        let decision = decideSpace(
+            identity: created.identity, parentWorkspaceID: request.reportsTo?.workspaceID, startedFromSpaceID: request.projectID
+        )
+        let childWorkspaceID = UUID().uuidString
+        let childAgentUUID = UUID().uuidString
+        let mission = request.reportsTo.flatMap { parent in
+            createMission(
+                parent: parent, childWorkspaceID: childWorkspaceID, childAgentUUID: childAgentUUID,
+                agent: request.agent, branch: created.checkedOutBranch ?? request.branch
+            )
+        }
         addWorkspace(
             title: NewTask.workspaceTitle(description: request.description) ?? request.branch,
             cwd: created.workingDirectory,
             agent: request.agent,
             profileID: decision.spaceID,
+            workspaceID: childWorkspaceID,
+            initialAgentUUID: childAgentUUID,
+            missionID: mission?.id,
+            reportsToLead: mission?.reportsToLead == true,
             deliveredHandover: created.handoverError == nil,
             handoverText: created.handover,
             worktreeBranch: created.checkedOutBranch,
@@ -210,7 +231,7 @@ extension NiruxShellView {
     /// can't inherit this view's main-actor isolation (see `runOffMain` in
     /// the worktree cleanup). `stateDirectory` is read on the main thread:
     /// a test's environment may be gone by the time this runs.
-    nonisolated private static func readNewTaskInfo(
+    nonisolated static func readNewTaskInfo(
         spaceID: String,
         folder: String?,
         anchors: [SpaceAnchor],

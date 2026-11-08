@@ -107,12 +107,28 @@ extension NiruxShellView {
 
     func spaceSettingsLeadModel(for space: WorkspaceProfile) -> SpaceSettingsLeadPane.Model {
         let lead = leadWorkspace(inSpace: space.id)
+        let defaults = SpaceDefaultsStore(spaceID: space.id)?.load()
         return SpaceSettingsLeadPane.Model(
             spaceName: space.name,
             isGeneral: !Self.spaceCanHaveLead(space.id),
             hasLead: lead != nil,
-            place: leadPlace(in: space, leadFolder: lead?.cwd)
+            place: leadPlace(in: space, leadFolder: lead?.cwd),
+            startsTasks: defaults?.defaults.leadStartsTasksWithoutAsking ?? true,
+            canChangeStartsTasks: defaults?.isWritable ?? false
         )
+    }
+
+    /// "Starts tasks without asking", saved in the space's defaults.json
+    /// (on is the default, so it writes nothing).
+    func setLeadStartsTasks(_ on: Bool, spaceID: String) {
+        guard let store = SpaceDefaultsStore(spaceID: spaceID) else { return }
+        let loaded = store.load()
+        var defaults = loaded.defaults
+        defaults.leadStartsTasks = on ? nil : false
+        if defaults != loaded.defaults, case .failure(let error) = store.save(defaults, replacing: loaded) {
+            showToast(error.message, tone: .error)
+        }
+        refreshSpaceSettingsLead()
     }
 
     /// Where the running Lead works (`leadFolder`), else where a new one

@@ -17,6 +17,11 @@ enum MissionPromptText {
         switch event.kind {
         case .instruction:
             return event.message
+        case .question where delivery.mission.reportsToLead == true:
+            // A space's Lead answers with its tools (see LeadTools).
+            return "\(prefix) Question from \(child):\n\(quoted(event.message))\n"
+                + "Answer with the reply tool, question \(event.id); if neither the brief, the code nor the user's "
+                + "words settle it, don't guess: hand it to the user with ask_user."
         case .question:
             return "\(prefix) Question from \(child):\n\(quoted(event.message))\n"
                 + "Reply with: \"$NIRUX_CLI_PATH\" --mission reply --event \(event.id) --message \"<answer>\""
