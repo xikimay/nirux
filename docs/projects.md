@@ -114,7 +114,7 @@ truncate.
   title. A workspace title the user chose is not used: `launchAgent` only runs
   on a brand-new workspace, which has no such title yet.
 - **Project** is the space name until Projects exist. It is left out for the
-  default space while it still has its default name ("main"), and when it
+  default space while it has its built-in name ("General", "main" before), and when it
   equals the label.
 - **Where:** `claudeCommand` gains a `sessionName` argument, passed as one
   shell-quoted `--name=<name>` so a name starting with "-" can't read as a flag,
@@ -578,7 +578,7 @@ below).
   its first turn completes, so Resume checks the live columns first (see
   "Resuming from ⌘P").
 - **Space:** a running session follows its workspace into another space
-  (Move to Project, or its space deleted); an ended one stays where it was.
+  (Move to Space, or its space deleted); an ended one stays where it was.
 - **Checkout:** the workspace's, when the agent works inside it. A worktree
   nested in it (`claude --worktree` puts them under `.claude/worktrees/`) has
   its own top level, and gets no checkout.
