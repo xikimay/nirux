@@ -153,6 +153,19 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(working.cardActions, [.cleanup(.available, pullRequest: 39)])
     }
 
+    /// A Mission question the status line doesn't show (another column
+    /// waits on the user first) keeps a line that opens it.
+    func testEveryMissionQuestionOpensFromTheRow() {
+        let asking = column(0, .needsAttention, reason: .question("Which?"))
+        var child = column(1)
+        let question = SidebarMissionQuestion(questionID: "q", parentTitle: "web-main", text: "Keep it?", handOff: .parentClosed)
+        child.missionQuestion = question
+        let row = workspace([asking, child])
+        XCTAssertEqual(row.rowSummary.status.text, "Needs you · Which?")
+        XCTAssertEqual(row.cardActions, [.missionQuestion(columnIndex: 1, question)])
+        XCTAssertEqual(workspace([child]).cardActions, [], "the status line shows it")
+    }
+
     /// A click on a row that waits on the user brings up the asking column,
     /// whose chip only shows once the row is selected; another row, or the
     /// selected one, keeps the workspace's focused column.

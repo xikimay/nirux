@@ -347,7 +347,7 @@ final class MissionDeliveryTests: XCTestCase {
         answered.isAnswered = true
         sidebar.update(profiles: [], workspaces: [workspace([column(answered)], index: 3)])
         XCTAssertTrue(sidebar.expandedViews.contains {
-            ($0 as? NSTextField)?.stringValue == "Answer from web-main ready to type in"
+            ($0 as? NSTextField)?.stringValue == "Answer ready · from web-main"
         })
         XCTAssertFalse(sidebar.hitAreas.contains { area in
             guard case .link(let url, _) = area.region else { return false }

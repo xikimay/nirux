@@ -626,10 +626,22 @@ final class SidebarView: NSView {
     }
 
     /// Under the text only, not under a link's icons.
+    /// Under the link's words when only some are ("Merged · Clean up":
+    /// the accent ones), else under all the text.
     private func applyUnderline(to label: NSTextField) {
         let attr = NSMutableAttributedString(attributedString: label.attributedStringValue)
-        attr.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attr.length)) { attachment, range, _ in
-            guard attachment == nil else { return }
+        let whole = NSRange(location: 0, length: attr.length)
+        var linkRanges: [NSRange] = []
+        attr.enumerateAttribute(.foregroundColor, in: whole) { color, range, _ in
+            if (color as? NSColor) == Theme.Color.accent { linkRanges.append(range) }
+        }
+        if linkRanges.isEmpty || linkRanges == [whole] {
+            attr.enumerateAttribute(.attachment, in: whole) { attachment, range, _ in
+                guard attachment == nil else { return }
+                linkRanges.append(range)
+            }
+        }
+        for range in linkRanges {
             attr.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
         }
         label.attributedStringValue = attr

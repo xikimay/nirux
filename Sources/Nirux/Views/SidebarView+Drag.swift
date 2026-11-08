@@ -160,6 +160,8 @@ extension SidebarView {
     /// press-to-switch behavior.
     private func deliverDrop(_ drag: SidebarWorkspaceDrag) {
         guard let currentIndex = lastInfos.first(where: { $0.id == drag.workspaceID })?.index else { return }
+        // A reorder is no first click of a double-click.
+        if drag.isDragging { lastRowPress = nil }
         if drag.isDragging,
            let slot = drag.currentSlot,
            let target = SidebarDragMath.targetPosition(slot: slot, draggedPosition: drag.position) {
