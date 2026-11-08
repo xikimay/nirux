@@ -3,8 +3,12 @@ import AppKit
 // MARK: - Mission Worktrees
 
 extension NiruxShellView {
-    /// Shared entry point: create a git worktree, move an optional handover file into it, and open a workspace.
-    /// Used by both the `nirux://new-worktree` URL scheme and the WorktreePanel.
+    /// `nirux://new-worktree`: create a git worktree, move an optional
+    /// handover file into it, and open a workspace. Its space is decided
+    /// once the worktree exists (docs/spaces.md, "Routing"): its
+    /// repository's space, else the parent's current space, else
+    /// `requestedProfileID` (the space the requesting shell started in),
+    /// else the default space, with the banner that says so.
     func createWorktreeWorkspace(
         branch: String,
         repoRoot: String,
@@ -14,12 +18,14 @@ extension NiruxShellView {
         parentWorkspaceID: String? = nil,
         parentAgentUUID: String? = nil
     ) {
-        let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
+        let routesByAnchor = routesByAnchor
         DispatchQueue.global(qos: .userInitiated).async {
             let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot)
             // Read back from the checkout: the session is named after the
             // branch it will actually work on (see `SessionName`).
             let checkedOutBranch = path.flatMap(GitWorktree.currentBranch(at:))
+            let identity = routesByAnchor
+                ? path.flatMap { FolderIdentity.identify($0, timeout: FolderIdentity.backgroundRoutingTimeout) } : nil
             // Move handover file into the worktree if provided. The path comes
             // from a URL: HandoverFile only accepts the user's own regular file
             // directly in /tmp, never a symlink or hard link.
@@ -84,11 +90,14 @@ extension NiruxShellView {
                             missionID = candidateID
                         }
                     }
+                    let decision = self.decideSpace(
+                        identity: identity, parentWorkspaceID: parentWorkspaceID, startedFromSpaceID: requestedProfileID
+                    )
                     self.addWorkspace(
                         title: branch,
                         cwd: path,
                         agent: agent,
-                        profileID: targetProfileID,
+                        profileID: decision.spaceID,
                         workspaceID: childWorkspaceID,
                         initialAgentUUID: childAgentUUID,
                         missionID: missionID,
@@ -97,6 +106,7 @@ extension NiruxShellView {
                         worktreeBranch: checkedOutBranch
                     )
                     self.saveState()
+                    if decision.reason == .general { self.presentSpaceArrival(workspaceID: childWorkspaceID) }
                 } else {
                     NSLog("[Worktree] Failed to create worktree for \(branch): \(error ?? "unknown")")
                     self.presentProblem(

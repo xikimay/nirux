@@ -1,8 +1,8 @@
 # Spaces, anchors and the Lead
 
-Status: design validated by the user on 2026-11-08. Nothing is implemented
-yet. Where this document and [projects.md](projects.md) differ (management UI,
-routing, defaults), this one wins.
+Status: design validated by the user on 2026-11-08. Shipped: anchors and
+routing (S4). Where this document and [projects.md](projects.md) differ
+(management UI, routing, defaults), this one wins.
 
 Creating spaces and workspaces was messy because a space didn't know where its
 code lives. Five ways to create a workspace each guessed a different starting
@@ -64,7 +64,10 @@ struct SpaceAnchor: Codable, Equatable {
 
 - Stored on the space in `projects.json` (schema version 2). Decoding stays
   lenient and keeps unknown kinds; a build that finds a newer schema reads the
-  file and never writes it (existing rule).
+  file and never writes it (existing rule). Version 2 is written only once a
+  space has an anchor, so an older nightly keeps writing the file until then.
+  `state.json`'s mirror carries the anchors too; an older build's mirror has
+  none, and the file's are kept.
 - **Identity** of a repository is
   `git rev-parse --path-format=absolute --git-common-dir`, symlinks resolved:
   the same for the main checkout and every linked worktree. Run it off the
@@ -73,9 +76,22 @@ struct SpaceAnchor: Codable, Equatable {
 - **One space per anchor.** Adding a repository anchored elsewhere offers to
   move it.
 - **Adding an anchor** offers to move that repository's workspaces into the
-  space; the ones in General are preselected.
+  space; the ones in General are preselected. A workspace counts when its
+  folder, or its focused terminal's, now routes to the space.
 - **A space with anchors** opens a plain new workspace in its default anchor's
-  main checkout, never in `~`.
+  main checkout, never in `~`. When that folder is gone, the first of its other
+  anchors' folders still there; a bare repository has no main checkout to find
+  without git: `~` then.
+- **Never the home folder** (or a folder holding it) as a folder anchor: every
+  folder under it would join the space.
+- **Read-only:** while `projects.json` can't be written (a newer Nirux saved
+  it, or it is unreadable), anchors don't change, as spaces can't be deleted:
+  only that file keeps them.
+- **New Space…** (shipped) suggests the focused terminal's repository, already
+  in the list and naming the space, unless another space has it. "Add
+  Repository…" in the space menu anchors the repository holding the folder
+  picked (or the folder, when it is in none and the user agrees). Until Space
+  Settings, a "Repositories" submenu makes one the default or removes one.
 
 ## Routing
 
@@ -89,7 +105,15 @@ right space with the right env:
    Open Worktree): that space.
 4. **Anything else** (a `nirux://` request from outside, a confirmed request
    without a launch ID): **General**, with a notification offering "Move to…"
-   and "Anchor to a Space…".
+   and "Anchor to a Space…". It is a banner at the bottom of the window (a
+   native notification never shows: the request brings Nirux to the front),
+   for 12 s or until a click elsewhere.
+
+A request from a Nirux terminal names its shell's space (`profile=`), which
+counts as rule 3. Routing runs git only once a space has an anchor, and waits
+for it at most 300 ms (3 s after a worktree was made off the main thread, for a
+`nirux://new-worktree` or New Task…); past that it routes as if the folder were
+in no repository.
 
 After that the assignment is sticky: only the user moves a workspace.
 

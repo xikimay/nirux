@@ -221,24 +221,45 @@ extension NiruxShellView {
 
     /// The agent resumes in `directory`: in a new column of the workspace
     /// it ran in, else of a workspace of `spaceID` open on that folder,
-    /// else of a new workspace.
+    /// else of a new workspace, in the space its folder belongs to, else
+    /// `spaceID` (docs/spaces.md, "Routing").
     private func openResumedSession(_ record: AgentSessionRecord, spaceID: String, directory: String) {
         // Resumed meanwhile, by a restored column or another Resume.
         if goToHeldSession(record) { return }
         let open = workspaces.filter { !$0.isClosing }
-        let workspace: WorkspaceState
-        let column: ColumnState
         if let existing = open.first(where: { $0.id == record.workspaceID })
             ?? open.first(where: { $0.profileID == spaceID && AgentSessionResume.isSamePath($0.cwd, directory) }) {
             existing.addColumn(cwd: directory)
             guard let added = existing.columns[safe: existing.focusedIndex] else { return }
-            (workspace, column) = (existing, added)
             focusWorkspace(id: existing.id, column: existing.focusedIndex)
-        } else {
-            addWorkspace(title: SessionHistory.title(of: record), cwd: directory, profileID: spaceID)
-            guard let added = activeWorkspace, let first = added.columns.first else { return }
-            (workspace, column) = (added, first)
+            return launchResumedSession(record, in: existing, column: added, directory: directory)
         }
+        // In flight again while git names the folder's repository: a second
+        // Resume meanwhile would open a second workspace.
+        guard sessionResume.inFlight.insert(record.key).inserted else { return }
+        routeWorkspace(folder: directory, startedFromSpaceID: spaceID) { [weak self] decision in
+            guard let self else { return }
+            self.sessionResume.inFlight.remove(record.key)
+            if self.goToHeldSession(record) { return }
+            // A workspace already there in the space it goes to (its
+            // repository's, or one opened during the hop).
+            if let existing = self.workspaces.first(where: {
+                !$0.isClosing && $0.profileID == decision.spaceID && AgentSessionResume.isSamePath($0.cwd, directory)
+            }) {
+                existing.addColumn(cwd: directory)
+                guard let added = existing.columns[safe: existing.focusedIndex] else { return }
+                self.focusWorkspace(id: existing.id, column: existing.focusedIndex)
+                return self.launchResumedSession(record, in: existing, column: added, directory: directory)
+            }
+            self.addWorkspace(title: SessionHistory.title(of: record), cwd: directory, profileID: decision.spaceID)
+            guard let added = self.activeWorkspace, let first = added.columns.first else { return }
+            self.launchResumedSession(record, in: added, column: first, directory: directory)
+        }
+    }
+
+    private func launchResumedSession(
+        _ record: AgentSessionRecord, in workspace: WorkspaceState, column: ColumnState, directory: String
+    ) {
         let agent: DeferredAgentLaunch.Agent = switch record.agent {
         case .claude: .claude(resume: .session(record.sessionID), mode: Self.currentClaudeLaunchMode())
         case .codex: .codex(resume: .session(record.sessionID), mode: Self.currentCodexLaunchMode())

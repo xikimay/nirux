@@ -247,8 +247,7 @@ extension NiruxShellView {
                 board.expireWorktrees()
                 return showToast("That worktree’s folder is gone")
             }
-            addWorkspace(title: title, cwd: path, profileID: board.projectID)
-            saveState()
+            openRoutedWorkspace(title: title, cwd: path, startedFromSpaceID: board.projectID)
         case .cleanUp(let path):
             // The flow and confirmation of "Clean Up Worktree…", by folder.
             requestWorktreeCleanup(path: path)
