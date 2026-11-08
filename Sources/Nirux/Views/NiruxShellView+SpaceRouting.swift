@@ -74,7 +74,7 @@ extension NiruxShellView {
     /// else to the default space, with the banner that says so.
     func openRequestedWorkspace(title: String?, cwd: String?, agent: NiruxApp.WorkspaceAgent?, requestedSpaceID: String?) {
         let folder = cwd ?? defaultFolder(forSpace: requestedSpaceID ?? WorkspaceProfile.defaultID)
-        routeWorkspace(folder: folder, startedFromSpaceID: requestedSpaceID) { [weak self] decision in
+        routeWorkspace(folder: folder, startedFromSpaceID: requestedSpaceID ?? activeProfileID) { [weak self] decision in
             guard let self else { return }
             let workspaceID = UUID().uuidString
             self.addWorkspace(title: title, cwd: folder, agent: agent, profileID: decision.spaceID, workspaceID: workspaceID)
