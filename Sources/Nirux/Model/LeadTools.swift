@@ -198,7 +198,6 @@ enum LeadTools {
             for (key, value) in fields {
                 guard let value else { continue }
                 guard let text = value else { return "\(key) must be a string." }
-                guard text.count <= maxContextLength else { return "\(key) must hold at most \(maxContextLength) characters." }
             }
             return nil
         default:
