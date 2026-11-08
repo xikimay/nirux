@@ -19,7 +19,13 @@ final class MenuBarFlowTests: XCTestCase {
                 "the default space can't be deleted"
             )
 
-            bar.run(["Space", "New Space"])
+            // The sidebar's New Space… sheet; the space itself is made the
+            // way its Create button does.
+            bar.run(["Space", "New Space…"])
+            harness.waitUntil("the New Space sheet") { shell.newSpacePanel?.panel?.isSheet == true }
+            try XCTUnwrap(shell.newSpacePanel).cancelButton.performClick(nil)
+            harness.waitUntil("the sheet to close") { harness.window.attachedSheet == nil }
+            shell.createSpace(NewSpacePanel.Draft(name: "Menu", colorHex: WorkspaceProfile.palette[1].hex, anchors: []))
             let space = shell.activeProfileID
             XCTAssertNotEqual(space, WorkspaceProfile.defaultID)
             XCTAssertEqual(bar.titles(of: ["Space", "Space Settings"]).last, "Delete Space…")

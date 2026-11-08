@@ -24,9 +24,10 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             "testCIFailureMenuItems": ["Ask Agent Why CI Failed", "Rerun Failed CI Jobs…"],
             "testReviewBranchMenuItem": ["Review Branch"],
             "testSpaceMenuItems": [
-                "New Space", "Rename Space…", "Space Color", "Edit Space Brief…", "Edit Task Templates…",
+                "New Space…", "Rename Space…", "Space Color", "Edit Space Brief…", "Edit Task Templates…",
                 "Space Memory…", "Board Settings…", "Delete Space…"
-            ]
+            ],
+            "testSpaceRepositoryMenuItems": ["Add Repository…", "Repositories"]
         ],
         exemptions: [:]
     )
@@ -35,12 +36,17 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
 
     // MARK: - Menus
 
-    /// Builds the menus with every item showing: two spaces, a workspace in
-    /// a worktree with two columns, an inactive workspace.
+    /// Builds the menus with every item showing: two spaces, one with a
+    /// repository, a workspace in a worktree with two columns, an inactive
+    /// workspace.
     func testEverySidebarMenuItemHasAFlowTest() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
-            shell.createProfileFromActiveContext()
+            let repository = try XCTUnwrap(FolderIdentity.identify(harness.repo, timeout: 10)).anchor
+            shell.createSpace(NewSpacePanel.Draft(name: "flow", colorHex: WorkspaceProfile.palette[1].hex, anchors: [repository]))
+            harness.waitUntil("the new space on screen") {
+                shell.profiles.first { $0.id == shell.activeProfileID }?.name == "flow"
+            }
             shell.addWorkspace(title: "inactive", cwd: harness.repo)
             let inactiveIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "inactive" })
             shell.handleWorkspaceSidebarAction(.markInactive, workspaceIndex: inactiveIndex)
@@ -253,10 +259,24 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 try XCTUnwrap(shell.profiles.first { $0.id == shell.activeProfileID })
             }
 
-            harness.perform(["New Space"], in: shell.sidebar.spaceOptionsMenu())
+            // The focused terminal's repository is already in the sheet and
+            // names the space. Creating it offers to move that repository's
+            // workspace in from the default space, checked: it moves.
+            harness.perform(["New Space…"], in: shell.sidebar.spaceOptionsMenu())
+            harness.waitUntil("the New Space sheet") { shell.newSpacePanel?.panel?.isSheet == true }
+            let sheet = try XCTUnwrap(shell.newSpacePanel)
+            XCTAssertEqual(sheet.rows.map(\.anchor), [SpaceAnchor(kind: .gitRepository(commonDir: harness.repo + "/.git"), name: "repo", isDefault: true)])
+            XCTAssertEqual(sheet.nameField.stringValue, "repo")
+            let repoWorkspace = try XCTUnwrap(shell.activeWorkspace)
+            sheet.createButton.performClick(nil)
+            XCTAssertNil(harness.window.attachedSheet)
+            harness.waitUntil("the new space on screen") { shell.activeProfileID != WorkspaceProfile.defaultID }
+            XCTAssertEqual(harness.alerts.last, "Move workspaces to “repo”?")
             let space = try activeSpace()
-            XCTAssertNotEqual(space.id, WorkspaceProfile.defaultID)
+            XCTAssertEqual(space.name, "repo")
+            XCTAssertEqual(space.anchors.map(\.name), ["repo"])
             let spaceWorkspace = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertIdentical(spaceWorkspace, repoWorkspace)
             XCTAssertEqual(spaceWorkspace.profileID, space.id)
 
             harness.perform(["Rename Space…"], in: shell.sidebar.spaceOptionsMenu())
@@ -328,6 +348,61 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             harness.perform(["Delete Space…"], in: shell.sidebar.spaceOptionsMenu())
             XCTAssertFalse(shell.profiles.contains { $0.id == space.id })
             XCTAssertEqual(spaceWorkspace.profileID, WorkspaceProfile.defaultID)
+        }
+    }
+
+    /// "Add Repository…" anchors the repository of the folder picked (a
+    /// linked worktree here: the repository is named after its main
+    /// checkout), offers its workspaces, and a plain workspace then opens in
+    /// its main checkout. A folder in no repository is added as a folder
+    /// once the user agrees, never the home folder. "Repositories" makes one
+    /// the default and removes one.
+    func testSpaceRepositoryMenuItems() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let repoWorkspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.createSpace(NewSpacePanel.Draft(name: "Repos", colorHex: WorkspaceProfile.palette[2].hex, anchors: []))
+            let space = try XCTUnwrap(shell.profiles.first { $0.name == "Repos" })
+            XCTAssertEqual(shell.activeProfileID, space.id)
+            // No repository yet: its first workspace opens in the home folder.
+            XCTAssertEqual(shell.activeWorkspace?.cwd, harness.home)
+            @MainActor func anchors() -> [SpaceAnchor] { shell.profiles.first { $0.id == space.id }?.anchors ?? [] }
+
+            harness.chosenFolders = [harness.worktree]
+            harness.perform(["Add Repository…"], in: shell.sidebar.spaceOptionsMenu())
+            harness.waitUntil("the repository anchored") { !anchors().isEmpty }
+            let repository = SpaceAnchor(kind: .gitRepository(commonDir: harness.repo + "/.git"), name: "repo", isDefault: true)
+            XCTAssertEqual(anchors(), [repository])
+            harness.waitUntil("the repository's workspace offered") { repoWorkspace.profileID == space.id }
+            XCTAssertEqual(harness.alerts.last, "Move workspaces to “Repos”?")
+            shell.addWorkspace(title: "plain")
+            XCTAssertEqual(shell.activeWorkspace?.cwd, harness.repo)
+            XCTAssertEqual(shell.activeWorkspace?.profileID, space.id)
+
+            // The home folder would take in every folder under it: refused,
+            // without asking.
+            let alertCount = harness.alerts.count
+            harness.chosenFolders = [harness.home]
+            harness.perform(["Add Repository…"], in: shell.sidebar.spaceOptionsMenu())
+            harness.waitUntil("the refusal") { shell.toast?.message.contains("can’t be a space’s folder") == true }
+            XCTAssertEqual(harness.alerts.count, alertCount)
+            XCTAssertEqual(anchors().count, 1)
+
+            let notes = harness.root + "/notes"
+            try FileManager.default.createDirectory(atPath: notes, withIntermediateDirectories: true)
+            harness.chosenFolders = [notes]
+            harness.perform(["Add Repository…"], in: shell.sidebar.spaceOptionsMenu())
+            harness.waitUntil("the folder anchored") { anchors().count == 2 }
+            XCTAssertEqual(harness.alerts.last, "“notes” isn’t in a git repository")
+            XCTAssertEqual(anchors().last, SpaceAnchor(kind: .folder(path: notes), name: "notes"))
+
+            harness.perform(["Repositories", "notes", "Make Default"], in: shell.sidebar.spaceOptionsMenu())
+            XCTAssertEqual(anchors().map(\.isDefault), [false, true])
+            harness.perform(["Repositories", "repo", "Remove from Space"], in: shell.sidebar.spaceOptionsMenu())
+            XCTAssertEqual(anchors(), [SpaceAnchor(kind: .folder(path: notes), name: "notes", isDefault: true)])
+            // The default space has no repositories.
+            shell.selectProfile(WorkspaceProfile.defaultID)
+            XCTAssertFalse(shell.sidebar.spaceOptionsMenu().items.contains { $0.title == "Add Repository…" })
         }
     }
 

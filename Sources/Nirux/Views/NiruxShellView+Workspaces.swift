@@ -37,8 +37,10 @@ extension NiruxShellView {
         }()
 
         let wsTitle = title ?? "ws \(workspaces.count + 1)"
-        let wsCwd = cwd ?? sideEffects.homeDirectory()
         let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
+        // A space with anchors opens a plain workspace in its default
+        // folder, never in the home folder (docs/spaces.md).
+        let wsCwd = cwd ?? defaultFolder(forSpace: targetProfileID)
         let workspace = WorkspaceState(
             id: workspaceID,
             title: wsTitle,
@@ -237,11 +239,12 @@ extension NiruxShellView {
         guard profileAlreadySelected || workspaceStore.selectProfile(profileID) else { return }
         guard profileAlreadySelected || previousProfileID != activeProfileID else { return }
 
-        // An empty space (spaces persist) gets a workspace when selected.
+        // An empty space (spaces persist) gets a workspace when selected,
+        // in its default folder.
         if !workspaceStore.visibleWorkspaceIndices.isEmpty {
             refreshAfterWorkspaceSelection(animated: false)
         } else {
-            addWorkspace(title: activeProfile.name, cwd: sideEffects.homeDirectory())
+            addWorkspace(title: activeProfile.name)
         }
         saveState()
 
@@ -273,23 +276,6 @@ extension NiruxShellView {
         }, completionHandler: {
             DispatchQueue.main.async { snapshot.removeFromSuperview() }
         })
-    }
-
-    func createProfileFromActiveContext() {
-        let sourceWorkspace = activeWorkspace
-        let baseName = sourceWorkspace.flatMap { profileName(for: $0) } ?? "space"
-        let cwd = sourceWorkspace?.focusedWorkingDirectory ?? sideEffects.homeDirectory()
-        // Spaces persist: reuse an empty one of that name rather than pile up
-        // "name 2", "name 3"…
-        if let empty = profiles.first(where: { $0.name == baseName && workspaceStore.visibleWorkspaceIndices(in: $0.id).isEmpty }),
-           workspaceStore.selectProfile(empty.id) {
-            addWorkspace(title: empty.name, cwd: cwd)
-            saveState()
-            return
-        }
-        let profile = workspaceStore.createProfile(named: baseName)
-        addWorkspace(title: profile.name, cwd: cwd)
-        saveState()
     }
 
     func handleWorkspaceSidebarAction(_ action: WorkspaceSidebarAction, workspaceIndex: Int) {
@@ -357,11 +343,6 @@ extension NiruxShellView {
         updateSidebar()
         focusActiveTerminal(in: window)
         saveState()
-    }
-
-    private func profileName(for workspace: WorkspaceState) -> String {
-        let name = (workspace.focusedWorkingDirectory as NSString).lastPathComponent
-        return name.isEmpty ? workspace.title : name
     }
 
     // MARK: - Sidebar toggle

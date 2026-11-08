@@ -21,6 +21,7 @@ Nirux is alpha software.
 - Claude plan usage limits (opt-in): the window's title bar shows the 5-hour window and the weekly limit of a Pro or Max plan (`5h 42% · 7d 18%`), with their resets in a tooltip, see [Claude plan usage limits](#claude-plan-usage-limits).
 - Opt-in Telegram Remote Access: pair one private Telegram user to list live agent sessions, inspect status and recent output, receive completion/attention alerts, and continue a selected session without exposing a webhook or general-purpose shell.
 - Worktree flow: create or open Git worktrees as new workspaces, optionally handing context from the current agent session into the new workspace.
+- Spaces and their repositories: **New Space…** gives a space a name, a color and the repositories or folders its work lives in, one of them the default (the space menu's **Add Repository…** and **Repositories** change them later). A repository belongs to one space: its worktrees open there whatever space is on screen, and a plain new workspace of the space opens in its default repository's main checkout. A `nirux://` request from outside Nirux that no space claims opens in General, with a banner offering **Move to…** and **Anchor to…**. See [docs/spaces.md](docs/spaces.md).
 - Built-in editor: open files, keep tabs, search the workspace, browse the file tree with Finder icons, view Git changes, and toggle file diffs. Find/replace, word wrap, font zoom, per-tab scroll restore, and disk-conflict protection included.
 - Browser context: open URLs in app, keep URL history, import cookies from Chrome, Brave, Arc, or Edge into the shared WebKit data store, download files to ~/Downloads, and inspect pages with the Web Inspector.
 - PR links: a card's PR, CI, and review lines open in a browser column of that workspace. CI opens the failed check, else the PR's Checks tab.
@@ -95,7 +96,7 @@ The parent can also give a Claude Code child more work, even after it completed:
 
 Mission completion is always reported explicitly by the child agent. Nirux does not infer completion from a stopped turn, and answers to a child's `ask` are never typed into its terminal. Worktrees opened without Mission metadata keep the existing handover behavior.
 
-Every command palette action also has a menu bar item, so the Help menu's search finds it with its shortcut: the Space menu holds New Space, the space's settings, Board, Session History… and Clean Up Merged Worktrees…; the Workspaces menu New Workspace, New Task…, the worktrees, Rename and the context; the Agent menu New Claude Code, New Codex, Next Waiting Agent, Resume All Agents, Review Branch and Install Agent Skills; Help, Getting Started.
+Every command palette action also has a menu bar item, so the Help menu's search finds it with its shortcut: the Space menu holds New Space…, the space's settings, Board, Session History… and Clean Up Merged Worktrees…; the Workspaces menu New Workspace, New Task…, the worktrees, Rename and the context; the Agent menu New Claude Code, New Codex, Next Waiting Agent, Resume All Agents, Review Branch and Install Agent Skills; Help, Getting Started.
 
 Typical command palette actions:
 

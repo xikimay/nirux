@@ -112,7 +112,7 @@ extension NiruxApp {
     private func perform(_ request: NiruxURLRequest) {
         switch request.action {
         case let .newWorkspace(cwd, title, agent):
-            shell?.addWorkspace(title: title, cwd: cwd, agent: agent, profileID: request.profileID)
+            shell?.openRequestedWorkspace(title: title, cwd: cwd, agent: agent, requestedSpaceID: request.profileID)
         case .newWorktree(let worktree):
             shell?.createWorktreeWorkspace(
                 branch: worktree.branch,

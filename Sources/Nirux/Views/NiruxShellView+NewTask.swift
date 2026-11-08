@@ -61,7 +61,9 @@ extension NiruxShellView {
     /// `completion` says how it ended; when the form was closed meanwhile,
     /// it comes back to show a failure.
     func startTask(_ request: NewTask.Request, completion: @escaping @MainActor @Sendable (NewTaskPanel.Outcome) -> Void) {
-        Self.createTaskWorktree(request, handoverFilename: Self.handoverFilename(for: request.agent)) { [weak self] result in
+        Self.createTaskWorktree(
+            request, handoverFilename: Self.handoverFilename(for: request.agent), routesByAnchor: routesByAnchor
+        ) { [weak self] result in
             guard let self else { return }
             switch result {
             case .failed(let message):
@@ -76,12 +78,15 @@ extension NiruxShellView {
         }
     }
 
+    /// In the space its repository belongs to, else the one picked in the
+    /// form (docs/spaces.md, "Routing").
     private func openTaskWorkspace(_ request: NewTask.Request, _ created: CreatedTaskWorktree) {
+        let decision = decideSpace(identity: created.identity, parentWorkspaceID: nil, startedFromSpaceID: request.projectID)
         addWorkspace(
             title: NewTask.workspaceTitle(description: request.description) ?? request.branch,
             cwd: created.workingDirectory,
             agent: request.agent,
-            profileID: request.projectID,
+            profileID: decision.spaceID,
             deliveredHandover: created.handoverError == nil,
             handoverText: created.handover,
             worktreeBranch: created.checkedOutBranch
@@ -130,6 +135,8 @@ extension NiruxShellView {
         let handoverError: HandoverFile.TransferError?
         /// git's error, when it failed after creating the worktree.
         let gitWarning: String?
+        /// `workingDirectory`'s repository, for routing.
+        let identity: FolderIdentity?
     }
 
     enum TaskWorktreeResult: Sendable {
@@ -166,17 +173,20 @@ extension NiruxShellView {
     nonisolated private static func createTaskWorktree(
         _ request: NewTask.Request,
         handoverFilename: String,
+        routesByAnchor: Bool,
         completion: @escaping @MainActor @Sendable (TaskWorktreeResult) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = makeTaskWorktree(request, handoverFilename: handoverFilename)
+            let result = makeTaskWorktree(request, handoverFilename: handoverFilename, routesByAnchor: routesByAnchor)
             DispatchQueue.main.async { @MainActor in
                 completion(result)
             }
         }
     }
 
-    nonisolated private static func makeTaskWorktree(_ request: NewTask.Request, handoverFilename: String) -> TaskWorktreeResult {
+    nonisolated private static func makeTaskWorktree(
+        _ request: NewTask.Request, handoverFilename: String, routesByAnchor: Bool
+    ) -> TaskWorktreeResult {
         let target = request.target
         let start: NewTask.Start
         if let remoteBranch = target.remoteBranch, let name = target.remoteBranchName {
@@ -215,7 +225,9 @@ extension NiruxShellView {
             checkedOutBranch: GitWorktree.currentBranch(at: path),
             handover: handover,
             handoverError: handoverError,
-            gitWarning: error
+            gitWarning: error,
+            identity: routesByAnchor
+                ? FolderIdentity.identify(workingDirectory, timeout: FolderIdentity.backgroundRoutingTimeout) : nil
         ))
     }
 }

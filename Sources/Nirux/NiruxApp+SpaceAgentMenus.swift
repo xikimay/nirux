@@ -7,7 +7,7 @@ import AppKit
 extension NiruxApp {
     // MARK: Space
 
-    /// Whatever the sidebar's "New Space" does.
+    /// Whatever the sidebar's "New Space…" does.
     @objc func newSpace(_ sender: Any?) {
         shell?.sidebar.onCreateProfile?()
     }

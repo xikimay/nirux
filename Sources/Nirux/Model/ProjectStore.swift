@@ -18,11 +18,15 @@ import Foundation
 ///
 /// Changing the format: bump `schemaVersion`. A file with keys this build
 /// doesn't know is read but never written, so a rollback can't strip them.
+/// Version 2 adds the spaces' anchors (see SpaceAnchor). It is written only
+/// when a space has some: until then the file is what version 1 wrote, and
+/// an older nightly can still write it.
 @MainActor
 final class ProjectStore {
-    static let schemaVersion = 1
+    /// The newest schema this build reads and writes.
+    static let schemaVersion = 2
     private static let fileKeys: Set<String> = ["schemaVersion", "projects", "deletedIDs"]
-    private static let projectKeys: Set<String> = ["id", "name", "colorHex"]
+    private static let projectKeys: Set<String> = ["id", "name", "colorHex", "anchors"]
 
     enum Availability: Equatable {
         case writable
@@ -117,7 +121,8 @@ final class ProjectStore {
         let mirrorIDs = Set(mirror.map(\.id))
         let kept = backup.projects.filter { mirrorIDs.contains($0.id) }
         droppedSinceBackup = Set(backup.projects.map(\.id)).subtracting(mirrorIDs)
-        return Self.merged(kept, withMirror: mirror, deletedIDs: deletedIDs)
+        // This build wrote the mirror with its anchors: none means none.
+        return Self.merged(kept, withMirror: mirror, deletedIDs: deletedIDs, mirrorHasAnchors: true)
     }
 
     func markDeleted(_ id: String) {
@@ -157,7 +162,9 @@ final class ProjectStore {
         // A space this instance still lists isn't deleted, whatever another
         // instance recorded.
         deletedIDs.subtract(profiles.map(\.id))
-        let file = ProjectsFile(schemaVersion: Self.schemaVersion, projects: profiles, deletedIDs: deletedIDs.sorted())
+        let file = ProjectsFile(
+            schemaVersion: Self.schemaVersion(for: profiles), projects: profiles, deletedIDs: deletedIDs.sorted()
+        )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(file) else {
@@ -185,6 +192,11 @@ final class ProjectStore {
             isFileCurrent = false
         }
         return isFileCurrent
+    }
+
+    /// 1 without anchors: an older build reads and writes that file.
+    static func schemaVersion(for profiles: [WorkspaceProfile]) -> Int {
+        profiles.contains { !$0.anchors.isEmpty } ? schemaVersion : 1
     }
 
     // MARK: - Orphaned briefs
@@ -253,7 +265,8 @@ final class ProjectStore {
                 return WorkspaceProfile(
                     id: id,
                     name: project.name ?? unnamed,
-                    colorHex: project.colorHex ?? WorkspaceProfile.colorHex(for: index)
+                    colorHex: project.colorHex ?? WorkspaceProfile.colorHex(for: index),
+                    anchors: project.anchors
                 )
             })
             deletedIDs = try container.decodeIfPresent([String].self, forKey: .deletedIDs) ?? []
@@ -264,6 +277,20 @@ final class ProjectStore {
         let id: String?
         let name: String?
         let colorHex: String?
+        let anchors: [SpaceAnchor]
+
+        private enum CodingKeys: String, CodingKey {
+            case id, name, colorHex, anchors
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decodeIfPresent(String.self, forKey: .id)
+            name = try container.decodeIfPresent(String.self, forKey: .name)
+            colorHex = try container.decodeIfPresent(String.self, forKey: .colorHex)
+            // Anchors this build can't read never make the file unreadable.
+            anchors = (try? container.decodeIfPresent([SpaceAnchor].self, forKey: .anchors)) ?? []
+        }
     }
 
     private struct SchemaVersionOnly: Decodable {
@@ -302,21 +329,29 @@ final class ProjectStore {
         guard let top = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return false }
         if !Set(top.keys).isSubset(of: fileKeys) { return true }
         let projects = top["projects"] as? [[String: Any]] ?? []
-        return projects.contains { !Set($0.keys).isSubset(of: projectKeys) }
+        return projects.contains { project in
+            !Set(project.keys).isSubset(of: projectKeys)
+                || (project["anchors"] as? [[String: Any]] ?? []).contains(where: SpaceAnchor.hasUnknownKeys)
+        }
     }
 
     /// `projects` with a newer mirror merged in: it may have renamed or
-    /// recolored spaces, or created new ones.
+    /// recolored spaces, or created new ones. Anchors come from the mirror
+    /// when `mirrorHasAnchors` (this build wrote it, with the marker), else
+    /// only when it has some: an older build's mirror has none, since it
+    /// drops what it doesn't know.
     static func merged(
         _ projects: [WorkspaceProfile],
         withMirror mirror: [WorkspaceProfile],
-        deletedIDs: Set<String>
+        deletedIDs: Set<String>,
+        mirrorHasAnchors: Bool = false
     ) -> [WorkspaceProfile] {
         var result = projects
         for mirrored in mirror where !deletedIDs.contains(mirrored.id) {
             if let index = result.firstIndex(where: { $0.id == mirrored.id }) {
                 result[index].name = mirrored.name
                 result[index].colorHex = mirrored.colorHex
+                if mirrorHasAnchors || !mirrored.anchors.isEmpty { result[index].anchors = mirrored.anchors }
             } else {
                 var added = mirrored
                 // An older build may have recreated a space it had dropped.
