@@ -152,6 +152,8 @@ enum Theme {
         static let keepAwake = "cup.and.saucer.fill"
         static let permission = "hand.raised"
         static let question = "bubble.left"
+        /// A task row's blocker (macOS 12+).
+        static let blocked = "circle.slash"
         static let prFeedback = "bubble.left"
         static let botFeedback = "cpu"
         static let agentError = "exclamationmark.triangle.fill"

@@ -30,12 +30,12 @@ final class SidebarTaskRowTests: XCTestCase {
 
     private func workspace(
         _ columns: [ColumnInfo], branch: String? = "fix/login", pr: PRInfo? = nil, cleanup: MergedCleanupOffer? = nil,
-        isActive: Bool = false
+        isActive: Bool = false, nextStep: String? = nil, blocker: String? = nil
     ) -> WorkspaceInfo {
         WorkspaceInfo(
             id: "ws", index: 4, title: "Fix login", profileID: WorkspaceProfile.defaultID, isInactive: false,
             columnCount: columns.count, focusedColumn: 0, gitBranch: branch, notification: nil, isActive: isActive,
-            columns: columns, prInfo: pr, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active,
+            columns: columns, prInfo: pr, diffStats: nil, purpose: nil, nextStep: nextStep, blocker: blocker, phase: .active,
             lastSummary: nil, lastActivityAt: Date().timeIntervalSince1970 - 720, mergedCleanup: cleanup
         )
     }
@@ -76,6 +76,46 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(workspace([column()]).rowSummary.status, SidebarStatusLine(text: "fix/login", tone: .branch))
         XCTAssertEqual(status(workspace([column(focused: true)], branch: nil)), "~/app", "no branch: the folder")
         XCTAssertEqual(status(workspace([], branch: nil)), "No activity yet")
+    }
+
+    /// A blocker (the Lead's or the user's) waits behind the user, a break,
+    /// a question, work and an agent to resume, in grey; it comes before a
+    /// finished turn and
+    /// the pull request. The next step takes the branch's place; the
+    /// selected row prints it under a status line that says something
+    /// else. Neither adds a line to another row.
+    func testBlockerAndNextStepRankAfterWork() {
+        let blocker = "waits for #212 to merge"
+        let next = "write the import side"
+        var asking = column(1, .needsAttention, reason: .turnFinished)
+        asking.missionQuestion = SidebarMissionQuestion(questionID: "q", parentTitle: "the Lead", text: "?", handOff: nil)
+        let question = column(0, .needsAttention, reason: .question("Which?"))
+        let finished = column(0, .needsAttention, reason: .turnFinished)
+        XCTAssertEqual(status(workspace([question], blocker: blocker)), "Needs you · Which?")
+        XCTAssertEqual(status(workspace([column(0, .needsAttention, reason: .apiError(kind: nil, detail: nil))], blocker: blocker)),
+                       "Stopped on an API error")
+        XCTAssertEqual(status(workspace([column(0, .working), asking], blocker: blocker)), "Asking the Lead")
+        XCTAssertEqual(status(workspace([column(0, .working)], blocker: blocker)), "Working")
+        XCTAssertEqual(status(workspace([column()], pr: pullRequest(ci: "FAILURE"), blocker: blocker)), "#39 · checks failed")
+        var paused = column(1)
+        paused.deferredAgent = SidebarDeferredAgent(processName: "claude", summary: "claude session", columnID: UUID())
+        XCTAssertEqual(status(workspace([column(), paused], blocker: blocker)), "Paused · Resume", "its agent isn't running")
+
+        let blocked = workspace([finished], pr: pullRequest(ci: "SUCCESS"), nextStep: next, blocker: blocker)
+        XCTAssertEqual(blocked.rowSummary.status, SidebarStatusLine(text: "Blocked · \(blocker)", tone: .neutral))
+        XCTAssertEqual(blocked.rowSummary.mark, .blocked)
+        XCTAssertEqual(blocked.cardActions, [], "no third line")
+        XCTAssertEqual(workspace([column()], isActive: true, nextStep: next, blocker: blocker).cardActions, [.next(next)])
+
+        XCTAssertEqual(status(workspace([column()], nextStep: next)), "Next · \(next)")
+        XCTAssertEqual(workspace([column()], isActive: true, nextStep: next).cardActions, [], "the status line says it")
+        XCTAssertEqual(status(workspace([finished], nextStep: next)), "Done")
+        XCTAssertEqual(status(workspace([column()], pr: pullRequest(ci: "PENDING"), nextStep: next)), "#39 · checks running")
+        XCTAssertEqual(workspace([column()], pr: pullRequest(ci: "PENDING"), isActive: true, nextStep: next).cardActions, [.next(next)])
+        XCTAssertEqual(status(workspace([column()], nextStep: " ", blocker: "")), "fix/login", "blank says nothing")
+        var lead = workspace([column()], isActive: true, nextStep: next)
+        lead.isLead = true
+        XCTAssertEqual(lead.cardActions, [.next(next)], "the Lead's row has no status line")
     }
 
     /// The pull request's line, and where a click on it goes.

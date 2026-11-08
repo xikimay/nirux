@@ -155,8 +155,9 @@ final class SidebarWorkspaceCardRenderer {
         workspace.lastActivityAt.map { .age(SidebarView.cardAge(since: $0)) }
     }
 
-    /// The title's tooltip: what the row doesn't print — the branch, the
-    /// changes, the phase, the purpose, the last summary, the next step.
+    /// The title's tooltip: what the row may not print — the branch, the
+    /// changes, the phase, the purpose, the last summary, the blocker and
+    /// the next step, whole.
     private func titleToolTip() -> String {
         var lines = [workspace.title]
         if let branch = workspace.gitBranch { lines.append("Branch: \(branch)") }
@@ -164,8 +165,8 @@ final class SidebarWorkspaceCardRenderer {
         lines.append("Phase: \(workspace.phase.displayName)")
         if let purpose = workspace.purpose { lines.append("Purpose: \(purpose)") }
         if let summary = workspace.lastSummary { lines.append("Last: \(summary)") }
-        // The selected row prints the next step, every row its blocker.
-        if let action = workspace.sidebarAction, !workspace.isActive, !action.isBlocker { lines.append(action.text) }
+        if let blocker = workspace.blockerText { lines.append("Blocker: \(blocker)") }
+        if let next = workspace.nextStepText { lines.append("Next: \(next)") }
         if workspace.columns.contains(where: { $0.isEditor && $0.editorIsDirty }) { lines.append("Unsaved changes in the editor") }
         if workspace.lastActivityAt == nil { lines.append("No activity yet") }
         return lines.joined(separator: "\n")
@@ -173,7 +174,8 @@ final class SidebarWorkspaceCardRenderer {
 
     /// The sign in the state marks' column: amber for the user, red for
     /// something broken, a breathing green dot for work, a speech bubble
-    /// for a question to the parent, a check, the merge sign, else grey.
+    /// for a question to the parent, a slashed circle for a blocker, a
+    /// check, the merge sign, else grey.
     private func buildMark(_ mark: SidebarRowMark, centerY: CGFloat) {
         let centerX = (Metrics.markCenterX + layout.nestIndent)
         // The status line says it to VoiceOver.
@@ -186,6 +188,7 @@ final class SidebarWorkspaceCardRenderer {
         let color: NSColor
         switch mark {
         case .asking: return symbol(Theme.Symbol.question, Theme.Color.textSecondary, nil)
+        case .blocked: return symbol(Theme.Symbol.blocked, Theme.Color.textSecondary, nil)
         case .readyToMerge: return symbol(Theme.Symbol.checksPassed, Theme.Color.success, nil)
         case .merged: return symbol(Theme.Symbol.merged, Theme.Color.done, nil)
         case .needsYou: color = Theme.Color.waiting
@@ -401,7 +404,7 @@ final class SidebarWorkspaceCardRenderer {
 
     // MARK: - Action block
 
-    /// Approvals, Resume, the blocker, Clean up, then what's next: under
+    /// Approvals, Resume, a question, Clean up, then what's next: under
     /// line 3, after a separator unless it only says something.
     private func buildActionBlock(top: CGFloat) {
         let actions = layout.actions
@@ -440,14 +443,6 @@ final class SidebarWorkspaceCardRenderer {
                 kind: kind, detail: detail, failedAt: failedAt, resume: resume,
                 workspaceIndex: workspace.index, columnIndex: columnIndex, x: x, width: width, top: top
             ).render())
-        case .blocker(let text):
-            let label = textLabel(text, font: Theme.Font.caption, color: Theme.Color.error)
-            label.toolTip = text
-            label.frame = NSRect(
-                x: layout.indentX, y: top - Metrics.actionLineHeight,
-                width: layout.contentMaxX - layout.indentX, height: Metrics.actionLineHeight
-            )
-            append(label)
         case .reviewBadges(let badges):
             let indent = layout.indentX
             let prefix = textLabel("Reviews", font: Theme.Font.caption, color: Theme.Color.textTertiary)
