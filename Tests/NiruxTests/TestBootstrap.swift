@@ -22,9 +22,11 @@ func testBundleDidLoad() {
     MainActor.assumeIsolated {
         // With no display active, Ghostty can't create the display link
         // vsync needs, so it creates no surface and terminal tests time out.
-        // Off in every run, so a locked Mac runs what CI runs. The app keeps
-        // vsync.
-        TerminalAppearance.appendedLines = ["window-vsync = false"]
+        // Off in every run, so a locked Mac runs what CI runs. The app turns
+        // it off only for a surface built while no display is active
+        // (ColumnState.matchTerminalVsyncToDisplays), which the tests of
+        // that clear this line to see.
+        TerminalAppearance.appendedLines = [TerminalAppearance.vsyncOffLine]
     }
 }
 

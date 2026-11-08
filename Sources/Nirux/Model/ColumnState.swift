@@ -126,6 +126,14 @@ final class ColumnState {
     var agentUsage: ClaudeSessionUsage?
     var usageLabel: ColumnHeaderLabel?
 
+    /// The terminal has Ghostty's surface (its lifecycle callbacks).
+    private(set) var hasTerminalSurface = false
+    /// The terminal's controller builds surfaces with vsync; nil before it
+    /// has one.
+    private(set) var terminalHasVsync: Bool?
+    /// Whether a display is active (tests replace it).
+    var isAnyDisplayActive: () -> Bool = Displays.anyActive
+
     private func setupHeader() {
         let header = ColumnHeaderView()
         header.icon = .symbol(Theme.Symbol.terminal)
@@ -280,15 +288,16 @@ final class ColumnState {
             }
         }
 
-        let terminal = TerminalView(frame: .zero)
-        terminal.controller = TerminalAppearance.makeController()
+        let terminal = ColumnTerminalView(frame: .zero)
+        terminalView = terminal
+        terminal.onSurfaceBuildChance = { [weak self] in self?.matchTerminalVsyncToDisplays() }
+        matchTerminalVsyncToDisplays()
         terminal.configuration = TerminalSurfaceOptions(
             backend: .inMemory(ptySession.terminalSession),
             workingDirectory: cwd
         )
         terminal.delegate = self
         view.addSubview(terminal)
-        terminalView = terminal
 
         // Header (above the terminal, not overlapping)
         setupHeader()
@@ -320,6 +329,30 @@ final class ColumnState {
         }
 
         if let shellArgs { scheduleShellStart(cwd: cwd, args: shellArgs, environment: environment) }
+    }
+
+    /// Ghostty builds a surface with vsync only while a display is active:
+    /// vsync needs a CVDisplayLink, which can't be created (-6661) while
+    /// every display sleeps (a locked Mac, its screen off). No surface is
+    /// built then, and what the terminal prints meanwhile is lost: the
+    /// surface holds the screen and the scrollback, and the PTY's output
+    /// goes to it only (`InMemoryTerminalSession.receive` drops it without
+    /// one). A Lead starts tasks while the user is away. So, until it has
+    /// its surface, the terminal gets a controller with vsync off while no
+    /// display is active, with vsync on otherwise, whenever it may build
+    /// one. Ghostty never turns vsync on in a surface built without it:
+    /// that terminal draws on every change while focused, as every terminal
+    /// does unfocused (Ghostty stops the display link then).
+    func matchTerminalVsyncToDisplays() {
+        guard !hasTerminalSurface, let terminal = terminalView as? ColumnTerminalView else { return }
+        let vsync = isAnyDisplayActive()
+        guard vsync != terminalHasVsync else { return }
+        terminalHasVsync = vsync
+        let controller = TerminalAppearance.makeController(vsync: vsync)
+        // AppTerminalView gives it only as it moves to a window.
+        controller.setColorScheme(terminal.colorScheme)
+        // Builds the surface now if the terminal can have one.
+        terminal.controller = controller
     }
 
     /// Delay shell start so the terminal surface is created first. Weak: a
@@ -626,6 +659,16 @@ extension ColumnState: TerminalSurfaceOpenURLDelegate {
 extension ColumnState: TerminalSurfaceHoverLinkDelegate {
     func terminalDidUpdateHoverLink(_ url: String?) {
         (url == nil ? NSCursor.arrow : .pointingHand).set()
+    }
+}
+
+extension ColumnState: TerminalSurfaceLifecycleDelegate {
+    func terminalDidAttachSurface(_ surface: TerminalSurface) {
+        hasTerminalSurface = true
+    }
+
+    func terminalDidDetachSurface() {
+        hasTerminalSurface = false
     }
 }
 
