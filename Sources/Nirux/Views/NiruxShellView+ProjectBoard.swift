@@ -220,7 +220,7 @@ extension NiruxShellView {
             content.body = .sections(sections, others: others)
         }
         // A one-repository board's cells read its own queue, whatever runs elsewhere.
-        content.queue = board.section(id: nil).flatMap { states[$0.id] }
+        content.queue = orphans.first.map(orphanQueueState) ?? board.section(id: nil).flatMap { states[$0.id] }
         guard board.sections.count > 1 || !orphans.isEmpty else { return }
         content.queueLines = board.sections.compactMap { section in
             states[section.id].map { state in
