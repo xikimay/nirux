@@ -92,12 +92,6 @@ final class SpaceSettingsGeneralPane: NSObject, NSTableViewDataSource, NSTableVi
         }
     }
 
-    /// "Rename Space…": the name, selected.
-    func focusName() {
-        view.window?.makeFirstResponder(nameField)
-        nameField.currentEditor()?.selectAll(nil)
-    }
-
     // MARK: - Actions
 
     func controlTextDidEndEditing(_ obj: Notification) {

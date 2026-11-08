@@ -2,8 +2,7 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// "Board Settings…" from a space's menu to board.json, through Space
-/// Settings' Board tab: what the form shows, what Save writes, and what it
+/// Space Settings' Board tab to board.json: what the form shows, what Save writes, and what it
 /// refuses. Clicks are hit-tested by hand, since a window that is never
 /// shown (CI) drops events sent with `sendEvent`.
 final class BoardSettingsPanelTests: XCTestCase {
@@ -24,17 +23,13 @@ final class BoardSettingsPanelTests: XCTestCase {
     // MARK: - Opening
 
     @MainActor
-    func testTheSpaceMenuOpensTheFormFilledWithSuggestionsAndWritesNothing() throws {
+    func testSpaceSettingsOpensTheFormFilledWithSuggestionsAndWritesNothing() throws {
         try withShell { shell, space in
             let repo = root + "/widgets"
             try BoardConfigSuggestionsTests.makeRepository(
                 at: repo, remote: "https://github.com/acme/widgets.git", workflows: ["nightly.yml", "tests.yml"]
             )
             shell.addWorkspace(title: "widgets", cwd: repo, profileID: space.id)
-
-            let titles = try spaceMenu(shell, space).items.map(\.title)
-            let briefIndex = try XCTUnwrap(titles.firstIndex(of: "Edit Space Brief…"))
-            XCTAssertEqual(titles[briefIndex + 1], "Board Settings…")
 
             let form = try open(shell, space)
             XCTAssertEqual(form.repositoryField.stringValue, "acme/widgets")
@@ -526,24 +521,11 @@ final class BoardSettingsPanelTests: XCTestCase {
         try Data(text.utf8).write(to: url)
     }
 
-    @MainActor
-    private func spaceMenu(_ shell: NiruxShellView, _ space: WorkspaceProfile) throws -> NSMenu {
-        let menu = NSMenu()
-        shell.sidebar.addSpaceManagementItems(to: menu, for: ProfileInfo(
-            id: space.id, name: space.name, colorHex: space.colorHex,
-            isActive: false, workspaceCount: 1, attention: nil
-        ))
-        return menu
-    }
-
-    /// Picks "Board Settings…" in the space's menu and waits for the form
-    /// in Space Settings' Board tab.
+    /// Opens Space Settings' Board tab (the Board's own "Board Settings…"
+    /// does the same) and waits for the form.
     @MainActor
     private func open(_ shell: NiruxShellView, _ space: WorkspaceProfile) throws -> BoardSettingsPanel {
-        let menu = try spaceMenu(shell, space)
-        let index = menu.indexOfItem(withTitle: "Board Settings…")
-        XCTAssertGreaterThanOrEqual(index, 0)
-        menu.performActionForItem(at: index)
+        shell.showBoardSettings(profileID: space.id)
         XCTAssertEqual(shell.spaceSettings?.selectedTab, .board)
         return try waitForForm(shell, replacing: nil)
     }

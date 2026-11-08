@@ -76,6 +76,7 @@ extension NiruxShellView {
                 colorHex: profile.colorHex,
                 isActive: profile.id == activeProfileID,
                 workspaceCount: profileWorkspaces.count,
+                taskCount: profileWorkspaces.filter { !$0.isInactive }.count,
                 // The space on screen: what its cards say. Another one: the
                 // same rule, read off its columns.
                 attention: profile.id == activeProfileID

@@ -174,20 +174,16 @@ first step changed is how they are stored and managed:
     doesn't bring it back), but isn't recorded as deleted.
   - without the marker, the backup and the mirror are merged.
   - This needs revisiting once projects carry more than the mirror does.
-- **Empty spaces persist**, drawn as a ring in the switcher. Selecting one
+- **Empty spaces persist**, drawn as a ring in the space picker. Selecting one
   shows what to do instead of opening a workspace (see
   [spaces.md](spaces.md), "Interface"). ⌘⌥←/→ skips empty spaces.
-- **Space menu**, on the header or on right-clicking any space's dot:
-  "Space Settings…", then "Rename Space…", "Edit Space Brief…", "Board
-  Settings…", "Edit Task Templates…" and "Space Memory…" (see
-  [project-memory.md](project-memory.md)), which open Space Settings on the
-  matching tab ([spaces.md](spaces.md), S8), then "Space Color" and "Delete
-  Space…". With the sidebar
-  collapsed, the space's tile at the top of the rail opens it, the spaces
-  to switch to listed first.
-  Right-clicking lets you manage a space without switching to it. A deleted
-  space's workspaces move to the default space, and its brief stays on disk.
-  A new space takes a color no other space uses.
+- **Space picker**, at the top of the sidebar (the space's tile at the top of
+  the collapsed rail opens the same menu): the spaces, General first, with
+  their task count and ⌘⌥1…⌘⌥9, then "New Space…", "Space Settings…" (one
+  window for the active space: name, color, repositories, defaults, brief,
+  memory, board, templates; [spaces.md](spaces.md), S8) and "Delete
+  Space…". A deleted space's workspaces move to the default space, and its
+  brief stays on disk. A new space takes a color no other space uses.
 - **Newer files stay intact:** a file whose schema is newer, or that has keys
   this build doesn't know, is read but never written. Deleting a space is then
   refused, since only `projects.json` can record it.
@@ -412,8 +408,7 @@ so.
 
 **Editing.**
 
-- "Edit Space Brief…" in the space menu opens Space Settings › Brief, a text
-  editor that shows the template until Save creates the file. It follows the
+- Space Settings › Brief is a text editor that shows the template until Save creates the file. It follows the
   file while nothing is typed (an agent editing it), and asks before Save
   replaces what changed on disk.
 - Terminals export `NIRUX_PROJECT_BRIEF`, the file's path, and the header tells

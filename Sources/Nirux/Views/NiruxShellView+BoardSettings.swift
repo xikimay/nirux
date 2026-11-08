@@ -13,7 +13,7 @@ extension NiruxShellView {
         let suggestions: BoardConfigSuggestions
     }
 
-    /// "Board Settings…" in a space's menu: Space Settings on its Board tab.
+    /// "Board Settings…" in the Board's ⋯ menu: Space Settings on its Board tab.
     func showBoardSettings(profileID: String) {
         showSpaceSettings(profileID: profileID, tab: .board)
     }

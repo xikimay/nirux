@@ -36,7 +36,7 @@ final class SidebarRailTests: XCTestCase {
     }
 
     private func profile(_ id: String, isActive: Bool) -> ProfileInfo {
-        ProfileInfo(id: id, name: id, colorHex: "#78A3F7", isActive: isActive, workspaceCount: 3, attention: nil)
+        ProfileInfo(id: id, name: id, colorHex: "#78A3F7", isActive: isActive, workspaceCount: 3, taskCount: 3, attention: nil)
     }
 
     /// A collapsed sidebar in a window that is never shown.
@@ -166,23 +166,6 @@ final class SidebarRailTests: XCTestCase {
         XCTAssertTrue(workspaceMenu.contains("Close Workspace"))
         XCTAssertTrue(workspaceMenu.contains("Organize"))
         XCTAssertEqual(Array(try menuTitles("project").prefix(2)), ["p", "q"])
-    }
-
-    func testProjectMenuSwitchesProjects() throws {
-        let (sidebar, window) = rail(
-            [workspace("a", index: 0, isActive: true)],
-            profiles: [profile("p", isActive: true), profile("q", isActive: false)]
-        )
-        defer { window.close() }
-        var selected: [String] = []
-        sidebar.onProfileClicked = { selected.append($0) }
-
-        let menu = sidebar.projectMenu()
-        XCTAssertEqual(menu.items.prefix(2).map(\.state), [.on, .off])
-        menu.performActionForItem(at: 1)
-
-        XCTAssertEqual(selected, ["q"])
-        XCTAssertTrue(menu.items.contains { $0.title == "New Space…" })
     }
 
     /// The cards' rule: amber only for a wait on the user; a red check

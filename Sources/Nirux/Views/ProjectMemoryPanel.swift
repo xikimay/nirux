@@ -1,6 +1,6 @@
 import AppKit
 
-/// Space Settings › Memory (⌘P › Space Memory…, the space's menu): what
+/// Space Settings › Memory (⌘P › Space Memory…, Space Settings…): what
 /// agents know about the space's repository, in one list (see
 /// ProjectMemory.Knowledge): the project brief's rules apply always, the
 /// repository's CLAUDE.md and AGENTS.md are the team's, Claude Code's
@@ -264,7 +264,7 @@ final class ProjectMemoryPanel: NSObject {
     static func emptyText(model: Model, filtered: Bool) -> String {
         guard model.knowledge.entries.isEmpty else { return filtered ? "Nothing matches." : "" }
         return "Agents know nothing about \(model.repository) yet.\n\n"
-            + "The space brief’s rules (Edit Space Brief…) apply to every session; "
+            + "The space brief’s rules (Space Settings › Brief) apply to every session; "
             + "Claude Code notes what it learns as its sessions work."
     }
 

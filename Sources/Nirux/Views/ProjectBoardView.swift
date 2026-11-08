@@ -629,7 +629,7 @@ final class ProjectBoardView: NSView {
         if row.folderIsGone { parts.append("folder is gone") }
         // A detached worktree may hold the branch mid-rebase: not "no local worktree".
         if row.worktreePath == nil, row.folder == nil { parts.append("not checked out") }
-        if !row.workspaces.isEmpty, row.workspaces.allSatisfy(\.isInactive) { parts.append("inactive") }
+        if !row.workspaces.isEmpty, row.workspaces.allSatisfy(\.isInactive) { parts.append("archived") }
         return parts.joined(separator: " · ")
     }
 

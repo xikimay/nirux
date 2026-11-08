@@ -39,11 +39,6 @@ extension NiruxShellView {
         SpaceBrief.prepareInjection(spaceID: workspace.profileID)
     }
 
-    /// "Edit Space Brief…": Space Settings › Brief.
-    func editSpaceBrief(profileID: String) {
-        showSpaceSettings(profileID: profileID, tab: .brief)
-    }
-
     /// The Codex brief file, unless one of the user's Codex configs already
     /// sets `developer_instructions`, which Nirux must not override: the user
     /// config (`$CODEX_HOME` when Nirux sees it, else ~/.codex) and project

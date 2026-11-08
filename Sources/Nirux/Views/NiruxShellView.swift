@@ -217,15 +217,8 @@ final class NiruxShellView: NSView {
         }
         sidebar.onProfileClicked = { [weak self] profileID in self?.selectProfile(profileID) }
         sidebar.onCreateProfile = { [weak self] in self?.showNewSpacePanel() }
-        sidebar.onAddRepository = { [weak self] profileID in self?.addRepository(toSpace: profileID) }
         sidebar.onShowSpaceSettings = { [weak self] profileID in self?.showSpaceSettings(profileID: profileID) }
         sidebar.onNewWorkspace = { [weak self] in self?.showNewPanel() }
-        sidebar.onRenameProfile = { [weak self] profileID in self?.showRenameSpacePanel(profileID: profileID) }
-        sidebar.onEditProfileBrief = { [weak self] profileID in self?.editSpaceBrief(profileID: profileID) }
-        sidebar.onEditBoardSettings = { [weak self] profileID in self?.showBoardSettings(profileID: profileID) }
-        sidebar.onEditTaskTemplates = { [weak self] profileID in self?.editTaskTemplates(profileID: profileID) }
-        sidebar.onShowProjectMemory = { [weak self] profileID in self?.showProjectMemory(profileID: profileID) }
-        sidebar.onRecolorProfile = { [weak self] profileID, hex in self?.recolorSpace(profileID: profileID, colorHex: hex) }
         sidebar.onDeleteProfile = { [weak self] profileID in self?.confirmDeleteSpace(profileID: profileID) }
         sidebar.onMoveWorkspaceToProfile = { [weak self] workspaceID, profileID in
             self?.moveWorkspaceToSpace(workspaceID: workspaceID, profileID: profileID)
@@ -612,13 +605,6 @@ extension NiruxShellView {
             self.saveState()
         }
         nameInputPanel?.show(relativeTo: window, currentValue: workspace.title, placeholder: "Workspace name")
-    }
-
-    /// "Rename Space…": Space Settings › General, the name selected.
-    func showRenameSpacePanel(profileID: String) {
-        showSpaceSettings(profileID: profileID, tab: .general)
-        guard spaceSettings?.spaceID == profileID else { return }
-        spaceSettings?.general.focusName()
     }
 
     // MARK: - Worktree

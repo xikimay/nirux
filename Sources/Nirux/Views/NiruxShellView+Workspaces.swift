@@ -262,6 +262,13 @@ extension NiruxShellView {
         activateProfile(profileID, slideOutDirection: nil)
     }
 
+    /// ⌥⌘1…⌥⌘9: the space at that place in the space picker, read off
+    /// the list the menu shows, so the chord goes where its item says.
+    func selectSpace(number: Int) {
+        guard let profile = sidebar.lastProfiles[safe: number - 1] else { return }
+        selectProfile(profile.id)
+    }
+
     func focusSpace(_ dir: SpaceDir) {
         let slideOutDirection: CGFloat
         let delta: Int

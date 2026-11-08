@@ -18,7 +18,7 @@ list, **What agents know**, whatever file holds an item.
 Space Settings › Memory shows it ([spaces.md](spaces.md), S8):
 
 - **⌘P › Space Memory…**: the active space's.
-- **The space menu › Space Memory…**: that space's.
+- **Space Settings… › Memory** (space picker or Space menu): the active space's.
 
 It reads the repository of the space's active workspace, else of its first
 workspace, else of its default repository or folder.

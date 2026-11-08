@@ -159,7 +159,7 @@ extension NiruxShellView {
                 self?.toggleSidebar()
             },
             PaletteAction(
-                icon: .symbol("archivebox"), title: "Show/Hide Inactive Workspaces", subtitle: "Unfold or fold the sidebar's INACTIVE section",
+                icon: .symbol("archivebox"), title: "Show/Hide Archived", subtitle: "Unfold or fold the sidebar's archived list",
                 shortcut: nil
             ) { [weak self] in
                 self?.sidebar.toggleInactiveSection()

@@ -189,7 +189,7 @@ documented in B1's pull request:
   gets a row of its own in group 4, "folder is gone", with Clean Up, which
   closes it. It doesn't join the checkout around it.
 - **Rows show workspaces in sidebar order**, active ones first. A row reads
-  "inactive" only when all its workspaces are.
+  "archived" only when all its workspaces are.
 - **Checks, for display:** the latest run of each check counts, a rerun not
   started yet included; a skipped or neutral job doesn't hide a success.
 - **Urgency across a row's agent columns:** stopped on error, exited mid-turn,

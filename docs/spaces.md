@@ -91,9 +91,9 @@ struct SpaceAnchor: Codable, Equatable {
   only that file keeps them.
 - **New Space…** (shipped) suggests the focused terminal's repository, already
   in the list and naming the space, unless another space has it. "Add
-  Repository…" in the space menu anchors the repository holding the folder
-  picked (or the folder, when it is in none and the user agrees). Space
-  Settings › General lists the repositories and folders, adds one ("Add
+  Repository…" in Space Settings › General anchors the repository holding
+  the folder picked (or the folder, when it is in none and the user agrees).
+  General also lists the repositories and folders, adds one ("Add
   Folder…" anchors a folder even inside a repository), makes one the
   default, and removes one.
 
@@ -216,10 +216,10 @@ New flow, built on the guarded typing `tell` already uses
 Mockups were validated in the design session. What changes:
 
 - **Sidebar:** a space picker at the top (name, task count, amber when an agent
-  waits; ⌘1…⌘9), the Lead row, then task rows on two lines: title and time,
+  waits; ⌥⌘1…⌥⌘9, since ⌘1…⌘9 focus columns), the Lead row, then task rows on two lines: title and time,
   then one status line ("Needs you · npm run migrate", "Asking the Lead",
   "Working", "#39 · checks passed"). No chips on every row. INACTIVE becomes an
-  "Archived" row at the bottom. The bottom dot switcher and Activity go. This
+  "Archived" row at the bottom, unfolding its list above it. The bottom dot switcher and Activity go. This
   replaces the three-line cards of the October visual system.
 - **Title bar:** three buttons: New, Board, Search.
 - **Popovers, not alerts,** for anything the user must read and answer.
@@ -232,7 +232,7 @@ Mockups were validated in the design session. What changes:
   Memory, Board, Templates) instead of five separate panels. Shipped without
   Lead (S11): toolbar tabs like Nirux Settings, each change applied at once
   except the Brief and Templates editors and the Board form, which have
-  Save. The space menu's items open the matching tab. A repository's setup
+  Save. (S10a reduced the space menu to Space Settings… and Delete Space….) A repository's setup
   script is edited in a sheet from General. A space's default agent only
   preselects the agent of its tasks; a plain workspace stays a shell.
 - **An empty space** shows its name, Add Repository… until it has a
@@ -290,9 +290,9 @@ Notes per PR:
   workspaces the user started). Shipped; the defaults live in the space's
   own `defaults.json`, not in projects.json (see projects.md section 5).
 - **S9.** Shipped. "Start a Lead" came with S11a.
-- **S10.** Which title-bar accessories stay (keep-awake cup, plan usage
-  limits) is the user's call, asked in the PR. Check ⌘1…⌘9 against the editor
-  and Ghostty bindings.
+- **S10.** Three PRs: the picker and the Archived row, then the two-line
+  rows, then the title bar. The keep-awake cup and the plan usage limits stay
+  in the title bar. Mission children grouped under their parent wait for S11.
 - **S11.** See "The Lead". Three PRs: S11a the Lead's workspace, the New
   Space switch, the Lead tab, ⌃⌘L, Missions and sidebar answers on by
   default; S11b its MCP tools; S11c the ⌘N checkbox and Mission children
