@@ -96,6 +96,7 @@ final class LeadToolsFlowTests: XCTestCase {
 
             // A question it hands to the user, the task named by its branch:
             // amber at once, with why.
+            shell.refreshGitContextNow(for: task)
             harness.waitUntil("the task's branch") { task.gitBranch == "feat/add-a-date-filter" }
             let second = try ask("Keep the old date= parameter?", from: mission)
             let why = "Only the user knows what the mobile app needs."
@@ -130,8 +131,16 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertEqual(sheet.descriptionView.string, "Search page")
             XCTAssertEqual(sheet.reportsTo, NewTask.MissionParent(workspaceID: lead.workspace.id, agentUUID: lead.agentUUID))
             XCTAssertEqual(shell.workspaces.count, tasksBefore, "nothing starts by itself")
-            XCTAssertTrue(try call(LeadTools.startTask, ["description": "Another one"], lead: lead, in: harness).isError, "one sheet at a time")
+            XCTAssertEqual(sheet.startButton.keyEquivalent, "", "a stray Return doesn't start it")
+            XCTAssertFalse(sheet.panel?.firstResponder === sheet.descriptionView, "nor do stray keys reach it")
+
+            // One sheet at a time: the next waits for this one to close.
+            let queued = try call(LeadTools.startTask, ["description": "Another one"], lead: lead, in: harness)
+            XCTAssertFalse(queued.isError)
+            XCTAssertTrue(queued.text.hasPrefix("Queued for the user"), queued.text)
             sheet.cancelButton.performClick(nil)
+            harness.waitUntil("the next proposal") { shell.newTaskPanel?.descriptionView.string == "Another one" }
+            shell.newTaskPanel?.cancelButton.performClick(nil)
         }
     }
 }

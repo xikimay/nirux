@@ -88,6 +88,10 @@ final class NiruxShellView: NSView {
     /// Lines for a Lead's prompt (the user answered a question it handed
     /// over), typed once that prompt is free (`typeMissionMessages`).
     var pendingLeadNotices: [LeadNotice] = []
+    /// A Lead's tasks waiting to be proposed in the New sheet, one sheet at
+    /// a time, and the timer that shows the next once no sheet is up.
+    var pendingLeadProposals: [LeadProposal] = []
+    var leadProposalTimer: Timer?
     /// A stuck-agent alert went out (Telegram relays it): the reason, the
     /// workspace, the column's index, the column.
     var onStuckAgentAlert: ((AgentAttentionReason, WorkspaceState, Int, ColumnState) -> Void)?

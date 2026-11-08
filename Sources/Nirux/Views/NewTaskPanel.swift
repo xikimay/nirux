@@ -237,7 +237,16 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         guard panel != nil else { return }
         descriptionView.string = description
         if let templateName { pickedTemplateName = templateName }
-        textDidChange(Notification(name: NSText.didChangeNotification, object: descriptionView))
+        headingLabel.stringValue = "Proposed by the Lead · \(space.name)"
+        hideError()
+        updateBranchSuggestion()
+        refresh()
+        // It comes while the user types elsewhere: no field takes the keys,
+        // and neither Return nor Escape answers it until they edit
+        // something here (a click, or ⌘Return, still does).
+        panel?.makeFirstResponder(nil)
+        startButton.keyEquivalent = ""
+        cancelButton.keyEquivalent = ""
     }
 
     /// The repository's info, read by the shell. Ignored when another
@@ -256,7 +265,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
             templatePopup.menu?.addItem(NSMenuItem(title: template.name, action: nil, keyEquivalent: ""))
         }
         templatePopup.selectItem(at: previousTemplate.flatMap { name in
-            info.templates.firstIndex { $0.name == name }.map { $0 + 1 }
+            info.templates.firstIndex { $0.name.caseInsensitiveCompare(name) == .orderedSame }.map { $0 + 1 }
         } ?? 0)
         templatePopup.isEnabled = !isStarting
         updateBranchSuggestion()

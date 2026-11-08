@@ -12,8 +12,10 @@ import Foundation
 /// `NiruxShellView.handleLeadRequest`) before acting.
 enum LeadChannel {
     static let protocolVersion = 1
-    /// A request nobody took within this long is dropped: its caller gave up.
-    static let requestLifetime: TimeInterval = 600
+    /// A request nobody took within this long is dropped: its caller takes
+    /// it back after `LeadTools.takeTimeout`, so one this old was left by a
+    /// caller that died (a `claude` that quit while Nirux was closed).
+    static let requestLifetime: TimeInterval = 60
 
     struct Request: Codable, Equatable, Sendable {
         var v = LeadChannel.protocolVersion
@@ -80,42 +82,80 @@ enum LeadChannel {
 
     // MARK: - The server's side
 
-    /// Sends `request` and waits for the app's answer, at most `timeout`.
-    /// Nil when none came: the request is taken back, so a late app never
-    /// acts on a call its caller gave up on.
+    enum Outcome: Equatable {
+        case answered(Response)
+        /// No Nirux took the request within the wait: it was taken back,
+        /// nothing was done.
+        case notTaken
+        /// A Nirux took it but hasn't answered yet: it may still act.
+        case stillWorking
+    }
+
+    /// Sends `request`, waits up to `takeTimeout` for a Nirux to take it
+    /// (else takes it back: nothing happens), then up to `workTimeout` for
+    /// the answer.
     static func send(
-        _ request: Request, stateDirectory: URL, timeout: TimeInterval, pollInterval: TimeInterval = 0.05
-    ) -> Response? {
+        _ request: Request, stateDirectory: URL, takeTimeout: TimeInterval, workTimeout: TimeInterval,
+        pollInterval: TimeInterval = 0.05
+    ) -> Outcome {
         let requests = requestsFolder(stateDirectory: stateDirectory)
         let responses = responsesFolder(stateDirectory: stateDirectory)
-        guard write(request, id: request.id, in: requests) else { return nil }
-        let deadline = Date().addingTimeInterval(timeout)
+        let requestFile = requests.appendingPathComponent(request.id + ".json")
+        guard write(request, id: request.id, in: requests) else { return .notTaken }
+        let start = Date()
         var interval = max(0.01, pollInterval)
         while true {
-            if let response = take(Response.self, id: request.id, from: responses) { return response }
-            guard Date() < deadline else { break }
-            Thread.sleep(forTimeInterval: min(interval, max(0, deadline.timeIntervalSinceNow)))
+            if let response = take(Response.self, id: request.id, from: responses) { return .answered(response) }
+            let taken = !FileManager.default.fileExists(atPath: requestFile.path)
+            let elapsed = Date().timeIntervalSince(start)
+            if !taken, elapsed >= takeTimeout {
+                // Taken back only if nobody claimed it meanwhile.
+                if unlink(requestFile.path) == 0 { return .notTaken }
+            } else if taken, elapsed >= takeTimeout + workTimeout {
+                return take(Response.self, id: request.id, from: responses).map { .answered($0) } ?? .stillWorking
+            }
+            Thread.sleep(forTimeInterval: interval)
             interval = min(0.5, interval * 1.5)
         }
-        try? FileManager.default.removeItem(at: requests.appendingPathComponent(request.id + ".json"))
-        // Taken meanwhile: its answer may still come, too late to wait for.
-        return take(Response.self, id: request.id, from: responses)
     }
 
     // MARK: - The app's side
 
-    /// Every request waiting, oldest first, each removed as it is read.
-    /// Ones of another protocol, too old, or unreadable are dropped.
-    static func takeRequests(stateDirectory: URL, now: TimeInterval = Date().timeIntervalSince1970) -> [Request] {
+    /// The requests waiting, oldest first, without taking them: `claim`
+    /// takes one. Ones of another protocol, too old, or unreadable are
+    /// removed.
+    static func waitingRequests(stateDirectory: URL, now: TimeInterval = Date().timeIntervalSince1970) -> [Request] {
         let folder = requestsFolder(stateDirectory: stateDirectory)
         let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
-        let requests = names.compactMap { name -> Request? in
-            guard name.hasSuffix(".json"), !name.hasPrefix(".") else { return nil }
-            return take(Request.self, id: String(name.dropLast(5)), from: folder)
+        var requests: [Request] = []
+        for name in names where name.hasSuffix(".json") && !name.hasPrefix(".") {
+            let url = folder.appendingPathComponent(name)
+            guard isIdentifier(String(name.dropLast(5))), let data = FileManager.default.contents(atPath: url.path) else { continue }
+            guard let request = try? JSONDecoder().decode(Request.self, from: data),
+                  request.v == protocolVersion, now - request.createdAt < requestLifetime, request.id + ".json" == name
+            else {
+                try? FileManager.default.removeItem(at: url)
+                continue
+            }
+            requests.append(request)
         }
-        return requests
-            .filter { $0.v == protocolVersion && now - $0.createdAt < requestLifetime }
-            .sorted { $0.createdAt < $1.createdAt }
+        return requests.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// Takes `request` for this process: false when another Nirux, or its
+    /// caller giving up, took it first.
+    static func claim(_ request: Request, stateDirectory: URL) -> Bool {
+        let folder = requestsFolder(stateDirectory: stateDirectory)
+        let claimed = folder.appendingPathComponent(".\(request.id).claimed-\(getpid())")
+        guard rename(folder.appendingPathComponent(request.id + ".json").path, claimed.path) == 0 else { return false }
+        try? FileManager.default.removeItem(at: claimed)
+        return true
+    }
+
+    /// Every request waiting, each claimed: tests, and a Nirux that takes
+    /// them all.
+    static func takeRequests(stateDirectory: URL, now: TimeInterval = Date().timeIntervalSince1970) -> [Request] {
+        waitingRequests(stateDirectory: stateDirectory, now: now).filter { claim($0, stateDirectory: stateDirectory) }
     }
 
     @discardableResult
@@ -131,7 +171,7 @@ enum LeadChannel {
             for name in names {
                 let url = folder.appendingPathComponent(name)
                 let modified = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date
-                if modified.map({ now.timeIntervalSince($0) > requestLifetime }) ?? true {
+                if modified.map({ now.timeIntervalSince($0) > 600 }) ?? true {
                     try? FileManager.default.removeItem(at: url)
                 }
             }

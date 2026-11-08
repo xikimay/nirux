@@ -133,13 +133,7 @@ extension NiruxShellView {
                 workspace.raiseNotification(.waiting)
                 workspace.onMetadataChanged?()
                 if !NSApp.isActive { NSApp.requestUserAttention(.informationalRequest) }
-                NiruxNotifier.shared.postMissionEvent(
-                    workspaceID: workspace.id,
-                    workspaceTitle: workspace.title,
-                    columnIndex: columnIndex,
-                    kind: .question,
-                    message: question.text
-                )
+                sideEffects.notifyMissionQuestion(workspace.id, workspace.title, columnIndex, question.text)
             }
         }
         for (questionID, workspaceID) in missionQuestionsHandedToUser where handedOff[questionID] == nil {

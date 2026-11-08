@@ -154,8 +154,12 @@ extension NiruxShellView {
     /// In the space its repository belongs to, else the sheet's
     /// (docs/spaces.md, "Routing").
     private func openTaskWorkspace(_ request: NewTask.Request, _ created: CreatedTaskWorktree) {
+        // A task a Lead starts comes from its space's repository: it opens
+        // in that space, as its parent, whatever another space anchors.
+        let leadParent = request.reportsTo.flatMap { parent in workspaces.first { $0.id == parent.workspaceID && $0.isLead } }
         let decision = decideSpace(
-            identity: created.identity, parentWorkspaceID: request.reportsTo?.workspaceID, startedFromSpaceID: request.projectID
+            identity: leadParent == nil ? created.identity : nil,
+            parentWorkspaceID: request.reportsTo?.workspaceID, startedFromSpaceID: request.projectID
         )
         let childWorkspaceID = UUID().uuidString
         let childAgentUUID = UUID().uuidString
@@ -177,7 +181,8 @@ extension NiruxShellView {
             deliveredHandover: created.handoverError == nil,
             handoverText: created.handover,
             worktreeBranch: created.checkedOutBranch,
-            setupScript: setupScript(for: decision)
+            setupScript: setupScript(for: decision),
+            activate: request.opensInFront
         )
         saveState()
         // A hook prints its reason last.

@@ -45,7 +45,8 @@ final class LeadChannelTests: XCTestCase {
 
     func testARequestGetsItsAnswerAndLeavesNoFile() throws {
         _ = answerRequests(1, with: "done")
-        let response = try XCTUnwrap(LeadChannel.send(request(), stateDirectory: stateDirectory, timeout: 5))
+        let outcome = LeadChannel.send(request(), stateDirectory: stateDirectory, takeTimeout: 5, workTimeout: 5)
+        guard case .answered(let response) = outcome else { return XCTFail("no answer: \(outcome)") }
         XCTAssertEqual(response.text, "done list_tasks")
         for folder in [LeadChannel.requestsFolder(stateDirectory: stateDirectory), LeadChannel.responsesFolder(stateDirectory: stateDirectory)] {
             XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), [])
@@ -54,11 +55,33 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o700)
     }
 
-    /// Nobody answers: the caller takes its request back, so a late app
-    /// never acts on it.
-    func testAnUnansweredRequestIsTakenBack() {
-        XCTAssertNil(LeadChannel.send(request(), stateDirectory: stateDirectory, timeout: 0.2))
+    /// Nobody takes it: the caller takes its request back, so a late app
+    /// never acts on it. Taken but not answered: the caller says it may
+    /// still happen.
+    func testAnUntakenRequestIsTakenBackAndATakenOneMayStillHappen() {
+        XCTAssertEqual(LeadChannel.send(request(), stateDirectory: stateDirectory, takeTimeout: 0.2, workTimeout: 0.2), .notTaken)
         XCTAssertEqual(LeadChannel.takeRequests(stateDirectory: stateDirectory), [])
+
+        let directory = stateDirectory!
+        let taker = Thread {
+            let deadline = Date().addingTimeInterval(5)
+            while Date() < deadline, LeadChannel.takeRequests(stateDirectory: directory).isEmpty {
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+        }
+        taker.start()
+        XCTAssertEqual(LeadChannel.send(request(), stateDirectory: stateDirectory, takeTimeout: 2, workTimeout: 0.3), .stillWorking)
+    }
+
+    /// Another Nirux on the same state directory leaves a request it
+    /// doesn't own alone; one claim only wins.
+    func testARequestIsClaimedOnce() throws {
+        let item = request()
+        XCTAssertTrue(LeadChannel.write(item, id: item.id, in: LeadChannel.requestsFolder(stateDirectory: stateDirectory)))
+        XCTAssertEqual(LeadChannel.waitingRequests(stateDirectory: stateDirectory).map(\.id), [item.id])
+        XCTAssertEqual(LeadChannel.waitingRequests(stateDirectory: stateDirectory).map(\.id), [item.id], "looking takes nothing")
+        XCTAssertTrue(LeadChannel.claim(item, stateDirectory: stateDirectory))
+        XCTAssertFalse(LeadChannel.claim(item, stateDirectory: stateDirectory))
     }
 
     func testOldAndForeignRequestsAreDropped() {

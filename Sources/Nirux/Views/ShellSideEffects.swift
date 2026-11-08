@@ -66,6 +66,16 @@ struct ShellSideEffects {
         NiruxNotifier.shared.postSetupFailure(workspaceID: workspaceID, workspaceTitle: title)
     }
 
+    /// Posts the notification of a Mission question that came to the user
+    /// (workspace id, title, column, question). Tests replace it: xctest
+    /// must never reach UNUserNotificationCenter.
+    var notifyMissionQuestion: @MainActor (_ workspaceID: String, _ title: String, _ column: Int, _ question: String) -> Void = {
+        workspaceID, title, column, question in
+        NiruxNotifier.shared.postMissionEvent(
+            workspaceID: workspaceID, workspaceTitle: title, columnIndex: column, kind: .question, message: question
+        )
+    }
+
     /// Shows an app-modal alert and waits for its answer.
     var runModal: @MainActor (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }
 

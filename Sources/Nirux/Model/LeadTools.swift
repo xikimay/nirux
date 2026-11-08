@@ -13,10 +13,14 @@ enum LeadTools {
     static let queueMerge = "queue_merge"
     static let names = [startTask, listTasks, tell, reply, askUser, queueMerge]
 
-    /// How long a call waits for the app: a task fetches origin and makes
-    /// its worktree first.
-    static func timeout(for tool: String) -> TimeInterval {
-        tool == startTask ? 120 : 20
+    /// How long a call waits for a Nirux to take it: a running app takes
+    /// it at once.
+    static let takeTimeout: TimeInterval = 15
+
+    /// How long a call then waits for the answer: a task fetches origin
+    /// and makes its worktree first.
+    static func workTimeout(for tool: String) -> TimeInterval {
+        tool == startTask ? 300 : 30
     }
 
     static var definitions: [[String: Any]] {

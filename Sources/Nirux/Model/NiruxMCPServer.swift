@@ -26,14 +26,17 @@ enum NiruxMCPServer {
     /// user.
     static let leadInstructions = """
         You are the Lead of this Nirux space. The user talks to you: turn what they ask into tasks, start \
-        them with start_task, follow them with list_tasks, and bring the user only what needs them. One \
-        repository per task: a feature across two repositories is two tasks. Don't edit files, commit or \
-        switch branches in this checkout: even a one-line fix is a task. Each task's questions and result \
-        are typed into your prompt as [Nirux Mission] messages: answer with reply when the space brief, the \
-        code or this conversation settles it; otherwise hand it over with ask_user and say why. Give a task \
-        more work with tell. When tasks are ready to merge, propose them with queue_merge: the user starts \
-        the queue. Never merge a pull request, remove a worktree or a branch, or act on another space: \
-        leave those to the user. After a /clear, list_tasks shows where things stand.
+        them, follow them, and bring the user only what needs them. Start tasks only with start_task (not \
+        the nirux-worktree skill, not git worktree), one repository per task: a feature across two \
+        repositories is two tasks. Read list_tasks first: give a running task more work with tell instead of \
+        starting another, and group small related fixes into one task. Don't edit files, commit or switch \
+        branches in this checkout. Each task's questions and result are typed into your prompt as [Nirux \
+        Mission] messages, only while you are idle: after starting or telling tasks, end your turn; don't \
+        poll or sleep. Answer a question with reply when the space brief, the code or this conversation \
+        settles it; otherwise hand it over with ask_user and say why. When tasks are ready to merge, propose \
+        them with queue_merge: the user starts the queue. Never merge a pull request, remove a worktree or a \
+        branch, or act on another space: leave those to the user. After a /clear, list_tasks shows where \
+        things stand.
         """
 
     /// The instructions for whoever launched the server: the Lead's role
@@ -107,16 +110,29 @@ enum NiruxMCPServer {
     /// reading: a closed pipe ends the server rather than killing it.
     static func run(context: Context = .current()) -> Int32 {
         signal(SIGPIPE, SIG_IGN)
-        while let line = readLine(strippingNewline: true) {
-            guard var reply = reply(to: Data(line.utf8), context: context) else { continue }
-            reply.append(0x0A)
-            do {
-                try FileHandle.standardOutput.write(contentsOf: reply)
-            } catch {
-                return 0
+        let output = ServerOutput()
+        // A Lead's call can wait minutes for the app: it answers on its
+        // own, so pings and other calls are read and answered meanwhile.
+        let slowCalls = DispatchQueue(label: "nirux.mcp.lead-calls", attributes: .concurrent)
+        while let line = readLine(strippingNewline: true), !output.isClosed {
+            let data = Data(line.utf8)
+            if isLeadToolCall(data, context: context) {
+                slowCalls.async { output.write(reply(to: data, context: context)) }
+            } else {
+                output.write(reply(to: data, context: context))
             }
         }
         return 0
+    }
+
+    /// A `tools/call` of one of the Lead's tools, from a Lead.
+    static func isLeadToolCall(_ line: Data, context: Context) -> Bool {
+        guard context.isLead, line.count <= maxLineBytes,
+              let object = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any],
+              object["method"] as? String == "tools/call",
+              let name = (object["params"] as? [String: Any])?["name"] as? String
+        else { return false }
+        return LeadTools.names.contains(name)
     }
 
     /// The answer to one message, without its newline; nil for a
@@ -182,14 +198,24 @@ enum NiruxMCPServer {
             id: UUID().uuidString, tool: name, arguments: json,
             workspaceID: workspaceID, agentUUID: agentUUID, createdAt: Date().timeIntervalSince1970
         )
-        let timeout = context.leadTimeout ?? LeadTools.timeout(for: name)
-        guard let response = LeadChannel.send(request, stateDirectory: context.stateDirectory, timeout: timeout) else {
+        let take = context.leadTimeout ?? LeadTools.takeTimeout
+        let work = context.leadTimeout ?? LeadTools.workTimeout(for: name)
+        switch LeadChannel.send(request, stateDirectory: context.stateDirectory, takeTimeout: take, workTimeout: work) {
+        case .answered(let response):
+            return ToolResult(text: response.text, isError: response.isError)
+        case .notTaken:
             return ToolResult(
-                text: "Nirux didn't answer within \(Int(timeout)) seconds: it may be closed or busy. Try again, or tell the user.",
+                text: "Nirux didn't take the call within \(Int(take)) seconds: it may be closed or busy. Nothing was done: "
+                    + "try again later, or tell the user.",
+                isError: true
+            )
+        case .stillWorking:
+            return ToolResult(
+                text: "Nirux took the call but hasn't finished: it may still be doing it. Don't call again; "
+                    + "list_tasks shows the result in a moment.",
                 isError: true
             )
         }
-        return ToolResult(text: response.text, isError: response.isError)
     }
 
     /// A string or a finite number: not a boolean, which JSONSerialization
@@ -358,5 +384,31 @@ enum HistorySearchUsage {
         defer { close(descriptor) }
         guard fstat(descriptor, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return }
         _ = line.withUnsafeBytes { write(descriptor, $0.baseAddress, line.count) }
+    }
+}
+
+/// The server's stdout, one message per line, from any thread. A closed
+/// pipe (Claude stopped reading) ends the server.
+private final class ServerOutput: @unchecked Sendable {
+    private let lock = NSLock()
+    private var closed = false
+
+    var isClosed: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return closed
+    }
+
+    func write(_ reply: Data?) {
+        guard var reply else { return }
+        reply.append(0x0A)
+        lock.lock()
+        defer { lock.unlock() }
+        guard !closed else { return }
+        do {
+            try FileHandle.standardOutput.write(contentsOf: reply)
+        } catch {
+            closed = true
+        }
     }
 }

@@ -212,6 +212,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
             guard let shellView else { return answer("Nirux is closing.", true) }
             shellView.handleLeadRequest(request, answer: answer)
         }
+        leadRequests.owns = { [weak shellView] request in
+            shellView?.workspaces.contains { $0.id == request.workspaceID } == true
+        }
         leadRequests.start()
 
         // Focus first terminal
