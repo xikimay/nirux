@@ -245,7 +245,9 @@ extension NiruxShellView {
         guard let number = send.pullRequest,
               let project = workspaces.first(where: { $0.columns.contains { $0.branchReview === review } })?.profileID
         else { return false }
-        return mergeQueues[project]?.queues(number) == true
+        // Any of the space's queues: a local branch may not be named as
+        // the pull request's head, and a needless warning beats a missed one.
+        return mergeQueues(of: project).contains { $0.queues(number) }
     }
 }
 
@@ -253,8 +255,8 @@ extension MergeQueueController {
     /// Pull request `number` waits or is under way in this queue, here or
     /// in another Nirux: a push to its branch stops the queue.
     func queues(_ number: Int) -> Bool {
-        let entries = isRunning ? engine?.entries.map { ($0.number, $0.step) } : runsElsewhere ? saved?.entries.map { ($0.number, $0.step) } : nil
-        return entries?.contains { $0.0 == number && $0.1 != .done } == true
+        let entries = isRunning ? engine?.entries : runsElsewhere ? saved?.entries : nil
+        return entries?.contains { $0.number == number && $0.step != .done } == true
     }
 }
 

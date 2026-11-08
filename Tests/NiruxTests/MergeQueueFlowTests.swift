@@ -195,6 +195,7 @@ final class MergeQueueFlowTests: XCTestCase {
     ) -> MergeQueueController {
         let controller = MergeQueueController(
             projectID: projectID,
+            repository: MQ.widgets,
             client: client,
             local: MergeQueueLocalAccess(folders: { [] }, busyAgents: { _, _ in [] }),
             stateDirectory: stateDirectory,
@@ -363,7 +364,9 @@ final class MergeQueueFlowTests: XCTestCase {
         var engine = MQ.Harness(entries: [MQ.entry(52, head: a)])
         engine.start()
         engine.answer(world, until: { $0.pendingDelay == 20 })
-        let files = try XCTUnwrap(MergeQueue.Files(projectID: "project", stateDirectory: stateDirectory, dryRun: false))
+        let files = try XCTUnwrap(MergeQueue.Files(
+            projectID: "project", repository: MQ.widgets, stateDirectory: stateDirectory, dryRun: false
+        ))
         MergeQueue.SavedQueue(engine: engine.engine, dryRun: false, savedAt: Date()).save(to: files.state)
 
         let client = FakeQueueClient(world: world)
@@ -407,6 +410,53 @@ final class MergeQueueFlowTests: XCTestCase {
         XCTAssertFalse(queue.isRunning)
     }
 
+    /// A queue an older Nirux saved in the space's own file, before one
+    /// queue per repository: read for its repository only, when it is the
+    /// newer one, and never written again.
+    @MainActor
+    func testTheSpaceFileOfAnOlderNiruxIsReadForItsRepository() throws {
+        let a = MQ.sha("a")
+        var engine = MQ.Harness(entries: [MQ.entry(52, head: a)])
+        engine.start()
+        let files = try XCTUnwrap(MergeQueue.Files(
+            projectID: "project", repository: MQ.widgets, stateDirectory: stateDirectory, dryRun: false
+        ))
+        XCTAssertEqual(files.legacyState.deletingLastPathComponent(), files.state.deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent())
+        let legacy = MergeQueue.SavedQueue(engine: engine.engine, dryRun: false, savedAt: Date())
+        legacy.save(to: files.legacyState)
+        let legacyBytes = try Data(contentsOf: files.legacyState)
+
+        let restored = controller(FakeQueueClient(), clock: VirtualClock())
+        XCTAssertEqual(restored.saved?.stopReason?.kind, .interrupted, "running when that Nirux quit")
+        MergeQueueController.waitForFiles()
+        XCTAssertEqual(MergeQueue.SavedQueue.load(from: files.state)?.status, .stopped, "settled in its own file")
+        XCTAssertEqual(try Data(contentsOf: files.legacyState), legacyBytes, "the older file stays as it was")
+
+        // Another repository's queue in the space file isn't this one's.
+        try FileManager.default.removeItem(at: files.state)
+        var gadgets = legacy
+        gadgets.repository = "acme/gadgets"
+        gadgets.save(to: files.legacyState)
+        XCTAssertNil(controller(FakeQueueClient(), clock: VirtualClock()).saved)
+
+        // An older space file than the queue's own is ignored.
+        var older = legacy
+        older.savedAt = Date().addingTimeInterval(-3600)
+        older.save(to: files.legacyState)
+        var own = legacy
+        own.status = .finished
+        own.save(to: files.state)
+        XCTAssertEqual(controller(FakeQueueClient(), clock: VirtualClock()).saved?.status, .finished)
+
+        // The older Nirux ran a queue since: its file is the newer one.
+        var newer = legacy
+        newer.status = .stopped
+        newer.savedAt = Date().addingTimeInterval(3600)
+        newer.save(to: files.legacyState)
+        XCTAssertEqual(controller(FakeQueueClient(), clock: VirtualClock()).saved?.status, .stopped)
+    }
+
     @MainActor
     func testTheShellOwnsOneQueuePerProjectAndOnePerRepository() throws {
         let previousStateDirectory = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
@@ -425,19 +475,31 @@ final class MergeQueueFlowTests: XCTestCase {
         shell.mergeQueueClient = client
         shell.mergeQueueLockFolder = lockFolder
 
-        let first = shell.mergeQueue(projectID: "first")
-        XCTAssertTrue(shell.mergeQueue(projectID: "first") === first)
-        let second = shell.mergeQueue(projectID: "second")
+        let first = shell.mergeQueue(projectID: "first", repository: MQ.widgets)
+        XCTAssertTrue(shell.mergeQueue(projectID: "first", repository: GitHubRepository(owner: "Acme", name: "Widgets")) === first)
+        let second = shell.mergeQueue(projectID: "second", repository: MQ.widgets)
         XCTAssertFalse(first === second)
+        let gadgets = shell.mergeQueue(projectID: "first", repository: GitHubRepository(owner: "acme", name: "gadgets"))
+        XCTAssertFalse(first === gadgets)
+        gadgets.beginActivity = { NSObject() }
+        gadgets.endActivity = { _ in }
         XCTAssertTrue(first.isDryRun)
         first.beginActivity = { NSObject() }
         first.endActivity = { _ in }
 
         XCTAssertNil(first.start(settings: MQ.settings(), entries: [MQ.entry(52, head: MQ.sha("a"))]))
         XCTAssertEqual(second.start(settings: MQ.settings(), entries: [MQ.entry(53, head: MQ.sha("b"))]), .repositoryBusy)
+        XCTAssertEqual(gadgets.start(settings: MQ.settings(), entries: [MQ.entry(53, head: MQ.sha("b"))]), .otherRepository,
+                       "a queue never mixes repositories")
+        XCTAssertNil(gadgets.start(settings: MQ.settings(repository: "acme/gadgets"), entries: [MQ.entry(54, head: MQ.sha("c"))]),
+                     "another repository's queue runs beside it")
+        XCTAssertTrue(first.isRunning && gadgets.isRunning)
+        XCTAssertEqual(shell.runningMergeQueues.count, 2)
         first.stop()
+        gadgets.stop()
         XCTAssertFalse(first.isRunning)
-        XCTAssertEqual(first.files?.state.deletingLastPathComponent().lastPathComponent, "first")
+        XCTAssertEqual(first.files?.state.pathComponents.suffix(5), ["first", "queues", "acme", "widgets", "queue-state.dry-run.json"])
+        XCTAssertNotEqual(first.files?.state, gadgets.files?.state)
         // Nothing reached GitHub for real: the fake answered, and no queue changed anything.
         XCTAssertTrue(client.mutations.isEmpty)
     }
