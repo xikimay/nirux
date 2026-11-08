@@ -76,6 +76,12 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
     /// The Board tab's form and the setup script sheet, while shown (the
     /// shell makes them).
     weak var boardForm: BoardSettingsPanel?
+    /// The repository the Board tab shows, by section id (docs/spaces.md,
+    /// S12); nil for the default one.
+    var boardRepository: String?
+    /// The Board tab was asked to read again while it was reading: it reads
+    /// once that read lands, with this status by its buttons.
+    var pendingBoardReload: String??
     weak var setupScriptEditor: SpaceFileEditorPane?
     weak var memoryPanel: ProjectMemoryPanel?
 

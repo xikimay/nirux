@@ -7,15 +7,34 @@ import AppKit
 /// invalid values; Revert reads the file again. The post-merge workflow is
 /// never preselected: it stays unset until the user picks a file or None.
 /// A file this build must not rewrite is shown read-only, with the reason,
-/// and Save disabled.
+/// and Save disabled. A space with several repositories (docs/spaces.md,
+/// S12) picks the one it edits in a Repository pop-up; leaving one with
+/// unsaved values asks first.
 @MainActor
 final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     struct Content {
         let spaceID: String
         let spaceName: String
         let filePath: String
+        /// board.json about the repository shown.
         let loaded: BoardConfigStore.Loaded
         let suggestions: BoardConfigSuggestions
+        /// The space's repositories when it has several (the pop-up's
+        /// items), else none.
+        var repositories: [Repository] = []
+        /// The id of the one shown.
+        var selectedRepository: String?
+    }
+
+    struct Repository: Equatable {
+        let id: String
+        let title: String
+    }
+
+    /// What to do with values typed but not saved, before showing another
+    /// repository.
+    enum ChangesAnswer {
+        case save, discard, cancel
     }
 
     enum WorkflowChoice: Equatable {
@@ -31,6 +50,13 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     /// Revert: the shell reads the file again and shows a new form.
     var onRevert: (() -> Void)?
     var onDismiss: (() -> Void)?
+    /// The pop-up picked another repository: the shell shows its form.
+    var onSelectRepository: ((String) -> Void)?
+    /// Asks whether to save the values typed for the repository named, before
+    /// leaving it. An alert on the window; tests answer for the user.
+    lazy var askToSaveChanges: (String, @escaping (ChangesAnswer) -> Void) -> Void = { [weak self] name, answer in
+        self?.askToSave(name, answer: answer)
+    }
 
     /// The tab's view the form fills; nil once dismissed.
     private(set) weak var hostView: NSView?
@@ -40,6 +66,11 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     private(set) var spaceID: String?
     private(set) var isWritable = true
 
+    let repositoryPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    /// The repository behind each item of `repositoryPopup`.
+    private(set) var repositoryChoices: [Repository] = []
+    /// The one shown, which the pop-up goes back to when leaving is cancelled.
+    private var shownRepository: String?
     let repositoryField = NSTextField()
     let baseBranchField = NSTextField()
     let checksView = NSTextView()
@@ -89,6 +120,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         container.frame = NSRect(origin: .zero, size: Self.hostSize)
         host.addSubview(container)
         shownConfig = draftConfig()
+        shownRepository = content.selectedRepository
         statusLabel.stringValue = status ?? ""
         layoutPanel()
         if host.window != nil, isWritable { host.window?.makeFirstResponder(repositoryField) }
@@ -173,6 +205,42 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         onRevert?()
     }
 
+    /// Another repository: its form, once what was typed here is saved or
+    /// let go.
+    @objc func repositoryChanged(_ sender: Any?) {
+        let index = repositoryPopup.indexOfSelectedItem
+        guard repositoryChoices.indices.contains(index), repositoryChoices[index].id != shownRepository else { return }
+        let target = repositoryChoices[index].id
+        guard isDirty else { return onSelectRepository?(target) ?? () }
+        let name = repositoryChoices.first { $0.id == shownRepository }?.title ?? "this repository"
+        askToSaveChanges(name) { [weak self] answer in
+            guard let self, self.container != nil else { return }
+            // A save refused says why, and the form stays.
+            if answer == .discard || (answer == .save && self.save()) {
+                self.onSelectRepository?(target)
+            } else {
+                self.repositoryPopup.selectItem(at: self.repositoryChoices.firstIndex { $0.id == self.shownRepository } ?? 0)
+            }
+        }
+    }
+
+    private func askToSave(_ name: String, answer: @escaping (ChangesAnswer) -> Void) {
+        guard let window = hostView?.window else { return answer(.cancel) }
+        let alert = NSAlert()
+        alert.messageText = "Save the changes to “\(name)”?"
+        alert.informativeText = "They are lost if you show another repository without saving them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Don’t Save")
+        alert.beginSheetModal(for: window) { response in
+            switch response {
+            case .alertFirstButtonReturn: answer(.save)
+            case .alertThirdButtonReturn: answer(.discard)
+            default: answer(.cancel)
+            }
+        }
+    }
+
     @objc func workflowChanged(_ sender: Any?) {
         let isOther = selectedWorkflowChoice == .other
         workflowNameField.isEnabled = isWritable && isOther
@@ -240,7 +308,25 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
             y = addBanner(banner, y: y, in: view) + 14
         }
 
-        y = addLabel("Repository", y: y, in: view)
+        repositoryChoices = content.repositories.count > 1 ? content.repositories : []
+        if !repositoryChoices.isEmpty {
+            y = addLabel("Repository", y: y, in: view)
+            repositoryPopup.removeAllItems()
+            // One item each, even with the same title: `addItems(withTitles:)`
+            // would merge them and shift the indexes.
+            for choice in repositoryChoices {
+                repositoryPopup.menu?.addItem(withTitle: choice.title, action: nil, keyEquivalent: "")
+            }
+            repositoryPopup.selectItem(at: repositoryChoices.firstIndex { $0.id == content.selectedRepository } ?? 0)
+            repositoryPopup.target = self
+            repositoryPopup.action = #selector(repositoryChanged(_:))
+            repositoryPopup.frame = NSRect(x: Self.fieldX, y: y - 1, width: 240, height: 26)
+            view.addSubview(repositoryPopup)
+            y += 28
+            y = addHint("Each repository of the space has its own settings and its own merge queue.", y: y, in: view) + 14
+        }
+
+        y = addLabel(repositoryChoices.isEmpty ? "Repository" : "GitHub repository", y: y, in: view)
         repositoryField.stringValue = isUnread ? "" : saved?.repository ?? suggested?.repository ?? ""
         repositoryField.placeholderString = "owner/name"
         y = addField(repositoryField, y: y, in: view)
