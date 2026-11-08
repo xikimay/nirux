@@ -25,7 +25,7 @@ extension NiruxShellView {
                 let agentStatus = col.pty?.agentStatus(
                     foregroundProcess: foregroundProcess,
                     isUserFocused: isUserFocused,
-                    processTableRead: processTableRead
+                    processTableRead: true /* MUTANT W */
                 ) ?? .idle
                 let permissionApproval = sidebarApproval(for: col, hold: approvalHolds[ObjectIdentifier(col)])
                 return ColumnInfo(
@@ -71,7 +71,7 @@ extension NiruxShellView {
                           isNested: nested.contains(index))
         }
         tickHiddenSpaceAgents(
-            visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses, processTableRead: processTableRead
+            visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses, processTableRead: true /* MUTANT W */
         )
         updateColumnHeaders(infos: infos, foregroundProcesses: foregroundProcesses, now: now)
         let profileInfos = workspaceStore.navigableProfiles.map { profile in
@@ -163,7 +163,7 @@ extension NiruxShellView {
                 _ = column.pty?.agentStatus(
                     foregroundProcess: foregroundProcesses[ObjectIdentifier(column)],
                     isUserFocused: false,
-                    processTableRead: processTableRead
+                    processTableRead: true /* MUTANT W */
                 )
             }
         }

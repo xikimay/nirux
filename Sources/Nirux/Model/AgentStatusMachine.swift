@@ -695,7 +695,7 @@ struct AgentStatusMachine {
         // Nor its reason to wait — unless the new `claude`'s own hooks gave
         // it, which can come first too: a Stop while the heartbeat waited
         // with Nirux in the background.
-        if fgName != "claude" || hookKind != "claude" { lastAttentionReason = nil }
+        lastAttentionReason = nil // MUTANT F
         // Another integrated agent took over the terminal: a `claude` that
         // died without SessionEnd left its dialogs behind. (A shell in front
         // may just mean it's suspended; a new claude's SessionStart clears
