@@ -78,7 +78,7 @@ extension NiruxShellView {
                     branch: branch, target: target, fetchesFirst: true, reportsTo: parent
                 )
                 // It opens behind what the user is doing.
-                request.opensInFront = false
+                request.startedByLead = true
                 self.startLeadTask(request, repository: repository.name, fetchError: nil, answer: answer)
             }
         }
@@ -118,7 +118,7 @@ extension NiruxShellView {
                 retry = NewTask.Request(
                     description: request.description, template: request.template, agent: request.agent,
                     projectID: request.projectID, branch: request.branch, target: request.target, fetchesFirst: false,
-                    reportsTo: request.reportsTo, opensInFront: request.opensInFront
+                    reportsTo: request.reportsTo, startedByLead: request.startedByLead
                 )
                 self.startLeadTask(retry, repository: repository, fetchError: message, answer: answer)
             }

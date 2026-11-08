@@ -7,6 +7,7 @@ extension NiruxShellView {
         let snapshot = snapshot ?? ProcessSnapshot()
         let now = Date().timeIntervalSince1970
         let visibleIndices = visibleWorkspaceIndices
+        let nested = workspaceStore.nestedWorkspaceIndices(in: activeProfileID)
         let (foregroundProcesses, invalidatedSessionBinding) = followForegroundProcesses(snapshot: snapshot, now: now)
         let approvalHolds = releaseApprovalsNotHeld()
         let missionQuestions = missionQuestions(foreground: { foregroundProcesses[ObjectIdentifier($0)] }, now: now)
@@ -64,7 +65,8 @@ extension NiruxShellView {
                           lastSummary: workspace.lastSummary, lastActivityAt: workspace.lastActivityAt,
                           reviewBadges: workspace.reviewBadges,
                           mergedCleanup: mergedCleanupOffer(workspaceIndex: index),
-                          isLead: workspace.isLead)
+                          isLead: workspace.isLead,
+                          isNested: nested.contains(index))
         }
         tickHiddenSpaceAgents(visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses)
         updateColumnHeaders(infos: infos, foregroundProcesses: foregroundProcesses, now: now)

@@ -316,6 +316,9 @@ struct WorkspaceInfo: Hashable {
     var mergedCleanup: MergedCleanupOffer?
     /// The space's Lead: first, never moved, dragged or parked.
     var isLead = false
+    /// A Mission child listed under its parent: drawn indented, moved among
+    /// its siblings only, never dragged.
+    var isNested = false
 
     var sidebarAction: (text: String, isBlocker: Bool)? {
         if let blocker = normalizedContextText(blocker) {

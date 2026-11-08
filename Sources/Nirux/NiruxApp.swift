@@ -153,6 +153,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
 
         // Before the restore relaunches agent sessions, which read the skills.
         updateAgentSkills(reportingTo: shellView)
+        // Before the restore: its first layout lists Mission children under
+        // their parent.
+        MissionStore.shared.load()
         // Restore previous session if available
         shellView.restoreState()
 
@@ -160,7 +163,6 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // ~/.codex/config.toml, then start routing events to columns. Must
         // run AFTER restoreState so queued events resolve to live columns.
         installAgentHooks(reportingTo: shellView)
-        MissionStore.shared.load()
         let hooks = AgentHookCenter.shared
         // Before the backlog replay in start(): it releases what it can't hold.
         hooks.applySidebarApprovals(enabled: NiruxShellView.currentSidebarApprovalsEnabled())
