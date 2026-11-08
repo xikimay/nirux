@@ -42,9 +42,10 @@ enum NewTask {
         /// The agent the task reports to (a space's Lead): its Mission's
         /// parent. Nil: nobody.
         var reportsTo: MissionParent?
-        /// False for a task its Lead started by itself: it opens without
-        /// taking the user's focus or space.
-        var opensInFront = true
+        /// A task its Lead started by itself (`start_task`): it opens in the
+        /// Lead's space, without taking the user's focus or space.
+        var startedByLead = false
+        var opensInFront: Bool { !startedByLead }
     }
 
     /// A Mission's parent: a workspace's column.

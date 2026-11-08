@@ -340,8 +340,11 @@ extension NiruxShellView {
         case .moveDown:
             didChange = workspaceStore.moveWorkspace(at: workspaceIndex, delta: 1)
         case .markActive:
+            // By identity: back among the active ones, it may take another
+            // slot (its children follow it, see WorkspaceStore).
+            let restored = workspaces[workspaceIndex]
             didChange = workspaceStore.setWorkspaceInactive(at: workspaceIndex, false)
-            if didChange { workspaceStore.selectWorkspace(at: workspaceIndex) }
+            if didChange { workspaceStore.selectWorkspace(id: restored.id) }
         case .markInactive:
             didChange = workspaceStore.setWorkspaceInactive(at: workspaceIndex, true)
         case .close:
@@ -368,9 +371,9 @@ extension NiruxShellView {
         }
         guard didChange else { return }
         refreshAfterWorkspaceMutation()
-        if case .markActive = action {
-            refreshGitContextNow(for: workspaces[workspaceIndex])
-            refreshPRInfo(for: [workspaces[workspaceIndex]])
+        if case .markActive = action, let restored = activeWorkspace {
+            refreshGitContextNow(for: restored)
+            refreshPRInfo(for: [restored])
         }
     }
 

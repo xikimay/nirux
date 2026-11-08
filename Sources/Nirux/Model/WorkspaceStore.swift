@@ -10,6 +10,11 @@ final class WorkspaceStore {
     /// id in NIRUX_PROFILE_ID, so a request naming one goes to the default
     /// space, where their workspaces moved.
     var deletedProfileIDs: Set<String> = []
+    /// Each Mission's parent workspace, by Mission id, read once per pass
+    /// (the shell reads MissionStore). A Lead's tasks are left out: they
+    /// are the space's list itself. Children list under their parent (see
+    /// `visibleWorkspaceIndices(in:)`).
+    var missionParents: @MainActor () -> [String: String] = { [:] }
 
     /// -1 while no workspace is active: the active space is empty and
     /// shows `EmptySpaceView`. Keys, ⌘W and notifications then reach no
@@ -56,11 +61,13 @@ final class WorkspaceStore {
 
     func replaceWorkspaces(_ newWorkspaces: [WorkspaceState]) {
         workspaces = newWorkspaces
+        for profileID in Set(workspaces.map(\.profileID)) { keepTreeOrder(in: profileID) }
         reconcileSelection(preferActiveProfile: true)
     }
 
     func appendWorkspace(_ workspace: WorkspaceState, activate: Bool = true) {
         workspaces.append(workspace)
+        keepTreeOrder(in: workspace.profileID)
         if activate { selectWorkspace(id: workspace.id) }
     }
 
@@ -174,6 +181,8 @@ final class WorkspaceStore {
         let adjustedTarget = workspaces.firstIndex { $0 === targetWorkspace } ?? workspaces.count
         let insertIndex = delta > 0 ? adjustedTarget + 1 : adjustedTarget
         workspaces.insert(workspace, at: min(insertIndex, workspaces.count))
+        // Its children follow it.
+        keepTreeOrder(in: workspace.profileID)
         reconcileSelection(preferActiveProfile: true)
         return true
     }
@@ -196,8 +205,11 @@ final class WorkspaceStore {
         guard workspaces.indices.contains(index) else { return nil }
         let isInactive = workspaces[index].isInactive
         let isLead = workspaces[index].isLead
+        // Among its siblings: a child moves under its parent, a card with
+        // children among the cards with none above them.
+        let parents = activeParents(in: workspaces[index].profileID)
         let candidates = visibleWorkspaceIndices.filter {
-            workspaces[$0].isInactive == isInactive && workspaces[$0].isLead == isLead
+            workspaces[$0].isInactive == isInactive && workspaces[$0].isLead == isLead && parents[$0] == parents[index]
         }
         guard let position = candidates.firstIndex(of: index) else { return nil }
         return (candidates, position)
@@ -211,6 +223,7 @@ final class WorkspaceStore {
         // The top card takes over, not the Lead above the cards: keys typed
         // next would go into its prompt.
         let isActiveCard = { (candidate: Int) in !self.workspaces[candidate].isInactive }
+        keepTreeOrder(in: workspaces[index].profileID)
         if activeWorkspaceIndex == index,
            isInactive,
            let firstActive = visibleWorkspaceIndices.first(where: { isActiveCard($0) && !self.workspaces[$0].isLead })
@@ -328,6 +341,7 @@ final class WorkspaceStore {
         }
         profiles.remove(at: index)
         deletedProfileIDs.insert(id)
+        keepTreeOrder(in: WorkspaceProfile.defaultID)
         reconcileSelection(preferActiveProfile: true)
         return true
     }
@@ -363,18 +377,77 @@ final class WorkspaceStore {
         workspace.profileID = profileID
         workspaces.remove(at: index)
         workspaces.append(workspace)
+        keepTreeOrder(in: profileID)
         if wasActive { selectWorkspace(id: neighbourID ?? workspace.id) }
         reconcileSelection(preferActiveProfile: true)
         return true
     }
 
-    /// The sidebar's order: the Lead, the active workspaces, the inactive
-    /// ones.
+    /// The sidebar's order: the Lead, the active workspaces, each followed
+    /// by its Mission children (depth first), the inactive ones.
     func visibleWorkspaceIndices(in profileID: String) -> [Int] {
         let matching = workspaces.indices.filter { workspaces[$0].profileID == profileID }
+        let active = matching.filter { !workspaces[$0].isLead && !workspaces[$0].isInactive }
         return matching.filter { workspaces[$0].isLead }
-            + matching.filter { !workspaces[$0].isLead && !workspaces[$0].isInactive }
+            + treeOrder(active, parents: activeParents(in: profileID)).map(\.index)
             + matching.filter { !workspaces[$0].isLead && workspaces[$0].isInactive }
+    }
+
+    /// The active workspaces listed under a parent (drawn indented).
+    func nestedWorkspaceIndices(in profileID: String) -> Set<Int> {
+        Set(activeParents(in: profileID).keys)
+    }
+
+    /// Each active workspace's parent, by index: its Mission's parent when
+    /// that one is open in the same space, active, and not the Lead (the
+    /// Lead's tasks are the space's list itself).
+    private func activeParents(in profileID: String) -> [Int: Int] {
+        let active = workspaces.indices.filter {
+            workspaces[$0].profileID == profileID && !workspaces[$0].isLead && !workspaces[$0].isInactive
+        }
+        let byID = Dictionary(active.map { (workspaces[$0].id, $0) }, uniquingKeysWith: { first, _ in first })
+        let missionParents = missionParents()
+        var parents: [Int: Int] = [:]
+        for index in active {
+            if let missionID = workspaces[index].missionID, let parentID = missionParents[missionID],
+               let parent = byID[parentID], parent != index {
+                parents[index] = parent
+            }
+        }
+        // A loop of parents (a hand-edited ledger) lists at the top level.
+        let tree = treeOrder(active, parents: parents)
+        let nested = Set(tree.filter(\.nested).map(\.index))
+        return parents.filter { nested.contains($0.key) }
+    }
+
+    /// The store keeps a space's active workspaces in the sidebar's order,
+    /// each followed by its children: a child its parent lets go (closed,
+    /// archived, moved away) stays where it was listed.
+    private func keepTreeOrder(in profileID: String) {
+        let active = workspaces.indices.filter {
+            workspaces[$0].profileID == profileID && !workspaces[$0].isLead && !workspaces[$0].isInactive
+        }
+        let order = treeOrder(active, parents: activeParents(in: profileID)).map(\.index)
+        guard order != active else { return }
+        let reordered = order.map { workspaces[$0] }
+        for (slot, index) in active.enumerated() { workspaces[index] = reordered[slot] }
+    }
+
+    /// Roots in store order, each followed by its children, depth first. A
+    /// loop of parents (a hand-edited ledger) lists at the top level.
+    private func treeOrder(_ indices: [Int], parents: [Int: Int]) -> [(index: Int, nested: Bool)] {
+        var children: [Int: [Int]] = [:]
+        for index in indices { if let parent = parents[index] { children[parent, default: []].append(index) } }
+        var result: [(index: Int, nested: Bool)] = []
+        var visited = Set<Int>()
+        func visit(_ index: Int, nested: Bool) {
+            guard visited.insert(index).inserted else { return }
+            result.append((index, nested))
+            for child in children[index] ?? [] { visit(child, nested: true) }
+        }
+        for index in indices where parents[index] == nil { visit(index, nested: false) }
+        for index in indices where !visited.contains(index) { visit(index, nested: false) }
+        return result
     }
 
     /// The space's Lead, unless it is closing (docs/spaces.md, "The Lead").

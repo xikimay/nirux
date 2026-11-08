@@ -115,6 +115,106 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
+    /// ⌘N in a space with a Lead offers "Report to the Lead", checked: the
+    /// task then reports to it. Unchecked, it reports to nobody; a space
+    /// without a Lead doesn't offer it.
+    func testReportToTheLeadFromTheNewSheet() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            @MainActor func start(_ description: String, reporting: Bool) throws -> WorkspaceState {
+                let sheet = try XCTUnwrap(shell.showNewPanel(spaceID: lead.space))
+                XCTAssertFalse(sheet.reportCheckbox.isHidden)
+                XCTAssertEqual(sheet.reportCheckbox.state, .on, "checked by default")
+                if !reporting { sheet.reportCheckbox.performClick(nil) }
+                sheet.descriptionView.string = description
+                sheet.textDidChange(Notification(name: NSText.didChangeNotification, object: sheet.descriptionView))
+                harness.waitUntil("the repository's info") { sheet.info?.target != nil }
+                sheet.startButton.performClick(nil)
+                harness.waitUntil("the task to open") { shell.workspaces.contains { $0.title == description } }
+                return try XCTUnwrap(shell.workspaces.first { $0.title == description })
+            }
+            let reporting = try start("Reports to the Lead", reporting: true)
+            XCTAssertEqual(MissionStore.shared.missions.first { $0.childWorkspaceID == reporting.id }?.parentWorkspaceID, lead.workspace.id)
+            XCTAssertTrue(shell.activeWorkspace === reporting, "a task the user starts comes to the front")
+            let alone = try start("Reports to nobody", reporting: false)
+            XCTAssertNil(MissionStore.shared.missions.first { $0.childWorkspaceID == alone.id })
+
+            let plain = shell.workspaceStore.createProfile(named: "No Lead", select: true).id
+            let sheet = try XCTUnwrap(shell.showNewPanel(spaceID: plain))
+            XCTAssertTrue(sheet.reportCheckbox.isHidden)
+            sheet.cancelButton.performClick(nil)
+        }
+    }
+
+    /// A task's own Mission children list right under it, indented, and
+    /// move among themselves; the Lead's tasks stay the space's list. A
+    /// parent archived lets its children go, where they were listed.
+    func testMissionChildrenListUnderTheirParent() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            @MainActor func open(_ title: String, reportingTo parent: WorkspaceState? = nil) throws -> WorkspaceState {
+                let workspaceID = UUID().uuidString
+                let agentUUID = UUID().uuidString
+                let mission = try parent.map { parent in
+                    try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                        id: UUID().uuidString, parentWorkspaceID: parent.id,
+                        parentAgentUUID: try XCTUnwrap(parent.columns.first?.agentUUID),
+                        childWorkspaceID: workspaceID, childAgentUUID: agentUUID, childAgentKind: "claude",
+                        branch: "feat/\(title)", reportsToLead: parent.isLead
+                    ), enabled: true))
+                }
+                shell.addWorkspace(
+                    title: title, cwd: harness.repo, profileID: lead.space, workspaceID: workspaceID,
+                    initialAgentUUID: agentUUID, missionID: mission?.id, reportsToLead: parent?.isLead == true
+                )
+                return try XCTUnwrap(shell.activeWorkspace)
+            }
+            let task = try open("task")
+            let other = try open("other")
+            _ = try open("lead's task", reportingTo: lead.workspace)
+            // Opened last: the store still lists it under its parent.
+            let sub = try open("sub", reportingTo: task)
+            let store = shell.workspaceStore
+            let titles = { store.visibleWorkspaceIndices(in: lead.space).map { shell.workspaces[$0].title } }
+            let index = { (workspace: WorkspaceState) in try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace }) }
+            XCTAssertEqual(titles(), ["Lead", "task", "sub", "other", "lead's task"])
+            XCTAssertEqual(store.nestedWorkspaceIndices(in: lead.space), [try index(sub)])
+
+            shell.updateSidebar()
+            let info = try XCTUnwrap(shell.sidebar.displayedWorkspaceInfos.first { $0.id == sub.id })
+            XCTAssertTrue(info.isNested)
+            XCTAssertEqual(
+                SidebarCardLayout(workspace: info, sidebarWidth: 260).cardX,
+                SidebarExpandedMetrics.workspaceInsetX + SidebarExpandedMetrics.nestIndent
+            )
+
+            XCTAssertFalse(store.moveWorkspace(at: try index(sub), delta: -1), "it stays under its parent")
+            XCTAssertTrue(store.moveWorkspace(at: try index(task), delta: 1))
+            XCTAssertEqual(titles(), ["Lead", "other", "task", "sub", "lead's task"], "its children follow it")
+
+            XCTAssertTrue(store.setWorkspaceInactive(at: try index(task), true))
+            XCTAssertEqual(titles(), ["Lead", "other", "sub", "lead's task", "task"], "let go where it was listed")
+            XCTAssertTrue(store.nestedWorkspaceIndices(in: lead.space).isEmpty)
+
+            // Back among the active ones it takes its children back, and the
+            // one restored is the one selected.
+            XCTAssertTrue(store.moveWorkspace(at: try index(sub), delta: -1))
+            shell.updateSidebar()
+            shell.handleWorkspaceSidebarAction(.markActive, workspaceIndex: try index(task))
+            XCTAssertTrue(shell.activeWorkspace === task)
+            XCTAssertEqual(titles(), ["Lead", "other", "task", "sub", "lead's task"])
+
+            // A deleted space's former Lead never takes its tasks under it.
+            XCTAssertTrue(store.deleteProfile(id: lead.space))
+            XCTAssertEqual(
+                store.nestedWorkspaceIndices(in: WorkspaceProfile.defaultID).map { shell.workspaces[$0].title }, ["sub"]
+            )
+            _ = other
+        }
+    }
+
     /// A defaults.json Nirux can't read asks first: the Lead proposes.
     func testAnUnreadableSettingAsksFirst() throws {
         try UIFlowHarness.run { harness in

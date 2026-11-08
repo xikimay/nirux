@@ -131,7 +131,9 @@ A sheet titled "New in <space>":
 - **Repository** popup, shown only with two or more anchors, the default
   preselected. **Agent** (the space's default) and **Template** popups.
 - The suggested branch on one line, editable, "from origin/main".
-- **Report to the Lead** checkbox (with the Lead PR).
+- **Report to the Lead** checkbox, shown when the space has a Lead, checked by
+  default: the task's Mission reports to the Lead's Claude (shipped with
+  S11c). A Lead's proposal comes with it checked.
 - **Existing Branch…** opens an existing worktree (today's Open Worktree), or
   a branch without one: its worktree is made, with a shell (shipped with S7).
 - Names come from the description's first line, else the branch, else the
@@ -224,6 +226,15 @@ New flow, built on the guarded typing `tell` already uses
   app hasn't finished within its wait may still happen, and the Lead is told
   not to call again. Calls are answered off the server's read loop.
 - **No tool merges, removes a worktree or a branch, or reaches another space.**
+- **Mission children under their parent** (shipped with S11c): a task's own
+  Mission children (the worktrees it opens with the skill) list right after
+  it, indented, in the sidebar, the rail and ⌘↑/↓ alike; they move among
+  themselves and follow their parent when it moves, never dragged. The
+  Lead's tasks stay the space's list under the Lead row (a deleted space's
+  former Lead too). A parent closed, archived or in another space lets its
+  children go to the top level, where they were listed: the store keeps the
+  sidebar's order. A row asking the user isn't indented, so its request is
+  never cut. No folding; a grandchild has a child's indent.
 - **State lives in Nirux** (board, Missions), not in the Lead's conversation: a
   `/clear` or a restart loses nothing.
 - Mission handoffs and sidebar permission answers leave Experimental for
