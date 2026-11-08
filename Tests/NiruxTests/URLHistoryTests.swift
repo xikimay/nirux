@@ -22,8 +22,9 @@ final class URLHistoryTests: XCTestCase {
 
     // MARK: - localhost is a special case (no dot but still a host)
 
-    func testLocalhostBareGetsHttps() {
+    func testLocalhostGetsHttps() {
         XCTAssertEqual(URLHistory.normalize("localhost"), "https://localhost")
+        XCTAssertEqual(URLHistory.normalize("localhost:8080"), "https://localhost:8080")
     }
 
     // MARK: - Search queries return nil

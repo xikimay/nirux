@@ -394,11 +394,15 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
             XCTAssertEqual(harness.agentLaunches.count, 2)
             XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command codex") == true, "\(harness.agentLaunches)")
 
-            // No agent waits on the user: a hint says so, and the focus
-            // stays. QuickSwitcherFlowTests walks a queue.
+            // Claude waits on the user (faked: a real one needs a `claude`
+            // in front): the command goes to it. QuickSwitcherFlowTests
+            // walks a queue.
+            let claude = try XCTUnwrap(workspace.columns[safe: columnCount])
+            let wait = AgentWait(reason: .question(nil), since: Date().timeIntervalSince1970 - 60)
+            harness.shell.quickSwitch.agentWait = { column, _, _ in column === claude ? wait : nil }
+            XCTAssertNotIdentical(workspace.columns[safe: workspace.focusedIndex], claude)
             harness.runPaletteCommand("Next Waiting Agent")
-            XCTAssertIdentical(harness.shell.activeWorkspace, workspace)
-            XCTAssertEqual(harness.shell.quickSwitch.hint?.text, NiruxShellView.noWaitingAgentHint)
+            XCTAssertIdentical(workspace.columns[safe: workspace.focusedIndex], claude)
         }
     }
 

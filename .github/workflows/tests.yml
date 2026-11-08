@@ -31,8 +31,13 @@ jobs:
           fetch-depth: 0
 
       # The dependencies' clones and binaries (GhosttyKit's download sometimes
-      # fails to connect). A pull request reads the cache the nightly saves on
-      # main; build products aren't cached (a stale one once crashed tests).
+      # fails to connect), per toolchain: a new runner image's SwiftPM starts
+      # afresh. A pull request reads the cache the nightly saves on main;
+      # build products aren't cached (a stale one once crashed tests).
+      - name: Toolchain
+        id: toolchain
+        run: echo "swift=$(swift --version 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/cache@v6
         with:
           path: |
@@ -40,7 +45,7 @@ jobs:
             .build/checkouts
             .build/repositories
             .build/workspace-state.json
-          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.swift }}-${{ hashFiles('Package.resolved') }}
 
       - name: Build
         run: swift build --build-tests

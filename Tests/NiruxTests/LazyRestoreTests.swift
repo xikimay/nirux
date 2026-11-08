@@ -120,13 +120,15 @@ final class LazyRestoreTests: XCTestCase {
 
     /// Long enough for the columns on screen to resume: the resume's wait,
     /// then until the resume ran, which a busy machine (classes run side by
-    /// side, scripts/run-tests.sh) does late. 10 s at most.
-    private func settle(_ shell: NiruxShellView) {
+    /// side, scripts/run-tests.sh) does late. One still waiting 3 s later
+    /// keeps restarting its wait: that fails.
+    private func settle(_ shell: NiruxShellView, file: StaticString = #filePath, line: UInt = #line) {
         RunLoop.main.run(until: Date().addingTimeInterval(NiruxShellView.onScreenResumeDelay + 0.15))
-        let deadline = Date().addingTimeInterval(10)
+        let deadline = Date().addingTimeInterval(3)
         while shell.isOnScreenResumeScheduled, Date() < deadline {
             RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         }
+        XCTAssertFalse(shell.isOnScreenResumeScheduled, "the resume kept waiting", file: file, line: line)
     }
 
     private func column(_ shell: NiruxShellView, _ workspace: Int, _ column: Int) throws -> ColumnState {

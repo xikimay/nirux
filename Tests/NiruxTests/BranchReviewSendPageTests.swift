@@ -101,7 +101,9 @@ final class BranchReviewSendPageTests: XCTestCase {
         page.controller.markSent(["c3": "First"], branch: "another", head: snapshot.head)
         page.controller.markSent(["c1": "Second", "c2": "Went"], branch: snapshot.branch, head: "h9")
         let store = try store()
-        page.waitUntil("sent") { store.load().record.comment(id: "c1")?.sent != nil }
+        // The column takes the write once it is on disk: wait for the
+        // column, which a busy machine updates after the file.
+        page.waitUntil("sent") { page.controller.review?.record.comment(id: "c1")?.sent != nil }
         XCTAssertEqual(store.load().record.comment(id: "c1")?.sent?.head, "h9")
         XCTAssertEqual(store.load().record.comment(id: "c2")?.sent?.head, "h0", "sent before: its mark stays")
         XCTAssertNil(store.load().record.comment(id: "c3")?.sent, "another branch's review isn't this one")

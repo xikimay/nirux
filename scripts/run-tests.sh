@@ -5,9 +5,10 @@
 # other: a serial `swift test` spent ten of the CI's thirteen minutes on them.
 #
 # Usage, after `swift build --build-tests`: scripts/run-tests.sh [workers]
-# (two per CPU by default: six on the CI's three cores took 2.5 minutes;
-# eight made tests that time themselves fail). Fails when a class fails or
-# crashes, or when fewer tests ran than `swift test list` names.
+# (two per CPU, six at most: six on the CI's three cores took 2.5 minutes;
+# eight made tests that time themselves fail). Fails when a class fails,
+# crashes or runs past NIRUX_TESTS_CLASS_TIMEOUT (600 s), or when fewer tests
+# ran than `swift test list` names.
 set -euo pipefail
 
 # One class, run by a worker below. xargs and bash are protected binaries,
@@ -15,11 +16,20 @@ set -euo pipefail
 # set again for xctest only.
 if [[ "${1:-}" == --class ]]; then
     class="$2"
+    log="$NIRUX_TESTS_WORK/$class.log"
     start=$SECONDS
-    status=0
     DYLD_FRAMEWORK_PATH="$NIRUX_TESTS_FRAMEWORK_PATH" DYLD_LIBRARY_PATH="$NIRUX_TESTS_LIBRARY_PATH" \
-        "$NIRUX_TESTS_XCTEST" -XCTest "$class" "$NIRUX_TESTS_BUNDLE" \
-        > "$NIRUX_TESTS_WORK/$class.log" 2>&1 || status=$?
+        "$NIRUX_TESTS_XCTEST" -XCTest "$class" "$NIRUX_TESTS_BUNDLE" > "$log" 2>&1 &
+    pid=$!
+    # A class that hangs fails with its log, instead of the job at its
+    # timeout with none.
+    (sleep "$NIRUX_TESTS_CLASS_TIMEOUT" && kill -KILL "$pid" \
+        && echo "Killed after ${NIRUX_TESTS_CLASS_TIMEOUT}s." >> "$log") 2>/dev/null &
+    watchdog=$!
+    status=0
+    wait "$pid" || status=$?
+    pkill -P "$watchdog" sleep 2>/dev/null || true
+    wait "$watchdog" 2>/dev/null || true
     elapsed=$((SECONDS - start))
     echo "$elapsed $class" >> "$NIRUX_TESTS_WORK/times"
     if [[ $status -eq 0 ]]; then
@@ -31,12 +41,14 @@ if [[ "${1:-}" == --class ]]; then
     exit 0
 fi
 
-workers="${1:-$(($(sysctl -n hw.activecpu) * 2))}"
-cd "$(dirname "$0")/.."
+cpus=$(sysctl -n hw.activecpu)
+workers="${1:-$((cpus * 2 < 6 ? cpus * 2 : 6))}"
+script="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+cd "$(dirname "$script")/.."
 
 work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/nirux-tests.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
-touch "$work/failed"
+touch "$work/failed" "$work/times"
 
 swift test list --skip-build > "$work/listed"
 # XCTest names only: anything else (a Swift Testing test) would never run.
@@ -56,47 +68,49 @@ echo "$expected tests in $(wc -l < "$work/classes" | tr -d ' ') classes, $worker
 
 # What `swift test` sets for xctest on macOS.
 platform="$(xcrun --sdk macosx --show-sdk-platform-path)/Developer"
+xctest="$(xcrun --sdk macosx --find xctest)"
+bundle="$(swift build --show-bin-path)/NiruxPackageTests.xctest"
 export NO_COLOR=1 SWIFT_TESTING_ENABLED=0
 export NIRUX_TESTS_FRAMEWORK_PATH="$platform/Library/Frameworks"
 export NIRUX_TESTS_LIBRARY_PATH="$platform/usr/lib"
-export NIRUX_TESTS_XCTEST="$(xcrun --sdk macosx --find xctest)"
-export NIRUX_TESTS_BUNDLE="$(swift build --show-bin-path)/NiruxPackageTests.xctest"
-export NIRUX_TESTS_WORK="$work"
+export NIRUX_TESTS_XCTEST="$xctest" NIRUX_TESTS_BUNDLE="$bundle" NIRUX_TESTS_WORK="$work"
+export NIRUX_TESTS_CLASS_TIMEOUT="${NIRUX_TESTS_CLASS_TIMEOUT:-600}"
 
 status=0
 start=$SECONDS
 # A worker always exits 0: xargs failing means one was killed.
-xargs -P "$workers" -n 1 bash "$0" --class < "$work/classes" || {
+xargs -P "$workers" -n 1 bash "$script" --class < "$work/classes" || {
     echo "::error::a worker stopped early (xargs exit $?)"
     status=1
 }
 echo "All classes done in $((SECONDS - start))s"
 
+# A class that crashed has no summary, and one whose worker never ran no log.
 executed=0
 while read -r class; do
     log="$work/$class.log"
     # The last summary is the whole run's: "Executed 12 tests, with …".
-    count=$(grep -E 'Executed [0-9]+ tests?' "$log" 2>/dev/null | tail -1 | sed -E 's/.*Executed ([0-9]+) tests?.*/\1/')
+    count=$({ grep -E 'Executed [0-9]+ tests?' "$log" 2>/dev/null || true; } | tail -1 | sed -E 's/.*Executed ([0-9]+) tests?.*/\1/')
     executed=$((executed + ${count:-0}))
-    if ! grep -qx "$class" "$work/failed"; then
+    if ! grep -qxF "$class" "$work/failed"; then
         echo "::group::$class"
-        cat "$log"
+        cat "$log" 2>/dev/null || echo "(no log)"
         echo "::endgroup::"
     fi
 done < "$work/classes"
 
 echo "Slowest classes:"
-sort -rn "$work/times" | head -15 | sed 's/^/  /'
+{ sort -rn "$work/times" | head -15 | sed 's/^/  /'; } || true
 
 if [[ -s "$work/failed" ]]; then
     while read -r class; do
         echo
         echo "=== $class failed:"
-        cat "$work/$class.log"
+        cat "$work/$class.log" 2>/dev/null || echo "(no log)"
     done < "$work/failed"
     echo
     echo "Failures:"
-    grep -h ': error: ' "$work"/*.log || true
+    grep -h ': error: ' "$work"/*.log 2>/dev/null || true
     status=1
 fi
 if [[ $executed -ne $expected ]]; then

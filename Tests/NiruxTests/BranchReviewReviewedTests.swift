@@ -381,6 +381,22 @@ final class BranchReviewReviewedTests: XCTestCase {
         XCTAssertEqual(store.load().record.lastHead, head)
     }
 
+    /// Opened since at a later head (the page waits behind its Reload
+    /// banner): written without moving it back.
+    @MainActor
+    func testReviewOpenedSinceAtALaterHeadKeepsIt() throws {
+        let later = String(repeating: "c", count: 40)
+        let page = try page(headOrder: { _, ancestor, descendant in ancestor == descendant || descendant == later })
+        defer { page.close() }
+        let store = try store()
+        _ = try store.update(try XCTUnwrap(store.open(head: later, pullRequest: .notFound, history: yes).access)) { _ in }.get()
+
+        try click(page, #".file[data-id=\"0\"] .file-check"#)
+        page.waitUntil("the mark") { store.load().record.reviewedMarks["Sources/KeepAwake.swift"] != nil }
+        XCTAssertEqual(store.load().record.lastHead, later)
+        XCTAssertEqual(store.load().record.reviewedMarks["Sources/KeepAwake.swift"]?.head, head)
+    }
+
     /// Opened since at a head neither before nor after the page's: the
     /// page doesn't write over it.
     @MainActor
