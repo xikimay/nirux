@@ -63,6 +63,20 @@ extension NiruxShellView {
         "\(path.abbreviatedPath()) can’t be a space’s folder: every folder in it would join the space."
     }
 
+    /// Only `projects.json` keeps anchors for sure: an older build's mirror
+    /// has none, so a change made while the file can't be written (a newer
+    /// Nirux saved it, or it is unreadable) would be lost or undone at the
+    /// next launch. Says so when it can't.
+    func canChangeAnchors() -> Bool {
+        guard projectStore.availability == .writable else {
+            showToast(Self.anchorsLockedMessage, tone: .error)
+            return false
+        }
+        return true
+    }
+
+    static let anchorsLockedMessage = "Repositories can’t change now: a newer Nirux saved the spaces, or projects.json can’t be read"
+
     /// A repository or folder another space has: asks before taking it.
     /// True when it is free, or the user agreed.
     func confirmTakingAnchor(_ anchor: SpaceAnchor, intoSpaceNamed name: String, excluding spaceID: String?) -> Bool {
@@ -119,7 +133,8 @@ extension NiruxShellView {
         if case .folder(let path) = anchor.kind, isTooBroadForAFolderAnchor(path) {
             return showToast(tooBroadFolderMessage(path), tone: .error)
         }
-        guard let space = profiles.first(where: { $0.id == spaceID }),
+        guard canChangeAnchors(),
+              let space = profiles.first(where: { $0.id == spaceID }),
               confirmTakingAnchor(anchor, intoSpaceNamed: space.name, excluding: spaceID),
               workspaceStore.addAnchor(anchor, toProfile: spaceID)
         else { return }
@@ -130,13 +145,13 @@ extension NiruxShellView {
     }
 
     func removeSpaceAnchor(key: String, fromSpace spaceID: String) {
-        guard workspaceStore.removeAnchor(key: key, fromProfile: spaceID) else { return }
+        guard canChangeAnchors(), workspaceStore.removeAnchor(key: key, fromProfile: spaceID) else { return }
         updateSidebar()
         saveState()
     }
 
     func makeDefaultSpaceAnchor(key: String, inSpace spaceID: String) {
-        guard workspaceStore.makeDefaultAnchor(key: key, inProfile: spaceID) else { return }
+        guard canChangeAnchors(), workspaceStore.makeDefaultAnchor(key: key, inProfile: spaceID) else { return }
         updateSidebar()
         saveState()
     }
@@ -265,7 +280,7 @@ extension NiruxShellView {
                 return
             }
             var suggestion: SpaceAnchor?
-            if let identity, identity.commonDir != nil,
+            if self.projectStore.availability == .writable, let identity, identity.commonDir != nil,
                identity.anchor.key.flatMap(self.workspaceStore.profile(anchoring:)) == nil {
                 suggestion = identity.anchor
             }
@@ -274,6 +289,7 @@ extension NiruxShellView {
     }
 
     private func pickAnchorForNewSpace(asRepository: Bool, panel: NewSpacePanel) {
+        guard projectStore.availability == .writable else { return panel.showError(Self.anchorsLockedMessage + ".") }
         sideEffects.chooseFolder(asRepository ? "Add Repository" : "Add Folder", panel.panel) { [weak self, weak panel] folder in
             guard let folder else { return }
             Self.pickAnchor(folder, asRepository: asRepository) { [weak self, weak panel] pick in
@@ -310,6 +326,9 @@ extension NiruxShellView {
     /// shows it, opening a workspace in its default folder when it is
     /// empty.
     func createSpace(_ draft: NewSpacePanel.Draft) {
+        // The sheet adds none then; one taken from another space would come
+        // back to it at the next launch.
+        let anchors = projectStore.availability == .writable ? draft.anchors : []
         let spaceID: String
         if let empty = profiles.first(where: { space in
             space.id != WorkspaceProfile.defaultID && space.name == draft.name && space.anchors.isEmpty
@@ -317,10 +336,10 @@ extension NiruxShellView {
         }) {
             spaceID = empty.id
             workspaceStore.setProfileColor(id: spaceID, colorHex: draft.colorHex)
-            workspaceStore.setAnchors(draft.anchors, forProfile: spaceID)
+            workspaceStore.setAnchors(anchors, forProfile: spaceID)
         } else {
             spaceID = workspaceStore.createProfile(
-                named: draft.name, colorHex: draft.colorHex, anchors: draft.anchors, select: false
+                named: draft.name, colorHex: draft.colorHex, anchors: anchors, select: false
             ).id
         }
         updateSidebar()
@@ -331,7 +350,7 @@ extension NiruxShellView {
             self.updateSidebar()
             self.saveState()
         }
-        guard !draft.anchors.isEmpty else { return finish() }
+        guard !anchors.isEmpty else { return finish() }
         offerToMoveWorkspaces(into: spaceID, then: finish)
     }
 }

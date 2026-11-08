@@ -81,9 +81,12 @@ struct SpaceAnchor: Equatable, Sendable {
 /// lenient: whatever this build can't read as one of those (another kind,
 /// a missing path) is kept as read and written back unchanged.
 extension SpaceAnchor: Codable {
-    /// The keys of a kind this build knows. Others mean a newer build added
-    /// fields: the file is then read-only (see ProjectStore).
-    static let knownKeys: Set<String> = ["kind", "commonDir", "path", "name", "isDefault"]
+    /// The keys of each kind this build knows. Others mean a newer build
+    /// added fields: the file is then read-only (see ProjectStore).
+    static let knownKeys: [String: Set<String>] = [
+        "gitRepository": ["kind", "commonDir", "name", "isDefault"],
+        "folder": ["kind", "path", "name", "isDefault"]
+    ]
 
     private enum CodingKeys: String, CodingKey {
         case kind, commonDir, path, name, isDefault
@@ -131,8 +134,8 @@ extension SpaceAnchor: Codable {
     /// A stored anchor of a kind this build knows that carries keys it
     /// doesn't: rewriting it would drop them.
     static func hasUnknownKeys(_ object: [String: Any]) -> Bool {
-        guard let kind = object["kind"] as? String, ["gitRepository", "folder"].contains(kind) else { return false }
-        return !Set(object.keys).isSubset(of: knownKeys)
+        guard let kind = object["kind"] as? String, let known = knownKeys[kind] else { return false }
+        return !Set(object.keys).isSubset(of: known)
     }
 }
 

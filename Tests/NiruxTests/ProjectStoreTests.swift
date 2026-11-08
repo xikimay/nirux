@@ -385,12 +385,14 @@ final class ProjectStoreTests: XCTestCase {
         XCTAssertEqual(kept["package"] as? String, "@acme/ui", "an unknown kind is written back as read")
     }
 
+    /// Keys are known per kind: a folder anchor carrying a repository's key
+    /// (a newer build's folder inside a repository) would lose it.
     @MainActor
     func testAnAnchorWithFieldsThisBuildDoesNotKnowIsNeverRewritten() throws {
         try writeFile(##"""
         {"schemaVersion": 2, "deletedIDs": [], "projects": [{"id": "work", "name": "Work", "colorHex": "#9ECE6A",
-         "anchors": [{"kind": "gitRepository", "commonDir": "/code/web/.git", "name": "web", "isDefault": true,
-                      "fingerprint": "abc"}]}]}
+         "anchors": [{"kind": "folder", "path": "/code/web/ui", "name": "ui", "isDefault": true,
+                      "commonDir": "/code/web/.git"}]}]}
         """##)
         let before = try Data(contentsOf: fileURL)
         let store = ProjectStore(fileURL: fileURL)

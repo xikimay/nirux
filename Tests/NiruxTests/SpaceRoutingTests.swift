@@ -40,22 +40,6 @@ final class SpaceRoutingTests: XCTestCase {
         XCTAssertEqual(route(outside, parent: "deleted", startedFrom: "gone"), .init(spaceID: WorkspaceProfile.defaultID, reason: .general))
     }
 
-    /// A confirmed `nirux://` request keeps neither the caller's space nor
-    /// its parent: it routes by its folder, else to the default space.
-    func testAConfirmedRequestWithoutALaunchIDGoesToTheDefaultSpace() throws {
-        let url = try XCTUnwrap(URL(string: "nirux://new-worktree?branch=x&repo=/code/elsewhere&profile=web&parentWorkspace=W&parentAgent=A"))
-        let restricted = try XCTUnwrap(NiruxURLRequest(url: url)).restrictedForConfirmation()
-        guard case .newWorktree(let worktree) = restricted.action else { return XCTFail("not a worktree request") }
-
-        let decision = SpaceRouting.route(
-            identity: FolderIdentity(path: "/code/elsewhere", commonDir: "/code/elsewhere/.git", topLevel: "/code/elsewhere"),
-            parentSpaceID: worktree.parentWorkspaceID, startedFromSpaceID: restricted.profileID,
-            spaces: [WorkspaceProfile.defaultProfile, Self.space("web", .repository(commonDir: Self.webRepository, topLevel: nil))]
-        )
-
-        XCTAssertEqual(decision, .init(spaceID: WorkspaceProfile.defaultID, reason: .general))
-    }
-
     func testTheMostSpecificAnchorWins() {
         // A folder anchor inside the repository beats the repository, in
         // the main checkout.

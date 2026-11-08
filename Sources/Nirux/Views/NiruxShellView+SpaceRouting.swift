@@ -4,14 +4,13 @@ import AppKit
 
 extension NiruxShellView {
     /// Where a plain new workspace of a space opens: its default anchor's
-    /// folder (a repository's main checkout), else the home folder. Also the
-    /// home folder for a space that doesn't exist, or a folder that is gone.
+    /// folder (a repository's main checkout), else the first of its other
+    /// anchors' folders still there (the default one moved), else the home
+    /// folder. Also the home folder for a space that doesn't exist.
     func defaultFolder(forSpace spaceID: String) -> String {
-        if let folder = profiles.first(where: { $0.id == spaceID })?.defaultFolder,
-           NiruxURLRequest.directoryExists(folder) {
-            return folder
-        }
-        return sideEffects.homeDirectory()
+        let space = profiles.first { $0.id == spaceID }
+        let folders = [space?.defaultFolder] + (space?.anchors.map(\.folder) ?? [])
+        return folders.lazy.compactMap { $0 }.first(where: NiruxURLRequest.directoryExists) ?? sideEffects.homeDirectory()
     }
 
     /// Decides the space of a workspace about to open on `folder`, then
