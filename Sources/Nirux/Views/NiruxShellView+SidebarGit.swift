@@ -87,6 +87,8 @@ extension NiruxShellView {
             )
         }
         sidebar.update(profiles: profileInfos, workspaces: infos)
+        // A rename or a repository added changes what an empty space says.
+        refreshEmptySpaceView()
         updateSidebarAttention(infos: infos, missionQuestions: missionQuestions)
         if invalidatedSessionBinding { saveState(snapshot: snapshot) }
         refreshProjectBoards(snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
@@ -211,6 +213,8 @@ extension NiruxShellView {
             edgeGlowLeft.show(Self.alert(in: wsInfo.columns.enumerated().filter { $0.offset < focused }.map(\.element)))
             edgeGlowRight.show(Self.alert(in: wsInfo.columns.enumerated().filter { $0.offset > focused }.map(\.element)))
         } else {
+            // An empty space: no columns to point at.
+            columnIndicator.update(columnCount: 0, focusedIndex: 0)
             edgeGlowLeft.show(nil)
             edgeGlowRight.show(nil)
         }

@@ -1,9 +1,9 @@
 # Spaces, anchors and the Lead
 
 Status: design validated by the user on 2026-11-08. Shipped: anchors and
-routing (S4), one ⌘N (S7), Space Settings and per-space defaults (S8).
-Where this document and [projects.md](projects.md) differ (management UI,
-routing, defaults), this one wins.
+routing (S4), one ⌘N (S7), Space Settings and per-space defaults (S8), the
+empty space view (S9). Where this document and [projects.md](projects.md)
+differ (management UI, routing, defaults), this one wins.
 
 Creating spaces and workspaces was messy because a space didn't know where its
 code lives. Five ways to create a workspace each guessed a different starting
@@ -215,7 +215,11 @@ Mockups were validated in the design session. What changes:
   Save. The space menu's items open the matching tab. A repository's setup
   script is edited in a sheet from General. A space's default agent only
   preselects the agent of its tasks; a plain workspace stays a shell.
-- **An empty space** shows Add Repository…, New… and Start a Lead.
+- **An empty space** shows its name, Add Repository… until it has a
+  repository or folder, and New… (Return, ⌘N); Start a Lead comes with the
+  Lead (S11). General shows only New…. The view stays while workspaces
+  elsewhere close or move, and comes back at launch. Closing a space's last
+  workspace still selects another space's.
 - **Nirux's own skills update themselves** on launch, unless the user edited
   them.
 
