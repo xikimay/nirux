@@ -21,6 +21,9 @@ struct FolderIdentity: Equatable, Sendable {
     /// slow disk or a huge repository (it then routes as if the folder
     /// were in none).
     static let routingTimeout: TimeInterval = 0.3
+    /// After a worktree was made off the main thread, which took seconds
+    /// anyway: a busy machine mustn't send it to the wrong space.
+    static let backgroundRoutingTimeout: TimeInterval = 3
 
     /// Runs git (`rev-parse`, no network): call it off the main thread. Nil
     /// when the folder doesn't exist.

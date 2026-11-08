@@ -41,6 +41,28 @@ extension NiruxShellView {
         }
     }
 
+    /// Runs `body`, which may show an app-modal alert, from the main run
+    /// loop rather than from the main-queue block that calls this: the main
+    /// queue runs no other block until such an alert is answered (see
+    /// SessionResume).
+    func runFromRunLoop(_ body: @escaping @MainActor @Sendable () -> Void) {
+        // On the main thread, which Swift 6.1 doesn't infer for this block.
+        RunLoop.main.perform(inModes: [.default]) {
+            MainActor.assumeIsolated { body() }
+        }
+    }
+
+    /// The home folder or a folder holding it: as a space's folder it would
+    /// take in every folder under the home folder.
+    func isTooBroadForAFolderAnchor(_ path: String) -> Bool {
+        let homes = [sideEffects.homeDirectory(), NSHomeDirectory()].map { $0.realPath ?? $0 }
+        return homes.contains { SpaceRouting.contains(path, $0) }
+    }
+
+    func tooBroadFolderMessage(_ path: String) -> String {
+        "\(path.abbreviatedPath()) can’t be a space’s folder: every folder in it would join the space."
+    }
+
     /// A repository or folder another space has: asks before taking it.
     /// True when it is free, or the user agreed.
     func confirmTakingAnchor(_ anchor: SpaceAnchor, intoSpaceNamed name: String, excluding spaceID: String?) -> Bool {
@@ -64,33 +86,39 @@ extension NiruxShellView {
         sideEffects.chooseFolder("Add Repository", window) { [weak self] folder in
             guard let folder else { return }
             Self.pickAnchor(folder, asRepository: true) { [weak self] pick in
-                self?.finishAddingRepository(pick, toSpace: spaceID)
+                self?.runFromRunLoop { [weak self] in self?.finishAddingRepository(pick, toSpace: spaceID) }
             }
         }
     }
 
-    private func finishAddingRepository(_ pick: AnchorPick, toSpace spaceID: String) {
+    /// A folder in no repository joins as a folder once the user agrees,
+    /// never the home folder or one holding it.
+    private func finishAddingRepository(_ pick: AnchorPick, toSpace spaceID: String, moving workspaceID: String? = nil) {
         guard let space = profiles.first(where: { $0.id == spaceID }) else { return }
         switch pick {
         case .missing(let folder):
             showToast("That folder is gone: \(folder.abbreviatedPath())", tone: .error)
         case .notARepository(let folder):
+            guard !isTooBroadForAFolderAnchor(folder) else { return showToast(tooBroadFolderMessage(folder), tone: .error) }
             let alert = NSAlert()
             alert.messageText = "“\((folder as NSString).lastPathComponent)” isn’t in a git repository"
             alert.informativeText = "Add it to “\(space.name)” as a folder? Workspaces opened in it or below join the space."
             alert.addButton(withTitle: "Add Folder")
             alert.addButton(withTitle: "Cancel")
             guard runModal(alert) == .alertFirstButtonReturn else { return }
-            addAnchor(.folder(folder), toSpace: spaceID)
+            addAnchor(.folder(folder), toSpace: spaceID, moving: workspaceID)
         case .anchor(let anchor):
-            addAnchor(anchor, toSpace: spaceID)
+            addAnchor(anchor, toSpace: spaceID, moving: workspaceID)
         }
     }
 
     /// Anchors it to the space, after asking when another space has it,
     /// moves `workspaceID` there, then offers the others of that
-    /// repository or folder.
+    /// repository or folder. May show an alert: call it from the run loop.
     func addAnchor(_ anchor: SpaceAnchor, toSpace spaceID: String, moving workspaceID: String? = nil) {
+        if case .folder(let path) = anchor.kind, isTooBroadForAFolderAnchor(path) {
+            return showToast(tooBroadFolderMessage(path), tone: .error)
+        }
         guard let space = profiles.first(where: { $0.id == spaceID }),
               confirmTakingAnchor(anchor, intoSpaceNamed: space.name, excluding: spaceID),
               workspaceStore.addAnchor(anchor, toProfile: spaceID)
@@ -114,13 +142,14 @@ extension NiruxShellView {
     }
 
     /// The banner's "Anchor to…": the repository holding the workspace's
-    /// folder (or the folder) joins the space, and so does the workspace.
+    /// folder joins the space, and so does the workspace. A folder in no
+    /// repository asks first, as "Add Repository…" does.
     func anchorWorkspaceFolder(workspaceID: String, toSpace spaceID: String) {
         guard let workspace = workspaces.first(where: { $0.id == workspaceID && !$0.isClosing }) else { return }
-        Self.identifyOffMain(workspace.cwd, timeout: Self.anchorPickTimeout) { [weak self] identity in
-            guard let self else { return }
-            guard let identity else { return self.showToast("That folder is gone", tone: .error) }
-            self.addAnchor(identity.anchor, toSpace: spaceID, moving: workspaceID)
+        Self.pickAnchor(workspace.cwd, asRepository: true) { [weak self] pick in
+            self?.runFromRunLoop { [weak self] in
+                self?.finishAddingRepository(pick, toSpace: spaceID, moving: workspaceID)
+            }
         }
     }
 
@@ -136,17 +165,19 @@ extension NiruxShellView {
         guard !candidates.isEmpty else { return then() }
         let folders = Array(Set(candidates.flatMap(\.folders)))
         Self.identifyAllOffMain(folders) { [weak self] identities in
-            guard let self else { return }
-            let spaces = self.workspaceStore.profiles
-            let matching = candidates.filter { candidate in
-                candidate.folders.contains { folder in
-                    identities[folder].map { SpaceRouting.anchoringSpace(of: $0, in: spaces) == spaceID } ?? false
+            self?.runFromRunLoop { [weak self] in
+                guard let self else { return }
+                let spaces = self.workspaceStore.profiles
+                let matching = candidates.filter { candidate in
+                    candidate.folders.contains { folder in
+                        identities[folder].map { SpaceRouting.anchoringSpace(of: $0, in: spaces) == spaceID } ?? false
+                    }
+                }.compactMap { candidate in
+                    self.workspaces.first { $0.id == candidate.id && !$0.isClosing && $0.profileID != spaceID }
                 }
-            }.compactMap { candidate in
-                self.workspaces.first { $0.id == candidate.id && !$0.isClosing && $0.profileID != spaceID }
+                if !matching.isEmpty { self.askToMove(matching, into: spaceID) }
+                then()
             }
-            if !matching.isEmpty { self.askToMove(matching, into: spaceID) }
-            then()
         }
     }
 
@@ -178,17 +209,19 @@ extension NiruxShellView {
         }
     }
 
-    /// Each folder's identity, off the main thread; a folder that is gone
-    /// is left out.
+    /// Each folder's identity, off the main thread and side by side, so the
+    /// wait stays about one git call however many workspaces are open; a
+    /// folder that is gone is left out.
     nonisolated static func identifyAllOffMain(
         _ folders: [String],
         completion: @escaping @MainActor @Sendable ([String: FolderIdentity]) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
-            var identities: [String: FolderIdentity] = [:]
-            for folder in folders {
-                identities[folder] = FolderIdentity.identify(folder, timeout: 2)
+            let results = IdentityResults()
+            DispatchQueue.concurrentPerform(iterations: folders.count) { index in
+                results.set(FolderIdentity.identify(folders[index], timeout: 2), for: folders[index])
             }
+            let identities = results.all
             DispatchQueue.main.async { @MainActor in completion(identities) }
         }
     }
@@ -200,8 +233,9 @@ extension NiruxShellView {
     /// Space…") suggests that workspace's folder instead.
     func showNewSpacePanel(suggestingFolderOf workspaceID: String? = nil) {
         guard let window else { return }
-        if let open = newSpacePanel?.panel {
-            open.makeKeyAndOrderFront(nil)
+        // Shown, or about to be once git has named the repository.
+        if let pending = newSpacePanel {
+            pending.panel?.makeKeyAndOrderFront(nil)
             return
         }
         let source = workspaceID.flatMap { id in workspaces.first { $0.id == id } }
@@ -225,7 +259,11 @@ extension NiruxShellView {
         let colorHex = workspaceStore.unusedColorHex()
         guard let folder else { return panel.show(attachedTo: window, colorHex: colorHex, suggestion: nil) }
         Self.identifyOffMain(folder, timeout: 1) { [weak self, weak panel] identity in
-            guard let self, let panel, self.newSpacePanel === panel, let window = self.window else { return }
+            guard let self, let panel, self.newSpacePanel === panel else { return }
+            guard let window = self.window else {
+                self.newSpacePanel = nil
+                return
+            }
             var suggestion: SpaceAnchor?
             if let identity, identity.commonDir != nil,
                identity.anchor.key.flatMap(self.workspaceStore.profile(anchoring:)) == nil {
@@ -239,20 +277,31 @@ extension NiruxShellView {
         sideEffects.chooseFolder(asRepository ? "Add Repository" : "Add Folder", panel.panel) { [weak self, weak panel] folder in
             guard let folder else { return }
             Self.pickAnchor(folder, asRepository: asRepository) { [weak self, weak panel] pick in
-                guard let self, let panel, panel.panel != nil else { return }
-                switch pick {
-                case .missing(let folder):
-                    panel.showError("That folder is gone: \(folder.abbreviatedPath())")
-                case .notARepository(let folder):
-                    panel.showError("\(folder.abbreviatedPath()) isn’t in a git repository. Add Folder… adds a plain folder.")
-                case .anchor(let anchor):
-                    let typed = panel.nameField.stringValue.trimmingCharacters(in: .whitespaces)
-                    let owner = anchor.key.flatMap(self.workspaceStore.profile(anchoring:))
-                    guard self.confirmTakingAnchor(anchor, intoSpaceNamed: typed.isEmpty ? "the new space" : typed, excluding: nil)
-                    else { return }
-                    panel.add(anchor, movingFrom: owner?.name)
+                self?.runFromRunLoop { [weak self, weak panel] in
+                    guard let self, let panel, panel.panel != nil else { return }
+                    self.addPickedAnchor(pick, to: panel)
                 }
             }
+        }
+    }
+
+    private func addPickedAnchor(_ pick: AnchorPick, to panel: NewSpacePanel) {
+        switch pick {
+        case .missing(let folder):
+            panel.showError("That folder is gone: \(folder.abbreviatedPath())")
+        case .notARepository(let folder):
+            panel.showError("\(folder.abbreviatedPath()) isn’t in a git repository. Add Folder… adds a plain folder.")
+        case .anchor(let anchor):
+            // Already listed: nothing to ask.
+            guard !panel.rows.contains(where: { $0.anchor.key == anchor.key }) else { return }
+            if case .folder(let path) = anchor.kind, isTooBroadForAFolderAnchor(path) {
+                return panel.showError(tooBroadFolderMessage(path))
+            }
+            let typed = panel.nameField.stringValue.trimmingCharacters(in: .whitespaces)
+            let owner = anchor.key.flatMap(workspaceStore.profile(anchoring:))
+            guard confirmTakingAnchor(anchor, intoSpaceNamed: typed.isEmpty ? "the new space" : typed, excluding: nil)
+            else { return }
+            panel.add(anchor, movingFrom: owner?.name)
         }
     }
 
@@ -284,5 +333,23 @@ extension NiruxShellView {
         }
         guard !draft.anchors.isEmpty else { return finish() }
         offerToMoveWorkspaces(into: spaceID, then: finish)
+    }
+}
+
+/// `identifyAllOffMain`'s results, filled from several threads.
+private final class IdentityResults: @unchecked Sendable {
+    private let lock = NSLock()
+    private var identities: [String: FolderIdentity] = [:]
+
+    func set(_ identity: FolderIdentity?, for folder: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        identities[folder] = identity
+    }
+
+    var all: [String: FolderIdentity] {
+        lock.lock()
+        defer { lock.unlock() }
+        return identities
     }
 }

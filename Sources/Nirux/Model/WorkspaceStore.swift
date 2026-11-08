@@ -406,9 +406,10 @@ final class WorkspaceStore {
         return "\(fallback) \(idx)"
     }
 
-    /// The default space comes first if missing. Each repository or folder
-    /// belongs to the first space listing it, and each space has one default
-    /// anchor (a hand-edited or merged file may break both).
+    /// The default space comes first if missing. It has no repositories or
+    /// folders; each other one belongs to the first space listing it, and
+    /// each space has one default anchor (a hand-edited or merged file may
+    /// break all three).
     private static func normalizedProfiles(_ profiles: [WorkspaceProfile]) -> [WorkspaceProfile] {
         var result = profiles.isEmpty ? [WorkspaceProfile.defaultProfile] : profiles
         if !result.contains(where: { $0.id == WorkspaceProfile.defaultID }) {
@@ -416,6 +417,7 @@ final class WorkspaceStore {
         }
         var claimed = Set<String>()
         for index in result.indices {
+            if result[index].id == WorkspaceProfile.defaultID { result[index].anchors.removeAll(where: \.isKnown) }
             result[index].anchors = result[index].anchors.filter { anchor in
                 anchor.key.map { claimed.insert($0).inserted } ?? true
             }.normalizedAnchors()

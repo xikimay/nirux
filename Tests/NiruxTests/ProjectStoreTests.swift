@@ -342,6 +342,21 @@ final class ProjectStoreTests: XCTestCase {
         XCTAssertEqual(loaded.first { $0.id == "work" }?.anchors, [Self.repositoryAnchor])
     }
 
+    /// The last repository removed, then projects.json lost: the backup is
+    /// one change older, and this build's mirror (with the marker) says
+    /// there are none.
+    @MainActor
+    func testARemovedRepositoryStaysRemovedWhenTheFileIsRecoveredFromTheBackup() throws {
+        var anchored = work
+        anchored.anchors = [Self.repositoryAnchor]
+        _ = savedStore([main, anchored], [main, work])
+        try FileManager.default.removeItem(at: fileURL)
+
+        let loaded = ProjectStore(fileURL: fileURL).load(mirror: [main, work], markerPresent: true)
+
+        XCTAssertEqual(loaded.first { $0.id == "work" }?.anchors, [])
+    }
+
     @MainActor
     func testAnchorKindsFromANewerBuildSurviveAndBadAnchorsCostNothing() throws {
         try writeFile(##"""

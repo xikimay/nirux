@@ -61,7 +61,9 @@ extension NiruxShellView {
     /// `completion` says how it ended; when the form was closed meanwhile,
     /// it comes back to show a failure.
     func startTask(_ request: NewTask.Request, completion: @escaping @MainActor @Sendable (NewTaskPanel.Outcome) -> Void) {
-        Self.createTaskWorktree(request, handoverFilename: Self.handoverFilename(for: request.agent)) { [weak self] result in
+        Self.createTaskWorktree(
+            request, handoverFilename: Self.handoverFilename(for: request.agent), routesByAnchor: routesByAnchor
+        ) { [weak self] result in
             guard let self else { return }
             switch result {
             case .failed(let message):
@@ -171,17 +173,20 @@ extension NiruxShellView {
     nonisolated private static func createTaskWorktree(
         _ request: NewTask.Request,
         handoverFilename: String,
+        routesByAnchor: Bool,
         completion: @escaping @MainActor @Sendable (TaskWorktreeResult) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = makeTaskWorktree(request, handoverFilename: handoverFilename)
+            let result = makeTaskWorktree(request, handoverFilename: handoverFilename, routesByAnchor: routesByAnchor)
             DispatchQueue.main.async { @MainActor in
                 completion(result)
             }
         }
     }
 
-    nonisolated private static func makeTaskWorktree(_ request: NewTask.Request, handoverFilename: String) -> TaskWorktreeResult {
+    nonisolated private static func makeTaskWorktree(
+        _ request: NewTask.Request, handoverFilename: String, routesByAnchor: Bool
+    ) -> TaskWorktreeResult {
         let target = request.target
         let start: NewTask.Start
         if let remoteBranch = target.remoteBranch, let name = target.remoteBranchName {
@@ -221,7 +226,8 @@ extension NiruxShellView {
             handover: handover,
             handoverError: handoverError,
             gitWarning: error,
-            identity: FolderIdentity.identify(workingDirectory, timeout: FolderIdentity.routingTimeout)
+            identity: routesByAnchor
+                ? FolderIdentity.identify(workingDirectory, timeout: FolderIdentity.backgroundRoutingTimeout) : nil
         ))
     }
 }

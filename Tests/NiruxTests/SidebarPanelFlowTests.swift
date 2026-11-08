@@ -316,8 +316,8 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
     /// linked worktree here: the repository is named after its main
     /// checkout), offers its workspaces, and a plain workspace then opens in
     /// its main checkout. A folder in no repository is added as a folder
-    /// once the user agrees. "Repositories" makes one the default and
-    /// removes one.
+    /// once the user agrees, never the home folder. "Repositories" makes one
+    /// the default and removes one.
     func testSpaceRepositoryMenuItems() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -340,16 +340,27 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertEqual(shell.activeWorkspace?.cwd, harness.repo)
             XCTAssertEqual(shell.activeWorkspace?.profileID, space.id)
 
+            // The home folder would take in every folder under it: refused,
+            // without asking.
+            let alertCount = harness.alerts.count
             harness.chosenFolders = [harness.home]
             harness.perform(["Add Repository…"], in: shell.sidebar.spaceOptionsMenu())
-            harness.waitUntil("the folder anchored") { anchors().count == 2 }
-            XCTAssertEqual(harness.alerts.last, "“home” isn’t in a git repository")
-            XCTAssertEqual(anchors().last, SpaceAnchor(kind: .folder(path: harness.home), name: "home"))
+            harness.waitUntil("the refusal") { shell.toast?.message.contains("can’t be a space’s folder") == true }
+            XCTAssertEqual(harness.alerts.count, alertCount)
+            XCTAssertEqual(anchors().count, 1)
 
-            harness.perform(["Repositories", "home", "Make Default"], in: shell.sidebar.spaceOptionsMenu())
+            let notes = harness.root + "/notes"
+            try FileManager.default.createDirectory(atPath: notes, withIntermediateDirectories: true)
+            harness.chosenFolders = [notes]
+            harness.perform(["Add Repository…"], in: shell.sidebar.spaceOptionsMenu())
+            harness.waitUntil("the folder anchored") { anchors().count == 2 }
+            XCTAssertEqual(harness.alerts.last, "“notes” isn’t in a git repository")
+            XCTAssertEqual(anchors().last, SpaceAnchor(kind: .folder(path: notes), name: "notes"))
+
+            harness.perform(["Repositories", "notes", "Make Default"], in: shell.sidebar.spaceOptionsMenu())
             XCTAssertEqual(anchors().map(\.isDefault), [false, true])
             harness.perform(["Repositories", "repo", "Remove from Space"], in: shell.sidebar.spaceOptionsMenu())
-            XCTAssertEqual(anchors(), [SpaceAnchor(kind: .folder(path: harness.home), name: "home", isDefault: true)])
+            XCTAssertEqual(anchors(), [SpaceAnchor(kind: .folder(path: notes), name: "notes", isDefault: true)])
             // The default space has no repositories.
             shell.selectProfile(WorkspaceProfile.defaultID)
             XCTAssertFalse(shell.sidebar.spaceOptionsMenu().items.contains { $0.title == "Add Repository…" })

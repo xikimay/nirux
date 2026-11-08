@@ -19,13 +19,19 @@ extension NiruxShellView {
     /// thread, and only once a space has an anchor: until then `open` runs
     /// at once. The parent's space is read when deciding, so a parent moved
     /// meanwhile counts where it is now.
+    /// A space has a repository or folder: only then is git asked where a
+    /// new workspace's folder belongs.
+    var routesByAnchor: Bool {
+        profiles.contains { $0.anchors.contains(where: \.isKnown) }
+    }
+
     func routeWorkspace(
         folder: String,
         parentWorkspaceID: String? = nil,
         startedFromSpaceID: String?,
         open: @escaping @MainActor @Sendable (SpaceRouting.Decision) -> Void
     ) {
-        guard profiles.contains(where: { $0.anchors.contains(where: \.isKnown) }) else {
+        guard routesByAnchor else {
             return open(decideSpace(identity: nil, parentWorkspaceID: parentWorkspaceID, startedFromSpaceID: startedFromSpaceID))
         }
         Self.identifyOffMain(folder) { [weak self] identity in

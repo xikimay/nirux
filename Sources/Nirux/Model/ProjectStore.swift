@@ -121,7 +121,8 @@ final class ProjectStore {
         let mirrorIDs = Set(mirror.map(\.id))
         let kept = backup.projects.filter { mirrorIDs.contains($0.id) }
         droppedSinceBackup = Set(backup.projects.map(\.id)).subtracting(mirrorIDs)
-        return Self.merged(kept, withMirror: mirror, deletedIDs: deletedIDs)
+        // This build wrote the mirror with its anchors: none means none.
+        return Self.merged(kept, withMirror: mirror, deletedIDs: deletedIDs, mirrorHasAnchors: true)
     }
 
     func markDeleted(_ id: String) {
@@ -335,19 +336,21 @@ final class ProjectStore {
 
     /// `projects` with a newer mirror merged in: it may have renamed or
     /// recolored spaces, or created new ones. Anchors come from the mirror
+    /// when `mirrorHasAnchors` (this build wrote it, with the marker), else
     /// only when it has some: an older build's mirror has none, since it
     /// drops what it doesn't know.
     static func merged(
         _ projects: [WorkspaceProfile],
         withMirror mirror: [WorkspaceProfile],
-        deletedIDs: Set<String>
+        deletedIDs: Set<String>,
+        mirrorHasAnchors: Bool = false
     ) -> [WorkspaceProfile] {
         var result = projects
         for mirrored in mirror where !deletedIDs.contains(mirrored.id) {
             if let index = result.firstIndex(where: { $0.id == mirrored.id }) {
                 result[index].name = mirrored.name
                 result[index].colorHex = mirrored.colorHex
-                if !mirrored.anchors.isEmpty { result[index].anchors = mirrored.anchors }
+                if mirrorHasAnchors || !mirrored.anchors.isEmpty { result[index].anchors = mirrored.anchors }
             } else {
                 var added = mirrored
                 // An older build may have recreated a space it had dropped.

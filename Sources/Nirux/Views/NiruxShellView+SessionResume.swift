@@ -241,6 +241,15 @@ extension NiruxShellView {
             guard let self else { return }
             self.sessionResume.inFlight.remove(record.key)
             if self.goToHeldSession(record) { return }
+            // Its repository's space may already have a workspace there.
+            if decision.spaceID != spaceID, let existing = self.workspaces.first(where: {
+                !$0.isClosing && $0.profileID == decision.spaceID && AgentSessionResume.isSamePath($0.cwd, directory)
+            }) {
+                existing.addColumn(cwd: directory)
+                guard let added = existing.columns[safe: existing.focusedIndex] else { return }
+                self.focusWorkspace(id: existing.id, column: existing.focusedIndex)
+                return self.launchResumedSession(record, in: existing, column: added, directory: directory)
+            }
             self.addWorkspace(title: SessionHistory.title(of: record), cwd: directory, profileID: decision.spaceID)
             guard let added = self.activeWorkspace, let first = added.columns.first else { return }
             self.launchResumedSession(record, in: added, column: first, directory: directory)

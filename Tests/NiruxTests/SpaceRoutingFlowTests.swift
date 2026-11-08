@@ -37,16 +37,18 @@ final class SpaceRoutingFlowTests: XCTestCase {
 
             // In no repository: the parent's space, else the space it was
             // started from.
-            shell.openRoutedWorkspace(title: "child", cwd: harness.home, parentWorkspaceID: parent.id, startedFromSpaceID: anchored.id)
+            let notes = harness.root + "/notes"
+            try FileManager.default.createDirectory(atPath: notes, withIntermediateDirectories: true)
+            shell.openRoutedWorkspace(title: "child", cwd: notes, parentWorkspaceID: parent.id, startedFromSpaceID: anchored.id)
             harness.waitUntil("the child") { workspace("child") != nil }
             XCTAssertEqual(workspace("child")?.profileID, other.id)
-            shell.openRoutedWorkspace(title: "started", cwd: harness.home, startedFromSpaceID: anchored.id)
+            shell.openRoutedWorkspace(title: "started", cwd: notes, startedFromSpaceID: anchored.id)
             harness.waitUntil("the started one") { workspace("started") != nil }
             XCTAssertEqual(workspace("started")?.profileID, anchored.id)
 
             // From outside, in no repository: the default space, and a
             // banner that says so.
-            shell.openRequestedWorkspace(title: "stray", cwd: harness.home, agent: nil, requestedSpaceID: nil)
+            shell.openRequestedWorkspace(title: "stray", cwd: notes, agent: nil, requestedSpaceID: nil)
             harness.waitUntil("the stray workspace") { workspace("stray") != nil }
             let stray = try XCTUnwrap(workspace("stray"))
             XCTAssertEqual(stray.profileID, WorkspaceProfile.defaultID)
@@ -58,14 +60,16 @@ final class SpaceRoutingFlowTests: XCTestCase {
             let anchorMenu = try XCTUnwrap(shell.spaceArrivalAnchorMenu(workspaceID: stray.id))
             XCTAssertEqual(anchorMenu.items.filter { !$0.isSeparatorItem }.map(\.title), ["Other", "Anchored", "New Space…"])
 
-            // "Anchor to…" Other: the folder joins Other, so does the
-            // workspace, and the other workspaces in that folder are offered,
-            // unchecked when they aren't in the default space.
+            // "Anchor to…" Other: in no repository, the folder joins Other
+            // once the user agrees, so does the workspace, and the other
+            // workspaces in that folder are offered, unchecked when they
+            // aren't in the default space.
             anchorMenu.performActionForItem(at: 0)
             XCTAssertNil(shell.spaceArrivalBanner)
             harness.waitUntil("the stray workspace to move") { stray.profileID == other.id }
+            XCTAssertTrue(harness.alerts.contains("“notes” isn’t in a git repository"))
             XCTAssertEqual(shell.profiles.first { $0.id == other.id }?.anchors, [
-                SpaceAnchor(kind: .folder(path: harness.home), name: "home", isDefault: true)
+                SpaceAnchor(kind: .folder(path: notes), name: "notes", isDefault: true)
             ])
             harness.waitUntil("the offer") { harness.alerts.last == "Move workspaces to “Other”?" }
             XCTAssertEqual(workspace("started")?.profileID, anchored.id, "offered unchecked")
