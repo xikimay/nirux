@@ -139,7 +139,7 @@ enum BoardSections {
         }
         // Schema 1 only for the default repository, which is how an older
         // Nirux reads it (its tasks take the board's base branch there).
-        guard context.unread.isEmpty, result.count == 1, case .anchor(let commonDir) = result[0].slot,
+        guard result.count == 1, case .anchor(let commonDir) = result[0].slot,
               let defaultRepository = repositoryAnchors(context.anchors).first,
               Self.commonDir(of: defaultRepository) == commonDir,
               legacyAnchor(for: config, entries: [], context: context)?.key == defaultRepository.key

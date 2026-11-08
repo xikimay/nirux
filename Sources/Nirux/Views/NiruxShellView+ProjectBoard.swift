@@ -230,7 +230,7 @@ extension NiruxShellView {
                     id: section.id, title: name ?? repository ?? "Repository", tooltip: repository, queue: state
                 )
             }
-        } + orphans.map { orphan in
+        } + orphans.prefix(0).map { orphan in
             ProjectBoardView.QueueLine(
                 id: Self.orphanSectionID(orphan), title: orphan.queueRepository.ownerAndName,
                 tooltip: "Its queue runs, but it isn’t one of this board’s repositories now.",
