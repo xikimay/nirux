@@ -776,6 +776,14 @@ extension NiruxShellView {
         commandPalette?.show(relativeTo: window, sections: paletteSections())
     }
 
+    /// The title bar's Search: opens the palette, or closes it. The click
+    /// outside the palette already closed it on mouse-down; the button acts
+    /// on mouse-up, within a moment.
+    func toggleCommandPaletteFromTitleBar(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        if let palette = commandPalette, now - palette.lastClickDismissal < 1 { return }
+        showCommandPalette()
+    }
+
     func showCommandPalette(prefilter: String) {
         if commandPalette?.isVisible == true {
             commandPalette?.dismiss()

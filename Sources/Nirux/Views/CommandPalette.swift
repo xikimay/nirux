@@ -165,6 +165,10 @@ final class CommandPalette: NSObject {
     }
 
     var isVisible: Bool { panel?.isVisible ?? false }
+    /// `NSEvent.timestamp` of the click outside the panel that last closed
+    /// it: the title bar's Search button, pressed to close the palette,
+    /// closes it on mouse-down and must not open it again on mouse-up.
+    private(set) var lastClickDismissal: TimeInterval = -.infinity
 
     func dismiss() {
         removeMonitors()
@@ -268,6 +272,7 @@ final class CommandPalette: NSObject {
         clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
             guard let self, let panel = self.panel else { return event }
             if event.window !== panel {
+                self.lastClickDismissal = event.timestamp
                 self.dismiss()
             } else if let index = self.rowIndexAtEvent(event) {
                 self.handleMouseClick(index)
