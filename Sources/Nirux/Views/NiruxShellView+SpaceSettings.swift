@@ -9,7 +9,7 @@ extension NiruxShellView {
     func showSpaceSettings(profileID: String, tab: SpaceSettingsWindow.Tab = .general) {
         guard let space = profiles.first(where: { $0.id == profileID }) else { return }
         if let open = spaceSettings, open.spaceID != profileID {
-            guard !open.hasUnsavedText else {
+            guard !open.hasUnsavedChanges else {
                 open.show(tab: open.selectedTab ?? .general, title: Self.spaceSettingsTitle(open.spaceID, in: profiles))
                 return showToast("Save or revert the changes in this Space Settings first")
             }
@@ -50,8 +50,9 @@ extension NiruxShellView {
             case .memory: self.loadProjectMemoryTab(spaceID: spaceID)
             case .board: if self.boardSettingsPanel?.spaceID != spaceID { self.loadBoardTab(spaceID: spaceID) }
             case .general: self.refreshSpaceSettingsGitHub()
-            // What another Nirux saved, and Settings' modes, as they are now.
-            case .defaults: settings.defaults.show(defaultsActions.reload())
+            // What another Nirux saved, and Settings' modes, as they are
+            // now; variables typed and held back by a problem stay.
+            case .defaults: if !settings.defaults.hasUnsavedRows { settings.defaults.show(defaultsActions.reload()) }
             case .brief, .templates: break
             }
         }
@@ -139,6 +140,12 @@ extension NiruxShellView {
         refreshSpaceSettingsGitHub()
     }
 
+    /// General's rows again (a setup script saved or removed).
+    func refreshSpaceSettingsGeneral() {
+        guard let settings = spaceSettings, let space = profiles.first(where: { $0.id == settings.spaceID }) else { return }
+        settings.general.update(spaceSettingsGeneralModel(for: space))
+    }
+
     /// Reads each repository's GitHub remote (`origin`) off the main thread,
     /// then shows it in General's rows.
     func refreshSpaceSettingsGitHub() {
@@ -195,11 +202,12 @@ extension NiruxShellView {
         sheet.title = "Setup Script · \(anchor.name)"
         sheet.contentView = editor.view
         setupScriptSheet = (sheet, editor)
+        settings.setupScriptEditor = editor
         let close = { [weak self, weak window, weak sheet] in
             guard let self, let sheet else { return }
             window?.endSheet(sheet)
             if self.setupScriptSheet?.panel === sheet { self.setupScriptSheet = nil }
-            self.spaceSettingsSpacesChanged()
+            self.refreshSpaceSettingsGeneral()
         }
         editor.onSaved = close
         editor.onCancel = close

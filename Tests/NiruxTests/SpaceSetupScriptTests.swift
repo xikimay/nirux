@@ -94,6 +94,24 @@ final class SpaceSetupScriptTests: XCTestCase {
         }
     }
 
+    /// A linked script never runs, so the editor doesn't edit it either
+    /// (nor removes where the link points).
+    @MainActor
+    func testALinkedScriptIsShownButNeverChanged() throws {
+        let url = try XCTUnwrap(SpaceSetupScript.url(spaceID: "s", anchor: web, stateDirectory: stateDirectory))
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let dotfile = stateDirectory.appendingPathComponent("dotfiles-setup.sh")
+        try "npm ci\n".write(to: dotfile, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(at: url, withDestinationURL: dotfile)
+        XCTAssertNil(SpaceSetupScript.scriptToRun(spaceID: "s", anchor: web, stateDirectory: stateDirectory))
+
+        let editor = SpaceFileEditorPane(source: .setupScript(url: url, anchorName: "web"), mode: .sheet)
+        XCTAssertFalse(editor.isWritable)
+        XCTAssertFalse(editor.saveButton.isEnabled)
+        XCTAssertFalse(editor.save())
+        XCTAssertEqual(try String(contentsOf: dotfile, encoding: .utf8), "npm ci\n")
+    }
+
     /// Spelled as a hook for a rollback (an older Nirux reads a Codex
     /// payload and exits); anything else isn't the signal.
     func testOnlyTheExactSignalIsRecognized() {

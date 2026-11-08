@@ -56,13 +56,16 @@ final class SpaceSettingsFlowTests: XCTestCase {
             XCTAssertNil(try XCTUnwrap(workspace(harness, "general")).terminalEnvironment(agentUUID: "A-2")["API_URL"])
 
             // From outside Nirux, in the same space: none of it, after a
-            // relaunch too.
+            // relaunch too, and Settings' mode, the one its confirmation
+            // named.
             shell.openRequestedWorkspace(
-                title: "outside", cwd: harness.worktree, agent: nil, requestedSpaceID: nil, startedOutsideNirux: true
+                title: "outside", cwd: harness.worktree, agent: .claude, requestedSpaceID: nil, startedOutsideNirux: true
             )
             harness.waitUntil("the request's workspace") { workspace(harness, "outside") != nil }
             let outside = try XCTUnwrap(workspace(harness, "outside"))
             XCTAssertEqual(outside.profileID, space.id)
+            XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command claude") == true, harness.agentLaunches.last ?? "")
+            XCTAssertFalse(harness.agentLaunches.last?.contains("--permission-mode plan") == true, harness.agentLaunches.last ?? "")
             XCTAssertNil(outside.terminalEnvironment(agentUUID: "A-3")["API_URL"])
             let persisted = try XCTUnwrap(shell.persistedState().workspaces.first { $0.id == outside.id })
             XCTAssertTrue(persisted.startedOutsideNirux)
@@ -96,6 +99,16 @@ final class SpaceSettingsFlowTests: XCTestCase {
             shell.createWorktreeWorkspace(branch: "feat/outside", repoRoot: harness.repo, agent: .claude, startedOutsideNirux: true)
             harness.waitUntil("the outside worktree's workspace") { workspace(harness, "feat/outside") != nil }
             XCTAssertEqual(harness.agentLaunches.count, count + 1)
+            XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command claude") == true, harness.agentLaunches.last ?? "")
+
+            // Its agent asks for a worktree with Nirux's launch ID: the
+            // child stays outside.
+            let outsideParent = try XCTUnwrap(workspace(harness, "feat/outside"))
+            shell.createWorktreeWorkspace(
+                branch: "feat/grandchild", repoRoot: harness.repo, agent: .claude, parentWorkspaceID: outsideParent.id
+            )
+            harness.waitUntil("the child's workspace") { workspace(harness, "feat/grandchild") != nil }
+            XCTAssertTrue(try XCTUnwrap(workspace(harness, "feat/grandchild")).startedOutsideNirux)
             XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command claude") == true, harness.agentLaunches.last ?? "")
 
             shell.openRoutedWorkspace(title: "existing", cwd: harness.worktree, agent: .claude, startedFromSpaceID: space.id)
@@ -201,6 +214,11 @@ final class SpaceSettingsFlowTests: XCTestCase {
             try edit(0, row: 1, to: "NIRUX_PROFILE_ID")
             XCTAssertTrue(pane.problemsLabel.stringValue.contains("reserved"), pane.problemsLabel.stringValue)
             XCTAssertEqual(store.load().defaults.environment.count, 1)
+            // Held back, they survive another tab, and closing asks.
+            settings.select(.brief)
+            settings.select(.defaults)
+            XCTAssertEqual(pane.rows.map(\.name), ["API_URL", "NIRUX_PROFILE_ID"])
+            XCTAssertEqual(settings.unsavedParts.map(\.name), ["environment variables"])
             pane.tableView.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
             pane.removeButton.performClick(nil)
             XCTAssertTrue(pane.problemsLabel.isHidden)
@@ -230,7 +248,7 @@ final class SpaceSettingsFlowTests: XCTestCase {
             }
             settings.brief.textView.string += "Draft.\n"
             settings.brief.textDidChange(Notification(name: NSText.didChangeNotification))
-            XCTAssertTrue(settings.hasUnsavedText)
+            XCTAssertTrue(settings.hasUnsavedChanges)
 
             shell.showSpaceSettings(profileID: second.id)
             XCTAssertIdentical(shell.spaceSettings, settings)

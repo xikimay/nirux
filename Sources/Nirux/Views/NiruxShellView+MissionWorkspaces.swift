@@ -94,6 +94,11 @@ extension NiruxShellView {
                     let decision = self.decideSpace(
                         identity: identity, parentWorkspaceID: parentWorkspaceID, startedFromSpaceID: requestedProfileID
                     )
+                    // An agent in a workspace opened from outside Nirux holds
+                    // a valid launch ID too: its children stay outside.
+                    let parentStartedOutside = parentWorkspaceID.flatMap { id in
+                        self.workspaces.first { $0.id == id }
+                    }?.startedOutsideNirux == true
                     self.addWorkspace(
                         title: branch,
                         cwd: path,
@@ -105,7 +110,7 @@ extension NiruxShellView {
                         deliveredHandover: deliveredHandover,
                         handoverText: handoverText,
                         worktreeBranch: checkedOutBranch,
-                        startedOutsideNirux: startedOutsideNirux,
+                        startedOutsideNirux: startedOutsideNirux || parentStartedOutside,
                         setupScript: self.setupScript(for: decision)
                     )
                     self.saveState()

@@ -75,6 +75,7 @@ extension NiruxShellView {
         boardSettingsPanel?.dismiss()
         let panel = BoardSettingsPanel()
         boardSettingsPanel = panel
+        settings.boardForm = panel
         panel.onSave = { [weak self] config in
             // Refused if another Nirux saved the file since it was read.
             switch store.save(config, replacing: loaded) {

@@ -138,12 +138,11 @@ extension NiruxShellView {
                 spaceID: workspace.profileID, name: Self.handoverFilename(for: agent), text: handoverText, branch: worktreeBranch
             )
         }
-        let defaults = SpaceDefaultsStore.defaults(forSpace: workspace.profileID)
         let cmd: String
         switch agent {
         case .claude:
             cmd = NiruxShellView.claudeCommand(
-                mode: defaults.claudeMode(settings: NiruxShellView.currentClaudeLaunchMode()),
+                mode: NiruxShellView.claudeLaunchMode(for: workspace),
                 sessionName: SessionName.make(
                     worktreeBranch: worktreeBranch,
                     spaceName: workspaceStore.profiles.first { $0.id == workspace.profileID }?.name,
@@ -154,7 +153,7 @@ extension NiruxShellView {
             )
         case .codex:
             cmd = NiruxShellView.codexCommand(
-                mode: defaults.codexMode(settings: NiruxShellView.currentCodexLaunchMode()),
+                mode: NiruxShellView.codexLaunchMode(for: workspace),
                 briefFile: NiruxShellView.codexBriefFile(from: brief, launchDirectory: workspace.cwd),
                 handoverPrompt: handoverPrompt
             )

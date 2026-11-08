@@ -184,6 +184,16 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         commitEnvironment()
     }
 
+    /// Variables typed and not written (a problem holds them back).
+    var hasUnsavedRows: Bool { rows != loaded.defaults.environment }
+
+    /// Writes the typed variables; false while a problem holds them back.
+    func saveRows() -> Bool {
+        view.window?.makeFirstResponder(nil)
+        commitEnvironment()
+        return !hasUnsavedRows
+    }
+
     /// Writes the list unless a variable has a problem; an empty row goes.
     func commitEnvironment() {
         let before = rows.count

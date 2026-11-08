@@ -73,8 +73,36 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
         Tab.allCases[safe: tabs.selectedTabViewItemIndex]
     }
 
-    /// Text typed in the Brief or Templates tab and not saved.
-    var hasUnsavedText: Bool { brief.isDirty || templates.isDirty }
+    /// The Board tab's form and the setup script sheet, while shown (the
+    /// shell makes them).
+    weak var boardForm: BoardSettingsPanel?
+    weak var setupScriptEditor: SpaceFileEditorPane?
+
+    /// Something typed and not saved, which closing would lose.
+    struct UnsavedPart {
+        let name: String
+        let tab: Tab
+        let save: @MainActor () -> Bool
+    }
+
+    var unsavedParts: [UnsavedPart] {
+        var parts: [UnsavedPart] = []
+        for (pane, tab) in [(brief, Tab.brief), (templates, .templates)] where pane.isDirty {
+            parts.append(UnsavedPart(name: pane.documentName, tab: tab, save: { pane.save() }))
+        }
+        if let editor = setupScriptEditor, editor.isDirty {
+            parts.append(UnsavedPart(name: editor.documentName, tab: .general, save: { editor.save() }))
+        }
+        if let form = boardForm, form.isDirty {
+            parts.append(UnsavedPart(name: "board settings", tab: .board, save: { form.save() }))
+        }
+        if defaults.hasUnsavedRows {
+            parts.append(UnsavedPart(name: "environment variables", tab: .defaults, save: { [defaults] in defaults.saveRows() }))
+        }
+        return parts
+    }
+
+    var hasUnsavedChanges: Bool { !unsavedParts.isEmpty }
 
     init(spaceID: String, general: SpaceSettingsGeneralPane, defaults: SpaceSettingsDefaultsPane,
          brief: SpaceFileEditorPane, templates: SpaceFileEditorPane) {
@@ -121,10 +149,6 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
         tabs.tabStyle = .toolbar
         // The window keeps the space's name as its title.
         tabs.canPropagateSelectedChildViewControllerTitle = false
-        tabs.onSelect = { [weak self] index in
-            guard let self, let tab = Tab.allCases[safe: index] else { return }
-            self.tabShown(tab)
-        }
         let views: [Tab: NSView] = [
             .general: general.view, .defaults: defaults.view, .brief: brief.view,
             .memory: memoryHost, .board: boardHost, .templates: templates.view
@@ -137,6 +161,12 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
             item.label = tab.title
             item.image = NSImage(systemSymbolName: tab.symbol, accessibilityDescription: tab.title)
             tabs.addTabViewItem(item)
+        }
+        // After the first tab got picked by being added: `show` says which
+        // tab shows, once.
+        tabs.onSelect = { [weak self] index in
+            guard let self, let tab = Tab.allCases[safe: index] else { return }
+            self.tabShown(tab)
         }
         let panel = SpaceSettingsPanel(contentViewController: tabs)
         panel.styleMask = [.titled, .closable]
@@ -237,15 +267,15 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
 
     // MARK: - NSWindowDelegate
 
-    /// Unsaved text asks first: Save, Don't Save, or Cancel.
+    /// Unsaved changes ask first: Save, Don't Save, or Cancel.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        let dirty = [brief, templates].filter(\.isDirty)
-        guard !dirty.isEmpty else { return true }
+        let parts = unsavedParts
+        guard !parts.isEmpty else { return true }
         let alert = NSAlert()
-        alert.messageText = dirty.count == 1
-            ? "Save the changes to the \(dirty[0].documentName)?"
-            : "Save the changes to the brief and the templates?"
-        alert.informativeText = "Your changes are lost if you don’t save them."
+        alert.messageText = parts.count == 1 ? "Save the changes to the \(parts[0].name)?" : "Save your changes?"
+        alert.informativeText = parts.count == 1
+            ? "Your changes are lost if you don’t save them."
+            : "The \(parts.map(\.name).joined(separator: ", ")) have changes that are lost if you don’t save them."
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Don’t Save").hasDestructiveAction = true
@@ -253,17 +283,14 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
             guard let self else { return }
             switch response {
             case .alertFirstButtonReturn:
-                // A save that fails (or asks about a file changed on disk)
-                // keeps the window open on its tab.
-                for pane in dirty where !pane.save() {
-                    if let tab: Tab = pane === self.brief ? .brief : (pane === self.templates ? .templates : nil) {
-                        self.select(tab)
-                    }
+                // A save that fails (a problem, a file changed on disk)
+                // keeps the window open on its tab, saying why.
+                for part in parts where !part.save() {
+                    self.select(part.tab)
                     return
                 }
                 self.close()
             case .alertThirdButtonReturn:
-                dirty.forEach { $0.revert() }
                 self.close()
             default:
                 break

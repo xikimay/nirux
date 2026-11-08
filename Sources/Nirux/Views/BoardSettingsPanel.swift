@@ -35,6 +35,8 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     /// The tab's view the form fills; nil once dismissed.
     private(set) weak var hostView: NSView?
     private var container: NSView?
+    /// The values as shown: anything else typed isn't saved.
+    private var shownConfig: BoardConfig?
     private(set) var spaceID: String?
     private(set) var isWritable = true
 
@@ -86,6 +88,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         // resizing masks would add its first size to the container's.
         container.frame = NSRect(origin: .zero, size: Self.hostSize)
         host.addSubview(container)
+        shownConfig = draftConfig()
         statusLabel.stringValue = status ?? ""
         layoutPanel()
         if host.window != nil, isWritable { host.window?.makeFirstResponder(repositoryField) }
@@ -142,12 +145,28 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
 
     // MARK: - Actions
 
-    @objc func saveAction(_ sender: Any?) {
-        guard isWritable, container != nil else { return }
+    /// Values typed and not saved.
+    var isDirty: Bool { isWritable && container != nil && draftConfig() != shownConfig }
+
+    /// Saves what is typed; false with the reason shown when it can't.
+    @discardableResult
+    func save() -> Bool {
+        guard isWritable, container != nil else { return false }
         let config = draftConfig()
         let problems = config.problems
-        guard problems.isEmpty else { return showError(problems.joined(separator: "\n")) }
-        if let failure = onSave?(config) { return showError(failure) }
+        guard problems.isEmpty else {
+            showError(problems.joined(separator: "\n"))
+            return false
+        }
+        if let failure = onSave?(config) {
+            showError(failure)
+            return false
+        }
+        return true
+    }
+
+    @objc func saveAction(_ sender: Any?) {
+        save()
     }
 
     @objc func revertAction(_ sender: Any?) {

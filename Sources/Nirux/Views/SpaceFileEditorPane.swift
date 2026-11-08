@@ -272,10 +272,11 @@ final class SpaceFileEditorPane: NSObject, NSTextViewDelegate {
 // MARK: - The space's files
 
 extension SpaceFileEditorPane.Contents {
-    /// `url` as the editor shows it: through a link to where it points, a
-    /// small UTF-8 regular file or a reason it isn't one.
-    static func read(_ url: URL, maxBytes: Int = SpaceBrief.maxFileBytes) -> Self {
-        switch BoardConfigStore.read(url.resolvingSymlinksInPath(), maxBytes: maxBytes) {
+    /// `url` as the editor shows it: a small UTF-8 regular file, or a
+    /// reason it isn't one. `followingLinks`: through a link to where it
+    /// points (the brief is read that way at launch too).
+    static func read(_ url: URL, maxBytes: Int = SpaceBrief.maxFileBytes, followingLinks: Bool = true) -> Self {
+        switch BoardConfigStore.read(followingLinks ? url.resolvingSymlinksInPath() : url, maxBytes: maxBytes) {
         case .missing:
             return .missing
         case .data(let data):
@@ -327,8 +328,9 @@ extension SpaceFileEditorPane.Source {
             documentName: "setup script",
             explanation: "Runs with /bin/sh in each new worktree of \(anchorName) that Nirux makes for you, before the "
                 + "agent starts. It may run twice in a folder: keep it idempotent. Saving only comments removes it.",
-            read: { .read(url, maxBytes: SpaceSetupScript.maxFileBytes) },
-            write: { try SpaceSetupScript.save($0, to: url.resolvingSymlinksInPath()) },
+            // Never through a link: a new worktree doesn't run one either.
+            read: { .read(url, maxBytes: SpaceSetupScript.maxFileBytes, followingLinks: false) },
+            write: { try SpaceSetupScript.save($0, to: url) },
             template: { SpaceSetupScript.template(anchorName: anchorName) }
         )
     }

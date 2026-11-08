@@ -144,6 +144,36 @@ final class BoardSettingsPanelTests: XCTestCase {
         }
     }
 
+    /// Values typed and not saved: closing asks, another space's window
+    /// waits, and Save from that question writes them.
+    @MainActor
+    func testUnsavedValuesAreNotLostSilently() throws {
+        try withShell { shell, space in
+            let form = try open(shell, space)
+            let settings = try XCTUnwrap(shell.spaceSettings)
+            XCTAssertFalse(form.isDirty)
+            XCTAssertEqual(settings.unsavedParts.map(\.name), [])
+            form.repositoryField.stringValue = "acme/widgets"
+            form.baseBranchField.stringValue = "main"
+            XCTAssertTrue(form.isDirty)
+            XCTAssertEqual(settings.unsavedParts.map(\.name), ["board settings"])
+
+            let other = shell.workspaceStore.createProfile(named: "Other", select: false)
+            shell.showSpaceSettings(profileID: other.id)
+            XCTAssertIdentical(shell.spaceSettings, settings, "kept for its changes")
+
+            var questions: [String] = []
+            settings.askInSheet = { alert, _, reply in
+                questions.append(alert.messageText)
+                reply(.alertFirstButtonReturn)
+            }
+            XCTAssertFalse(settings.windowShouldClose(try XCTUnwrap(settings.panel)))
+            XCTAssertEqual(questions, ["Save the changes to the board settings?"])
+            XCTAssertNil(shell.spaceSettings, "saved, then closed")
+            XCTAssertEqual(try store(space).load().config?.repository, "acme/widgets")
+        }
+    }
+
     @MainActor
     func testInvalidValuesAreRefusedAndNothingIsWritten() throws {
         try withShell { shell, space in
