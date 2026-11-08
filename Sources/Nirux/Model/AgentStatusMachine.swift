@@ -501,7 +501,7 @@ struct AgentStatusMachine {
             // leaves a finished turn the user looked at seen. Only a turn
             // still believed running (Esc fires no Stop) ends here.
             closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
-            guard hookTurnInFlight else { return }
+            guard hookTurnInFlight || hookWorking else { return }
             endTurn()
             _ = block(for: .turnFinished, isUserFocused: isUserFocused, alert: false)
             return
@@ -692,7 +692,10 @@ struct AgentStatusMachine {
         foregroundSince = now
         hookWorking = false
         lastReadAt = 0 // the old command's dying output is not this one's work
-        lastAttentionReason = nil
+        // Nor its reason to wait — unless the new `claude`'s own hooks gave
+        // it, which can come first too: a Stop while the heartbeat waited
+        // with Nirux in the background.
+        if fgName != "claude" || hookKind != "claude" { lastAttentionReason = nil }
         // Another integrated agent took over the terminal: a `claude` that
         // died without SessionEnd left its dialogs behind. (A shell in front
         // may just mean it's suspended; a new claude's SessionStart clears

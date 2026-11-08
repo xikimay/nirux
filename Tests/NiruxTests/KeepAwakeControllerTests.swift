@@ -402,6 +402,31 @@ final class KeepAwakeShellTests: XCTestCase {
         }
     }
 
+    /// A process table that could not be read tells nothing: the refresh
+    /// leaves every agent as its hooks left it, on screen or in another
+    /// space. Read as "no agent", it dropped their hook authority.
+    func testUnreadProcessTableLeavesAgentsAsTheyWere() throws {
+        try withShell { shell in
+            shell.workspaceStore.replaceProfiles(
+                [WorkspaceProfile.defaultProfile, side], activeProfileID: WorkspaceProfile.defaultID
+            )
+            let hidden = WorkspaceState(id: "hidden", title: "hidden", cwd: NSTemporaryDirectory(), profileID: side.id)
+            shell.workspaceStore.appendWorkspace(hidden, activate: false)
+            let ptys = try [shell.workspaces.first, hidden].map { try XCTUnwrap($0?.columns.first?.pty) }
+            for pty in ptys {
+                _ = pty.applyAgentHook(
+                    AgentHookEvent(kind: .claude, name: .userPromptSubmit, timestamp: Date().timeIntervalSince1970),
+                    isUserFocused: false
+                )
+            }
+            shell.updateSidebar(snapshot: ProcessSnapshot(entries: []))
+            for pty in ptys {
+                XCTAssertEqual(pty.cachedAgentState, .working)
+                XCTAssertEqual(pty.agentHookKind, "claude")
+            }
+        }
+    }
+
     /// Once the heartbeat has gone quiet (Nirux in the background, or a
     /// modal alert holding its timer), the poll re-reads the agents; while
     /// it beats, the poll leaves that to it.
@@ -505,7 +530,7 @@ final class KeepAwakeShellTests: XCTestCase {
             let pty = PtySession()
             _ = pty.agentStatus(foregroundProcess: ForegroundProcess(
                 instance: ProcessInstance(pid: 1, startedAt: 0), name: name, arguments: [name]
-            ), isUserFocused: false)
+            ), isUserFocused: false, processTableRead: true)
             ticked.append((pty, name))
         }
         for (pty, name) in ticked {

@@ -234,7 +234,7 @@ final class StuckAgentSidebarTests: XCTestCase {
         // A status refresh, as the sidebar runs it: follow, then tick.
         func refresh(_ foreground: ForegroundProcess, _ snapshot: ProcessSnapshot, at now: TimeInterval) {
             column.trackForegroundAgent(foreground, snapshot: snapshot, now: now)
-            _ = pty.agentStatus(foregroundProcess: foreground, isUserFocused: false)
+            _ = pty.agentStatus(foregroundProcess: foreground, isUserFocused: false, processTableRead: true)
         }
         refresh(claude, bothAlive, at: 100)
 

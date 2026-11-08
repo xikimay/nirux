@@ -436,16 +436,16 @@ final class AgentStatusMachineTests: XCTestCase {
         XCTAssertEqual(machine.attentionReason, .turnFinished)
     }
 
-    /// The incident: hook authority lost while the agent sat idle, its idle
+    /// Hook authority lost while the agent sat idle (an unread process
+    /// table did it for every column; ^Z and `fg` still do), its idle
     /// compaction's spinner read by the output fallback as a turn that went
     /// quiet, then the compaction's SessionStart handing the column back to
-    /// hooks with that unexplained wait — an amber "needs you" for good.
+    /// hooks with that unexplained wait: an amber "needs you" for good.
     func testAnUnexplainedWaitClearsOnceHooksTakeOverAgain() {
         startTurn()
         machine.noteUserInput(now: t0)
         _ = machine.apply(event(.stop, at: 10), isUserFocused: false)
-        // The native binary's own name, read when its arguments can't be.
-        _ = machine.tick(fgName: "2.1.319", isUserFocused: false, now: t0 + 20)
+        _ = machine.tick(fgName: "zsh", isUserFocused: false, now: t0 + 20)
         _ = machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 22)
         machine.noteRead(now: t0 + 3_000)
         XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 3_000.5), .working)
@@ -459,6 +459,18 @@ final class AgentStatusMachineTests: XCTestCase {
         )
         _ = machine.apply(compacted, isUserFocused: false)
         XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 3_012), .idle)
+    }
+
+    /// With Nirux in the background the heartbeat waits: a `claude` started
+    /// meanwhile may finish its turn before any tick saw it in front. Its
+    /// Stop explains the wait, and stays.
+    func testHooksThatCameBeforeTheTickKeepTheirReason() {
+        _ = machine.tick(fgName: "zsh", isUserFocused: false, now: t0)
+        _ = machine.apply(event(.sessionStart, at: 1), isUserFocused: false)
+        _ = machine.apply(event(.userPromptSubmit, at: 2), isUserFocused: false)
+        _ = machine.apply(event(.stop, at: 30), isUserFocused: false)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 60), .needsAttention)
+        XCTAssertEqual(machine.attentionReason, .turnFinished)
     }
 
     // MARK: - Turn timer

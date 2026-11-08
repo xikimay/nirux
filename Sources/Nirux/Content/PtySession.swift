@@ -99,7 +99,10 @@ final class ProcessSnapshot {
             var procs = [kinfo_proc](repeating: kinfo_proc(), count: size / stride + (16 << attempt))
             size = procs.count * stride
             let status = procs.withUnsafeMutableBytes { read($0.baseAddress, &size) }
-            if status == 0 { return Array(procs.prefix(size / stride)) }
+            if status == 0 {
+                procs.removeLast(procs.count - min(procs.count, size / stride))
+                return procs
+            }
             guard status == ENOMEM else { return [] }
         }
         return []
@@ -673,7 +676,7 @@ final class PtySession: @unchecked Sendable {
     func agentStatus(
         foregroundProcess: ForegroundProcess?,
         isUserFocused: Bool,
-        processTableRead: Bool = true
+        processTableRead: Bool
     ) -> AgentStatus {
         let fgName = processTableRead ? foregroundProcess?.name ?? "" : nil
         return state.machine.tick(fgName: fgName, isUserFocused: isUserFocused, now: Date())
