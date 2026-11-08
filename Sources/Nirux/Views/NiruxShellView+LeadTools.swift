@@ -412,7 +412,7 @@ extension NiruxShellView {
             text += (text.isEmpty ? "" : " ") + "The user wrote “\(title)”’s " + kept.joined(separator: " and ")
                 + " by hand: Nirux keeps theirs until they clear it. Don't send it again; if it's out of date, tell them here."
         }
-        answer(text, !changed && !kept.isEmpty)
+        answer(text, done.isEmpty)
     }
 
     /// A next step or blocker for the Lead's prompt: one line, the user's
