@@ -184,18 +184,23 @@ final class WorkspaceStore {
     }
 
     /// A workspace's same-group neighbours within the visible (active
-    /// profile) list, plus its position among them.
+    /// profile) list, plus its position among them. The Lead is a group of
+    /// its own: it stays on top, and nothing moves above it.
     private func visibleGroupPosition(of index: Int) -> (candidates: [Int], position: Int)? {
         guard workspaces.indices.contains(index) else { return nil }
         let isInactive = workspaces[index].isInactive
-        let candidates = visibleWorkspaceIndices.filter { workspaces[$0].isInactive == isInactive }
+        let isLead = workspaces[index].isLead
+        let candidates = visibleWorkspaceIndices.filter {
+            workspaces[$0].isInactive == isInactive && workspaces[$0].isLead == isLead
+        }
         guard let position = candidates.firstIndex(of: index) else { return nil }
         return (candidates, position)
     }
 
+    /// The Lead is never parked.
     @discardableResult
     func setWorkspaceInactive(at index: Int, _ isInactive: Bool) -> Bool {
-        guard workspaces.indices.contains(index) else { return false }
+        guard workspaces.indices.contains(index), !(isInactive && workspaces[index].isLead) else { return false }
         workspaces[index].isInactive = isInactive
         if activeWorkspaceIndex == index,
            isInactive,
@@ -309,6 +314,8 @@ final class WorkspaceStore {
         else { return false }
         for workspace in workspaces where workspace.profileID == id {
             workspace.profileID = WorkspaceProfile.defaultID
+            // General has no Lead: it becomes a plain workspace there.
+            workspace.isLead = false
         }
         profiles.remove(at: index)
         deletedProfileIDs.insert(id)
@@ -331,7 +338,9 @@ final class WorkspaceStore {
     func moveWorkspace(at index: Int, toProfile profileID: String) -> Bool {
         guard workspaces.indices.contains(index),
               profiles.contains(where: { $0.id == profileID }),
-              workspaces[index].profileID != profileID
+              workspaces[index].profileID != profileID,
+              // A Lead sees only its own space.
+              !workspaces[index].isLead
         else { return false }
         let workspace = workspaces[index]
         let wasActive = workspace.id == activeWorkspaceID
@@ -351,9 +360,18 @@ final class WorkspaceStore {
         return true
     }
 
+    /// The sidebar's order: the Lead, the active workspaces, the inactive
+    /// ones.
     func visibleWorkspaceIndices(in profileID: String) -> [Int] {
         let matching = workspaces.indices.filter { workspaces[$0].profileID == profileID }
-        return matching.filter { !workspaces[$0].isInactive } + matching.filter { workspaces[$0].isInactive }
+        return matching.filter { workspaces[$0].isLead }
+            + matching.filter { !workspaces[$0].isLead && !workspaces[$0].isInactive }
+            + matching.filter { !workspaces[$0].isLead && workspaces[$0].isInactive }
+    }
+
+    /// The space's Lead, unless it is closing (docs/spaces.md, "The Lead").
+    func leadWorkspace(inSpace profileID: String) -> WorkspaceState? {
+        workspaces.first { $0.profileID == profileID && $0.isLead && !$0.isClosing }
     }
 
     private func reconcileSelection(preferActiveProfile: Bool) {

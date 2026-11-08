@@ -295,7 +295,7 @@ extension NiruxShellView {
     }
 
     static func currentMissionHandoffsEnabled() -> Bool {
-        Persistence.load()?.settings?.missionHandoffsEnabled == true
+        PersistedSettings.effective(Persistence.load()?.settings).missionHandoffsEnabled
     }
 
     private func validMissionParent(

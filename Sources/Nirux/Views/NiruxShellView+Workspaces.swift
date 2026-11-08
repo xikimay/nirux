@@ -24,7 +24,8 @@ extension NiruxShellView {
         handoverText: String? = nil,
         worktreeBranch: String? = nil,
         startedOutsideNirux: Bool = false,
-        setupScript: URL? = nil
+        setupScript: URL? = nil,
+        isLead: Bool = false
     ) {
         let snapshot: NSImageView? = {
             guard let rep = viewport.bitmapImageRepForCachingDisplay(in: viewport.bounds) else { return nil }
@@ -51,6 +52,7 @@ extension NiruxShellView {
             missionID: missionID,
             missionHandoffsEnabled: Self.currentMissionHandoffsEnabled(),
             startedOutsideNirux: startedOutsideNirux,
+            isLead: isLead,
             initialAgentUUID: initialAgentUUID
         )
         wireWorkspace(workspace)

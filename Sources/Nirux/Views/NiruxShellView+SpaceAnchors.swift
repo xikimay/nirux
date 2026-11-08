@@ -184,7 +184,8 @@ extension NiruxShellView {
     /// space checked. `then` runs once the user answered, or at once when
     /// there is nothing to offer.
     func offerToMoveWorkspaces(into spaceID: String, then: @escaping @MainActor @Sendable () -> Void) {
-        let candidates = workspaces.filter { !$0.isClosing && $0.profileID != spaceID }
+        // A Lead stays in its own space.
+        let candidates = workspaces.filter { !$0.isClosing && $0.profileID != spaceID && !$0.isLead }
             .map { (id: $0.id, folders: Array(Set([$0.cwd, $0.focusedWorkingDirectory]))) }
         guard !candidates.isEmpty else { return then() }
         let folders = Array(Set(candidates.flatMap(\.folders)))
@@ -356,8 +357,12 @@ extension NiruxShellView {
         }
         updateSidebar()
         saveState()
+        let startsLead = draft.startsLead
         let finish: @MainActor @Sendable () -> Void = { [weak self] in
             guard let self, self.profiles.contains(where: { $0.id == spaceID }) else { return }
+            // The Lead opens in the space and shows it, instead of a plain
+            // workspace in an empty one.
+            if startsLead { return self.startLead(spaceID: spaceID) }
             self.selectProfile(spaceID)
             self.updateSidebar()
             self.saveState()

@@ -89,7 +89,7 @@ final class SettingsWindowTests: XCTestCase {
         try withIsolatedState {
             let shell = makeShell()
             let workspace = try XCTUnwrap(shell.workspaces.first)
-            XCTAssertFalse(workspace.missionHandoffsEnabled)
+            XCTAssertTrue(workspace.missionHandoffsEnabled, "on by default")
             let controller = TelegramRemoteAccessController(
                 sessions: { [] },
                 sendPrompt: { _, _ in .sessionUnavailable },
@@ -105,7 +105,7 @@ final class SettingsWindowTests: XCTestCase {
             try choose(30, in: app.settingsStuckAgentPopup)
             XCTAssertEqual(shell.stuckAgentWaitThreshold, NiruxShellView.stuckWaitThreshold(minutes: 30))
             try click(app.settingsMissionHandoffsCheckbox)
-            XCTAssertTrue(workspace.missionHandoffsEnabled)
+            XCTAssertFalse(workspace.missionHandoffsEnabled)
             try click(app.settingsTelegramCompletionCheckbox)
             XCTAssertFalse(controller.notifyOnCompletion)
             try click(app.settingsTelegramAttentionCheckbox)
@@ -330,8 +330,8 @@ final class SettingsWindowTests: XCTestCase {
 
     // MARK: - Sidebar approvals
 
-    /// Opt-in: off until turned on, and receivers only wait on a running app
-    /// that turned it on.
+    /// On by default, and receivers only wait on a running app that has it
+    /// on.
     @MainActor
     func testSidebarApprovalsApplyAtOnce() throws {
         try withIsolatedState {
@@ -339,7 +339,11 @@ final class SettingsWindowTests: XCTestCase {
             defer { hooks.approvalsEnabled = false }
             let app = try openSettings()
             defer { close(app) }
-            XCTAssertEqual(app.settingsSidebarApprovalsCheckbox?.state, .off)
+            XCTAssertEqual(app.settingsSidebarApprovalsCheckbox?.state, .on)
+
+            try click(app.settingsSidebarApprovalsCheckbox)
+            XCTAssertEqual(Persistence.load()?.settings?.sidebarApprovalsEnabled, false)
+            XCTAssertFalse(hooks.approvalsEnabled)
             XCTAssertFalse(PermissionApprovalChannel.standard.isAppListening())
 
             try click(app.settingsSidebarApprovalsCheckbox)
@@ -348,7 +352,6 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertTrue(PermissionApprovalChannel.standard.isAppListening(), "receivers see this app")
 
             try click(app.settingsSidebarApprovalsCheckbox)
-            XCTAssertEqual(Persistence.load()?.settings?.sidebarApprovalsEnabled, false)
             XCTAssertFalse(hooks.approvalsEnabled)
             XCTAssertFalse(PermissionApprovalChannel.standard.isAppListening())
         }
@@ -533,7 +536,7 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertTrue(window is NSPanel)
             let tabs = app.settingsTabs
             XCTAssertEqual(tabs.tabStyle, .toolbar)
-            XCTAssertEqual(tabs.tabViewItems.map(\.label), ["General", "Agents", "Notifications", "Experimental", "Telegram"])
+            XCTAssertEqual(tabs.tabViewItems.map(\.label), ["General", "Agents", "Notifications", "Telegram"])
             XCTAssertTrue(tabs.tabViewItems.allSatisfy { $0.image != nil })
 
             // Tallest first, so a window that keeps the previous size would cut the next pane.

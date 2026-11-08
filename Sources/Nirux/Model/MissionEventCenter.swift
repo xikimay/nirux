@@ -32,7 +32,7 @@ final class MissionEventCenter {
         initialRetryDelay: TimeInterval = 0.5,
         maximumRetryDelay: TimeInterval = 30,
         isEnabled: @escaping () -> Bool = {
-            Persistence.load()?.settings?.missionHandoffsEnabled == true
+            PersistedSettings.effective(Persistence.load()?.settings).missionHandoffsEnabled
         }
     ) {
         let retryDelay = max(0.01, initialRetryDelay)

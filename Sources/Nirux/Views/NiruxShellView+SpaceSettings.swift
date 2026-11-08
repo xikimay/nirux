@@ -72,8 +72,13 @@ extension NiruxShellView {
         defaultsActions.settingsClaudeMode = { Self.currentClaudeLaunchMode() }
         defaultsActions.settingsCodexMode = { Self.currentCodexLaunchMode() }
         let defaults = SpaceSettingsDefaultsPane(loaded: defaultsActions.reload(), actions: defaultsActions)
+        let lead = SpaceSettingsLeadPane(model: spaceSettingsLeadModel(for: space))
+        lead.actions.setLead = { [weak self] on in
+            guard let self else { return }
+            if on { self.startLead(spaceID: spaceID) } else { self.stopLead(spaceID: spaceID) }
+        }
         let settings = SpaceSettingsWindow(
-            spaceID: spaceID, general: general, defaults: defaults,
+            spaceID: spaceID, general: general, defaults: defaults, lead: lead,
             brief: SpaceFileEditorPane(source: Self.briefSource(for: space)),
             templates: SpaceFileEditorPane(source: Self.templatesSource(for: space))
         )
@@ -89,6 +94,7 @@ extension NiruxShellView {
             // What another Nirux saved, and Settings' modes, as they are
             // now; variables typed and held back by a problem stay.
             case .defaults: if !settings.defaults.hasUnsavedRows { settings.defaults.show(defaultsActions.reload()) }
+            case .lead: self.refreshSpaceSettingsLead()
             case .brief, .templates: break
             }
         }
@@ -168,6 +174,7 @@ extension NiruxShellView {
             return settings.close()
         }
         settings.general.update(spaceSettingsGeneralModel(for: space))
+        settings.lead.update(spaceSettingsLeadModel(for: space))
         settings.setTitle(Self.spaceSettingsTitle(space.id, in: profiles))
         // Their templates name the space.
         settings.brief.replaceSource(Self.briefSource(for: space))

@@ -1,7 +1,8 @@
 # Spaces, anchors and the Lead
 
 Status: design validated by the user on 2026-11-08. Shipped: anchors and
-routing (S4), one ⌘N (S7), Space Settings and per-space defaults (S8).
+routing (S4), one ⌘N (S7), Space Settings and per-space defaults (S8), the
+Lead's workspace and settings (S11a).
 Where this document and [projects.md](projects.md) differ (management UI,
 routing, defaults), this one wins.
 
@@ -172,9 +173,18 @@ New flow, built on the guarded typing `tell` already uses
 
 ## The Lead
 
-- **Opt-in per space:** "Start a Lead" in New Space… and Space Settings. A
-  workspace pinned at the top of the sidebar, in the default anchor's main
-  checkout, with Claude and the Board column. One per space; ⌘0 focuses it.
+- **Opt-in per space:** "Start a Lead" in New Space… (off unless switched on)
+  and Space Settings › Lead. A workspace pinned at the top of the sidebar, in
+  the default anchor's main checkout, with Claude and the Board column (unless
+  another workspace of the space shows the Board). One per space, never in
+  General; it can't be moved, dragged, parked or sent to another space.
+  ⌃⌘L (Space › Lead) focuses it, or starts it when the space has none: ⌘0
+  stays the editor's font-size reset. Turning it off, or closing its
+  workspace, closes it (asking first while Claude runs); deleting its space
+  makes it a plain workspace in General.
+- **Its role** reaches its Claude through the Nirux MCP server's instructions:
+  its shells carry `NIRUX_LEAD=1`. Until its tools land (S11b) it starts
+  tasks with the `nirux-worktree` skill, which links them to it as Missions.
 - **Tools** (Nirux MCP server, given to the Lead's Claude only), limited to its
   space and its anchors:
   - `start_task(description, repo?, template?)`: the ⌘N path, reporting to the
@@ -189,7 +199,9 @@ New flow, built on the guarded typing `tell` already uses
 - **State lives in Nirux** (board, Missions), not in the Lead's conversation: a
   `/clear` or a restart loses nothing.
 - Mission handoffs and sidebar permission answers leave Experimental and are on
-  by default.
+  by default (Settings › Agents › Missions; shipped with S11a). Both were
+  written `false` whether or not the user chose, so a one-time
+  `defaultsRevision` turns them on once; a later choice stays.
 
 ## Interface
 
@@ -269,7 +281,10 @@ Notes per PR:
 - **S10.** Which title-bar accessories stay (keep-awake cup, plan usage
   limits) is the user's call, asked in the PR. Check ⌘1…⌘9 against the editor
   and Ghostty bindings.
-- **S11.** See "The Lead". Adds the Lead tab, ⌘0 and the ⌘N checkbox.
+- **S11.** See "The Lead". Three PRs: S11a the Lead's workspace, the New
+  Space switch, the Lead tab, ⌃⌘L, Missions and sidebar answers on by
+  default; S11b its MCP tools; S11c the ⌘N checkbox and Mission children
+  under their parent in the sidebar.
 - **S12.** `board.json` gets one config per anchor; the current single
   repository becomes the matching anchor's.
 - **S13.** An MCP tool sets a task's next step and blocker; manual editing

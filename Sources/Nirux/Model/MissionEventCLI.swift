@@ -57,7 +57,7 @@ enum MissionEventCLI {
     static func main(
         _ arguments: [String],
         handoffsEnabled: () -> Bool? = {
-            Persistence.load().map { $0.settings?.missionHandoffsEnabled == true }
+            Persistence.load().map { PersistedSettings.effective($0.settings).missionHandoffsEnabled }
         }
     ) -> Int32 {
         let commands = "ask|completed|receive|reply|tell [options]"

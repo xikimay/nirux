@@ -117,8 +117,9 @@ extension SidebarView {
     }
 
     private func makeWorkspaceDrag(workspaceIndex: Int, rowFrame: NSRect, startPoint: NSPoint) -> SidebarWorkspaceDrag? {
-        guard let dragged = lastInfos.first(where: { $0.index == workspaceIndex }) else { return nil }
-        let group = displayedWorkspaceInfos.filter { $0.isInactive == dragged.isInactive }
+        // The Lead stays on top: a press on it is a click.
+        guard let dragged = lastInfos.first(where: { $0.index == workspaceIndex }), !dragged.isLead else { return nil }
+        let group = displayedWorkspaceInfos.filter { $0.isInactive == dragged.isInactive && !$0.isLead }
         let frames = group.compactMap { info in
             hitAreas.first { area in
                 if case .workspace(let index) = area.region { return index == info.index }

@@ -49,7 +49,7 @@ final class AgentHookCenter {
     /// what it asked of the user (from the column's state when it has one,
     /// else from the event alone).
     var onEventReceived: ((AgentHookEvent, Resolution?, AgentHookOutcome) -> Void)?
-    /// Sidebar approvals (Settings → Experimental). Off, every request a
+    /// Sidebar approvals (Settings → Agents). Off, every request a
     /// receiver still holds for a decision is released.
     var approvalsEnabled = false
     /// Where sidebar decisions go; tests point it at a temporary directory.

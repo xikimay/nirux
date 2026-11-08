@@ -58,12 +58,22 @@ extension NiruxShellView {
 
     /// Close-workspace entry point for the sidebar menu and for ⌘W on a
     /// workspace's last column: confirm before killing live agent sessions
-    /// or multi-column workspaces.
-    func requestCloseWorkspace(at index: Int) {
-        let remaining = workspaceStore.remainingWorkspaceCount
+    /// or multi-column workspaces. `replacingLast` (turning a space's Lead
+    /// off) closes even the last workspace, once confirmed: a plain one
+    /// opens in its space first.
+    func requestCloseWorkspace(at index: Int, replacingLast: Bool = false) {
+        let remaining = workspaceStore.remainingWorkspaceCount + (replacingLast ? 1 : 0)
         guard let workspace = workspaces[safe: index], !workspace.isClosing,
               WorkspaceClosePolicy.canClose(totalWorkspaceCount: remaining)
         else { return }
+        let close = { [weak self] (index: Int) in
+            guard let self else { return }
+            if replacingLast, self.workspaceStore.remainingWorkspaceCount <= 1 {
+                self.addWorkspace(profileID: workspace.profileID)
+                self.saveState()
+            }
+            self.closeWorkspace(at: index)
+        }
         let columns = workspace.openColumns
         let snapshot = ProcessSnapshot()
         let context = WorkspaceClosePolicy.Context(
@@ -76,7 +86,7 @@ extension NiruxShellView {
         case .blocked:
             return
         case .close:
-            closeWorkspace(at: index)
+            close(index)
         case .confirm(let details):
             guard confirmDestructiveClose(
                 message: "Close workspace “\(workspace.title)”?",
@@ -86,8 +96,8 @@ extension NiruxShellView {
             // Main-queue work can mutate `workspaces` while the modal runs
             // (worktree creation finishing, a prior close's deferred removal) —
             // re-resolve the index by identity before closing.
-            guard let currentIndex = workspaces.firstIndex(where: { $0 === workspace }) else { return }
-            closeWorkspace(at: currentIndex)
+            guard let currentIndex = workspaces.firstIndex(where: { $0 === workspace }), !workspace.isClosing else { return }
+            close(currentIndex)
         }
     }
 
@@ -136,6 +146,8 @@ extension NiruxShellView {
         // The store keeps it until the exit animation ends — flag it so a
         // quick second ⌘W neither counts nor selects it meanwhile.
         wsToRemove.isClosing = true
+        // Closing the Lead turns it off: Space Settings says so at once.
+        if wsToRemove.isLead { refreshSpaceSettingsLead() }
         // Only move the selection when the *active* workspace is going away —
         // closing another workspace from its context menu must not steal focus.
         if index == activeWSIndex,

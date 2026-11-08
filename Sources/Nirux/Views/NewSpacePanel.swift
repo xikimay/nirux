@@ -17,6 +17,8 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
         let name: String
         let colorHex: String
         let anchors: [SpaceAnchor]
+        /// "Start a Lead" (docs/spaces.md, "The Lead"): off unless chosen.
+        var startsLead = false
     }
 
     var onAddRepository: (() -> Void)?
@@ -35,6 +37,7 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
     let addRepositoryButton = NSButton(title: "Add Repository…", target: nil, action: nil)
     let addFolderButton = NSButton(title: "Add Folder…", target: nil, action: nil)
     let errorLabel = NSTextField(wrappingLabelWithString: "")
+    let leadSwitch = NSSwitch()
     let createButton = NSButton(title: "Create Space", target: nil, action: nil)
     let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
     private(set) var swatches: [ColorSwatchButton] = []
@@ -48,6 +51,9 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
     private let sectionHint = NSTextField(labelWithString: "Where this space’s work starts. Optional: a space can have none.")
     private let note = NSTextField(wrappingLabelWithString:
         "A repository belongs to one space: its worktrees open here, even when you are looking at another space.")
+    private let leadSectionLabel = NSTextField(labelWithString: "")
+    private let leadTitle = NSTextField(labelWithString: "Start a Lead")
+    private let leadHint = NSTextField(wrappingLabelWithString: "")
     private let separator = NSBox()
     private static let width: CGFloat = 520
     private static let margin: CGFloat = 24
@@ -64,6 +70,7 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
         self.colorHex = colorHex
         rows = []
         nameIsEdited = false
+        leadSwitch.state = .off
         let panel = buildPanel()
         self.panel = panel
         if let suggestion { add(suggestion, movingFrom: nil) } else { layout() }
@@ -128,7 +135,7 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
             panel?.makeFirstResponder(nameField)
             return nil
         }
-        return Draft(name: name, colorHex: colorHex, anchors: rows.map(\.anchor))
+        return Draft(name: name, colorHex: colorHex, anchors: rows.map(\.anchor), startsLead: leadSwitch.state == .on)
     }
 
     func showError(_ message: String) {
@@ -234,6 +241,18 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
         ])
         note.font = Theme.Font.caption
         note.textColor = Theme.Color.textTertiary
+        leadSectionLabel.attributedStringValue = NSAttributedString(string: "LEAD", attributes: [
+            .font: Theme.Font.label, .foregroundColor: Theme.Color.textTertiary, .kern: Theme.Font.labelKern
+        ])
+        leadSwitch.controlSize = .small
+        leadSwitch.setAccessibilityLabel("Start a Lead")
+        leadTitle.font = .systemFont(ofSize: 12, weight: .semibold)
+        leadTitle.textColor = Theme.Color.textPrimary
+        leadTitle.setAccessibilityElement(false)
+        leadHint.font = Theme.Font.caption
+        leadHint.textColor = Theme.Color.textSecondary
+        leadHint.maximumNumberOfLines = 0
+        leadHint.setAccessibilityElement(false)
         separator.boxType = .custom
         separator.borderWidth = 0
         separator.fillColor = Theme.Color.line
@@ -242,7 +261,7 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
         content.subviews.forEach { $0.removeFromSuperview() }
         let persistent: [NSView] = [
             heading, nameLabel, nameField, colorLabel, sectionLabel, sectionHint, addRepositoryButton, addFolderButton,
-            note, errorLabel, separator, cancelButton, createButton
+            note, leadSectionLabel, leadSwitch, leadTitle, leadHint, errorLabel, separator, cancelButton, createButton
         ] + swatches
         persistent.forEach(content.addSubview)
 
@@ -306,7 +325,19 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
         )
         y += repositorySize.height + 12
 
-        y = place(note, y: y, height: Self.wrappedHeight(of: note, width: inner)) + 14
+        y = place(note, y: y, height: Self.wrappedHeight(of: note, width: inner)) + 20
+
+        y = place(leadSectionLabel, y: y, height: 13) + 8
+        let switchSize = leadSwitch.fittingSize
+        leadSwitch.frame = NSRect(x: margin, y: y, width: switchSize.width, height: switchSize.height)
+        let textX = margin + switchSize.width + 10
+        let textWidth = Self.width - margin - textX
+        leadTitle.frame = NSRect(x: textX, y: y, width: textWidth, height: 16)
+        leadHint.stringValue = Self.leadDescription(repositoryName: rows.first(where: \.anchor.isDefault)?.anchor.name)
+        leadSwitch.setAccessibilityHelp(leadHint.stringValue)
+        let hintHeight = Self.wrappedHeight(of: leadHint, width: textWidth)
+        leadHint.frame = NSRect(x: textX, y: y + 19, width: textWidth, height: hintHeight)
+        y += max(switchSize.height, 19 + hintHeight) + 16
 
         if !errorLabel.isHidden {
             y = place(errorLabel, y: y, height: Self.wrappedHeight(of: errorLabel, width: inner)) + 10
@@ -321,6 +352,13 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
         panel.setContentSize(NSSize(width: Self.width, height: y))
         content.frame = NSRect(x: 0, y: 0, width: Self.width, height: y)
         panel.recalculateKeyViewLoop()
+    }
+
+    /// What the Lead is, and where it would work.
+    static func leadDescription(repositoryName: String?) -> String {
+        let place = repositoryName.map { "on \($0)’s main checkout" } ?? "in your home folder until the space has a repository"
+        return "A workspace pinned at the top, \(place), with Claude and the Board. You talk to it; it starts "
+            + "tasks and follows them."
     }
 
     private func place(_ view: NSView, y: CGFloat, height: CGFloat) -> CGFloat {

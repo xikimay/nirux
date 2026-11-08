@@ -108,7 +108,7 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertEqual(decoded.settings?.claudeLaunchMode, .acceptEdits)
         XCTAssertEqual(decoded.settings?.codexLaunchMode, .readOnly)
         XCTAssertEqual(decoded.settings?.claudeNoFlicker, false)
-        XCTAssertEqual(decoded.settings?.missionHandoffsEnabled, false)
+        XCTAssertEqual(decoded.settings?.missionHandoffsEnabled, true)
         XCTAssertEqual(decoded.activeWorkspaceID, "workspace-main")
     }
 
@@ -478,16 +478,41 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertNil(settings.sidebarExpanded)
         XCTAssertEqual(settings.claudeLaunchMode, .plan)
         XCTAssertEqual(settings.claudeNoFlicker, false)
-        XCTAssertFalse(settings.missionHandoffsEnabled)
+        XCTAssertTrue(settings.missionHandoffsEnabled)
+    }
+
+    /// Mission handoffs and sidebar approvals were opt-in Experimental
+    /// settings, always written `false`: a file from before revision 1
+    /// turns both on once, a later choice stays, and a newer revision is
+    /// written back as it was.
+    func testMissionsAndSidebarApprovalsTurnOnOnce() throws {
+        func decode(_ json: String) throws -> PersistedSettings {
+            try JSONDecoder().decode(PersistedSettings.self, from: Data(json.utf8))
+        }
+        let before = try decode(#"{"missionHandoffsEnabled": false, "sidebarApprovalsEnabled": false}"#)
+        XCTAssertTrue(before.missionHandoffsEnabled)
+        XCTAssertTrue(before.sidebarApprovalsEnabled)
+
+        let chosen = try decode(#"{"missionHandoffsEnabled": false, "sidebarApprovalsEnabled": false, "defaultsRevision": 1}"#)
+        XCTAssertFalse(chosen.missionHandoffsEnabled)
+        XCTAssertFalse(chosen.sidebarApprovalsEnabled)
+
+        let saved = try JSONSerialization.jsonObject(with: JSONEncoder().encode(before)) as? [String: Any]
+        XCTAssertEqual(saved?["defaultsRevision"] as? Int, PersistedSettings.currentDefaultsRevision)
+        let newer = try decode(#"{"missionHandoffsEnabled": false, "defaultsRevision": 7}"#)
+        XCTAssertFalse(newer.missionHandoffsEnabled)
+        let resaved = try JSONSerialization.jsonObject(with: JSONEncoder().encode(newer)) as? [String: Any]
+        XCTAssertEqual(resaved?["defaultsRevision"] as? Int, 7)
     }
 
     func testMissionHandoffSettingAndWorkspaceLinkRoundTrip() throws {
-        let settings = PersistedSettings(missionHandoffsEnabled: true)
+        // Turned off: the choice survives a save, whatever the default.
+        let settings = PersistedSettings(missionHandoffsEnabled: false)
         let decodedSettings = try JSONDecoder().decode(
             PersistedSettings.self,
             from: JSONEncoder().encode(settings)
         )
-        XCTAssertTrue(decodedSettings.missionHandoffsEnabled)
+        XCTAssertFalse(decodedSettings.missionHandoffsEnabled)
 
         let missionID = "11111111-1111-4111-8111-111111111111"
         let workspace = PersistedWorkspace(
