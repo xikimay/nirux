@@ -189,7 +189,7 @@ final class MissionStore {
         enabled: Bool,
         now: TimeInterval = Date().timeIntervalSince1970
     ) -> Mission? {
-        guard enabled,
+        guard enabled || request.reportsToLead,
               ensureLoaded(),
               Self.isIdentifier(request.id),
               Self.isIdentifier(request.parentWorkspaceID),

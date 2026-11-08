@@ -60,10 +60,11 @@ final class MissionTests: XCTestCase {
         leads.reportsToLead = true
         let mission = try XCTUnwrap(store.create(leads, enabled: false, now: 10))
         XCTAssertEqual(mission.reportsToLead, true)
-        guard case .accepted(let accepted) = store.process(event(), enabled: false) else {
-            return XCTFail("the Lead's task asks with handoffs off")
+        if case .accepted(let accepted) = store.process(event(), enabled: false) {
+            XCTAssertEqual(accepted?.event.kind, .question)
+        } else {
+            XCTFail("the Lead's task asks with handoffs off")
         }
-        XCTAssertEqual(accepted?.event.kind, .question)
         XCTAssertNil(store.create(request(id: "77777777-7777-4777-8777-777777777777"), enabled: false, now: 11))
 
         // Past the setting's gate: the usage error says the command ran.
