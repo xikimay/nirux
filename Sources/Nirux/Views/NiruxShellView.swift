@@ -201,7 +201,7 @@ final class NiruxShellView: NSView {
         verticalStrip.addSubview(workspace.containerView)
         sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index) }
         sidebar.onWorkspaceAction = { [weak self] action, index in self?.handleWorkspaceSidebarAction(action, workspaceIndex: index) }
-        sidebar.offersWorktreeCleanup = { [weak self] index in self?.offersWorktreeCleanup(workspaceIndex: index) ?? false }
+        sidebar.worktreeCleanupOffer = { [weak self] index in self?.worktreeCleanupOffer(workspaceIndex: index) }
         sidebar.onWorkspaceReordered = { [weak self] index, position in
             self?.handleWorkspaceReorder(workspaceIndex: index, targetPosition: position)
         }

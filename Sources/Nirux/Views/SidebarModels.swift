@@ -319,9 +319,19 @@ struct SidebarUpdatePayload {
     let workspaces: [WorkspaceInfo]
 }
 
+/// Where a card's menu shows "Clean Up Worktree…".
+enum WorktreeCleanupMenuOffer {
+    /// The pull request is merged, or the folder is gone: on top, among
+    /// what the workspace's state offers.
+    case suggested
+    /// Any other linked worktree: next to Close Workspace; the checks say
+    /// what stands in the way.
+    case available
+}
+
 enum WorkspaceSidebarAction {
     case moveUp, moveDown, markActive, markInactive
-    case close, rename, editContext, newWorkspace, reviewBranch
+    case close, rename, editContext, reviewBranch
     case closeColumn(columnIndex: Int)
     case cleanUpWorktree
     case askWhyCIFailed, rerunFailedCI

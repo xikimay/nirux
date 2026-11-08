@@ -57,9 +57,9 @@ brought forward, and its "Finish" action is the worktree cleanup shipped in #46.
 **A new column type, "Project Board".** `docs/projects.md` already decided that
 the Project view is a dedicated column type.
 
-- It opens from the command palette ("Open Board") in the current
-  workspace, usually the project's main checkout, next to the agent that
-  coordinates the work.
+- It opens from the command palette ("Open Board") or Space › Board (⌃⌘B)
+  in the current workspace, usually the project's main checkout, next to the
+  agent that coordinates the work.
 - It stores the id of the project it shows: at first, the space of the
   workspace it was opened in. Moving that workspace to another space doesn't
   change it. A menu in the header switches project. There is no "all projects"

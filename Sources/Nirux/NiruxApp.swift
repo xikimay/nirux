@@ -318,6 +318,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         if [#selector(showFind(_:)), #selector(findNextMatch(_:)), #selector(findPreviousMatch(_:))].contains(menuItem.action) {
             return canFind
         }
+        if menuItem.action == #selector(importBrowserCookies(_:)) {
+            return shell.map { !$0.sideEffects.cookieBrowsers().isEmpty } ?? false
+        }
         if menuItem.action == #selector(toggleInactiveWorkspaces(_:)) {
             guard let shell else { return false }
             menuItem.state = shell.sidebar.isInactiveSectionCollapsed ? .off : .on

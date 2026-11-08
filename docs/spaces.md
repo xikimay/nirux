@@ -201,7 +201,7 @@ Mockups were validated in the design session. What changes:
 - **Menu bar:** Space, Agent and Help menus, so every command has a menu item
   and its shortcut. ⌃⌘B opens the Board.
 - **Card menu:** state actions first (Review Branch, failed CI, Clean Up once
-  merged), then an Organize submenu, then Rename and Close.
+  merged), then an Organize submenu, then Rename, the context and Close.
 - **Space Settings:** one window with tabs (General, Defaults, Lead, Brief,
   Memory, Board, Templates) instead of five separate panels. Shipped without
   Lead (S11): toolbar tabs like Nirux Settings, each change applied at once
@@ -253,7 +253,9 @@ Notes per PR:
   out of scope.
 - **S5.** Sections and scope; typing still finds workspaces in every space.
 - **S6.** Items open today's panels until S8 lands.
-- **S7.** See "One door: ⌘N". The palette keeps a single "New…".
+- **S7.** See "One door: ⌘N". The palette keeps a single "New…", and so
+  does the menu bar's Workspaces menu (New Workspace, New Task…, New
+  Worktree… today).
 - **S8.** Defaults follow projects.md section 5 (precedence, literal env,
   reserved `NIRUX_*`, `0600`, setup script typed before the agent, only for
   workspaces the user started). Shipped; the defaults live in the space's
