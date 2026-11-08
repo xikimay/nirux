@@ -348,7 +348,7 @@ final class ColumnState {
         let vsync = isAnyDisplayActive()
         guard vsync != terminalHasVsync else { return }
         terminalHasVsync = vsync
-        let controller = TerminalAppearance.makeController(vsync: vsync)
+        let controller = TerminalAppearance.makeController(vsync: false) // MUTATION M3
         // AppTerminalView gives it only as it moves to a window.
         controller.setColorScheme(terminal.colorScheme)
         // Builds the surface now if the terminal can have one.
