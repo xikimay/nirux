@@ -496,10 +496,15 @@ struct AgentStatusMachine {
             ))
         case "idle_prompt":
             // Claude finished responding a minute ago: the main thread sits
-            // at its prompt, not in a dialog.
+            // at its prompt, not in a dialog. Its Stop said so already: the
+            // reminder alerts nobody, asks nothing over Telegram, and
+            // leaves a finished turn the user looked at seen. Only a turn
+            // still believed running (Esc fires no Stop) ends here.
             closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
+            guard hookTurnInFlight else { return }
             endTurn()
-            reason = .turnFinished
+            _ = block(for: .turnFinished, isUserFocused: isUserFocused, alert: false)
+            return
         default:
             reason = .message(event.detail)
         }
@@ -605,9 +610,14 @@ struct AgentStatusMachine {
     }
 
     /// Reconcile with the foreground process (heartbeat tick). `fgName` is
-    /// the foreground process name, "" when unknown.
+    /// the foreground process name, "" when there is none; nil when the
+    /// process table could not be read: nothing is known then, and nothing
+    /// changes. Read as "no agent", it would drop the hook authority of a
+    /// `claude` idle at its prompt, and the output fallback would take its
+    /// next redraw (an idle compaction's spinner) for a turn.
     @discardableResult
-    mutating func tick(fgName: String, isUserFocused: Bool, now: Date) -> AgentStatus {
+    mutating func tick(fgName: String?, isUserFocused: Bool, now: Date) -> AgentStatus {
+        guard let fgName else { return state }
         let isAgent = Self.isRecognizedAgentProcess(fgName)
         if fgName != lastForegroundName { foregroundChanged(to: fgName, now: now) }
 
@@ -624,7 +634,11 @@ struct AgentStatusMachine {
             if hookWorking || isRunningAnsweredDialog(now: now) {
                 state = .working
             } else if state == .needsAttention {
-                if isUserFocused { state = .idle }
+                // Hooks say why they stop an agent. A wait without a
+                // reason is the output fallback's guess from before they
+                // took over again: an amber "needs you" on an agent idle at
+                // its prompt.
+                if isUserFocused || attentionReason == nil { state = .idle }
             } else if state == .working {
                 state = .idle
             }

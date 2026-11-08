@@ -388,6 +388,79 @@ final class AgentStatusMachineTests: XCTestCase {
         XCTAssertEqual(machine.attentionReason, .turnFinished)
     }
 
+    // MARK: - Idle reminder, idle compaction
+
+    /// Claude's `idle_prompt` comes a minute after a turn its Stop already
+    /// reported: no second alert, nothing for Telegram (which pings on any
+    /// attention), and a turn the user looked at stays seen.
+    func testIdleReminderAfterAFinishedTurnSaysNothingNew() {
+        startTurn()
+        XCTAssertTrue(machine.apply(event(.stop, at: 10), isUserFocused: false).firedAttention)
+        var reminder = machine.apply(event(.notification, at: 70, type: "idle_prompt"), isUserFocused: false)
+        XCTAssertNil(reminder.attention)
+        XCTAssertFalse(reminder.firedAttention)
+        XCTAssertEqual(machine.attentionReason, .turnFinished, "still the unseen finished turn")
+
+        _ = machine.tick(fgName: "claude", isUserFocused: true, now: t0 + 80)
+        reminder = machine.apply(event(.notification, at: 140, type: "idle_prompt"), isUserFocused: false)
+        XCTAssertNil(reminder.attention)
+        XCTAssertFalse(reminder.firedAttention)
+        XCTAssertEqual(machine.state, .idle, "seen")
+    }
+
+    /// Esc ends a turn without Stop: the reminder ends it, quietly — the
+    /// user stopped it.
+    func testIdleReminderEndsATurnInterruptedWithoutStop() {
+        startTurn()
+        let reminder = machine.apply(event(.notification, at: 70, type: "idle_prompt"), isUserFocused: false)
+        XCTAssertFalse(reminder.firedAttention)
+        XCTAssertNil(reminder.attention)
+        XCTAssertNil(machine.turnStartedAt)
+        XCTAssertEqual(machine.attentionReason, .turnFinished)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 71), .needsAttention)
+    }
+
+    /// The process table read fails now and then (processes started
+    /// mid-read). A tick that knows nothing changes nothing: the idle
+    /// compaction's spinner, an hour after the turn, is no turn.
+    func testUnreadProcessTableKeepsTheHookAuthority() {
+        startTurn()
+        machine.noteUserInput(now: t0)
+        _ = machine.apply(event(.stop, at: 10), isUserFocused: false)
+        XCTAssertEqual(machine.tick(fgName: nil, isUserFocused: false, now: t0 + 20), .needsAttention)
+        XCTAssertEqual(machine.hookKind, "claude")
+        for second in stride(from: 3_000.0, to: 3_060, by: 0.5) {
+            machine.noteRead(now: t0 + second)
+            XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + second + 0.2), .needsAttention)
+        }
+        XCTAssertEqual(machine.attentionReason, .turnFinished)
+    }
+
+    /// The incident: hook authority lost while the agent sat idle, its idle
+    /// compaction's spinner read by the output fallback as a turn that went
+    /// quiet, then the compaction's SessionStart handing the column back to
+    /// hooks with that unexplained wait — an amber "needs you" for good.
+    func testAnUnexplainedWaitClearsOnceHooksTakeOverAgain() {
+        startTurn()
+        machine.noteUserInput(now: t0)
+        _ = machine.apply(event(.stop, at: 10), isUserFocused: false)
+        // The native binary's own name, read when its arguments can't be.
+        _ = machine.tick(fgName: "2.1.319", isUserFocused: false, now: t0 + 20)
+        _ = machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 22)
+        machine.noteRead(now: t0 + 3_000)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 3_000.5), .working)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 3_010), .needsAttention)
+        XCTAssertNil(machine.attentionReason)
+
+        _ = machine.apply(event(.subagentStop, at: 3_011, agent: "compactor"), isUserFocused: false)
+        let compacted = AgentHookEvent(
+            kind: .claude, name: .sessionStart, sessionID: "lead", source: "compact",
+            timestamp: t0.timeIntervalSince1970 + 3_011
+        )
+        _ = machine.apply(compacted, isUserFocused: false)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 3_012), .idle)
+    }
+
     // MARK: - Turn timer
 
     func testTurnTimerRunsFromPromptToStop() {
