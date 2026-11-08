@@ -104,18 +104,22 @@ enum LeadTools {
                 setTaskContext, title: "Set a task's next step and blocker",
                 description: """
                     Keep a task's next step and blocker current: the user reads them on its row in the sidebar. \
-                    Pass one or both; an empty string clears one. A field the user wrote by hand stays theirs: \
-                    Nirux says so, and leaves it.
+                    Pass only what changed; an empty string clears one. A field the user wrote by hand stays \
+                    theirs: Nirux says so, and leaves it.
                     """,
                 properties: [
                     "task": ["type": "string", "description": "The task's branch, or its title."],
+                    // The limit in words, not maxLength: Nirux counts after
+                    // folding whitespace, a schema check before it.
                     "next_step": [
-                        "type": "string", "maxLength": maxContextLength,
-                        "description": "What happens next, and who does it, in a few words (\"user reviews #39\", \"write the import side\")."
+                        "type": "string",
+                        "description": "What happens next, and who does it, in a few words, at most \(maxContextLength) characters "
+                            + "(\"user reviews #39\", \"write the import side\")."
                     ],
                     "blocker": [
-                        "type": "string", "maxLength": maxContextLength,
-                        "description": "What keeps the task from going on (\"waits for #212 to merge\"); empty once it is gone."
+                        "type": "string",
+                        "description": "What keeps the task from going on, at most \(maxContextLength) characters "
+                            + "(\"waits for #212 to merge\"); empty once it is gone."
                     ]
                 ],
                 required: ["task"]

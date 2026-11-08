@@ -68,9 +68,9 @@ struct SidebarRowSummary: Hashable {
 @MainActor
 extension WorkspaceInfo {
     /// Needs you, then broken, then a Mission question the parent may still
-    /// answer, then work, then the blocker (grey: it doesn't ask the user),
-    /// then a finished turn, then the pull request, then the next step,
-    /// else the branch.
+    /// answer, then work, then an agent to resume, then the blocker (grey:
+    /// it doesn't ask the user), then a finished turn, then the pull
+    /// request, then the next step, else the branch.
     var rowSummary: SidebarRowSummary {
         let age = lastActivityAt.map { SidebarRowSummary.Trailing.age(SidebarView.cardAge(since: $0)) }
         func row(_ mark: SidebarRowMark, _ text: String, _ tone: SidebarStatusLine.Tone,
@@ -108,9 +108,6 @@ extension WorkspaceInfo {
         if let answered = question?.missionQuestion {
             return row(.asking, SidebarWorkspaceCardRenderer.answeredText(answered), .neutral)
         }
-        if let blocker = blockerText {
-            return row(.blocked, "Blocked · \(blocker)", .neutral)
-        }
         // A restored agent that hasn't resumed: selecting the row resumes it
         // too.
         if let paused = columns.first(where: { $0.deferredAgent != nil }), let agent = paused.deferredAgent {
@@ -122,6 +119,9 @@ extension WorkspaceInfo {
                 ),
                 trailing: age
             )
+        }
+        if let blocker = blockerText {
+            return row(.blocked, "Blocked · \(blocker)", .neutral)
         }
         // A finished turn the user hasn't looked at yet: until then, before
         // the pull request's lasting line.

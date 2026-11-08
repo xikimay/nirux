@@ -223,8 +223,9 @@ extension WorkspaceInfo {
         }
         // The blocker is the status line's, or waits behind what comes
         // first (the tooltip has it). The selected row adds the next step
-        // when its status line says something else.
-        if isActive, let next = nextStepText, summary.status.text != Self.nextStepLine(next) {
+        // when its status line says something else; the Lead's row has no
+        // status line.
+        if isActive, let next = nextStepText, isLead || summary.status.text != Self.nextStepLine(next) {
             actions.append(.next(next))
         }
         // The status line says "Merged · Clean up" unless an agent's state

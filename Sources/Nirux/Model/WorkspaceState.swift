@@ -90,7 +90,12 @@ final class WorkspaceState {
     var notification: AttentionSignal?
     var hasNotification: Bool { notification != nil }
     var prInfo: PRInfo? {
-        didSet { if prInfo?.url != oldValue?.url || prInfo?.state != "OPEN" { prFeedback = nil } }
+        didSet {
+            if prInfo?.url != oldValue?.url || prInfo?.state != "OPEN" { prFeedback = nil }
+            // Merged (or first seen merged): what the Lead wrote is over, and
+            // nothing tells it. The user's stays.
+            if prInfo?.state == "MERGED", oldValue?.state != "MERGED" { clearLeadContext() }
+        }
     }
     /// The open PR's feedback (docs/pr-feedback-inbox.md), read after each
     /// PR refresh. Cleared when the PR changes or stops being open.
@@ -235,6 +240,13 @@ extension WorkspaceState {
         let value = Self.normalizedContextText(text)
         guard value != Self.normalizedContextText(presented) else { return }
         setContext(field, value, fromLead: false)
+    }
+
+    /// Clears the next step and blocker the Lead wrote.
+    func clearLeadContext() {
+        for field in ContextField.allCases where contextIsFromLead(field) {
+            setContext(field, nil, fromLead: false)
+        }
     }
 
     enum LeadContextOutcome: Equatable {

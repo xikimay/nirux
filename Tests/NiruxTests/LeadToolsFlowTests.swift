@@ -172,6 +172,7 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(refused.isError)
             XCTAssertTrue(refused.text.contains("by hand"), refused.text)
             XCTAssertEqual(task.blocker, "no API key")
+            XCTAssertTrue(try setContext(["next_step": "user reviews #39", "blocker": "x"]).isError, "nothing it asked for happened")
             let partly = try setContext(["next_step": "merge #39", "blocker": ""])
             XCTAssertFalse(partly.isError, "the next step changed")
             XCTAssertTrue(partly.text.contains("blocker (“no API key”)"), partly.text)
@@ -188,6 +189,23 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(task.blockerIsFromLead)
 
             XCTAssertTrue(try call(LeadTools.setTaskContext, ["task": "nope", "blocker": "x"], lead: lead, in: harness).isError)
+
+            // Two of its tasks named alike: the branch says which.
+            let twinID = UUID().uuidString
+            let twinAgent = UUID().uuidString
+            let twin = try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
+                id: UUID().uuidString, parentWorkspaceID: lead.workspace.id, parentAgentUUID: lead.agentUUID,
+                childWorkspaceID: twinID, childAgentUUID: twinAgent, childAgentKind: "claude",
+                branch: "feat/export-2", reportsToLead: true
+            ), enabled: true))
+            shell.addWorkspace(
+                title: "Export CSV", cwd: harness.repo, profileID: lead.space, workspaceID: twinID,
+                initialAgentUUID: twinAgent, missionID: twin.id, reportsToLead: true
+            )
+            let ambiguous = try setContext(["blocker": "y"])
+            XCTAssertTrue(ambiguous.isError)
+            XCTAssertTrue(ambiguous.text.contains("several share that title"), ambiguous.text)
+            XCTAssertEqual(task.blocker, "CI is red on main")
         }
     }
 

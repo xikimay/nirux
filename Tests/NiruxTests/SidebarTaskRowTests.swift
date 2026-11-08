@@ -79,7 +79,8 @@ final class SidebarTaskRowTests: XCTestCase {
     }
 
     /// A blocker (the Lead's or the user's) waits behind the user, a break,
-    /// a question and work, in grey; it comes before a finished turn and
+    /// a question, work and an agent to resume, in grey; it comes before a
+    /// finished turn and
     /// the pull request. The next step takes the branch's place; the
     /// selected row prints it under a status line that says something
     /// else. Neither adds a line to another row.
@@ -95,6 +96,10 @@ final class SidebarTaskRowTests: XCTestCase {
                        "Stopped on an API error")
         XCTAssertEqual(status(workspace([column(0, .working), asking], blocker: blocker)), "Asking the Lead")
         XCTAssertEqual(status(workspace([column(0, .working)], blocker: blocker)), "Working")
+        XCTAssertEqual(status(workspace([column()], pr: pullRequest(ci: "FAILURE"), blocker: blocker)), "#39 · checks failed")
+        var paused = column(1)
+        paused.deferredAgent = SidebarDeferredAgent(processName: "claude", summary: "claude session", columnID: UUID())
+        XCTAssertEqual(status(workspace([column(), paused], blocker: blocker)), "Paused · Resume", "its agent isn't running")
 
         let blocked = workspace([finished], pr: pullRequest(ci: "SUCCESS"), nextStep: next, blocker: blocker)
         XCTAssertEqual(blocked.rowSummary.status, SidebarStatusLine(text: "Blocked · \(blocker)", tone: .neutral))
@@ -108,6 +113,9 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(status(workspace([column()], pr: pullRequest(ci: "PENDING"), nextStep: next)), "#39 · checks running")
         XCTAssertEqual(workspace([column()], pr: pullRequest(ci: "PENDING"), isActive: true, nextStep: next).cardActions, [.next(next)])
         XCTAssertEqual(status(workspace([column()], nextStep: " ", blocker: "")), "fix/login", "blank says nothing")
+        var lead = workspace([column()], isActive: true, nextStep: next)
+        lead.isLead = true
+        XCTAssertEqual(lead.cardActions, [.next(next)], "the Lead's row has no status line")
     }
 
     /// The pull request's line, and where a click on it goes.

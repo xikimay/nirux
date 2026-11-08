@@ -330,7 +330,8 @@ final class WorkspaceContextPanel {
     }
 
     /// Under the next step and blocker: which ones the Lead wrote, and
-    /// that what the user types stays theirs. Nothing for a workspace no
+    /// that what the user changes stays theirs (a field saved as shown
+    /// keeps its owner). Nothing for a workspace no
     /// Lead follows.
     static func contextHelp(nextStepIsFromLead: Bool, blockerIsFromLead: Bool, reportsToLead: Bool) -> String {
         let written: String? = switch (nextStepIsFromLead, blockerIsFromLead) {
@@ -339,8 +340,8 @@ final class WorkspaceContextPanel {
         case (false, true): "The Lead wrote the blocker."
         case (false, false): nil
         }
-        if let written { return written + " What you type here stays yours; clear a field to hand it back." }
-        return reportsToLead ? "The Lead keeps these up to date, except what you type here: clear a field to hand it back." : ""
+        if let written { return written + " What you change here stays yours; clear a field to hand it back." }
+        return reportsToLead ? "The Lead keeps these up to date, except what you change here: clear a field to hand it back." : ""
     }
 
     static func liveContextText(_ configuration: WorkspaceContextPanelConfiguration) -> String {

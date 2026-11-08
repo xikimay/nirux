@@ -332,7 +332,12 @@ extension WorkspaceInfo {
             color = Theme.Color.done
             detail = prInfo.map { "#\($0.number) merged" } ?? "merged"
         case .idle:
-            if let finished = asking(.finished) {
+            // As the row's status line: the blocker before a finished turn.
+            if let blocker = blockerText, !columns.contains(where: { $0.deferredAgent != nil }) {
+                color = Theme.Color.textTertiary
+                detail = withAge("blocked")
+                note = blocker
+            } else if let finished = asking(.finished) {
                 color = SidebarRenderer.color(for: .finished)
                 detail = withAge(finished.headline)
             } else {
