@@ -1,6 +1,6 @@
 import AppKit
 
-/// Project Memory (⌘P › Project Memory…, the project's menu): what agents
+/// Space Memory (⌘P › Space Memory…, the space's menu): what agents
 /// know about the workspace's repository, in one list (see
 /// ProjectMemory.Knowledge): the project brief's rules apply always, the
 /// repository's CLAUDE.md and AGENTS.md are the team's, Claude Code's

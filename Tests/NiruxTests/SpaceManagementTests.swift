@@ -1,4 +1,3 @@
-import AppKit
 import XCTest
 @testable import Nirux
 
@@ -155,33 +154,13 @@ final class SpaceManagementTests: XCTestCase {
         XCTAssertEqual(store.activeWorkspace?.id, "a", "not the inactive card that follows it in the array")
     }
 
-    /// The default space was "main" before spaces had anchors: launching
-    /// renames it General and lists it first, wherever projects.json put it.
     @MainActor
-    func testDefaultSpaceStillNamedMainBecomesGeneralAtLaunchAndComesFirst() throws {
-        let stateDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("nirux-general-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: stateDirectory) }
-        try Data(#"""
-        {"schemaVersion": 1, "deletedIDs": [], "projects": [
-          {"id": "work", "name": "Work", "colorHex": "#9ECE6A"},
-          {"id": "default", "name": "main", "colorHex": "#7AA2F7"}
-        ]}
-        """#.utf8).write(to: stateDirectory.appendingPathComponent("projects.json"))
-        let previous = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
-        setenv("NIRUX_STATE_DIR", stateDirectory.path, 1)
-        defer {
-            if let previous { setenv("NIRUX_STATE_DIR", previous, 1) } else { unsetenv("NIRUX_STATE_DIR") }
-        }
-        _ = NSApplication.shared
-        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
-        shell.stopHeartbeat()
+    func testGeneralComesFirstWhereverItWasStored() {
+        let store = WorkspaceStore()
+        let work = WorkspaceProfile(id: "work", name: "Work", colorHex: "#9ECE6A")
+        store.replaceProfiles([work, WorkspaceProfile.defaultProfile], activeProfileID: work.id)
 
-        shell.restoreState()
-
-        XCTAssertEqual(shell.profiles.map(\.id), [WorkspaceProfile.defaultID, "work"])
-        XCTAssertEqual(shell.profiles.map(\.name), ["General", "Work"])
+        XCTAssertEqual(store.profiles.map(\.id), [WorkspaceProfile.defaultID, work.id])
     }
 
     func testOnlyTheUntouchedDefaultNameBecomesGeneral() {

@@ -21,9 +21,11 @@ struct WorkspaceProfile: Codable, Equatable {
         palette[index % palette.count].hex
     }
 
-    /// The spaces read at launch, the default one renamed "General" while it
-    /// still has its old built-in name. A name the user chose stays, and so
-    /// does "main" when another space is already called General.
+    /// The spaces read at launch (`ProjectStore.load`), the default one
+    /// renamed "General" while it still has its old built-in name. A name the
+    /// user chose stays, and so does "main" while another space is called
+    /// General. It runs at every launch, so a backup or an older copy of
+    /// Nirux writing "main" back can't bring the old name back for good.
     static func renamingLegacyDefault(_ profiles: [WorkspaceProfile]) -> [WorkspaceProfile] {
         let generalName = defaultProfile.name
         guard let index = profiles.firstIndex(where: { $0.id == defaultID }),

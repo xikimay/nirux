@@ -63,7 +63,7 @@ final class ProjectStore {
         hasLoaded = true
         let mirror = mirror.map(Self.deduplicated)
         let spaces = loadedSpaces(mirror: mirror, markerPresent: markerPresent)
-        return spaces + orphanedBriefSpaces(known: spaces)
+        return WorkspaceProfile.renamingLegacyDefault(spaces + orphanedBriefSpaces(known: spaces))
     }
 
     private func loadedSpaces(mirror: [WorkspaceProfile]?, markerPresent: Bool) -> [WorkspaceProfile] {
@@ -249,9 +249,10 @@ final class ProjectStore {
             let stored = try container.decodeIfPresent([StoredProject].self, forKey: .projects) ?? []
             projects = ProjectStore.deduplicated(stored.enumerated().compactMap { index, project in
                 guard let id = project.id, !id.isEmpty else { return nil }
+                let unnamed = id == WorkspaceProfile.defaultID ? WorkspaceProfile.defaultProfile.name : "space"
                 return WorkspaceProfile(
                     id: id,
-                    name: project.name ?? "space",
+                    name: project.name ?? unnamed,
                     colorHex: project.colorHex ?? WorkspaceProfile.colorHex(for: index)
                 )
             })

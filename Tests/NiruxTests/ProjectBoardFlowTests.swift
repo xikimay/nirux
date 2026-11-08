@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import Nirux
 
-/// The Project Board in a real window, from "Open Project Board" to its
+/// The Board in a real window, from "Open Board" to its
 /// buttons. A fake `gh` client stands in for GitHub (the runners have
 /// `gh`): the board calls it off the main thread and hops back, the path
 /// where a closure isolated to the main actor trapped in the nightly
@@ -156,8 +156,8 @@ final class ProjectBoardFlowTests: XCTestCase {
             try click(try XCTUnwrap(loginRow.actions.first { $0.title == "Focus" }))
             XCTAssertEqual(shell.activeWorkspace?.title, "login")
 
-            // "Open Project Board" again, from another workspace of the
-            // project, brings the board back rather than opening another.
+            // "Open Board" again, from another workspace of the
+            // space, brings the board back rather than opening another.
             try runPaletteAction("Open Board", in: shell)
             XCTAssertEqual(shell.activeWorkspace?.title, "widgets")
             XCTAssertEqual(shell.projectBoardLocations.count, 1)

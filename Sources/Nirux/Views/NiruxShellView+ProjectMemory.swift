@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Project Memory panel (⌘P › Project Memory…, the project's menu)
+// MARK: - Space Memory panel (⌘P › Space Memory…, the space's menu)
 
 extension NiruxShellView {
     /// What a Project Memory read needs, kept for the reads after a write.
@@ -80,7 +80,7 @@ extension NiruxShellView {
         let trash = sideEffects.trash
         var actions = ProjectMemoryPanel.Actions()
         // An item's file opens in the editor of the workspace it was read
-        // for, brought forward, as the project brief opens in the
+        // for, brought forward, as the space brief opens in the
         // workspace's.
         actions.open = { [weak self, weak workspace] url, line in
             guard let self else { return }
