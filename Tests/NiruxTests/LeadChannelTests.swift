@@ -95,6 +95,32 @@ final class LeadChannelTests: XCTestCase {
         XCTAssertEqual(LeadChannel.takeRequests(stateDirectory: stateDirectory), [], "each is read once")
     }
 
+    /// The app takes only requests from its own workspaces, and none an
+    /// earlier launch's terminals left.
+    @MainActor
+    func testTheAppTakesOnlyItsOwnFreshRequests() {
+        let folder = LeadChannel.requestsFolder(stateDirectory: stateDirectory)
+        let left = request(createdAt: Date().timeIntervalSince1970 - 5)
+        XCTAssertTrue(LeadChannel.write(left, id: left.id, in: folder))
+        let center = LeadRequestCenter()
+        var handled: [String] = []
+        center.handler = { request, answer in
+            handled.append(request.id)
+            answer("ok", false)
+        }
+        let foreign = request()
+        center.owns = { $0.id != foreign.id }
+        center.start(stateDirectory: stateDirectory)
+        defer { center.stop() }
+        XCTAssertEqual(handled, [], "an earlier launch's request")
+        let mine = request(createdAt: Date().timeIntervalSince1970 + 1)
+        for item in [mine, foreign] { XCTAssertTrue(LeadChannel.write(item, id: item.id, in: folder)) }
+        center.drain()
+        XCTAssertEqual(handled, [mine.id])
+        XCTAssertEqual(LeadChannel.waitingRequests(stateDirectory: stateDirectory).map(\.id), [foreign.id], "left to its Nirux")
+        XCTAssertEqual(LeadChannel.take(LeadChannel.Response.self, id: mine.id, from: LeadChannel.responsesFolder(stateDirectory: stateDirectory))?.text, "ok")
+    }
+
     // MARK: - The MCP server
 
     private func context(lead: Bool) -> NiruxMCPServer.Context {

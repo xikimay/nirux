@@ -125,6 +125,9 @@ final class LeadToolsFlowTests: XCTestCase {
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data("{ not json".utf8).write(to: file)
             XCTAssertFalse(shell.leadStartsTasksWithoutAsking(spaceID: lead.space))
+            // The switch turns it back on: the file is replaced.
+            shell.setLeadStartsTasks(true, spaceID: lead.space)
+            XCTAssertTrue(shell.leadStartsTasksWithoutAsking(spaceID: lead.space))
         }
     }
 

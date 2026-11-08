@@ -154,13 +154,16 @@ extension NiruxShellView {
     /// In the space its repository belongs to, else the sheet's
     /// (docs/spaces.md, "Routing").
     private func openTaskWorkspace(_ request: NewTask.Request, _ created: CreatedTaskWorktree) {
-        // A task a Lead starts comes from its space's repository: it opens
-        // in that space, as its parent, whatever another space anchors.
-        let leadParent = request.reportsTo.flatMap { parent in workspaces.first { $0.id == parent.workspaceID && $0.isLead } }
-        let decision = decideSpace(
-            identity: leadParent == nil ? created.identity : nil,
-            parentWorkspaceID: request.reportsTo?.workspaceID, startedFromSpaceID: request.projectID
+        var decision = decideSpace(
+            identity: created.identity, parentWorkspaceID: request.reportsTo?.workspaceID, startedFromSpaceID: request.projectID
         )
+        // A task a Lead starts comes from its space's repository: it opens
+        // in that space, as its parent, even when another space anchors its
+        // folder (its setup script then doesn't run).
+        if let lead = request.reportsTo.flatMap({ parent in workspaces.first { $0.id == parent.workspaceID && $0.isLead } }),
+           decision.spaceID != lead.profileID {
+            decision = decideSpace(identity: nil, parentWorkspaceID: lead.id, startedFromSpaceID: lead.profileID)
+        }
         let childWorkspaceID = UUID().uuidString
         let childAgentUUID = UUID().uuidString
         let mission = request.reportsTo.flatMap { parent in

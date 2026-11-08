@@ -108,7 +108,10 @@ extension NiruxShellView {
         let loaded = store.load()
         var defaults = loaded.defaults
         defaults.leadStartsTasks = on ? nil : false
-        if defaults != loaded.defaults, case .failure(let error) = store.save(defaults, replacing: loaded) {
+        // An unreadable file is replaced (set aside first) even with nothing
+        // to change: it reads as off until then.
+        if defaults != loaded.defaults || loaded.status == .unreadable,
+           case .failure(let error) = store.save(defaults, replacing: loaded) {
             showToast(error.message, tone: .error)
         }
         // The Defaults tab shows the file as it is now, unless it holds

@@ -416,13 +416,15 @@ extension NiruxShellView {
         guard !controller.isRunning, !controller.runsElsewhere else {
             return answer("\(chosen.1.name)'s merge queue is running: propose these once it ends.", true)
         }
-        // The user's own list stays theirs.
+        // The user's own list stays theirs; a Lead's earlier one is its own.
         let current = controller.selection(for: chosen.1.gitHub)
-        guard current.isEmpty || Set(current) == Set(numbers) else {
+        let proposalKey = space.id + " " + chosen.1.gitHub.ownerAndName
+        guard current.isEmpty || Set(current) == Set(numbers) || current == leadQueueProposals[proposalKey] else {
             return answer("The user is preparing \(chosen.1.name)'s queue (" + current.map { "#\($0)" }.joined(separator: ", ")
                 + "): suggest yours to them in this conversation instead.", true)
         }
         controller.proposeSelection(numbers, repository: chosen.1.gitHub)
+        leadQueueProposals[proposalKey] = numbers
         requestMergeQueueStart(board: board, section: chosen.0.id)
         guard mergeQueueConfirmation != nil else {
             return answer("Nirux couldn't open the merge queue's sheet (the Board may need its settings): tell the user.", true)
