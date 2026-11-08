@@ -40,7 +40,7 @@ enum NiruxMCPServer {
     /// The instructions for whoever launched the server: the Lead's role
     /// comes first in its workspace (`NIRUX_LEAD=1`).
     static func instructions(for context: Context) -> String {
-        context.isLead ? leadInstructions + "\n\n" + instructions : instructions
+        instructions
     }
 
     /// `--mcp-config=<this server>` and `--allowedTools=<its tools>` for

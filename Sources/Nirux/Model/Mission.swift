@@ -189,7 +189,7 @@ final class MissionStore {
         enabled: Bool,
         now: TimeInterval = Date().timeIntervalSince1970
     ) -> Mission? {
-        guard enabled || request.reportsToLead,
+        guard enabled,
               ensureLoaded(),
               Self.isIdentifier(request.id),
               Self.isIdentifier(request.parentWorkspaceID),
@@ -255,7 +255,7 @@ final class MissionStore {
               Self.isIdentifier(incoming.childWorkspaceID),
               Self.isIdentifier(incoming.childAgentUUID),
               let index = missions.firstIndex(where: { $0.id == incoming.missionID }),
-              missions[index].isCarried(handoffsEnabled: enabled),
+              enabled,
               missions[index].childWorkspaceID == incoming.childWorkspaceID,
               missions[index].childAgentUUID == incoming.childAgentUUID
         else { return .rejected }

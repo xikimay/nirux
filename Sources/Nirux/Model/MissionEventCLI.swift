@@ -67,7 +67,7 @@ enum MissionEventCLI {
         // Terminals keep their Mission environment after the setting is
         // turned off, while Nirux drops their events: say so, don't wait.
         // A space's Lead and its tasks keep their Missions.
-        guard handoffsEnabled() != false || isLeadsMission(environment: environment, missionsURL: missionsURL) else {
+        guard handoffsEnabled() != false else {
             writeStandardError("Mission handoffs are turned off in Nirux Settings; stop using Mission commands.")
             return 4
         }

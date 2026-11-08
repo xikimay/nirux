@@ -372,9 +372,7 @@ final class WorkspaceStore {
     /// ones.
     func visibleWorkspaceIndices(in profileID: String) -> [Int] {
         let matching = workspaces.indices.filter { workspaces[$0].profileID == profileID }
-        return matching.filter { workspaces[$0].isLead }
-            + matching.filter { !workspaces[$0].isLead && !workspaces[$0].isInactive }
-            + matching.filter { !workspaces[$0].isLead && workspaces[$0].isInactive }
+        return matching.filter { !workspaces[$0].isInactive } + matching.filter { workspaces[$0].isInactive }
     }
 
     /// The space's Lead, unless it is closing (docs/spaces.md, "The Lead").
