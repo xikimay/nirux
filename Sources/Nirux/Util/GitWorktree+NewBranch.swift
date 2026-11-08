@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-// MARK: - New branches (New Task…, see NewTask)
+// MARK: - New branches (⌘N tasks, see NewTask)
 
 extension GitWorktree {
     /// Why `branch` can't be a new task's branch, or nil:
@@ -29,6 +29,16 @@ extension GitWorktree {
             return "\(entry.branch ?? branch) is already checked out in \(entry.path): choose another branch name"
         }
         return nil
+    }
+
+    /// A local branch, or a worktree's (one not committed to yet has no
+    /// ref), named `branch` in any case: the filesystem ignores case, so git
+    /// takes them for one.
+    static func localBranchExistsIgnoringCase(_ branch: String, repoRoot: String) -> Bool {
+        let refs = gitRun(["for-each-ref", "--ignore-case", "--format=%(refname)", "refs/heads/\(branch)"], cwd: repoRoot)
+        guard refs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return true }
+        let lowered = branch.lowercased()
+        return list(repoRoot: repoRoot).contains { $0.branch?.lowercased() == lowered }
     }
 
     /// The commit a new task's branch starts from, or why it can't start.
@@ -76,15 +86,21 @@ extension GitWorktree {
     /// no tags, no submodules, never a credentials prompt, and given up after
     /// `timeout`. Nil once fetched, else why not.
     static func fetch(branch: String, from remote: String = "origin", repoRoot: String, timeout: TimeInterval = 10) -> String? {
-        let result = gitRunFull(
-            [
-                "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", remote,
-                "+refs/heads/\(branch):refs/remotes/\(remote)/\(branch)"
-            ],
-            cwd: repoRoot,
-            timeout: timeout,
-            environment: ["GIT_TERMINAL_PROMPT": "0"]
-        )
+        func run() -> GitResult {
+            gitRunFull(
+                [
+                    "fetch", "--quiet", "--no-tags", "--no-recurse-submodules", remote,
+                    "+refs/heads/\(branch):refs/remotes/\(remote)/\(branch)"
+                ],
+                cwd: repoRoot,
+                timeout: timeout,
+                environment: ["GIT_TERMINAL_PROMPT": "0"]
+            )
+        }
+        var result = run()
+        // Another fetch of the same branch (a second task, an agent's
+        // worktree) updated the ref meanwhile: once more, now up to date.
+        if result.status != 0, result.stderr.contains("cannot lock ref") { result = run() }
         guard result.status != 0 else { return nil }
         let lines = result.stderr.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }

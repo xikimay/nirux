@@ -408,7 +408,7 @@ final class WorkspaceStore {
 
     /// The default space (General) always exists and comes first, so every
     /// list of spaces starts with it: the switcher, the menus, Move to Space,
-    /// New Task's popup. It has no repositories or folders; each other one
+    /// New Space…. It has no repositories or folders; each other one
     /// belongs to the first space listing it, and each space has one default
     /// anchor (a hand-edited or merged file may break all three).
     private static func normalizedProfiles(_ profiles: [WorkspaceProfile]) -> [WorkspaceProfile] {

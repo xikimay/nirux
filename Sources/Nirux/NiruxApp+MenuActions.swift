@@ -31,7 +31,7 @@ extension NiruxApp {
     }
 
     @objc func newWorkspace(_ sender: Any?) {
-        shell?.showNewWorkspacePanel()
+        shell?.showNewPanel()
     }
 
     @objc func resumeAllAgents(_ sender: Any?) {

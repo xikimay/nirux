@@ -134,6 +134,6 @@ extension OnboardingChecklist {
     static let shortcuts: [(key: String, label: String)] = [
         (NiruxShortcuts.commandPalette.chord.display, "palette"),
         (NiruxShortcuts.newTerminal.chord.display, "column"),
-        (NiruxShortcuts.newWorkspace.chord.display, "workspace")
+        (NiruxShortcuts.newWorkspace.chord.display, "new")
     ]
 }
