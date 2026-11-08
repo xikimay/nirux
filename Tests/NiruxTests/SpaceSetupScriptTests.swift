@@ -55,28 +55,30 @@ final class SpaceSetupScriptTests: XCTestCase {
         XCTAssertNil(SpaceSetupScript.scriptToRun(spaceID: "s", anchor: web, stateDirectory: stateDirectory))
     }
 
-    /// `/bin/sh '<script>' || '<Nirux>' --hook codex --setup-failed '<id>';
-    /// <agent>`: the agent starts whatever the script did.
+    /// `/bin/sh -e '<script>' </dev/null || '<Nirux>' --hook codex
+    /// --setup-failed '<id>'; <agent>`: the agent starts whatever the
+    /// script did.
     func testTheTypedLineRunsTheScriptThenTheAgent() {
         XCTAssertEqual(
             SpaceSetupScript.command(
                 script: "/state/projects/s/setup/it's-1.sh", executable: "/Applications/Nirux.app/Contents/MacOS/Nirux",
                 workspaceID: "W-1", then: "command claude --permission-mode plan"
             ),
-            "/bin/sh '/state/projects/s/setup/it'\\''s-1.sh' || '/Applications/Nirux.app/Contents/MacOS/Nirux' "
+            "/bin/sh -e '/state/projects/s/setup/it'\\''s-1.sh' </dev/null || '/Applications/Nirux.app/Contents/MacOS/Nirux' "
                 + "'--hook' 'codex' '--setup-failed' 'W-1'; command claude --permission-mode plan"
         )
         XCTAssertEqual(
             SpaceSetupScript.command(script: "/s.sh", executable: nil, workspaceID: "W-1", then: nil),
-            "/bin/sh '/s.sh'"
+            "/bin/sh -e '/s.sh' </dev/null"
         )
     }
 
-    /// The typed line runs in the user's shell: the script fails, the
-    /// report runs, then the agent command, in that order.
+    /// The typed line runs in the user's shell: the script fails at its
+    /// first failing command, gets no input, the report runs, then the
+    /// agent command, in that order.
     func testAFailingScriptReportsThenTheAgentStillStarts() throws {
         let script = stateDirectory.appendingPathComponent("fail.sh")
-        try "echo setup; exit 3\n".write(to: script, atomically: true, encoding: .utf8)
+        try "echo setup\nread answer && echo \"read $answer\"\nfalse\necho after\n".write(to: script, atomically: true, encoding: .utf8)
         let report = stateDirectory.appendingPathComponent("report.sh")
         try "#!/bin/sh\necho \"report $*\"\n".write(to: report, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: report.path)
@@ -87,11 +89,32 @@ final class SpaceSetupScriptTests: XCTestCase {
             process.arguments = ["-c", line]
             let output = Pipe()
             process.standardOutput = output
+            // Something to read, which the script must not get.
+            let input = Pipe()
+            process.standardInput = input
+            try input.fileHandleForWriting.write(contentsOf: Data("yes\n".utf8))
             try process.run()
             process.waitUntilExit()
             let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
             XCTAssertEqual(text, "setup\nreport --hook codex --setup-failed W-1\nagent\n", shell)
         }
+    }
+
+    /// Once per worktree: a later request that reuses it doesn't run the
+    /// script again where an agent may be working.
+    func testTheScriptRunsOncePerWorktree() throws {
+        let repo = stateDirectory.appendingPathComponent("repo").path
+        try FileManager.default.createDirectory(atPath: repo, withIntermediateDirectories: true)
+        let git = Process()
+        git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        git.arguments = ["init", "-q", repo]
+        try git.run()
+        git.waitUntilExit()
+        XCTAssertEqual(git.terminationStatus, 0)
+        XCTAssertTrue(SpaceSetupScript.claimFirstRun(worktree: repo))
+        XCTAssertFalse(SpaceSetupScript.claimFirstRun(worktree: repo))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: repo + "/.git/" + SpaceSetupScript.markerName))
+        XCTAssertFalse(SpaceSetupScript.claimFirstRun(worktree: stateDirectory.appendingPathComponent("not-a-repo").path))
     }
 
     /// A linked script never runs, so the editor doesn't edit it either

@@ -521,10 +521,13 @@ What shipped differs from the proposal below in these ways:
 - **Agent.** The space's agent is the one its tasks preselect (New Task…,
   ⌘N); a plain new workspace stays a shell.
 - **Setup scripts** are per repository (anchor), in `projects/<space
-  id>/setup/<name>-<hash>.sh`, run with `/bin/sh` only in worktrees Nirux
-  makes for the user (New Task…, the worktree skill, New Worktree), not in an
-  existing worktree it opens. A script with only comments doesn't run. The
-  failure report is spelled `'<Nirux>' --hook codex --setup-failed <workspace
+  id>/setup/<name>-<hash>.sh`, run with `/bin/sh -e` and no input only in
+  worktrees Nirux makes for the user (New Task…, the worktree skill, New
+  Worktree), once per worktree: a marker in the worktree's git folder
+  (`.git/worktrees/<name>/nirux-setup-ran`) keeps a request that reuses it,
+  where an agent may work, from running it again. Not in an existing
+  worktree opened as such. A script with only comments doesn't run, and a
+  linked one neither runs nor is edited. The failure report is spelled `'<Nirux>' --hook codex --setup-failed <workspace
   id>`: an older Nirux at the same path (a rollback) reads it as a Codex hook
   payload it can't parse and exits, instead of opening a second window on the
   same state. It reaches the running Nirux as a distributed notification
@@ -532,11 +535,20 @@ What shipped differs from the proposal below in these ways:
   notification and the Telegram alert.
 - **From outside Nirux.** A workspace opened by a `nirux://` request the
   user confirmed (no launch ID) is marked so in `state.json`: its shells
-  never get the space's environment, nor its first agent the setup script.
+  never get the space's environment nor a launch ID (its agents' requests
+  ask first too), its first agent no setup script, and its launches take
+  Settings' modes, the ones the confirmation named. An older build drops the
+  mark when it saves, so after a rollback such a workspace counts as started
+  in Nirux. Older builds also ignore the space's modes.
+- **Environment.** Names steering the shell or the agents (`PATH`, `HOME`,
+  `TERM…`, `CLAUDE_…`, `ANTHROPIC_…`, `OPENAI_…`, `CODEX_…`) and values with a
+  `$` are written but warned about.
+- **Deleting a space** deletes its `defaults.json` and setup scripts, which
+  may hold secrets; its brief stays.
 
 | Default | Applied when | How |
 | --- | --- | --- |
-| Agent (Claude, Codex, none) | A workspace is created in the project | `launchAgent` |
+| Agent (Claude, Codex) | A task is started in the project (preselected) | New Task…, ⌘N |
 | Claude permission mode | A Claude column launches | `ClaudeLaunchMode.cliArgs` |
 | Codex mode | A Codex column launches | `CodexLaunchMode.cliArgs` |
 | Environment variables | A shell starts in the project | `makeTerminalEnvironment` |

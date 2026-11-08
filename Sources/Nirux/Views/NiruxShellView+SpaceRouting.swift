@@ -54,8 +54,8 @@ extension NiruxShellView {
     /// A workspace the user opened from a space on an existing folder (Open
     /// Worktree, the board, a worktree made in the panel): it goes where
     /// its folder belongs, else to its parent's space, else to that space.
-    /// `isNewWorktree`: Nirux just made it, so its repository's setup
-    /// script runs first.
+    /// `isNewWorktree`: Nirux just made it (or reused one for its branch),
+    /// so its repository's setup script runs first, the first time only.
     func openRoutedWorkspace(
         title: String,
         cwd: String,
@@ -65,13 +65,27 @@ extension NiruxShellView {
         worktreeBranch: String? = nil,
         isNewWorktree: Bool = false
     ) {
-        routeWorkspace(folder: cwd, parentWorkspaceID: parentWorkspaceID, startedFromSpaceID: startedFromSpaceID) { [weak self] decision in
-            guard let self else { return }
-            self.addWorkspace(
-                title: title, cwd: cwd, agent: agent, profileID: decision.spaceID, worktreeBranch: worktreeBranch,
-                setupScript: isNewWorktree ? self.setupScript(for: decision) : nil
-            )
-            self.saveState()
+        let open: @MainActor @Sendable (Bool) -> Void = { [weak self] firstSetup in
+            self?.routeWorkspace(folder: cwd, parentWorkspaceID: parentWorkspaceID, startedFromSpaceID: startedFromSpaceID) { [weak self] decision in
+                guard let self else { return }
+                self.addWorkspace(
+                    title: title, cwd: cwd, agent: agent, profileID: decision.spaceID, worktreeBranch: worktreeBranch,
+                    setupScript: firstSetup ? self.setupScript(for: decision) : nil
+                )
+                self.saveState()
+            }
+        }
+        guard isNewWorktree else { return open(false) }
+        Self.claimFirstSetupOffMain(cwd, completion: open)
+    }
+
+    /// `SpaceSetupScript.claimFirstRun` off the main thread, through a
+    /// nonisolated function so the closure can't inherit this view's
+    /// main-actor isolation.
+    nonisolated static func claimFirstSetupOffMain(_ worktree: String, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let first = SpaceSetupScript.claimFirstRun(worktree: worktree)
+            DispatchQueue.main.async { @MainActor in completion(first) }
         }
     }
 

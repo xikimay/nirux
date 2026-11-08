@@ -515,7 +515,12 @@ extension WorkspaceState {
         if let briefURL = SpaceBrief.briefURL(spaceID: profileID) {
             environment["NIRUX_PROJECT_BRIEF"] = briefURL.path
         }
-        guard !startedOutsideNirux else { return environment }
+        guard !startedOutsideNirux else {
+            // Its agents' nirux:// requests ask first, as its own did: they
+            // come from outside Nirux too.
+            environment[NiruxLaunchAuthorization.environmentKey] = ""
+            return environment
+        }
         // The space's variables, under Nirux's own: they never replace a
         // NIRUX_ one (SpaceDefaults refuses those names anyway).
         return environment.merging(SpaceDefaultsStore.defaults(forSpace: profileID).effectiveEnvironment) { nirux, _ in nirux }

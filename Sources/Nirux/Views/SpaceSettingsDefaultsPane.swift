@@ -34,6 +34,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
     let addButton = NSButton(title: "Add Variable", target: nil, action: nil)
     let removeButton = NSButton(title: "Remove", target: nil, action: nil)
     let problemsLabel = NSTextField(wrappingLabelWithString: "")
+    let warningsLabel = NSTextField(wrappingLabelWithString: "")
     let bannerLabel = NSTextField(wrappingLabelWithString: "")
 
     private(set) var loaded: SpaceDefaultsStore.Loaded
@@ -212,6 +213,9 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         let problems = draft.environmentProblems
         problemsLabel.stringValue = problems.isEmpty ? "" : (problems + ["Fix them to save the variables."]).joined(separator: "\n")
         problemsLabel.isHidden = problems.isEmpty
+        let warnings = draft.environmentWarnings
+        warningsLabel.stringValue = warnings.joined(separator: "\n")
+        warningsLabel.isHidden = warnings.isEmpty
         updateRemoveButton()
     }
 
@@ -316,12 +320,16 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
         problemsLabel.textColor = .systemRed
         problemsLabel.isSelectable = false
         problemsLabel.preferredMaxLayoutWidth = Self.contentWidth
+        warningsLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        warningsLabel.textColor = .systemOrange
+        warningsLabel.isSelectable = false
+        warningsLabel.preferredMaxLayoutWidth = Self.contentWidth
         bannerLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
         bannerLabel.textColor = .systemOrange
         bannerLabel.isSelectable = false
         bannerLabel.preferredMaxLayoutWidth = Self.contentWidth
 
-        let environment = NSStackView(views: [header, scroll, buttons, problemsLabel, envHint])
+        let environment = NSStackView(views: [header, scroll, buttons, problemsLabel, warningsLabel, envHint])
         environment.orientation = .vertical
         environment.alignment = .leading
         environment.spacing = 8
@@ -344,6 +352,7 @@ final class SpaceSettingsDefaultsPane: NSObject, NSTableViewDataSource, NSTableV
             scroll.heightAnchor.constraint(equalToConstant: 150),
             bannerLabel.widthAnchor.constraint(equalToConstant: Self.contentWidth),
             problemsLabel.widthAnchor.constraint(equalToConstant: Self.contentWidth),
+            warningsLabel.widthAnchor.constraint(equalToConstant: Self.contentWidth),
             envHint.widthAnchor.constraint(equalToConstant: Self.contentWidth),
             formHint.widthAnchor.constraint(equalToConstant: Self.contentWidth)
         ])

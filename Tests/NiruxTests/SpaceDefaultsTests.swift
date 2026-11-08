@@ -58,6 +58,19 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertNil(SpaceDefaults.problem(name: "_Private9", value: "any value = fine"))
     }
 
+    /// Written all the same, but said: names that steer the shell or the
+    /// agents, and values that look expanded.
+    func testSurprisingVariablesAreWarnedAbout() {
+        XCTAssertNotNil(SpaceDefaults.warning(name: "PATH", value: "/opt/bin")?.range(of: "shell"))
+        XCTAssertNotNil(SpaceDefaults.warning(name: "TERM_PROGRAM", value: "x"))
+        XCTAssertNotNil(SpaceDefaults.warning(name: "ANTHROPIC_API_KEY", value: "sk")?.range(of: "every agent"))
+        XCTAssertNotNil(SpaceDefaults.warning(name: "API_URL", value: "$HOST:4000")?.range(of: "literal"))
+        XCTAssertNil(SpaceDefaults.warning(name: "API_URL", value: "http://localhost:4000"))
+        let defaults = SpaceDefaults(environment: [variable("PATH", "/x"), variable("PATH", "/y"), variable("NIRUX_A", "$B")])
+        XCTAssertEqual(defaults.environmentWarnings.count, 1, "the variable that applies, once")
+        XCTAssertEqual(defaults.effectiveEnvironment, ["PATH": "/x"])
+    }
+
     // MARK: - The file
 
     func testAMissingFileGivesNoDefaults() throws {
@@ -152,6 +165,19 @@ final class SpaceDefaultsTests: XCTestCase {
         XCTAssertEqual(store.load().status, .readOnly(.notARegularFile))
         XCTAssertEqual(store.save(SpaceDefaults()), .failure(.readOnly(.notARegularFile)))
         XCTAssertEqual(try String(contentsOf: elsewhere, encoding: .utf8), #"{"agent": "codex"}"#)
+    }
+
+    /// A deleted space's defaults and setup scripts go; its brief stays.
+    func testADeletedSpaceLeavesNoSecretsBehind() throws {
+        let store = try store()
+        _ = try store.save(SpaceDefaults(environment: [variable("TOKEN", "s3cr3t")])).get()
+        let folder = store.fileURL.deletingLastPathComponent()
+        try Data("x".utf8).write(to: folder.appendingPathComponent("defaults.corrupt.1-abc.json"))
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent("setup"), withIntermediateDirectories: true)
+        try Data("npm ci\n".utf8).write(to: folder.appendingPathComponent("setup/web-1.sh"))
+        try Data("Goals.\n".utf8).write(to: folder.appendingPathComponent("brief.md"))
+        SpaceDefaultsStore.removeFiles(ofSpace: "space-1", stateDirectory: stateDirectory)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path), ["brief.md"])
     }
 
     // MARK: - Workspaces opened from outside

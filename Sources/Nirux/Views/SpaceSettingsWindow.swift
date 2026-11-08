@@ -77,6 +77,7 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
     /// shell makes them).
     weak var boardForm: BoardSettingsPanel?
     weak var setupScriptEditor: SpaceFileEditorPane?
+    weak var memoryPanel: ProjectMemoryPanel?
 
     /// Something typed and not saved, which closing would lose.
     struct UnsavedPart {
@@ -95,6 +96,13 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
         }
         if let form = boardForm, form.isDirty {
             parts.append(UnsavedPart(name: "board settings", tab: .board, save: { form.save() }))
+        }
+        if let memory = memoryPanel, memory.shows(in: memoryHost), memory.hasUnsavedEdit {
+            // The write runs on; a failure says so once the window is gone.
+            parts.append(UnsavedPart(name: "memory item", tab: .memory, save: {
+                memory.saveEditing()
+                return memory.editing == nil || memory.isWriting
+            }))
         }
         if defaults.hasUnsavedRows {
             parts.append(UnsavedPart(name: "environment variables", tab: .defaults, save: { [defaults] in defaults.saveRows() }))
@@ -162,13 +170,13 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
             item.image = NSImage(systemSymbolName: tab.symbol, accessibilityDescription: tab.title)
             tabs.addTabViewItem(item)
         }
-        // After the first tab got picked by being added: `show` says which
-        // tab shows, once.
+        let panel = SpaceSettingsPanel(contentViewController: tabs)
+        // After the init, which picks the first tab: `show` says which tab
+        // shows, once.
         tabs.onSelect = { [weak self] index in
             guard let self, let tab = Tab.allCases[safe: index] else { return }
             self.tabShown(tab)
         }
-        let panel = SpaceSettingsPanel(contentViewController: tabs)
         panel.styleMask = [.titled, .closable]
         panel.isFloatingPanel = false
         panel.hidesOnDeactivate = false
@@ -269,6 +277,8 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
 
     /// Unsaved changes ask first: Save, Don't Save, or Cancel.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
+        // A name or a value still being typed counts.
+        sender.makeFirstResponder(nil)
         let parts = unsavedParts
         guard !parts.isEmpty else { return true }
         let alert = NSAlert()
@@ -283,11 +293,12 @@ final class SpaceSettingsWindow: NSObject, NSWindowDelegate {
             guard let self else { return }
             switch response {
             case .alertFirstButtonReturn:
-                // A save that fails (a problem, a file changed on disk)
-                // keeps the window open on its tab, saying why.
-                for part in parts where !part.save() {
+                // On its tab, which a question about it needs; one that
+                // fails (a problem, a file changed on disk) keeps the window
+                // open there, saying why.
+                for part in parts {
                     self.select(part.tab)
-                    return
+                    if !part.save() { return }
                 }
                 self.close()
             case .alertThirdButtonReturn:

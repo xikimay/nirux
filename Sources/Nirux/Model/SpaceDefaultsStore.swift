@@ -37,6 +37,21 @@ struct SpaceDefaultsStore: Sendable {
         SpaceDefaultsStore(spaceID: spaceID, stateDirectory: stateDirectory)?.load().defaults ?? SpaceDefaults()
     }
 
+    /// A deleted space's defaults (copies set aside included) and setup
+    /// scripts, which may hold secrets, go with it; its brief stays.
+    static func removeFiles(ofSpace spaceID: String, stateDirectory: URL = Persistence.stateDirectory) {
+        guard let folder = SpaceBrief.directory(spaceID: spaceID, stateDirectory: stateDirectory),
+              let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path)
+        else { return }
+        for name in names where name == fileName || name.hasPrefix("defaults.corrupt.") || name == SpaceSetupScript.folderName {
+            do {
+                try FileManager.default.removeItem(at: folder.appendingPathComponent(name))
+            } catch {
+                NiruxDebugLog.log("SpaceDefaultsStore: could not remove \(name) of a deleted space: \(error)")
+            }
+        }
+    }
+
     // MARK: - Loading
 
     struct Loaded: Equatable, Sendable {

@@ -34,7 +34,10 @@ extension NiruxShellView {
             : "Its \(count == 1 ? "workspace moves" : "\(count) workspaces move") to \"\(target)\"."
         guard confirmDestructiveClose(
             message: "Delete the space \"\(space.name)\"?",
-            details: [moved, "Its brief stays on disk. Folders and repositories aren't touched."],
+            details: [
+                moved,
+                "Its defaults and setup scripts are deleted; its brief stays on disk. Folders and repositories aren't touched."
+            ],
             confirmTitle: "Delete Space"
         ) else { return }
         deleteSpace(profileID: profileID)
@@ -58,6 +61,7 @@ extension NiruxShellView {
         guard workspaceStore.deleteProfile(id: profileID) else { return }
         projectHistoryWorkspacesMoved(moved, from: profileID, to: WorkspaceProfile.defaultID)
         projectStore.markDeleted(profileID)
+        SpaceDefaultsStore.removeFiles(ofSpace: profileID)
         refreshAfterWorkspaceMutation()
         // Opened while the confirmation was up: its space is gone.
         spaceSettingsSpacesChanged()

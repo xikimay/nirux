@@ -78,6 +78,7 @@ extension NiruxShellView {
         guard let settings = spaceSettings, settings.spaceID == spaceID else { return }
         settings.hideMemoryPlaceholder()
         if projectMemoryPanel == nil { projectMemoryPanel = ProjectMemoryPanel() }
+        settings.memoryPanel = projectMemoryPanel
         projectMemoryPanel?.show(
             in: settings.memoryHost, model: model,
             actions: projectMemoryActions(context: context, workspace: workspace, spaceID: spaceID)
@@ -106,7 +107,7 @@ extension NiruxShellView {
         actions.confirm = { [weak self] alert in self?.runModal(alert) == .alertFirstButtonReturn }
         let limit = SpaceBrief.maxCharacters
         actions.move = { [weak self] target, scope in
-            guard let self else { return false }
+            guard let self, !briefHasUnsavedText() else { return false }
             switch (target, scope) {
             case (.memory(let memory, let directory), .always):
                 guard let brief = ensureProjectBrief(spaceID: spaceID) else { return false }
@@ -124,6 +125,7 @@ extension NiruxShellView {
         }
         actions.save = { [weak self] target, text in
             guard let self else { return false }
+            if case .briefRule = target, briefHasUnsavedText() { return false }
             switch target {
             case .memory(let memory, let directory):
                 return writeProjectMemory(context, keeping: .init(target)) {
@@ -142,6 +144,7 @@ extension NiruxShellView {
         actions.add = { [weak self] item in
             guard let self else { return false }
             if item.scope == .always {
+                guard !briefHasUnsavedText() else { return false }
                 guard let brief = ensureProjectBrief(spaceID: spaceID) else { return false }
                 let text = "**\(item.title)** \(item.text)"
                 return writeProjectMemory(context) {
@@ -158,6 +161,7 @@ extension NiruxShellView {
         }
         actions.delete = { [weak self] target in
             guard let self else { return false }
+            if case .briefRule = target, briefHasUnsavedText() { return false }
             switch target {
             case .memory(let memory, let directory):
                 return writeProjectMemory(context, keeping: .init(target)) {
@@ -181,6 +185,14 @@ extension NiruxShellView {
             }
         }
         return actions
+    }
+
+    /// The Brief tab holds typed text: a write to the brief now would be
+    /// lost, or replace it, when that text is saved. Says so in the panel.
+    private func briefHasUnsavedText() -> Bool {
+        guard spaceSettings?.brief.isDirty == true else { return false }
+        projectMemoryPanel?.writeFailed("Save or revert the text typed in the Brief tab first: this changes the brief.")
+        return true
     }
 
     /// The project's brief, created on first use as "Edit Space Brief…"
@@ -208,6 +220,8 @@ extension NiruxShellView {
         let request = projectMemoryRequest
         let opening = projectMemoryPanel?.opening ?? 0
         Self.runProjectMemoryWrite(context, work) { [weak self] model, result in
+            // The Brief tab shows what a write to the brief left.
+            self?.spaceSettings?.brief.checkDisk()
             guard let self, let panel = projectMemoryPanel else { return }
             // Closed or reopened since: the result isn't this panel's to show,
             // but the write is over.

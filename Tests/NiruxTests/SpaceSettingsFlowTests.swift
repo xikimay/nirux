@@ -82,7 +82,7 @@ final class SpaceSettingsFlowTests: XCTestCase {
             let anchor = try XCTUnwrap(space.anchors.first)
             let script = try XCTUnwrap(SpaceSetupScript.url(spaceID: space.id, anchor: anchor))
             try SpaceSetupScript.save("touch .setup-ran", to: script)
-            let prefix = "/bin/sh '\(script.path)'"
+            let prefix = "/bin/sh -e '\(script.path)' </dev/null"
 
             shell.createWorktreeWorkspace(branch: "feat/setup", repoRoot: harness.repo, agent: .claude)
             harness.waitUntil("the worktree's workspace") { workspace(harness, "feat/setup") != nil }
@@ -90,6 +90,14 @@ final class SpaceSettingsFlowTests: XCTestCase {
             let typed = try XCTUnwrap(harness.agentLaunches.last)
             // xctest isn't Nirux: no executable to report a failure with.
             XCTAssertTrue(typed.hasPrefix(prefix + "; command claude"), typed)
+
+            // Asked again for that branch: the same worktree, where an agent
+            // works now; the script doesn't run again.
+            shell.createWorktreeWorkspace(branch: "feat/setup", repoRoot: harness.repo, agent: .claude)
+            harness.waitUntil("the reused worktree's workspace") {
+                shell.workspaces.filter { $0.title == "feat/setup" && !$0.isClosing }.count == 2
+            }
+            XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command claude") == true, harness.agentLaunches.last ?? "")
 
             shell.createWorktreeWorkspace(branch: "feat/bare", repoRoot: harness.repo, agent: nil)
             harness.waitUntil("the second worktree's workspace") { workspace(harness, "feat/bare") != nil }
@@ -101,15 +109,14 @@ final class SpaceSettingsFlowTests: XCTestCase {
             XCTAssertEqual(harness.agentLaunches.count, count + 1)
             XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command claude") == true, harness.agentLaunches.last ?? "")
 
-            // Its agent asks for a worktree with Nirux's launch ID: the
-            // child stays outside.
-            let outsideParent = try XCTUnwrap(workspace(harness, "feat/outside"))
-            shell.createWorktreeWorkspace(
-                branch: "feat/grandchild", repoRoot: harness.repo, agent: .claude, parentWorkspaceID: outsideParent.id
+            // Its agents get no launch ID: their own requests ask first, and
+            // come from outside too.
+            let outsideWorkspace = try XCTUnwrap(workspace(harness, "feat/outside"))
+            XCTAssertEqual(outsideWorkspace.terminalEnvironment(agentUUID: "A")[NiruxLaunchAuthorization.environmentKey], "")
+            XCTAssertEqual(
+                try XCTUnwrap(workspace(harness, "feat/setup")).terminalEnvironment(agentUUID: "B")[NiruxLaunchAuthorization.environmentKey],
+                NiruxLaunchAuthorization.launchID
             )
-            harness.waitUntil("the child's workspace") { workspace(harness, "feat/grandchild") != nil }
-            XCTAssertTrue(try XCTUnwrap(workspace(harness, "feat/grandchild")).startedOutsideNirux)
-            XCTAssertTrue(harness.agentLaunches.last?.hasPrefix("command claude") == true, harness.agentLaunches.last ?? "")
 
             shell.openRoutedWorkspace(title: "existing", cwd: harness.worktree, agent: .claude, startedFromSpaceID: space.id)
             harness.waitUntil("the existing worktree's workspace") { workspace(harness, "existing") != nil }
@@ -254,6 +261,16 @@ final class SpaceSettingsFlowTests: XCTestCase {
             XCTAssertIdentical(shell.spaceSettings, settings)
             XCTAssertEqual(settings.spaceID, first.id)
             XCTAssertTrue(shell.toast?.message.contains("Save or revert") == true)
+
+            // Quitting asks too: Cancel keeps Nirux running.
+            harness.alertResponses = [.alertSecondButtonReturn]
+            XCTAssertFalse(shell.spaceSettingsAllowQuit())
+            XCTAssertEqual(harness.alerts.last, "Save your changes in Space Settings before quitting?")
+            XCTAssertEqual(settings.selectedTab, .brief)
+
+            // Each editor undoes its own typing only.
+            XCTAssertNotNil(settings.brief.textView.undoManager)
+            XCTAssertFalse(settings.brief.textView.undoManager === settings.templates.textView.undoManager)
 
             let panel = try XCTUnwrap(settings.panel)
             XCTAssertFalse(settings.windowShouldClose(panel), "Cancel")

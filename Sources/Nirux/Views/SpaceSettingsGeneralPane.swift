@@ -67,10 +67,12 @@ final class SpaceSettingsGeneralPane: NSObject, NSTableViewDataSource, NSTableVi
 
     func update(_ model: Model) {
         let selectedKey = self.model.rows[safe: tableView.selectedRow]?.key
+        // A pop-up menu open on screen isn't rebuilt under the pointer.
+        let colorChanged = model.colorHex != self.model.colorHex || colorPopup.numberOfItems == 0
         self.model = model
         // Leaves typed text alone while the field is being edited.
         if nameField.currentEditor() == nil { nameField.stringValue = model.name }
-        fillColors()
+        if colorChanged { fillColors() }
         repositoriesSection.isHidden = model.isGeneral
         tableView.reloadData()
         if let selectedKey, let row = model.rows.firstIndex(where: { $0.key == selectedKey }) {

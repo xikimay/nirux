@@ -22,6 +22,9 @@ extension NiruxShellView {
         let routesByAnchor = routesByAnchor
         DispatchQueue.global(qos: .userInitiated).async {
             let (path, error) = GitWorktree.create(branch: branch, repoRoot: repoRoot)
+            // A worktree an agent already works in (the branch was checked
+            // out) never runs the setup script again.
+            let firstSetup = path.map(SpaceSetupScript.claimFirstRun(worktree:)) ?? false
             // Read back from the checkout: the session is named after the
             // branch it will actually work on (see `SessionName`).
             let checkedOutBranch = path.flatMap(GitWorktree.currentBranch(at:))
@@ -94,11 +97,6 @@ extension NiruxShellView {
                     let decision = self.decideSpace(
                         identity: identity, parentWorkspaceID: parentWorkspaceID, startedFromSpaceID: requestedProfileID
                     )
-                    // An agent in a workspace opened from outside Nirux holds
-                    // a valid launch ID too: its children stay outside.
-                    let parentStartedOutside = parentWorkspaceID.flatMap { id in
-                        self.workspaces.first { $0.id == id }
-                    }?.startedOutsideNirux == true
                     self.addWorkspace(
                         title: branch,
                         cwd: path,
@@ -110,8 +108,8 @@ extension NiruxShellView {
                         deliveredHandover: deliveredHandover,
                         handoverText: handoverText,
                         worktreeBranch: checkedOutBranch,
-                        startedOutsideNirux: startedOutsideNirux || parentStartedOutside,
-                        setupScript: self.setupScript(for: decision)
+                        startedOutsideNirux: startedOutsideNirux,
+                        setupScript: firstSetup ? self.setupScript(for: decision) : nil
                     )
                     self.saveState()
                     if decision.reason == .general { self.presentSpaceArrival(workspaceID: childWorkspaceID) }

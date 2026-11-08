@@ -70,6 +70,31 @@ struct SpaceDefaults: Equatable, Sendable {
         return letters.contains(first) && name.unicodeScalars.allSatisfy(rest.contains)
     }
 
+    /// What may surprise about a variable that applies, or nil: it is
+    /// written all the same.
+    static func warning(name: String, value: String) -> String? {
+        let upper = name.uppercased()
+        if ["PATH", "HOME", "SHELL", "ZDOTDIR", "TMPDIR", "USER", "LANG"].contains(upper) || upper.hasPrefix("TERM") {
+            return "\(name) replaces the shell’s own: agents and tools may not start, or not find their settings."
+        }
+        if ["CLAUDE_", "ANTHROPIC_", "OPENAI_", "CODEX_"].contains(where: upper.hasPrefix) {
+            return "\(name) reaches every agent of the space: its account, settings folder or keys."
+        }
+        if value.contains("$") {
+            return "\(name)’s value is literal: “$” stays as typed, nothing is expanded."
+        }
+        return nil
+    }
+
+    /// The warnings of the variables that apply, one line each.
+    var environmentWarnings: [String] {
+        var seen = Set<String>()
+        return environment.compactMap { variable in
+            guard Self.problem(name: variable.name, value: variable.value) == nil, seen.insert(variable.name).inserted else { return nil }
+            return Self.warning(name: variable.name, value: variable.value)
+        }
+    }
+
     /// What the list can't apply, one line per variable, for Space Settings.
     var environmentProblems: [String] {
         var seen = Set<String>()

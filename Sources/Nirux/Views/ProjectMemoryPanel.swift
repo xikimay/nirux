@@ -92,6 +92,19 @@ final class ProjectMemoryPanel: NSObject {
     /// The window it shows in, while its tab is picked.
     private var window: NSWindow? { background?.window }
 
+    /// Fills `host` now.
+    func shows(in host: NSView) -> Bool { background?.superview === host }
+
+    /// An edit, a write or an addition is under way: reading the files
+    /// again now would drop it.
+    var isBusy: Bool { editing != nil || isWriting || addSheet != nil }
+
+    /// An item's text edited and not saved.
+    var hasUnsavedEdit: Bool {
+        guard let original = editing?.text, let text = preview?.editedText else { return false }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines) != original.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// The scopes the control offers after "All": team rules apply always.
     static let scopes: [ProjectMemory.Scope] = [.always, .whenRelevant]
 

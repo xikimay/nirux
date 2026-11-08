@@ -8,9 +8,11 @@ import Foundation
 ///
 /// Nirux types it before the agent command in the new worktree's terminal
 /// (`command(script:…)`), only in worktrees it made for the user (New
-/// Task…, the worktree skill, New Worktree). Worktree creation can reuse
-/// a folder, so a script may run twice there: it must be idempotent. A
-/// failure doesn't stop the agent: Nirux says so in a notification.
+/// Task…, the worktree skill, New Worktree), and once per worktree
+/// (`claimFirstRun`): a request that reuses a worktree an agent works in
+/// never runs it again there. It should still be idempotent (a worktree
+/// made outside Nirux and opened later runs it once). A failure doesn't
+/// stop the agent: Nirux says so in a notification.
 enum SpaceSetupScript {
     static let folderName = "setup"
     static let maxFileBytes = 256 * 1024
@@ -78,29 +80,52 @@ enum SpaceSetupScript {
     static func template(anchorName: String) -> String {
         let name = anchorName.replacingOccurrences(of: "\n", with: " ")
         return """
-        # Setup for new worktrees of \(name). Nirux runs it with /bin/sh in the
-        # new worktree's folder, before the agent starts, in worktrees it makes
-        # for you. It may run twice in the same folder: keep it idempotent.
-        # If it fails, the agent still starts and Nirux tells you.
-        # Lines starting with # are comments; a script with only comments
-        # doesn't run. For example:
+        # Setup for new worktrees of \(name). Nirux runs it once per worktree it
+        # makes for you, with /bin/sh -e in the worktree's folder, before the
+        # agent starts: the first failing command stops it, and nothing can be
+        # typed into it (a command that asks a question gets no answer).
+        # Keep it idempotent. If it fails, the agent still starts and Nirux
+        # tells you. Lines starting with # are comments; a script with only
+        # comments doesn't run. For example:
         # npm ci
-        # cp ../main/.env .env
+        # cp "$(git rev-parse --path-format=absolute --git-common-dir)/../.env" .env
 
         """
     }
 
+    /// The marker of a worktree whose setup ran, in its own git folder
+    /// (`.git/worktrees/<name>`, which `git worktree remove` deletes).
+    static let markerName = "nirux-setup-ran"
+
+    /// True the first time it is asked for `worktree`, which it records:
+    /// the script runs there then, never on a later request that reuses
+    /// the worktree. False when git can't name the worktree's folder. Runs
+    /// git: call it off the main thread.
+    static func claimFirstRun(worktree: String) -> Bool {
+        guard let gitDir = GitCommand.output(["rev-parse", "--absolute-git-dir"], cwd: worktree, timeout: 5)?
+            .trimmingCharacters(in: .whitespacesAndNewlines), gitDir.hasPrefix("/")
+        else { return false }
+        let marker = URL(fileURLWithPath: gitDir).appendingPathComponent(markerName).path
+        let descriptor = open(marker, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard descriptor >= 0 else { return false }
+        close(descriptor)
+        return true
+    }
+
     /// The line typed into a new worktree's terminal:
-    /// `/bin/sh '<script>' || '<Nirux>' --hook codex --setup-failed
-    /// '<workspace id>'; <agent command>`, every shell Nirux supports
-    /// reading it the same way (`;` runs the agent whatever the script did).
-    /// `/bin/sh` by its path: no alias or function of the user's replaces
-    /// it. The failure report is spelled as a hook so that an older Nirux
+    /// `/bin/sh -e '<script>' </dev/null || '<Nirux>' --hook codex
+    /// --setup-failed '<workspace id>'; <agent command>`, every shell Nirux
+    /// supports reading it the same way (`;` runs the agent whatever the
+    /// script did). `-e`: a failing command fails the script, not only its
+    /// last line. No input: a command asking a question (`npx`, `pnpm`)
+    /// gets an end of file instead of waiting in a terminal nobody looks
+    /// at. `/bin/sh` by its path: no alias or function of the user's
+    /// replaces it. The failure report is spelled as a hook so that an older Nirux
     /// at the same path (a rollback) takes it for a Codex payload it can't
     /// read and exits, instead of opening a second window on the same
     /// state. Without an executable (xctest), nothing reports the failure.
     static func command(script: String, executable: String?, workspaceID: String, then agentCommand: String?) -> String {
-        var line = "/bin/sh " + quoted(script)
+        var line = "/bin/sh -e " + quoted(script) + " </dev/null"
         if let executable {
             line += " || " + ([executable] + SetupFailureSignal.arguments(workspaceID: workspaceID)).map(quoted).joined(separator: " ")
         }

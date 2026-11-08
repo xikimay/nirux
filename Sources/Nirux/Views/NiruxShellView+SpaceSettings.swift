@@ -20,6 +20,37 @@ extension NiruxShellView {
         settings.show(tab: tab, title: Self.spaceSettingsTitle(profileID, in: profiles))
     }
 
+    /// Quitting with changes typed in Space Settings asks first, in an
+    /// alert (`runModal`): Save, Cancel or Don't Save. True: quit. A save
+    /// that fails, or asks about a file changed on disk, cancels the quit
+    /// with the window on that tab.
+    func spaceSettingsAllowQuit() -> Bool {
+        guard let settings = spaceSettings else { return true }
+        settings.panel?.makeFirstResponder(nil)
+        let parts = settings.unsavedParts
+        guard !parts.isEmpty else { return true }
+        settings.show(tab: parts[0].tab, title: Self.spaceSettingsTitle(settings.spaceID, in: profiles))
+        let alert = NSAlert()
+        alert.messageText = "Save your changes in Space Settings before quitting?"
+        alert.informativeText = "The \(parts.map(\.name).joined(separator: ", ")) \(parts.count == 1 ? "has" : "have") "
+            + "changes that are lost if you don’t save them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Don’t Save").hasDestructiveAction = true
+        switch runModal(alert) {
+        case .alertFirstButtonReturn:
+            for part in parts {
+                settings.select(part.tab)
+                if !part.save() { return false }
+            }
+            return true
+        case .alertThirdButtonReturn:
+            return true
+        default:
+            return false
+        }
+    }
+
     static func spaceSettingsTitle(_ spaceID: String, in spaces: [WorkspaceProfile]) -> String {
         "\(spaces.first { $0.id == spaceID }?.name ?? "Space") Settings"
     }
@@ -47,7 +78,10 @@ extension NiruxShellView {
         settings.onTabShown = { [weak self, weak settings] tab in
             guard let self, let settings, self.spaceSettings === settings else { return }
             switch tab {
-            case .memory: self.loadProjectMemoryTab(spaceID: spaceID)
+            case .memory:
+                // An edit or a write under way stays: reading again would drop it.
+                if let memory = self.projectMemoryPanel, memory.shows(in: settings.memoryHost), memory.isBusy { return }
+                self.loadProjectMemoryTab(spaceID: spaceID)
             case .board: if self.boardSettingsPanel?.spaceID != spaceID { self.loadBoardTab(spaceID: spaceID) }
             case .general: self.refreshSpaceSettingsGitHub()
             // What another Nirux saved, and Settings' modes, as they are
@@ -159,9 +193,10 @@ extension NiruxShellView {
         guard !repositories.isEmpty else { return }
         Self.readGitHubNames(repositories) { [weak self] names in
             guard let self, let settings = self.spaceSettings, settings.spaceID == space.id else { return }
-            self.spaceSettingsGitHub.merge(names) { _, new in new }
+            for repository in repositories { self.spaceSettingsGitHub[repository.key] = names[repository.key] }
             guard let current = self.profiles.first(where: { $0.id == space.id }) else { return }
-            settings.general.update(self.spaceSettingsGeneralModel(for: current))
+            let model = self.spaceSettingsGeneralModel(for: current)
+            if model != settings.general.model { settings.general.update(model) }
         }
     }
 

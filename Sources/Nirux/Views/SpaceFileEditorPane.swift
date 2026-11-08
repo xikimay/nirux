@@ -47,6 +47,8 @@ final class SpaceFileEditorPane: NSObject, NSTextViewDelegate {
     let mode: Mode
     /// What the file held when the text on screen was last made from it.
     private(set) var contents: Contents = .missing
+    /// Its own: the window's would undo one tab's typing from another.
+    private let undo = UndoManager()
     /// The text as last loaded or saved: typing anything else makes the
     /// pane dirty.
     private var baseline = ""
@@ -100,7 +102,7 @@ final class SpaceFileEditorPane: NSObject, NSTextViewDelegate {
         }
         textView.string = baseline
         textView.isEditable = isWritable
-        textView.undoManager?.removeAllActions()
+        undo.removeAllActions()
         updateButtons()
     }
 
@@ -175,6 +177,10 @@ final class SpaceFileEditorPane: NSObject, NSTextViewDelegate {
         } else {
             revert()
         }
+    }
+
+    func undoManager(for view: NSTextView) -> UndoManager? {
+        undo
     }
 
     func textDidChange(_ notification: Notification) {
@@ -326,8 +332,8 @@ extension SpaceFileEditorPane.Source {
     static func setupScript(url: URL, anchorName: String) -> Self {
         Self(
             documentName: "setup script",
-            explanation: "Runs with /bin/sh in each new worktree of \(anchorName) that Nirux makes for you, before the "
-                + "agent starts. It may run twice in a folder: keep it idempotent. Saving only comments removes it.",
+            explanation: "Runs once, with /bin/sh -e and no input, in each new worktree of \(anchorName) that Nirux "
+                + "makes for you, before the agent starts. Keep it idempotent. Saving only comments removes it.",
             // Never through a link: a new worktree doesn't run one either.
             read: { .read(url, maxBytes: SpaceSetupScript.maxFileBytes, followingLinks: false) },
             write: { try SpaceSetupScript.save($0, to: url) },

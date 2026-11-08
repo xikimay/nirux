@@ -276,6 +276,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     /// command, and a call already sent is waited for.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let shell else { return .terminateNow }
+        // Changes typed in Space Settings ask first (an update's relaunch
+        // too).
+        guard shell.spaceSettingsAllowQuit() else { return .terminateCancel }
         return shell.mergeQueueTerminateReply { quit in
             NSApp.reply(toApplicationShouldTerminate: quit)
         }
