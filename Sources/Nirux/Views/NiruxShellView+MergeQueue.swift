@@ -173,8 +173,8 @@ extension NiruxShellView {
     func refuseToDeleteSpaceWithRunningQueue(profileID: String) -> Bool {
         guard mergeQueues[profileID]?.isRunning == true else { return false }
         let alert = NSAlert()
-        alert.messageText = "This project’s merge queue is running"
-        alert.informativeText = "Stop it from the board or the status bar, then delete the project."
+        alert.messageText = "This space’s merge queue is running"
+        alert.informativeText = "Stop it from the board or the status bar, then delete the space."
         runModal(alert)
         return true
     }
@@ -195,7 +195,7 @@ extension NiruxShellView {
         }
         guard !controller.isRunning else { return showToast("The merge queue is already running") }
         guard !controller.runsElsewhere else {
-            return showToast("Another Nirux runs this project’s queue: wait until it ends")
+            return showToast("Another Nirux runs this space’s queue: wait until it ends")
         }
         let numbers = controller.selection(for: settings.gitHubRepository)
         guard !numbers.isEmpty else { return showToast("Add pull requests to the queue first") }
@@ -233,7 +233,7 @@ extension NiruxShellView {
         guard confirmation.canStart else { return }
         guard mergeQueueQuit == nil else { return panel.showError("Nirux is quitting.") }
         guard profiles.contains(where: { $0.id == panel.projectID }) else {
-            return panel.showError("This project was deleted.")
+            return panel.showError("This space was deleted.")
         }
         guard BoardConfigStore(spaceID: panel.projectID)?.load().queueSettings == confirmation.settings else {
             return panel.showError("Board Settings changed since this sheet read GitHub: Cancel, then Start again.")
@@ -284,7 +284,7 @@ extension NiruxShellView {
         if running.count > 1 { text += " (+\(running.count - 1) other queue\(running.count == 2 ? "" : "s"))" }
         // Stop reaches every running queue, not only the one shown.
         let stopsAll = running.count > 1
-        let project = profiles.first { $0.id == projectID }?.name ?? "Deleted project"
+        let project = profiles.first { $0.id == projectID }?.name ?? "Deleted space"
         var notice = StatusBarView.QueueNotice(
             text: text,
             isRunning: shown.isRunning,
@@ -295,7 +295,7 @@ extension NiruxShellView {
             stopsAll: stopsAll
         )
         notice.tooltip = "\(project) · \(engine.settings.repository) into \(engine.settings.baseBranch)\n\(text)\n"
-            + "Click to show the project’s board."
+            + "Click to show the space’s board."
             + (shown.isDryRun ? "\n" + ProjectBoardView.dryRunTooltip(reason: shown.dryRunReason) : "")
         statusBar.onQueueClick = { [weak self] in self?.showProjectBoard(projectID: projectID) }
         statusBar.onQueueStop = { [weak self] in
@@ -322,7 +322,7 @@ extension NiruxShellView {
         }
         guard let workspace = projectWorkspaces(of: projectID).first(where: { !$0.isInactive })
             ?? projectWorkspaces(of: projectID).first
-        else { return showToast("This project has no workspace to open its board in") }
+        else { return showToast("This space has no workspace to open its board in") }
         focusWorkspace(id: workspace.id)
         guard activeWorkspace === workspace else { return showToast("Couldn’t open the board", tone: .error) }
         openProjectBoard()

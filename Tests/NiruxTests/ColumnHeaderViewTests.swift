@@ -481,7 +481,7 @@ final class ProjectBoardHeaderTests: XCTestCase {
         XCTAssertEqual(board.refreshButton.toolTip, "Refresh · Updated 21:14")
 
         let menu = board.header.currentMenu()
-        let projects = try XCTUnwrap(menu.items.first { $0.title == "Project" }?.submenu)
+        let projects = try XCTUnwrap(menu.items.first { $0.title == "Space" }?.submenu)
         XCTAssertEqual(projects.items.map(\.title), ["Board", "Tools"])
         XCTAssertEqual(projects.items.map(\.state), [.on, .off])
         projects.performActionForItem(at: 1)
@@ -492,7 +492,7 @@ final class ProjectBoardHeaderTests: XCTestCase {
         var deleted = header
         deleted.projectIsMissing = true
         board.show(.init(header: deleted, body: .message("…")))
-        XCTAssertEqual(board.projectMenu().items.map(\.title), ["Deleted project", "Board", "Tools"])
+        XCTAssertEqual(board.projectMenu().items.map(\.title), ["Deleted space", "Board", "Tools"])
         XCTAssertEqual(board.projectMenu().items.map(\.state), [.on, .off, .off])
     }
 

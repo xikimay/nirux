@@ -208,7 +208,7 @@ enum SidebarRenderer {
     /// process.
     static func columnName(_ column: ColumnInfo) -> String {
         if column.isEditor { return column.editorFileName ?? "editor" }
-        if column.isProjectBoard { return "Project Board" }
+        if column.isProjectBoard { return "Board" }
         if column.isBranchReview { return "Branch Review" }
         if column.isWebView { return column.webTitle?.isEmpty == false ? column.webTitle! : "web" }
         return column.deferredAgent?.processName ?? column.stuck?.agentName ?? column.processName ?? "shell"

@@ -6,17 +6,17 @@ their decisions, read from the project's sessions, as memories here (section
 5), designed in `project-memory-tree.md`, section 3.8. The History tab,
 greyed for now, is optional and designed there too.
 
-Agents learn about a repository from several files: the Nirux project brief,
+Agents learn about a repository from several files: the Nirux space brief,
 the repository's `CLAUDE.md` and `AGENTS.md`, and the auto-memory Claude Code
-keeps for itself under `~/.claude`. **Project Memory…** shows all of it as one
+keeps for itself under `~/.claude`. **Space Memory…** shows all of it as one
 list, **What agents know**, whatever file holds an item.
 
 ![Project Memory, with demo data](images/project-memory.png)
 
 ## 1. Opening it
 
-- **⌘P › Project Memory…**: the active workspace's repository.
-- **The project menu › Project Memory…**: the repository of that project's
+- **⌘P › Space Memory…**: the active workspace's repository.
+- **The space menu › Space Memory…**: the repository of that space's
   active workspace, else of its first workspace.
 
 The workspace's own folder decides, not where its focused terminal has

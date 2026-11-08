@@ -13,7 +13,7 @@ struct QuickSwitchWorkspace: Equatable {
     /// On screen now.
     let isCurrent: Bool
     /// The user has several spaces: the row names its own, and the search
-    /// matches it. With one, its name ("main") would match every row.
+    /// matches it. With one, its name ("General") would match every row.
     let showsSpace: Bool
     let agent: QuickSwitchAgentState?
 

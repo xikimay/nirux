@@ -229,7 +229,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     @objc func projectChanged(_ sender: Any?) {
         guard let projectID = selectedProjectID else { return }
         info = nil
-        repositoryLabel.stringValue = "Looking for the project’s repository…"
+        repositoryLabel.stringValue = "Looking for the space’s repository…"
         repositoryLabel.textColor = NSColor.white.withAlphaComponent(0.5)
         templatePopup.isEnabled = false
         updateStartButton()
@@ -255,7 +255,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
             return nil
         }
         guard let projectID = selectedProjectID, let target = info?.target else {
-            showError(info == nil ? "The project’s repository is still being looked for." : Self.repositoryText(nil))
+            showError(info == nil ? "The space’s repository is still being looked for." : Self.repositoryText(nil))
             return nil
         }
         return NewTask.Request(
@@ -438,13 +438,13 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         templatePopup.menu?.addItem(NSMenuItem(title: "None", action: nil, keyEquivalent: ""))
         templatePopup.isEnabled = false
         y = addPopup(templatePopup, y: y, in: view)
-        y = addHint("How to proceed, added to the handover: Edit Task Templates… in the project’s menu.", y: y, in: view) + 10
+        y = addHint("How to proceed, added to the handover: Edit Task Templates… in the space’s menu.", y: y, in: view) + 10
 
         y = addLabel("Agent", y: y, in: view)
         agentPopup.addItems(withTitles: Self.agents.map(\.title))
         y = addPopup(agentPopup, y: y, in: view) + 6
 
-        y = addLabel("Project", y: y, in: view)
+        y = addLabel("Space", y: y, in: view)
         for project in projects {
             projectPopup.menu?.addItem(NSMenuItem(title: project.name, action: nil, keyEquivalent: ""))
         }
@@ -544,7 +544,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// there is none.
     static func repositoryText(_ target: NewTask.Target?, fetches: Bool = true) -> String {
         guard let target else {
-            return "No workspace of this project is in a git repository: open one in it first."
+            return "No workspace of this space is in a git repository: open one in it first."
         }
         var path = (target.repository as NSString).abbreviatingWithTildeInPath
         if let subdirectory = target.subdirectory { path += ", in \(subdirectory)" }

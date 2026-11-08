@@ -2,7 +2,10 @@ import Foundation
 
 struct WorkspaceProfile: Codable, Equatable {
     static let defaultID = "default"
-    static let defaultProfile = WorkspaceProfile(id: defaultID, name: "main", colorHex: "#7AA2F7")
+    /// General, the space that can't be deleted (docs/spaces.md).
+    static let defaultProfile = WorkspaceProfile(id: defaultID, name: "General", colorHex: "#7AA2F7")
+    /// The default space's name before November 2026.
+    static let legacyDefaultName = "main"
 
     /// Space colors, in the order new spaces take them.
     static let palette: [(name: String, hex: String)] = [
@@ -16,5 +19,23 @@ struct WorkspaceProfile: Codable, Equatable {
 
     static func colorHex(for index: Int) -> String {
         palette[index % palette.count].hex
+    }
+
+    /// The spaces read at launch (`ProjectStore.load`), the default one
+    /// renamed "General" while it still has its old built-in name. A name the
+    /// user chose stays, and so does "main" while another space is called
+    /// General. It runs at every launch, so a backup or an older copy of
+    /// Nirux writing "main" back can't bring the old name back for good.
+    static func renamingLegacyDefault(_ profiles: [WorkspaceProfile]) -> [WorkspaceProfile] {
+        let generalName = defaultProfile.name
+        guard let index = profiles.firstIndex(where: { $0.id == defaultID }),
+              profiles[index].name == legacyDefaultName,
+              !profiles.contains(where: {
+                  $0.id != defaultID && $0.name.caseInsensitiveCompare(generalName) == .orderedSame
+              })
+        else { return profiles }
+        var renamed = profiles
+        renamed[index].name = generalName
+        return renamed
     }
 }

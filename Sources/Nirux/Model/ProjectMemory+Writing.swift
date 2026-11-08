@@ -35,7 +35,7 @@ extension ProjectMemory {
             case .emptyTitle: return "Give it a title"
             case .changed(let file): return "\(file) changed since the panel read it: look again and retry"
             case .tooLong(let limit):
-                return "The project brief would pass \(limit.formatted()) characters, past what sessions get: shorten it first"
+                return "The space brief would pass \(limit.formatted()) characters, past what sessions get: shorten it first"
             case .failed(let reason): return reason
             }
         }

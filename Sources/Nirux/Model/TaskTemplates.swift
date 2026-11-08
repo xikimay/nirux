@@ -130,11 +130,11 @@ enum TaskTemplates {
         let sections = defaults.map { "## \($0.name)\n\n\($0.body)\n" }.joined(separator: "\n")
         return """
         <!--
-        Task templates for the project "\(name)". New Task… (Cmd+P) offers each
+        Task templates for the space "\(name)". New Task… (Cmd+P) offers each
         "## Name" section below; the one picked goes into the new workspace's
         handover, after the task's description. Add, edit or delete sections
         freely. Text inside this comment is ignored.
-        Deleting the project leaves this file here.
+        Deleting the space leaves this file here.
         -->
 
         \(sections)

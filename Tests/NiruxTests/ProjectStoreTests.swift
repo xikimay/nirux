@@ -176,7 +176,17 @@ final class ProjectStoreTests: XCTestCase {
 
         XCTAssertEqual(loaded.map(\.id), ["work", "bare"])
         XCTAssertEqual(loaded.first?.colorHex, WorkspaceProfile.colorHex(for: 0))
-        XCTAssertEqual(loaded.last?.name, "project")
+        XCTAssertEqual(loaded.last?.name, "space")
+    }
+
+    /// The default space was "main" before November 2026.
+    @MainActor
+    func testTheDefaultSpaceStillNamedMainLoadsAsGeneral() throws {
+        try writeFile(#"{"schemaVersion": 1, "projects": [{"id": "work", "name": "Work"}, {"id": "default", "name": "main"}]}"#)
+        XCTAssertEqual(ProjectStore(fileURL: fileURL).load(mirror: nil, markerPresent: true).map(\.name), ["Work", "General"])
+
+        try writeFile(#"{"schemaVersion": 1, "projects": [{"id": "default"}]}"#)
+        XCTAssertEqual(ProjectStore(fileURL: fileURL).load(mirror: nil, markerPresent: true).map(\.name), ["General"])
     }
 
     @MainActor
@@ -226,10 +236,11 @@ final class ProjectStoreTests: XCTestCase {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data(text.utf8).write(to: url)
         }
-        try writeBrief("lost", "<!--\nBrief for the space \"Witch Cat\": goals, priorities\n-->\n- Post on Fridays.")
+        // Written while the UI said "project" (October 2026).
+        try writeBrief("lost", "<!--\nBrief for the project \"Witch Cat\": goals, priorities\n-->\n- Post on Fridays.")
         try writeBrief("empty", "<!--\nBrief for the space \"Nothing\": goals\n-->\n")
         try writeBrief("gone", "<!--\nBrief for the space \"Gone\": goals\n-->\nRule.")
-        // Written by the current template, which says "project".
+        // Written by the current template, which says "space".
         let fresh = try XCTUnwrap(SpaceBrief.ensureBriefFile(spaceID: "new", spaceName: "Night Owl", stateDirectory: directory))
         try Data((try String(contentsOf: fresh, encoding: .utf8) + "- Ship at dawn.").utf8).write(to: fresh)
         let store = savedStore([main, work])

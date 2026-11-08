@@ -97,7 +97,7 @@ extension SidebarView {
         let tile = SidebarRailTileView(style: .project, text: profile.name.first.map(String.init) ?? "?")
         tile.role = .menuButton
         if let tooltip = railTooltip(for: .railButton(.project)) {
-            describe(tile, as: SidebarRailTooltip(title: "Project \(tooltip.title)", detail: tooltip.detail, note: tooltip.note))
+            describe(tile, as: SidebarRailTooltip(title: "Space \(tooltip.title)", detail: tooltip.detail, note: tooltip.note))
         }
         tile.onPress = { [weak self, weak tile] in
             guard let self, let tile else { return }
