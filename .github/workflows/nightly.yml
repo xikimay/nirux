@@ -99,8 +99,22 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "Building $VERSION (build $BUILD_NUMBER, release $RELEASE_TAG)"
 
+      # Same steps as tests.yml; saving the cache here, on main, is what lets
+      # pull requests read it.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.resolved') }}
+
+      - name: Build tests
+        run: swift build --build-tests
+
       - name: Run tests
-        run: swift test
+        run: scripts/run-tests.sh
 
       - name: Build release
         run: swift build -c release
