@@ -411,7 +411,8 @@ final class SidebarWorkspaceCardRenderer {
     private static func missionQuestionText(_ question: SidebarMissionQuestion) -> NSAttributedString {
         let font = Theme.Font.caption
         guard !question.isAnswered else {
-            return NSAttributedString(string: "Answer from \(question.parentTitle) ready to type in", attributes: [
+            let text = question.parentTitle == "you" ? "Your answer is ready to type in" : "Answer from \(question.parentTitle) ready to type in"
+            return NSAttributedString(string: text, attributes: [
                 .font: font, .foregroundColor: Theme.Color.textSecondary
             ])
         }

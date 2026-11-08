@@ -460,10 +460,12 @@ final class MissionStore {
                 && now - event.timestamp < MissionEventCLI.parentMessageLifetime
                 && !mission.events.contains { $0.kind == .response && $0.inReplyTo == event.id }
         case .completed:
-            // Not once the parent sent the child more work: it moved on.
+            // Not once the child got more work from the parent: it moved on.
             return event.parentTypedAt == nil && event.parentConsumedAt == nil
                 && now - event.timestamp < MissionEventCLI.parentMessageLifetime
-                && !mission.events.contains { $0.kind == .instruction && $0.timestamp > event.timestamp }
+                && !mission.events.contains {
+                    $0.kind == .instruction && $0.timestamp > event.timestamp && $0.childConsumedAt != nil
+                }
         case .acknowledged:
             return false
         }

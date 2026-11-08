@@ -123,6 +123,7 @@ struct SidebarMissionQuestion: Hashable {
     let handOff: HandOff?
     /// Answered, the answer not typed into the child's prompt yet: a
     /// `claude` restarted since takes it only after one prompt.
+    /// `parentTitle` then names who answered ("you" for the user).
     var isAnswered = false
 
     /// Whether a question asked at `askedAt` now waits on the user: at once
@@ -146,7 +147,7 @@ struct SidebarMissionQuestion: Hashable {
         switch handOff {
         case .parentClosed: return "“\(parentTitle)” was closed, so the question comes to you."
         case .parentNotClaude: return "“\(parentTitle)” isn’t running Claude Code, so the question comes to you."
-        case .parentDidNotAnswer: return "“\(parentTitle)” read it but didn’t answer, so the question comes to you."
+        case .parentDidNotAnswer: return "“\(parentTitle)” ended its turn without answering, so the question comes to you."
         case .unanswered(let minutes):
             return "“\(parentTitle)” hasn’t answered in \(minutes) minutes. You can answer instead."
         case nil: return "Waiting for “\(parentTitle)” to answer. You can answer instead."

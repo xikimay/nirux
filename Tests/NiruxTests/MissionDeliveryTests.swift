@@ -100,7 +100,9 @@ final class MissionDeliveryTests: XCTestCase {
         let tell = try XCTUnwrap(store.accept(parentEvent(.instruction, "Now the docs", at: 50), enabled: true))
         XCTAssertTrue(store.markInstructionTyped(eventID: tell.event.id, at: 51))
         XCTAssertEqual(store.missions[0].status, .active, "reopened")
-        XCTAssertTrue(store.pendingPromptDeliveries(now: 52).isEmpty)
+        let kinds = pending(store, at: 52)
+        XCTAssertFalse(kinds.contains(.response), "the child completed after asking")
+        XCTAssertFalse(kinds.contains(.completed), "the parent sent more work since")
     }
 
     /// A question the parent couldn't take within the lifetime waits on the
@@ -227,6 +229,26 @@ final class MissionDeliveryTests: XCTestCase {
         XCTAssertNil(Question.handOff(parent: .claude, askedAt: 100, threshold: 600, now: 699))
         XCTAssertEqual(Question.handOff(parent: .claude, askedAt: 100, threshold: 600, now: 700), .unanswered(minutes: 10))
         XCTAssertEqual(Question.handOff(parent: .stoppedWithoutAnswer, askedAt: 100, threshold: 600, now: 101), .parentDidNotAnswer)
+    }
+
+    /// No Claude in the parent's column, or a parent idle after it took
+    /// the question, counts only past a grace; a parent that stopped
+    /// without answering keeps the question with the user, turn after turn.
+    func testTheParentWatchWaitsOutTheGraceThenSticks() {
+        let grace = NiruxShellView.missionParentGrace
+        var watch = NiruxShellView.MissionParentWatch()
+        XCTAssertEqual(watch.settle(.notClaude, foregroundKnown: true, now: 100), .claude, "a claude restarting")
+        XCTAssertEqual(watch.settle(.claude, foregroundKnown: false, now: 105), .claude)
+        XCTAssertEqual(watch.settle(.notClaude, foregroundKnown: true, now: 100 + grace), .notClaude,
+                       "a process-table miss doesn't restart the clock")
+        XCTAssertEqual(watch.settle(.claude, foregroundKnown: true, now: 200), .claude, "back")
+        XCTAssertEqual(watch.settle(.notClaude, foregroundKnown: true, now: 201), .claude, "a new absence, a new grace")
+
+        var stopped = NiruxShellView.MissionParentWatch()
+        XCTAssertEqual(stopped.settle(.stoppedWithoutAnswer, foregroundKnown: true, now: 300), .claude, "a reply may be queued")
+        XCTAssertEqual(stopped.settle(.stoppedWithoutAnswer, foregroundKnown: true, now: 300 + grace), .stoppedWithoutAnswer)
+        XCTAssertEqual(stopped.settle(.claude, foregroundKnown: true, now: 400), .stoppedWithoutAnswer, "its next turn changes nothing")
+        XCTAssertEqual(stopped.settle(.closed, foregroundKnown: true, now: 500), .closed)
     }
 
     // MARK: - Card row

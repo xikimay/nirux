@@ -3,9 +3,49 @@ import AppKit
 // MARK: - Mission questions: the child's card, the hand-off to the user, the reply popover
 
 extension NiruxShellView {
-    /// How long a parent may show no Claude before its child's question
-    /// comes to the user: a `claude` restarted, a process table misread.
+    /// How long a parent may show no Claude, or sit idle after it took the
+    /// question, before the question comes to the user: a `claude`
+    /// restarted, a `reply` Nirux hasn't drained yet. In the background the
+    /// stuck watch samples every 30 s, so it takes up to a minute there.
     static let missionParentGrace: TimeInterval = 20
+
+    /// What Nirux saw of a question's parent across refreshes.
+    struct MissionParentWatch: Equatable {
+        /// Since when its column runs no Claude.
+        var absentSince: TimeInterval?
+        /// Since when it sits idle after it took the question.
+        var stoppedSince: TimeInterval?
+        /// It took the question and stopped without `reply`: the question
+        /// stays with the user, whatever the parent does next.
+        var skipped = false
+
+        /// The parent state the hand-off goes by, from what a refresh
+        /// observed: no Claude, or idle after taking the question, counts
+        /// only past the grace; once it stopped without answering, it stays
+        /// so. `foregroundKnown` false (a process-table miss) proves nothing.
+        mutating func settle(
+            _ observed: SidebarMissionQuestion.Parent, foregroundKnown: Bool, now: TimeInterval
+        ) -> SidebarMissionQuestion.Parent {
+            var state = observed
+            switch observed {
+            case .notClaude:
+                absentSince = absentSince ?? now
+                if now - (absentSince ?? now) < NiruxShellView.missionParentGrace { state = .claude }
+            case .claude, .stoppedWithoutAnswer:
+                if foregroundKnown { absentSince = nil }
+            case .closed:
+                break
+            }
+            if state == .stoppedWithoutAnswer, !skipped {
+                stoppedSince = stoppedSince ?? now
+                skipped = now - (stoppedSince ?? now) >= NiruxShellView.missionParentGrace
+            } else if state == .claude, !skipped {
+                stoppedSince = nil
+            }
+            if skipped, state == .claude || state == .stoppedWithoutAnswer { return .stoppedWithoutAnswer }
+            return state == .stoppedWithoutAnswer ? .claude : state
+        }
+    }
 
     /// The question each Mission child column waits on, keyed by the
     /// column, with why it now waits on the user if it does: its parent
@@ -18,7 +58,7 @@ extension NiruxShellView {
     ) -> [ObjectIdentifier: SidebarMissionQuestion] {
         var result: [ObjectIdentifier: SidebarMissionQuestion] = [:]
         var waiting = Set<String>()
-        defer { missionParentAbsentSince = missionParentAbsentSince.filter { waiting.contains($0.key) } }
+        defer { missionParentWatch = missionParentWatch.filter { waiting.contains($0.key) } }
         let store = MissionStore.shared
         for mission in store.missions where mission.status == .active {
             guard let workspace = workspaces.first(where: { $0.id == mission.childWorkspaceID }),
@@ -35,8 +75,9 @@ extension NiruxShellView {
                     childWorkspaceID: mission.childWorkspaceID, childAgentUUID: mission.childAgentUUID
                 )?.event {
                     result[ObjectIdentifier(column)] = SidebarMissionQuestion(
-                        questionID: answer.inReplyTo ?? answer.id, parentTitle: parentTitle, text: answer.message,
-                        handOff: nil, isAnswered: true
+                        questionID: answer.inReplyTo ?? answer.id,
+                        parentTitle: answer.answeredByUser == true ? "you" : parentTitle,
+                        text: answer.message, handOff: nil, isAnswered: true
                     )
                 }
                 continue
@@ -44,11 +85,12 @@ extension NiruxShellView {
             waiting.insert(question.id)
             let parent = parentWorkspace?.columns.first { $0.agentUUID == mission.parentAgentUUID }
             var parentState: SidebarMissionQuestion.Parent
+            var foregroundKnown = true
             if let parent {
                 if let pty = parent.pty, !pty.hasExited {
-                    // An unreadable foreground (a process-table miss) isn't
-                    // proof the parent quit Claude: the threshold applies.
-                    if foreground(parent).map({ $0.name == "claude" && !AgentHookCenter.isHeadlessClaude($0) }) == false {
+                    let process = foreground(parent)
+                    foregroundKnown = process != nil
+                    if process.map({ $0.name == "claude" && !AgentHookCenter.isHeadlessClaude($0) }) == false {
                         parentState = .notClaude
                     } else if let typedAt = question.parentTypedAt, pty.finishedTurn(afterTypingAt: typedAt) {
                         parentState = .stoppedWithoutAnswer
@@ -61,13 +103,9 @@ extension NiruxShellView {
             } else {
                 parentState = .closed
             }
-            if parentState == .notClaude {
-                let since = missionParentAbsentSince[question.id] ?? now
-                missionParentAbsentSince[question.id] = since
-                if now - since < Self.missionParentGrace { parentState = .claude }
-            } else {
-                missionParentAbsentSince[question.id] = nil
-            }
+            var watch = missionParentWatch[question.id] ?? MissionParentWatch()
+            parentState = watch.settle(parentState, foregroundKnown: foregroundKnown, now: now)
+            missionParentWatch[question.id] = watch
             result[ObjectIdentifier(column)] = SidebarMissionQuestion(
                 questionID: question.id,
                 parentTitle: parentTitle,

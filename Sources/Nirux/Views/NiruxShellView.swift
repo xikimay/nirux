@@ -79,9 +79,9 @@ final class NiruxShellView: NSView {
     /// amber), by question ID: the child workspace whose notification they
     /// raised, once.
     var missionQuestionsHandedToUser: [String: String] = [:]
-    /// Since when a question's parent stopped running Claude, by question ID
+    /// What Nirux saw of each waiting question's parent, by question ID
     /// (see `missionParentGrace`).
-    var missionParentAbsentSince: [String: TimeInterval] = [:]
+    var missionParentWatch: [String: MissionParentWatch] = [:]
     /// The reply popover, and the question it shows.
     var missionReplyPopover: NSPopover?
     var missionReplyQuestionID: String?

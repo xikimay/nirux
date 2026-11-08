@@ -200,6 +200,8 @@ final class MissionAskTests: XCTestCase {
         }
         let question = try await drainUntilQuestionIsRecorded(fixture)
         let (status, printed) = await asking.value
+        // Its own copy of the question may have come after that drain.
+        fixture.center.drain()
         XCTAssertEqual(status, 0)
         XCTAssertLessThan(Date().timeIntervalSince(started), 30, "it waits for Nirux, not for the answer")
         XCTAssertEqual(printed, [

@@ -440,7 +440,8 @@ extension WorkspaceState {
             // A Mission child ends its turn after asking: it waits on its
             // parent, not on the user.
             if reason == .turnFinished, let uuid = col?.agentUUID,
-               MissionStore.shared.waitingQuestion(childWorkspaceID: self.id, childAgentUUID: uuid) != nil {
+               MissionStore.shared.waitingQuestion(childWorkspaceID: self.id, childAgentUUID: uuid) != nil
+                || MissionStore.shared.pendingAnswer(childWorkspaceID: self.id, childAgentUUID: uuid) != nil {
                 self.onMetadataChanged?()
                 return
             }
