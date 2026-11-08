@@ -477,12 +477,12 @@ final class SidebarView: NSView {
         return menu
     }
 
-    /// The active space's options, then "New Project".
+    /// The active space's options, then "New Space".
     func addSpaceOptions(to menu: NSMenu) {
         if let active = lastProfiles.first(where: { $0.isActive }) {
             addSpaceManagementItems(to: menu, for: active)
         }
-        menu.addClosureItem(title: "New Project") { [weak self] in
+        menu.addClosureItem(title: "New Space") { [weak self] in
             self?.onCreateProfile?()
         }
     }

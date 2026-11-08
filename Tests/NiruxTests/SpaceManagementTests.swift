@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Nirux
 
@@ -152,5 +153,45 @@ final class SpaceManagementTests: XCTestCase {
 
         XCTAssertTrue(store.moveWorkspace(at: 2, toProfile: home.id))
         XCTAssertEqual(store.activeWorkspace?.id, "a", "not the inactive card that follows it in the array")
+    }
+
+    /// The default space was "main" before spaces had anchors: launching
+    /// renames it General and lists it first, wherever projects.json put it.
+    @MainActor
+    func testDefaultSpaceStillNamedMainBecomesGeneralAtLaunchAndComesFirst() throws {
+        let stateDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nirux-general-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: stateDirectory) }
+        try Data(#"""
+        {"schemaVersion": 1, "deletedIDs": [], "projects": [
+          {"id": "work", "name": "Work", "colorHex": "#9ECE6A"},
+          {"id": "default", "name": "main", "colorHex": "#7AA2F7"}
+        ]}
+        """#.utf8).write(to: stateDirectory.appendingPathComponent("projects.json"))
+        let previous = ProcessInfo.processInfo.environment["NIRUX_STATE_DIR"]
+        setenv("NIRUX_STATE_DIR", stateDirectory.path, 1)
+        defer {
+            if let previous { setenv("NIRUX_STATE_DIR", previous, 1) } else { unsetenv("NIRUX_STATE_DIR") }
+        }
+        _ = NSApplication.shared
+        let shell = NiruxShellView(frame: NSRect(x: 0, y: 0, width: 1200, height: 800))
+        shell.stopHeartbeat()
+
+        shell.restoreState()
+
+        XCTAssertEqual(shell.profiles.map(\.id), [WorkspaceProfile.defaultID, "work"])
+        XCTAssertEqual(shell.profiles.map(\.name), ["General", "Work"])
+    }
+
+    func testOnlyTheUntouchedDefaultNameBecomesGeneral() {
+        func renamed(_ spaces: [(String, String)]) -> [String] {
+            WorkspaceProfile.renamingLegacyDefault(
+                spaces.map { WorkspaceProfile(id: $0.0, name: $0.1, colorHex: "#7AA2F7") }
+            ).map(\.name)
+        }
+        XCTAssertEqual(renamed([("default", "Personal")]), ["Personal"], "a name the user chose")
+        XCTAssertEqual(renamed([("default", "main"), ("x", "general")]), ["main", "general"], "General is taken")
+        XCTAssertEqual(renamed([("x", "main")]), ["main"], "not the default space")
     }
 }

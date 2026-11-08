@@ -10,10 +10,10 @@ extension NiruxShellView {
             persisted: persisted,
             hasUnreadableState: persisted == nil && Persistence.hasStoredState
         )
-        let loadedProfiles = projectStore.load(
+        let loadedProfiles = WorkspaceProfile.renamingLegacyDefault(projectStore.load(
             mirror: persisted?.workspaceProfiles,
             markerPresent: persisted?.projectsFileVersion != nil
-        )
+        ))
         workspaceStore.deletedProfileIDs = projectStore.deletedIDs
         guard let state = persisted, !state.workspaces.isEmpty else {
             workspaceStore.replaceProfiles(loadedProfiles, activeProfileID: activeProfileID)

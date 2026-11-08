@@ -113,7 +113,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             shell.addWorkspace(title: "login", cwd: login, profileID: space.id)
             try select("widgets", in: shell)
 
-            try runPaletteAction("Open Project Board", in: shell)
+            try runPaletteAction("Open Board", in: shell)
             let location = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id))
             XCTAssertTrue(location.workspace === shell.activeWorkspace)
             XCTAssertTrue(location.column === shell.activeWorkspace?.columns[location.workspace.focusedIndex],
@@ -158,7 +158,7 @@ final class ProjectBoardFlowTests: XCTestCase {
 
             // "Open Project Board" again, from another workspace of the
             // project, brings the board back rather than opening another.
-            try runPaletteAction("Open Project Board", in: shell)
+            try runPaletteAction("Open Board", in: shell)
             XCTAssertEqual(shell.activeWorkspace?.title, "widgets")
             XCTAssertEqual(shell.projectBoardLocations.count, 1)
             XCTAssertTrue(shell.activeWorkspace?.columns[shell.activeWorkspace?.focusedIndex ?? -1] === location.column)
@@ -194,7 +194,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
             shell.addWorkspace(title: "widgets", cwd: repo, profileID: space.id)
 
-            try runPaletteAction("Open Project Board", in: shell)
+            try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
             try waitUntil("Board Settings opens") { shell.boardSettingsPanel?.panel != nil }
             let form = try XCTUnwrap(shell.boardSettingsPanel)
@@ -223,7 +223,7 @@ final class ProjectBoardFlowTests: XCTestCase {
         try withShell(client: client) { shell, space in
             try writeConfig(for: space, workflow: "ci.yml")
             shell.addWorkspace(title: "widgets", cwd: root, profileID: space.id)
-            try runPaletteAction("Open Project Board", in: shell)
+            try runPaletteAction("Open Board", in: shell)
             try waitUntil("the first post-merge run is read") {
                 client.calls.contains { $0.what == "run acme/widgets ci.yml main" }
             }
@@ -259,11 +259,11 @@ final class ProjectBoardFlowTests: XCTestCase {
             try writeConfig(for: space, workflow: "nightly.yml")
             try writeConfig(for: other, workflow: "nightly.yml")
             shell.addWorkspace(title: "gadgets", cwd: root, profileID: other.id)
-            try runPaletteAction("Open Project Board", in: shell)
+            try runPaletteAction("Open Board", in: shell)
             let gadgetsBoard = try XCTUnwrap(shell.projectBoardLocation(projectID: other.id))
 
             shell.addWorkspace(title: "widgets", cwd: root, profileID: space.id)
-            try runPaletteAction("Open Project Board", in: shell)
+            try runPaletteAction("Open Board", in: shell)
             let widgetsBoard = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id))
             XCTAssertEqual(shell.projectBoardLocations.count, 2)
 
@@ -278,7 +278,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             _ = shell.workspaceStore.deleteProfile(id: third.id)
             shell.updateSidebar()
             shell.renderProjectBoard(widgetsBoard.board)
-            XCTAssertEqual(Self.checkedProject(widgetsBoard.board.view), "Deleted project")
+            XCTAssertEqual(Self.checkedProject(widgetsBoard.board.view), "Deleted space")
             guard case .message(let message)? = widgetsBoard.board.view.content?.body else { return XCTFail("no message") }
             XCTAssertTrue(message.contains("deleted"), message)
         }
@@ -296,7 +296,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             // Configured: no Board Settings request outlives the test.
             try writeConfig(for: space, workflow: "nightly.yml")
             shell.addWorkspace(title: "widgets", cwd: root, profileID: space.id)
-            try runPaletteAction("Open Project Board", in: shell)
+            try runPaletteAction("Open Board", in: shell)
             state = shell.persistedState()
         }
         var saved = try XCTUnwrap(state)

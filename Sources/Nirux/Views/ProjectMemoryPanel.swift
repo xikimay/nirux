@@ -14,7 +14,7 @@ import AppKit
 final class ProjectMemoryPanel: NSObject {
     static let panelSize = NSSize(width: 900, height: 600)
     static let listWidth: CGFloat = 380
-    static let title = "Project Memory"
+    static let title = "Space Memory"
     static let tabs = ["What agents know", "History"]
     static let openTitle = "Open in Editor"
     static let addTitle = "+ Add"
@@ -254,7 +254,7 @@ final class ProjectMemoryPanel: NSObject {
     static func emptyText(model: Model, filtered: Bool) -> String {
         guard model.knowledge.entries.isEmpty else { return filtered ? "Nothing matches." : "" }
         return "Agents know nothing about \(model.repository) yet.\n\n"
-            + "The project brief’s rules (Edit Project Brief…) apply to every session; "
+            + "The space brief’s rules (Edit Space Brief…) apply to every session; "
             + "Claude Code notes what it learns as its sessions work."
     }
 
@@ -398,7 +398,7 @@ final class ProjectMemoryPanel: NSObject {
         let alert = NSAlert()
         alert.messageText = "Delete “\(entry.title)”?"
         switch target {
-        case .briefRule: alert.informativeText = "It leaves the project brief."
+        case .briefRule: alert.informativeText = "It leaves the space brief."
         case .memory: alert.informativeText = "Its file goes to the Trash and its line leaves MEMORY.md."
         case .missingFile: alert.informativeText = "Its line leaves MEMORY.md."
         }
@@ -417,7 +417,7 @@ final class ProjectMemoryPanel: NSObject {
         if case .memory = target, scope == .always {
             let alert = NSAlert()
             alert.messageText = "Move “\(entry.title)” to Always?"
-            alert.informativeText = "It joins the project brief, which every session Nirux starts in this project gets. "
+            alert.informativeText = "It joins the space brief, which every session Nirux starts in this space gets. "
                 + "Its memory file goes to the Trash."
             alert.addButton(withTitle: "Move")
             alert.addButton(withTitle: "Cancel")
@@ -583,7 +583,7 @@ final class ProjectMemoryPanel: NSObject {
         row.addSubview(underline)
         let history = label(Self.tabs[1], font: Theme.Font.body, color: Theme.Color.textDisabled, x: current.frame.maxX + Theme.Space.xl)
         let later = label("later", font: Theme.Font.caption, color: Theme.Color.textDisabled, x: history.frame.maxX + Theme.Space.xs)
-        for view in [history, later] { view.toolTip = "Coming later: what was said and decided in this project" }
+        for view in [history, later] { view.toolTip = "Coming later: what was said and decided in this space" }
         row.addSubview(Self.line(at: 0))
         background.addSubview(row)
     }

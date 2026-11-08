@@ -219,7 +219,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
 
         let path = (content.filePath as NSString).abbreviatingWithTildeInPath
         y = addWrappingLabel(
-            "The Project Board and its merge queue use these settings. They are kept in \(path), "
+            "The Board and its merge queue use these settings. They are kept in \(path), "
                 + "never in the repository. Nothing is written before Save.",
             x: 24, y: y, width: Self.width - 48, size: 11.5, alpha: 0.5, in: view
         ) + 12
@@ -497,18 +497,18 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     static func repositoryHint(_ suggestions: BoardConfigSuggestions) -> String {
         switch suggestions.source {
         case .shared:
-            return "This project’s workspaces push to \(suggestions.repository ?? "it")."
+            return "This space’s workspaces push to \(suggestions.repository ?? "it")."
         case .differing(let repositories):
-            return "This project’s workspaces push to different places (\(repositories.joined(separator: ", "))): "
+            return "This space’s workspaces push to different places (\(repositories.joined(separator: ", "))): "
                 + "type the repository whose pull requests the board shows."
         case .noRepository:
-            return "No workspace of this project is in a git repository: type owner/name."
+            return "No workspace of this space is in a git repository: type owner/name."
         }
     }
 
     static func baseBranchHint(_ suggestions: BoardConfigSuggestions) -> String {
         guard let checkout = suggestions.checkout else {
-            return "No local checkout of this repository is open in the project: type the branch pull requests merge into."
+            return "No local checkout of this repository is open in the space: type the branch pull requests merge into."
         }
         let path = (checkout as NSString).abbreviatingWithTildeInPath
         guard suggestions.baseBranch != nil else {

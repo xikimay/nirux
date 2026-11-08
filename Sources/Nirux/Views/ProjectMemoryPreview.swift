@@ -142,7 +142,7 @@ final class ProjectMemoryPreview: NSView {
             guard let (file, rule) = knowledge.rule(of: entry) else { return }
             meta.append(entry.scope == .team
                 ? "In the repository’s \(file.label): change it there, in a commit"
-                : "Every session Nirux starts in this project gets it")
+                : "Every session Nirux starts in this space gets it")
             body = Self.text(of: rule.text, in: knowledge.memory)
             let lines = rule.lines.count == 1 ? "line \(rule.lines.lowerBound)" : "lines \(rule.lines.lowerBound)–\(rule.lines.upperBound)"
             sourceLabel.stringValue = "Source: \(file.label), \(lines)"
