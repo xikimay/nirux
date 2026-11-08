@@ -17,7 +17,7 @@ final class ColumnTerminalView: TerminalView {
     }
 
     override func setFrameSize(_ newSize: NSSize) {
-        onSurfaceBuildChance?(false)
+        // MUTATION M5: no call before
         super.setFrameSize(newSize)
         onSurfaceBuildChance?(true)
     }
