@@ -26,6 +26,27 @@ extension NiruxApp {
         shell?.openProjectBoard()
     }
 
+    /// ⌃⌘L: the active space's Lead, started when it has none (see
+    /// `validateLeadItem`).
+    @objc func focusLead(_ sender: Any?) {
+        shell?.focusOrStartLead()
+    }
+
+    /// "Lead" when the active space has one, else "Start a Lead"; General
+    /// has none.
+    @MainActor
+    func validateLeadItem(_ item: NSMenuItem) -> Bool {
+        guard let shell, NiruxShellView.spaceCanHaveLead(shell.activeProfileID) else {
+            item.title = Self.leadItemTitle
+            return false
+        }
+        item.title = shell.leadWorkspace(inSpace: shell.activeProfileID) == nil ? Self.startLeadItemTitle : Self.leadItemTitle
+        return true
+    }
+
+    static let leadItemTitle = "Lead"
+    static let startLeadItemTitle = "Start a Lead"
+
     @objc func showSessionHistory(_ sender: Any?) {
         shell?.showSessionHistory()
     }
@@ -89,6 +110,7 @@ extension NiruxApp {
         menu.addItem(withTitle: SidebarView.spaceSettingsTitle, action: #selector(showActiveSpaceSettings(_:)), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Board", action: #selector(openBoard(_:)), shortcut: .board)
+        menu.addItem(withTitle: Self.leadItemTitle, action: #selector(focusLead(_:)), shortcut: .lead)
         menu.addItem(withTitle: "Session History…", action: #selector(showSessionHistory(_:)), keyEquivalent: "")
         menu.addItem(.separator())
 

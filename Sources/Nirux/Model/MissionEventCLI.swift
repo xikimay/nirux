@@ -57,27 +57,42 @@ enum MissionEventCLI {
     static func main(
         _ arguments: [String],
         handoffsEnabled: () -> Bool? = {
-            Persistence.load().map { $0.settings?.missionHandoffsEnabled == true }
-        }
+            Persistence.load().map { PersistedSettings.effective($0.settings).missionHandoffsEnabled }
+        },
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        missionsURL: URL = MissionStore.defaultFileURL
     ) -> Int32 {
         let commands = "ask|completed|receive|reply|tell [options]"
         guard let command = arguments.first else { return usage(commands) }
         // Terminals keep their Mission environment after the setting is
         // turned off, while Nirux drops their events: say so, don't wait.
-        guard handoffsEnabled() != false else {
+        // A space's Lead and its tasks keep their Missions.
+        guard handoffsEnabled() != false || isLeadsMission(environment: environment, missionsURL: missionsURL) else {
             writeStandardError("Mission handoffs are turned off in Nirux Settings; stop using Mission commands.")
             return 4
         }
         let options = Array(arguments.dropFirst())
         switch command {
-        case "ask": return ask(arguments: options)
-        case "receive": return receive(arguments: options)
-        case "reply": return reply(arguments: options)
-        case "tell": return tell(arguments: options)
-        case MissionEvent.Kind.question.rawValue: return run(kind: .question, arguments: options)
-        case MissionEvent.Kind.completed.rawValue: return run(kind: .completed, arguments: options)
+        case "ask": return ask(arguments: options, environment: environment, missionsURL: missionsURL)
+        case "receive": return receive(arguments: options, environment: environment, missionsURL: missionsURL)
+        case "reply": return reply(arguments: options, environment: environment, missionsURL: missionsURL)
+        case "tell": return tell(arguments: options, environment: environment, missionsURL: missionsURL)
+        case MissionEvent.Kind.question.rawValue:
+            return run(kind: .question, arguments: options, environment: environment, missionsURL: missionsURL)
+        case MissionEvent.Kind.completed.rawValue:
+            return run(kind: .completed, arguments: options, environment: environment, missionsURL: missionsURL)
         default: return usage(commands)
         }
+    }
+
+    /// A space's Lead (`NIRUX_LEAD=1`), or a task it started (its Mission
+    /// `reportsToLead`): Nirux carries their Missions whatever the setting.
+    static func isLeadsMission(environment: [String: String], missionsURL: URL) -> Bool {
+        if environment[WorkspaceState.leadEnvironmentKey] == "1" { return true }
+        guard let missionID = environment["NIRUX_MISSION_ID"] else { return false }
+        var ledger = MissionLedgerReader(url: missionsURL)
+        ledger.refresh()
+        return ledger.missions.first { $0.id == missionID }?.reportsToLead == true
     }
 
     static func run(

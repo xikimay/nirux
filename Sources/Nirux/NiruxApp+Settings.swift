@@ -27,7 +27,6 @@ extension NiruxApp {
         tabs.addTabViewItem(settingsTab("General", symbol: "gearshape", generalPane()))
         tabs.addTabViewItem(settingsTab("Agents", symbol: "sparkles", agentsPane()))
         tabs.addTabViewItem(settingsTab("Notifications", symbol: "bell", notificationsPane()))
-        tabs.addTabViewItem(settingsTab("Experimental", symbol: "testtube.2", experimentalPane()))
         tabs.addTabViewItem(settingsTab("Telegram", symbol: "paperplane", telegramPane()))
 
         // This initializer also titles the window after the tab picked.
@@ -168,6 +167,7 @@ extension NiruxApp {
                         + "a badge on its card and one notification."
                 )
             ],
+            missionsSection(),
             explainSection()
         ])
     }
@@ -244,9 +244,11 @@ extension NiruxApp {
         ])
     }
 
-    private func experimentalPane() -> NSView {
+    /// Missions and sidebar permission answers, which the Lead depends on:
+    /// on by default (docs/spaces.md, "The Lead").
+    private func missionsSection() -> [NSView] {
         let handoffs = SettingsForm.checkbox("Mission handoffs", target: self, action: #selector(settingsMissionHandoffsChanged(_:)))
-        handoffs.state = Persistence.load()?.settings?.missionHandoffsEnabled == true ? .on : .off
+        handoffs.state = NiruxShellView.currentMissionHandoffsEnabled() ? .on : .off
         settingsMissionHandoffsCheckbox = handoffs
         let approvals = SettingsForm.checkbox(
             "Answer Claude permissions from the sidebar", target: self, action: #selector(settingsSidebarApprovalsChanged(_:))
@@ -254,24 +256,21 @@ extension NiruxApp {
         approvals.state = NiruxShellView.currentSidebarApprovalsEnabled() ? .on : .off
         settingsSidebarApprovalsCheckbox = approvals
 
-        return SettingsForm.pane([
-            [
-                handoffs,
-                SettingsForm.hint(
-                    "Allows worktree agents to exchange questions, answers, and completion results. "
-                        + "New terminals pick up changes.",
-                    under: handoffs
-                )
-            ],
-            [
-                approvals,
-                SettingsForm.hint(
-                    "Allow or deny once for columns you are not looking at: short commands, reads, "
-                        + "web fetches and searches, shown in full. Never \"always allow\".",
-                    under: approvals
-                )
-            ]
-        ])
+        return [
+            SettingsForm.header("Missions"),
+            handoffs,
+            SettingsForm.hint(
+                "Worktree agents and the agent that started them exchange questions, answers, and results. "
+                    + "A space’s Lead and its tasks always do. New terminals pick up changes.",
+                under: handoffs
+            ),
+            approvals,
+            SettingsForm.hint(
+                "Allow or deny once for columns you are not looking at: short commands, reads, "
+                    + "web fetches and searches, shown in full. Never \"always allow\".",
+                under: approvals
+            )
+        ]
     }
 
     private func telegramPane() -> NSView {

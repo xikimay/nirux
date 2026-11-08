@@ -55,6 +55,9 @@ enum NiruxShortcuts: CaseIterable {
     case toggleSidebar
     case nextWaitingAgent
     case board
+    /// The active space's Lead (docs/spaces.md, "The Lead"). Not ⌘0: the
+    /// editor's bridge keeps it for resetting the font size.
+    case lead
     case settings
 
     var chord: KeyChord {
@@ -73,6 +76,7 @@ enum NiruxShortcuts: CaseIterable {
         case .toggleSidebar: KeyChord("s", [.command, .control])
         case .nextWaitingAgent: KeyChord("j")
         case .board: KeyChord("b", [.command, .control])
+        case .lead: KeyChord("l", [.command, .control])
         case .settings: KeyChord(",")
         }
     }

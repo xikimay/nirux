@@ -122,8 +122,22 @@ jobs:
             --password "$APPLE_APP_SPECIFIC_PASSWORD" \
             --wait
 
-          xcrun stapler staple Nirux.app
-          xcrun stapler validate Nirux.app
+          # The stapler fetches and checks the ticket on Apple's CloudKit, and
+          # the runner's connection to it sometimes drops ("The network
+          # connection was lost", Error 68) after notarization was accepted.
+          # Both commands are idempotent: try three times, 30 s apart.
+          retry() {
+            for attempt in 1 2 3; do
+              "$@" && return 0
+              if [ "$attempt" -lt 3 ]; then
+                echo "::warning::$* failed (attempt $attempt of 3), retrying in 30 s"
+                sleep 30
+              fi
+            done
+            return 1
+          }
+          retry xcrun stapler staple Nirux.app
+          retry xcrun stapler validate Nirux.app
           spctl --assess --type execute --verbose=4 Nirux.app
 
           rm -f Nirux.app.zip
