@@ -498,6 +498,12 @@ extension WorkspaceState {
     @discardableResult
     func recordAgentHookActivity(_ event: AgentHookEvent) -> Bool {
         switch event.name {
+        // Claude's reminder of a turn already over, and its compactions
+        // (mostly its own, while idle): the card's age stays the agent's
+        // last real work.
+        case .notification where event.notificationType == "idle_prompt",
+             .sessionStart where event.source == "compact":
+            return false
         case .stop, .turnComplete:
             return recordAgentActivity(at: event.timestamp, automaticSummary: event.detail)
         case .notification, .permissionRequest, .sessionStart, .sessionEnd, .userPromptSubmit, .stopFailure:

@@ -123,6 +123,31 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(workspace.lastSummary, "Keep the completed work summary")
     }
 
+    /// Claude's idle reminder and its compaction while idle are no work of
+    /// the agent's: the card's age stays its last turn.
+    func testIdleReminderAndIdleCompactionLeaveTheCardsAge() throws {
+        let workspace = WorkspaceState(title: "context", cwd: "/tmp")
+        let stop = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: ["hook_event_name": "Stop"], env: [:], now: 20))
+        XCTAssertTrue(workspace.recordAgentHookActivity(stop))
+        let idle: [[String: Any]] = [
+            ["hook_event_name": "Notification", "notification_type": "idle_prompt", "message": "Claude is waiting for your input"],
+            ["hook_event_name": "SessionStart", "source": "compact"]
+        ]
+        for payload in idle {
+            let event = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: payload, env: [:], now: 3_000))
+            XCTAssertFalse(workspace.recordAgentHookActivity(event))
+        }
+        XCTAssertEqual(workspace.lastActivityAt, 20)
+        let real: [[String: Any]] = [
+            ["hook_event_name": "Notification", "notification_type": "permission_prompt"],
+            ["hook_event_name": "SessionStart", "source": "clear"]
+        ]
+        for (index, payload) in real.enumerated() {
+            let event = try XCTUnwrap(AgentHookEvent(kind: .claude, payload: payload, env: [:], now: 3_100 + Double(index)))
+            XCTAssertTrue(workspace.recordAgentHookActivity(event))
+        }
+    }
+
     func testGitContextChangesRejectStalePRMetadata() {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         let pullRequest = PRInfo(
