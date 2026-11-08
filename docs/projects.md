@@ -4,6 +4,10 @@ Status: design, partly implemented. Session names (section 1), the space brief
 (section 4), the first step of the model (section 2) and the session ledger's
 data layer (section 6) have shipped; the rest is still a proposal.
 
+[spaces.md](spaces.md) (2026-11-08) supersedes the management UI, routing and
+defaults below where they differ: spaces get anchors, a General catch-all, one
+⌘N, and an optional Lead agent.
+
 Nirux groups workspaces into "spaces" (`WorkspaceProfile`: id, name, color).
 In practice spaces are used as projects, but a space knows nothing about its
 project: no repository, no context for the agents, no defaults, no history.
