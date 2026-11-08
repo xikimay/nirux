@@ -21,8 +21,9 @@ final class SpaceSettingsLeadPane: NSObject {
     enum Place: Equatable {
         /// The main checkout of the space's repository with this name.
         case repository(String)
-        /// One of the space's plain folders, by name.
-        case folder(String)
+        /// One of the space's plain folders, by name; `repository`, one of
+        /// its repositories, which could be the default instead.
+        case folder(String, repository: String?)
         /// The home folder: the space has neither.
         case home
         /// A running Lead's folder that is none of the space's anchors any
@@ -83,9 +84,11 @@ final class SpaceSettingsLeadPane: NSObject {
         switch place {
         case .repository(let name):
             at = "on \(name)’s main checkout"
-        case .folder(let name):
+        case .folder(let name, let repository):
             at = "in \(name)"
-            advice = addOne
+            advice = repository.map {
+                "It starts tasks only from a repository: make \($0) the default" + (spaceName == nil ? "." : " in General.")
+            } ?? addOne
         case .home:
             at = "in your home folder"
             advice = addOne

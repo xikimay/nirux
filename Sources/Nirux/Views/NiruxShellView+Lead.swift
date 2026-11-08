@@ -81,13 +81,20 @@ extension NiruxShellView {
         }
     }
 
-    /// The Lead starts tasks with the `nirux-worktree` skill: installed if
-    /// no copy is there (Nirux updates the ones it wrote at launch).
+    /// The Lead starts tasks with the `nirux-worktree` skill: installed,
+    /// alone, when no copy is there (Nirux updates the ones it wrote at
+    /// launch, and leaves the others' copies alone).
     private func installSkillsForTheLead() {
         let home = sideEffects.homeDirectory()
-        guard AgentSkillsInstaller.status(of: ["nirux-worktree": Self.worktreeSkillContent], home: home) == .missing else { return }
-        installAgentSkills(confirmsSuccess: false)
-        showToast("Installed Nirux’s agent skills: the Lead starts tasks with nirux-worktree")
+        let skill = ["nirux-worktree": Self.worktreeSkillContent]
+        guard AgentSkillsInstaller.status(of: skill, home: home) == .missing else { return }
+        do {
+            try AgentSkillsInstaller.install(skill, home: home)
+            showToast("Installed the nirux-worktree skill: the Lead starts tasks with it")
+        } catch {
+            showToast("Couldn’t install the nirux-worktree skill the Lead starts tasks with: \(error.localizedDescription)", tone: .error)
+        }
+        refreshOnboardingChecklist()
     }
 
     /// The Lead's workspace, on its first terminal (where Claude runs).
@@ -111,9 +118,13 @@ extension NiruxShellView {
     /// Where the running Lead works (`leadFolder`), else where a new one
     /// would start (`defaultFolder(forSpace:)`).
     private func leadPlace(in space: WorkspaceProfile, leadFolder: String?) -> SpaceSettingsLeadPane.Place {
+        let firstRepository = space.anchors.first { anchor in
+            if case .gitRepository = anchor.kind { return anchor.folder != nil }
+            return false
+        }?.name
         func place(of anchor: SpaceAnchor) -> SpaceSettingsLeadPane.Place {
             if case .gitRepository = anchor.kind { return .repository(anchor.name) }
-            return .folder(anchor.name)
+            return .folder(anchor.name, repository: firstRepository)
         }
         let start = defaultFolderAnchor(forSpace: space.id)
         guard let leadFolder else { return start.map(place(of:)) ?? .home }

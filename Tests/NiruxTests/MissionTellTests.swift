@@ -204,7 +204,7 @@ final class MissionTellTests: XCTestCase {
                 missionsURL: fixture.missionsURL
             ), 2, "\(arguments)")
         }
-        XCTAssertEqual(MissionEventCLI.main(["tell", "--message", "Hi"], handoffsEnabled: { false }), 4)
+        XCTAssertEqual(MissionEventCLI.main(["tell", "--message", "Hi"], handoffsEnabled: { false }, environment: [:]), 4)
     }
 
     // MARK: - Ledger

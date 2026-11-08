@@ -244,6 +244,32 @@ extension MenuBarFlowTests {
         }
     }
 
+    /// Space Settings › Lead says where the running Lead works, not where a
+    /// new one would; parking the active card hands over to the next card,
+    /// not to the Lead above them.
+    func testWhereTheLeadWorksAndParkingPastIt() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.projectBoardClient = ProjectBoardFlowTests.FakeGitHub(openPullRequests: "[]", runs: "[]")
+            shell.createSpace(NewSpacePanel.Draft(name: "Where", colorHex: WorkspaceProfile.palette[3].hex, anchors: []))
+            let space = shell.activeProfileID
+            shell.startLead(spaceID: space)
+            let lead = try XCTUnwrap(shell.leadWorkspace(inSpace: space))
+            let place = { shell.spaceSettingsLeadModel(for: try XCTUnwrap(shell.profiles.first { $0.id == space })).place }
+            XCTAssertEqual(try place(), .home)
+            let repository = SpaceAnchor(kind: .gitRepository(commonDir: harness.repo + "/.git"), name: "repo")
+            XCTAssertTrue(shell.workspaceStore.addAnchor(repository, toProfile: space))
+            XCTAssertEqual(try place(), .elsewhere(path: lead.cwd, repository: "repo"), "still in the home folder")
+
+            shell.addWorkspace(title: "first", cwd: harness.repo, profileID: space)
+            let first = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "second", cwd: harness.repo, profileID: space)
+            let second = try XCTUnwrap(shell.activeWorkspace)
+            XCTAssertTrue(shell.workspaceStore.setWorkspaceInactive(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === second }), true))
+            XCTAssertTrue(shell.activeWorkspace === first)
+        }
+    }
+
     /// "Start a Lead" in the New Space sheet: the space opens on its Lead,
     /// with no plain workspace beside it.
     func testNewSpaceSheetStartsTheLead() throws {

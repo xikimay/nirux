@@ -260,8 +260,8 @@ extension NiruxApp {
             SettingsForm.header("Missions"),
             handoffs,
             SettingsForm.hint(
-                "Worktree agents and the agent that started them (a space’s Lead, say) exchange questions, "
-                    + "answers, and results. New terminals pick up changes.",
+                "Worktree agents and the agent that started them exchange questions, answers, and results. "
+                    + "A space’s Lead and its tasks always do. New terminals pick up changes.",
                 under: handoffs
             ),
             approvals,

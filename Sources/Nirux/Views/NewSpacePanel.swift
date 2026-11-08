@@ -358,7 +358,11 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
     private var leadPlace: SpaceSettingsLeadPane.Place {
         guard let anchor = rows.first(where: \.anchor.isDefault)?.anchor else { return .home }
         if case .gitRepository = anchor.kind { return .repository(anchor.name) }
-        return .folder(anchor.name)
+        let repository = rows.first { row in
+            if case .gitRepository = row.anchor.kind { return true }
+            return false
+        }?.anchor.name
+        return .folder(anchor.name, repository: repository)
     }
 
     private func place(_ view: NSView, y: CGFloat, height: CGFloat) -> CGFloat {

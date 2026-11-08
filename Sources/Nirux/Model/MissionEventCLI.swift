@@ -73,12 +73,14 @@ enum MissionEventCLI {
         }
         let options = Array(arguments.dropFirst())
         switch command {
-        case "ask": return ask(arguments: options)
-        case "receive": return receive(arguments: options)
-        case "reply": return reply(arguments: options)
-        case "tell": return tell(arguments: options)
-        case MissionEvent.Kind.question.rawValue: return run(kind: .question, arguments: options)
-        case MissionEvent.Kind.completed.rawValue: return run(kind: .completed, arguments: options)
+        case "ask": return ask(arguments: options, environment: environment, missionsURL: missionsURL)
+        case "receive": return receive(arguments: options, environment: environment, missionsURL: missionsURL)
+        case "reply": return reply(arguments: options, environment: environment, missionsURL: missionsURL)
+        case "tell": return tell(arguments: options, environment: environment, missionsURL: missionsURL)
+        case MissionEvent.Kind.question.rawValue:
+            return run(kind: .question, arguments: options, environment: environment, missionsURL: missionsURL)
+        case MissionEvent.Kind.completed.rawValue:
+            return run(kind: .completed, arguments: options, environment: environment, missionsURL: missionsURL)
         default: return usage(commands)
         }
     }
