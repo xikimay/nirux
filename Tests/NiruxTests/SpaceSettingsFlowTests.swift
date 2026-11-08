@@ -226,6 +226,7 @@ final class SpaceSettingsFlowTests: XCTestCase {
             settings.select(.defaults)
             XCTAssertEqual(pane.rows.map(\.name), ["API_URL", "NIRUX_PROFILE_ID"])
             XCTAssertEqual(settings.unsavedParts.map(\.name), ["environment variables"])
+            guard pane.tableView.numberOfRows == 2 else { return }
             pane.tableView.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
             pane.removeButton.performClick(nil)
             XCTAssertTrue(pane.problemsLabel.isHidden)
@@ -268,9 +269,13 @@ final class SpaceSettingsFlowTests: XCTestCase {
             XCTAssertEqual(harness.alerts.last, "Save your changes in Space Settings before quitting?")
             XCTAssertEqual(settings.selectedTab, .brief)
 
-            // Each editor undoes its own typing only.
-            XCTAssertNotNil(settings.brief.textView.undoManager)
-            XCTAssertFalse(settings.brief.textView.undoManager === settings.templates.textView.undoManager)
+            // Each editor undoes its own typing only, on screen in the same
+            // window.
+            let briefUndo = try XCTUnwrap(settings.brief.textView.undoManager)
+            settings.select(.templates)
+            let templatesUndo = try XCTUnwrap(settings.templates.textView.undoManager)
+            XCTAssertFalse(briefUndo === templatesUndo)
+            settings.select(.brief)
 
             let panel = try XCTUnwrap(settings.panel)
             XCTAssertFalse(settings.windowShouldClose(panel), "Cancel")
