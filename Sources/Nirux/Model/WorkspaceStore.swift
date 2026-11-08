@@ -11,11 +11,14 @@ final class WorkspaceStore {
     /// space, where their workspaces moved.
     var deletedProfileIDs: Set<String> = []
 
+    /// -1 while no workspace is active: the active space is empty and
+    /// shows `EmptySpaceView`. Keys, ⌘W and notifications then reach no
+    /// workspace, not the first one of another space.
     var activeWorkspaceIndex: Int {
         get {
             guard let activeWorkspaceID,
                   let index = workspaces.firstIndex(where: { $0.id == activeWorkspaceID })
-            else { return workspaces.indices.first ?? 0 }
+            else { return -1 }
             return index
         }
         set { selectWorkspace(at: newValue) }
@@ -31,7 +34,7 @@ final class WorkspaceStore {
     }
 
     /// Every space, empty ones included: spaces persist (see `ProjectStore`),
-    /// and selecting an empty one opens a workspace in it.
+    /// and selecting an empty one shows `EmptySpaceView`.
     var navigableProfiles: [WorkspaceProfile] { profiles }
 
     var visibleWorkspaceIndices: [Int] {
@@ -91,18 +94,21 @@ final class WorkspaceStore {
         return selectWorkspace(at: index)
     }
 
-    /// Selects a space. An empty one is selected with no active workspace:
-    /// the caller opens one in it.
+    /// Selects a space. An empty one is selected with no active workspace,
+    /// and stays so until a workspace opens or moves in. So is one whose
+    /// last workspace is closing.
     @discardableResult
     func selectProfile(_ profileID: String) -> Bool {
         guard profiles.contains(where: { $0.id == profileID }) else { return false }
         activeProfileID = profileID
-        activeWorkspaceID = visibleWorkspaceIndices(in: profileID).first.map { workspaces[$0].id }
+        activeWorkspaceID = visibleWorkspaceIndices(in: profileID)
+            .first { !workspaces[$0].isClosing }
+            .map { workspaces[$0].id }
         return true
     }
 
-    /// ⌘⌥←/→ cycles through spaces that have workspaces: stepping onto an
-    /// empty one would open a workspace each time it passes.
+    /// ⌘⌥←/→ cycles through spaces that have workspaces: an empty one
+    /// shows only `EmptySpaceView`, where cycling would stop.
     @discardableResult
     func selectAdjacentProfile(delta: Int) -> WorkspaceProfile? {
         let candidates = profiles.filter { $0.id == activeProfileID || hasWorkspaces(in: $0.id) }
@@ -208,8 +214,7 @@ final class WorkspaceStore {
 
     /// A new space, in the color asked for or one no space uses. Its
     /// anchors are taken from the spaces that had them (one space per
-    /// anchor). `select` makes it the active space, with no workspace yet:
-    /// the caller opens one.
+    /// anchor). `select` makes it the active space, with no workspace yet.
     @discardableResult
     func createProfile(
         named baseName: String, colorHex: String? = nil, anchors: [SpaceAnchor] = [], select: Bool = true
@@ -312,7 +317,6 @@ final class WorkspaceStore {
         }
         profiles.remove(at: index)
         deletedProfileIDs.insert(id)
-        if activeProfileID == id { activeProfileID = WorkspaceProfile.defaultID }
         reconcileSelection(preferActiveProfile: true)
         return true
     }
@@ -357,9 +361,13 @@ final class WorkspaceStore {
     }
 
     private func reconcileSelection(preferActiveProfile: Bool) {
-        if !profiles.contains(where: { $0.id == activeProfileID }) {
-            activeProfileID = WorkspaceProfile.defaultID
-        }
+        let activeSpaceIsGone = !profiles.contains { $0.id == activeProfileID }
+        if activeSpaceIsGone { activeProfileID = WorkspaceProfile.defaultID }
+
+        // An empty space on screen stays there while workspaces elsewhere
+        // close or move, until one opens or moves in. Once it is deleted,
+        // the selection goes where the work is.
+        if !activeSpaceIsGone, activeWorkspaceID == nil, !hasWorkspaces(in: activeProfileID) { return }
 
         if preferActiveProfile,
            !hasWorkspaces(in: activeProfileID),

@@ -174,9 +174,9 @@ first step changed is how they are stored and managed:
     doesn't bring it back), but isn't recorded as deleted.
   - without the marker, the backup and the mirror are merged.
   - This needs revisiting once projects carry more than the mirror does.
-- **Empty spaces persist**, drawn as a ring in the space picker. Choosing one
-  opens a workspace in it. ⌘⌥←/→ skips empty spaces, so cycling doesn't open
-  workspaces.
+- **Empty spaces persist**, drawn as a ring in the space picker. Selecting one
+  shows what to do instead of opening a workspace (see
+  [spaces.md](spaces.md), "Interface"). ⌘⌥←/→ skips empty spaces.
 - **Space picker**, at the top of the sidebar (the space's tile at the top of
   the collapsed rail opens the same menu): the spaces, General first, with
   their task count and ⌘⌥1…⌘⌥9, then "New Space…", "Space Settings…" (one
