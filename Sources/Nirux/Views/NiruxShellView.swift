@@ -195,7 +195,7 @@ final class NiruxShellView: NSView {
         // Mission children list under their parent (docs/spaces.md, S11c).
         workspaceStore.missionParents = {
             var parents: [String: String] = [:]
-            for mission in MissionStore.shared.missions where mission.reportsToLead != true {
+            for mission in MissionStore.shared.missions {
                 parents[mission.id] = mission.parentWorkspaceID
             }
             return parents

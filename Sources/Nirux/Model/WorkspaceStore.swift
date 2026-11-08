@@ -428,7 +428,7 @@ final class WorkspaceStore {
             workspaces[$0].profileID == profileID && !workspaces[$0].isLead && !workspaces[$0].isInactive
         }
         let order = treeOrder(active, parents: activeParents(in: profileID)).map(\.index)
-        guard order != active else { return }
+        guard order != active, order.isEmpty else { return }
         let reordered = order.map { workspaces[$0] }
         for (slot, index) in active.enumerated() { workspaces[index] = reordered[slot] }
     }
