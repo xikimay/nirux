@@ -231,7 +231,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// repository was selected since.
     func update(repositoryKey: String?, info: ProjectInfo) {
         guard panel != nil, repositoryKey == selectedRepositoryKey else { return }
-        let previousTemplate = selectedTemplate?.name
+        let previousTemplate = selectedTemplate?.name ?? pickedTemplateName
         self.info = info
         hideError()
         startsWithoutFetch = false
@@ -274,6 +274,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
             // edit something here (⌘Return and a click still do).
             panel?.makeFirstResponder(nil)
             startButton.keyEquivalent = ""
+            cancelButton.keyEquivalent = ""
         } else {
             // The field being edited lost the focus when it was disabled.
             beginEditingBranch()
@@ -796,6 +797,7 @@ final class NewTaskSheet: NSPanel {
     /// focus, and any key while an input method composes text there.
     static func leavesToTextView(_ event: NSEvent, firstResponder: NSResponder?, multilineView: NSTextView?) -> Bool {
         guard let multilineView, firstResponder === multilineView else { return false }
+        if multilineView.hasMarkedText() { return true }
         let modifiers = event.modifierFlags.intersection([.command, .control])
         return modifiers.isEmpty && (event.charactersIgnoringModifiers == "\r" || event.charactersIgnoringModifiers == "\u{3}")
     }

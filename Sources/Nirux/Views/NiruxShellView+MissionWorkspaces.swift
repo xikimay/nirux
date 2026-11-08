@@ -215,6 +215,7 @@ extension NiruxShellView {
               // otherwise make `feat/x` next to `Feat/x`, which the filesystem
               // takes for one, then delete that one as its own after git
               // refuses (see `afterFailedNewBranch`).
+              GitWorktree.newBranchProblem(branch, repoRoot: repoRoot) == nil,
               let target = NewTask.resolveTarget(folder: repoRoot, baseBranch: baseBranch()),
               let remoteBranch = target.remoteBranch, let name = target.remoteBranchName
         else { return nil }
