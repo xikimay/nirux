@@ -412,12 +412,23 @@ final class AgentStatusMachineTests: XCTestCase {
     /// user stopped it.
     func testIdleReminderEndsATurnInterruptedWithoutStop() {
         startTurn()
-        let reminder = machine.apply(event(.notification, at: 70, type: "idle_prompt"), isUserFocused: false)
+        machine.noteKeystroke(now: t0 + 30)
+        let reminder = machine.apply(event(.notification, at: 90, type: "idle_prompt"), isUserFocused: false)
         XCTAssertFalse(reminder.firedAttention)
         XCTAssertNil(reminder.attention)
         XCTAssertNil(machine.turnStartedAt)
         XCTAssertEqual(machine.attentionReason, .turnFinished)
-        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 71), .needsAttention)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 91), .needsAttention)
+    }
+
+    /// No key since the prompt: no Esc, the turn's Stop got lost (a hook
+    /// that failed, Nirux replaced mid-turn). The reminder is its end.
+    func testIdleReminderStandsForALostStop() {
+        startTurn()
+        let reminder = machine.apply(event(.notification, at: 90, type: "idle_prompt"), isUserFocused: false)
+        XCTAssertTrue(reminder.firedAttention)
+        XCTAssertEqual(reminder.attention, .turnFinished)
+        XCTAssertNil(machine.turnStartedAt)
     }
 
     /// The process table read fails now and then (processes started
@@ -442,6 +453,27 @@ final class AgentStatusMachineTests: XCTestCase {
     /// quiet, then the compaction's SessionStart handing the column back to
     /// hooks with that unexplained wait: an amber "needs you" for good.
     func testAnUnexplainedWaitClearsOnceHooksTakeOverAgain() {
+        idleCompactionWithoutHookAuthority()
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 3_010), .needsAttention)
+        XCTAssertNil(machine.attentionReason)
+
+        _ = machine.apply(event(.subagentStop, at: 3_011, agent: "compactor"), isUserFocused: false)
+        _ = machine.apply(compacted(at: 3_011), isUserFocused: false)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 3_012), .idle)
+    }
+
+    /// The same, the compaction's SessionStart in the middle of the spinner:
+    /// the turn the fallback ran ends with it (Missions read it).
+    func testHooksTakingOverEndTheFallbacksTurn() {
+        idleCompactionWithoutHookAuthority()
+        _ = machine.apply(compacted(at: 3_001), isUserFocused: false)
+        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 3_001.5), .idle)
+        XCTAssertNil(machine.turnStartedAt)
+    }
+
+    /// A finished turn, ^Z and `fg` (hook authority gone), then an idle
+    /// compaction's spinner the output fallback takes for a turn.
+    private func idleCompactionWithoutHookAuthority() {
         startTurn()
         machine.noteUserInput(now: t0)
         _ = machine.apply(event(.stop, at: 10), isUserFocused: false)
@@ -449,16 +481,27 @@ final class AgentStatusMachineTests: XCTestCase {
         _ = machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 22)
         machine.noteRead(now: t0 + 3_000)
         XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 3_000.5), .working)
-        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 3_010), .needsAttention)
-        XCTAssertNil(machine.attentionReason)
+    }
 
-        _ = machine.apply(event(.subagentStop, at: 3_011, agent: "compactor"), isUserFocused: false)
-        let compacted = AgentHookEvent(
+    private func compacted(at offset: TimeInterval) -> AgentHookEvent {
+        AgentHookEvent(
             kind: .claude, name: .sessionStart, sessionID: "lead", source: "compact",
-            timestamp: t0.timeIntervalSince1970 + 3_011
+            timestamp: t0.timeIntervalSince1970 + offset
         )
-        _ = machine.apply(compacted, isUserFocused: false)
-        XCTAssertEqual(machine.tick(fgName: "claude", isUserFocused: false, now: t0 + 3_012), .idle)
+    }
+
+    /// The very `claude` that fired hooks, back in front after ^Z and `fg`
+    /// or Ctrl-G's $EDITOR: its hooks still drive the column, and a redraw
+    /// no hook explains (the "/clear to save tokens" hint) is no turn.
+    func testTheClaudeThatFiredHooksKeepsThemAfterAnotherProcessHeldTheTerminal() {
+        startTurn()
+        machine.noteUserInput(now: t0)
+        _ = machine.apply(event(.stop, at: 10), isUserFocused: false)
+        _ = machine.tick(fgName: "vim", isUserFocused: false, now: t0 + 20)
+        _ = machine.tick(fgName: "claude", claudeFiredHooks: true, isUserFocused: false, now: t0 + 30)
+        XCTAssertEqual(machine.hookKind, "claude")
+        machine.noteRead(now: t0 + 4_500)
+        XCTAssertEqual(machine.tick(fgName: "claude", claudeFiredHooks: true, isUserFocused: false, now: t0 + 4_500.5), .idle)
     }
 
     /// With Nirux in the background the heartbeat waits: a `claude` started

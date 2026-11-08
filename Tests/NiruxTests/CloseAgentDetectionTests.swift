@@ -183,7 +183,9 @@ final class CloseAgentDetectionTests: XCTestCase {
                 foregroundProcess: ForegroundProcess(
                     instance: ProcessInstance(pid: 99_999, startedAt: 0), name: "claude", arguments: ["claude"]
                 ),
-                isUserFocused: true
+                isUserFocused: true,
+                processTableRead: true,
+                claudeFiredHooks: false
             )
             XCTAssertEqual(session.agentProcessName(snapshot: emptySnapshot), "claude")
             // A snapshot that captured the table wins: the shell runs no agent.

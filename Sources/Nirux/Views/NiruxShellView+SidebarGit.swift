@@ -25,7 +25,8 @@ extension NiruxShellView {
                 let agentStatus = col.pty?.agentStatus(
                     foregroundProcess: foregroundProcess,
                     isUserFocused: isUserFocused,
-                    processTableRead: processTableRead
+                    processTableRead: processTableRead,
+                    claudeFiredHooks: foregroundProcess.map { col.claudeHooksFired(by: $0.instance) } ?? false
                 ) ?? .idle
                 let permissionApproval = sidebarApproval(for: col, hold: approvalHolds[ObjectIdentifier(col)])
                 return ColumnInfo(
@@ -160,10 +161,12 @@ extension NiruxShellView {
         let visible = Set(visibleIndices)
         for (index, workspace) in workspaces.enumerated() where !visible.contains(index) {
             for column in workspace.columns {
+                let foregroundProcess = foregroundProcesses[ObjectIdentifier(column)]
                 _ = column.pty?.agentStatus(
-                    foregroundProcess: foregroundProcesses[ObjectIdentifier(column)],
+                    foregroundProcess: foregroundProcess,
                     isUserFocused: false,
-                    processTableRead: processTableRead
+                    processTableRead: processTableRead,
+                    claudeFiredHooks: foregroundProcess.map { column.claudeHooksFired(by: $0.instance) } ?? false
                 )
             }
         }

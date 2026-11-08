@@ -671,15 +671,19 @@ final class PtySession: @unchecked Sendable {
     /// events (prompt submitted, tool call, turn stop, permission request)
     /// are authoritative; agents without hooks fall back to output-activity
     /// detection. Called on the heartbeat with a shared process snapshot;
-    /// `processTableRead` false when that snapshot came back empty (see
+    /// `processTableRead` false when that snapshot came back empty;
+    /// `claudeFiredHooks` per `ColumnState.claudeHooksFired(by:)` (see
     /// `AgentStatusMachine.tick`).
     func agentStatus(
         foregroundProcess: ForegroundProcess?,
         isUserFocused: Bool,
-        processTableRead: Bool
+        processTableRead: Bool,
+        claudeFiredHooks: Bool
     ) -> AgentStatus {
         let fgName = processTableRead ? foregroundProcess?.name ?? "" : nil
-        return state.machine.tick(fgName: fgName, isUserFocused: isUserFocused, now: Date())
+        return state.machine.tick(
+            fgName: fgName, claudeFiredHooks: claudeFiredHooks, isUserFocused: isUserFocused, now: Date()
+        )
     }
 
     /// Apply a hook event routed by AgentHookCenter (main queue).

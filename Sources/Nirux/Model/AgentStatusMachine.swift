@@ -499,12 +499,18 @@ struct AgentStatusMachine {
             // at its prompt, not in a dialog. Its Stop said so already: the
             // reminder alerts nobody, asks nothing over Telegram, and
             // leaves a finished turn the user looked at seen. Only a turn
-            // still believed running (Esc fires no Stop) ends here.
+            // still believed running (Esc fires no Stop, a Stop can get
+            // lost) ends here.
             closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
             guard hookTurnInFlight || hookWorking else { return }
             endTurn()
-            _ = block(for: .turnFinished, isUserFocused: isUserFocused, alert: false)
-            return
+            // Esc is a key: the user stopped it. Without one since the
+            // prompt, the turn's Stop got lost, and this is its end.
+            if lastInputAt > (lastPromptAt ?? 0) {
+                _ = block(for: .turnFinished, isUserFocused: isUserFocused, alert: false)
+                return
+            }
+            reason = .turnFinished
         default:
             reason = .message(event.detail)
         }
@@ -615,8 +621,10 @@ struct AgentStatusMachine {
     /// changes. Read as "no agent", it would drop the hook authority of a
     /// `claude` idle at its prompt, and the output fallback would take its
     /// next redraw (an idle compaction's spinner) for a turn.
+    /// `claudeFiredHooks`: the `claude` in front is the very process whose
+    /// own hooks reached this column.
     @discardableResult
-    mutating func tick(fgName: String?, isUserFocused: Bool, now: Date) -> AgentStatus {
+    mutating func tick(fgName: String?, claudeFiredHooks: Bool = false, isUserFocused: Bool, now: Date) -> AgentStatus {
         guard let fgName else { return state }
         let isAgent = Self.isRecognizedAgentProcess(fgName)
         if fgName != lastForegroundName { foregroundChanged(to: fgName, now: now) }
@@ -627,6 +635,9 @@ struct AgentStatusMachine {
             state = .idle
             return state
         }
+        // Back in front after something else held the terminal (^Z and
+        // `fg`, Ctrl-G's $EDITOR): its hooks still drive it.
+        if claudeFiredHooks, fgName == "claude" { hookKind = "claude" }
 
         // Hook-authoritative path (Claude with installed hooks): events own
         // every transition; output silence mid-turn means nothing.
@@ -641,6 +652,8 @@ struct AgentStatusMachine {
                 if isUserFocused || attentionReason == nil { state = .idle }
             } else if state == .working {
                 state = .idle
+                // The fallback's turn, if it ran one: hooks show none.
+                if !hookTurnInFlight { turnStartedAt = nil }
             }
             return state
         }

@@ -530,7 +530,7 @@ final class KeepAwakeShellTests: XCTestCase {
             let pty = PtySession()
             _ = pty.agentStatus(foregroundProcess: ForegroundProcess(
                 instance: ProcessInstance(pid: 1, startedAt: 0), name: name, arguments: [name]
-            ), isUserFocused: false, processTableRead: true)
+            ), isUserFocused: false, processTableRead: true, claudeFiredHooks: false)
             ticked.append((pty, name))
         }
         for (pty, name) in ticked {
