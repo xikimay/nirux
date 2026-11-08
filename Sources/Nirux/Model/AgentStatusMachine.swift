@@ -46,6 +46,8 @@ struct AgentStatusMachine {
     private(set) var lastEventAt: TimeInterval = 0
     /// Codex's last turnComplete: output before it is the finished turn's.
     private var turnEndedAt: TimeInterval = 0
+    /// Claude's last main-thread turn end (Stop, StopFailure).
+    private var mainTurnEndedAt: TimeInterval = 0
     /// Start of the current turn (epoch seconds): UserPromptSubmit, else
     /// the first turn event seen (a turn already running at launch). Nil
     /// between turns. Drives the "working · 12m" display.
@@ -341,6 +343,7 @@ struct AgentStatusMachine {
         }
         closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
         endTurn()
+        mainTurnEndedAt = now
         turnFailure = event.name == .stopFailure
             ? AgentTurnFailure(
                 kind: event.errorKind, detail: event.detail, failedAt: now,
@@ -496,9 +499,22 @@ struct AgentStatusMachine {
             ))
         case "idle_prompt":
             // Claude finished responding a minute ago: the main thread sits
-            // at its prompt, not in a dialog.
+            // at its prompt, not in a dialog. Its Stop said so already: the
+            // reminder alerts nobody, asks nothing over Telegram, and
+            // leaves a finished turn the user looked at seen. Only a turn
+            // still believed running (Esc fires no Stop, a Stop can get
+            // lost) ends here.
             closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
+            guard hookTurnInFlight || hookWorking else { return }
             endTurn()
+            // Esc is a key: the user stopped it. Background subagents may
+            // have worked on after its Stop. Otherwise the turn's Stop got
+            // lost, and this is its end.
+            let promptAt = lastPromptAt ?? 0
+            if lastInputAt > promptAt || mainTurnEndedAt >= promptAt {
+                _ = block(for: .turnFinished, isUserFocused: isUserFocused, alert: false)
+                return
+            }
             reason = .turnFinished
         default:
             reason = .message(event.detail)
@@ -605,9 +621,16 @@ struct AgentStatusMachine {
     }
 
     /// Reconcile with the foreground process (heartbeat tick). `fgName` is
-    /// the foreground process name, "" when unknown.
+    /// the foreground process name, "" when there is none; nil when the
+    /// process table could not be read: nothing is known then, and nothing
+    /// changes. Read as "no agent", it would drop the hook authority of a
+    /// `claude` idle at its prompt, and the output fallback would take its
+    /// next redraw (an idle compaction's spinner) for a turn.
+    /// `claudeFiredHooks`: the `claude` in front is the very process whose
+    /// own hooks reached this column.
     @discardableResult
-    mutating func tick(fgName: String, isUserFocused: Bool, now: Date) -> AgentStatus {
+    mutating func tick(fgName: String?, claudeFiredHooks: Bool = false, isUserFocused: Bool, now: Date) -> AgentStatus {
+        guard let fgName else { return state }
         let isAgent = Self.isRecognizedAgentProcess(fgName)
         if fgName != lastForegroundName { foregroundChanged(to: fgName, now: now) }
 
@@ -617,6 +640,13 @@ struct AgentStatusMachine {
             state = .idle
             return state
         }
+        // Back in front after something else held the terminal (^Z and
+        // `fg`, Ctrl-G's $EDITOR): its hooks still drive it, and the turn
+        // it was in goes on.
+        if claudeFiredHooks, fgName == "claude", hookKind != "claude" {
+            hookKind = "claude"
+            hookWorking = hookTurnInFlight && openDialogs.isEmpty
+        }
 
         // Hook-authoritative path (Claude with installed hooks): events own
         // every transition; output silence mid-turn means nothing.
@@ -624,9 +654,15 @@ struct AgentStatusMachine {
             if hookWorking || isRunningAnsweredDialog(now: now) {
                 state = .working
             } else if state == .needsAttention {
-                if isUserFocused { state = .idle }
+                // Hooks say why they stop an agent. A wait without a
+                // reason is the output fallback's guess from before they
+                // took over again: an amber "needs you" on an agent idle at
+                // its prompt.
+                if isUserFocused || attentionReason == nil { state = .idle }
             } else if state == .working {
                 state = .idle
+                // The fallback's turn, if it ran one: hooks show none.
+                if !hookTurnInFlight { turnStartedAt = nil }
             }
             return state
         }
@@ -678,7 +714,10 @@ struct AgentStatusMachine {
         foregroundSince = now
         hookWorking = false
         lastReadAt = 0 // the old command's dying output is not this one's work
-        lastAttentionReason = nil
+        // Nor its reason to wait — unless the new `claude`'s own hooks gave
+        // it, which can come first too: a Stop while the heartbeat waited
+        // with Nirux in the background.
+        if fgName != "claude" || hookKind != "claude" { lastAttentionReason = nil }
         // Another integrated agent took over the terminal: a `claude` that
         // died without SessionEnd left its dialogs behind. (A shell in front
         // may just mean it's suspended; a new claude's SessionStart clears
@@ -782,6 +821,7 @@ struct AgentStatusMachine {
         lastClosedDialogRequestedAt = 0
         lastEventAt = 0
         turnEndedAt = 0
+        mainTurnEndedAt = 0
         turnStartedAt = nil
         lastReadAt = 0
         lastInteractionAt = 0

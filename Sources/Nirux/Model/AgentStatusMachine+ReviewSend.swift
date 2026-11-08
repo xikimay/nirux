@@ -80,8 +80,9 @@ extension AgentStatusMachine {
         }
         guard !AgentHookCenter.isHeadlessClaude(foreground) else { return .headless }
         // `hookKind` is the column's, cleared when Claude ends or another
-        // process comes to the front (Ctrl-Z): a Claude restarted in it, or
-        // back in front, must report again. A prompt since it started: SessionStart can come before
+        // process comes to the front (Ctrl-Z): a Claude restarted in it
+        // must report again (the very one back in front gets it back, see
+        // `tick`). A prompt since it started: SessionStart can come before
         // Claude's own dialogs.
         guard hookKind == "claude", let lastPromptAt, lastPromptAt >= foreground.instance.startedAt else {
             return .notHeardFrom

@@ -5,6 +5,7 @@ import AppKit
 extension NiruxShellView {
     func updateSidebar(snapshot: ProcessSnapshot? = nil) {
         let snapshot = snapshot ?? ProcessSnapshot()
+        let processTableRead = !snapshot.isEmpty
         let now = Date().timeIntervalSince1970
         let visibleIndices = visibleWorkspaceIndices
         let nested = workspaceStore.nestedWorkspaceIndices(in: activeProfileID)
@@ -23,7 +24,9 @@ extension NiruxShellView {
                 }
                 let agentStatus = col.pty?.agentStatus(
                     foregroundProcess: foregroundProcess,
-                    isUserFocused: isUserFocused
+                    isUserFocused: isUserFocused,
+                    processTableRead: processTableRead,
+                    claudeFiredHooks: foregroundProcess.map { col.claudeHooksFired(by: $0.instance) } ?? false
                 ) ?? .idle
                 let permissionApproval = sidebarApproval(for: col, hold: approvalHolds[ObjectIdentifier(col)])
                 return ColumnInfo(
@@ -68,7 +71,9 @@ extension NiruxShellView {
                           isLead: workspace.isLead,
                           isNested: nested.contains(index))
         }
-        tickHiddenSpaceAgents(visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses)
+        tickHiddenSpaceAgents(
+            visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses, processTableRead: processTableRead
+        )
         updateColumnHeaders(infos: infos, foregroundProcesses: foregroundProcesses, now: now)
         let profileInfos = workspaceStore.navigableProfiles.map { profile in
             let profileWorkspaces = workspaces.filter { $0.profileID == profile.id }
@@ -150,14 +155,18 @@ extension NiruxShellView {
     /// without hooks "working" long after it went quiet.
     private func tickHiddenSpaceAgents(
         visibleIndices: [Int],
-        foregroundProcesses: [ObjectIdentifier: ForegroundProcess]
+        foregroundProcesses: [ObjectIdentifier: ForegroundProcess],
+        processTableRead: Bool
     ) {
         let visible = Set(visibleIndices)
         for (index, workspace) in workspaces.enumerated() where !visible.contains(index) {
             for column in workspace.columns {
+                let foregroundProcess = foregroundProcesses[ObjectIdentifier(column)]
                 _ = column.pty?.agentStatus(
-                    foregroundProcess: foregroundProcesses[ObjectIdentifier(column)],
-                    isUserFocused: false
+                    foregroundProcess: foregroundProcess,
+                    isUserFocused: false,
+                    processTableRead: processTableRead,
+                    claudeFiredHooks: foregroundProcess.map { column.claudeHooksFired(by: $0.instance) } ?? false
                 )
             }
         }

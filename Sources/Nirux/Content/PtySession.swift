@@ -53,14 +53,11 @@ final class ProcessSnapshot {
 
     init() {
         PollingDiagnostics.recordProcessTableScan()
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
-        var size: Int = 0
-        guard sysctl(&mib, 4, nil, &size, nil, 0) == 0, size > 0 else { return }
-        let count = size / MemoryLayout<kinfo_proc>.size
-        var procs = [kinfo_proc](repeating: kinfo_proc(), count: count)
-        guard sysctl(&mib, 4, &procs, &size, nil, 0) == 0 else { return }
-        let actual = size / MemoryLayout<kinfo_proc>.size
-        for i in 0..<actual {
+        var procs = Self.readProcessTable { buffer, size in
+            var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
+            return sysctl(&mib, 4, buffer, &size, nil, 0) == 0 ? 0 : errno
+        }
+        for i in procs.indices {
             let pid = procs[i].kp_proc.p_pid
             let ppid = procs[i].kp_eproc.e_ppid
             let processGroupID = procs[i].kp_eproc.e_pgid
@@ -82,6 +79,33 @@ final class ProcessSnapshot {
                 arguments: []
             ))
         }
+    }
+
+    /// The whole process table. `read` is sysctl(KERN_PROC_ALL) on a
+    /// buffer (nil asks for the size) of `size` bytes, returning 0 or an
+    /// errno. Processes started between the size query and the read fail
+    /// it with ENOMEM — about one scan in 1,500 with a dozen agents at work
+    /// — and an empty snapshot shows no foreground process in any column:
+    /// ask again, with more room each time. Empty when it still fails.
+    static func readProcessTable(
+        attempts: Int = 4,
+        read: (UnsafeMutableRawPointer?, inout Int) -> Int32
+    ) -> [kinfo_proc] {
+        let stride = MemoryLayout<kinfo_proc>.stride
+        for attempt in 0..<attempts {
+            var size = 0
+            guard read(nil, &size) == 0, size > 0 else { return [] }
+            // The kernel's estimate leaves room for 5 more processes.
+            var procs = [kinfo_proc](repeating: kinfo_proc(), count: size / stride + (16 << attempt))
+            size = procs.count * stride
+            let status = procs.withUnsafeMutableBytes { read($0.baseAddress, &size) }
+            if status == 0 {
+                procs.removeLast(procs.count - min(procs.count, size / stride))
+                return procs
+            }
+            guard status == ENOMEM else { return [] }
+        }
+        return []
     }
 
     init(entries: [Entry]) {
@@ -646,10 +670,20 @@ final class PtySession: @unchecked Sendable {
     /// Compute agent status. With Claude Code hooks installed, lifecycle
     /// events (prompt submitted, tool call, turn stop, permission request)
     /// are authoritative; agents without hooks fall back to output-activity
-    /// detection. Called on the heartbeat with a shared process snapshot.
-    func agentStatus(foregroundProcess: ForegroundProcess?, isUserFocused: Bool) -> AgentStatus {
-        let fgName = foregroundProcess?.name ?? ""
-        return state.machine.tick(fgName: fgName, isUserFocused: isUserFocused, now: Date())
+    /// detection. Called on the heartbeat with a shared process snapshot;
+    /// `processTableRead` false when that snapshot came back empty;
+    /// `claudeFiredHooks` per `ColumnState.claudeHooksFired(by:)` (see
+    /// `AgentStatusMachine.tick`).
+    func agentStatus(
+        foregroundProcess: ForegroundProcess?,
+        isUserFocused: Bool,
+        processTableRead: Bool,
+        claudeFiredHooks: Bool
+    ) -> AgentStatus {
+        let fgName = processTableRead ? foregroundProcess?.name ?? "" : nil
+        return state.machine.tick(
+            fgName: fgName, claudeFiredHooks: claudeFiredHooks, isUserFocused: isUserFocused, now: Date()
+        )
     }
 
     /// Apply a hook event routed by AgentHookCenter (main queue).

@@ -136,4 +136,31 @@ final class PtyForegroundProcessTests: XCTestCase {
         XCTAssertFalse(snapshot.isProcess(ProcessInstance(pid: 22, startedAt: 22), childOf: 20), "grandchild")
         XCTAssertFalse(snapshot.isProcess(ProcessInstance(pid: 21, startedAt: 5), childOf: 20), "reused pid")
     }
+
+    /// Processes started between the size query and the read fail it
+    /// (ENOMEM): an empty table would show every column without its agent.
+    func testProcessTableReadAgainWhenProcessesStartMidRead() {
+        let stride = MemoryLayout<kinfo_proc>.stride
+        var capacities: [Int] = []
+        let table = ProcessSnapshot.readProcessTable { buffer, size in
+            guard let buffer else {
+                size = 2 * stride
+                return 0
+            }
+            capacities.append(size / stride)
+            guard capacities.count > 1 else { return ENOMEM }
+            let procs = buffer.bindMemory(to: kinfo_proc.self, capacity: size / stride)
+            for index in 0..<3 {
+                procs[index] = kinfo_proc()
+                procs[index].kp_proc.p_pid = pid_t(100 + index)
+            }
+            size = 3 * stride
+            return 0
+        }
+        XCTAssertEqual(table.map(\.kp_proc.p_pid), [100, 101, 102])
+        // More room than the kernel's estimate, and more on each try.
+        guard capacities.count == 2 else { return XCTFail("read \(capacities.count) times") }
+        XCTAssertGreaterThan(capacities[0], 2)
+        XCTAssertGreaterThan(capacities[1], capacities[0])
+    }
 }
