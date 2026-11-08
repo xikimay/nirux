@@ -68,16 +68,28 @@ extension NiruxShellView {
         }
     }
 
+    /// The setup script of the anchor that routed a new worktree, if it has
+    /// one (see SpaceSetupScript).
+    func setupScript(for decision: SpaceRouting.Decision) -> URL? {
+        guard decision.reason == .anchor, let anchor = decision.anchor else { return nil }
+        return SpaceSetupScript.scriptToRun(spaceID: decision.spaceID, anchor: anchor)
+    }
+
     /// `nirux://new-workspace`. From a Nirux terminal, `requestedSpaceID`
     /// is the space its shell started in; a request from outside, or one
     /// the user confirmed, names none and goes where its folder belongs,
     /// else to the default space, with the banner that says so.
-    func openRequestedWorkspace(title: String?, cwd: String?, agent: NiruxApp.WorkspaceAgent?, requestedSpaceID: String?) {
+    func openRequestedWorkspace(
+        title: String?, cwd: String?, agent: NiruxApp.WorkspaceAgent?, requestedSpaceID: String?, startedOutsideNirux: Bool = false
+    ) {
         let folder = cwd ?? defaultFolder(forSpace: requestedSpaceID ?? WorkspaceProfile.defaultID)
         routeWorkspace(folder: folder, startedFromSpaceID: requestedSpaceID) { [weak self] decision in
             guard let self else { return }
             let workspaceID = UUID().uuidString
-            self.addWorkspace(title: title, cwd: folder, agent: agent, profileID: decision.spaceID, workspaceID: workspaceID)
+            self.addWorkspace(
+                title: title, cwd: folder, agent: agent, profileID: decision.spaceID, workspaceID: workspaceID,
+                startedOutsideNirux: startedOutsideNirux
+            )
             self.saveState()
             if decision.reason == .general { self.presentSpaceArrival(workspaceID: workspaceID) }
         }

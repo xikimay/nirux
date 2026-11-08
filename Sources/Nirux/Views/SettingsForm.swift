@@ -133,9 +133,13 @@ enum SettingsForm {
 /// top edge fixed, as macOS Settings windows do: left alone, the tab view
 /// controller grows the window for a taller pane but never shrinks it.
 final class SettingsTabViewController: NSTabViewController {
+    /// The index of the tab just picked.
+    var onSelect: ((Int) -> Void)?
+
     override func tabView(_ tabView: NSTabView, didSelect tabViewItem: NSTabViewItem?) {
         super.tabView(tabView, didSelect: tabViewItem)
         fitWindowToSelectedPane(animated: true)
+        onSelect?(selectedTabViewItemIndex)
     }
 
     /// Animates only in front of the user (xctest's app is never active).

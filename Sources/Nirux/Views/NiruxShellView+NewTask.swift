@@ -74,10 +74,10 @@ extension NiruxShellView {
         }
     }
 
-    /// The agent a space's tasks start with unless the sheet says otherwise.
-    /// Claude Code until spaces have their own defaults (S8).
+    /// The agent a space's tasks start with unless the sheet says otherwise:
+    /// its default (Space Settings › Defaults), else Claude Code.
     func defaultTaskAgent(forSpace spaceID: String) -> NiruxApp.WorkspaceAgent {
-        .claude
+        SpaceDefaultsStore.defaults(forSpace: spaceID).taskAgent
     }
 
     /// The space's repositories and folders the sheet can start from: those
@@ -155,7 +155,8 @@ extension NiruxShellView {
             profileID: decision.spaceID,
             deliveredHandover: created.handoverError == nil,
             handoverText: created.handover,
-            worktreeBranch: created.checkedOutBranch
+            worktreeBranch: created.checkedOutBranch,
+            setupScript: setupScript(for: decision)
         )
         saveState()
         // A hook prints its reason last.
@@ -176,20 +177,9 @@ extension NiruxShellView {
         }
     }
 
-    /// "Edit Task Templates…" in a project's menu: opens its templates in an
-    /// editor column, creating the file with the default ones on first use.
+    /// "Edit Task Templates…": Space Settings › Templates.
     func editTaskTemplates(profileID: String) {
-        let projectName = workspaceStore.profiles.first { $0.id == profileID }?.name ?? profileID
-        do {
-            guard let url = try TaskTemplates.ensureFile(spaceID: profileID, spaceName: projectName) else {
-                NSSound.beep()
-                return
-            }
-            openInEditorColumn(path: url.path)
-        } catch {
-            NiruxDebugLog.log("TaskTemplates: could not create the templates file: \(error)")
-            NSSound.beep()
-        }
+        showSpaceSettings(profileID: profileID, tab: .templates)
     }
 
     struct CreatedTaskWorktree: Sendable {
