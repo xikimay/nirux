@@ -99,28 +99,11 @@ enum AgentAttentionReason: Hashable, Sendable {
         case .stillWaiting(let dialog, _): return dialog.detailLine
         }
     }
-
-    /// Activity feed summary.
-    var activitySummary: String {
-        switch self {
-        case .permission(let tool, let summary):
-            if isPlanApproval { return "plan approval" }
-            let head = tool.map { "permission: \($0)" } ?? "permission"
-            return [head, summary].compactMap { $0 }.joined(separator: " · ")
-        case .question(let text): return "question: \(text ?? "needs input")"
-        case .turnFinished: return "turn finished"
-        case .message(let text): return text ?? "needs input"
-        case .apiError(let kind, let detail):
-            return ["stopped on error: \(kind ?? "unknown")", detail].compactMap { $0 }.joined(separator: " · ")
-        case .exitedMidTurn: return "exited mid-turn"
-        case .stillWaiting(let dialog, let waited):
-            return "waiting \(SidebarRenderer.shortDuration(waited)) · \(dialog.activitySummary)"
-        }
-    }
 }
+
 /// What a lit attention signal asks of the user, least urgent first: the
-/// sidebar's cards and rail, the project switcher's ring and the activity
-/// feed draw it. Only `.waiting` is amber (`Theme.Color.waiting`).
+/// sidebar's cards and rail and the project switcher's ring draw it. Only
+/// `.waiting` is amber (`Theme.Color.waiting`).
 enum AttentionSignal: String, Codable, Comparable, Hashable, Sendable {
     /// A turn ended: the agent waits for its next prompt, nobody is blocked.
     case finished

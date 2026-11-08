@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Space Memory panel (⌘P › Space Memory…, the space's menu)
+// MARK: - Space Memory (Space Settings › Memory; ⌘P › Space Memory…, the space's menu)
 
 extension NiruxShellView {
     /// What a Project Memory read needs, kept for the reads after a write.
@@ -29,19 +29,28 @@ extension NiruxShellView {
         }
     }
 
-    /// Opens what agents know about the active workspace's repository; from
-    /// a project's menu, about that project's workspace's (see
-    /// `projectMemoryWorkspace`). The workspace's own folder decides, not
-    /// where its focused terminal has `cd`'d.
+    /// Space Settings on its Memory tab, for the active space or the one
+    /// whose menu was used.
     func showProjectMemory(profileID: String? = nil) {
-        guard window != nil else { return }
-        guard let workspace = profileID.map(projectMemoryWorkspace(inProject:)) ?? activeWorkspace else {
-            showToast("Open a workspace in this space to see what agents know")
+        showSpaceSettings(profileID: profileID ?? activeProfileID, tab: .memory)
+    }
+
+    /// Fills the Memory tab: what agents know about the repository of the
+    /// space's workspace (see `projectMemoryWorkspace`), else of its default
+    /// repository or folder. The workspace's own folder decides, not where
+    /// its focused terminal has `cd`'d.
+    func loadProjectMemoryTab(spaceID: String) {
+        guard let settings = spaceSettings, settings.spaceID == spaceID else { return }
+        let workspace = projectMemoryWorkspace(inProject: spaceID)
+        guard let folder = workspace?.cwd ?? profiles.first(where: { $0.id == spaceID })?.defaultFolder else {
+            settings.showMemoryPlaceholder(
+                "Open a workspace in this space, or add a repository in General, to see what agents know."
+            )
             return
         }
         let context = ProjectMemoryContext(
-            folder: workspace.cwd,
-            brief: SpaceBrief.briefURL(spaceID: workspace.profileID),
+            folder: folder,
+            brief: SpaceBrief.briefURL(spaceID: spaceID),
             home: sideEffects.homeDirectory(),
             environment: ProcessInfo.processInfo.environment,
             managed: sideEffects.claudeManagedSettings()
@@ -52,7 +61,7 @@ extension NiruxShellView {
         let request = projectMemoryRequest
         Self.readProjectMemory(context) { [weak self, weak workspace] model in
             guard let self, request == projectMemoryRequest else { return }
-            presentProjectMemory(model, context: context, workspace: workspace)
+            presentProjectMemory(model, context: context, workspace: workspace, spaceID: spaceID)
         }
     }
 
@@ -64,19 +73,23 @@ extension NiruxShellView {
     }
 
     private func presentProjectMemory(
-        _ model: ProjectMemoryPanel.Model, context: ProjectMemoryContext, workspace: WorkspaceState?
+        _ model: ProjectMemoryPanel.Model, context: ProjectMemoryContext, workspace: WorkspaceState?, spaceID: String
     ) {
-        guard let window else { return }
+        guard let settings = spaceSettings, settings.spaceID == spaceID else { return }
+        settings.hideMemoryPlaceholder()
         if projectMemoryPanel == nil { projectMemoryPanel = ProjectMemoryPanel() }
+        settings.memoryPanel = projectMemoryPanel
         projectMemoryPanel?.show(
-            relativeTo: window, model: model, actions: projectMemoryActions(context: context, workspace: workspace)
+            in: settings.memoryHost, model: model,
+            actions: projectMemoryActions(context: context, workspace: workspace, spaceID: spaceID)
         )
     }
 
     // MARK: - Actions
 
-    private func projectMemoryActions(context: ProjectMemoryContext, workspace: WorkspaceState?) -> ProjectMemoryPanel.Actions {
-        let spaceID = workspace?.profileID
+    private func projectMemoryActions(
+        context: ProjectMemoryContext, workspace: WorkspaceState?, spaceID: String
+    ) -> ProjectMemoryPanel.Actions {
         let trash = sideEffects.trash
         var actions = ProjectMemoryPanel.Actions()
         // An item's file opens in the editor of the workspace it was read
@@ -84,7 +97,8 @@ extension NiruxShellView {
         // workspace's.
         actions.open = { [weak self, weak workspace] url, line in
             guard let self else { return }
-            window?.makeKey()
+            // In front of Space Settings, which stays open behind it.
+            window?.makeKeyAndOrderFront(nil)
             let target = workspace.flatMap { workspace in
                 workspace.isClosing ? nil : workspaces.firstIndex { $0 === workspace }
             }
@@ -94,7 +108,7 @@ extension NiruxShellView {
         actions.confirm = { [weak self] alert in self?.runModal(alert) == .alertFirstButtonReturn }
         let limit = SpaceBrief.maxCharacters
         actions.move = { [weak self] target, scope in
-            guard let self else { return false }
+            guard let self, !briefHasUnsavedText() else { return false }
             switch (target, scope) {
             case (.memory(let memory, let directory), .always):
                 guard let brief = ensureProjectBrief(spaceID: spaceID) else { return false }
@@ -112,6 +126,7 @@ extension NiruxShellView {
         }
         actions.save = { [weak self] target, text in
             guard let self else { return false }
+            if case .briefRule = target, briefHasUnsavedText() { return false }
             switch target {
             case .memory(let memory, let directory):
                 return writeProjectMemory(context, keeping: .init(target)) {
@@ -130,6 +145,7 @@ extension NiruxShellView {
         actions.add = { [weak self] item in
             guard let self else { return false }
             if item.scope == .always {
+                guard !briefHasUnsavedText() else { return false }
                 guard let brief = ensureProjectBrief(spaceID: spaceID) else { return false }
                 let text = "**\(item.title)** \(item.text)"
                 return writeProjectMemory(context) {
@@ -146,6 +162,7 @@ extension NiruxShellView {
         }
         actions.delete = { [weak self] target in
             guard let self else { return false }
+            if case .briefRule = target, briefHasUnsavedText() { return false }
             switch target {
             case .memory(let memory, let directory):
                 return writeProjectMemory(context, keeping: .init(target)) {
@@ -171,16 +188,22 @@ extension NiruxShellView {
         return actions
     }
 
+    /// The Brief tab holds typed text: a write to the brief now would be
+    /// lost, or replace it, when that text is saved. Says so in the panel.
+    private func briefHasUnsavedText() -> Bool {
+        guard spaceSettings?.brief.isDirty == true else { return false }
+        projectMemoryPanel?.writeFailed("Save or revert the text typed in the Brief tab first: this changes the brief.")
+        return true
+    }
+
     /// The project's brief, created on first use as "Edit Space Brief…"
     /// does; nil with a toast when it can't be.
-    private func ensureProjectBrief(spaceID: String?) -> URL? {
-        if let spaceID {
-            let name = workspaceStore.profiles.first { $0.id == spaceID }?.name ?? spaceID
-            do {
-                if let url = try SpaceBrief.ensureBriefFile(spaceID: spaceID, spaceName: name) { return url }
-            } catch {
-                NiruxDebugLog.log("ProjectMemory: could not create the brief file: \(error)")
-            }
+    private func ensureProjectBrief(spaceID: String) -> URL? {
+        let name = workspaceStore.profiles.first { $0.id == spaceID }?.name ?? spaceID
+        do {
+            if let url = try SpaceBrief.ensureBriefFile(spaceID: spaceID, spaceName: name) { return url }
+        } catch {
+            NiruxDebugLog.log("ProjectMemory: could not create the brief file: \(error)")
         }
         projectMemoryPanel?.writeFailed("Couldn’t create the space’s brief")
         return nil
@@ -198,6 +221,8 @@ extension NiruxShellView {
         let request = projectMemoryRequest
         let opening = projectMemoryPanel?.opening ?? 0
         Self.runProjectMemoryWrite(context, work) { [weak self] model, result in
+            // The Brief tab shows what a write to the brief left.
+            self?.spaceSettings?.brief.checkDisk()
             guard let self, let panel = projectMemoryPanel else { return }
             // Closed or reopened since: the result isn't this panel's to show,
             // but the write is over.

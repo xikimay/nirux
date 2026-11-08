@@ -4,7 +4,7 @@ import AppKit
 
 extension NiruxShellView {
     func wireEmptySpaceView() {
-        emptySpaceView.onNew = { [weak self] in self?.showNewWorkspacePanel() }
+        emptySpaceView.onNew = { [weak self] in self?.showNewPanel() }
         emptySpaceView.onAddRepository = { [weak self] in
             guard let self else { return }
             self.addRepository(toSpace: self.activeProfileID)
@@ -23,14 +23,5 @@ extension NiruxShellView {
             spaceName: space.name,
             offersAddRepository: space.id != WorkspaceProfile.defaultID && !space.anchors.contains(where: \.isKnown)
         ))
-    }
-
-    /// Where a space's brief or task templates open: the active workspace's
-    /// editor, else (on an empty space) a new workspace in that space.
-    func workspaceForSpaceFile(spaceID: String, spaceName: String) -> WorkspaceState? {
-        if let activeWorkspace { return activeWorkspace }
-        addWorkspace(title: spaceName, profileID: spaceID)
-        saveState()
-        return activeWorkspace
     }
 }

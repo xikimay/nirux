@@ -1,9 +1,9 @@
 # Spaces, anchors and the Lead
 
 Status: design validated by the user on 2026-11-08. Shipped: anchors and
-routing (S4), the empty space view (S9). Where this document and
-[projects.md](projects.md) differ (management UI, routing, defaults), this
-one wins.
+routing (S4), one ⌘N (S7), Space Settings and per-space defaults (S8), the
+empty space view (S9). Where this document and [projects.md](projects.md)
+differ (management UI, routing, defaults), this one wins.
 
 Creating spaces and workspaces was messy because a space didn't know where its
 code lives. Five ways to create a workspace each guessed a different starting
@@ -91,8 +91,10 @@ struct SpaceAnchor: Codable, Equatable {
 - **New Space…** (shipped) suggests the focused terminal's repository, already
   in the list and naming the space, unless another space has it. "Add
   Repository…" in the space menu anchors the repository holding the folder
-  picked (or the folder, when it is in none and the user agrees). Until Space
-  Settings, a "Repositories" submenu makes one the default or removes one.
+  picked (or the folder, when it is in none and the user agrees). Space
+  Settings › General lists the repositories and folders, adds one ("Add
+  Folder…" anchors a folder even inside a repository), makes one the
+  default, and removes one.
 
 ## Routing
 
@@ -113,7 +115,7 @@ right space with the right env:
 A request from a Nirux terminal names its shell's space (`profile=`), which
 counts as rule 3. Routing runs git only once a space has an anchor, and waits
 for it at most 300 ms (3 s after a worktree was made off the main thread, for a
-`nirux://new-worktree` or New Task…); past that it routes as if the folder were
+`nirux://new-worktree` or a ⌘N task); past that it routes as if the folder were
 in no repository.
 
 After that the assignment is sticky: only the user moves a workspace.
@@ -129,11 +131,17 @@ A sheet titled "New in <space>":
   preselected. **Agent** (the space's default) and **Template** popups.
 - The suggested branch on one line, editable, "from origin/main".
 - **Report to the Lead** checkbox (with the Lead PR).
-- **Existing Branch…** opens an existing worktree (today's Open Worktree).
+- **Existing Branch…** opens an existing worktree (today's Open Worktree), or
+  a branch without one: its worktree is made, with a shell (shipped with S7).
 - Names come from the description's first line, else the branch, else the
   folder. Never "ws N".
 - The skill and the Lead start from `origin/<base>` too. The skill may ask for
-  the current `HEAD` explicitly when the user wants a stacked branch.
+  the current `HEAD` explicitly when the user wants a stacked branch
+  (`from=head`); a branch that exists opens as it is.
+- **A space without a repository** (shipped with S7): the Repository popup
+  shows "No Repository" and offers the focused terminal's repository and "Add
+  Repository…"; once one is added the task starts. General never has one: a
+  task typed there offers "New Space…", pre-filled with that repository.
 
 ## Missions without waiting
 
@@ -201,7 +209,12 @@ Mockups were validated in the design session. What changes:
 - **Card menu:** state actions first (Review Branch, failed CI, Clean Up once
   merged), then an Organize submenu, then Rename, the context and Close.
 - **Space Settings:** one window with tabs (General, Defaults, Lead, Brief,
-  Memory, Board, Templates) instead of five separate panels.
+  Memory, Board, Templates) instead of five separate panels. Shipped without
+  Lead (S11): toolbar tabs like Nirux Settings, each change applied at once
+  except the Brief and Templates editors and the Board form, which have
+  Save. The space menu's items open the matching tab. A repository's setup
+  script is edited in a sheet from General. A space's default agent only
+  preselects the agent of its tasks; a plain workspace stays a shell.
 - **An empty space** shows its name, Add Repository… until it has a
   repository or folder, and New… (Return, ⌘N); Start a Lead comes with the
   Lead (S11). General shows only New…. The view stays while workspaces
@@ -251,11 +264,11 @@ Notes per PR:
 - **S5.** Sections and scope; typing still finds workspaces in every space.
 - **S6.** Items open today's panels until S8 lands.
 - **S7.** See "One door: ⌘N". The palette keeps a single "New…", and so
-  does the menu bar's Workspaces menu (New Workspace, New Task…, New
-  Worktree… today).
+  does the menu bar's Workspaces menu.
 - **S8.** Defaults follow projects.md section 5 (precedence, literal env,
   reserved `NIRUX_*`, `0600`, setup script typed before the agent, only for
-  workspaces the user started).
+  workspaces the user started). Shipped; the defaults live in the space's
+  own `defaults.json`, not in projects.json (see projects.md section 5).
 - **S9.** "Start a Lead" appears once S11 lands.
 - **S10.** Which title-bar accessories stay (keep-awake cup, plan usage
   limits) is the user's call, asked in the PR. Check ⌘1…⌘9 against the editor

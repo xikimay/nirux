@@ -59,6 +59,13 @@ struct ShellSideEffects {
     /// Tests on a busy machine wait longer.
     var routingTimeout: TimeInterval = FolderIdentity.routingTimeout
 
+    /// The native notification for a setup script that failed (workspace
+    /// id, workspace title). Tests replace it: xctest must never reach
+    /// UNUserNotificationCenter.
+    var notifySetupFailure: @MainActor (_ workspaceID: String, _ title: String) -> Void = { workspaceID, title in
+        NiruxNotifier.shared.postSetupFailure(workspaceID: workspaceID, workspaceTitle: title)
+    }
+
     /// Shows an app-modal alert and waits for its answer.
     var runModal: @MainActor (NSAlert) -> NSApplication.ModalResponse = { $0.runModal() }
 

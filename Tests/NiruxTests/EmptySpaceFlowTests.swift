@@ -39,43 +39,17 @@ final class EmptySpaceFlowTests: XCTestCase {
             XCTAssertEqual(shell.activeProfileID, empty.id)
             XCTAssertFalse(view.isHidden)
 
-            // Return presses New…, which asks for the workspace's name. It
-            // opens in this space, even after another one opened elsewhere
-            // meanwhile.
+            // Return presses New…: the ⌘N sheet, on this space. Start with
+            // nothing typed opens a shell there, which takes the view's place.
             pressReturn(in: harness.window)
-            let field = try XCTUnwrap(harness.waitForField(placeholder: "Name this workspace for the task"))
-            shell.addWorkspace(title: "arrived", cwd: harness.repo, profileID: WorkspaceProfile.defaultID)
-            harness.submit("first", into: field)
+            harness.waitUntil("the New sheet") { shell.newTaskPanel?.panel?.isSheet == true }
+            let sheet = try XCTUnwrap(shell.newTaskPanel)
+            XCTAssertEqual(sheet.space.id, empty.id)
+            harness.waitUntil("the sheet's info") { sheet.info != nil }
+            sheet.startButton.performClick(nil)
             let first = try XCTUnwrap(shell.activeWorkspace)
-            XCTAssertEqual(first.title, "first")
             XCTAssertEqual(first.profileID, empty.id)
             XCTAssertTrue(view.isHidden)
-        }
-    }
-
-    /// A space's brief and task templates need an editor: on an empty
-    /// space, they open in a new workspace there.
-    func testTheBriefAndTemplatesOfAnEmptySpaceOpenInANewWorkspace() throws {
-        try UIFlowHarness.run { harness in
-            let shell = harness.shell
-            let briefSpace = shell.workspaceStore.createProfile(named: "Brief", select: false)
-            shell.selectProfile(briefSpace.id)
-            harness.perform(["Edit Space Brief…"], in: shell.sidebar.spaceOptionsMenu())
-            let briefWorkspace = try XCTUnwrap(shell.activeWorkspace)
-            XCTAssertEqual(briefWorkspace.profileID, briefSpace.id)
-            XCTAssertEqual(briefWorkspace.title, "Brief")
-            let brief = try XCTUnwrap(SpaceBrief.briefURL(spaceID: briefSpace.id)).path
-            let briefEditor = try XCTUnwrap(briefWorkspace.columns.compactMap(\.editorColumn).first)
-            harness.waitUntil("the brief in the editor") { briefEditor.activePath == brief }
-
-            let templatesSpace = shell.workspaceStore.createProfile(named: "Templates", select: false)
-            shell.selectProfile(templatesSpace.id)
-            harness.perform(["Edit Task Templates…"], in: shell.sidebar.spaceOptionsMenu())
-            let templatesWorkspace = try XCTUnwrap(shell.activeWorkspace)
-            XCTAssertEqual(templatesWorkspace.profileID, templatesSpace.id)
-            let templates = try XCTUnwrap(TaskTemplates.fileURL(spaceID: templatesSpace.id)).path
-            let templatesEditor = try XCTUnwrap(templatesWorkspace.columns.compactMap(\.editorColumn).first)
-            harness.waitUntil("the templates in the editor") { templatesEditor.activePath == templates }
         }
     }
 

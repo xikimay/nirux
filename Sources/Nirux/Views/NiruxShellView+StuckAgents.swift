@@ -25,8 +25,8 @@ extension NiruxShellView {
 
     /// One column on a status refresh: follow its foreground agent, send
     /// the alert a stuck state owes (once), and show or take down the
-    /// notice of an agent that died mid-turn. The alert goes out (Telegram,
-    /// Activity) even for the column on screen: a dialog nobody touched for
+    /// notice of an agent that died mid-turn. The alert goes out (Telegram)
+    /// even for the column on screen: a dialog nobody touched for
     /// the whole threshold says nobody is watching. Only the in-app flag,
     /// the Dock badge and the system banner skip that column while Nirux is
     /// in front.
@@ -47,17 +47,6 @@ extension NiruxShellView {
                 && workspace.columns[safe: workspace.focusedIndex] === column
             if !onScreen { column.notifyAgentAttention(reason: reason) }
             onStuckAgentAlert?(reason, workspace, place.columnIndex, column)
-            stuckAgentActivity.record(ActivityEntry(
-                category: .attention,
-                agentKind: pty.agentMidTurnExit?.processName ?? "claude",
-                agentUUID: column.agentUUID,
-                workspaceID: workspace.id,
-                columnIndex: place.columnIndex,
-                workspaceTitle: workspace.title,
-                detail: reason.activitySummary,
-                timestamp: now,
-                signal: reason.signal
-            ))
         }
         let stuck = pty.agentStuckState(now: now, waitThreshold: stuckAgentWaitThreshold, foreground: foregroundProcess)
         if case .exitedMidTurn(let exit)? = stuck {
@@ -98,6 +87,8 @@ extension NiruxShellView {
             }
         }
         closeEndedAgentSessions(now: now)
+        // A child's question nobody answered comes to the user away too.
+        noteMissionQuestionHandOffs(missionQuestions(foreground: { $0.pty?.foregroundProcess(snapshot: snapshot) }, now: now))
     }
 
     /// What the column's row shows of a stuck agent.

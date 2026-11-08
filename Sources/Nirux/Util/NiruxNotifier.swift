@@ -99,8 +99,9 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         post(content)
     }
 
-    /// Explicit child-to-parent Mission signal. The activity feed is the
-    /// durable surface; this banner covers the user being in another app.
+    /// A Mission child's question that came to the user, or its completion.
+    /// The child's card is the durable surface; this banner covers the user
+    /// being in another app.
     func postMissionEvent(
         workspaceID: String,
         workspaceTitle: String,
@@ -135,6 +136,19 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         content.sound = .default
         content.categoryIdentifier = Self.ciFailureCategory
         content.userInfo = ["workspaceID": workspaceID]
+        post(content)
+    }
+
+    /// "Setup script failed" / workspace: a new worktree's setup script
+    /// failed (SpaceSetupScript). Clicking focuses its terminal.
+    func postSetupFailure(workspaceID: String, workspaceTitle: String) {
+        guard !NSApp.isActive else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Setup script failed"
+        content.subtitle = workspaceTitle
+        content.body = "The agent started anyway: its terminal shows what failed."
+        content.sound = .default
+        content.userInfo = ["workspaceID": workspaceID, "columnIndex": 0]
         post(content)
     }
 

@@ -7,8 +7,8 @@ import Security
 /// actions that start processes must either present this value or be
 /// confirmed by the user.
 ///
-/// Exported to every terminal as `NIRUX_LAUNCH_ID`; the installed skills and
-/// the in-app worktree flow pass it back as `launch=${NIRUX_LAUNCH_ID}`, left
+/// Exported to every terminal as `NIRUX_LAUNCH_ID`; the installed skills
+/// pass it back as `launch=${NIRUX_LAUNCH_ID}`, left
 /// for the agent's shell to expand so the value stays out of prompts,
 /// transcripts and the scrollback (unless `open` itself fails and echoes the
 /// URL back). The names avoid TOKEN/KEY/SECRET, which
@@ -57,7 +57,7 @@ struct NiruxURLRequest: Equatable, Sendable {
     enum Action: Equatable, Sendable {
         /// nirux://new-workspace?cwd=...&title=...&agent=claude|codex&profile=...
         case newWorkspace(cwd: String?, title: String?, agent: NiruxApp.WorkspaceAgent?)
-        /// nirux://new-worktree?branch=...&repo=...&agent=...&handover=...&profile=...
+        /// nirux://new-worktree?branch=...&repo=...&agent=...&handover=...&profile=...&from=head
         case newWorktree(NewWorktree)
         /// nirux://open-editor?file=...&line=...&endLine=...&workspace=...
         /// `target` is filled by `resolvingPaths()`: validating the file
@@ -74,6 +74,9 @@ struct NiruxURLRequest: Equatable, Sendable {
         var handoverPath: String?
         var parentWorkspaceID: String?
         var parentAgentUUID: String?
+        /// `from=head`: a new branch starts from `repo`'s HEAD (a stacked
+        /// branch). Otherwise from origin's base branch, fetched first.
+        var startsFromHead = false
     }
 
     enum Disposition: Equatable {
@@ -84,6 +87,10 @@ struct NiruxURLRequest: Equatable, Sendable {
     var action: Action
     var profileID: String?
     let launchID: String?
+    /// Confirmed by the user, with no launch ID: it came from outside Nirux,
+    /// so the workspace it opens gets neither the space's environment nor
+    /// its setup script (see `WorkspaceState.startedOutsideNirux`).
+    private(set) var cameFromOutside = false
 
     init?(url: URL) {
         guard url.scheme == "nirux" else { return nil }
@@ -108,7 +115,8 @@ struct NiruxURLRequest: Equatable, Sendable {
                 agent: agent,
                 handoverPath: value("handover"),
                 parentWorkspaceID: value("parentWorkspace"),
-                parentAgentUUID: value("parentAgent")
+                parentAgentUUID: value("parentAgent"),
+                startsFromHead: value("from")?.lowercased() == "head"
             ))
         case "open-editor":
             guard let file = value("file"), file.hasPrefix("/") else { return nil }
@@ -183,6 +191,7 @@ struct NiruxURLRequest: Equatable, Sendable {
     func restrictedForConfirmation() -> NiruxURLRequest {
         var restricted = self
         restricted.profileID = nil
+        restricted.cameFromOutside = true
         switch action {
         case .newWorktree(var request):
             request.parentWorkspaceID = nil
@@ -248,6 +257,9 @@ struct NiruxURLRequest: Equatable, Sendable {
             var lines = [
                 "Repository: \(Self.displaySafe(request.repo))",
                 "Branch: \(Self.displaySafe(request.branch))",
+                request.startsFromHead
+                    ? "A new branch starts from this checkout’s HEAD."
+                    : "A new branch starts from origin’s base branch, fetched first (a network access).",
                 agentLine(request.agent)
             ]
             if let handover = request.handoverPath {
@@ -350,50 +362,5 @@ struct URLConfirmationQueue {
         consecutiveCancels += 1
         let delay = Self.cooldown * pow(2, Double(min(consecutiveCancels - 1, 16)))
         cooldownUntil = now + min(delay, Self.maxCooldown)
-    }
-}
-
-/// One-time authorization for the worktree request that Nirux's own
-/// worktree panel asks the running agent to send. It is keyed by the
-/// handover file Nirux pre-created under an unguessable name and bound to
-/// the exact request Nirux built, so it lets that request (and only that
-/// one) through even when the agent's shell has no current NIRUX_LAUNCH_ID
-/// (a tmux session from before a restart) or the confirmation queue is
-/// cooling down.
-@MainActor
-enum InAppWorktreeTickets {
-    static let lifetime: TimeInterval = 30 * 60
-
-    private struct Ticket {
-        let request: NiruxURLRequest.NewWorktree
-        let profileID: String?
-        let expiry: TimeInterval
-    }
-
-    private static var tickets: [String: Ticket] = [:]
-
-    /// `request.repo` must already be a resolved (realpath) path, as the
-    /// incoming request will be after `resolvingPaths()`.
-    static func issue(for request: NiruxURLRequest.NewWorktree, profileID: String?, now: TimeInterval) {
-        guard let path = request.handoverPath else { return }
-        tickets = tickets.filter { $0.value.expiry > now }
-        tickets[path] = Ticket(request: request, profileID: profileID, expiry: now + lifetime)
-    }
-
-    /// True when `request` is exactly the one a live ticket was issued for.
-    static func matches(_ request: NiruxURLRequest, now: TimeInterval) -> Bool {
-        guard case .newWorktree(let worktree) = request.action,
-              let path = worktree.handoverPath,
-              let ticket = tickets[path]
-        else { return false }
-        return ticket.expiry > now && ticket.request == worktree && ticket.profileID == request.profileID
-    }
-
-    /// `matches`, consuming the ticket: true at most once.
-    static func redeem(_ request: NiruxURLRequest, now: TimeInterval) -> Bool {
-        guard matches(request, now: now), case .newWorktree(let worktree) = request.action,
-              let path = worktree.handoverPath else { return false }
-        tickets[path] = nil
-        return true
     }
 }

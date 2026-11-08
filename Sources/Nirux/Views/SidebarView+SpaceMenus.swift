@@ -3,17 +3,22 @@ import AppKit
 // MARK: - Space management menus (see ProjectStore)
 
 extension SidebarView {
-    /// A space's items: rename, its repositories (not the default space's),
-    /// brief, board settings, task templates, Claude Code's memory, color,
-    /// delete. Used by the active space's header menu and by right-clicking
-    /// any space's dot, so an empty space can be managed without opening a
-    /// workspace in it.
+    /// A space's items: Space Settings, then shortcuts to its tabs (rename,
+    /// brief, board, task templates, memory), Add Repository… (not the
+    /// default space's), color, delete. Used by the active space's header
+    /// menu and by right-clicking any space's dot, so an empty space can be
+    /// managed without opening a workspace in it.
     func addSpaceManagementItems(to menu: NSMenu, for profile: ProfileInfo) {
+        menu.addClosureItem(title: "Space Settings…") { [weak self] in
+            self?.onShowSpaceSettings?(profile.id)
+        }
         menu.addClosureItem(title: "Rename Space…") { [weak self] in
             self?.onRenameProfile?(profile.id)
         }
         if profile.id != WorkspaceProfile.defaultID {
-            addRepositoryItems(to: menu, spaceID: profile.id)
+            menu.addClosureItem(title: "Add Repository…") { [weak self] in
+                self?.onAddRepository?(profile.id)
+            }
         }
         menu.addClosureItem(title: "Edit Space Brief…") { [weak self] in
             self?.onEditProfileBrief?(profile.id)
@@ -42,45 +47,6 @@ extension SidebarView {
             }
         }
         menu.addItem(.separator())
-    }
-
-    /// The active space's items, for the menu bar's Space › Space Settings.
-    func addActiveSpaceSettings(to menu: NSMenu) {
-        guard let active = lastProfiles.first(where: \.isActive) else { return }
-        addSpaceManagementItems(to: menu, for: active)
-        if menu.items.last?.isSeparatorItem == true { menu.removeItem(at: menu.numberOfItems - 1) }
-    }
-
-    /// "Add Repository…", then "Repositories": one submenu per repository
-    /// or folder, "(Default)" after the default's name, with "Make Default"
-    /// and "Remove from Space" (until Space Settings, docs/spaces.md S8).
-    private func addRepositoryItems(to menu: NSMenu, spaceID: String) {
-        menu.addClosureItem(title: "Add Repository…") { [weak self] in
-            self?.onAddRepository?(spaceID)
-        }
-        let anchors = spaceAnchors?(spaceID) ?? []
-        guard !anchors.isEmpty else { return }
-        let item = NSMenuItem(title: "Repositories", action: nil, keyEquivalent: "")
-        let submenu = NSMenu()
-        for anchor in anchors {
-            guard let key = anchor.key else { continue }
-            let title = anchor.isDefault ? "\(anchor.name) (Default)" : anchor.name
-            let anchorItem = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            anchorItem.toolTip = anchor.folder?.abbreviatedPath(maxComponents: 6)
-            let actions = NSMenu()
-            if !anchor.isDefault {
-                actions.addClosureItem(title: "Make Default") { [weak self] in
-                    self?.onMakeDefaultAnchor?(spaceID, key)
-                }
-            }
-            actions.addClosureItem(title: "Remove from Space") { [weak self] in
-                self?.onRemoveAnchor?(spaceID, key)
-            }
-            anchorItem.submenu = actions
-            submenu.addItem(anchorItem)
-        }
-        item.submenu = submenu
-        menu.addItem(item)
     }
 
     /// "Move to Space" for a workspace card. Cards list the active space's

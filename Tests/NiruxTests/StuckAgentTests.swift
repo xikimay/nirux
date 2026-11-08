@@ -222,15 +222,12 @@ final class StuckAgentTests: XCTestCase {
         XCTAssertEqual(machine.state, .working)
     }
 
-    func testStopFailureStandaloneOutcomeAndActivityRow() throws {
+    func testStopFailureStandaloneOutcome() {
         let failure = event(.stopFailure, errorKind: "rate_limit", message: "429 Too Many Requests")
         XCTAssertEqual(
             AgentStatusMachine.standaloneOutcome(for: failure).attention,
             .apiError(kind: "rate_limit", detail: "429 Too Many Requests")
         )
-        let entry = try XCTUnwrap(ActivityEntry(event: failure, workspaceTitle: "ws", columnIndex: 0))
-        XCTAssertEqual(entry.category, .attention, "older builds must still decode the history")
-        XCTAssertEqual(entry.detail, "stopped on error: rate_limit · 429 Too Many Requests")
     }
 
     // MARK: - Resume
@@ -577,7 +574,6 @@ final class StuckAgentTests: XCTestCase {
         let wait = AgentAttentionReason.stillWaiting(.permission(tool: "Bash", summary: "git push"), waited: 7_500)
         XCTAssertEqual(wait.headline, "needs permission — waiting 2h05m")
         XCTAssertEqual(wait.detailLine, "Bash: git push")
-        XCTAssertEqual(wait.activitySummary, "waiting 2h05m · permission: Bash · git push")
         XCTAssertTrue(wait.isBlockingDialog)
         XCTAssertFalse(wait.isFailure)
 

@@ -1,64 +1,130 @@
 import AppKit
 
-// MARK: - New Task (see NewTask)
+// MARK: - The ⌘N sheet (see NewTask)
 
 extension NiruxShellView {
-    /// New Task… in the palette: the form opens on the active project.
-    func showNewTaskPanel() {
+    /// ⌘N, the sidebar's "+" and "New…" in the palette: the sheet opens on
+    /// the active space, its default repository selected
+    /// (docs/spaces.md, "One door: ⌘N").
+    func showNewPanel() {
         guard let window else { return }
-        if let panel = newTaskPanel {
-            if panel.isHidden { panel.reshow() } else { panel.focus() }
+        // Another sheet is up (an alert, Board Settings): a second one would
+        // wait unseen behind it, and one waiting there would come up loose.
+        if let sheet = window.attachedSheet, sheet !== newTaskPanel?.panel {
+            NSSound.beep()
+            sheet.makeKeyAndOrderFront(nil)
             return
         }
+        if let panel = newTaskPanel {
+            guard panel.isHidden else { return panel.focus() }
+            // Closed while its task starts: it comes back by itself if
+            // starting fails, and ⌘N opens a new sheet meanwhile.
+            startingTaskPanels.append(panel)
+            newTaskPanel = nil
+        }
+        let spaceID = activeProfileID
+        guard let space = profiles.first(where: { $0.id == spaceID }) else { return }
         let panel = NewTaskPanel()
         newTaskPanel = panel
+        let stateDirectory = Persistence.stateDirectory
         // Capture lists in the inner closures too: they are @Sendable, and
         // Swift 6.1 rejects one reading a weak var it didn't capture itself.
-        panel.onProjectSelected = { [weak self, weak panel] projectID in
-            guard let self, let panel else { return }
-            let folders = self.newTaskFolders(projectID: projectID)
-            Self.readNewTaskProject(
-                projectID: projectID, folders: folders, stateDirectory: Persistence.stateDirectory
+        panel.onRepositorySelected = { [weak self, weak panel] repository in
+            let defaultAnchor = self?.profiles.first { $0.id == spaceID }?.anchors.defaultAnchor
+            Self.readNewTaskInfo(
+                spaceID: spaceID, folder: repository?.folder, defaultAnchor: defaultAnchor, stateDirectory: stateDirectory
             ) { [weak panel] info in
-                panel?.update(projectID: projectID, info: info)
+                panel?.update(repositoryKey: repository?.key, info: info)
             }
         }
         panel.onStart = { [weak self, weak panel] request in
             guard let self, let panel else { return }
             self.startTask(request) { [weak panel] outcome in panel?.finishStarting(outcome) }
         }
+        panel.onOpenShell = { [weak self] repository in
+            self?.openPlainWorkspace(spaceID: spaceID, folder: repository?.folder)
+        }
+        panel.onAddSuggested = { [weak self] anchor in
+            self?.runFromRunLoop { [weak self] in self?.addAnchor(anchor, toSpace: spaceID) }
+        }
+        panel.onAddRepository = { [weak self, weak panel] in
+            self?.addRepository(toSpace: spaceID, sheet: panel?.panel)
+        }
+        panel.onNewSpace = { [weak self] in self?.showNewSpacePanel() }
+        panel.onExistingBranch = { [weak self] repository in
+            self?.showWorktreeListPalette(repositoryFolder: repository?.folder)
+        }
         panel.onDismiss = { [weak self, weak panel] in
             guard let self else { return }
             if self.newTaskPanel === panel { self.newTaskPanel = nil }
+            self.startingTaskPanels.removeAll { $0 === panel }
             self.focusActiveTerminal(in: self.window)
         }
+        let repositories = newTaskRepositories(of: space)
         panel.show(
             attachedTo: window,
-            projects: profiles.map { NewTaskPanel.Project(id: $0.id, name: $0.name) },
-            selectedProjectID: activeProfileID
+            space: NewTaskPanel.Space(id: space.id, name: space.name, isGeneral: space.id == WorkspaceProfile.defaultID),
+            repositories: repositories,
+            selectedKey: space.anchors.defaultAnchor?.key,
+            agent: defaultTaskAgent(forSpace: space.id),
+            homeFolder: sideEffects.homeDirectory()
         )
+        if repositories.isEmpty, space.id != WorkspaceProfile.defaultID {
+            suggestRepository(to: panel)
+        }
     }
 
-    /// Where to look for a project's repository, in order: the active
-    /// workspace's folder and the folder its focused terminal is in, when it
-    /// belongs to the project, then the folders of the project's other
-    /// workspaces, inactive ones included.
-    func newTaskFolders(projectID: String) -> [NewTask.Folder] {
-        var folders: [NewTask.Folder] = []
-        let active = activeWorkspace.flatMap { $0.profileID == projectID ? $0 : nil }
-        if let active {
-            folders.append(NewTask.Folder(path: active.cwd, isWorkspaceFolder: true))
-            folders.append(NewTask.Folder(path: active.focusedWorkingDirectory, isWorkspaceFolder: false))
+    /// The agent a space's tasks start with unless the sheet says otherwise:
+    /// its default (Space Settings › Defaults), else Claude Code.
+    func defaultTaskAgent(forSpace spaceID: String) -> NiruxApp.WorkspaceAgent {
+        SpaceDefaultsStore.defaults(forSpace: spaceID).taskAgent
+    }
+
+    /// The space's repositories and folders the sheet can start from: those
+    /// with a folder (a bare repository has no main checkout to find).
+    func newTaskRepositories(of space: WorkspaceProfile) -> [NewTaskPanel.Repository] {
+        space.anchors.compactMap { anchor in
+            guard let key = anchor.key, let folder = anchor.folder else { return nil }
+            return NewTaskPanel.Repository(key: key, name: anchor.name, folder: folder)
         }
-        for workspace in workspaces where workspace.profileID == projectID && !workspace.isClosing && workspace !== active {
-            folders.append(NewTask.Folder(path: workspace.cwd, isWorkspaceFolder: true))
+    }
+
+    /// The sheet of a space whose repositories changed: `key` (one just
+    /// added) is selected, else the one that was, else the default.
+    func refreshNewTaskPanelRepositories(selecting key: String? = nil) {
+        guard let panel = newTaskPanel, panel.panel != nil,
+              let space = profiles.first(where: { $0.id == panel.space.id })
+        else { return }
+        let repositories = newTaskRepositories(of: space)
+        let selected = [key, panel.selectedRepositoryKey, space.anchors.defaultAnchor?.key]
+            .compactMap { $0 }.first { candidate in repositories.contains { $0.key == candidate } }
+        panel.updateRepositories(repositories, selecting: selected)
+    }
+
+    /// Offers the focused terminal's repository to a space that has none,
+    /// unless another space has it (as New Space… does).
+    private func suggestRepository(to panel: NewTaskPanel) {
+        guard projectStore.availability == .writable, let folder = activeWorkspace?.focusedWorkingDirectory else { return }
+        Self.identifyOffMain(folder, timeout: max(1, sideEffects.routingTimeout)) { [weak self, weak panel] identity in
+            guard let self, let panel, let identity, identity.commonDir != nil,
+                  identity.anchor.key.flatMap(self.workspaceStore.profile(anchoring:)) == nil
+            else { return }
+            panel.setSuggestion(identity.anchor)
         }
-        return folders
+    }
+
+    /// Return with nothing typed: a shell in the repository's main checkout,
+    /// else where a plain workspace of the space opens (its default folder,
+    /// else the home folder). Named after its folder, then its branch.
+    func openPlainWorkspace(spaceID: String, folder: String?) {
+        let cwd = folder.flatMap { NiruxURLRequest.directoryExists($0) ? $0 : nil } ?? defaultFolder(forSpace: spaceID)
+        addWorkspace(cwd: cwd, profileID: spaceID)
+        saveState()
     }
 
     /// Fetches origin's branch, creates the worktree and writes the handover
     /// off the main thread, then opens the workspace and launches the agent.
-    /// `completion` says how it ended; when the form was closed meanwhile,
+    /// `completion` says how it ended; when the sheet was closed meanwhile,
     /// it comes back to show a failure.
     func startTask(_ request: NewTask.Request, completion: @escaping @MainActor @Sendable (NewTaskPanel.Outcome) -> Void) {
         Self.createTaskWorktree(
@@ -78,8 +144,8 @@ extension NiruxShellView {
         }
     }
 
-    /// In the space its repository belongs to, else the one picked in the
-    /// form (docs/spaces.md, "Routing").
+    /// In the space its repository belongs to, else the sheet's
+    /// (docs/spaces.md, "Routing").
     private func openTaskWorkspace(_ request: NewTask.Request, _ created: CreatedTaskWorktree) {
         let decision = decideSpace(identity: created.identity, parentWorkspaceID: nil, startedFromSpaceID: request.projectID)
         addWorkspace(
@@ -89,7 +155,8 @@ extension NiruxShellView {
             profileID: decision.spaceID,
             deliveredHandover: created.handoverError == nil,
             handoverText: created.handover,
-            worktreeBranch: created.checkedOutBranch
+            worktreeBranch: created.checkedOutBranch,
+            setupScript: setupScript(for: decision)
         )
         saveState()
         // A hook prints its reason last.
@@ -110,25 +177,14 @@ extension NiruxShellView {
         }
     }
 
-    /// "Edit Task Templates…" in a project's menu: opens its templates in an
-    /// editor column, creating the file with the default ones on first use.
+    /// "Edit Task Templates…": Space Settings › Templates.
     func editTaskTemplates(profileID: String) {
-        let projectName = workspaceStore.profiles.first { $0.id == profileID }?.name ?? profileID
-        do {
-            guard let url = try TaskTemplates.ensureFile(spaceID: profileID, spaceName: projectName) else {
-                NSSound.beep()
-                return
-            }
-            openInEditorColumn(path: url.path, in: workspaceForSpaceFile(spaceID: profileID, spaceName: projectName))
-        } catch {
-            NiruxDebugLog.log("TaskTemplates: could not create the templates file: \(error)")
-            NSSound.beep()
-        }
+        showSpaceSettings(profileID: profileID, tab: .templates)
     }
 
     struct CreatedTaskWorktree: Sendable {
         let path: String
-        /// The worktree, or the project's folder in it (`Target.subdirectory`).
+        /// The worktree, or the space's folder in it (`Target.subdirectory`).
         let workingDirectory: String
         let checkedOutBranch: String?
         let handover: String
@@ -146,7 +202,7 @@ extension NiruxShellView {
     }
 
     /// Handover files never belong in a commit: the repository ignores them
-    /// (see `GitWorktree.ensureExcluded`), in any folder, since a project's
+    /// (see `GitWorktree.ensureExcluded`), in any folder, since a task's
     /// workspace may open in a folder of the repository.
     nonisolated static let excludedHandovers = NiruxApp.WorkspaceAgent.allCases.map(handoverFilename(for:))
 
@@ -154,16 +210,21 @@ extension NiruxShellView {
     /// can't inherit this view's main-actor isolation (see `runOffMain` in
     /// the worktree cleanup). `stateDirectory` is read on the main thread:
     /// a test's environment may be gone by the time this runs.
-    nonisolated private static func readNewTaskProject(
-        projectID: String,
-        folders: [NewTask.Folder],
+    nonisolated private static func readNewTaskInfo(
+        spaceID: String,
+        folder: String?,
+        defaultAnchor: SpaceAnchor?,
         stateDirectory: URL,
         completion: @escaping @MainActor @Sendable (NewTaskPanel.ProjectInfo) -> Void
     ) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let baseBranch = BoardConfigStore(spaceID: projectID, stateDirectory: stateDirectory)?.load().config?.baseBranch
-            let target = NewTask.resolveTarget(folders: folders, baseBranch: baseBranch)
-            let templates = TaskTemplates.load(spaceID: projectID, stateDirectory: stateDirectory)
+            // The board is set up for the default repository: the others
+            // start from their origin's default branch.
+            let usesBoardBase = folder.map { boardBaseApplies(to: $0, defaultAnchor: defaultAnchor) } ?? false
+            let baseBranch = usesBoardBase
+                ? BoardConfigStore(spaceID: spaceID, stateDirectory: stateDirectory)?.load().config?.baseBranch : nil
+            let target = folder.flatMap { NewTask.resolveTarget(folder: $0, baseBranch: baseBranch) }
+            let templates = TaskTemplates.load(spaceID: spaceID, stateDirectory: stateDirectory)
             DispatchQueue.main.async { @MainActor in
                 completion(NewTaskPanel.ProjectInfo(target: target, templates: templates))
             }

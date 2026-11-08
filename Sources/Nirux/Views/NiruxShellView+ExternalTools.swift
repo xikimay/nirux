@@ -122,10 +122,24 @@ extension NiruxShellView {
         Persistence.load()?.settings?.codexLaunchMode ?? .default
     }
 
+    /// The mode a fresh Claude launch in `workspace` uses: its space's,
+    /// else Settings' (docs/projects.md, section 5). A restore keeps the
+    /// mode its column recorded. A workspace opened from outside Nirux
+    /// takes Settings' mode: the one its confirmation named.
+    static func claudeLaunchMode(for workspace: WorkspaceState) -> ClaudeLaunchMode {
+        guard !workspace.startedOutsideNirux else { return currentClaudeLaunchMode() }
+        return SpaceDefaultsStore.defaults(forSpace: workspace.profileID).claudeMode(settings: currentClaudeLaunchMode())
+    }
+
+    static func codexLaunchMode(for workspace: WorkspaceState) -> CodexLaunchMode {
+        guard !workspace.startedOutsideNirux else { return currentCodexLaunchMode() }
+        return SpaceDefaultsStore.defaults(forSpace: workspace.profileID).codexMode(settings: currentCodexLaunchMode())
+    }
+
     func openClaudeCode() {
         guard let workspace = activeWorkspace else { return }
         let cmd = Self.claudeCommand(
-            mode: Self.currentClaudeLaunchMode(),
+            mode: Self.claudeLaunchMode(for: workspace),
             briefFile: spaceBriefInjection(for: workspace)?.claudePromptFile
         )
         workspace.addColumn()
@@ -140,7 +154,7 @@ extension NiruxShellView {
     func openCodex() {
         guard let workspace = activeWorkspace else { return }
         let cmd = Self.codexCommand(
-            mode: Self.currentCodexLaunchMode(),
+            mode: Self.codexLaunchMode(for: workspace),
             briefFile: Self.codexBriefFile(
                 from: spaceBriefInjection(for: workspace), launchDirectory: workspace.focusedWorkingDirectory
             )
@@ -234,10 +248,15 @@ extension NiruxShellView {
            `feat/short-description` or `fix/short-description` if no convention is apparent.
         2. **Detect the git repo root** — the top level of the current checkout, even inside a
            linked worktree. Nirux still places the new worktree next to the main checkout, named
-           after it, and a new branch starts from the current checkout's HEAD:
+           after it:
            ```bash
            git rev-parse --show-toplevel
            ```
+           A new branch starts from origin's base branch (the space's board setting, else origin's
+           default branch), which Nirux fetches first; a branch that already exists opens as it is.
+           When the new work builds on the current branch — the user wants a stacked branch, or it
+           needs this branch's commits that aren't on origin yet — add `&from=head` to the URL in
+           step 4: the new branch then starts from the current checkout's HEAD.
         3. **Write a session handover** so the new workspace inherits context. First create the
            file with `mktemp`, using the current agent name (`claude` or `codex`); it prints the
            path. `mktemp` creates the file privately under a random name, so nothing else can
@@ -292,39 +311,51 @@ extension NiruxShellView {
            open "nirux://new-worktree?branch=<url-encoded-branch>&repo=<url-encoded-repo-root>\
         &agent=<claude-or-codex>&handover=<path-printed-by-mktemp>${launch_query}${profile_query}${parent_query}${mission_query}"
            ```
-           Nirux moves the handover file into the worktree on launch; no manual cleanup is needed.
+           For a stacked branch, put `&from=head` right after the handover parameter. Nirux moves
+           the handover file into the worktree on launch; no manual cleanup is needed.
 
         When `mission_query` is present, Nirux records the parent/child link and starts the child
-        with explicit mailbox instructions. The child asks and waits without PTY injection:
+        with Mission instructions. Nirux types the messages between the two agents into their
+        Claude Code prompts, once the agent's turn is over and nobody is typing there:
 
-        ```bash
-        "$NIRUX_CLI_PATH" --mission ask --message "<concise blocker or question>"
-        "$NIRUX_CLI_PATH" --mission completed --message "<concise result>"
-        ```
+        - The child asks with the command below and ends its turn; Nirux types the answer into
+          its prompt. A Codex child's `ask` waits for the answer instead.
+          ```bash
+          "$NIRUX_CLI_PATH" --mission ask --message "<concise blocker or question>"
+          ```
+        - The child's question reaches your prompt as a `[Nirux Mission] Question from …` message
+          that ends with the command to answer it. Answer briefly, then go on with your work. If
+          nobody answers for a while, Nirux asks the user instead.
+          ```bash
+          "$NIRUX_CLI_PATH" --mission reply --event <question-event-id> --message "<concise answer>"
+          ```
+        - The child reports its result with the command below, and it reaches your prompt as a
+          `[Nirux Mission] … completed: …` message.
+          ```bash
+          "$NIRUX_CLI_PATH" --mission completed --message "<concise result>"
+          ```
+        - Nirux types only into Claude Code. A Codex parent waits for the child's question or
+          result instead, then answers a question with `reply` as above:
+          ```bash
+          "$NIRUX_CLI_PATH" --mission receive
+          ```
 
-        The parent can wait for a child event, then answer a question by its `eventID`:
-
-        ```bash
-        "$NIRUX_CLI_PATH" --mission receive
-        "$NIRUX_CLI_PATH" --mission reply --event <question-event-id> --message "<concise answer>"
-        ```
-
-        To give a child more work (a follow-up, `/code-review`), even after it completed, the parent
-        names it by branch. Nirux types the message and Enter into the child's Claude Code prompt
-        once its turn is over and nobody is typing there. The Mission is then active again, so use
-        `receive` for the child's next question or result:
+        To give a Claude Code child more work (a follow-up, `/code-review`), even after it
+        completed, name it by branch. Nirux types the message and Enter into the child's prompt,
+        and the Mission is active again:
 
         ```bash
         "$NIRUX_CLI_PATH" --mission tell --branch <child-branch> --message "<instruction or /command>"
         ```
 
-        Messages hold at most \(MissionEventCLI.maxMessageLength) characters. `ask`, `receive` and
-        `tell` wait at most \(Int(MissionEventCLI.defaultWaitTimeout)) seconds, under the default 2-minute
-        limit of the Claude Code shell tool; if your shell tool takes a timeout, allow at least 120
-        seconds. Exit statuses:
+        Messages hold at most \(MissionEventCLI.maxMessageLength) characters. `tell` waits at most
+        \(Int(MissionEventCLI.defaultWaitTimeout)) seconds for Nirux to type the message, and a Codex
+        child's `ask` and `receive` as long for an event, under the default 2-minute limit of the Claude
+        Code shell tool; if your shell tool takes a timeout, allow at least 120 seconds. Exit statuses:
 
-        - 0: done. The output is the answer, the event, or (for `tell`) a confirmation, even if
-          the shell tool also reported a timeout.
+        - 0: done. The output says what happens next (for a Claude Code child's `ask`: end your turn
+          now), or is the answer or (for `receive`) one JSON event, even if the shell tool also
+          reported a timeout.
         - 3: nothing yet. Run the exact same command again to keep waiting, and do the same if the
           shell tool stops the command before it prints anything. An identical `ask` resumes the
           same question instead of sending it twice, and prints the answer if it arrived meanwhile.
@@ -333,16 +364,11 @@ extension NiruxShellView {
           drops a `tell` it could not type within an hour.
         - 4: do not retry that command. Mission handoffs are off, the Mission has ended, the
           terminal is not part of it, (for `reply`) the question no longer waits for an answer,
-          for example because a human answered it from Nirux Activity, or (for `tell`) no Mission on
-          that branch came from this terminal, or its child runs Codex.
+          for example because the user answered it in Nirux, or (for `tell`) no Mission on that
+          branch came from this terminal, or its child runs Codex.
         - 2: invalid usage, or not a Mission terminal; the error message says which.
         - 1: Nirux's state could not be read or written. If a sandbox blocks it, run the command
           outside the sandbox.
-
-        `receive` prints one JSON object. For a `question`, reply before calling `receive` again;
-        for `completed`, the event is acknowledged automatically, so stop calling `receive` unless
-        another child Mission is still running or you sent a `tell`. A human can also click the
-        question in Nirux Activity and use the Reply action.
 
         Do not report completion from a Stop/turn-complete hook. Use `completed` only when the
         delegated task is genuinely complete; use `ask` only when parent input is needed.

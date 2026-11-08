@@ -9,6 +9,8 @@ extension NiruxShellView {
         let visibleIndices = visibleWorkspaceIndices
         let (foregroundProcesses, invalidatedSessionBinding) = followForegroundProcesses(snapshot: snapshot, now: now)
         let approvalHolds = releaseApprovalsNotHeld()
+        let missionQuestions = missionQuestions(foreground: { foregroundProcesses[ObjectIdentifier($0)] }, now: now)
+        noteMissionQuestionHandOffs(missionQuestions)
         let infos = visibleIndices.map { index in
             let workspace = workspaces[index]
             let isActive = index == activeWSIndex
@@ -46,7 +48,8 @@ extension NiruxShellView {
                     openDialog: agentStatus == .working
                         ? nil : col.pty?.agentVisibleDialog(foreground: foregroundProcess)?.reason,
                     stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
-                    deferredAgent: Self.sidebarDeferredAgent(of: col)
+                    deferredAgent: Self.sidebarDeferredAgent(of: col),
+                    missionQuestion: missionQuestions[ObjectIdentifier(col)]
                 )
             }
             return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
@@ -77,16 +80,17 @@ extension NiruxShellView {
                 attention: profile.id == activeProfileID
                     ? infos.compactMap(\.attention).max()
                     : profileWorkspaces.compactMap {
-                        Self.attention(of: $0, foregroundProcesses: foregroundProcesses, now: now)
+                        Self.attention(
+                            of: $0, foregroundProcesses: foregroundProcesses, missionQuestions: missionQuestions, now: now
+                        )
                     }.max()
             )
         }
         sidebar.update(profiles: profileInfos, workspaces: infos)
         // A rename or a repository added changes what an empty space says.
         refreshEmptySpaceView()
-        updateSidebarAttention(infos: infos)
+        updateSidebarAttention(infos: infos, missionQuestions: missionQuestions)
         if invalidatedSessionBinding { saveState(snapshot: snapshot) }
-        scheduleActivityReadMark()
         refreshProjectBoards(snapshot: snapshot, now: now, foregroundProcesses: foregroundProcesses)
     }
 
@@ -162,10 +166,12 @@ extension NiruxShellView {
     private static func attention(
         of workspace: WorkspaceState,
         foregroundProcesses: [ObjectIdentifier: ForegroundProcess],
+        missionQuestions: [ObjectIdentifier: SidebarMissionQuestion],
         now: TimeInterval
     ) -> AttentionSignal? {
         var signals: [AttentionSignal] = []
         for column in workspace.columns {
+            if missionQuestions[ObjectIdentifier(column)]?.handOff != nil { signals.append(.waiting) }
             guard let pty = column.pty else { continue }
             let status = pty.cachedAgentState
             if let wait = pty.agentBlockedWait(now: now, foreground: foregroundProcesses[ObjectIdentifier(column)]),
@@ -178,11 +184,17 @@ extension NiruxShellView {
         return signals.max()
     }
 
-    private func updateSidebarAttention(infos: [WorkspaceInfo]) {
+    private func updateSidebarAttention(infos: [WorkspaceInfo], missionQuestions: [ObjectIdentifier: SidebarMissionQuestion]) {
         // Dock badge: workspaces currently waiting for attention.
         let attentionCount = workspaces.filter { workspace in
             workspace.hasNotification
-                || workspace.columns.contains { $0.pty?.cachedAgentState == .needsAttention }
+                || workspace.columns.contains { column in
+                    let question = missionQuestions[ObjectIdentifier(column)]
+                    if question?.handOff != nil { return true }
+                    guard let pty = column.pty, pty.cachedAgentState == .needsAttention else { return false }
+                    // A child that asked its parent ended its turn to wait.
+                    return question == nil || AttentionSignal.of(pty.agentAttentionReason) != .finished
+                }
         }.count
         NiruxNotifier.shared.updateDockBadge(attentionCount: attentionCount)
         // Same source, the other way: agents still working.
@@ -289,125 +301,9 @@ extension NiruxShellView {
 
     private static let flashOverlayID = NSUserInterfaceItemIdentifier("nirux.focusFlashOverlay")
 
-    @objc func handleSidebarActivityActivation(_ notification: Notification) {
-        guard let entry = notification.userInfo?["entry"] as? ActivityEntry else { return }
-        handleActivityEntry(entry)
-    }
-
-    /// Mission questions are actionable mailbox rows: clicking offers a
-    /// reply without stealing focus from the parent workspace. Other rows
-    /// keep click-to-focus behavior.
-    func handleActivityEntry(_ entry: ActivityEntry) {
-        guard entry.category == .missionQuestion,
-              let questionID = entry.missionEventID,
-              MissionStore.shared.response(to: questionID) == nil
-        else {
-            focusActivityEntry(entry)
-            return
-        }
-        ActivityStore.shared.markRead(upTo: entry.timestamp)
-        showMissionReplyPanel(entry: entry, questionID: questionID)
-    }
-
-    private func showMissionReplyPanel(entry: ActivityEntry, questionID: String) {
-        let alert = NSAlert()
-        alert.messageText = "Reply to \(entry.workspaceTitle)"
-        alert.informativeText = entry.detail ?? "The child mission needs input."
-        alert.alertStyle = .informational
-
-        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
-        input.placeholderString = "Concise answer for the child agent"
-        alert.accessoryView = input
-        alert.addButton(withTitle: "Reply")
-        alert.addButton(withTitle: "Open Child")
-        alert.addButton(withTitle: "Cancel")
-
-        let result = runModal(alert)
-        if result == .alertSecondButtonReturn {
-            focusActivityEntry(entry)
-            return
-        }
-        guard result == .alertFirstButtonReturn else { return }
-
-        let reply = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !reply.isEmpty else { return showToast("Type a reply first") }
-        guard reply.count <= MissionEventCLI.maxMessageLength else {
-            return showToast("Replies are limited to \(MissionEventCLI.maxMessageLength) characters")
-        }
-        let enabled = Self.currentMissionHandoffsEnabled()
-        guard enabled else { return showToast("Mission handoffs are off in Settings") }
-        guard let accepted = MissionStore.shared.respond(to: questionID, message: input.stringValue, enabled: enabled) else {
-            showToast("Couldn’t send the reply to the child mission", tone: .error)
-            return
-        }
-        if recordMissionActivity(accepted.mission, event: accepted.event) {
-            MissionStore.shared.markDelivered(eventID: accepted.event.id)
-        }
-    }
-
-    /// Click-through for an activity row. Prefers the agent's identity —
-    /// unlike the frozen columnIndex it survives column reordering and
-    /// closures, so the flash confirms the RIGHT column. Falls back to the
-    /// event-time workspace/column when the agent has exited. Clicking is
-    /// also an explicit acknowledgment: everything up to that entry is read.
-    func focusActivityEntry(_ entry: ActivityEntry) {
-        ActivityStore.shared.markRead(upTo: entry.timestamp)
-        if let uuid = entry.agentUUID,
-           let resolution = resolveAgentColumn(uuid: uuid),
-           let wsIndex = workspaces.firstIndex(where: { $0 === resolution.workspace }) {
-            switchToWorkspace(wsIndex)
-            focusColumnByIndex(resolution.columnIndex)
-            flashColumnBorder(workspaceIndex: wsIndex, columnIndex: resolution.columnIndex)
-        } else if let workspaceID = entry.workspaceID {
-            focusWorkspace(id: workspaceID, column: entry.columnIndex)
-        }
-    }
-
-    /// Expanded, active, visible window with part of Activity in the viewport.
-    var activityFeedIsVisibleToUser: Bool {
-        isSidebarExpanded
-            && NSApp.isActive
-            && window?.isMiniaturized == false
-            && window?.occlusionState.contains(.visible) == true
-            && sidebar.isActivityFeedVisible
-    }
-
-    /// Unread entries become read after they have actually been visible.
-    func scheduleActivityReadMark() {
-        guard activityFeedIsVisibleToUser, ActivityStore.shared.unreadCount > 0 else { return }
-        guard activityReadTimer == nil else { return }
-        guard let cutoff = ActivityStore.shared.newestTimestamp else { return }
-        let generation = activityReadGeneration
-        activityReadTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, generation == self.activityReadGeneration else { return }
-                self.activityReadTimer = nil
-                guard self.activityFeedIsVisibleToUser else { return }
-                ActivityStore.shared.markRead(upTo: cutoff)
-            }
-        }
-    }
-
-    /// Invalidates the pending dwell. Bumping the generation also
-    /// neutralizes a timer that already fired but whose MainActor task
-    /// hasn't run yet — that stale task must not touch a newer timer.
-    func cancelActivityReadMark() {
-        activityReadGeneration &+= 1
-        activityReadTimer?.invalidate()
-        activityReadTimer = nil
-    }
-
-    /// Rebuild Activity explicitly because the upstream sidebar render
-    /// signature intentionally only tracks workspace navigation state.
-    func refreshActivitySidebar() {
-        updateSidebar()
-        sidebar.rebuildContent()
-        scheduleActivityReadMark()
-    }
-
-    /// One-shot border pulse on a column — click feedback for Activity and
-    /// notification click-through, which are otherwise a visual no-op
-    /// when the target is already focused. Runs as an overlay so it can't
+    /// One-shot border pulse on a column — click feedback for notification
+    /// click-through, which is otherwise a visual no-op when the target is
+    /// already focused. Runs as an overlay so it can't
     /// clobber the focus border or the attention pulse. The overlay's model
     /// opacity is 0: if the animation never runs or is dropped (layer
     /// rebuilt, view detached mid-flash), the failure mode is an invisible
@@ -478,9 +374,9 @@ extension NiruxShellView {
         updateSidebar(snapshot: snapshot)
         if changed { saveState(snapshot: snapshot) }
         // After this drain: a turn that ended may have freed a Mission
-        // child's prompt for a waiting `tell`.
+        // agent's prompt for a message waiting to be typed.
         if events.contains(where: { [.stop, .stopFailure].contains($0.event.name) }) {
-            DispatchQueue.main.async { [weak self] in self?.typeMissionInstructions() }
+            DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
         }
     }
 
@@ -503,55 +399,35 @@ extension NiruxShellView {
         }
     }
 
-    /// MissionEventCenter delivery target. The activity write is flushed
-    /// before returning so the mission ledger can safely mark the event as
-    /// delivered; replay remains idempotent through missionEventID.
-    func recordMissionActivity(_ mission: Mission, event: MissionEvent) -> Bool {
+    /// MissionEventCenter delivery target, once per event (the ledger then
+    /// marks it delivered). The event itself waits in the ledger to be
+    /// typed into its recipient's prompt; the child's card shows a waiting
+    /// question from the ledger too (`missionQuestion(for:)`).
+    func handleMissionEvent(_ mission: Mission, event: MissionEvent) -> Bool {
         let workspace = workspaces.first(where: { $0.id == mission.childWorkspaceID })
-        let columnIndex = workspace?.columns.firstIndex(where: { $0.agentUUID == mission.childAgentUUID })
-        let category: ActivityEntry.Category
         switch event.kind {
-        case .question: category = .missionQuestion
-        case .completed: category = .missionCompleted
-        case .response: category = .missionResponse
-        case .instruction: category = .missionInstruction
-        case .acknowledged: return false
-        }
-        let entry = ActivityEntry(
-            category: category,
-            agentKind: [.response, .instruction].contains(event.kind) ? "parent" : mission.childAgentKind,
-            agentUUID: mission.childAgentUUID,
-            workspaceID: mission.childWorkspaceID,
-            columnIndex: columnIndex,
-            workspaceTitle: workspace?.title ?? mission.branch,
-            detail: event.message,
-            timestamp: event.timestamp,
-            missionID: mission.id,
-            missionEventID: event.id,
-            missionReplyToEventID: event.inReplyTo
-        )
-        ActivityStore.shared.record(entry)
-        ActivityStore.shared.flush()
-        if event.kind == .question {
-            workspace?.raiseNotification(.waiting)
-        } else if event.kind == .response {
-            workspace?.notification = nil
-        }
-        if event.kind == .question || event.kind == .completed {
+        case .acknowledged:
+            return false
+        case .response:
+            // Answered: the question handed to the user is over.
+            if workspace?.notification == .waiting { workspace?.notification = nil }
+        case .completed:
+            // So are its open questions.
+            if workspace?.notification == .waiting { workspace?.notification = nil }
             NiruxNotifier.shared.postMissionEvent(
                 workspaceID: mission.childWorkspaceID,
                 workspaceTitle: workspace?.title ?? mission.branch,
-                columnIndex: columnIndex,
+                columnIndex: workspace?.columns.firstIndex(where: { $0.agentUUID == mission.childAgentUUID }),
                 kind: event.kind,
                 message: event.message
             )
+        case .question, .instruction:
+            break
         }
-        refreshActivitySidebar()
-        // Once the event is marked delivered: a new `tell` may find its
-        // child's prompt free.
-        if event.kind == .instruction {
-            DispatchQueue.main.async { [weak self] in self?.typeMissionInstructions() }
-        }
+        updateSidebar()
+        // Once the event is marked delivered: its recipient's prompt may be
+        // free now.
+        DispatchQueue.main.async { [weak self] in self?.typeMissionMessages() }
         return true
     }
 

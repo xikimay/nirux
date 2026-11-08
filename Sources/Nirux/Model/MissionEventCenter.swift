@@ -15,7 +15,8 @@ final class MissionEventCenter {
     private let isEnabled: () -> Bool
     private let initialRetryDelay: TimeInterval
     private let maximumRetryDelay: TimeInterval
-    /// Return true only after the event is durably represented to the user.
+    /// Return true once the app acted on the event (see
+    /// `MissionEvent.deliveredAt`); false retries it on the next drain.
     var onEvent: ((Mission, MissionEvent) -> Bool)?
 
     private var dirSource: DispatchSourceFileSystemObject?

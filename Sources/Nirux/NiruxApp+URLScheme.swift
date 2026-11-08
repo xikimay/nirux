@@ -76,7 +76,7 @@ extension NiruxApp {
             guard let self else { return }
             guard let resolved else {
                 NSLog("[URL] Ignored nirux:// request: folder or file not usable")
-                if request.hasValidLaunchID() || InAppWorktreeTickets.matches(request, now: ProcessInfo.processInfo.systemUptime) {
+                if request.hasValidLaunchID() {
                     self.shell?.presentProblem(Self.unusableTargetMessage(for: request.action), "")
                 }
                 return
@@ -96,7 +96,7 @@ extension NiruxApp {
 
     private func route(_ request: NiruxURLRequest, restoreApp: NSRunningApplication?) {
         let now = ProcessInfo.processInfo.systemUptime
-        if InAppWorktreeTickets.redeem(request, now: now) || request.disposition() == .perform {
+        if request.disposition() == .perform {
             perform(request)
             return
         }
@@ -112,7 +112,10 @@ extension NiruxApp {
     private func perform(_ request: NiruxURLRequest) {
         switch request.action {
         case let .newWorkspace(cwd, title, agent):
-            shell?.openRequestedWorkspace(title: title, cwd: cwd, agent: agent, requestedSpaceID: request.profileID)
+            shell?.openRequestedWorkspace(
+                title: title, cwd: cwd, agent: agent, requestedSpaceID: request.profileID,
+                startedOutsideNirux: request.cameFromOutside
+            )
         case .newWorktree(let worktree):
             shell?.createWorktreeWorkspace(
                 branch: worktree.branch,
@@ -121,7 +124,9 @@ extension NiruxApp {
                 handoverPath: worktree.handoverPath,
                 profileID: request.profileID,
                 parentWorkspaceID: worktree.parentWorkspaceID,
-                parentAgentUUID: worktree.parentAgentUUID
+                parentAgentUUID: worktree.parentAgentUUID,
+                startsFromHead: worktree.startsFromHead,
+                startedOutsideNirux: request.cameFromOutside
             )
         case .openEditor(_, let target):
             guard let target else { return }

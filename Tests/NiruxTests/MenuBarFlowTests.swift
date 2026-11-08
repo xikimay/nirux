@@ -7,17 +7,11 @@ import XCTest
 /// (see UIFlowHarness): each must reach the command its title names.
 @MainActor
 final class MenuBarFlowTests: XCTestCase {
-    /// Space Settings is rebuilt from the sidebar's space menu each time it
-    /// opens, so it always acts on the space in front.
+    /// Space Settings… opens the window of the space in front.
     func testSpaceMenu() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let bar = MenuBar(shell: shell)
-            XCTAssertEqual(
-                bar.titles(of: ["Space", "Space Settings"]),
-                ["Rename Space…", "Edit Space Brief…", "Board Settings…", "Edit Task Templates…", "Space Memory…", "Space Color"],
-                "the default space can't be deleted"
-            )
 
             // The sidebar's New Space… sheet; the space itself is made the
             // way its Create button does.
@@ -28,14 +22,17 @@ final class MenuBarFlowTests: XCTestCase {
             shell.createSpace(NewSpacePanel.Draft(name: "Menu", colorHex: WorkspaceProfile.palette[1].hex, anchors: []))
             let space = shell.activeProfileID
             XCTAssertNotEqual(space, WorkspaceProfile.defaultID)
-            XCTAssertEqual(bar.titles(of: ["Space", "Space Settings"]).last, "Delete Space…")
-            bar.run(["Space", "Space Settings", "Rename Space…"])
+            bar.run(["Space", "Space Settings…"])
+            XCTAssertEqual(shell.spaceSettings?.spaceID, space)
+            XCTAssertEqual(shell.spaceSettings?.selectedTab, .general)
             harness.submit("Menu Space", into: try XCTUnwrap(harness.waitForField(placeholder: "Space name")))
             XCTAssertEqual(shell.profiles.first { $0.id == space }?.name, "Menu Space")
 
             bar.run(["Space", "Previous Space"])
             XCTAssertEqual(shell.activeProfileID, WorkspaceProfile.defaultID)
-            XCTAssertFalse(bar.titles(of: ["Space", "Space Settings"]).contains("Delete Space…"))
+            bar.run(["Space", "Space Settings…"])
+            XCTAssertEqual(shell.spaceSettings?.spaceID, WorkspaceProfile.defaultID)
+            shell.spaceSettings?.close()
 
             // ⌃⌘B, typed in a terminal, reaches the menu. No repository yet:
             // the board asks for one, and runs no gh.
@@ -44,8 +41,9 @@ final class MenuBarFlowTests: XCTestCase {
             XCTAssertNotNil(workspace.columns[safe: workspace.focusedIndex]?.pty)
             try harness.withApp { harness.press("b", keyCode: 0x0B, [.command, .control]) }
             XCTAssertEqual(workspace.columns[safe: workspace.focusedIndex]?.projectBoard?.projectID, WorkspaceProfile.defaultID)
-            harness.waitUntil("Board Settings to open") { shell.boardSettingsPanel?.panel != nil }
-            shell.boardSettingsPanel?.dismiss()
+            harness.waitUntil("Board Settings to open") { shell.boardSettingsPanel?.hostView != nil }
+            XCTAssertEqual(shell.spaceSettings?.selectedTab, .board)
+            shell.spaceSettings?.close()
 
             bar.run(["Space", "Session History…"])
             let history = try XCTUnwrap(shell.sessionHistoryPanel)
@@ -74,14 +72,11 @@ final class MenuBarFlowTests: XCTestCase {
             }
             shell.commandPalette?.dismiss()
 
-            bar.run(["Workspaces", "New Worktree…"])
-            try XCTUnwrap(harness.waitForField(placeholder: "Branch name (e.g. feat/my-feature)")).window?.orderOut(nil)
-
-            bar.run(["Workspaces", "New Task…"])
-            harness.waitUntil("the new task sheet") { shell.newTaskPanel?.panel?.isSheet == true }
-            let form = try XCTUnwrap(shell.newTaskPanel)
-            harness.waitUntil("the space's repository") { form.info != nil }
-            form.cancelButton.performClick(nil)
+            bar.run(["Workspaces", "New…"])
+            harness.waitUntil("the sheet") { shell.newTaskPanel?.panel?.isSheet == true }
+            let sheet = try XCTUnwrap(shell.newTaskPanel)
+            harness.waitUntil("the space's info") { sheet.info != nil }
+            sheet.cancelButton.performClick(nil)
             XCTAssertNil(shell.newTaskPanel)
 
             // The context of the workspace in front, not the first one.

@@ -70,6 +70,12 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         if args.count >= 4, args[1] == "--hook", args[2] == "claude", args[3] == "--mcp" {
             exit(NiruxMCPServer.run())
         }
+        // A setup script failed in a new worktree (SpaceSetupScript), also
+        // spelled as a hook: an older build reads a Codex payload it can't
+        // parse and exits.
+        if let workspaceID = SetupFailureSignal.workspaceID(in: args) {
+            exit(SetupFailureSignal.run(workspaceID: workspaceID))
+        }
         if args.count >= 3, args[1] == "--hook", let kind = AgentHookEvent.Kind(rawValue: args[2]) {
             let payload = args.count > 3 ? args.last : nil
             exit(AgentHookCLI.run(kind: kind, payload: payload))
@@ -153,12 +159,7 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         // ~/.codex/config.toml, then start routing events to columns. Must
         // run AFTER restoreState so queued events resolve to live columns.
         installAgentHooks(reportingTo: shellView)
-        ActivityStore.shared.load()
         MissionStore.shared.load()
-        ActivityStore.shared.onChange = { [weak shellView] in
-            shellView?.refreshActivitySidebar()
-        }
-        shellView.refreshActivitySidebar()
         let hooks = AgentHookCenter.shared
         // Before the backlog replay in start(): it releases what it can't hold.
         hooks.applySidebarApprovals(enabled: NiruxShellView.currentSidebarApprovalsEnabled())
@@ -181,26 +182,27 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
                 reason, workspaceTitle: workspace.title, columnIndex: columnIndex, agentUUID: column.agentUUID
             )
         }
+        shellView.onSetupScriptFailed = { [weak remoteAccess] workspace, columnIndex, column in
+            remoteAccess?.handleSetupFailure(
+                workspaceTitle: workspace.title, columnIndex: columnIndex, agentUUID: column.agentUUID
+            )
+        }
+        observeSetupFailures()
         remoteAccess.onStateChange = { [weak self] in
             self?.refreshTelegramSettingsState()
         }
         hooks.onEventReceived = { [weak remoteAccess] event, resolution, outcome in
-            ActivityStore.shared.record(
-                event,
-                workspaceTitle: resolution?.workspace.title ?? event.cwd ?? "External agent",
-                columnIndex: resolution?.columnIndex, outcome: outcome
-            )
             remoteAccess?.handleAgentEvent(event, resolution: resolution, outcome: outcome)
         }
         hooks.start()
         shellView.catchUpProjectHistory()
         // Start after the hook backlog drain so events queued while Nirux was
-        // closed are recorded locally but never replayed as Telegram alerts.
+        // closed are never replayed as Telegram alerts.
         remoteAccess.reloadFromPersistence()
 
         let missionEvents = MissionEventCenter.shared
         missionEvents.onEvent = { [weak shellView] mission, event in
-            shellView?.recordMissionActivity(mission, event: event) ?? false
+            shellView?.handleMissionEvent(mission, event: event) ?? false
         }
         missionEvents.start()
 
@@ -264,6 +266,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
     /// command, and a call already sent is waited for.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let shell else { return .terminateNow }
+        // Changes typed in Space Settings ask first (an update's relaunch
+        // too).
+        guard shell.spaceSettingsAllowQuit() else { return .terminateCancel }
         return shell.mergeQueueTerminateReply { quit in
             NSApp.reply(toApplicationShouldTerminate: quit)
         }
@@ -281,7 +286,6 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         ExplainQueue.shared.cancelAll(waitingUpTo: 2)
         telegramRemoteAccessController?.shutdown()
         NiruxNotifier.shared.updateDockBadge(attentionCount: 0)
-        ActivityStore.shared.flush()
         // Every agent goes with its terminal; a restore resumes the session.
         shell?.sessionLedger.closeAllSessions(at: Date().timeIntervalSince1970)
         // Receivers stop waiting on an app that is gone.

@@ -133,23 +133,11 @@ extension NiruxShellView {
     func workspacePaletteActions() -> [PaletteAction] {
         [
             PaletteAction(
-                icon: .symbol("plus.rectangle.on.rectangle"), title: "New Workspace", subtitle: "Create a new workspace",
+                icon: .symbol(Theme.Symbol.newWorkspace), title: "New…",
+                subtitle: "Start a task on a new branch, or open a shell in this space",
                 shortcut: .newWorkspace
             ) { [weak self] in
-                self?.showNewWorkspacePanel()
-            },
-            PaletteAction(
-                icon: .symbol("square.and.pencil"), title: "New Task…",
-                subtitle: "Describe a task: Nirux makes its worktree and hands it to an agent",
-                shortcut: nil
-            ) { [weak self] in
-                self?.showNewTaskPanel()
-            },
-            PaletteAction(
-                icon: .symbol("arrow.triangle.branch"), title: "New Worktree",
-                subtitle: "Create a git worktree + workspace", shortcut: nil
-            ) { [weak self] in
-                self?.showWorktreePanel()
+                self?.showNewPanel()
             },
             PaletteAction(
                 icon: .symbol("folder"), title: "Open Worktree",

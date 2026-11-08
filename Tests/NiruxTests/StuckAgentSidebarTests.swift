@@ -386,15 +386,11 @@ final class StuckAgentSidebarTests: XCTestCase {
             alerts.append(reason)
         }
         shell.stuckAgentWaitThreshold = 600
-        let activity = ActivityStore(persistsToDisk: false)
-        shell.stuckAgentActivity = activity
         shell.refreshStuckAgents(snapshot: snapshot, now: now)
         shell.refreshStuckAgents(snapshot: snapshot, now: now + 30)
         let waited = AgentAttentionReason.stillWaiting(.permission(tool: "Bash", summary: nil), waited: 3_600)
         XCTAssertEqual(alerts, [waited], "once")
         XCTAssertEqual(notified, [waited])
-        XCTAssertEqual(activity.entries.map(\.category), [.attention])
-        XCTAssertEqual(activity.entries.first?.detail, "waiting 1h00m · permission: Bash")
 
         // Nirux leaving the front starts the watch as the heartbeat stops.
         NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)

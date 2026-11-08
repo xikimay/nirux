@@ -30,7 +30,10 @@ final class SpaceRoutingTests: XCTestCase {
         }
         let outside = FolderIdentity(path: "/elsewhere", commonDir: nil, topLevel: nil)
 
-        XCTAssertEqual(route(Self.inWeb("/code/web/src"), parent: "other", startedFrom: "other"), .init(spaceID: "web", reason: .anchor))
+        let anchored = route(Self.inWeb("/code/web/src"), parent: "other", startedFrom: "other")
+        XCTAssertEqual(anchored.spaceID, "web")
+        XCTAssertEqual(anchored.reason, .anchor)
+        XCTAssertEqual(anchored.anchor?.key, "git:/code/web/.git", "the anchor whose setup script would run")
         XCTAssertEqual(route(outside, parent: "other", startedFrom: "ui"), .init(spaceID: "other", reason: .parent))
         XCTAssertEqual(route(outside, parent: nil, startedFrom: "ui"), .init(spaceID: "ui", reason: .startedFrom))
         XCTAssertEqual(route(nil, parent: nil, startedFrom: "ui"), .init(spaceID: "ui", reason: .startedFrom), "git too slow")

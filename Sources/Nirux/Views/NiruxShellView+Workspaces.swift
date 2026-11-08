@@ -20,7 +20,9 @@ extension NiruxShellView {
         missionID: String? = nil,
         deliveredHandover: Bool = false,
         handoverText: String? = nil,
-        worktreeBranch: String? = nil
+        worktreeBranch: String? = nil,
+        startedOutsideNirux: Bool = false,
+        setupScript: URL? = nil
     ) {
         let snapshot: NSImageView? = {
             guard let rep = viewport.bitmapImageRepForCachingDisplay(in: viewport.bounds) else { return nil }
@@ -34,18 +36,19 @@ extension NiruxShellView {
             return imageView
         }()
 
-        let wsTitle = title ?? "ws \(workspaces.count + 1)"
         let targetProfileID = workspaceStore.targetProfileID(for: requestedProfileID)
         // A space with anchors opens a plain workspace in its default
         // folder, never in the home folder (docs/spaces.md).
         let wsCwd = cwd ?? defaultFolder(forSpace: targetProfileID)
         let workspace = WorkspaceState(
             id: workspaceID,
-            title: wsTitle,
+            // Unnamed: its folder's name (docs/spaces.md, "One door: ⌘N").
+            title: title ?? NewTask.folderTitle(wsCwd, home: sideEffects.homeDirectory()),
             cwd: wsCwd,
             profileID: targetProfileID,
             missionID: missionID,
             missionHandoffsEnabled: Self.currentMissionHandoffsEnabled(),
+            startedOutsideNirux: startedOutsideNirux,
             initialAgentUUID: initialAgentUUID
         )
         wireWorkspace(workspace)
@@ -55,11 +58,16 @@ extension NiruxShellView {
         updateSidebar()
         focusActiveTerminal(in: window)
 
-        // Launch agent in the new workspace's terminal
+        // The setup script, then the agent, in the new workspace's terminal.
+        // Never for a workspace opened from outside Nirux.
+        let setupScript = startedOutsideNirux ? nil : setupScript
         if let agent {
             launchAgent(
-                agent, in: workspace, deliveredHandover: deliveredHandover, handoverText: handoverText, worktreeBranch: worktreeBranch
+                agent, in: workspace, deliveredHandover: deliveredHandover, handoverText: handoverText,
+                worktreeBranch: worktreeBranch, setupScript: setupScript
             )
+        } else if let setupScript, let column = workspace.columns.first {
+            sideEffects.launchAgent(column, setupCommand(setupScript, in: workspace, then: nil))
         }
 
         if let snapshot {
@@ -82,25 +90,44 @@ extension NiruxShellView {
     nonisolated static func agentStartupPrompt(
         agent: NiruxApp.WorkspaceAgent, deliveredHandover: Bool, isMission: Bool
     ) -> String? {
+        startupPrompt(
+            agent: agent, deliveredHandover: deliveredHandover,
+            mission: isMission ? (agent == .claude ? typedAnswerMission : waitingMission) : nil
+        )
+    }
+
+    nonisolated static func startupPrompt(
+        agent: NiruxApp.WorkspaceAgent, deliveredHandover: Bool, mission: String?
+    ) -> String? {
         var instructions: [String] = []
         if deliveredHandover {
             let handoverName = handoverFilename(for: agent)
             instructions.append("Read \(handoverName) for full context, then proceed with the next steps described there.")
         }
-        if isMission {
-            instructions.append(
-                "This is a Nirux mission workspace. Ask the parent and wait safely with "
-                + "\"$NIRUX_CLI_PATH\" --mission ask --message \"...\" "
-                + "(at most \(MissionEventCLI.maxMessageLength) characters); the command output is the parent's answer. "
-                + "It waits up to \(Int(MissionEventCLI.defaultWaitTimeout)) seconds, so allow it a shell-tool timeout "
-                + "of at least 120 seconds. If it exits with status 3, or your shell tool stops it before it "
-                + "prints anything, run the exact same command again: it resumes the same question. "
-                + "Status 4 means the Mission is over; do not retry. Report the final result with "
-                + "\"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
-            )
-        }
+        if let mission { instructions.append(mission) }
         return instructions.isEmpty ? nil : instructions.joined(separator: " ")
     }
+
+    /// A Claude Code child: Nirux types the answer into its prompt
+    /// (`MissionPromptText`).
+    nonisolated static let typedAnswerMission = "This is a Nirux mission workspace. To ask the parent agent, run "
+        + "\"$NIRUX_CLI_PATH\" --mission ask --message \"...\" "
+        + "(at most \(MissionEventCLI.maxMessageLength) characters), then end your turn: Nirux types "
+        + "the answer into your prompt as a message starting with \(MissionPromptText.prefix). "
+        + "If it exits with status 3, run the exact same command again: it does not ask twice. "
+        + "Status 4 means the Mission is over; do not retry. Report the final result with "
+        + "\"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
+
+    /// A Codex child, and every child before Nirux typed answers: `ask`
+    /// waits for the answer.
+    nonisolated static let waitingMission = "This is a Nirux mission workspace. Ask the parent and wait safely with "
+        + "\"$NIRUX_CLI_PATH\" --mission ask --message \"...\" "
+        + "(at most \(MissionEventCLI.maxMessageLength) characters); the command output is the parent's answer. "
+        + "It waits up to \(Int(MissionEventCLI.defaultWaitTimeout)) seconds, so allow it a shell-tool timeout "
+        + "of at least 120 seconds. If it exits with status 3, or your shell tool stops it before it "
+        + "prints anything, run the exact same command again: it resumes the same question. "
+        + "Status 4 means the Mission is over; do not retry. Report the final result with "
+        + "\"$NIRUX_CLI_PATH\" --mission completed --message \"...\"."
 
     /// `worktreeBranch` is the branch read back from the checkout
     /// (`GitWorktree.currentBranch(at:)`) of a worktree workspace Nirux just
@@ -111,7 +138,8 @@ extension NiruxShellView {
         in workspace: WorkspaceState,
         deliveredHandover: Bool,
         handoverText: String?,
-        worktreeBranch: String?
+        worktreeBranch: String?,
+        setupScript: URL?
     ) {
         guard let col = workspace.columns[safe: workspace.focusedIndex] else { return }
         let handoverPrompt = Self.agentStartupPrompt(
@@ -131,7 +159,7 @@ extension NiruxShellView {
         switch agent {
         case .claude:
             cmd = NiruxShellView.claudeCommand(
-                mode: NiruxShellView.currentClaudeLaunchMode(),
+                mode: NiruxShellView.claudeLaunchMode(for: workspace),
                 sessionName: SessionName.make(
                     worktreeBranch: worktreeBranch,
                     spaceName: workspaceStore.profiles.first { $0.id == workspace.profileID }?.name,
@@ -142,13 +170,20 @@ extension NiruxShellView {
             )
         case .codex:
             cmd = NiruxShellView.codexCommand(
-                mode: NiruxShellView.currentCodexLaunchMode(),
+                mode: NiruxShellView.codexLaunchMode(for: workspace),
                 briefFile: NiruxShellView.codexBriefFile(from: brief, launchDirectory: workspace.cwd),
                 handoverPrompt: handoverPrompt
             )
         }
 
-        sideEffects.launchAgent(col, cmd)
+        sideEffects.launchAgent(col, setupScript.map { setupCommand($0, in: workspace, then: cmd) } ?? cmd)
+    }
+
+    /// The setup script's line (see SpaceSetupScript), then `agentCommand`.
+    private func setupCommand(_ script: URL, in workspace: WorkspaceState, then agentCommand: String?) -> String {
+        SpaceSetupScript.command(
+            script: script.path, executable: Self.niruxExecutable, workspaceID: workspace.id, then: agentCommand
+        )
     }
 
     func focusWorkspace(_ dir: VDir) {

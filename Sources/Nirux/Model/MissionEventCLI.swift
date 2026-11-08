@@ -5,6 +5,11 @@ import Foundation
 /// events to the app-owned queue; wait commands only read the atomically
 /// written mission ledger, so no CLI process races the app for state writes.
 ///
+/// A Claude Code child's `ask` returns at once: Nirux types the answer into
+/// its prompt (see `MissionStore.pendingPromptDeliveries`). A Codex child's
+/// waits for it, since Codex reports no dialogs and Nirux can't tell that
+/// its prompt is free.
+///
 /// Exit statuses, as the installed skill and the child's startup prompt
 /// explain them to agents: 0 done, 1 Nirux state could not be read or
 /// written, 2 invalid usage, 3 nothing yet (run the same command again),
@@ -25,6 +30,9 @@ enum MissionEventCLI {
     /// How long Nirux keeps trying to type a `tell`. Past it, the message is
     /// never typed: nobody may want it any more.
     static let instructionLifetime: TimeInterval = 3600
+    /// How long Nirux keeps trying to type a child's question or completion
+    /// into its parent's prompt. A question then waits on the user alone.
+    static let parentMessageLifetime: TimeInterval = 3600
 
     private struct ChildContext {
         let missionID: String
@@ -105,10 +113,11 @@ enum MissionEventCLI {
         return append(event, to: eventsURL) ? 0 : 1
     }
 
-    /// Emit a correlated question and wait until a response is persisted.
-    /// The child opted into waiting by invoking this command, so no PTY
-    /// injection or heuristic idle detection is involved. Running the same
-    /// command again after a timeout resumes the same question.
+    /// Emit a correlated question. A Claude Code child returns at once and
+    /// ends its turn: Nirux types the answer into its prompt. Any other
+    /// child waits until a response is persisted, and running the same
+    /// command again after a timeout resumes the same question. Either way
+    /// an identical `ask` prints an answer that already came.
     static func ask(
         arguments: [String],
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -116,6 +125,8 @@ enum MissionEventCLI {
         eventsURL: URL = MissionEventCenter.defaultEventsURL,
         missionsURL: URL = MissionStore.defaultFileURL,
         pollInterval: TimeInterval = 0.2,
+        confirmationTimeout: TimeInterval = 5,
+        workspaceTitle: (String) -> String? = savedWorkspaceTitle,
         output: (String) -> Void = writeStandardOutput
     ) -> Int32 {
         guard let context = childContext(environment) else { return notAMissionTerminal(child: true) }
@@ -137,6 +148,7 @@ enum MissionEventCLI {
             return 4
         }
         let questionID = questionID(for: message, context: context, in: mission, now: now())
+        let typesAnswer = mission.childAgentKind == NiruxApp.WorkspaceAgent.claude.rawValue
         if !mission.events.contains(where: { $0.id == questionID }) {
             let question = MissionEvent(
                 id: questionID,
@@ -150,8 +162,11 @@ enum MissionEventCLI {
             guard append(question, to: eventsURL) else { return 1 }
         }
 
+        // A Claude Code child waits only until Nirux recorded the question,
+        // like `reply`: ending its turn on a question nobody has would
+        // leave it idle for good.
         let outcome = waitForLedger(
-            &ledger, timeout: timeout, pollInterval: pollInterval
+            &ledger, timeout: typesAnswer ? confirmationTimeout : timeout, pollInterval: pollInterval
         ) { missions -> AskOutcome? in
             guard let mission = missions.first(where: { $0.id == context.missionID }) else {
                 return nil
@@ -161,7 +176,8 @@ enum MissionEventCLI {
             }) {
                 return .answered(response)
             }
-            return mission.status == .active ? nil : .missionCompleted
+            guard mission.status == .active else { return .missionCompleted }
+            return typesAnswer && mission.events.contains(where: { $0.id == questionID }) ? .recorded : nil
         }
         switch outcome {
         case let .answered(response):
@@ -173,18 +189,34 @@ enum MissionEventCLI {
         case .missionCompleted:
             writeStandardError("This Mission completed before the question was answered.")
             return 4
+        case .recorded:
+            let parent = workspaceTitle(mission.parentWorkspaceID).map { "\"\($0)\"" } ?? "the parent agent"
+            output("Question sent to \(parent). End your turn now: Nirux will type the answer into your prompt.")
+            return 0
+        case nil where typesAnswer:
+            writeStandardError(
+                "Nirux has not recorded the question yet. Run the exact same command again; it does not ask twice."
+            )
+            return 3
         case nil:
             writeStandardError(
-                "No answer yet; the question stays queued and appears in Nirux Activity. "
+                "No answer yet; the question stays queued for the parent agent, or the user in Nirux. "
                     + "Run the exact same command again to keep waiting."
             )
             return 3
         }
     }
 
+    /// The title Nirux last saved for a workspace, to name the parent.
+    static func savedWorkspaceTitle(_ workspaceID: String) -> String? {
+        Persistence.load()?.workspaces.first { $0.id == workspaceID }?.title
+    }
+
     private enum AskOutcome {
         case answered(MissionEvent)
         case missionCompleted
+        /// Nirux has the question; it types the answer into the prompt.
+        case recorded
     }
 
     private enum ChildMission {
@@ -229,13 +261,19 @@ enum MissionEventCLI {
             ])
         }
         let recorded = Set(mission.events.lazy.filter { $0.kind == .question }.map(\.id))
-        let settled = Set(mission.events.compactMap { event -> String? in
+        let answered = Set(mission.events.compactMap { $0.kind == .response ? $0.inReplyTo : nil })
+        var settled = Set(mission.events.compactMap { event -> String? in
             guard event.kind == .response,
                   let receivedAt = event.childConsumedAt,
                   now - receivedAt >= answerReplayWindow
             else { return nil }
             return event.inReplyTo
         })
+        // A question the child's `completed` retired unanswered: asked again
+        // after a `tell` reopened the Mission, it is a new question.
+        settled.formUnion(mission.events.lazy
+            .filter { $0.kind == .question && $0.parentConsumedAt != nil && !answered.contains($0.id) }
+            .map(\.id))
         // A later generation also closes an earlier one, so a clock moved
         // back never reopens an old question and replays its answer.
         var current = derivedID(0)
@@ -378,8 +416,8 @@ enum MissionEventCLI {
         }) else {
             writeStandardError(
                 "This question is not waiting for an answer from this terminal: it was already answered "
-                    + "(perhaps from Nirux Activity), its Mission ended, or it belongs to another parent. "
-                    + "Do not resend it; keep using `receive` for the child's other events."
+                    + "(perhaps by the user in Nirux), its Mission ended, or it belongs to another parent. "
+                    + "Do not resend it."
             )
             return 4
         }
@@ -405,7 +443,13 @@ enum MissionEventCLI {
         ) { missions in
             missions.lazy.flatMap(\.events).contains(where: { $0.id == responseID }) ? true : nil
         }
-        guard confirmed == nil else { return 0 }
+        guard confirmed == nil else {
+            let typed = mission.events.contains { $0.id == eventID && $0.expectsTypedAnswer == true }
+            writeStandardOutput(typed
+                ? "Answer sent. Nirux types it into the child's prompt once its turn is over."
+                : "Answer sent. The child's `ask` prints it.")
+            return 0
+        }
         writeStandardError("The answer is queued but Nirux has not confirmed it yet; do not send it again.")
         return 3
     }

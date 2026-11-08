@@ -41,7 +41,8 @@ extension NiruxShellView {
                 cwd: persistedWS.cwd,
                 profileID: profileID,
                 missionID: persistedWS.missionID,
-                missionHandoffsEnabled: state.settings?.missionHandoffsEnabled == true
+                missionHandoffsEnabled: state.settings?.missionHandoffsEnabled == true,
+                startedOutsideNirux: persistedWS.startedOutsideNirux
             )
             workspace.isInactive = persistedWS.isInactive
             workspace.purpose = persistedWS.purpose
@@ -283,7 +284,8 @@ extension NiruxShellView {
                     blocker: workspace.blocker,
                     reviewRuns: workspace.reviewRuns.isEmpty ? nil : Dictionary(
                         uniqueKeysWithValues: workspace.reviewRuns.map { ($0.key.rawValue, $0.value) }
-                    ))
+                    ),
+                    startedOutsideNirux: workspace.startedOutsideNirux)
             },
             activeWorkspaceIndex: activeWSIndex,
             settings: settings,
