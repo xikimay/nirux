@@ -1,0 +1,241 @@
+# Spaces, anchors and the Lead
+
+Status: design validated by the user on 2026-11-08. Nothing is implemented
+yet. Where this document and [projects.md](projects.md) differ (management UI,
+routing, defaults), this one wins.
+
+Creating spaces and workspaces was messy because a space didn't know where its
+code lives. Five ways to create a workspace each guessed a different starting
+point:
+
+| Entry | Starts from today |
+| --- | --- |
+| New Workspace (⌘N) | `~`, named "ws N", no agent |
+| New Project | the active workspace's folder, not remembered |
+| New Task… | `origin/<base>` after a fetch, the repository guessed from open workspaces (fails in an empty space) |
+| New Worktree | the focused terminal's `HEAD` (fails after a `cd` elsewhere) |
+| `nirux-worktree` skill | the agent's checkout `HEAD`, no fetch |
+
+This document gives a space its repositories (anchors), replaces the five
+entries with one, makes parent/child messages reliable, adds a Lead agent per
+space, and strips the interface down to what is used.
+
+## Decided
+
+- **A space is a free group** with zero, one or several anchors (a git
+  repository or a folder), one of them the default.
+- **A repository belongs to one space.** Its worktrees open there.
+- **The UI says "Space" again**, not "Project". Code, persisted keys
+  (`profileID`), `NIRUX_PROFILE_ID` and the `profile=` parameter keep their
+  names.
+- **General** is the default space (id `default`, today named "main"): first in
+  the picker, never deleted, no anchors. It takes what arrives from outside
+  and matches no anchor.
+- **One door: ⌘N.** It replaces New Workspace, New Task… and New Worktree, and
+  always starts from `origin/<base>`, fetched. The skill and the Lead go through
+  the same path.
+- **One Lead per space**, optional, seeing only its space. It starts tasks
+  without asking (a switch turns that into "propose, you click").
+- **"Report to the Lead"** in ⌘N, checked by default when the space has a Lead.
+- **Always the user:** merging, removing a worktree or branch, and permissions
+  the Lead can't judge.
+- **Isolation by place and by view.** Each task has its own worktree and
+  branch; a space shows only itself. No sandbox (out of scope).
+- **The sidebar Activity section goes.** Cards, native notifications, the Dock
+  badge, Telegram and ⌘J cover it.
+- **Missions are rebuilt before the Lead**, in their own PR: messages are typed
+  into prompts both ways.
+- **Clean, minimal interface, the Apple way**, with only what is used. Dark
+  only stays.
+- **One task, one repository.** A feature across two repositories is two tasks
+  the Lead links.
+- **One merge queue per repository.**
+
+## Spaces and anchors
+
+```swift
+struct SpaceAnchor: Codable, Equatable {
+    enum Kind { case gitRepository(commonDir: String), folder(path: String), unknown(raw: Data) }
+    var kind: Kind
+    var name: String        // the main checkout's folder name, or the folder's
+    var isDefault: Bool
+}
+```
+
+- Stored on the space in `projects.json` (schema version 2). Decoding stays
+  lenient and keeps unknown kinds; a build that finds a newer schema reads the
+  file and never writes it (existing rule).
+- **Identity** of a repository is
+  `git rev-parse --path-format=absolute --git-common-dir`, symlinks resolved:
+  the same for the main checkout and every linked worktree. Run it off the
+  main thread with a limit of about 300 ms. Folder anchors compare whole path
+  components (`/a/web` doesn't match `/a/web2`).
+- **One space per anchor.** Adding a repository anchored elsewhere offers to
+  move it.
+- **Adding an anchor** offers to move that repository's workspaces into the
+  space; the ones in General are preselected.
+- **A space with anchors** opens a plain new workspace in its default anchor's
+  main checkout, never in `~`.
+
+## Routing
+
+Decided once, before the workspace is created, so the first agent starts in the
+right space with the right env:
+
+1. **Anchor match.** The most specific anchor wins (a folder anchor inside a
+   repository beats the repository).
+2. **Parent.** A worktree or Mission child joins its parent's current space.
+3. **Started by the user from a space** (⌘N, the sidebar's "+", the space menu,
+   Open Worktree): that space.
+4. **Anything else** (a `nirux://` request from outside, a confirmed request
+   without a launch ID): **General**, with a notification offering "Move to…"
+   and "Anchor to a Space…".
+
+After that the assignment is sticky: only the user moves a workspace.
+
+## One door: ⌘N
+
+A sheet titled "New in <space>":
+
+- A large description field. Return with text starts a task; Return with an
+  empty field opens a plain workspace (a shell in the default anchor's main
+  checkout, or `~` without anchors).
+- **Repository** popup, shown only with two or more anchors, the default
+  preselected. **Agent** (the space's default) and **Template** popups.
+- The suggested branch on one line, editable, "from origin/main".
+- **Report to the Lead** checkbox (with the Lead PR).
+- **Existing Branch…** opens an existing worktree (today's Open Worktree).
+- Names come from the description's first line, else the branch, else the
+  folder. Never "ws N".
+- The skill and the Lead start from `origin/<base>` too. The skill may ask for
+  the current `HEAD` explicitly when the user wants a stacked branch.
+
+## Missions without waiting
+
+Today a child's `ask` blocks for up to 90 s and must be re-run until answered;
+the parent only sees a question if it runs `--mission receive` itself; the user
+answers through an `NSAlert` with a one-line field. Questions get lost and the
+reply UI is unreadable.
+
+New flow, built on the guarded typing `tell` already uses
+(`AgentStatusMachine.isPromptFree`, retried at each turn end):
+
+- **Ask.** A Claude child's `ask` records the question and returns at once,
+  telling the agent to end its turn: the answer will be typed into its prompt.
+  The child shows "Asking <parent>" in neutral grey (amber stays for the user).
+- **Deliver.** Nirux types the question into the parent's prompt when it is
+  free, with one line naming the child and how to reply.
+- **Reply.** The parent's `--mission reply` is typed into the child's prompt the
+  same way. `completed` is typed into the parent's prompt as a one-line notice.
+- **Fallback to the user.** When the parent is gone, is not Claude, or hasn't
+  taken the question within the stuck-agent threshold, the child turns amber
+  ("Needs you · a question"). A popover shows the whole question with a
+  multi-line reply field (⌘↩ sends). It replaces the `NSAlert`.
+- **Codex children** keep today's blocking `ask` (Codex reports no dialogs, so
+  Nirux can't tell its prompt is free).
+- `receive` keeps working for old skills but leaves the skill text.
+- The Activity section, its store and its reply alert go. Native
+  notifications, the Dock badge, Telegram and ⌘J stay.
+
+## The Lead
+
+- **Opt-in per space:** "Start a Lead" in New Space… and Space Settings. A
+  workspace pinned at the top of the sidebar, in the default anchor's main
+  checkout, with Claude and the Board column. One per space; ⌘0 focuses it.
+- **Tools** (Nirux MCP server, given to the Lead's Claude only), limited to its
+  space and its anchors:
+  - `start_task(description, repo?, template?)`: the ⌘N path, reporting to the
+    Lead. With "Starts tasks without asking" off, it opens a pre-filled ⌘N sheet.
+  - `list_tasks()`: the board's rows and agent states.
+  - `tell(task, message)`, `reply(question, message)`: Missions.
+  - `ask_user(task, question, why)`: hands a question to the user (amber row,
+    popover showing why).
+  - `queue_merge(prs)`: opens the merge queue's confirmation sheet. It never
+    starts a queue.
+- **No tool merges, removes a worktree or a branch, or reaches another space.**
+- **State lives in Nirux** (board, Missions), not in the Lead's conversation: a
+  `/clear` or a restart loses nothing.
+- Mission handoffs and sidebar permission answers leave Experimental and are on
+  by default.
+
+## Interface
+
+Mockups were validated in the design session. What changes:
+
+- **Sidebar:** a space picker at the top (name, task count, amber when an agent
+  waits; ⌘1…⌘9), the Lead row, then task rows on two lines: title and time,
+  then one status line ("Needs you · npm run migrate", "Asking the Lead",
+  "Working", "#39 · checks passed"). No chips on every row. INACTIVE becomes an
+  "Archived" row at the bottom. The bottom dot switcher and Activity go. This
+  replaces the three-line cards of the October visual system.
+- **Title bar:** three buttons: New, Board, Search.
+- **Popovers, not alerts,** for anything the user must read and answer.
+- **⌘P in sections:** this space, actions, other spaces. One "New…" entry.
+- **Menu bar:** Space, Agent and Help menus, so every command has a menu item
+  and its shortcut. ⌃⌘B opens the Board.
+- **Card menu:** state actions first (Review Branch, failed CI, Clean Up once
+  merged), then an Organize submenu, then Rename and Close.
+- **Space Settings:** one window with tabs (General, Defaults, Lead, Brief,
+  Memory, Board, Templates) instead of five separate panels.
+- **An empty space** shows Add Repository…, New… and Start a Lead.
+- **Nirux's own skills update themselves** on launch, unless the user edited
+  them.
+
+## Plan
+
+Each PR is reviewable on its own and follows the usual cycle (adversarial
+review, `/code-review`, premortem, confirmation review, CI green, release
+build). PRs merge one at a time. S1 is mostly labels: it lands first and the
+others rebase on it.
+
+| # | PR | Depends on | Wave |
+| --- | --- | --- | --- |
+| S1 | "Space" labels; General (rename "main", first in the picker) | none | 1 |
+| S2 | Missions without waiting; Activity removed; reply popover | none | 1 |
+| S3 | Nirux's skills update themselves | none | 1 |
+| S4 | Anchors, routing, New Space… sheet, General as catch-all | none (rebases on S1) | 1 |
+| S5 | ⌘P in sections | S1 | 2 |
+| S6 | Space, Agent and Help menus; shorter card menu | S1 | 2 |
+| S7 | One ⌘N | S3, S4 | 3 |
+| S8 | Space Settings and per-space defaults | S4 | 3 |
+| S9 | Empty space view | S4 | 3 |
+| S10 | Clean sidebar, space picker, title bar | S1, S2 | 4 |
+| S11 | The Lead | S2, S4, S7, S8 | 5 |
+| S12 | Board with several repositories | S4 | 5 |
+| S13 | The Lead keeps each task's next step and blocker | S11 | 6 |
+
+Notes per PR:
+
+- **S1.** Every visible "Project" becomes "Space" (menus, palette, panels,
+  board header, README). The default space is renamed "General" only while its
+  name is still "main". General sorts first.
+- **S2.** See "Missions without waiting". Update the `nirux-worktree` skill and
+  the README. Keep Codex children working.
+- **S3.** Rewrite an installed Nirux skill (`metadata.author: nirux`) when the
+  bundled text changed and the installed copy is the one Nirux wrote (keep its
+  hash). A copy the user edited stays, and Getting Started keeps offering the
+  update.
+- **S4.** Model, identity, routing and General as above; New Space… sheet
+  (name, color, repositories, default); "Add Repository…" in the space menu;
+  the skill always sends its parent workspace. Moved-repository detection is
+  out of scope.
+- **S5.** Sections and scope; typing still finds workspaces in every space.
+- **S6.** Items open today's panels until S8 lands.
+- **S7.** See "One door: ⌘N". The palette keeps a single "New…".
+- **S8.** Defaults follow projects.md section 5 (precedence, literal env,
+  reserved `NIRUX_*`, `0600`, setup script typed before the agent, only for
+  workspaces the user started).
+- **S9.** "Start a Lead" appears once S11 lands.
+- **S10.** Which title-bar accessories stay (keep-awake cup, plan usage
+  limits) is the user's call, asked in the PR. Check ⌘1…⌘9 against the editor
+  and Ghostty bindings.
+- **S11.** See "The Lead". Adds the Lead tab, ⌘0 and the ⌘N checkbox.
+- **S12.** `board.json` gets one config per anchor; the current single
+  repository becomes the matching anchor's.
+- **S13.** An MCP tool sets a task's next step and blocker; manual editing
+  stays.
+
+## Out of scope
+
+Sandboxing agents to their space, a Lead across spaces, a light theme, moved
+repository detection, and tasks spanning two repositories.
