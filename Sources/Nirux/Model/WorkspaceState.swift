@@ -94,7 +94,6 @@ final class WorkspaceState {
             if prInfo?.url != oldValue?.url || prInfo?.state != "OPEN" { prFeedback = nil }
             // Merged (or first seen merged): what the Lead wrote is over, and
             // nothing tells it. The user's stays.
-            if prInfo?.state == "MERGED", oldValue?.state != "MERGED" { clearLeadContext() }
         }
     }
     /// The open PR's feedback (docs/pr-feedback-inbox.md), read after each
