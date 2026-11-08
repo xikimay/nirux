@@ -102,6 +102,22 @@ final class MergeQueueShellTests: XCTestCase {
         XCTAssertFalse(shell.statusBar.hasContent)
     }
 
+    /// A queue checks the worktrees of its space's repositories even where
+    /// no workspace of the space is open: the board lists them
+    /// (docs/spaces.md, S12), and an unpushed commit there must stop it.
+    @MainActor
+    func testTheLocalChecksCoverTheSpacesRepositoryCheckouts() {
+        let shell = makeShell(FakeQueueClient(isDryRun: true))
+        let space = shell.workspaceStore.createProfile(named: "Repositories")
+        XCTAssertTrue(shell.workspaceStore.setAnchors([
+            SpaceAnchor(kind: .gitRepository(commonDir: "/code/back/.git"), name: "back", isDefault: true),
+            SpaceAnchor(kind: .gitRepository(commonDir: "/code/bare.git"), name: "bare"),
+            .folder("/code/docs")
+        ], forProfile: space.id))
+        let queue = shell.mergeQueue(projectID: space.id, repository: MQ.widgets)
+        XCTAssertEqual(queue.local.folders(), ["/code/back", "/code/bare.git"], "the main checkout, else the git dir")
+    }
+
     @MainActor
     func testTheStatusBarShowsTheQueueThatEndedLast() throws {
         let shell = makeShell(FakeQueueClient(world: waitingWorld(), isDryRun: true))

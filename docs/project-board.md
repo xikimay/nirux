@@ -242,6 +242,11 @@ anchors don't appear. Decided with the user on 2026-11-08:
   Adding, removing or making default a repository reads board.json again.
 - **A queue left running** on a repository no section has any more (Board
   Settings changed, the anchor was removed) keeps a line, and its Stop.
+- **Pull requests match** a worktree only in a checkout a remote of which
+  names the section's repository: elsewhere, a branch of the same name is
+  other work. Its pull request then shows as not checked out.
+- **The queue's local checks** (unpushed commits, busy agents) cover the
+  repository anchors' checkouts too, not only the space's workspace folders.
 
 ## 3. Merge queue
 
@@ -871,7 +876,9 @@ schema 2:
   merge method, make the file read-only; an entry that isn't an object, a
   `commonDir` that isn't an absolute path, or two entries for one anchor make
   it unreadable. Save checks only the config it changes: the others stay as
-  read. A removed anchor's config stays in the file, and comes back with it.
+  read. A removed anchor's own config stays in the file, and comes back with
+  it. While git can't read some anchor's remotes, Save places nothing for
+  good: schema 1's config keeps no anchor.
 - **Board Settings** (with the user): a Repository pop-up above the form picks
   the repository edited, the default one first; each form suggests from that
   repository's checkout. Leaving one with values typed and not saved asks to

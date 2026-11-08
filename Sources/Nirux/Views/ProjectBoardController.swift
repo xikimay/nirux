@@ -13,7 +13,7 @@ import AppKit
 @MainActor
 final class ProjectBoardController {
     /// What one configured section read from GitHub.
-    struct RepositoryReads {
+    struct RepositoryReads: Sendable {
         /// As saved, for `gh --repo` and display.
         let name: String
         let gitHub: GitHubRepository
@@ -67,6 +67,8 @@ final class ProjectBoardController {
     private(set) var context = BoardSections.Context()
     /// One per repository anchor, else the space's one repository.
     private(set) var sections: [BoardSections.Section] = []
+    /// Each section's name, by id, told apart when two share one.
+    private(set) var displayNames: [String: String] = [:]
     private(set) var local: ProjectBoard.LocalSnapshot?
     /// By section id, for each section with a valid repository.
     private(set) var reads: [String: RepositoryReads] = [:]
@@ -75,6 +77,9 @@ final class ProjectBoardController {
     private(set) var schedule = ProjectBoard.RefreshSchedule()
     /// Bumped when the project changes: answers to earlier reads are dropped.
     private var generation = 0
+    /// The last generation given to a section's reads: never given twice,
+    /// so an answer for a config replaced since is always dropped.
+    private var lastReadGeneration = 0
     /// Bumped by each read of board.json: only the latest one applies.
     private var configRead = 0
     /// The anchors the last read of board.json placed its configs with.
@@ -176,7 +181,13 @@ final class ProjectBoardController {
             return
         }
         isReadingConfig = true
-        Self.readOffMain({ (store.load(), BoardSections.readContext(anchors: anchors)) }, then: { [weak self] read in
+        Self.readOffMain({
+            let loaded = store.load()
+            // The anchors' remotes only place schema 1's config.
+            let context = loaded.entries.contains { $0.slot == .legacy }
+                ? BoardSections.readContext(anchors: anchors) : BoardSections.Context(anchors: anchors)
+            return (loaded, context)
+        }, then: { [weak self] read in
             guard let self, self.configRead == current else { return }
             self.isReadingConfig = false
             self.apply(read.0, context: read.1)
@@ -185,18 +196,20 @@ final class ProjectBoardController {
 
     private func apply(_ newConfig: BoardConfigStore.Loaded, context: BoardSections.Context) {
         let wasRead = loaded != nil
+        let previousSections = sections.map(\.id)
         loaded = newConfig
         self.context = context
         // An unreadable file holds no config this build can use.
         let entries = newConfig.status == .unreadable ? [] : newConfig.entries
         sections = BoardSections.sections(entries, context: context)
+        displayNames = BoardSections.displayNames(sections)
         var newReads: [String: RepositoryReads] = [:]
         for section in sections {
             guard let config = section.config, var fresh = RepositoryReads(config: config) else { continue }
             if var previous = reads[section.id], previous.gitHub == fresh.gitHub {
                 if previous.baseBranch != fresh.baseBranch || previous.workflow != fresh.workflow {
                     // Reads still running answer for the config just replaced.
-                    previous.generation += 1
+                    previous.generation = newReadGeneration()
                     previous.schedule.reset()
                     previous.postMergeRun = nil
                     previous.baseBranch = fresh.baseBranch
@@ -206,11 +219,14 @@ final class ProjectBoardController {
             } else {
                 // Another repository, or a new section: answers for the old
                 // one are dropped.
-                fresh.generation = (reads[section.id]?.generation ?? 0) + 1
+                fresh.generation = newReadGeneration()
                 newReads[section.id] = fresh
             }
         }
-        if wasRead, Set(newReads.keys) != Set(reads.keys) { schedule.expire(.worktrees) }
+        // Other folders to list: an anchor added or removed, a section set up.
+        if wasRead, Set(newReads.keys) != Set(reads.keys) || sections.map(\.id) != previousSections {
+            schedule.expire(.worktrees)
+        }
         reads = newReads
         // Only a file that is missing, or saved without a repository: an
         // unreadable or read-only one says why instead.
@@ -227,6 +243,11 @@ final class ProjectBoardController {
     func reloadIfAnchorsChanged() {
         guard let requestedAnchors, spaceAnchors() != requestedAnchors else { return }
         reload()
+    }
+
+    private func newReadGeneration() -> Int {
+        lastReadGeneration += 1
+        return lastReadGeneration
     }
 
     /// Reads what is due. Called on every status refresh (the heartbeat),
@@ -259,10 +280,7 @@ final class ProjectBoardController {
     /// (or its git dir, for a bare repository): its worktrees show even
     /// with no workspace open there.
     private var foldersToList: [String] {
-        let anchors = sections.compactMap { section -> String? in
-            guard let anchor = section.anchor else { return nil }
-            return anchor.folder ?? section.commonDir
-        }
+        let anchors = sections.compactMap(\.checkoutFolder)
         let folders = workspaceFolders()
         return folders + anchors.filter { !folders.contains($0) }
     }
@@ -282,6 +300,7 @@ final class ProjectBoardController {
     private func read(_ source: ProjectBoard.Source, section id: String, now: TimeInterval) {
         guard let repository = reads[id] else { return }
         reads[id]?.schedule.start(source, now: now)
+        let current = generation
         let client = self.client
         let name = repository.name
         let gitHub = repository.gitHub
@@ -295,7 +314,7 @@ final class ProjectBoardController {
                     ProjectBoard.parsePullRequests(data, repository: gitHub).map(Result.success) ?? .failure(.unreadable)
                 }
             }, then: { [weak self] result in
-                self?.finish(source, section: id, reads: repository) { reads in
+                self?.finish(source, section: id, reads: repository, generation: current) { reads in
                     reads.errors[source] = result.failureValue
                     guard case .success(let pullRequests) = result else { return }
                     if list == .open {
@@ -322,7 +341,7 @@ final class ProjectBoardController {
                     ProjectBoard.parseRuns(data).map { .success($0.first) } ?? .failure(.unreadable)
                 }
             }, then: { [weak self] result in
-                self?.finish(source, section: id, reads: repository) { reads in
+                self?.finish(source, section: id, reads: repository, generation: current) { reads in
                     reads.errors[source] = result.failureValue
                     if case .success(let run) = result { reads.postMergeRun = .some(run) }
                 }
@@ -339,7 +358,7 @@ final class ProjectBoardController {
         let name = repository.name
         let current = generation
         Self.readOffMain({ client.retarget(repository: name, number: number, base: base) }, then: { [weak self] result in
-            guard let self, current == self.generation, self.reads[id]?.gitHub == repository.gitHub else { return }
+            guard let self, current == self.generation, self.reads[id]?.generation == repository.generation else { return }
             self.reads[id]?.retargetFailure = result.failureValue.map { "Retarget #\(number): \($0.message)" }
             self.reads[id]?.schedule.expire(.openPullRequests)
             self.onRead?()
@@ -350,10 +369,10 @@ final class ProjectBoardController {
     /// Stores an answer, unless it is for an earlier project or config of
     /// the section: then it is moot.
     private func finish(
-        _ source: ProjectBoard.Source, section id: String, reads asked: RepositoryReads,
+        _ source: ProjectBoard.Source, section id: String, reads asked: RepositoryReads, generation: Int,
         _ store: (inout RepositoryReads) -> Void
     ) {
-        guard var reads = self.reads[id], reads.gitHub == asked.gitHub, reads.generation == asked.generation else { return }
+        guard generation == self.generation, var reads = self.reads[id], reads.generation == asked.generation else { return }
         reads.schedule.finish(source)
         store(&reads)
         self.reads[id] = reads
@@ -484,7 +503,7 @@ final class ProjectBoardController {
         return .sections(sections.map { section in
             var content = ProjectBoardView.Section(
                 id: section.id,
-                title: section.name ?? "Repository",
+                title: displayNames[section.id] ?? section.name ?? "Repository",
                 rows: bySection[section.id] ?? [],
                 requiredChecks: section.config?.requiredChecks ?? [],
                 baseBranch: section.config?.baseBranch

@@ -96,6 +96,34 @@ final class BoardSectionsTests: XCTestCase {
                        [Entry(slot: .anchor(commonDir: "/code/back/.git"), config: config("acme/front"))])
     }
 
+    /// An anchor whose remotes git couldn't read might be the one schema 1's
+    /// config belongs to: nothing is placed for good meanwhile.
+    func testNothingIsPlacedForGoodWhileARemoteIsUnread() {
+        var unread = context()
+        unread.unread = ["/code/front/.git"]
+        let entries = [Entry(slot: .legacy, config: config("acme/front"))]
+        let sections = BoardSections.sections(entries, context: unread)
+        XCTAssertEqual(summary(sections), ["back:acme/front:legacy", "front:none:own"], "shown where the rule puts it now")
+        XCTAssertEqual(BoardSections.entries(saving: config("acme/back"), as: sections[1], in: entries, context: unread), [
+            Entry(slot: .legacy, config: config("acme/front")),
+            Entry(slot: .anchor(commonDir: "/code/front/.git"), config: config("acme/back"))
+        ], "schema 1's config keeps no anchor")
+        var edited = config("acme/front")
+        edited.baseBranch = "develop"
+        XCTAssertEqual(BoardSections.entries(saving: edited, as: sections[0], in: entries, context: unread),
+                       [Entry(slot: .legacy, config: edited)])
+        XCTAssertEqual(BoardSections.entries(saving: config("acme/back"), as: sections[1], in: [], context: unread),
+                       [Entry(slot: .anchor(commonDir: "/code/front/.git"), config: config("acme/back"))],
+                       "one config: written with its anchor, not left to the rule")
+    }
+
+    func testTwoAnchorsWithOneNameAreToldApart() {
+        let other = SpaceAnchor(kind: .gitRepository(commonDir: "/elsewhere/front/.git"), name: "front")
+        let sections = BoardSections.sections([], context: BoardSections.Context(anchors: [front, other, back]))
+        let names = BoardSections.displayNames(sections)
+        XCTAssertEqual(sections.map { names[$0.id] }, ["back", "front (/code/front)", "front (/elsewhere/front)"])
+    }
+
     /// A removed anchor's config stays in the file: adding the repository
     /// back brings it back.
     func testAConfigOfARemovedAnchorIsKept() {

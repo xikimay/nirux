@@ -237,6 +237,9 @@ extension BoardConfig: Codable {
 }
 
 extension GitHubRepository {
+    /// `owner/name`, lowercased as compared.
+    var ownerAndName: String { "\(owner)/\(name)" }
+
     /// `owner/name` as board.json and a saved queue spell it, on
     /// github.com; nil for anything `BoardConfig.isValidRepository` refuses.
     init?(ownerAndName value: String) {

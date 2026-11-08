@@ -25,7 +25,7 @@ extension NiruxShellView {
             repository: repository,
             client: mergeQueueClient ?? MergeQueue.client(),
             local: MergeQueueLocalAccess(
-                folders: { [weak self] in self?.projectWorkspaces(of: projectID).map(\.cwd) ?? [] },
+                folders: { [weak self] in self?.mergeQueueFolders(of: projectID) ?? [] },
                 busyAgents: { [weak self] worktrees, allWorktrees in
                     self?.mergeQueueBusyAgents(in: worktrees, allWorktrees: allWorktrees) ?? []
                 }
@@ -42,13 +42,23 @@ extension NiruxShellView {
         return controller
     }
 
+    /// Where a queue looks for its pull requests' worktrees: the project's
+    /// workspace folders, and its repository anchors' checkouts, which the
+    /// board lists even with no workspace open there (docs/spaces.md, S12).
+    func mergeQueueFolders(of projectID: String) -> [String] {
+        let folders = projectWorkspaces(of: projectID).map(\.cwd)
+        let anchors = BoardSections.repositoryAnchors(profiles.first { $0.id == projectID }?.anchors ?? [])
+            .compactMap { $0.folder ?? BoardSections.commonDir(of: $0) }
+        return folders + anchors.filter { !folders.contains($0) }
+    }
+
     /// The project's queues made so far, by repository name.
     func mergeQueues(of projectID: String) -> [MergeQueueController] {
         mergeQueues.values.filter { $0.projectID == projectID }.sorted { Self.queueOrder($0) < Self.queueOrder($1) }
     }
 
     private static func queueOrder(_ controller: MergeQueueController) -> String {
-        "\(controller.queueRepository.owner)/\(controller.queueRepository.name)"
+        controller.queueRepository.ownerAndName
     }
 
     /// The agents working or waiting on a dialog in these worktrees (paths
@@ -131,7 +141,7 @@ extension NiruxShellView {
     /// numbers match none of the board's rows.
     func orphanQueueState(_ controller: MergeQueueController) -> ProjectBoard.QueueState {
         var state = queueState(of: controller)
-        let name = "\(controller.queueRepository.owner)/\(controller.queueRepository.name)"
+        let name = controller.queueRepository.ownerAndName
         state.status = state.status.map { "\(name): \($0)" }
         state.entries = []
         state.selection = []
@@ -173,22 +183,27 @@ extension NiruxShellView {
         return state
     }
 
-    /// The queue a board's line shows: its section's (nil: the board's only
-    /// one), else, on a board with one line, a queue left running on a
-    /// repository the board no longer has.
+    /// The queue a board's line shows: its section's, or an orphan's line
+    /// on a board with several; on a board with one line (`id` nil), a queue
+    /// left running on a repository the board no longer has, unless the
+    /// board's own runs: Stop must reach what runs.
     func boardQueue(_ board: ProjectBoardController, section id: String?) -> MergeQueueController? {
-        if let id, let orphan = projectBoardOrphanQueues(board).first(where: { Self.orphanSectionID($0) == id }) {
+        let orphans = projectBoardOrphanQueues(board)
+        if let id, let orphan = orphans.first(where: { Self.orphanSectionID($0) == id }) {
             return orphan
         }
-        if let section = board.section(id: id), let repository = board.repository(of: section)?.gitHub {
-            return mergeQueue(projectID: board.projectID, repository: repository)
+        let own = board.section(id: id).flatMap { section in
+            board.repository(of: section).map { mergeQueue(projectID: board.projectID, repository: $0.gitHub) }
         }
-        return id == nil ? projectBoardOrphanQueues(board).first : nil
+        guard id == nil, let orphan = orphans.first, own.map({ !$0.isRunning && !$0.runsElsewhere }) ?? true else {
+            return own
+        }
+        return orphan
     }
 
     /// The id of an orphan queue's section on a board with several lines.
     static func orphanSectionID(_ controller: MergeQueueController) -> String {
-        "queue:\(controller.queueRepository.owner)/\(controller.queueRepository.name)"
+        "queue:" + controller.queueRepository.ownerAndName
     }
 
     /// At each status refresh: a queue another Nirux runs is looked at

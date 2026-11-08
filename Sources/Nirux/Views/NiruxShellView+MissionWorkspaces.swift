@@ -197,19 +197,23 @@ extension NiruxShellView {
     /// The base branch a space's board sets for the repository holding
     /// `folder`: that repository anchor's config (docs/spaces.md, S12), or,
     /// in a space anchored to no repository, its one config, as before
-    /// anchors. Nil when the board sets none for it. Runs git: off the main
-    /// thread.
+    /// anchors: for any folder without anchors, for the repository of its
+    /// default folder anchor with one. Nil when the board sets none for it.
+    /// Runs git: off the main thread.
     nonisolated static func boardBaseBranch(
         for folder: String, spaceID: String, anchors: [SpaceAnchor], stateDirectory: URL
     ) -> String? {
         guard let loaded = BoardConfigStore(spaceID: spaceID, stateDirectory: stateDirectory)?.load(),
               loaded.status != .unreadable
         else { return nil }
+        let timeout = FolderIdentity.backgroundRoutingTimeout
         guard !BoardSections.repositoryAnchors(anchors).isEmpty else {
-            return loaded.entries.first { $0.slot == .legacy }?.config.baseBranch
+            let legacy = loaded.entries.first { $0.slot == .legacy }?.config.baseBranch
+            guard let defaultFolder = anchors.defaultAnchor?.folder else { return legacy }
+            let repository = FolderIdentity.identify(defaultFolder, timeout: timeout)?.commonDir
+            return repository != nil && FolderIdentity.identify(folder, timeout: timeout)?.commonDir == repository ? legacy : nil
         }
-        guard let commonDir = FolderIdentity.identify(folder, timeout: FolderIdentity.backgroundRoutingTimeout)?.commonDir
-        else { return nil }
+        guard let commonDir = FolderIdentity.identify(folder, timeout: timeout)?.commonDir else { return nil }
         // Placing schema 1's config needs the anchors' remotes; the others don't.
         let context = loaded.entries.contains { $0.slot == .legacy }
             ? BoardSections.readContext(anchors: anchors) : BoardSections.Context(anchors: anchors)

@@ -194,6 +194,9 @@ final class NewTaskTests: XCTestCase {
         XCTAssertEqual(base(root + "/repo.feat-a", anchors), "develop")
         XCTAssertNil(base(other, anchors))
         XCTAssertEqual(base(other, []), "develop", "no repository anchor: the one config")
+        try FileManager.default.createDirectory(atPath: repo + "/apps", withIntermediateDirectories: true)
+        XCTAssertEqual(base(root + "/repo.feat-a", [.folder(repo + "/apps")]), "develop", "the folder anchor's repository")
+        XCTAssertNil(base(other, [.folder(repo + "/apps")]), "not another repository")
 
         // Schema 2: each its own; the third has none.
         let commonDir = { (anchor: SpaceAnchor) in try XCTUnwrap(BoardSections.commonDir(of: anchor)) }

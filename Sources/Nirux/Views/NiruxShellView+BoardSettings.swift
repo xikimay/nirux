@@ -62,7 +62,7 @@ extension NiruxShellView {
             let sections = BoardSections.sections(loaded.status == .unreadable ? [] : loaded.entries, context: context)
             let section = sections.first { $0.id == repository } ?? sections[0]
             let shown = loaded.view(for: section.slot).config
-            let folders = section.anchor.map { [$0.folder ?? section.commonDir].compactMap { $0 } } ?? workspaceFolders
+            let folders = section.checkoutFolder.map { [$0] } ?? workspaceFolders
             let suggestions = BoardConfigSuggestions.read(
                 workspaceFolders: folders, repository: shown?.repository, baseBranch: shown?.baseBranch
             )
@@ -107,7 +107,10 @@ extension NiruxShellView {
             loaded: read.loaded.view(for: read.section.slot), suggestions: read.suggestions
         )
         if read.sections.count > 1 {
-            content.repositories = read.sections.map { BoardSettingsPanel.Repository(id: $0.id, title: $0.name ?? "Repository") }
+            let names = BoardSections.displayNames(read.sections)
+            content.repositories = read.sections.map {
+                BoardSettingsPanel.Repository(id: $0.id, title: names[$0.id] ?? $0.name ?? "Repository")
+            }
             content.selectedRepository = read.section.id
         }
         panel.show(attachedTo: window, content: content)

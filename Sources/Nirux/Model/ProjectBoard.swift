@@ -196,7 +196,8 @@ extension ProjectBoard {
         var mergedPullRequests: [PullRequest] = []
         /// Every repository of `local` is the project's (a section's, found
         /// by its anchor), whatever its remotes: its worktrees get rows even
-        /// without a configured repository, without pull requests.
+        /// without a configured repository. Pull requests still match only
+        /// in a checkout a remote of which names that repository.
         var localIsProjects = false
     }
 
@@ -232,21 +233,23 @@ extension ProjectBoard {
             let inside = members[index] ?? []
             // By owner and name: an SSH host alias (`git@github-work:…`)
             // points at github.com all the same.
-            let isProjects = sources.localIsProjects || sources.repository.map { configured in
+            let namesRepository = sources.repository.map { configured in
                 repository.remotes.contains { $0.owner == configured.owner && $0.name == configured.name }
             } ?? false
-            guard isProjects else {
+            guard sources.localIsProjects || namesRepository else {
                 if let first = inside.first {
                     foreign.append((first.order, row(.otherRepository, worktree: worktree, inside: inside, pullRequest: nil)))
                 }
                 continue
             }
-            // A merged pull request only if the worktree is still at its
+            // Only in a checkout that pushes to the configured repository:
+            // in another one, a branch of the same name is other work. A
+            // merged pull request only if the worktree is still at its
             // head: a branch name reused since has new work.
-            let pullRequest = worktree.branch.flatMap { branch in
+            let pullRequest = !namesRepository ? nil : worktree.branch.flatMap { branch in
                 open[branch] ?? merged[branch].flatMap { $0.headOid == worktree.head?.lowercased() ? $0 : nil }
             }
-            if let branch = worktree.branch { branchesWithWorktree.insert(branch) }
+            if namesRepository, let branch = worktree.branch { branchesWithWorktree.insert(branch) }
             let group: RowGroup
             if place.entry == 0 {
                 group = .main

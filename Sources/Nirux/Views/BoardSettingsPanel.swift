@@ -318,7 +318,11 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         if !repositoryChoices.isEmpty {
             y = addLabel("Repository", y: y, in: view)
             repositoryPopup.removeAllItems()
-            repositoryPopup.addItems(withTitles: repositoryChoices.map(\.title))
+            // One item each, even with the same title: `addItems(withTitles:)`
+            // would merge them and shift the indexes.
+            for choice in repositoryChoices {
+                repositoryPopup.menu?.addItem(withTitle: choice.title, action: nil, keyEquivalent: "")
+            }
             repositoryPopup.selectItem(at: repositoryChoices.firstIndex { $0.id == content.selectedRepository } ?? 0)
             repositoryPopup.target = self
             repositoryPopup.action = #selector(repositoryChanged(_:))

@@ -215,7 +215,7 @@ extension NiruxShellView {
                 sections[index].queue = projectBoardQueueState(board, section: section)
             }
             for orphan in orphans {
-                let name = "\(orphan.queueRepository.owner)/\(orphan.queueRepository.name)"
+                let name = orphan.queueRepository.ownerAndName
                 sections.append(ProjectBoardView.Section(
                     id: Self.orphanSectionID(orphan), title: name,
                     note: "Its queue runs, but it isn’t one of this board’s repositories now.",
@@ -225,9 +225,14 @@ extension NiruxShellView {
             content.body = .sections(sections, others: others)
             return
         }
-        // A board showing a message (no repository) still shows a queue that runs.
-        content.queue = board.section(id: nil).flatMap { projectBoardQueueState(board, section: $0) }
-            ?? orphans.first.map(orphanQueueState)
+        // The line shows what its Stop reaches (`boardQueue`): an orphan
+        // that runs, even on a board showing a message (no repository).
+        guard let shown = boardQueue(board, section: nil) else { return content.queue = nil }
+        if orphans.contains(where: { $0 === shown }) {
+            content.queue = orphanQueueState(shown)
+        } else {
+            content.queue = board.section(id: nil).flatMap { projectBoardQueueState(board, section: $0) }
+        }
     }
 
     /// A worktree was cleaned up: the boards list their worktrees again.

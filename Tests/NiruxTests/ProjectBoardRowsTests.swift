@@ -275,14 +275,18 @@ final class ProjectBoardRowsTests: XCTestCase {
     // MARK: - Several repositories (docs/spaces.md, S12)
 
     /// Each anchor's repository in its section, by common git dir even when
-    /// no remote names the configured repository; a repository of no anchor
-    /// whose remote names a section's joins it; the rest, and workspaces in
-    /// none, go last. A section without a repository lists its worktrees,
-    /// without pull requests.
+    /// no remote names the configured repository (its worktrees then match
+    /// no pull request: a branch of the same name there is other work); a
+    /// repository of no anchor whose remote names a section's joins it; the
+    /// rest, and workspaces in none, go last. A section without a
+    /// repository lists its worktrees, without pull requests.
     func testEachRepositoryHasItsSection() {
         let front = ProjectBoard.LocalRepository(worktrees: [
             worktree("/p/front", branch: "main"), worktree("/p/front.login", branch: "feat/login")
-        ], remotes: [], commonDir: "/p/front/.git")
+        ], remotes: [widgets], commonDir: "/p/front/.git")
+        let docs = ProjectBoard.LocalRepository(worktrees: [
+            worktree("/p/docs", branch: "main"), worktree("/p/docs.login", branch: "feat/login")
+        ], remotes: [], commonDir: "/p/docs/.git")
         let back = ProjectBoard.LocalRepository(worktrees: [
             worktree("/p/back", branch: "main"), worktree("/p/back.api", branch: "feat/api")
         ], remotes: [], commonDir: "/p/back/.git")
@@ -295,9 +299,14 @@ final class ProjectBoardRowsTests: XCTestCase {
                 id: "front", commonDir: "/p/front/.git", repository: widgets, baseBranch: "main",
                 openPullRequests: [pullRequest(12, "feat/login"), pullRequest(14, "feat/cloud")]
             ),
-            ProjectBoard.SectionSources(id: "back", commonDir: "/p/back/.git", repository: nil)
+            ProjectBoard.SectionSources(id: "back", commonDir: "/p/back/.git", repository: nil),
+            ProjectBoard.SectionSources(
+                id: "docs", commonDir: "/p/docs/.git", repository: gadgets, baseBranch: "main",
+                openPullRequests: [pullRequest(31, "feat/login")]
+            )
         ]
-        let result = ProjectBoard.sectionRows(sections, local: [front, back, clone, scratch], workspaces: [
+        let result = ProjectBoard.sectionRows(sections, local: [front, back, clone, scratch, docs], workspaces: [
+            workspace("docs-login", "/p/docs.login"),
             workspace("login", "/p/front.login"),
             workspace("api", "/p/back.api"),
             workspace("clone", "/p/widgets-clone"),
@@ -308,6 +317,9 @@ final class ProjectBoardRowsTests: XCTestCase {
             "main main", "main clone [clone]", "active login #12 [login]", "active feat/cloud #14"
         ])
         XCTAssertEqual(summary(result.bySection["back"] ?? []), ["main main", "active api [api]"])
+        XCTAssertEqual(summary(result.bySection["docs"] ?? []), [
+            "main main", "active feat/login #31", "active docs-login [docs-login]"
+        ], "#31 isn't the docs checkout's feat/login: no remote names acme/gadgets")
         XCTAssertEqual(summary(result.others), ["otherRepository scratch [scratch]", "otherRepository home [home]"])
     }
 }

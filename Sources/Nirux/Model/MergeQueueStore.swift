@@ -17,7 +17,7 @@ extension MergeQueue {
         /// board.json couldn't name.
         init?(projectID: String, repository: GitHubRepository, stateDirectory: URL, dryRun: Bool) {
             guard let folder = SpaceBrief.directory(spaceID: projectID, stateDirectory: stateDirectory),
-                  BoardConfig.isValidRepository("\(repository.owner)/\(repository.name)")
+                  BoardConfig.isValidRepository(repository.ownerAndName)
             else { return nil }
             let queueFolder = folder.appendingPathComponent("queues", isDirectory: true)
                 .appendingPathComponent(repository.owner, isDirectory: true)

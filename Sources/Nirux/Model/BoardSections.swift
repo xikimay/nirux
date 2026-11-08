@@ -31,10 +31,25 @@ enum BoardSections {
         var name: String? { anchor?.name }
 
         /// The anchor's common git dir.
-        var commonDir: String? {
-            guard case .gitRepository(let commonDir)? = anchor?.kind else { return nil }
-            return commonDir
+        var commonDir: String? { anchor.flatMap(BoardSections.commonDir(of:)) }
+
+        /// Where its worktrees are listed and its settings suggested: the
+        /// main checkout, else (a bare repository) the git dir. Nil without
+        /// an anchor.
+        var checkoutFolder: String? { anchor?.folder ?? commonDir }
+    }
+
+    /// Each section's name, by id: the anchor's, with its folder when two
+    /// share one ("app (~/a/app)").
+    static func displayNames(_ sections: [Section]) -> [String: String] {
+        let names = sections.map { $0.name ?? "Repository" }
+        var result: [String: String] = [:]
+        for (section, name) in zip(sections, names) {
+            let isShared = names.filter { $0 == name }.count > 1
+            let folder = section.checkoutFolder.map { ($0 as NSString).abbreviatingWithTildeInPath }
+            result[section.id] = isShared && folder != nil ? "\(name) (\(folder ?? ""))" : name
         }
+        return result
     }
 
     /// What placing the configs needs besides the file: the space's anchors
@@ -43,6 +58,9 @@ enum BoardSections {
         var anchors: [SpaceAnchor] = []
         /// By common git dir.
         var remotes: [String: [GitHubRepository]] = [:]
+        /// Repository anchors whose remotes git couldn't read (a volume not
+        /// mounted, a timeout): placing schema 1's config may be wrong.
+        var unread: Set<String> = []
     }
 
     /// The space's repository anchors, the default one first, then in the
@@ -99,12 +117,15 @@ enum BoardSections {
     /// What to write when `config` is saved as `section`'s: the other
     /// configs as read, schema 1's own placed explicitly once another
     /// joins it, and schema 1 again when one config is left that the rule
-    /// gives back to its anchor.
+    /// gives back to its anchor. While some anchor's remotes couldn't be
+    /// read, nothing is placed for good: schema 1's config keeps no anchor.
     static func entries(saving config: BoardConfig, as section: Section, in entries: [Entry], context: Context) -> [Entry] {
-        let target: Slot = section.commonDir.map { .anchor(commonDir: $0) } ?? .legacy
+        let isPlacing = context.unread.isEmpty
+        let target: Slot = section.slot == .legacy && !isPlacing ? .legacy : section.commonDir.map { .anchor(commonDir: $0) } ?? .legacy
         var result = entries.map { entry -> Entry in
             // Placed where it shows now, before the new config changes that.
-            guard entry.slot == .legacy, let anchor = legacyAnchor(for: entry.config, entries: entries, context: context),
+            guard isPlacing, entry.slot == .legacy,
+                  let anchor = legacyAnchor(for: entry.config, entries: entries, context: context),
                   let commonDir = commonDir(of: anchor)
             else { return entry }
             return Entry(slot: .anchor(commonDir: commonDir), config: entry.config)
@@ -114,7 +135,7 @@ enum BoardSections {
         } else {
             result.append(Entry(slot: target, config: config))
         }
-        guard result.count == 1, case .anchor(let commonDir) = result[0].slot else { return result }
+        guard isPlacing, result.count == 1, case .anchor(let commonDir) = result[0].slot else { return result }
         let placed = legacyAnchor(for: config, entries: [], context: context)
         return placed.flatMap(Self.commonDir(of:)) == commonDir ? [Entry(slot: .legacy, config: config)] : result
     }
@@ -131,7 +152,11 @@ enum BoardSections {
         for anchor in repositoryAnchors(anchors) {
             guard let commonDir = commonDir(of: anchor) else { continue }
             let remotes = WorktreeCleanup.git(["remote", "-v"], in: commonDir, tools: tools)
-            context.remotes[commonDir] = remotes.status == 0 ? ProjectBoard.parseRemotes(remotes.stdout) : []
+            if remotes.status == 0 {
+                context.remotes[commonDir] = ProjectBoard.parseRemotes(remotes.stdout)
+            } else {
+                context.unread.insert(commonDir)
+            }
         }
         return context
     }
