@@ -477,12 +477,16 @@ final class SidebarView: NSView {
         return menu
     }
 
+    /// Shared with the menu bar's Space › New Space, which runs the same
+    /// `onCreateProfile`.
+    static let newSpaceTitle = "New Space"
+
     /// The active space's options, then "New Space".
     func addSpaceOptions(to menu: NSMenu) {
         if let active = lastProfiles.first(where: { $0.isActive }) {
             addSpaceManagementItems(to: menu, for: active)
         }
-        menu.addClosureItem(title: "New Space") { [weak self] in
+        menu.addClosureItem(title: Self.newSpaceTitle) { [weak self] in
             self?.onCreateProfile?()
         }
     }
@@ -543,6 +547,8 @@ final class SidebarView: NSView {
         menu.addClosureItem(title: "View/Edit Context…") { [weak self] in
             self?.onWorkspaceAction?(.editContext, workspaceIndex)
         }
+        // Apart, so a click aimed at the context doesn't close the workspace.
+        menu.addItem(.separator())
         menu.addClosureItem(title: "Close Workspace") { [weak self] in
             self?.onWorkspaceAction?(.close, workspaceIndex)
         }.isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)

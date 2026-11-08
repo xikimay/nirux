@@ -7,8 +7,9 @@ import AppKit
 extension NiruxApp {
     // MARK: Space
 
+    /// Whatever the sidebar's "New Space" does.
     @objc func newSpace(_ sender: Any?) {
-        shell?.createProfileFromActiveContext()
+        shell?.sidebar.onCreateProfile?()
     }
 
     @objc func openBoard(_ sender: Any?) {
@@ -84,8 +85,7 @@ extension NiruxApp {
     @MainActor
     func spaceMenuItem() -> NSMenuItem {
         let menu = NSMenu(title: "Space")
-        // No ellipsis: the space is made at once, as the sidebar's "New Space" does.
-        menu.addItem(withTitle: "New Space", action: #selector(newSpace(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: SidebarView.newSpaceTitle, action: #selector(newSpace(_:)), keyEquivalent: "")
         let settings = NSMenuItem(title: "Space Settings", action: nil, keyEquivalent: "")
         settings.submenu = RebuiltMenu(title: "Space Settings") { [weak self] menu in
             self?.shell?.sidebar.addActiveSpaceSettings(to: menu)

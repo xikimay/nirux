@@ -60,12 +60,13 @@ final class MenuBarFlowTests: XCTestCase {
             let shell = harness.shell
             let bar = MenuBar(shell: shell)
 
+            // Lists the worktrees off the main thread, then opens the palette.
             bar.run(["Workspaces", "Open Worktree…"])
-            let palette = try XCTUnwrap(shell.commandPalette)
             harness.waitUntil("the worktree list") {
-                palette.isVisible && palette.filteredActions.map(\.title) == [harness.worktreeBranch]
+                shell.commandPalette?.isVisible == true
+                    && shell.commandPalette?.filteredActions.map(\.title) == [harness.worktreeBranch]
             }
-            palette.dismiss()
+            shell.commandPalette?.dismiss()
 
             bar.run(["Workspaces", "New Worktree…"])
             try XCTUnwrap(harness.waitForField(placeholder: "Branch name (e.g. feat/my-feature)")).window?.orderOut(nil)

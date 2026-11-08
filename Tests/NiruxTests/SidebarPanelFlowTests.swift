@@ -50,10 +50,16 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 shell.workspaces.firstIndex { $0 === active }
             })
             shell.workspaces[worktreeIndex].prInfo = Self.redPullRequest
+            let gone = harness.root + "/gone"
+            try FileManager.default.createDirectory(atPath: gone, withIntermediateDirectories: true)
+            shell.addWorkspace(title: "gone", cwd: gone)
+            let goneIndex = try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "gone" })
+            try FileManager.default.removeItem(atPath: gone)
             shell.updateSidebar()
             let menus = [
                 shell.sidebar.workspaceActionMenu(workspaceIndex: worktreeIndex, columnIndex: 1),
                 shell.sidebar.workspaceActionMenu(workspaceIndex: inactiveIndex, columnIndex: nil),
+                shell.sidebar.workspaceActionMenu(workspaceIndex: goneIndex, columnIndex: nil),
                 shell.sidebar.spaceOptionsMenu()
             ]
             let titles = menus.flatMap(\.items).filter { !$0.isSeparatorItem }.map(\.title)
@@ -64,10 +70,12 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             // Rename, its context and Close.
             XCTAssertEqual(menus[0].items.map(\.title), [
                 "Focus Column", "Close Column", "",
-                "Review Branch", "Ask Agent Why CI Failed", "Rerun Failed CI Jobs…", "Clean Up Worktree…", "",
+                "Review Branch", "Ask Agent Why CI Failed", "Rerun Failed CI Jobs…", "",
                 "Organize", "",
-                "Rename Workspace", "View/Edit Context…", "Close Workspace"
+                "Rename Workspace", "View/Edit Context…", "",
+                "Close Workspace"
             ])
+            XCTAssertEqual(menus[2].items.prefix(3).map(\.title), ["Review Branch", "Clean Up Worktree…", ""])
         }
     }
 
@@ -131,10 +139,23 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             harness.perform(["Close Workspace"], in: try menu(for: added))
             harness.waitUntil("the workspace to close") { !shell.workspaces.contains { $0 === added } }
 
-            // In the linked worktree: checked off the main thread, then
-            // refused (no GitHub remote), and nothing goes.
+            // In the linked worktree: offered once its pull request is
+            // merged, then checked off the main thread and refused (no GitHub
+            // remote), and nothing goes.
             shell.addWorkspace(title: "in worktree", cwd: harness.worktree)
             let worktreeWorkspace = try XCTUnwrap(shell.activeWorkspace)
+            shell.refreshGitContextNow(for: worktreeWorkspace)
+            harness.waitUntil("the worktree's git context") {
+                worktreeWorkspace.gitContext.map { NiruxShellView.comparablePath($0.identity.repositoryRoot) }
+                    == NiruxShellView.comparablePath(harness.worktree)
+            }
+            XCTAssertFalse(try menu(for: worktreeWorkspace).items.contains { $0.title == "Clean Up Worktree…" }, "no merged pull request")
+            // Set and read in one run-loop turn: a git refresh can't clear it
+            // in between.
+            worktreeWorkspace.prInfo = PRInfo(
+                number: 7, state: "MERGED", isDraft: false, ciStatus: nil, checks: [], reviewDecision: nil,
+                mergeable: nil, url: "https://example.test/pull/7", additions: nil, deletions: nil, changedFiles: nil
+            )
             harness.perform(["Clean Up Worktree…"], in: try menu(for: worktreeWorkspace))
             harness.waitUntil("the clean-up verdict") { !harness.alerts.isEmpty && shell.worktreeCleanupsInFlight.isEmpty }
             XCTAssertTrue(harness.alerts.last?.hasPrefix("Can’t clean up") == true, "\(harness.alerts)")
@@ -180,10 +201,9 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertFalse(moving.isInactive)
 
             // With a second space to move to; the default space stays in front.
-            shell.createProfileFromActiveContext()
-            let space = shell.activeProfileID
-            XCTAssertNotEqual(space, WorkspaceProfile.defaultID)
+            let space = shell.workspaceStore.createProfile(named: "Other").id
             shell.selectProfile(WorkspaceProfile.defaultID)
+            XCTAssertEqual(shell.activeProfileID, WorkspaceProfile.defaultID)
             let organize = try XCTUnwrap(try menu().items.first { $0.title == "Organize" }?.submenu)
             XCTAssertEqual(organize.items.map(\.title), ["Move Up", "Move Down", "Move to Space", "", "Move to Inactive"])
             let spaceName = try XCTUnwrap(shell.profiles.first { $0.id == space }).name

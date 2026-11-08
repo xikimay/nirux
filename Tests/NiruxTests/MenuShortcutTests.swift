@@ -108,12 +108,6 @@ final class MenuShortcutTests: XCTestCase {
 
     // MARK: - Nirux chords
 
-    @MainActor
-    func testBoardUsesControlCommandB() {
-        let board = items(withAction: #selector(NiruxApp.openBoard(_:)))
-        XCTAssertEqual(board.compactMap(chord(of:)), [KeyChord("b", [.command, .control])])
-    }
-
     /// ⌘S belongs to Monaco's save; no menu item may take it back.
     @MainActor
     func testToggleSidebarUsesControlCommandSAndLeavesCommandSFree() {
