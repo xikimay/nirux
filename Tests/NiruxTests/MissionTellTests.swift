@@ -72,6 +72,13 @@ final class MissionTellTests: XCTestCase {
         }
     }
 
+    /// The instructions Nirux would type now.
+    private func pendingInstructions(
+        _ fixture: Fixture, now: TimeInterval = Date().timeIntervalSince1970
+    ) -> [MissionStore.AcceptedEvent] {
+        fixture.store.pendingPromptDeliveries(now: now).filter { $0.event.kind == .instruction }
+    }
+
     private func instructions(in fixture: Fixture) -> [MissionEvent] {
         fixture.store.missions[0].events.filter { $0.kind == .instruction }
     }
@@ -101,10 +108,10 @@ final class MissionTellTests: XCTestCase {
         XCTAssertEqual(queued.childAgentUUID, childAgentUUID)
 
         fixture.center.drain()
-        XCTAssertEqual(fixture.store.pendingInstructions(now: 30).map(\.event.id), [queued.id])
+        XCTAssertEqual(pendingInstructions(fixture, now: 30).map(\.event.id), [queued.id])
 
         XCTAssertTrue(fixture.store.markInstructionTyped(eventID: queued.id, at: 30))
-        XCTAssertTrue(fixture.store.pendingInstructions(now: 30).isEmpty)
+        XCTAssertTrue(pendingInstructions(fixture, now: 30).isEmpty)
         XCTAssertEqual(instructions(in: fixture).first?.childConsumedAt, 30)
     }
 
@@ -142,13 +149,13 @@ final class MissionTellTests: XCTestCase {
         let lifetime = MissionEventCLI.instructionLifetime
         XCTAssertEqual(tell("/code-review", in: fixture, at: 20), 3)
         fixture.center.drain()
-        XCTAssertEqual(fixture.store.pendingInstructions(now: 20 + lifetime - 1).count, 1)
-        XCTAssertTrue(fixture.store.pendingInstructions(now: 20 + lifetime).isEmpty, "never typed now")
+        XCTAssertEqual(pendingInstructions(fixture, now: 20 + lifetime - 1).count, 1)
+        XCTAssertTrue(pendingInstructions(fixture, now: 20 + lifetime).isEmpty, "never typed now")
 
         XCTAssertEqual(tell("/code-review", in: fixture, at: 20 + lifetime), 3)
         fixture.center.drain()
         XCTAssertEqual(instructions(in: fixture).count, 2, "a rerun after that sends it anew")
-        XCTAssertEqual(fixture.store.pendingInstructions(now: 20 + lifetime).count, 1)
+        XCTAssertEqual(pendingInstructions(fixture, now: 20 + lifetime).count, 1)
     }
 
     func testTellReturnsOnceNiruxTypedIt() async throws {
@@ -167,11 +174,11 @@ final class MissionTellTests: XCTestCase {
         }
 
         let deadline = Date().addingTimeInterval(5)
-        while fixture.store.pendingInstructions().isEmpty, Date() < deadline {
+        while pendingInstructions(fixture).isEmpty, Date() < deadline {
             fixture.center.drain()
             try await Task.sleep(nanoseconds: 10_000_000)
         }
-        let pending = try XCTUnwrap(fixture.store.pendingInstructions().first)
+        let pending = try XCTUnwrap(pendingInstructions(fixture).first)
         XCTAssertTrue(fixture.store.markInstructionTyped(eventID: pending.event.id))
 
         let status = await waiting.value
@@ -209,7 +216,7 @@ final class MissionTellTests: XCTestCase {
         fixture.center.drain()
         XCTAssertEqual(fixture.store.missions[0].status, .completed, "until the child gets it")
 
-        let pending = try XCTUnwrap(fixture.store.pendingInstructions(now: 30).first)
+        let pending = try XCTUnwrap(pendingInstructions(fixture, now: 30).first)
         XCTAssertTrue(fixture.store.markInstructionTyped(eventID: pending.event.id, at: 30))
         XCTAssertEqual(fixture.store.missions[0].status, .active)
         XCTAssertEqual(MissionEventCLI.ask(
@@ -222,7 +229,8 @@ final class MissionTellTests: XCTestCase {
             ],
             eventsURL: fixture.eventsURL,
             missionsURL: fixture.missionsURL,
-            pollInterval: 0.01
+            pollInterval: 0.01,
+            confirmationTimeout: 0
         ), 3, "the child can ask again")
     }
 
@@ -269,7 +277,7 @@ final class MissionTellTests: XCTestCase {
         guard case .rejected = fixture.store.process(instruction(parentAgentUUID: otherAgentUUID), enabled: true)
         else { return XCTFail("another terminal cannot tell the child") }
         XCTAssertNotNil(fixture.store.accept(instruction(parentAgentUUID: parentAgentUUID), enabled: true))
-        XCTAssertEqual(fixture.store.pendingInstructions(now: 30).count, 1)
+        XCTAssertEqual(pendingInstructions(fixture, now: 30).count, 1)
     }
 
     // MARK: - Free prompt
@@ -339,6 +347,34 @@ final class MissionTellTests: XCTestCase {
         machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 7)) // "/clear" typed by a tell
         _ = machine.apply(hook(.sessionStart, at: 8, source: "clear"), isUserFocused: false)
         XCTAssertTrue(isFree(machine))
+    }
+
+    /// A failed turn (a usage limit) would fail every message typed after
+    /// it, one after the other: the prompt stays busy until one goes in.
+    func testAFailedTurnKeepsThePromptBusy() {
+        var machine = idleMachine()
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 5.5))
+        _ = machine.apply(hook(.userPromptSubmit, at: 6), isUserFocused: false)
+        _ = machine.apply(hook(.stopFailure, at: 7), isUserFocused: false)
+        XCTAssertNotNil(machine.turnFailure)
+        XCTAssertFalse(isFree(machine))
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: t0 + 8))
+        _ = machine.apply(hook(.userPromptSubmit, at: 9), isUserFocused: false)
+        _ = machine.apply(hook(.stop, at: 10), isUserFocused: false)
+        XCTAssertTrue(isFree(machine))
+    }
+
+    /// A question typed into the parent: its turn took it and ended, so the
+    /// parent didn't answer. Not while the turn runs, nor before it went in.
+    func testATurnThatTookAMessageAndEndedIsSeen() {
+        var machine = idleMachine()
+        let typedAt = t0 + 6
+        XCTAssertFalse(machine.finishedTurn(afterTypingAt: typedAt), "not typed in yet")
+        machine.noteKeystroke(now: Date(timeIntervalSince1970: typedAt))
+        _ = machine.apply(hook(.userPromptSubmit, at: 6.5), isUserFocused: false)
+        XCTAssertFalse(machine.finishedTurn(afterTypingAt: typedAt), "working on it")
+        _ = machine.apply(hook(.stop, at: 9), isUserFocused: false)
+        XCTAssertTrue(machine.finishedTurn(afterTypingAt: typedAt))
     }
 
     /// Claude Code shows some dialogs (trust, MCP servers) before any hook

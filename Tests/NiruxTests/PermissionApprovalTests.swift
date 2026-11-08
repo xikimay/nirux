@@ -478,7 +478,6 @@ extension PermissionApprovalTests {
         XCTAssertEqual(resolved.sessionID, "sess")
         XCTAssertEqual(resolved.agentID, "a1")
         XCTAssertEqual(resolved.timestamp, 9)
-        XCTAssertNil(ActivityEntry(event: resolved, workspaceTitle: "w", columnIndex: 0), "no feed row")
     }
 
     func testSidebarHoldsARequestOnlyWhenEverythingAllowsIt() {

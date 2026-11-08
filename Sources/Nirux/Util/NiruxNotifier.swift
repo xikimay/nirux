@@ -99,8 +99,9 @@ final class NiruxNotifier: NSObject, UNUserNotificationCenterDelegate {
         post(content)
     }
 
-    /// Explicit child-to-parent Mission signal. The activity feed is the
-    /// durable surface; this banner covers the user being in another app.
+    /// A Mission child's question that came to the user, or its completion.
+    /// The child's card is the durable surface; this banner covers the user
+    /// being in another app.
     func postMissionEvent(
         workspaceID: String,
         workspaceTitle: String,

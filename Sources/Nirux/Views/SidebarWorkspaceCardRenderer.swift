@@ -373,6 +373,28 @@ final class SidebarWorkspaceCardRenderer {
             append(SidebarReviewBadgesRow.label(
                 badges, x: badgesX, width: layout.contentMaxX - badgesX, top: top
             ))
+        case let .missionQuestion(columnIndex, question):
+            let label = NSTextField.sidebarLine(Self.missionQuestionText(question))
+            label.frame = NSRect(x: x, y: top - Metrics.actionLineHeight, width: width, height: Metrics.actionLineHeight)
+            append(label)
+            guard !question.isAnswered else {
+                label.toolTip = "Answer from \(question.parentTitle): \(question.text)\n\nNirux types it into this agent’s "
+                    + "prompt once its turn is over and nothing is typed there. A Claude started since it asked "
+                    + "takes it after one prompt from you."
+                label.setAccessibilityLabel("Answer from \(question.parentTitle) waiting: \(question.text)")
+                return
+            }
+            label.toolTip = "\(question.text)\n\n\(question.explanation) Click to answer."
+            label.setAccessibilityLabel(
+                question.handOff == nil ? "Asking \(question.parentTitle): \(question.text)" : "Needs you, a question: \(question.text)"
+            )
+            hitAreas.append(SidebarHitArea(
+                frame: label.frame.insetBy(dx: -2, dy: -2),
+                region: .link(
+                    url: SidebarView.missionQuestionActionURL(workspaceIndex: workspace.index, columnIndex: columnIndex),
+                    label: label
+                )
+            ))
         case .next(let text):
             let label = NSTextField.sidebarLine(Self.nextText(text))
             label.toolTip = "Next: \(text)"
@@ -382,6 +404,32 @@ final class SidebarWorkspaceCardRenderer {
             )
             append(label)
         }
+    }
+
+    /// "Asking web-main · <question>" in grey while the parent may answer,
+    /// "Needs you · a question" in amber once it waits on the user.
+    private static func missionQuestionText(_ question: SidebarMissionQuestion) -> NSAttributedString {
+        let font = Theme.Font.caption
+        guard !question.isAnswered else {
+            let text = question.parentTitle == "you" ? "Your answer is ready to type in" : "Answer from \(question.parentTitle) ready to type in"
+            return NSAttributedString(string: text, attributes: [
+                .font: font, .foregroundColor: Theme.Color.textSecondary
+            ])
+        }
+        guard question.handOff == nil else {
+            return NSAttributedString(string: "Needs you · a question", attributes: [
+                .font: font, .foregroundColor: Theme.Color.waiting
+            ])
+        }
+        let result = NSMutableAttributedString(string: "Asking \(question.parentTitle)", attributes: [
+            .font: font, .foregroundColor: Theme.Color.textSecondary
+        ])
+        if let text = AgentText.clean(question.text, maxLength: 300) {
+            result.append(NSAttributedString(string: " · \(text)", attributes: [
+                .font: font, .foregroundColor: Theme.Color.textTertiary
+            ]))
+        }
+        return result
     }
 
     private static func nextText(_ text: String) -> NSAttributedString {

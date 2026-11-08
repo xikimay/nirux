@@ -76,7 +76,15 @@ extension ColumnInfo {
                 headline: openDialog.headline, detail: openDialog.cleanDetailLine
             ))
         }
-        if agentStatus == .needsAttention {
+        if let question = missionQuestion, question.handOff != nil {
+            causes.append(AttentionCause(
+                signal: .waiting, label: "question", toolTip: "needs you — a question: \(question.text)",
+                headline: "needs you · a question", detail: AgentText.clean(question.text, maxLength: 300)
+            ))
+        }
+        // A child that asked its parent ended its turn to wait: not "done".
+        let waitsOnParent = missionQuestion.map { $0.handOff == nil } ?? false
+        if agentStatus == .needsAttention, !(waitsOnParent && AttentionSignal.of(attentionReason) == .finished) {
             let signal = AttentionSignal.of(attentionReason)
             causes.append(AttentionCause(
                 signal: signal, label: attentionReason?.chipLabel ?? (signal == .waiting ? "needs you" : "done"),
@@ -198,6 +206,9 @@ extension WorkspaceInfo {
                     columnIndex: column.index, kind: kind, detail: detail, failedAt: failedAt, resume: resume
                 ))
             }
+            if let question = column.missionQuestion {
+                actions.append(.missionQuestion(columnIndex: column.index, question))
+            }
         }
         if let action = sidebarAction {
             if action.isBlocker {
@@ -230,11 +241,15 @@ enum SidebarCardAction: Hashable {
     case reviewBadges(ReviewBadges)
     /// The next step, on the selected card.
     case next(String)
+    /// A Mission question the column's agent waits on: a click opens the
+    /// reply popover.
+    case missionQuestion(columnIndex: Int, SidebarMissionQuestion)
 
     /// Information rather than something to do: no separator above.
     var isQuiet: Bool {
         switch self {
         case .next, .reviewBadges: return true
+        case .missionQuestion(_, let question): return question.handOff == nil
         case .approval, .resume, .blocker, .cleanup: return false
         }
     }
