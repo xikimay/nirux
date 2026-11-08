@@ -14,19 +14,23 @@ struct SidebarStatusLine: Hashable {
         case branch
     }
 
-    /// What a click on the line does; nil: the row's click.
+    /// What a click on the line (or on its `linkText`) does; nil: the
+    /// row's click. A pull request's line stays the row's: it's where one
+    /// clicks to switch rows (the selected row has the links).
     enum Action: Hashable {
         /// The Mission question popover.
         case missionQuestion(columnIndex: Int)
-        /// A pull request or a check, in a browser column of the workspace.
-        case open(url: String)
         /// "Clean up" a merged pull request's worktree.
         case cleanUp
+        /// "Resume" a restored agent here, without switching rows.
+        case resume(columnIndex: Int, columnID: UUID)
     }
 
     let text: String
     let tone: Tone
     var action: Action?
+    /// The end of `text` that is the link ("Clean up"); nil: all of it.
+    var linkText: String?
 }
 
 /// The sign before a row's title, in the state dots' column.
@@ -36,12 +40,29 @@ enum SidebarRowMark: Hashable {
 
 /// A task row's two lines, before any view exists.
 struct SidebarRowSummary: Hashable {
+    /// What the time at the end of the title line counts.
+    enum Trailing: Hashable {
+        /// Since the last activity: how long it has waited, or sat.
+        case age(String)
+        /// How long the working agent's turn has run.
+        case turn(String)
+        /// The pull request a "Ready to merge" or "Merged" line doesn't name.
+        case pullRequest(Int)
+
+        var text: String {
+            switch self {
+            case .age(let text), .turn(let text): return text
+            case .pullRequest(let number): return "#\(number)"
+            }
+        }
+    }
+
     let mark: SidebarRowMark
     let status: SidebarStatusLine
-    /// At the end of the title line: how long since the last activity (how
-    /// long it has waited, how long the turn has run), or the pull request
-    /// a "Ready to merge" or "Merged" line doesn't name.
-    let trailing: String?
+    let trailing: Trailing?
+    /// The column a click on the row brings up: the one that waits on the
+    /// user or broke. Nil: the workspace's focused column.
+    var focusColumn: Int?
 }
 
 @MainActor
@@ -50,47 +71,71 @@ extension WorkspaceInfo {
     /// answer, then work, then the pull request, then a finished turn, else
     /// the branch.
     var rowSummary: SidebarRowSummary {
-        let age = lastActivityAt.map { SidebarView.cardAge(since: $0) }
+        let age = lastActivityAt.map { SidebarRowSummary.Trailing.age(SidebarView.cardAge(since: $0)) }
         func row(_ mark: SidebarRowMark, _ text: String, _ tone: SidebarStatusLine.Tone,
-                 _ action: SidebarStatusLine.Action? = nil, trailing: String? = nil) -> SidebarRowSummary {
+                 _ action: SidebarStatusLine.Action? = nil, trailing: SidebarRowSummary.Trailing? = nil) -> SidebarRowSummary {
             SidebarRowSummary(mark: mark, status: SidebarStatusLine(text: text, tone: tone, action: action), trailing: trailing ?? age)
         }
 
         if let waiting = columns.first(where: { $0.attention == .waiting }) {
-            if let question = waiting.missionQuestion, question.handOff != nil, !question.isAnswered {
-                return row(.needsYou, "Needs you · a question", .needsYou, .missionQuestion(columnIndex: waiting.index))
-            }
-            return row(.needsYou, "Needs you · \(Self.needsYouDetail(waiting))", .needsYou)
+            var summary = waiting.missionQuestion.map { $0.handOff != nil && !$0.isAnswered } == true
+                ? row(.needsYou, "Needs you · a question", .needsYou, .missionQuestion(columnIndex: waiting.index))
+                : row(.needsYou, "Needs you · \(Self.needsYouDetail(waiting))", .needsYou)
+            summary.focusColumn = waiting.index
+            return summary
         }
-        if let broken = columns.first(where: { $0.attention == .error }), let summary = broken.attentionSummary {
-            return row(.error, Self.sentence(summary.headline), .error)
+        if let broken = columns.first(where: { $0.attention == .error }), let headline = broken.attentionSummary?.headline {
+            var summary = row(.error, Self.sentence(headline), .error)
+            summary.focusColumn = broken.index
+            return summary
         }
         if let pullRequest = prInfo, pullRequest.state == "OPEN", pullRequest.ciStatus == "FAILURE",
            !columns.contains(where: { $0.agentStatus == .working }) {
-            let url = pullRequest.failedCheckUrl ?? "\(pullRequest.url)/checks"
-            return row(.error, "#\(pullRequest.number) · checks failed", .error, .open(url: url))
+            return row(.error, "#\(pullRequest.number) · checks failed", .error)
         }
-        if let asking = columns.first(where: { $0.missionQuestion != nil }), let question = asking.missionQuestion {
-            let text = question.isAnswered
-                ? (question.parentTitle == "you" ? "Your answer is ready to type in" : "Answer from \(question.parentTitle) ready to type in")
-                : "Asking \(question.parentTitle)"
-            return row(.asking, text, .neutral, question.isAnswered ? nil : .missionQuestion(columnIndex: asking.index))
+        // A child that asked ended its turn to wait (a Codex one blocks):
+        // asking comes before work. An answer waiting to be typed comes
+        // after: a Claude restarted since works through the user's prompt.
+        let question = Self.questionColumn(in: columns)
+        if let asking = question, let pending = asking.missionQuestion, !pending.isAnswered {
+            return row(.asking, "Asking \(pending.parentTitle)", .neutral, .missionQuestion(columnIndex: asking.index))
         }
         let working = columns.filter { $0.agentStatus == .working }
         if !working.isEmpty {
-            return row(.working, "Working", .neutral, trailing: working.compactMap(\.elapsedDisplay).first ?? age)
+            return row(.working, "Working", .neutral, trailing: working.compactMap(\.elapsedDisplay).first.map { .turn($0) } ?? age)
         }
-        if let pullRequest = prInfo, let summary = Self.pullRequestRow(pullRequest, cleanup: mergedCleanup, age: age) {
-            return summary
+        if let answered = question?.missionQuestion {
+            return row(.asking, SidebarWorkspaceCardRenderer.answeredText(answered), .neutral)
         }
+        // A restored agent that hasn't resumed: selecting the row resumes it
+        // too.
+        if let paused = columns.first(where: { $0.deferredAgent != nil }), let agent = paused.deferredAgent {
+            return SidebarRowSummary(
+                mark: .idle,
+                status: SidebarStatusLine(
+                    text: "Paused · Resume", tone: .neutral,
+                    action: .resume(columnIndex: paused.index, columnID: agent.columnID), linkText: "Resume"
+                ),
+                trailing: age
+            )
+        }
+        // A finished turn the user hasn't looked at yet: until then, before
+        // the pull request's lasting line.
         if columns.contains(where: { $0.attention == .finished }) {
             return row(.idle, "Done", .neutral)
         }
-        if columns.contains(where: { $0.deferredAgent != nil }) {
-            return row(.idle, "Paused", .neutral)
+        if let pullRequest = prInfo,
+           let summary = Self.pullRequestRow(pullRequest, cleanup: mergedCleanup, hasFeedback: prFeedback != nil, age: age) {
+            return summary
         }
         let place = gitBranch ?? columns.first(where: \.isFocused)?.abbreviatedCwd ?? columns.first?.abbreviatedCwd
         return row(.idle, place ?? "No activity yet", place == nil ? .neutral : .branch)
+    }
+
+    /// The column whose Mission question the status line shows: one still
+    /// unanswered first.
+    static func questionColumn(in columns: [ColumnInfo]) -> ColumnInfo? {
+        columns.first { $0.missionQuestion.map { !$0.isAnswered } ?? false } ?? columns.first { $0.missionQuestion != nil }
     }
 
     /// The command to allow, the question, else what the agent waits on.
@@ -115,33 +160,40 @@ extension WorkspaceInfo {
     }
 
     /// An open or merged pull request's line; nil for a closed one. "Ready
-    /// to merge": checks passed, GitHub says it merges cleanly, and no
-    /// review is asked for or asks for changes.
-    private static func pullRequestRow(_ pullRequest: PRInfo, cleanup: MergedCleanupOffer?, age: String?) -> SidebarRowSummary? {
-        let number = "#\(pullRequest.number)"
-        func row(_ mark: SidebarRowMark, _ text: String, _ action: SidebarStatusLine.Action?, trailing: String?) -> SidebarRowSummary {
-            SidebarRowSummary(mark: mark, status: SidebarStatusLine(text: text, tone: .neutral, action: action), trailing: trailing)
+    /// to merge": checks passed, no conflict (GitHub's "UNKNOWN" while it
+    /// recomputes after a push doesn't count, or the line would flicker), no
+    /// review asked for or asking for changes, and no feedback waiting to
+    /// be dealt with.
+    private static func pullRequestRow(
+        _ pullRequest: PRInfo, cleanup: MergedCleanupOffer?, hasFeedback: Bool, age: SidebarRowSummary.Trailing?
+    ) -> SidebarRowSummary? {
+        let number = SidebarRowSummary.Trailing.pullRequest(pullRequest.number)
+        func row(_ mark: SidebarRowMark, _ text: String, _ action: SidebarStatusLine.Action?,
+                 trailing: SidebarRowSummary.Trailing?, linkText: String? = nil) -> SidebarRowSummary {
+            SidebarRowSummary(
+                mark: mark, status: SidebarStatusLine(text: text, tone: .neutral, action: action, linkText: linkText),
+                trailing: trailing
+            )
         }
-        let open = SidebarStatusLine.Action.open(url: pullRequest.url)
         switch pullRequest.state {
         case "MERGED":
             switch cleanup {
-            case .available?: return row(.merged, "Merged · Clean up", .cleanUp, trailing: number)
+            case .available?: return row(.merged, "Merged · Clean up", .cleanUp, trailing: number, linkText: "Clean up")
             case .inProgress?: return row(.merged, "Merged · cleaning up…", nil, trailing: number)
-            case nil: return row(.merged, "Merged", open, trailing: number)
+            case nil: return row(.merged, "Merged", nil, trailing: number)
             }
         case "OPEN":
-            if pullRequest.isDraft { return row(.idle, "\(number) · draft", open, trailing: age) }
+            if pullRequest.isDraft { return row(.idle, "#\(pullRequest.number) · draft", nil, trailing: age) }
             switch pullRequest.ciStatus {
-            case "PENDING"?: return row(.idle, "\(number) · checks running", .open(url: "\(pullRequest.url)/checks"), trailing: age)
+            case "PENDING"?: return row(.idle, "#\(pullRequest.number) · checks running", nil, trailing: age)
             case "SUCCESS"?:
                 let reviewBlocks = ["REVIEW_REQUIRED", "CHANGES_REQUESTED"].contains(pullRequest.reviewDecision ?? "")
-                guard pullRequest.mergeable == "MERGEABLE", !reviewBlocks else {
-                    return row(.idle, "\(number) · checks passed", open, trailing: age)
+                guard pullRequest.mergeable != "CONFLICTING", !reviewBlocks, !hasFeedback else {
+                    return row(.idle, "#\(pullRequest.number) · checks passed", nil, trailing: age)
                 }
-                return row(.readyToMerge, "Ready to merge", open, trailing: number)
+                return row(.readyToMerge, "Ready to merge", nil, trailing: number)
             default:
-                return row(.idle, "\(number) · open", open, trailing: age)
+                return row(.idle, "#\(pullRequest.number) · open", nil, trailing: age)
             }
         default:
             return nil

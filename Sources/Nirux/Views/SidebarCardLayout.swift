@@ -169,10 +169,16 @@ struct SidebarCardLayout {
         state = workspace.cardState
         summary = workspace.rowSummary
         let showsColumns = workspace.isActive && !isCompact
-        links = showsColumns ? Self.links(for: workspace) : []
+        let rowWidth = sidebarWidth - Metrics.workspaceInsetX - Metrics.cardPaddingX - Metrics.textX
+        // Too wide for the line: the diff goes first, then the feedback; the
+        // pull request and its checks stay.
+        var links = showsColumns ? Self.links(for: workspace) : []
+        while links.count > 2, links.reduce(CGFloat(0), { $0 + $1.width }) + Self.linkGaps(links) > rowWidth {
+            links.removeFirst()
+        }
+        self.links = links
         actions = isCompact ? [] : workspace.cardActions
 
-        let rowWidth = sidebarWidth - Metrics.workspaceInsetX - Metrics.cardPaddingX - Metrics.textX
         let linksWidth = links.reduce(CGFloat(0)) { $0 + $1.width } + Self.linkGaps(links)
         let firstRowWidth = rowWidth - (links.isEmpty ? 0 : linksWidth + Theme.Space.sm)
         var rows: [[ChipPlacement]] = []

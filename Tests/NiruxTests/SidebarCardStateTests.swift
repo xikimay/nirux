@@ -184,8 +184,9 @@ final class SidebarCardStateTests: XCTestCase {
         )
         XCTAssertEqual(info.cardActions, [
             .resume(columnIndex: 0, kind: "rate_limit", detail: nil, failedAt: 1, resume: .offered),
-            .blocker("Blocker: API access")
-        ])
+            .blocker("Blocker: API access"),
+            .cleanup(.available, pullRequest: 7)
+        ], "the status line says the error: Clean up keeps a line")
         let result = SidebarWorkspaceCardRenderer(workspace: info, sidebarWidth: 260, yOffset: 900).render()
         XCTAssertEqual(
             900 - result.bottomY, SidebarExpandedMetrics.workspaceHeight(for: info, sidebarWidth: 260), accuracy: 0.5,
@@ -205,7 +206,9 @@ final class SidebarCardStateTests: XCTestCase {
         )
         let card = workspace([column(0), resting], isActive: true)
         XCTAssertEqual(card.cardActions, [])
-        XCTAssertEqual(workspace([column(0), resting]).rowSummary.status.text, "Paused")
+        XCTAssertEqual(workspace([column(0), resting]).rowSummary.status, SidebarStatusLine(
+            text: "Paused · Resume", tone: .neutral, action: .resume(columnIndex: 2, columnID: deferred.columnID), linkText: "Resume"
+        ))
         XCTAssertEqual(SidebarColumnChip(resting).style, .resume)
         XCTAssertTrue(workspace([resting], isInactive: true).showsCompactRow)
 

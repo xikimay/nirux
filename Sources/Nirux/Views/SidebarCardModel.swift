@@ -190,12 +190,19 @@ extension WorkspaceInfo {
             && ![.waiting, .error, .working].contains(cardState)
     }
 
-    /// The block under a row's two lines, top to bottom; empty hides it. A
-    /// Mission question and "Clean up" are the status line's
-    /// (`rowSummary`).
+    /// The block under a row's two lines, top to bottom; empty hides it.
+    /// "Clean up" and a Mission question are the status line's
+    /// (`rowSummary`) when it shows them; when it says something else first
+    /// they get a line here, so every question opens and every clean-up
+    /// shows.
     var cardActions: [SidebarCardAction] {
         var actions: [SidebarCardAction] = []
         let names = columns.map(SidebarRenderer.columnName)
+        let summary = rowSummary
+        let questionShown: Int? = switch summary.status.action {
+        case .missionQuestion(let columnIndex)?: columnIndex
+        default: summary.mark == .asking ? Self.questionColumn(in: columns)?.index : nil
+        }
         for column in columns {
             if let approval = column.permissionApproval {
                 // Two agents of a name: which one asks.
@@ -208,6 +215,9 @@ extension WorkspaceInfo {
                     columnIndex: column.index, kind: kind, detail: detail, failedAt: failedAt, resume: resume
                 ))
             }
+            if let question = column.missionQuestion, column.index != questionShown {
+                actions.append(.missionQuestion(columnIndex: column.index, question))
+            }
         }
         if let action = sidebarAction {
             if action.isBlocker {
@@ -215,6 +225,11 @@ extension WorkspaceInfo {
             } else if isActive, let nextStep = nextStep?.trimmingCharacters(in: .whitespacesAndNewlines) {
                 actions.append(.next(nextStep))
             }
+        }
+        // The status line says "Merged · Clean up" unless an agent's state
+        // comes first: then a line of its own keeps it.
+        if let mergedCleanup, let prInfo, summary.mark != .merged {
+            actions.append(.cleanup(mergedCleanup, pullRequest: prInfo.number))
         }
         if isActive, let reviewBadges {
             actions.append(.reviewBadges(reviewBadges))
@@ -232,15 +247,22 @@ enum SidebarCardAction: Hashable {
         columnIndex: Int, kind: String?, detail: String?, failedAt: TimeInterval, resume: SidebarStuckState.Resume
     )
     case blocker(String)
+    /// "Clean up" a merged pull request's worktree, when the status line
+    /// says something else.
+    case cleanup(MergedCleanupOffer, pullRequest: Int)
     case reviewBadges(ReviewBadges)
     /// The next step, on the selected row.
     case next(String)
+    /// A Mission question the status line doesn't show: a click opens the
+    /// reply popover.
+    case missionQuestion(columnIndex: Int, SidebarMissionQuestion)
 
     /// Information rather than something to do: no separator above.
     var isQuiet: Bool {
         switch self {
         case .next, .reviewBadges: return true
-        case .approval, .resume, .blocker: return false
+        case .missionQuestion(_, let question): return question.handOff == nil
+        case .approval, .resume, .blocker, .cleanup: return false
         }
     }
 }

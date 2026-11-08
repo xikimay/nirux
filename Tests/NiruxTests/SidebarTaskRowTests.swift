@@ -62,6 +62,15 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(status(workspace([column(0, .needsAttention, reason: .question(nil))])), "Needs you · a question")
         XCTAssertEqual(workspace([working, failed]).rowSummary.status, SidebarStatusLine(text: "Stopped on an API error", tone: .error))
         XCTAssertEqual(workspace([working, asking]).rowSummary.status.text, "Asking the Lead", "it ended its turn to wait")
+        var answered = asking
+        answered.missionQuestion?.isAnswered = true
+        XCTAssertEqual(status(workspace([working, answered])), "Working", "a restarted Claude works through the user's prompt")
+        XCTAssertEqual(status(workspace([answered])), "Answer ready · from the Lead")
+        XCTAssertEqual(status(workspace([column(1, .needsAttention, reason: .turnFinished)], pr: pullRequest(ci: "SUCCESS"))), "Done",
+                       "until the user looks, before the pull request's line")
+        XCTAssertEqual(needsYou.rowSummary.focusColumn, 0, "a click brings up the asking column")
+        XCTAssertEqual(workspace([working, failed]).rowSummary.focusColumn, 2)
+        XCTAssertNil(workspace([working]).rowSummary.focusColumn)
         XCTAssertEqual(workspace([working, column(5)], pr: pullRequest(ci: "FAILURE")).rowSummary.mark, .working, "it may be fixing the check")
         XCTAssertEqual(status(workspace([column(), column(1, .needsAttention, reason: .turnFinished)])), "Done")
         XCTAssertEqual(workspace([column()]).rowSummary.status, SidebarStatusLine(text: "fix/login", tone: .branch))
@@ -75,10 +84,9 @@ final class SidebarTaskRowTests: XCTestCase {
             workspace([column()], pr: pr, cleanup: cleanup).rowSummary
         }
         let failed = line(pullRequest(ci: "FAILURE"))
-        XCTAssertEqual(failed.status, SidebarStatusLine(text: "#39 · checks failed", tone: .error, action: .open(url: "https://ci.test/8")))
+        XCTAssertEqual(failed.status, SidebarStatusLine(text: "#39 · checks failed", tone: .error), "no link: a click selects the row")
         XCTAssertEqual(failed.mark, .error)
-        XCTAssertEqual(line(pullRequest(ci: "PENDING")).status.action, .open(url: "https://example.test/pull/39/checks"))
-        XCTAssertEqual(line(pullRequest(ci: "PENDING")).status.text, "#39 · checks running")
+        XCTAssertEqual(line(pullRequest(ci: "PENDING")).status, SidebarStatusLine(text: "#39 · checks running", tone: .neutral))
         XCTAssertEqual(line(pullRequest(ci: "SUCCESS", review: "REVIEW_REQUIRED", mergeable: "MERGEABLE")).status.text, "#39 · checks passed")
         XCTAssertEqual(line(pullRequest(ci: "SUCCESS", mergeable: "CONFLICTING")).status.text, "#39 · checks passed")
         XCTAssertEqual(line(pullRequest(draft: true)).status.text, "#39 · draft")
@@ -86,10 +94,14 @@ final class SidebarTaskRowTests: XCTestCase {
         let ready = line(pullRequest(ci: "SUCCESS", review: "APPROVED", mergeable: "MERGEABLE"))
         XCTAssertEqual(ready.status.text, "Ready to merge")
         XCTAssertEqual(ready.mark, .readyToMerge)
-        XCTAssertEqual(ready.trailing, "#39", "the number the line doesn't say")
+        XCTAssertEqual(ready.trailing, .pullRequest(39), "the number the line doesn't say")
+        XCTAssertEqual(line(pullRequest(ci: "SUCCESS", mergeable: "UNKNOWN")).status.text, "Ready to merge", "no flicker while GitHub recomputes")
+        var commented = workspace([column()], pr: pullRequest(ci: "SUCCESS", review: "APPROVED", mergeable: "MERGEABLE"))
+        commented.prFeedback = SidebarPRFeedback(humans: 1, bots: 0)
+        XCTAssertEqual(commented.rowSummary.status.text, "#39 · checks passed", "feedback nobody dealt with")
 
         let merged = line(pullRequest("MERGED"), cleanup: .available)
-        XCTAssertEqual(merged.status, SidebarStatusLine(text: "Merged · Clean up", tone: .neutral, action: .cleanUp))
+        XCTAssertEqual(merged.status, SidebarStatusLine(text: "Merged · Clean up", tone: .neutral, action: .cleanUp, linkText: "Clean up"))
         XCTAssertEqual(merged.mark, .merged)
         XCTAssertEqual(line(pullRequest("MERGED"), cleanup: .inProgress).status.action, nil, "a second click does nothing")
         XCTAssertEqual(line(pullRequest("CLOSED")).status.text, "fix/login")
@@ -122,16 +134,47 @@ final class SidebarTaskRowTests: XCTestCase {
         XCTAssertEqual(working?.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor, Theme.Color.textSecondary)
     }
 
-    /// A status line that does something is a link as wide as its text: a
-    /// click beside it selects the row.
-    func testStatusLinkIsAsWideAsItsText() throws {
-        let result = SidebarWorkspaceCardRenderer(
-            workspace: workspace([column()], pr: pullRequest(ci: "FAILURE")), sidebarWidth: 260, yOffset: 500
-        ).render()
+    /// "Clean up" is a link over its own words: a click on "Merged" or
+    /// beside the line selects the row. An agent's state on the line keeps
+    /// Clean up in a line of its own.
+    func testCleanUpLinksOnlyItsWords() throws {
+        let merged = workspace([column()], pr: pullRequest("MERGED"), cleanup: .available)
+        let result = SidebarWorkspaceCardRenderer(workspace: merged, sidebarWidth: 260, yOffset: 500).render()
         let link = try XCTUnwrap(result.hitAreas.first { if case .link = $0.region { true } else { false } })
         guard case .link(let url, let label) = link.region else { return XCTFail("no link") }
-        XCTAssertEqual(url, SidebarView.openActionURL(workspaceIndex: 4, url: "https://ci.test/8"))
-        XCTAssertEqual(label.stringValue, "#39 · checks failed")
+        XCTAssertEqual(url, SidebarView.cleanupActionURL(workspaceIndex: 4))
+        XCTAssertEqual(label.stringValue, "Merged · Clean up")
+        let prefixWidth = ceil(NSAttributedString(string: "Merged · ", attributes: [.font: Theme.Font.body]).size().width)
+        XCTAssertGreaterThan(link.frame.minX, label.frame.minX + prefixWidth - 4)
         XCTAssertLessThan(link.frame.maxX, label.frame.maxX)
+
+        let working = workspace([column(0, .working)], pr: pullRequest("MERGED"), cleanup: .available)
+        XCTAssertEqual(working.rowSummary.status.text, "Working")
+        XCTAssertEqual(working.cardActions, [.cleanup(.available, pullRequest: 39)])
+    }
+
+    /// A click on a row that waits on the user brings up the asking column,
+    /// whose chip only shows once the row is selected; another row, or the
+    /// selected one, keeps the workspace's focused column.
+    func testClickingAWaitingRowFocusesTheAskingColumn() {
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 600))
+        sidebar.isExpanded = true
+        var waiting = workspace([column(0), column(2, .needsAttention, reason: .question("Which?"))])
+        waiting = WorkspaceInfo(
+            id: "waiting", index: 1, title: "Waiting", profileID: WorkspaceProfile.defaultID, isInactive: false,
+            columnCount: 2, focusedColumn: 0, gitBranch: nil, notification: nil, isActive: false, columns: waiting.columns,
+            prInfo: nil, diffStats: nil, purpose: nil, nextStep: nil, blocker: nil, phase: .active, lastSummary: nil,
+            lastActivityAt: nil
+        )
+        sidebar.update(profiles: [], workspaces: [workspace([column()], isActive: true), waiting])
+        var columns: [String] = []
+        var workspaces: [Int] = []
+        sidebar.onColumnClicked = { columns.append("\($0):\($1)") }
+        sidebar.onWorkspaceClicked = { workspaces.append($0) }
+
+        sidebar.clickRow(1)
+        sidebar.clickRow(4)
+        XCTAssertEqual(columns, ["1:2"])
+        XCTAssertEqual(workspaces, [4])
     }
 }

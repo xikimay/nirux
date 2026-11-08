@@ -99,12 +99,14 @@ struct SidebarRailTileStyle {
     var breathes = false
 
     /// The rows' rule (`cardState`): amber only for a wait on the user. No
-    /// border, as the rows have none: the selected tile is tinted like the
-    /// selected row.
+    /// border, as the rows have none, but on the selected tile: tinted like
+    /// the selected row, and ringed so a waiting one still reads as
+    /// selected.
     static func workspace(state: SidebarCardState, isSelected: Bool, isInactive: Bool) -> SidebarRailTileStyle {
         var style = SidebarRailTileStyle(
             fill: isInactive ? .clear : Theme.Color.fillHover,
-            border: nil,
+            // An archived tile has no fill: its outline keeps it a tile.
+            border: isInactive ? Theme.Color.line : nil,
             textColor: isInactive ? Theme.Color.textTertiary : Theme.Color.textSecondary
         )
         switch state {
@@ -124,6 +126,8 @@ struct SidebarRailTileStyle {
             break
         }
         if isSelected {
+            style.border = Theme.Color.accent
+            style.borderWidth = 1.5
             if state != .waiting { style.fill = Theme.Color.fillSelected }
             if state != .waiting, state != .error { style.textColor = Theme.Color.textPrimary }
         }
@@ -310,7 +314,7 @@ extension WorkspaceInfo {
             if let waiting = asking(.waiting) {
                 (detail, note) = (withAge(waiting.headline), waiting.detail)
             } else {
-                (detail, note) = ("a child agent asked a question", "Answer from its card, in the expanded sidebar")
+                (detail, note) = ("a child agent asked a question", "Answer from its row, in the expanded sidebar")
             }
         case .error:
             color = Theme.Color.error

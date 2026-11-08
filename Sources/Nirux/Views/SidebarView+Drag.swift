@@ -58,7 +58,7 @@ extension SidebarView {
     /// `mouseDownCanMoveWindow == true`.
     func trackWorkspaceDrag(workspaceIndex: Int, rowFrame: NSRect, startPoint: NSPoint) {
         guard let window else {
-            onWorkspaceClicked?(workspaceIndex)
+            clickRow(workspaceIndex)
             return
         }
         guard var drag = makeWorkspaceDrag(workspaceIndex: workspaceIndex, rowFrame: rowFrame, startPoint: startPoint)
@@ -165,7 +165,7 @@ extension SidebarView {
            let target = SidebarDragMath.targetPosition(slot: slot, draggedPosition: drag.position) {
             onWorkspaceReordered?(currentIndex, target)
         } else {
-            onWorkspaceClicked?(currentIndex)
+            clickRow(currentIndex)
         }
     }
 
@@ -177,8 +177,20 @@ extension SidebarView {
         consumeGestureUntilMouseUp(window)
         if let clickedID {
             if let current = lastInfos.first(where: { $0.id == clickedID })?.index {
-                onWorkspaceClicked?(current)
+                clickRow(current)
             }
+        } else {
+            clickRow(workspaceIndex)
+        }
+    }
+
+    /// A click on a row: the workspace, on the column that waits on the
+    /// user or broke when another row was selected (its chips only show
+    /// once it is), else on its focused column.
+    func clickRow(_ workspaceIndex: Int) {
+        if let info = lastInfos.first(where: { $0.index == workspaceIndex }), !info.isActive,
+           let column = info.rowSummary.focusColumn {
+            onColumnClicked?(workspaceIndex, column)
         } else {
             onWorkspaceClicked?(workspaceIndex)
         }

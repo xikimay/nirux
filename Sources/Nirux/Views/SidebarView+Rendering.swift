@@ -416,7 +416,16 @@ extension SidebarView {
         result.views.forEach(addExpandedView)
         hitAreas.append(contentsOf: result.hitAreas)
         cardHoverViews[workspace.index] = result.cardHoverView
-        if let badge = result.menuBadge { menuBadgeViews[workspace.index] = badge }
+        if let badge = result.menuBadge {
+            menuBadgeViews[workspace.index] = badge
+            // VoiceOver's press: the menu a click on it opens.
+            let index = workspace.index
+            badge.onPress = { [weak self, weak badge] in
+                guard let self, let badge else { return }
+                workspaceActionMenu(workspaceIndex: index, columnIndex: nil)
+                    .popUp(positioning: nil, at: NSPoint(x: badge.frame.minX, y: badge.frame.minY), in: contentDocumentView)
+            }
+        }
         columnHoverViews[workspace.index] = result.columnHoverViews
         approvalButtonViews.merge(result.approvalButtons) { _, new in new }
         return result.bottomY
