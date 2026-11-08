@@ -177,8 +177,9 @@ struct NiruxURLRequest: Equatable, Sendable {
     /// What a request the user confirmed (no valid launch ID) may still do.
     /// It must not link the new agent to a live parent agent's Mission
     /// mailbox (that would give an outside caller a channel to it), and it
-    /// opens in the space the user is looking at rather than one the caller
-    /// picked. None of that is shown on the sheet.
+    /// opens in the space its folder belongs to, else the default space
+    /// (docs/spaces.md, "Routing"), never one the caller picked. None of
+    /// that is shown on the sheet.
     func restrictedForConfirmation() -> NiruxURLRequest {
         var restricted = self
         restricted.profileID = nil

@@ -444,7 +444,8 @@ extension NiruxShellView {
     /// again: those confirmed, and any opened there since. One with an
     /// editor holding unsaved changes stays open, its buffer the only copy
     /// left; their titles are returned. Nirux keeps one workspace open: a
-    /// fresh one in the home folder takes over if none would be left.
+    /// fresh one in the space's default folder (else the home folder) takes
+    /// over if none would be left.
     @discardableResult
     func closeWorkspacesAfterCleanup(of candidate: WorktreeCleanupCandidate) -> [String] {
         let isInside = Self.containment(in: candidate.path)
@@ -454,7 +455,7 @@ extension NiruxShellView {
         let closing = affected.filter { workspace in !kept.contains { $0 === workspace } }
         guard !closing.isEmpty else { return kept.map(\.title) }
         if workspaceStore.remainingWorkspaceCount <= closing.count {
-            addWorkspace(cwd: sideEffects.homeDirectory())
+            addWorkspace()
         }
         // The selected one last: its successor is then picked among the
         // workspaces left, in one hop.

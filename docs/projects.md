@@ -192,7 +192,8 @@ first step changed is how they are stored and managed:
 - **Orphaned briefs:** a brief with content whose space is gone (an older build
   dropped empty spaces) brings its space back at launch, under the name its
   template recorded. Deleted spaces' briefs don't.
-- **"New Space"** reuses an empty space of the same name rather than adding
+- **"New Space…"** reuses an empty space of the same name, with no
+  repository, rather than adding
   "name 2".
 - **Deleted spaces' ids:** a worktree request naming one (from a shell that
   still has it in `NIRUX_PROFILE_ID`) goes to the default space.
@@ -202,7 +203,8 @@ first step changed is how they are stored and managed:
   their old `NIRUX_PROFILE_ID` until they restart, so a worktree they create
   lands in the old space until routing (section 3) resolves the parent's
   current project.
-- **Not yet:** archiving, anchors, defaults, and the `Project` type name.
+- **Not yet:** archiving, defaults, and the `Project` type name. Anchors and
+  routing shipped as [spaces.md](spaces.md) describes them.
 
 The rest of this section is the full design.
 

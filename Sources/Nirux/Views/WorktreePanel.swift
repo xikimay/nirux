@@ -356,8 +356,10 @@ enum GitWorktree {
 
     /// `git rev-parse --path-format=absolute <queries>`: one absolute path
     /// per query, or nil (including for a path containing a newline).
-    static func absoluteGitPaths(_ queries: [String], in directory: String) -> [String]? {
-        let result = gitRunFull(["rev-parse", "--path-format=absolute"] + queries, cwd: directory)
+    static func absoluteGitPaths(
+        _ queries: [String], in directory: String, timeout: TimeInterval = defaultTimeout
+    ) -> [String]? {
+        let result = gitRunFull(["rev-parse", "--path-format=absolute"] + queries, cwd: directory, timeout: timeout)
         let lines = result.stdout.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         guard result.status == 0, lines.last == "" else { return nil }
         let paths = Array(lines.dropLast())
