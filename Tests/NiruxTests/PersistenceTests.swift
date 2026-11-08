@@ -313,11 +313,11 @@ final class PersistedStateCodingTests: XCTestCase {
         let profile = WorkspaceProfile(id: "repo", name: "repo", colorHex: "#9ECE6A")
         store.replaceProfiles([WorkspaceProfile.defaultProfile, profile], activeProfileID: profile.id)
 
-        XCTAssertTrue(store.renameProfile(id: profile.id, to: " main "))
-        XCTAssertEqual(store.profiles.first { $0.id == profile.id }?.name, "main 2")
+        XCTAssertTrue(store.renameProfile(id: profile.id, to: " General "))
+        XCTAssertEqual(store.profiles.first { $0.id == profile.id }?.name, "General 2")
 
-        XCTAssertTrue(store.renameProfile(id: profile.id, to: "main 2"))
-        XCTAssertEqual(store.profiles.first { $0.id == profile.id }?.name, "main 2")
+        XCTAssertTrue(store.renameProfile(id: profile.id, to: "General 2"))
+        XCTAssertEqual(store.profiles.first { $0.id == profile.id }?.name, "General 2")
     }
 
     @MainActor

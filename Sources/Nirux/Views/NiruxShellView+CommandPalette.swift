@@ -41,8 +41,8 @@ extension NiruxShellView {
                 self?.openEditorColumn()
             },
             PaletteAction(
-                icon: .symbol("tablecells"), title: "Open Project Board",
-                subtitle: "Branches, agents and pull requests of the current project",
+                icon: .symbol("tablecells"), title: "Open Board",
+                subtitle: "Branches, agents and pull requests of the current space",
                 shortcut: nil
             ) { [weak self] in
                 self?.openProjectBoard()
@@ -97,12 +97,12 @@ extension NiruxShellView {
             },
             PaletteAction(
                 icon: .symbol(Theme.Symbol.sessionHistory), title: "Session History…",
-                subtitle: "Every session of this project, to go back to or resume", shortcut: nil
+                subtitle: "Every session of this space, to go back to or resume", shortcut: nil
             ) { [weak self] in
                 self?.showSessionHistory()
             },
             PaletteAction(
-                icon: .symbol(Theme.Symbol.projectMemory), title: "Project Memory…",
+                icon: .symbol(Theme.Symbol.projectMemory), title: "Space Memory…",
                 subtitle: "What Claude Code remembers about this repository", shortcut: nil
             ) { [weak self] in
                 self?.showProjectMemory()

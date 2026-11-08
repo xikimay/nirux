@@ -298,7 +298,7 @@ final class ProjectBoardController {
         let project = projects.first { $0.id == projectID }
         let config = loaded?.config
         var header = ProjectBoardView.Header(
-            projectName: project?.name ?? "Deleted project",
+            projectName: project?.name ?? "Deleted space",
             repository: config?.repository,
             projects: projects,
             projectID: projectID,
@@ -327,7 +327,7 @@ final class ProjectBoardController {
 
         let body: ProjectBoardView.Body
         if project == nil {
-            body = .message("This project was deleted. Pick another one in the ⋯ menu above.")
+            body = .message("This space was deleted. Pick another one in the ⋯ menu above.")
         } else if let loaded, loaded.status == .unreadable {
             body = .message("board.json can’t be read: open Board Settings… to replace it.")
         } else if let loaded, case .readOnly(let reason) = loaded.status, repository == nil {
@@ -335,7 +335,7 @@ final class ProjectBoardController {
         } else if loaded == nil {
             body = .message("Reading board.json…")
         } else if repository == nil {
-            body = .message("Set this project’s repository in Board Settings… to list its branches and pull requests.")
+            body = .message("Set this space’s repository in Board Settings… to list its branches and pull requests.")
         } else if let local {
             let rows = ProjectBoard.rows(ProjectBoard.Sources(
                 repository: repository?.gitHub,

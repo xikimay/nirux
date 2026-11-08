@@ -27,7 +27,7 @@ extension NiruxShellView {
         projectBoardLocations.first { $0.board.projectID == projectID }
     }
 
-    /// The palette's "Open Project Board": the board of the current
+    /// The palette's "Open Board": the board of the current
     /// workspace's project, next to its focused column. A project has one
     /// board: if it has one already, that one comes to the front.
     func openProjectBoard() {
@@ -84,7 +84,7 @@ extension NiruxShellView {
         board.view.onBoardSettings = { [weak self, weak board] in
             guard let self, let board else { return }
             guard self.profiles.contains(where: { $0.id == board.projectID }) else {
-                return self.showToast("This board’s project was deleted")
+                return self.showToast("This board’s space was deleted")
             }
             self.showBoardSettings(profileID: board.projectID)
         }
