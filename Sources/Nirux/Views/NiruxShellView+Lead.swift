@@ -6,8 +6,9 @@ import AppKit
 /// in its default repository's main checkout, with Claude and the space's
 /// Board. The user talks to it; it starts tasks and follows them. Its
 /// Claude learns its role from the Nirux MCP server (`NIRUX_LEAD=1` in its
-/// shells, see `WorkspaceState.isLead`). Its state lives in Nirux (the
-/// board, Missions), so closing it or `/clear` loses nothing.
+/// shells, see `WorkspaceState.isLead`), and its tasks are Missions whatever
+/// the Mission handoffs setting (`Mission.reportsToLead`). A Lead started
+/// again is a new parent: the earlier tasks' questions come to the user.
 extension NiruxShellView {
     static let leadTitle = "Lead"
 
@@ -29,6 +30,7 @@ extension NiruxShellView {
     func startLead(spaceID: String) {
         guard Self.spaceCanHaveLead(spaceID), profiles.contains(where: { $0.id == spaceID }) else { return }
         if let lead = leadWorkspace(inSpace: spaceID) { return focusLead(lead) }
+        installSkillsForTheLead()
         addWorkspace(
             title: Self.leadTitle,
             cwd: defaultFolder(forSpace: spaceID),
@@ -41,7 +43,10 @@ extension NiruxShellView {
             isLead: true
         )
         if let lead = leadWorkspace(inSpace: spaceID), projectBoardLocation(projectID: spaceID) == nil {
-            let board = makeProjectBoard(projectID: spaceID, offersSettings: true)
+            // Not `openProjectBoard`: a space without board settings would
+            // open Space Settings › Board over the Lead and take Claude's
+            // keyboard. The Board asks for them when the user clicks it.
+            let board = makeProjectBoard(projectID: spaceID, offersSettings: false)
             lead.addProjectBoardColumn(board)
             // Claude keeps the keyboard; the Board sits to its right.
             lead.focusedIndex = 0
@@ -76,6 +81,15 @@ extension NiruxShellView {
         }
     }
 
+    /// The Lead starts tasks with the `nirux-worktree` skill: installed if
+    /// no copy is there (Nirux updates the ones it wrote at launch).
+    private func installSkillsForTheLead() {
+        let home = sideEffects.homeDirectory()
+        guard AgentSkillsInstaller.status(of: ["nirux-worktree": Self.worktreeSkillContent], home: home) == .missing else { return }
+        installAgentSkills(confirmsSuccess: false)
+        showToast("Installed Nirux’s agent skills: the Lead starts tasks with nirux-worktree")
+    }
+
     /// The Lead's workspace, on its first terminal (where Claude runs).
     func focusLead(_ lead: WorkspaceState) {
         let column = lead.columns.firstIndex { $0.pty != nil && !$0.isClosing }
@@ -85,16 +99,34 @@ extension NiruxShellView {
     // MARK: - Space Settings › Lead
 
     func spaceSettingsLeadModel(for space: WorkspaceProfile) -> SpaceSettingsLeadPane.Model {
-        // The repository whose main checkout the Lead opens in, as
-        // `defaultFolder(forSpace:)` picks it.
-        let anchors = [space.anchors.defaultAnchor].compactMap { $0 } + space.anchors.filter { !$0.isDefault }
-        let repository = anchors.first { $0.folder.map(NiruxURLRequest.directoryExists) == true }
+        let lead = leadWorkspace(inSpace: space.id)
         return SpaceSettingsLeadPane.Model(
             spaceName: space.name,
             isGeneral: !Self.spaceCanHaveLead(space.id),
-            hasLead: leadWorkspace(inSpace: space.id) != nil,
-            repositoryName: repository?.name
+            hasLead: lead != nil,
+            place: leadPlace(in: space, leadFolder: lead?.cwd)
         )
+    }
+
+    /// Where the running Lead works (`leadFolder`), else where a new one
+    /// would start (`defaultFolder(forSpace:)`).
+    private func leadPlace(in space: WorkspaceProfile, leadFolder: String?) -> SpaceSettingsLeadPane.Place {
+        func place(of anchor: SpaceAnchor) -> SpaceSettingsLeadPane.Place {
+            if case .gitRepository = anchor.kind { return .repository(anchor.name) }
+            return .folder(anchor.name)
+        }
+        let start = defaultFolderAnchor(forSpace: space.id)
+        guard let leadFolder else { return start.map(place(of:)) ?? .home }
+        let standardized = { (path: String) in URL(fileURLWithPath: path).standardizedFileURL.path }
+        if let anchor = space.anchors.first(where: { $0.folder.map(standardized) == standardized(leadFolder) }) {
+            return place(of: anchor)
+        }
+        if standardized(leadFolder) == standardized(sideEffects.homeDirectory()), start == nil { return .home }
+        let repository = start.flatMap { anchor -> String? in
+            if case .gitRepository = anchor.kind { return anchor.name }
+            return nil
+        }
+        return .elsewhere(path: leadFolder, repository: repository)
     }
 
     /// The Lead tab again, after the Lead started or closed.

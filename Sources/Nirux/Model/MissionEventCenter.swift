@@ -168,8 +168,9 @@ final class MissionEventCenter {
     }
 
     func deliverPendingEvents() {
-        guard store.ensureLoaded(), isEnabled() else { return }
-        for pending in store.pendingEvents() {
+        guard store.ensureLoaded() else { return }
+        let enabled = isEnabled()
+        for pending in store.pendingEvents() where pending.mission.isCarried(handoffsEnabled: enabled) {
             deliver(pending)
         }
     }

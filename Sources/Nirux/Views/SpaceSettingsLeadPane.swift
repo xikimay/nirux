@@ -12,9 +12,23 @@ final class SpaceSettingsLeadPane: NSObject {
         /// General has no Lead.
         var isGeneral: Bool
         var hasLead: Bool
-        /// Where the Lead works: its default repository's name, or nil
-        /// without one (it opens in the home folder then).
-        var repositoryName: String?
+        /// Where the Lead works, or would start.
+        var place: Place
+    }
+
+    /// Where a Lead works: it starts tasks only from a repository's
+    /// checkout.
+    enum Place: Equatable {
+        /// The main checkout of the space's repository with this name.
+        case repository(String)
+        /// One of the space's plain folders, by name.
+        case folder(String)
+        /// The home folder: the space has neither.
+        case home
+        /// A running Lead's folder that is none of the space's anchors any
+        /// more (the repository moved, or was added after it started);
+        /// `repository` names the one a new Lead would start in.
+        case elsewhere(path: String, repository: String?)
     }
 
     struct Actions {
@@ -51,21 +65,37 @@ final class SpaceSettingsLeadPane: NSObject {
         self.model = model
         leadSwitch.state = model.hasLead ? .on : .off
         leadSwitch.isEnabled = !model.isGeneral
-        descriptionLabel.stringValue = Self.description(of: model)
+        descriptionLabel.stringValue = model.isGeneral ? Self.generalDescription
+            : Self.description(place: model.place, spaceName: model.spaceName)
         leadSwitch.setAccessibilityHelp(descriptionLabel.stringValue)
         alwaysSection.isHidden = model.isGeneral
     }
 
-    static func description(of model: Model) -> String {
-        guard !model.isGeneral else {
-            return "General has no Lead: it takes the workspaces no other space claims, from every repository."
+    static let generalDescription = "General has no Lead: it takes the workspaces no other space claims, from every repository."
+
+    /// What a Lead is and where it works; New Space… says the same
+    /// (`spaceName` nil: the space has no name yet).
+    static func description(place: Place, spaceName: String?) -> String {
+        let at: String
+        var advice: String?
+        switch place {
+        case .repository(let name):
+            at = "on \(name)’s main checkout"
+        case .folder(let name):
+            at = "in \(name)"
+            advice = "It starts tasks only from a repository: add one in General."
+        case .home:
+            at = "in your home folder"
+            advice = "It starts tasks only from a repository: add one in General."
+        case .elsewhere(let path, let repository):
+            at = "in \(path.abbreviatedPath())"
+            advice = repository.map { "That is none of this space’s repositories: turn it off and on again to move it to \($0)." }
+                ?? "It starts tasks only from a repository: add one in General."
         }
-        let place = model.repositoryName.map { "on \($0)’s main checkout" } ?? "in your home folder"
-        var text = "A workspace pinned at the top, \(place), with Claude and the Board. You talk to it; it starts "
-            + "tasks and follows them. It sees only \(model.spaceName)."
-        if model.repositoryName == nil {
-            text += " Add a repository in General so it can start tasks."
-        }
+        var text = "A workspace pinned at the top, \(at), with Claude and the Board. You talk to it; it starts "
+            + "tasks and follows them."
+        if let spaceName { text += " It works on \(spaceName) only." }
+        if let advice { text += " " + advice }
         return text
     }
 
@@ -113,8 +143,8 @@ final class SpaceSettingsLeadPane: NSObject {
         for item in Self.alwaysYours {
             alwaysSection.addArrangedSubview(Self.alwaysRow(item.what, item.how))
         }
-        let hint = NSTextField(wrappingLabelWithString: "No tool of the Lead merges, removes a worktree or a branch, "
-            + "or reaches another space.")
+        let hint = NSTextField(wrappingLabelWithString: "The Lead is told to leave these to you. Its own commands "
+            + "follow the space’s Claude permission mode (Defaults tab).")
         hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         hint.textColor = .secondaryLabelColor
         hint.isSelectable = false
@@ -142,7 +172,8 @@ final class SpaceSettingsLeadPane: NSObject {
     private static func alwaysRow(_ what: String, _ how: String) -> NSView {
         let lock = NSImageView(image: NSImage(systemSymbolName: "lock", accessibilityDescription: nil) ?? NSImage())
         lock.contentTintColor = .secondaryLabelColor
-        lock.setAccessibilityElement(false)
+        // An image view's accessibility element is its cell.
+        lock.cell?.setAccessibilityElement(false)
         let whatLabel = NSTextField(labelWithString: what)
         let howLabel = NSTextField(labelWithString: how)
         howLabel.textColor = .secondaryLabelColor

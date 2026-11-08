@@ -20,6 +20,7 @@ extension NiruxShellView {
         workspaceID: String = UUID().uuidString,
         initialAgentUUID: String = UUID().uuidString,
         missionID: String? = nil,
+        reportsToLead: Bool = false,
         deliveredHandover: Bool = false,
         handoverText: String? = nil,
         worktreeBranch: String? = nil,
@@ -53,6 +54,7 @@ extension NiruxShellView {
             missionHandoffsEnabled: Self.currentMissionHandoffsEnabled(),
             startedOutsideNirux: startedOutsideNirux,
             isLead: isLead,
+            reportsToLead: reportsToLead,
             initialAgentUUID: initialAgentUUID
         )
         wireWorkspace(workspace)

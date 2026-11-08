@@ -48,7 +48,8 @@ extension NiruxShellView {
                 missionID: persistedWS.missionID,
                 missionHandoffsEnabled: PersistedSettings.effective(state.settings).missionHandoffsEnabled,
                 startedOutsideNirux: persistedWS.startedOutsideNirux,
-                isLead: isLead
+                isLead: isLead,
+                reportsToLead: persistedWS.reportsToLead
             )
             // A Lead is never parked.
             workspace.isInactive = persistedWS.isInactive && !isLead
@@ -289,7 +290,10 @@ extension NiruxShellView {
                         uniqueKeysWithValues: workspace.reviewRuns.map { ($0.key.rawValue, $0.value) }
                     ),
                     startedOutsideNirux: workspace.startedOutsideNirux,
-                    isLead: workspace.isLead)
+                    // One closing is no longer the Lead: a new one may
+                    // start before it goes.
+                    isLead: workspace.isLead && !workspace.isClosing,
+                    reportsToLead: workspace.reportsToLead)
             },
             activeWorkspaceIndex: activeWSIndex,
             settings: settings,

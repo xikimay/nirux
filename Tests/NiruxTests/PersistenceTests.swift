@@ -481,28 +481,17 @@ final class PersistedStateCodingTests: XCTestCase {
         XCTAssertTrue(settings.missionHandoffsEnabled)
     }
 
-    /// Mission handoffs and sidebar approvals were opt-in Experimental
-    /// settings, always written `false`: a file from before revision 1
-    /// turns both on once, a later choice stays, and a newer revision is
-    /// written back as it was.
-    func testMissionsAndSidebarApprovalsTurnOnOnce() throws {
-        func decode(_ json: String) throws -> PersistedSettings {
-            try JSONDecoder().decode(PersistedSettings.self, from: Data(json.utf8))
-        }
-        let before = try decode(#"{"missionHandoffsEnabled": false, "sidebarApprovalsEnabled": false}"#)
-        XCTAssertTrue(before.missionHandoffsEnabled)
-        XCTAssertTrue(before.sidebarApprovalsEnabled)
-
-        let chosen = try decode(#"{"missionHandoffsEnabled": false, "sidebarApprovalsEnabled": false, "defaultsRevision": 1}"#)
-        XCTAssertFalse(chosen.missionHandoffsEnabled)
-        XCTAssertFalse(chosen.sidebarApprovalsEnabled)
-
-        let saved = try JSONSerialization.jsonObject(with: JSONEncoder().encode(before)) as? [String: Any]
-        XCTAssertEqual(saved?["defaultsRevision"] as? Int, PersistedSettings.currentDefaultsRevision)
-        let newer = try decode(#"{"missionHandoffsEnabled": false, "defaultsRevision": 7}"#)
-        XCTAssertFalse(newer.missionHandoffsEnabled)
-        let resaved = try JSONSerialization.jsonObject(with: JSONEncoder().encode(newer)) as? [String: Any]
-        XCTAssertEqual(resaved?["defaultsRevision"] as? Int, 7)
+    /// On for a new install (no key), while a state file keeps the `false`
+    /// it holds: those were opt-in Experimental settings before the Lead.
+    func testMissionsAndSidebarApprovalsKeepWhatTheFileHolds() throws {
+        let kept = try JSONDecoder().decode(
+            PersistedSettings.self, from: Data(#"{"missionHandoffsEnabled": false, "sidebarApprovalsEnabled": false}"#.utf8)
+        )
+        XCTAssertFalse(kept.missionHandoffsEnabled)
+        XCTAssertFalse(kept.sidebarApprovalsEnabled)
+        let fresh = try JSONDecoder().decode(PersistedSettings.self, from: Data("{}".utf8))
+        XCTAssertTrue(fresh.missionHandoffsEnabled)
+        XCTAssertTrue(fresh.sidebarApprovalsEnabled)
     }
 
     func testMissionHandoffSettingAndWorkspaceLinkRoundTrip() throws {

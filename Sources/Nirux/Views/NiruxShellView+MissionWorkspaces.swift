@@ -90,6 +90,7 @@ extension NiruxShellView {
                         DeliveredHandovers.record(handoverPath, workspaceID: childWorkspaceID)
                     }
                     var missionID: String?
+                    var reportsToLead = false
                     if let parent = self.validMissionParent(
                         workspaceID: parentWorkspaceID,
                         agentUUID: parentAgentUUID
@@ -102,13 +103,15 @@ extension NiruxShellView {
                             childWorkspaceID: childWorkspaceID,
                             childAgentUUID: childAgentUUID,
                             childAgentKind: agent?.rawValue ?? "agent",
-                            branch: branch
+                            branch: branch,
+                            reportsToLead: parent.isLead
                         )
                         if MissionStore.shared.create(
                             request,
                             enabled: Self.currentMissionHandoffsEnabled()
                         ) != nil {
                             missionID = candidateID
+                            reportsToLead = parent.isLead
                         }
                     }
                     let decision = self.decideSpace(
@@ -122,6 +125,7 @@ extension NiruxShellView {
                         workspaceID: childWorkspaceID,
                         initialAgentUUID: childAgentUUID,
                         missionID: missionID,
+                        reportsToLead: reportsToLead,
                         deliveredHandover: deliveredHandover,
                         handoverText: handoverText,
                         worktreeBranch: checkedOutBranch,
@@ -256,7 +260,9 @@ extension NiruxShellView {
     /// others wait for that agent's next turn end. Runs when a Mission event
     /// arrives and when a turn ends.
     func typeMissionMessages() {
-        guard !MissionStore.shared.pendingPromptDeliveries().isEmpty, Self.currentMissionHandoffsEnabled() else { return }
+        let handoffsEnabled = Self.currentMissionHandoffsEnabled()
+        guard MissionStore.shared.pendingPromptDeliveries().contains(where: { $0.mission.isCarried(handoffsEnabled: handoffsEnabled) })
+        else { return }
         // Apply what may still wait out a queue's drain debounce: a dialog
         // that opened, a prompt that went in, or the child's `completed`,
         // which must not close the Mission after a `tell` reopened it.
@@ -265,7 +271,8 @@ extension NiruxShellView {
         let snapshot = ProcessSnapshot()
         let now = Date().timeIntervalSince1970
         var typedAny = false
-        for delivery in MissionStore.shared.pendingPromptDeliveries(now: now) {
+        for delivery in MissionStore.shared.pendingPromptDeliveries(now: now)
+        where delivery.mission.isCarried(handoffsEnabled: handoffsEnabled) {
             let mission = delivery.mission
             let childWorkspace = workspaces.first { $0.id == mission.childWorkspaceID }
             let parentWorkspace = workspaces.first { $0.id == mission.parentWorkspaceID }
@@ -298,18 +305,20 @@ extension NiruxShellView {
         PersistedSettings.effective(Persistence.load()?.settings).missionHandoffsEnabled
     }
 
+    /// The parent a new worktree's Mission reports to: any agent's column
+    /// with Mission handoffs on, a space's Lead whatever the setting.
     private func validMissionParent(
         workspaceID: String?, agentUUID: String?
-    ) -> (workspaceID: String, agentUUID: String)? {
-        guard Self.currentMissionHandoffsEnabled(),
-              let workspaceID,
+    ) -> (workspaceID: String, agentUUID: String, isLead: Bool)? {
+        guard let workspaceID,
               let agentUUID,
               UUID(uuidString: workspaceID) != nil,
               UUID(uuidString: agentUUID) != nil,
-              let workspace = workspaces.first(where: { $0.id == workspaceID }),
-              workspace.columns.contains(where: { $0.agentUUID == agentUUID })
+              let workspace = workspaces.first(where: { $0.id == workspaceID && !$0.isClosing }),
+              workspace.columns.contains(where: { $0.agentUUID == agentUUID }),
+              workspace.isLead || Self.currentMissionHandoffsEnabled()
         else { return nil }
-        return (workspaceID, agentUUID)
+        return (workspaceID, agentUUID, workspace.isLead)
     }
 }
 

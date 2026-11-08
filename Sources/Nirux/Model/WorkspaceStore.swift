@@ -202,9 +202,13 @@ final class WorkspaceStore {
     func setWorkspaceInactive(at index: Int, _ isInactive: Bool) -> Bool {
         guard workspaces.indices.contains(index), !(isInactive && workspaces[index].isLead) else { return false }
         workspaces[index].isInactive = isInactive
+        // The top card takes over, not the Lead above the cards: keys typed
+        // next would go into its prompt.
+        let isActiveCard = { (candidate: Int) in !self.workspaces[candidate].isInactive }
         if activeWorkspaceIndex == index,
            isInactive,
-           let firstActive = visibleWorkspaceIndices.first(where: { !workspaces[$0].isInactive }) {
+           let firstActive = visibleWorkspaceIndices.first(where: { isActiveCard($0) && !self.workspaces[$0].isLead })
+               ?? visibleWorkspaceIndices.first(where: isActiveCard) {
             activeWorkspaceID = workspaces[firstActive].id
         }
         reconcileSelection(preferActiveProfile: true)

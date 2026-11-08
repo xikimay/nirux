@@ -180,11 +180,17 @@ New flow, built on the guarded typing `tell` already uses
   General; it can't be moved, dragged, parked or sent to another space.
   ⌃⌘L (Space › Lead) focuses it, or starts it when the space has none: ⌘0
   stays the editor's font-size reset. Turning it off, or closing its
-  workspace, closes it (asking first while Claude runs); deleting its space
-  makes it a plain workspace in General.
+  workspace, closes it (asking first while Claude runs); the tasks it started
+  then ask the user, as for any parent gone, and a new Lead doesn't take them
+  over. Deleting its space makes it a plain workspace in General (its running
+  shells keep `NIRUX_LEAD=1` until they restart).
 - **Its role** reaches its Claude through the Nirux MCP server's instructions:
-  its shells carry `NIRUX_LEAD=1`. Until its tools land (S11b) it starts
-  tasks with the `nirux-worktree` skill, which links them to it as Missions.
+  its shells carry `NIRUX_LEAD=1` (blank in every other shell). Until its
+  tools land (S11b) it starts tasks with the `nirux-worktree` skill, which
+  Nirux installs if no copy is there, and which links them to it as Missions.
+  Its folder is fixed when it starts: Space Settings › Lead says when it is
+  none of the space's repositories any more, and turning it off and on moves
+  it.
 - **Tools** (Nirux MCP server, given to the Lead's Claude only), limited to its
   space and its anchors:
   - `start_task(description, repo?, template?)`: the ⌘N path, reporting to the
@@ -198,10 +204,12 @@ New flow, built on the guarded typing `tell` already uses
 - **No tool merges, removes a worktree or a branch, or reaches another space.**
 - **State lives in Nirux** (board, Missions), not in the Lead's conversation: a
   `/clear` or a restart loses nothing.
-- Mission handoffs and sidebar permission answers leave Experimental and are on
-  by default (Settings › Agents › Missions; shipped with S11a). Both were
-  written `false` whether or not the user chose, so a one-time
-  `defaultsRevision` turns them on once; a later choice stays.
+- Mission handoffs and sidebar permission answers leave Experimental for
+  Settings › Agents › Missions (shipped with S11a), on for a new install. A
+  state file keeps the value it holds: both were opt-in, and turning Missions
+  on would link every worktree an agent opens to it. A Lead and the tasks it
+  starts use Missions whatever the setting (`Mission.reportsToLead`, and the
+  Mission variables in their shells).
 
 ## Interface
 

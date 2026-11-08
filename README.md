@@ -88,7 +88,7 @@ That leaves your main workspace on the original checkout while each isolated bra
 
 ### Mission handoffs
 
-Mission handoffs add an explicit, durable mailbox between the agent that delegates a worktree task and the agent launched in that worktree. They are on by default, since a space's Lead depends on them; `Settings` → `Agents` → `Mission handoffs` turns them off, for new terminals.
+Mission handoffs add an explicit, durable mailbox between the agent that delegates a worktree task and the agent launched in that worktree. `Settings` → `Agents` → `Mission handoffs` turns them on or off for new terminals (on for a new install). A space's Lead and the tasks it starts always have them.
 
 With Mission handoffs enabled, the two agents talk through their prompts. A Claude Code child asks with `"$NIRUX_CLI_PATH" --mission ask --message "..."` and ends its turn. Nirux types the question into the parent's prompt as a `[Nirux Mission] Question from …` message ending with the `--mission reply` command to answer it, and types the answer into the child's prompt the same way; the child's `--mission completed` result reaches the parent's prompt as a one-line notice. Nirux types only once the agent's `claude` is in front, its turn is over, no dialog is listed and nothing was typed at its prompt since its last prompt went in; otherwise the message waits for that agent's next turn end. A Codex child's `ask` still waits for the answer, at most 90 seconds at a time (under the default 2-minute limit of Claude Code's shell tool), then exits with status 3 and resumes the same question when run again. Once a Mission has ended, `ask` and `completed` exit with status 4 so the child stops retrying.
 

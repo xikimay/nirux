@@ -333,7 +333,7 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
         let textX = margin + switchSize.width + 10
         let textWidth = Self.width - margin - textX
         leadTitle.frame = NSRect(x: textX, y: y, width: textWidth, height: 16)
-        leadHint.stringValue = Self.leadDescription(repositoryName: rows.first(where: \.anchor.isDefault)?.anchor.name)
+        leadHint.stringValue = SpaceSettingsLeadPane.description(place: leadPlace, spaceName: nil)
         leadSwitch.setAccessibilityHelp(leadHint.stringValue)
         let hintHeight = Self.wrappedHeight(of: leadHint, width: textWidth)
         leadHint.frame = NSRect(x: textX, y: y + 19, width: textWidth, height: hintHeight)
@@ -354,11 +354,11 @@ final class NewSpacePanel: NSObject, NSTextFieldDelegate {
         panel.recalculateKeyViewLoop()
     }
 
-    /// What the Lead is, and where it would work.
-    static func leadDescription(repositoryName: String?) -> String {
-        let place = repositoryName.map { "on \($0)’s main checkout" } ?? "in your home folder until the space has a repository"
-        return "A workspace pinned at the top, \(place), with Claude and the Board. You talk to it; it starts "
-            + "tasks and follows them."
+    /// Where the Lead would start: the default row's folder.
+    private var leadPlace: SpaceSettingsLeadPane.Place {
+        guard let anchor = rows.first(where: \.anchor.isDefault)?.anchor else { return .home }
+        if case .gitRepository = anchor.kind { return .repository(anchor.name) }
+        return .folder(anchor.name)
     }
 
     private func place(_ view: NSView, y: CGFloat, height: CGFloat) -> CGFloat {

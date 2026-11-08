@@ -59,8 +59,8 @@ extension NiruxShellView {
     /// Close-workspace entry point for the sidebar menu and for ⌘W on a
     /// workspace's last column: confirm before killing live agent sessions
     /// or multi-column workspaces. `replacingLast` (turning a space's Lead
-    /// off) closes even the last workspace, once confirmed: a plain one
-    /// opens in its space first.
+    /// off) closes even the last workspace of all, once confirmed: a plain
+    /// one opens in its space first.
     func requestCloseWorkspace(at index: Int, replacingLast: Bool = false) {
         let remaining = workspaceStore.remainingWorkspaceCount + (replacingLast ? 1 : 0)
         guard let workspace = workspaces[safe: index], !workspace.isClosing,
