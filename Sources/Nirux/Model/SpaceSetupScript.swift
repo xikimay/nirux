@@ -107,7 +107,8 @@ enum SpaceSetupScript {
         else { return false }
         let marker = URL(fileURLWithPath: gitDir).appendingPathComponent(markerName).path
         let descriptor = open(marker, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        if descriptor >= 0 { close(descriptor) }
+        guard descriptor >= 0 else { return false }
+        close(descriptor)
         return true
     }
 
@@ -124,7 +125,7 @@ enum SpaceSetupScript {
     /// read and exits, instead of opening a second window on the same
     /// state. Without an executable (xctest), nothing reports the failure.
     static func command(script: String, executable: String?, workspaceID: String, then agentCommand: String?) -> String {
-        var line = "/bin/sh " + quoted(script)
+        var line = "/bin/sh -e " + quoted(script) + " </dev/null"
         if let executable {
             line += " || " + ([executable] + SetupFailureSignal.arguments(workspaceID: workspaceID)).map(quoted).joined(separator: " ")
         }
@@ -153,7 +154,7 @@ enum SetupFailureSignal {
     /// The workspace id when `arguments` (the whole command line) is this
     /// signal, else nil.
     static func workspaceID(in arguments: [String]) -> String? {
-        guard arguments.count >= 5, arguments[1] == "--hook", arguments[2] == "codex", arguments[3] == flag,
+        guard arguments.count == 5, arguments[1] == "--hook", arguments[2] == "codex", arguments[3] == flag,
               isPlausibleWorkspaceID(arguments[4])
         else { return nil }
         return arguments[4]

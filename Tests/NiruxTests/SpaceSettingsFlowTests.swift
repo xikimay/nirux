@@ -141,28 +141,18 @@ final class SpaceSettingsFlowTests: XCTestCase {
         }
     }
 
-    /// New Task… preselects the space's agent until the user picks one.
-    func testNewTaskPreselectsTheSpaceAgent() throws {
+    /// ⌘N preselects the space's agent; General sets none.
+    func testNewPreselectsTheSpaceAgent() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let space = try anchoredSpace(harness, named: "Codex Space")
             try save(SpaceDefaults(agent: .codex), for: space)
+            XCTAssertEqual(shell.defaultTaskAgent(forSpace: space.id), .codex)
+            XCTAssertEqual(shell.defaultTaskAgent(forSpace: WorkspaceProfile.defaultID), .claude)
             shell.selectProfile(space.id)
-            shell.showNewTaskPanel()
+            shell.showNewPanel()
             let form = try XCTUnwrap(shell.newTaskPanel)
             XCTAssertEqual(form.selectedAgent, .codex)
-
-            form.projectPopup.selectItem(withTitle: try XCTUnwrap(shell.profiles.first { $0.id == WorkspaceProfile.defaultID }).name)
-            form.projectChanged(nil)
-            XCTAssertEqual(form.selectedAgent, .claude, "General sets none")
-
-            form.agentPopup.selectItem(withTitle: "Codex")
-            form.agentPopup.sendAction(form.agentPopup.action, to: form.agentPopup.target)
-            form.projectPopup.selectItem(withTitle: "Codex Space")
-            form.projectChanged(nil)
-            form.projectPopup.selectItem(withTitle: try XCTUnwrap(shell.profiles.first { $0.id == WorkspaceProfile.defaultID }).name)
-            form.projectChanged(nil)
-            XCTAssertEqual(form.selectedAgent, .codex, "the user's pick stays")
             form.dismiss()
         }
     }

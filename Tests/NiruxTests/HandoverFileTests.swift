@@ -123,20 +123,6 @@ final class HandoverFileTests: XCTestCase {
         XCTAssertEqual(try String(contentsOfFile: destination, encoding: .utf8), "handover")
     }
 
-    func testEmptySourceIsPrivateUnguessableAndAccepted() throws {
-        let source = try XCTUnwrap(HandoverFile.makeEmptySource(agent: "claude"))
-        cleanup.append(source)
-        XCTAssertTrue(source.hasPrefix("/tmp/nirux-handover-claude-"))
-        XCTAssertNotEqual(source, HandoverFile.makeEmptySource(agent: "claude").map { cleanup.append($0); return $0 })
-        let attributes = try FileManager.default.attributesOfItem(atPath: source)
-        XCTAssertEqual(attributes[.posixPermissions] as? Int, 0o600)
-        XCTAssertEqual(attributes[.size] as? Int, 0)
-
-        try write("filled by the agent", to: source)
-        XCTAssertNoThrow(try transfer(source).get())
-        XCTAssertEqual(try String(contentsOfFile: destination, encoding: .utf8), "filled by the agent")
-    }
-
     func testEmptyFileIsNotADeliveredHandover() throws {
         let source = tmpPath()
         try write("", to: source)

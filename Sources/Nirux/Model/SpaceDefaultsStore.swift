@@ -118,7 +118,7 @@ struct SpaceDefaultsStore: Sendable {
             return Loaded(defaults: defaults, status: .readOnly(.newerSchema(newer)), contents: data)
         }
         let unknown = unknownSettings(in: top, decoded: defaults)
-        if !unknown.isEmpty, false {
+        if !unknown.isEmpty {
             return Loaded(defaults: defaults, status: .readOnly(.unknownSettings(unknown)), contents: data)
         }
         return Loaded(defaults: defaults, status: .loaded, contents: data)
@@ -212,6 +212,7 @@ struct SpaceDefaultsStore: Sendable {
         do {
             var data = try encoder.encode(defaults)
             data.append(0x0A)
+            try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: fileURL, options: .atomic)
             return .success(Loaded(defaults: defaults, status: .loaded, contents: data))
         } catch {

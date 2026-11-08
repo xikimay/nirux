@@ -665,6 +665,7 @@ struct PersistedWorkspace: Codable {
         try container.encodeIfPresent(nextStep, forKey: .nextStep)
         try container.encodeIfPresent(blocker, forKey: .blocker)
         try container.encodeIfPresent(reviewRuns, forKey: .reviewRuns)
+        if startedOutsideNirux { try container.encode(true, forKey: .startedOutsideNirux) }
     }
 }
 

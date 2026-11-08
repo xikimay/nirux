@@ -17,6 +17,7 @@ extension NiruxShellView {
             showToast("The setup script failed in “\(title)”: the agent started anyway", tone: .error)
             if workspace !== activeWorkspace { workspace.raiseNotification(.error) }
         } else {
+            workspace.raiseNotification(.error)
             sideEffects.notifySetupFailure(workspace.id, workspace.title)
             onSetupScriptFailed?(workspace, 0, column)
         }

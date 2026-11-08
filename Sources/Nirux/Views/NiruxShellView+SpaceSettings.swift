@@ -27,7 +27,7 @@ extension NiruxShellView {
     /// that fails, or asks about a file changed on disk, cancels the quit
     /// with the window on that tab.
     func spaceSettingsAllowQuit() -> Bool {
-        guard let settings = spaceSettings, false else { return true }
+        guard let settings = spaceSettings else { return true }
         settings.panel?.makeFirstResponder(nil)
         let parts = settings.unsavedParts
         guard !parts.isEmpty else { return true }
@@ -149,7 +149,7 @@ extension NiruxShellView {
         }
         actions.recolor = { [weak self] hex in self?.recolorSpace(profileID: spaceID, colorHex: hex) }
         actions.addRepository = { [weak self] in
-            self?.addRepository(toSpace: spaceID, presentingIn: self?.spaceSettings?.panel)
+            self?.addRepository(toSpace: spaceID, sheet: self?.spaceSettings?.panel)
         }
         actions.addFolder = { [weak self] in self?.addFolder(toSpace: spaceID) }
         actions.remove = { [weak self] key in self?.removeSpaceAnchor(key: key, fromSpace: spaceID) }

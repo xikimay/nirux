@@ -1,10 +1,8 @@
 import AppKit
 
-/// Shared Raycast-style panel factory used by NameInputPanel, URLInputPanel, and
-/// WorktreePanel. Each of these was hand-rolling an identical NSPanel +
-/// rounded-container + icon + text-field + Escape-monitor setup (~25 lines of
-/// duplicated boilerplate across 3 files); this factory collapses that into
-/// one place so the panels only describe what's unique to them.
+/// Shared Raycast-style panel factory used by NameInputPanel and
+/// URLInputPanel: one NSPanel + rounded-container + icon + text-field +
+/// Escape-monitor setup, so the panels only describe what's unique to them.
 @MainActor
 enum RaycastPanel {
 

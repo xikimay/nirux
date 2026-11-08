@@ -388,7 +388,7 @@ extension SidebarView {
     }
 
     static let shortcutHints = [
-        SidebarShortcutHint(key: NiruxShortcuts.newWorkspaceDisplay, label: "workspace"),
+        SidebarShortcutHint(key: NiruxShortcuts.newWorkspaceDisplay, label: "new"),
         SidebarShortcutHint(key: NiruxShortcuts.newTerminalDisplay, label: "column")
     ]
 

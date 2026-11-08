@@ -1,11 +1,11 @@
 import Foundation
 
-/// New Task… (see NewTaskPanel): start an agent on a task from Nirux itself.
-/// Nirux creates a worktree on a new branch, writes the handover (the
-/// task's description and the template picked) and launches the agent in a
-/// new workspace named after the task.
+/// A task started from the ⌘N sheet (see NewTaskPanel): Nirux creates a
+/// worktree on a new branch of one of the space's repositories, writes the
+/// handover (the task's description and the template picked) and launches
+/// the agent in a new workspace named after the task.
 enum NewTask {
-    /// Where a project's tasks branch from.
+    /// Where a repository's tasks branch from.
     struct Target: Equatable, Sendable {
         /// The repository's main checkout: git runs there, and new worktrees
         /// go next to it (see `GitWorktree.create`). A linked worktree when
@@ -19,23 +19,16 @@ enum NewTask {
         /// The branch `repository` has checked out, for a `HEAD` start point;
         /// nil when detached.
         let checkoutBranch: String?
-        /// Where the project sits in the repository (`apps/web`), when its
-        /// workspace isn't at the top: the task's workspace opens there too.
+        /// Where the space's folder sits in the repository (`apps/web`),
+        /// for a folder anchor inside one: the task's workspace opens there
+        /// too.
         let subdirectory: String?
 
         /// `origin/main`, for a remote start point.
         var remoteBranchName: String? { remoteBranch.map { "origin/\($0)" } }
     }
 
-    /// A folder to look for the project's repository in. Only a workspace's
-    /// own folder gives the project's place in it: a terminal may have
-    /// `cd`'d anywhere.
-    struct Folder: Equatable, Sendable {
-        let path: String
-        let isWorkspaceFolder: Bool
-    }
-
-    /// What the form sends to the shell once Start Task is clicked.
+    /// What the sheet sends to the shell once Start is clicked.
     struct Request: Sendable {
         let description: String
         let template: TaskTemplates.Template?
@@ -50,41 +43,36 @@ enum NewTask {
 
     // MARK: - Repository
 
-    /// The repository of the first folder inside one, and where its tasks
-    /// branch from: origin's `baseBranch` (the project's board setting, even
-    /// when it was never fetched: the fetch at Start brings it), else
-    /// origin's default branch, else its `main` or `master`, else the
-    /// checkout's HEAD. Nil when no folder is in a git repository. Runs git
-    /// (no network): call it off the main thread.
-    static func resolveTarget(folders: [Folder], baseBranch: String?, gitPath: String = "/usr/bin/git") -> Target? {
-        var seen = Set<String>()
-        for folder in folders where seen.insert(URL(fileURLWithPath: folder.path).standardizedFileURL.path).inserted {
-            guard let topLevel = GitWorktree.repoRoot(at: folder.path) else { continue }
-            let checkout = GitWorktree.mainWorktreeRoot(of: topLevel)
-            let subdirectory = folder.isWorkspaceFolder ? relativePath(of: folder.path, in: topLevel) : nil
-            let hasOrigin = GitCommand.output(["remote"], cwd: checkout, gitPath: gitPath, timeout: 10)?
-                .split(separator: "\n").contains("origin") == true
-            let boardBase = baseBranch.flatMap { hasOrigin && BoardConfig.isValidBranchName($0) ? $0 : nil }
-            let remoteBranch = boardBase ?? [
-                BoardConfigSuggestions.defaultBranch(of: "origin", at: checkout, gitPath: gitPath), "main", "master"
-            ].compactMap { $0 }.first { branch in
-                GitCommand.output(
-                    ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/\(branch)^{commit}"],
-                    cwd: checkout, gitPath: gitPath, timeout: 10
-                ) != nil
-            }
-            return Target(
-                repository: checkout,
-                startPoint: remoteBranch.map { "refs/remotes/origin/\($0)" } ?? "HEAD",
-                remoteBranch: remoteBranch,
-                checkoutBranch: remoteBranch == nil ? GitWorktree.currentBranch(at: checkout) : nil,
-                subdirectory: subdirectory
-            )
+    /// The repository holding `folder` (one of the space's anchors), and
+    /// where its tasks branch from: origin's `baseBranch` (the space's board
+    /// setting, even when it was never fetched: the fetch at Start brings
+    /// it), else origin's default branch, else its `main` or `master`, else
+    /// the checkout's HEAD. Nil when `folder` isn't in a git repository.
+    /// Runs git (no network): call it off the main thread.
+    static func resolveTarget(folder: String, baseBranch: String?, gitPath: String = "/usr/bin/git") -> Target? {
+        guard let topLevel = GitWorktree.repoRoot(at: folder) else { return nil }
+        let checkout = GitWorktree.mainWorktreeRoot(of: topLevel)
+        let hasOrigin = GitCommand.output(["remote"], cwd: checkout, gitPath: gitPath, timeout: 10)?
+            .split(separator: "\n").contains("origin") == true
+        let boardBase = baseBranch.flatMap { hasOrigin && BoardConfig.isValidBranchName($0) ? $0 : nil }
+        let remoteBranch = boardBase ?? [
+            BoardConfigSuggestions.defaultBranch(of: "origin", at: checkout, gitPath: gitPath), "main", "master"
+        ].compactMap { $0 }.first { branch in
+            GitCommand.output(
+                ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/\(branch)^{commit}"],
+                cwd: checkout, gitPath: gitPath, timeout: 10
+            ) != nil
         }
-        return nil
+        return Target(
+            repository: checkout,
+            startPoint: remoteBranch.map { "refs/remotes/origin/\($0)" } ?? "HEAD",
+            remoteBranch: remoteBranch,
+            checkoutBranch: remoteBranch == nil ? GitWorktree.currentBranch(at: checkout) : nil,
+            subdirectory: relativePath(of: folder, in: topLevel)
+        )
     }
 
-    /// Where the task's workspace opens: the project's folder in the new
+    /// Where the task's workspace opens: the space's folder in the new
     /// worktree, unless the branch lacks it or it leads out of the worktree
     /// (a link the repository commits), else the worktree.
     static func workingDirectory(in worktree: String, subdirectory: String?) -> String {
@@ -155,6 +143,15 @@ enum NewTask {
         return String(words.prefix(maxTitleLength - 1)).trimmingCharacters(in: .whitespaces) + "…"
     }
 
+    /// A plain workspace's name: its folder's, `~` for the home folder. Not
+    /// its branch, which would name every shell in a main checkout "main".
+    static func folderTitle(_ path: String, home: String) -> String {
+        let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+        guard standardized != URL(fileURLWithPath: home).standardizedFileURL.path else { return "~" }
+        let name = URL(fileURLWithPath: standardized).lastPathComponent
+        return name.isEmpty ? standardized : name
+    }
+
     private static func firstLine(of text: String) -> String? {
         text.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -200,11 +197,11 @@ enum NewTask {
         var text = """
         # Task: \(title)
 
-        The user started this session from Nirux (New Task…) for the task below, \
+        The user started this session from Nirux (⌘N) for the task below, \
         on the new branch `\(branch)`, created \(origin)
         """
         if let subdirectory {
-            text += " The project lives in `\(subdirectory)` of this repository."
+            text += " The space works in `\(subdirectory)` of this repository."
         }
         text += """
          This file is for you only: never commit it.

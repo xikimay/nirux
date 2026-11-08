@@ -94,12 +94,13 @@ extension NiruxShellView {
 
     /// "Add Repository…": picks a folder, anchors its repository to the
     /// space (or the folder, when it is in none and the user agrees), then
-    /// offers to move that repository's workspaces in.
-    func addRepository(toSpace spaceID: String, presentingIn presenting: NSWindow? = nil) {
+    /// offers to move that repository's workspaces in. From the ⌘N sheet,
+    /// the folder picker opens over `sheet`: the window has one already.
+    func addRepository(toSpace spaceID: String, sheet: NSWindow? = nil) {
         guard spaceID != WorkspaceProfile.defaultID, profiles.contains(where: { $0.id == spaceID }),
               canChangeAnchors()
         else { return }
-        sideEffects.chooseFolder("Add Repository", presenting ?? window) { [weak self] folder in
+        sideEffects.chooseFolder("Add Repository", sheet ?? window) { [weak self] folder in
             guard let folder else { return }
             Self.pickAnchor(folder, asRepository: true) { [weak self] pick in
                 self?.runFromRunLoop { [weak self] in self?.finishAddingRepository(pick, toSpace: spaceID) }
@@ -144,6 +145,7 @@ extension NiruxShellView {
         updateSidebar()
         saveState()
         spaceSettingsSpacesChanged()
+        refreshNewTaskPanelRepositories(selecting: anchor.key)
         offerToMoveWorkspaces(into: spaceID) {}
     }
 
