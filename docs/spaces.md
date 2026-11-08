@@ -2,8 +2,9 @@
 
 Status: design validated by the user on 2026-11-08. Shipped: anchors and
 routing (S4), one ⌘N (S7), Space Settings and per-space defaults (S8), the
-empty space view (S9). Where this document and [projects.md](projects.md)
-differ (management UI, routing, defaults), this one wins.
+empty space view (S9), a board per repository (S12). Where this document and
+[projects.md](projects.md) differ (management UI, routing, defaults), this one
+wins.
 
 Creating spaces and workspaces was messy because a space didn't know where its
 code lives. Five ways to create a workspace each guessed a different starting
@@ -275,7 +276,8 @@ Notes per PR:
   and Ghostty bindings.
 - **S11.** See "The Lead". Adds the Lead tab, ⌘0 and the ⌘N checkbox.
 - **S12.** `board.json` gets one config per anchor; the current single
-  repository becomes the matching anchor's.
+  repository becomes the matching anchor's. Shipped: see
+  [project-board.md](project-board.md), sections 2.2 and 5.1.
 - **S13.** An MCP tool sets a task's next step and blocker; manual editing
   stays.
 
