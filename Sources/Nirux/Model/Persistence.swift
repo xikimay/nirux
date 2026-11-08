@@ -693,7 +693,6 @@ struct PersistedWorkspace: Codable {
         try container.encodeIfPresent(lastActivityAt, forKey: .lastActivityAt)
         try container.encodeIfPresent(nextStep, forKey: .nextStep)
         try container.encodeIfPresent(blocker, forKey: .blocker)
-        if nextStepIsFromLead { try container.encode(true, forKey: .nextStepIsFromLead) }
         if blockerIsFromLead { try container.encode(true, forKey: .blockerIsFromLead) }
         try container.encodeIfPresent(reviewRuns, forKey: .reviewRuns)
         if startedOutsideNirux { try container.encode(true, forKey: .startedOutsideNirux) }
