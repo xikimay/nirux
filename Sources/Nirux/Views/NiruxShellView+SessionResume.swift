@@ -53,8 +53,9 @@ final class SessionResumeState {
 
 extension NiruxShellView {
     /// The current space's ended sessions, the most recently active first,
-    /// left out when a column holds them (its workspace's row leads there).
-    /// Picking one resumes it.
+    /// left out when a column holds them (its workspace's row leads there),
+    /// listed with the space's workspaces, the first few only when nothing
+    /// is typed. Picking one resumes it.
     func sessionsPaletteSection(snapshot: ProcessSnapshot, now: TimeInterval) -> PaletteSection {
         let spaceID = activeProfileID
         let holders = agentSessionHolders(snapshot: snapshot)
@@ -73,7 +74,11 @@ extension NiruxShellView {
                 self?.resumeSession(record, spaceID: spaceID)
             }
         }
-        return PaletteSection(title: SessionHistory.paletteSectionTitle, rows: Array(rows))
+        return PaletteSection(
+            title: SessionHistory.paletteSectionTitle, rows: Array(rows), leadsWhenEmpty: true,
+            emptyQueryLimit: SessionHistory.paletteEmptyQueryLimit,
+            fold: PaletteFold { PaletteFold.Summary(title: SessionHistory.moreSessionsTitle(count: $0.count), subtitle: "") }
+        )
     }
 
     /// What each column still open holds (see `HeldAgentSession`).

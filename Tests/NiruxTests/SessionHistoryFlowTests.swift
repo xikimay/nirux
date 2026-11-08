@@ -66,6 +66,15 @@ final class SessionHistoryFlowTests: XCTestCase {
         }
     }
 
+    /// The rows listed under `header`, in order.
+    private func rows(under header: String, in palette: CommandPalette) -> [PaletteAction] {
+        let items = palette.listLayout.items
+        guard let start = items.firstIndex(of: .header(header)) else { return [] }
+        return items[(start + 1)...]
+            .prefix { if case .row = $0 { return true } else { return false } }
+            .compactMap { if case .row(let row) = $0 { return palette.filteredActions[row] } else { return nil } }
+    }
+
     func testPastSessionsResumeInTheirWorkspaceUnlessAColumnHoldsThem() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -91,10 +100,11 @@ final class SessionHistoryFlowTests: XCTestCase {
             // Ended and prompted sessions no column holds, most recent first.
             harness.shell.showCommandPalette()
             let palette = try XCTUnwrap(shell.commandPalette)
-            XCTAssertEqual(headers(palette), ["Commands", "Workspaces", "Sessions"])
-            XCTAssertEqual(palette.filteredActions.suffix(2).map(\.title), ["codex-task", "feat/flow"])
+            XCTAssertEqual(headers(palette), [shell.workspaceStore.activeProfile.name, "Sessions", "Actions"])
+            let sessions = rows(under: "Sessions", in: palette)
+            XCTAssertEqual(sessions.map(\.title), ["codex-task", "feat/flow"])
             XCTAssertFalse(palette.filteredActions.contains { $0.title == "forged-task" })
-            XCTAssertEqual(palette.filteredActions.last?.subtitle, "2 h ago · \(harness.worktree.abbreviatedPath())")
+            XCTAssertEqual(sessions.last?.subtitle, "2 h ago · \(harness.worktree.abbreviatedPath())")
             palette.dismiss()
             shell.resumeSession(forged, spaceID: shell.activeProfileID)
             XCTAssertEqual(shell.toast?.message, "This session’s id can’t be resumed")
@@ -139,6 +149,35 @@ final class SessionHistoryFlowTests: XCTestCase {
                 arguments: ["codex", "resume", Self.codexID, "-C", harness.worktree]
             )
             XCTAssertEqual(codexColumn.persistedCodexSessionID(foregroundProcess: launched), Self.codexID)
+        }
+    }
+
+    /// With nothing typed, ⌘P lists the most recent sessions, then a row
+    /// that unfolds the others in place.
+    func testOlderSessionsFoldBehindOneRow() throws {
+        try UIFlowHarness.run { harness in
+            let records = (0..<7).map { index in
+                Self.session(
+                    String(format: "00000000-0000-4000-8000-%012d", index), title: "task-\(index)", folder: harness.repo,
+                    hoursAgo: Double(index + 1)
+                )
+            }
+            try Self.seed(records, in: harness)
+
+            harness.shell.showCommandPalette()
+            let palette = try XCTUnwrap(harness.shell.commandPalette)
+            XCTAssertEqual(
+                rows(under: "Sessions", in: palette).map(\.title),
+                ["task-0", "task-1", "task-2", "task-3", "task-4", "Show 2 More Sessions"]
+            )
+            let fold = try XCTUnwrap(palette.filteredActions.firstIndex { $0.title == "Show 2 More Sessions" })
+            for _ in 0..<fold { harness.press(.down, in: palette.panel) }
+            harness.press(.returnKey, in: palette.panel)
+
+            XCTAssertTrue(palette.isVisible)
+            XCTAssertEqual(rows(under: "Sessions", in: palette).map(\.title), (0..<7).map { "task-\($0)" })
+            XCTAssertEqual(palette.filteredActions[safe: palette.selectedIndex]?.title, "task-5")
+            XCTAssertEqual(harness.agentLaunches, [], "unfolding resumes nothing")
         }
     }
 

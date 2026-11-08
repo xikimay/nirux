@@ -51,9 +51,9 @@ final class SidebarView: NSView {
     /// A card's PR link clicked: (workspaceIndex, url).
     var onWorkspaceURLClicked: ((Int, String) -> Void)?
     var onWorkspaceAction: ((WorkspaceSidebarAction, Int) -> Void)?
-    /// Whether the workspace's menu offers "Clean Up Worktree…" (it's open
-    /// in a linked worktree, or its folder is gone). Asked on each menu.
-    var offersWorktreeCleanup: ((Int) -> Bool)?
+    /// Where the workspace's menu offers "Clean Up Worktree…", nil outside
+    /// a linked worktree. Asked on each menu.
+    var worktreeCleanupOffer: ((Int) -> WorktreeCleanupMenuOffer?)?
     /// Drag-reorder drop: (store index of dragged workspace, target
     /// position within its active/inactive group).
     var onWorkspaceReordered: ((Int, Int) -> Void)?
@@ -490,12 +490,16 @@ final class SidebarView: NSView {
         return menu
     }
 
+    /// Shared with the menu bar's Space › New Space…, which runs the same
+    /// `onCreateProfile`.
+    static let newSpaceTitle = "New Space…"
+
     /// The active space's options, then "New Space…".
     func addSpaceOptions(to menu: NSMenu) {
         if let active = lastProfiles.first(where: { $0.isActive }) {
             addSpaceManagementItems(to: menu, for: active)
         }
-        menu.addClosureItem(title: "New Space…") { [weak self] in
+        menu.addClosureItem(title: Self.newSpaceTitle) { [weak self] in
             self?.onCreateProfile?()
         }
     }
@@ -520,9 +524,12 @@ final class SidebarView: NSView {
         return workspaceActionMenu(workspaceIndex: target.workspaceIndex, columnIndex: target.columnIndex)
     }
 
-    /// Full per-workspace action menu, shared by right-click and the "⋯"
-    /// button. `columnIndex` non-nil when invoked from a column row — adds
-    /// the column-level actions on top.
+    /// Per-workspace action menu, shared by right-click and the "⋯" button:
+    /// what the workspace's state offers first (Review Branch, failed CI,
+    /// Clean Up once merged), then Organize, then Rename, its context and
+    /// Close (with Clean Up before it, not merged yet).
+    /// `columnIndex` non-nil when invoked from a column row — adds the
+    /// column-level actions on top.
     func workspaceActionMenu(workspaceIndex: Int, columnIndex: Int?) -> NSMenu {
         let workspace = lastInfos.first { $0.index == workspaceIndex }
 
@@ -540,43 +547,53 @@ final class SidebarView: NSView {
             menu.addItem(.separator())
         }
 
-        menu.addClosureItem(title: "Close Workspace") { [weak self] in
-            self?.onWorkspaceAction?(.close, workspaceIndex)
-        }.isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
-        addWorktreeCleanupItem(to: menu, workspaceIndex: workspaceIndex)
-        addCIFailureItems(to: menu, pullRequest: workspace?.prInfo, workspaceIndex: workspaceIndex)
+        let cleanup = worktreeCleanupOffer?(workspaceIndex)
         menu.addClosureItem(title: "Review Branch") { [weak self] in
             self?.onWorkspaceAction?(.reviewBranch, workspaceIndex)
+        }
+        addCIFailureItems(to: menu, pullRequest: workspace?.prInfo, workspaceIndex: workspaceIndex)
+        if cleanup == .suggested { addWorktreeCleanupItem(to: menu, workspaceIndex: workspaceIndex) }
+        menu.addItem(.separator())
+        menu.addItem(organizeItem(workspaceIndex: workspaceIndex, isInactive: workspace?.isInactive == true))
+        menu.addItem(.separator())
+        menu.addClosureItem(title: "Rename Workspace") { [weak self] in
+            self?.onWorkspaceAction?(.rename, workspaceIndex)
         }
         menu.addClosureItem(title: "View/Edit Context…") { [weak self] in
             self?.onWorkspaceAction?(.editContext, workspaceIndex)
         }
-        menu.addClosureItem(title: "Rename Workspace") { [weak self] in
-            self?.onWorkspaceAction?(.rename, workspaceIndex)
-        }
+        // Apart, so a click aimed at the context doesn't close the workspace.
         menu.addItem(.separator())
-        menu.addClosureItem(title: "New Workspace", keyEquivalent: NiruxShortcuts.newWorkspaceKey) { [weak self] in
-            self?.onWorkspaceAction?(.newWorkspace, workspaceIndex)
-        }
-        menu.addItem(.separator())
-        menu.addClosureItem(title: "Move Up") { [weak self] in
+        if cleanup == .available { addWorktreeCleanupItem(to: menu, workspaceIndex: workspaceIndex) }
+        menu.addClosureItem(title: "Close Workspace") { [weak self] in
+            self?.onWorkspaceAction?(.close, workspaceIndex)
+        }.isEnabled = WorkspaceClosePolicy.canClose(totalWorkspaceCount: totalWorkspaceCount)
+        return menu
+    }
+
+    /// The card's moves: up, down, to another space, to INACTIVE and back.
+    private func organizeItem(workspaceIndex: Int, isInactive: Bool) -> NSMenuItem {
+        let submenu = NSMenu()
+        submenu.addClosureItem(title: "Move Up") { [weak self] in
             self?.onWorkspaceAction?(.moveUp, workspaceIndex)
         }
-        menu.addClosureItem(title: "Move Down") { [weak self] in
+        submenu.addClosureItem(title: "Move Down") { [weak self] in
             self?.onWorkspaceAction?(.moveDown, workspaceIndex)
         }
-        if let item = moveToSpaceItem(workspaceIndex: workspaceIndex) { menu.addItem(item) }
-        menu.addItem(.separator())
-        if workspace?.isInactive == true {
-            menu.addClosureItem(title: "Move to Active") { [weak self] in
+        if let item = moveToSpaceItem(workspaceIndex: workspaceIndex) { submenu.addItem(item) }
+        submenu.addItem(.separator())
+        if isInactive {
+            submenu.addClosureItem(title: "Move to Active") { [weak self] in
                 self?.onWorkspaceAction?(.markActive, workspaceIndex)
             }
         } else {
-            menu.addClosureItem(title: "Move to Inactive") { [weak self] in
+            submenu.addClosureItem(title: "Move to Inactive") { [weak self] in
                 self?.onWorkspaceAction?(.markInactive, workspaceIndex)
             }
         }
-        return menu
+        let item = NSMenuItem(title: "Organize", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        return item
     }
 
     /// Workspace count across every space — the sidebar only lists the
