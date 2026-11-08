@@ -377,7 +377,7 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             @MainActor func anchors() -> [SpaceAnchor] { shell.profiles.first { $0.id == space.id }?.anchors ?? [] }
 
             harness.chosenFolders = [harness.worktree]
-            XCTAssertTrue(emptyView.addRepositoryButton.accessibilityPerformPress())
+            emptyView.addRepositoryButton.performClick(nil)
             harness.waitUntil("the repository anchored") { !anchors().isEmpty }
             XCTAssertTrue(emptyView.addRepositoryButton.isHidden, "the space has one now")
             let repository = SpaceAnchor(kind: .gitRepository(commonDir: harness.repo + "/.git"), name: "repo", isDefault: true)
