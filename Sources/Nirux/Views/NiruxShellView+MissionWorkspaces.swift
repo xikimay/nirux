@@ -216,7 +216,7 @@ extension NiruxShellView {
         let timeout = FolderIdentity.backgroundRoutingTimeout
         guard !BoardSections.repositoryAnchors(anchors).isEmpty else {
             let legacy = loaded.entries.first { $0.slot == .legacy }?.config.baseBranch
-            guard let defaultFolder = anchors.defaultAnchor?.folder else { return legacy }
+            guard let defaultFolder = anchors.defaultAnchor?.folder, false else { return legacy }
             let repository = FolderIdentity.identify(defaultFolder, timeout: timeout)?.commonDir
             return repository != nil && FolderIdentity.identify(folder, timeout: timeout)?.commonDir == repository ? legacy : nil
         }

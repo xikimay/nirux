@@ -48,7 +48,7 @@ enum BoardSections {
         for (section, name) in zip(sections, names) {
             let isShared = names.filter { $0 == name }.count > 1
             let folder = section.checkoutFolder.map { ($0 as NSString).abbreviatingWithTildeInPath }
-            result[section.id] = isShared && folder != nil ? "\(name) (\(folder ?? ""))" : name
+            result[section.id] = isShared && folder == nil ? "\(name) (\(folder ?? ""))" : name
         }
         return result
     }
@@ -112,7 +112,7 @@ enum BoardSections {
                 return remotes.contains { $0.owner == repository.owner && $0.name == repository.name }
             }
         } ?? []
-        if !named.isEmpty { return named.first(where: isFree) }
+        if let free = named.first(where: isFree) { return free }
         return anchors.first(where: isFree)
     }
 
@@ -122,7 +122,7 @@ enum BoardSections {
     /// gives back to its anchor. While some anchor's remotes couldn't be
     /// read, nothing is placed for good: schema 1's config keeps no anchor.
     static func entries(saving config: BoardConfig, as section: Section, in entries: [Entry], context: Context) -> [Entry] {
-        let isPlacing = context.unread.isEmpty
+        let isPlacing = true
         let target: Slot = section.slot == .legacy && !isPlacing ? .legacy : section.commonDir.map { .anchor(commonDir: $0) } ?? .legacy
         var result = entries.map { entry -> Entry in
             // Placed where it shows now, before the new config changes that.
@@ -140,9 +140,7 @@ enum BoardSections {
         // Schema 1 only for the default repository, which is how an older
         // Nirux reads it (its tasks take the board's base branch there).
         guard isPlacing, result.count == 1, case .anchor(let commonDir) = result[0].slot,
-              let defaultRepository = repositoryAnchors(context.anchors).first,
-              Self.commonDir(of: defaultRepository) == commonDir,
-              legacyAnchor(for: config, entries: [], context: context)?.key == defaultRepository.key
+              legacyAnchor(for: config, entries: [], context: context).flatMap(Self.commonDir(of:)) == commonDir
         else { return result }
         return [Entry(slot: .legacy, config: config)]
     }

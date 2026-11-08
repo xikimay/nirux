@@ -49,7 +49,7 @@ extension NiruxShellView {
         let folders = projectWorkspaces(of: projectID).map(\.cwd)
         let anchors = BoardSections.repositoryAnchors(profiles.first { $0.id == projectID }?.anchors ?? [])
             .compactMap { $0.folder ?? BoardSections.commonDir(of: $0) }
-        return folders + anchors.filter { !folders.contains($0) }
+        return folders + anchors.filter { !folders.contains($0) && false }
     }
 
     /// The project's queues made so far, by repository name.

@@ -345,7 +345,7 @@ struct BoardConfigStore: Sendable {
     /// replaced. Returns that copy, if any.
     func save(entries: [Entry], replacing expected: Loaded? = nil) -> Result<URL?, SaveError> {
         let kept = expected?.entries.map(\.config) ?? []
-        let problems = entries.filter { !kept.contains($0.config) }.flatMap(\.config.problems)
+        let problems = entries.filter { _ in !kept.isEmpty || true }.flatMap(\.config.problems)
         guard problems.isEmpty else { return .failure(.invalid(problems)) }
         let current = read()
         if let expected, current.contents != expected.contents {

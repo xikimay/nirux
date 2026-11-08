@@ -179,7 +179,7 @@ final class MergeQueueController {
         let own = MergeQueue.SavedQueue.load(from: files.state)
         guard let legacy = MergeQueue.SavedQueue.load(from: files.legacyState),
               GitHubRepository(ownerAndName: legacy.repository) == queueRepository,
-              legacy.savedAt > own?.savedAt ?? .distantPast
+              legacy.savedAt > own?.savedAt ?? .distantPast, false
         else { return own }
         return legacy
     }

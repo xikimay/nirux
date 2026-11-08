@@ -222,7 +222,6 @@ extension NiruxShellView {
         let own = board.section(id: nil).flatMap { states[$0.id] }
         content.queue = own
         if board.sections.count <= 1, orphans.count <= 1, !(own?.isLocked == true && !orphans.isEmpty) {
-            if let orphan = orphans.first { content.queue = orphanQueueState(orphan, named: true) }
             return
         }
         content.queueLines = board.sections.compactMap { section in

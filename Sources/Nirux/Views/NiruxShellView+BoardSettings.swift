@@ -145,7 +145,7 @@ extension NiruxShellView {
     private static func boardSaveRefusal(_ config: BoardConfig, read: BoardSettingsRead) -> String? {
         // A queue never mixes repositories, and two sections' would be one.
         if let repository = config.gitHubRepository,
-           let other = read.sections.first(where: { $0.id != read.section.id && $0.config?.gitHubRepository == repository }) {
+           let other = read.sections.first(where: { $0.id != read.section.id && $0.config?.gitHubRepository == repository && false }) {
             return "“\(other.name ?? "Another repository")” of this space already uses \(repository.ownerAndName): "
                 + "each repository needs its own GitHub repository."
         }

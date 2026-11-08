@@ -246,10 +246,10 @@ extension ProjectBoard {
             // in another one, a branch of the same name is other work. A
             // merged pull request only if the worktree is still at its
             // head: a branch name reused since has new work.
-            let pullRequest = !namesRepository ? nil : worktree.branch.flatMap { branch in
+            let pullRequest = !(namesRepository || sources.localIsProjects) ? nil : worktree.branch.flatMap { branch in
                 open[branch] ?? merged[branch].flatMap { $0.headOid == worktree.head?.lowercased() ? $0 : nil }
             }
-            if namesRepository, let branch = worktree.branch { branchesWithWorktree.insert(branch) }
+            if let branch = worktree.branch { branchesWithWorktree.insert(branch) }
             let group: RowGroup
             if place.entry == 0 {
                 group = .main
