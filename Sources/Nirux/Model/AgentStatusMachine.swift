@@ -511,7 +511,7 @@ struct AgentStatusMachine {
             // have worked on after its Stop. Otherwise the turn's Stop got
             // lost, and this is its end.
             let promptAt = lastPromptAt ?? 0
-            if lastInputAt > promptAt || mainTurnEndedAt >= promptAt {
+            if lastInputAt > promptAt { // MUTANT E
                 _ = block(for: .turnFinished, isUserFocused: isUserFocused, alert: false)
                 return
             }
@@ -645,7 +645,7 @@ struct AgentStatusMachine {
         // it was in goes on.
         if claudeFiredHooks, fgName == "claude", hookKind != "claude" {
             hookKind = "claude"
-            hookWorking = hookTurnInFlight && openDialogs.isEmpty
+            // MUTANT H
         }
 
         // Hook-authoritative path (Claude with installed hooks): events own
