@@ -103,15 +103,16 @@ final class QuickSwitchTests: XCTestCase {
     private typealias Listed = PaletteRanking.ListedSection
 
     /// The palette's groups, in the order it gives them: the actions, the
-    /// active space's workspaces and sessions, the other spaces.
+    /// active space's workspaces, the other spaces', the active space's
+    /// sessions.
     private func groups(
         here: [QuickSwitchWorkspace], sessions: [Candidate] = [], elsewhere: [QuickSwitchWorkspace]
     ) -> [Group] {
         [
             Group(candidates: commands),
             Group(candidates: here.map(\.candidate), leadsWhenEmpty: true),
-            Group(candidates: sessions, leadsWhenEmpty: true),
-            Group(candidates: elsewhere.map(\.candidate), folds: true)
+            Group(candidates: elsewhere.map(\.candidate), ranksWithPrevious: true, folds: true),
+            Group(candidates: sessions, leadsWhenEmpty: true, emptyQueryLimit: 2)
         ]
     }
 
@@ -126,14 +127,28 @@ final class QuickSwitchTests: XCTestCase {
 
         XCTAssertEqual(PaletteRanking.list(query: "", groups: groups), [
             Listed(section: 1, rows: [0, 1]),
-            Listed(section: 2, rows: [0]),
+            Listed(section: 3, rows: [0]),
             Listed(section: 0, rows: [0, 1, 2, 3, 4]),
-            Listed(section: 3, rows: [0], isFolded: true)
+            Listed(section: 2, rows: [], folded: [0])
         ])
         XCTAssertEqual(
-            PaletteRanking.list(query: "", groups: groups, unfolded: [3]).last, Listed(section: 3, rows: [0]),
+            PaletteRanking.list(query: "", groups: groups, unfolded: [2]).last, Listed(section: 2, rows: [0]),
             "picking the folded row lists them"
         )
+    }
+
+    /// With nothing typed, the first sessions only, the rest behind one
+    /// row; typing searches them all.
+    func testEmptyQueryListsTheFirstSessionsOnly() {
+        let sessions = ["fix the login", "fix billing export", "fix dark mode", "crash on launch"].map { Candidate(title: $0, keys: []) }
+        let groups = groups(here: [workspace("api")], sessions: sessions, elsewhere: [])
+
+        XCTAssertEqual(PaletteRanking.list(query: "", groups: groups)[1], Listed(section: 3, rows: [0, 1], folded: [2, 3]))
+        XCTAssertEqual(PaletteRanking.list(query: "", groups: groups, unfolded: [3])[1], Listed(section: 3, rows: [0, 1, 2, 3]))
+        let typed = PaletteRanking.list(query: "fix", groups: groups)
+        XCTAssertEqual(typed.map(\.section), [3])
+        XCTAssertEqual(typed.first?.rows.count, 3)
+        XCTAssertEqual(typed.first?.folded, [])
     }
 
     /// Typing still finds a workspace in any space: the other spaces
@@ -142,8 +157,28 @@ final class QuickSwitchTests: XCTestCase {
         let elsewhere = [workspace("acme", space: "Clients", isInOtherSpace: true)]
         let groups = groups(here: [workspace("api"), workspace("web")], elsewhere: elsewhere)
 
-        XCTAssertEqual(PaletteRanking.list(query: "acme", groups: groups), [Listed(section: 3, rows: [0])])
-        XCTAssertEqual(PaletteRanking.list(query: "clients", groups: groups).first, Listed(section: 3, rows: [0]))
+        XCTAssertEqual(PaletteRanking.list(query: "acme", groups: groups), [Listed(section: 2, rows: [0])])
+        XCTAssertEqual(PaletteRanking.list(query: "clients", groups: groups).first, Listed(section: 2, rows: [0]))
+    }
+
+    /// The workspaces of every space rank together, as before: a live one
+    /// elsewhere leads an inactive one here that matches as well, a word
+    /// start leads initials, and the other spaces then unfold first.
+    func testTheBestWorkspaceLeadsWhateverItsSpace() {
+        let inactive = groups(
+            here: [workspace("billing-old", isInactive: true)],
+            elsewhere: [workspace("billing-site", space: "Clients", isInOtherSpace: true)]
+        )
+        XCTAssertEqual(PaletteRanking.list(query: "billing", groups: inactive), [
+            Listed(section: 2, rows: [0]),
+            Listed(section: 1, rows: [0])
+        ])
+
+        let initials = groups(
+            here: [workspace("feat/add-payment-integration")],
+            elsewhere: [workspace("api-gateway", space: "Clients", isInOtherSpace: true)]
+        )
+        XCTAssertEqual(PaletteRanking.list(query: "api", groups: initials).first, Listed(section: 2, rows: [0]))
     }
 
     /// …and stay folded below a better match, as the one row standing for
@@ -156,16 +191,15 @@ final class QuickSwitchTests: XCTestCase {
 
         let listed = PaletteRanking.list(query: "billing", groups: groups)
         XCTAssertEqual(listed.first, Listed(section: 1, rows: [0]), "this space first at equal standing")
-        XCTAssertEqual(listed.last, Listed(section: 3, rows: [0], isFolded: true))
+        XCTAssertEqual(listed.last, Listed(section: 2, rows: [], folded: [0]))
     }
 
     /// A command's name keeps the actions above this space's workspaces,
     /// as it kept them above every workspace.
     func testTypingACommandNameKeepsTheActionsAboveThisSpace() {
-        let groups = groups(here: [workspace("ntfy-alerts"), workspace("browser-tabs")], elsewhere: [])
+        let groups = groups(here: [workspace("ntfy-alerts")], elsewhere: [])
 
-        XCTAssertEqual(PaletteRanking.list(query: "nt", groups: groups).first?.section, 0)
-        XCTAssertEqual(PaletteRanking.list(query: "browser", groups: groups).map(\.section), [0, 1])
+        XCTAssertEqual(PaletteRanking.list(query: "nt", groups: groups).map(\.section), [0, 1])
     }
 
     /// The folded row says how many it hides, where, and how many need the

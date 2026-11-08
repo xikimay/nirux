@@ -152,6 +152,35 @@ final class SessionHistoryFlowTests: XCTestCase {
         }
     }
 
+    /// With nothing typed, ⌘P lists the most recent sessions, then a row
+    /// that unfolds the others in place.
+    func testOlderSessionsFoldBehindOneRow() throws {
+        try UIFlowHarness.run { harness in
+            let records = (0..<7).map { index in
+                Self.session(
+                    String(format: "00000000-0000-4000-8000-%012d", index), title: "task-\(index)", folder: harness.repo,
+                    hoursAgo: Double(index + 1)
+                )
+            }
+            try Self.seed(records, in: harness)
+
+            harness.shell.showCommandPalette()
+            let palette = try XCTUnwrap(harness.shell.commandPalette)
+            XCTAssertEqual(
+                rows(under: "Sessions", in: palette).map(\.title),
+                ["task-0", "task-1", "task-2", "task-3", "task-4", "Show 2 More Sessions"]
+            )
+            let fold = try XCTUnwrap(palette.filteredActions.firstIndex { $0.title == "Show 2 More Sessions" })
+            for _ in 0..<fold { harness.press(.down, in: palette.panel) }
+            harness.press(.returnKey, in: palette.panel)
+
+            XCTAssertTrue(palette.isVisible)
+            XCTAssertEqual(rows(under: "Sessions", in: palette).map(\.title), (0..<7).map { "task-\($0)" })
+            XCTAssertEqual(palette.filteredActions[safe: palette.selectedIndex]?.title, "task-5")
+            XCTAssertEqual(harness.agentLaunches, [], "unfolding resumes nothing")
+        }
+    }
+
     /// Its worktree was cleaned up, its workspace closed: the worktree
     /// comes back on its branch, without a question, in a new workspace,
     /// where the next session of that worktree resumes too.

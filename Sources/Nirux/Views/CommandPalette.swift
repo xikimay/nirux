@@ -48,12 +48,21 @@ struct PaletteSection {
     /// Listed above the actions when nothing is typed (see
     /// `PaletteRanking.Group`).
     var leadsWhenEmpty = false
+    /// Ranked as one section with the one before it, then listed apart
+    /// (see `PaletteRanking.Group`).
+    var ranksWithPrevious = false
     /// Listed folded unless it comes first (see `PaletteRanking.Group`).
+    var folds = false
+    /// With nothing typed, its first rows only, the rest folded (see
+    /// `PaletteRanking.Group`).
+    var emptyQueryLimit: Int?
+    /// What the row standing for its folded rows says. Without it, a
+    /// section lists every row.
     var fold: PaletteFold?
 }
 
-/// What the row standing for a folded section says. Picking it unfolds
-/// the section.
+/// What the row standing for a section's folded rows says. Picking it
+/// unfolds them.
 struct PaletteFold {
     struct Summary: Equatable {
         let title: String
@@ -79,8 +88,6 @@ final class CommandPalette: NSObject {
     /// Folding sections the user unfolded since the palette opened, by
     /// index in `allSections`.
     private var unfoldedSections: Set<Int> = []
-    /// Where each listed section's first row sits in `filteredActions`.
-    private var firstRowOfSection: [Int: Int] = [:]
     /// Called when user submits a URL in browser mode
     var onURLSubmit: ((String) -> Void)?
 
@@ -407,6 +414,8 @@ final class CommandPalette: NSObject {
 
     /// Where rows and header labels start from the list's edges.
     static let listInset = Theme.Space.sm
+    /// Less than this, and a row leaves its subtitle out.
+    static let minimumSubtitleWidth: CGFloat = 48
 
     private static func headerView(_ title: String, frame: NSRect) -> NSView {
         let header = NSView(frame: frame)
@@ -435,14 +444,16 @@ final class CommandPalette: NSObject {
         let height = row.frame.height
         let padding = Theme.Space.sm
 
-        row.addSubview(PaletteIconView(action.icon, frame: NSRect(x: padding, y: (height - 16) / 2, width: 16, height: 16)))
+        // A 16 pt slot, drawn 20 wide so wide symbols (</>) aren't clipped.
+        row.addSubview(PaletteIconView(action.icon, frame: NSRect(x: padding - 2, y: (height - 20) / 2, width: 20, height: 20)))
         let textLeft = padding + 16 + Theme.Space.sm
         let titleFrame = NSRect(x: textLeft, y: (height - 18) / 2, width: 0, height: 18)
         // Labels draw from their top: one whose top sits a font's ascender
         // above this line shares the title's baseline.
         let baseline = titleFrame.maxY - Theme.Font.title.ascender
         func onBaseline(_ label: NSTextField, x: CGFloat, width: CGFloat) {
-            let top = baseline + (label.font?.ascender ?? 0)
+            // On the pixel grid of a 2x screen: text off it renders soft.
+            let top = ((baseline + (label.font?.ascender ?? 0)) * 2).rounded() / 2
             label.frame = NSRect(x: x, y: top - 16, width: width, height: 16)
         }
 
@@ -472,15 +483,14 @@ final class CommandPalette: NSObject {
         title.font = Theme.Font.title
         title.textColor = action.isDimmed ? Theme.Color.textSecondary : Theme.Color.textPrimary
         title.lineBreakMode = .byTruncatingTail
-        // The subtitle keeps at least a third of the line.
+        // The title comes first: the subtitle takes what it leaves, when
+        // that's enough to read something.
         title.frame = titleFrame
-        title.frame.size.width = action.subtitle.isEmpty
-            ? textWidth
-            : min(ceil(title.cell?.cellSize.width ?? 0), (textWidth * 2 / 3).rounded(.down))
+        title.frame.size.width = min(ceil(title.cell?.cellSize.width ?? 0), textWidth)
         row.addSubview(title)
 
         let subtitleLeft = title.frame.maxX + Theme.Space.xs
-        if !action.subtitle.isEmpty, textLeft + textWidth - subtitleLeft > 0 {
+        if !action.subtitle.isEmpty, textLeft + textWidth - subtitleLeft >= Self.minimumSubtitleWidth {
             let subtitle = NSTextField(labelWithString: action.subtitle)
             subtitle.font = Theme.Font.body
             subtitle.textColor = Theme.Color.textTertiary
@@ -582,24 +592,23 @@ final class CommandPalette: NSObject {
         let query = query.trimmingCharacters(in: .whitespaces)
         let groups = all.map {
             PaletteRanking.Group(
-                candidates: $0.rows.map(\.rankingCandidate), leadsWhenEmpty: $0.leadsWhenEmpty, folds: $0.fold != nil
+                candidates: $0.rows.map(\.rankingCandidate), leadsWhenEmpty: $0.leadsWhenEmpty,
+                ranksWithPrevious: $0.ranksWithPrevious,
+                folds: $0.fold != nil && $0.folds, emptyQueryLimit: $0.fold == nil ? nil : $0.emptyQueryLimit
             )
         }
         var items: [PaletteListLayout.Item] = []
         var rows: [PaletteAction] = []
-        firstRowOfSection = [:]
         for listed in PaletteRanking.list(query: query, groups: groups, unfolded: unfoldedSections) {
             let section = all[listed.section]
             if !sections.isEmpty { items.append(.header(section.title)) }
-            firstRowOfSection[listed.section] = rows.count
-            if listed.isFolded, let fold = section.fold {
-                items.append(.row(rows.count))
-                rows.append(foldedRow(fold.summary(listed.rows), unfolding: listed.section))
-                continue
-            }
             for row in listed.rows {
                 items.append(.row(rows.count))
                 rows.append(section.rows[row])
+            }
+            if !listed.folded.isEmpty, let fold = section.fold {
+                items.append(.row(rows.count))
+                rows.append(foldedRow(fold.summary(listed.folded), unfolding: listed.section, at: rows.count))
             }
         }
         filteredActions = rows
@@ -608,22 +617,24 @@ final class CommandPalette: NSObject {
         rebuildList()
     }
 
-    private func foldedRow(_ summary: PaletteFold.Summary, unfolding section: Int) -> PaletteAction {
+    /// The row standing for a folded section, at `row` in the list.
+    private func foldedRow(_ summary: PaletteFold.Summary, unfolding section: Int, at row: Int) -> PaletteAction {
         PaletteAction(
             icon: .symbol(Theme.Symbol.unfold), title: summary.title, subtitle: summary.subtitle, shortcut: nil,
             badge: summary.badge, keepsPaletteOpen: true
         ) { [weak self] in
-            self?.unfold(section)
+            self?.unfold(section, firstRow: row)
         }
     }
 
-    /// Lists a folded section's rows in place, the first one selected, for
-    /// as long as the palette stays open.
-    private func unfold(_ section: Int) {
+    /// Lists a section's folded rows in place, for as long as the palette
+    /// stays open. Nothing above moves: the first of them takes the folded
+    /// row's place, selected.
+    private func unfold(_ section: Int, firstRow: Int) {
         unfoldedSections.insert(section)
         filterActions(query: searchField?.stringValue ?? "")
-        guard let first = firstRowOfSection[section], filteredActions.indices.contains(first) else { return }
-        selectedIndex = first
+        guard filteredActions.indices.contains(firstRow) else { return }
+        selectedIndex = firstRow
         highlightSelected(animated: false)
     }
 }

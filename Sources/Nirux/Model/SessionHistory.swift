@@ -7,6 +7,14 @@ enum SessionHistory {
     static let paletteSectionTitle = "Sessions"
     /// ⌘P lists this many past sessions at most, the most recently active.
     static let paletteLimit = 50
+    /// With nothing typed, ⌘P lists this many, then one row unfolding the
+    /// rest: the actions stay near the top.
+    static let paletteEmptyQueryLimit = 5
+
+    /// The row standing for the sessions ⌘P folds.
+    static func moreSessionsTitle(count: Int) -> String {
+        count == 1 ? "Show 1 More Session" : "Show \(count) More Sessions"
+    }
 
     /// The name it was launched with (a worktree's branch), else the
     /// workspace it ran in, else its branch or folder.

@@ -52,17 +52,12 @@ struct QuickSwitchWorkspace: Equatable {
     static func folded(_ workspaces: [QuickSwitchWorkspace]) -> Folded {
         var spaces: [String] = []
         for workspace in workspaces where !spaces.contains(workspace.spaceName) { spaces.append(workspace.spaceName) }
-        let needingYou = workspaces.filter {
-            switch $0.agent {
-            case .waiting, .failed: return true
-            case .working, nil: return false
-            }
-        }
+        let needingYou = workspaces.compactMap(\.agent).filter(\.needsUser)
         return Folded(
             title: workspaces.count == 1 ? "Show 1 Workspace" : "Show \(workspaces.count) Workspaces",
             subtitle: spaces.joined(separator: " · "),
             attention: needingYou.isEmpty ? nil : needingYou.count == 1 ? "1 needs you" : "\(needingYou.count) need you",
-            hasFailure: needingYou.contains { if case .failed = $0.agent { return true } else { return false } }
+            hasFailure: needingYou.contains(where: \.isFailure)
         )
     }
 }
@@ -83,6 +78,17 @@ enum QuickSwitchAgentState: Equatable {
         }
         if let wait = waits.min(by: { $0.since < $1.since }) { return .waiting(since: wait.since) }
         return isWorking ? .working : nil
+    }
+
+    /// An agent waits on the user, or failed: not one at work.
+    var needsUser: Bool {
+        if case .working = self { return false }
+        return true
+    }
+
+    var isFailure: Bool {
+        if case .failed = self { return true }
+        return false
     }
 
     /// "working", "waiting 12m", "API error".

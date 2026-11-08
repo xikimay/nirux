@@ -29,8 +29,9 @@ final class QuickSwitchState {
 extension NiruxShellView {
     /// The sections ⌘P lists beside its actions: the active space's
     /// workspaces and past sessions, above the actions when nothing is
-    /// typed, then the other spaces' workspaces, folded unless they hold
-    /// the best match (see `PaletteRanking.list`).
+    /// typed, and the other spaces' workspaces, ranked with the active
+    /// space's and folded unless they hold the best match (see
+    /// `PaletteRanking.list`).
     func paletteSections() -> [PaletteSection] {
         let snapshot = ProcessSnapshot()
         let now = Date().timeIntervalSince1970
@@ -43,10 +44,11 @@ extension NiruxShellView {
                 rows: here.map { workspacePaletteRow($0, now: now) },
                 leadsWhenEmpty: true
             ),
-            sessionsPaletteSection(snapshot: snapshot, now: now),
             PaletteSection(
                 title: Self.otherSpacesPaletteSectionTitle,
                 rows: elsewhere.map { workspacePaletteRow($0, now: now) },
+                ranksWithPrevious: true,
+                folds: true,
                 fold: PaletteFold { indices in
                     let folded = QuickSwitchWorkspace.folded(indices.map { elsewhere[$0] })
                     return PaletteFold.Summary(
@@ -55,7 +57,10 @@ extension NiruxShellView {
                         badge: folded.attention.map { PaletteBadge(text: $0, tone: folded.hasFailure ? .failure : .waiting) }
                     )
                 }
-            )
+            ),
+            // After the workspaces: at equal standing a query lists a
+            // workspace above a session, as it always did.
+            sessionsPaletteSection(snapshot: snapshot, now: now)
         ]
     }
 

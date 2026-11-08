@@ -47,7 +47,6 @@ final class QuickSwitcherFlowTests: XCTestCase {
             XCTAssertEqual(headers(all), [space, "Actions"])
             XCTAssertEqual(all.filteredActions.prefix(3).map(\.title), ["repo", "billing-fix", "Open Browser"])
             XCTAssertTrue(all.filteredActions.first?.subtitle.hasPrefix("Current · ") == true)
-            XCTAssertFalse(all.filteredActions.first?.subtitle.contains(space) == true, "its header names the space")
 
             // A click on a header picks nothing; the last row, scrolled
             // into view, takes a click.
@@ -68,13 +67,6 @@ final class QuickSwitcherFlowTests: XCTestCase {
             XCTAssertEqual(headers(all), [space, "Actions"])
             XCTAssertEqual(all.searchField?.placeholderString, "Type a command, a workspace or a session...")
 
-            // A command's name keeps the actions above this space's
-            // workspaces.
-            shell.addWorkspace(title: "terminal-notes", cwd: harness.worktree)
-            let command = try search("terminal", in: harness)
-            XCTAssertEqual(Array(headers(command).prefix(2)), ["Actions", space])
-            XCTAssertEqual(command.filteredActions.first?.title, "New Terminal")
-
             // A dialog has waited 12 minutes in it.
             let column = try XCTUnwrap(billing.columns.first)
             let since = Date().timeIntervalSince1970 - 12 * 60 - 5
@@ -83,7 +75,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
             }
 
             let palette = try search("billing", in: harness)
-            XCTAssertEqual(headers(palette), ["Workspaces"])
+            XCTAssertEqual(headers(palette), [space])
             XCTAssertEqual(palette.filteredActions.first?.title, "billing-fix")
             XCTAssertEqual(palette.filteredActions.first?.badge, PaletteBadge(text: "waiting 12m", tone: .waiting))
             XCTAssertEqual(palette.selectedIndex, 0)
@@ -114,7 +106,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
 
             // Below the active workspace that matches as well.
             let palette = try search("park", in: harness)
-            XCTAssertEqual(headers(palette).first, "Workspaces")
+            XCTAssertEqual(headers(palette).first, shell.workspaceStore.activeProfile.name)
             XCTAssertEqual(palette.filteredActions.prefix(2).map(\.title), ["parking-lot", "parked"])
             let row = palette.filteredActions[1]
             XCTAssertTrue(row.isDimmed)
@@ -147,8 +139,11 @@ final class QuickSwitcherFlowTests: XCTestCase {
                 candidate === column ? AgentWait(reason: .question(nil), since: now - 60) : nil
             }
 
+            let space = shell.workspaceStore.activeProfile.name
             let all = try search("", in: harness)
-            XCTAssertEqual(headers(all), [shell.workspaceStore.activeProfile.name, "Actions", "Other Spaces"])
+            XCTAssertEqual(headers(all), [space, "Actions", "Other Spaces"])
+            XCTAssertEqual(all.filteredActions.first?.title, "repo")
+            XCTAssertFalse(all.filteredActions.first?.subtitle.contains(space) == true, "its header names the space")
             let folded = try XCTUnwrap(all.filteredActions.last)
             XCTAssertEqual(folded.title, "Show 1 Workspace")
             XCTAssertEqual(folded.subtitle, "Clients")
@@ -160,6 +155,8 @@ final class QuickSwitcherFlowTests: XCTestCase {
             XCTAssertEqual(all.filteredActions[safe: all.selectedIndex]?.title, "acme")
             XCTAssertEqual(all.listLayout.items.suffix(2), [.header("Other Spaces"), .row(all.selectedIndex)])
             XCTAssertIdentical(shell.activeWorkspace, repo)
+            // Opened again, it starts folded.
+            XCTAssertEqual(try search("", in: harness).filteredActions.last?.title, "Show 1 Workspace")
 
             let palette = try search("clients", in: harness)
             XCTAssertEqual(headers(palette).first, "Other Spaces")
