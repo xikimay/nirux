@@ -77,7 +77,7 @@ The intended setup is:
 1. Open Nirux and use the first workspace as your main repo workspace.
 2. In that workspace, `cd` into the main checkout of the repo.
 3. Open the command palette with `Cmd+P`.
-4. Run `Install Agent Skills` before starting agent work. You only need to do this once.
+4. Run `Install Agent Skills` before starting agent work. You only need to do this once: Nirux keeps them up to date.
 5. Launch Claude Code or Codex from the palette.
 6. Ask the agent to start a feature, bugfix, or investigation in a separate workspace.
 
@@ -87,7 +87,7 @@ That leaves your main workspace on the original checkout while each isolated bra
 
 ### Mission handoffs (experimental)
 
-Mission handoffs add an explicit, durable mailbox between the agent that delegates a worktree task and the agent launched in that worktree. The feature is disabled by default. Enable `Settings` → `Experimental` → `Mission handoffs`; the setting applies to new terminals. After updating Nirux, run `Install Agent Skills` again so the installed `nirux-worktree` skill has the matching mailbox instructions.
+Mission handoffs add an explicit, durable mailbox between the agent that delegates a worktree task and the agent launched in that worktree. The feature is disabled by default. Enable `Settings` → `Experimental` → `Mission handoffs`; the setting applies to new terminals.
 
 With Mission handoffs enabled, the two agents talk through their prompts. A Claude Code child asks with `"$NIRUX_CLI_PATH" --mission ask --message "..."` and ends its turn. Nirux types the question into the parent's prompt as a `[Nirux Mission] Question from …` message ending with the `--mission reply` command to answer it, and types the answer into the child's prompt the same way; the child's `--mission completed` result reaches the parent's prompt as a one-line notice. Nirux types only once the agent's `claude` is in front, its turn is over, no dialog is listed and nothing was typed at its prompt since its last prompt went in; otherwise the message waits for that agent's next turn end. A Codex child's `ask` still waits for the answer, at most 90 seconds at a time (under the default 2-minute limit of Claude Code's shell tool), then exits with status 3 and resumes the same question when run again. Once a Mission has ended, `ask` and `completed` exit with status 4 so the child stops retrying.
 
@@ -262,7 +262,7 @@ nirux://new-worktree?branch=feat/example&repo=/path/to/repo&agent=codex&handover
 
 Supported agents are `claude` and `codex`. The optional `profile` query parameter targets the Nirux space that should receive the new workspace; Nirux terminals expose it as `NIRUX_PROFILE_ID` for the worktree skill. When a handover file is provided, Nirux moves it into the new worktree as `.claude-handover.md` or `.codex-handover.md`, then launches the selected agent with a prompt to read it. The handover must be the user's own regular file directly in `/tmp` with a name starting with `nirux-handover-` (the skill creates it with `mktemp /tmp/nirux-handover-<agent>-XXXXXX`); any other path is ignored and the worktree opens without it. An agent is only told to read a handover that this request delivered, never one that already exists in the folder.
 
-Any app or web page can open a `nirux://` URL, so every action runs without asking only when it carries `launch=` with the current value of `NIRUX_LAUNCH_ID`. Nirux generates that value at each launch and exports it to its terminals; the bundled skills pass it automatically. Without it, or with a value from before Nirux last restarted (for example from inside tmux), Nirux shows a confirmation that spells out the folder or file, branch, agent, and permission mode before doing anything; a confirmed request opens in the space you are looking at and can't link to a Mission. After updating Nirux, run `Install Agent Skills` again so installed skills pass the launch ID.
+Any app or web page can open a `nirux://` URL, so every action runs without asking only when it carries `launch=` with the current value of `NIRUX_LAUNCH_ID`. Nirux generates that value at each launch and exports it to its terminals; the bundled skills pass it automatically. Without it, or with a value from before Nirux last restarted (for example from inside tmux), Nirux shows a confirmation that spells out the folder or file, branch, agent, and permission mode before doing anything; a confirmed request opens in the space you are looking at and can't link to a Mission.
 
 When Mission handoffs are enabled, the optional `parentWorkspace` and `parentAgent` query parameters identify the delegating Nirux workspace and terminal by UUID. Supplying both creates the parent/child Mission record; the bundled `nirux-worktree` skill adds them automatically. See [Mission handoffs](#mission-handoffs-experimental) for the user workflow.
 
@@ -286,6 +286,8 @@ The command palette action `Install Agent Skills` writes the bundled skills to:
 ~/.claude/skills/nirux-draft/SKILL.md
 ~/.claude/skills/nirux-second-opinion/SKILL.md
 ```
+
+Nirux keeps these copies current. At launch, the installed app rewrites each copy whose text a version of Nirux wrote, so the skills follow the version you run. A copy you edited stays as you left it, and so does one reached through a symbolic link (dotfiles): Getting Started offers **Update**, and `Install Agent Skills` replaces it. A skill missing from a folder is never added back. To recognize its own copies, Nirux keeps a hash of each text it wrote in `~/Library/Application Support/nirux/agent-skills.json`, never in the skills folders. Development builds, copies on a state of their own (`NIRUX_STATE_DIR`) and `NIRUX_SKIP_HOOK_INSTALL=1` never rewrite the skills on their own.
 
 `nirux-worktree` lets supported agents open isolated Nirux workspaces when the user asks to start work on a feature, bug, or separate branch. `nirux-show-code` teaches agents to open code in the editor column via `nirux://open-editor` when the user asks to see code. `nirux-draft` has agents write text the user will paste elsewhere (a Slack message, a PR description, a Linear ticket, a SQL query) to a file under `$TMPDIR` and open it in the editor column; click into it, then `Cmd+A` `Cmd+C` copies it verbatim. `nirux-second-opinion` lets Claude, when the user asks for a second opinion, send its answer to a read-only `codex exec` in the same folder and show Codex's reply next to its own verdict.
 
