@@ -1,8 +1,8 @@
 import XCTest
 @testable import Nirux
 
-/// What ⌘P lists and in which order: the commands, then the workspaces,
-/// each workspace with its agents' state.
+/// What ⌘P lists and in which order: the active space's rows, the
+/// actions, the other spaces folded; each workspace with its agents' state.
 final class QuickSwitchTests: XCTestCase {
     private typealias Candidate = PaletteRanking.Candidate
     private typealias Section = PaletteRanking.RankedSection
@@ -22,11 +22,12 @@ final class QuickSwitchTests: XCTestCase {
         folder: String = "/Users/me/Projects/app",
         isInactive: Bool = false,
         isCurrent: Bool = false,
-        showsSpace: Bool = false
+        isInOtherSpace: Bool = false,
+        agent: QuickSwitchAgentState? = nil
     ) -> QuickSwitchWorkspace {
         QuickSwitchWorkspace(
             id: title, title: title, branch: branch, spaceName: space, spaceColorHex: "#7AA2F7",
-            folder: folder, isInactive: isInactive, isCurrent: isCurrent, showsSpace: showsSpace, agent: nil
+            folder: folder, isInactive: isInactive, isCurrent: isCurrent, isInOtherSpace: isInOtherSpace, agent: agent
         )
     }
 
@@ -96,13 +97,139 @@ final class QuickSwitchTests: XCTestCase {
         XCTAssertEqual(PaletteRanking.naming(query: "erm", title: "New Terminal"), .none)
     }
 
+    // MARK: - Space, actions, other spaces
+
+    private typealias Group = PaletteRanking.Group
+    private typealias Listed = PaletteRanking.ListedSection
+
+    /// The palette's groups, in the order it gives them: the actions, the
+    /// active space's workspaces, the other spaces', the active space's
+    /// sessions.
+    private func groups(
+        here: [QuickSwitchWorkspace], sessions: [Candidate] = [], elsewhere: [QuickSwitchWorkspace]
+    ) -> [Group] {
+        [
+            Group(candidates: commands),
+            Group(candidates: here.map(\.candidate), leadsWhenEmpty: true),
+            Group(candidates: elsewhere.map(\.candidate), ranksWithPrevious: true, folds: true),
+            Group(candidates: sessions, leadsWhenEmpty: true, emptyQueryLimit: 2)
+        ]
+    }
+
+    /// ⌘P opened without typing: this space first, then the actions, the
+    /// other spaces folded.
+    func testEmptyQueryListsThisSpaceThenTheActionsThenOtherSpacesFolded() {
+        let groups = groups(
+            here: [workspace("api"), workspace("web")],
+            sessions: [Candidate(title: "fix the login", keys: [])],
+            elsewhere: [workspace("acme", space: "Clients", isInOtherSpace: true)]
+        )
+
+        XCTAssertEqual(PaletteRanking.list(query: "", groups: groups), [
+            Listed(section: 1, rows: [0, 1]),
+            Listed(section: 3, rows: [0]),
+            Listed(section: 0, rows: [0, 1, 2, 3, 4]),
+            Listed(section: 2, rows: [], folded: [0])
+        ])
+        XCTAssertEqual(
+            PaletteRanking.list(query: "", groups: groups, unfolded: [2]).last, Listed(section: 2, rows: [0]),
+            "picking the folded row lists them"
+        )
+    }
+
+    /// With nothing typed, the first sessions only, the rest behind one
+    /// row; typing searches them all.
+    func testEmptyQueryListsTheFirstSessionsOnly() {
+        let sessions = ["fix the login", "fix billing export", "fix dark mode", "crash on launch"].map { Candidate(title: $0, keys: []) }
+        let groups = groups(here: [workspace("api")], sessions: sessions, elsewhere: [])
+
+        XCTAssertEqual(PaletteRanking.list(query: "", groups: groups)[1], Listed(section: 3, rows: [0, 1], folded: [2, 3]))
+        XCTAssertEqual(PaletteRanking.list(query: "", groups: groups, unfolded: [3])[1], Listed(section: 3, rows: [0, 1, 2, 3]))
+        let typed = PaletteRanking.list(query: "fix", groups: groups)
+        XCTAssertEqual(typed.map(\.section), [3])
+        XCTAssertEqual(typed.first?.rows.count, 3)
+        XCTAssertEqual(typed.first?.folded, [])
+    }
+
+    /// Typing still finds a workspace in any space: the other spaces
+    /// unfold when they hold the best match, or the only ones…
+    func testOtherSpacesUnfoldWhenTheyHoldTheBestMatch() {
+        let elsewhere = [workspace("acme", space: "Clients", isInOtherSpace: true)]
+        let groups = groups(here: [workspace("api"), workspace("web")], elsewhere: elsewhere)
+
+        XCTAssertEqual(PaletteRanking.list(query: "acme", groups: groups), [Listed(section: 2, rows: [0])])
+        XCTAssertEqual(PaletteRanking.list(query: "clients", groups: groups).first, Listed(section: 2, rows: [0]))
+    }
+
+    /// The workspaces of every space rank together, as before: a live one
+    /// elsewhere leads an inactive one here that matches as well, a word
+    /// start leads initials, and the other spaces then unfold first.
+    func testTheBestWorkspaceLeadsWhateverItsSpace() {
+        let inactive = groups(
+            here: [workspace("billing-old", isInactive: true)],
+            elsewhere: [workspace("billing-site", space: "Clients", isInOtherSpace: true)]
+        )
+        XCTAssertEqual(PaletteRanking.list(query: "billing", groups: inactive), [
+            Listed(section: 2, rows: [0]),
+            Listed(section: 1, rows: [0])
+        ])
+
+        let initials = groups(
+            here: [workspace("feat/add-payment-integration")],
+            elsewhere: [workspace("api-gateway", space: "Clients", isInOtherSpace: true)]
+        )
+        XCTAssertEqual(PaletteRanking.list(query: "api", groups: initials).first, Listed(section: 2, rows: [0]))
+    }
+
+    /// …and stay folded below a better match, as the one row standing for
+    /// their matches.
+    func testOtherSpacesFoldBelowABetterMatch() {
+        let groups = groups(
+            here: [workspace("billing-api")],
+            elsewhere: [workspace("billing-site", space: "Clients", isInOtherSpace: true), workspace("api", isInOtherSpace: true)]
+        )
+
+        let listed = PaletteRanking.list(query: "billing", groups: groups)
+        XCTAssertEqual(listed.first, Listed(section: 1, rows: [0]), "this space first at equal standing")
+        XCTAssertEqual(listed.last, Listed(section: 2, rows: [], folded: [0]))
+    }
+
+    /// A command's name keeps the actions above this space's workspaces,
+    /// as it kept them above every workspace.
+    func testTypingACommandNameKeepsTheActionsAboveThisSpace() {
+        let groups = groups(here: [workspace("ntfy-alerts")], elsewhere: [])
+
+        XCTAssertEqual(PaletteRanking.list(query: "nt", groups: groups).map(\.section), [0, 1])
+    }
+
+    /// The folded row says how many it hides, where, and how many need the
+    /// user: folding mustn't hide them.
+    func testFoldedRowSaysWhatItHides() {
+        let folded = QuickSwitchWorkspace.folded([
+            workspace("acme", space: "Clients", isInOtherSpace: true, agent: .waiting(since: 10)),
+            workspace("site", space: "Perso", isInOtherSpace: true, agent: .working),
+            workspace("crm", space: "Clients", isInOtherSpace: true)
+        ])
+        XCTAssertEqual(folded, QuickSwitchWorkspace.Folded(
+            title: "Show 3 Workspaces", subtitle: "Clients · Perso", attention: "1 needs you", hasFailure: false
+        ))
+
+        let failed = QuickSwitchWorkspace.folded([
+            workspace("acme", isInOtherSpace: true, agent: .failed(.apiError(kind: "overloaded", detail: nil))),
+            workspace("crm", isInOtherSpace: true, agent: .waiting(since: 10))
+        ])
+        XCTAssertEqual(failed.attention, "2 need you")
+        XCTAssertTrue(failed.hasFailure)
+        XCTAssertEqual(QuickSwitchWorkspace.folded([workspace("site", isInOtherSpace: true)]).title, "Show 1 Workspace")
+    }
+
     // MARK: - Workspaces
 
     /// A workspace is found by its branch, its space and its folder's name,
     /// not by the folders above.
     func testWorkspaceMatchesItsBranchSpaceAndFolder() {
         let found = workspace(
-            "login", branch: "feat/oauth", space: "Clients", folder: "/Users/me/Projects/acme-portal", showsSpace: true
+            "login", branch: "feat/oauth", space: "Clients", folder: "/Users/me/Projects/acme-portal", isInOtherSpace: true
         )
 
         XCTAssertEqual(workspaceRows("oauth", [found]), [0])
@@ -111,8 +238,8 @@ final class QuickSwitchTests: XCTestCase {
         XCTAssertNil(workspaceRows("projects", [found]))
     }
 
-    /// With a single space, its name ("main") would match every workspace.
-    func testTheOnlySpaceIsNotSearched() {
+    /// The active space's name would match every row under its header.
+    func testTheActiveSpaceIsNotSearched() {
         let workspaces = [workspace("api"), workspace("web", branch: "main")]
 
         XCTAssertEqual(workspaceRows("main", workspaces), [1], "its branch only")
@@ -132,7 +259,7 @@ final class QuickSwitchTests: XCTestCase {
         let sameAsBranch = workspace("feat/x", branch: "feat/x", space: "Work")
         XCTAssertEqual(sameAsBranch.subtitle(folderDisplay: "~/app"), "~/app")
 
-        let named = workspace("Login page", branch: "feat/x", space: "Work", isCurrent: true, showsSpace: true)
+        let named = workspace("Login page", branch: "feat/x", space: "Work", isCurrent: true, isInOtherSpace: true)
         XCTAssertEqual(named.subtitle(folderDisplay: "~/app"), "Current · feat/x · Work · ~/app")
 
         let parked = workspace("parked", branch: "feat/y", isInactive: true)
@@ -158,7 +285,7 @@ final class QuickSwitchTests: XCTestCase {
 
     /// Headers take no click; the first row under one brings it into view.
     func testHeadersAreNotRows() {
-        let layout = PaletteListLayout(items: [.header("Commands"), .row(0), .row(1), .header("Workspaces"), .row(2)])
+        let layout = PaletteListLayout(items: [.header("General"), .row(0), .row(1), .header("Actions"), .row(2)])
         let header = PaletteListLayout.headerHeight
         let row = PaletteListLayout.rowHeight
 

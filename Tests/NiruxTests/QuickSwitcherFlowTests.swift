@@ -40,16 +40,19 @@ final class QuickSwitcherFlowTests: XCTestCase {
             XCTAssertEqual(billing.title, "billing-fix")
             shell.switchToWorkspace(try index(of: repo, in: shell))
 
-            // Without a query: the commands, as before, then the workspaces.
+            // Without a query: this space's workspaces, then the actions.
+            let space = shell.workspaceStore.activeProfile.name
             let all = try search("", in: harness)
             XCTAssertEqual(all.searchField?.placeholderString, "Type a command, a workspace or a session...")
-            XCTAssertEqual(headers(all), ["Commands", "Workspaces"])
-            XCTAssertEqual(all.filteredActions.first?.title, "Open Browser")
-            XCTAssertEqual(all.filteredActions.suffix(2).map(\.title), ["repo", "billing-fix"])
-            XCTAssertTrue(all.filteredActions.suffix(2).first?.subtitle.hasPrefix("Current · ") == true)
+            XCTAssertEqual(headers(all), [space, "Actions"])
+            XCTAssertEqual(all.filteredActions.prefix(3).map(\.title), ["repo", "billing-fix", "Open Browser"])
+            XCTAssertTrue(all.filteredActions.first?.subtitle.hasPrefix("Current · ") == true)
 
-            // The last row, scrolled into view with its header: a click
-            // there picks it, a click on the header nothing.
+            // A click on a header picks nothing; the last row, scrolled
+            // into view, takes a click.
+            let headerView = try XCTUnwrap(all.rowViews.first)
+            XCTAssertEqual(all.listLayout.items.first, .header(space))
+            XCTAssertNil(all.row(atListPoint: NSPoint(x: headerView.frame.midX, y: headerView.frame.midY)))
             for _ in 1..<all.filteredActions.count { harness.press(.down, in: all.panel) }
             let last = all.filteredActions.count - 1
             XCTAssertEqual(all.selectedIndex, last)
@@ -57,14 +60,11 @@ final class QuickSwitcherFlowTests: XCTestCase {
             let rowItem = try XCTUnwrap(all.listLayout.itemIndex(ofRow: last))
             let rowView = try XCTUnwrap(all.rowViews[safe: rowItem])
             XCTAssertEqual(all.row(atListPoint: NSPoint(x: rowView.frame.midX, y: rowView.frame.midY)), last)
-            let headerView = try XCTUnwrap(all.rowViews[safe: rowItem - 2])
-            XCTAssertEqual(all.listLayout.items[rowItem - 2], .header("Workspaces"))
-            XCTAssertNil(all.row(atListPoint: NSPoint(x: headerView.frame.midX, y: headerView.frame.midY)))
 
             // Back from URL input (Escape), the sections come back.
             all.switchToURLMode()
             all.switchToActionsMode()
-            XCTAssertEqual(headers(all), ["Commands", "Workspaces"])
+            XCTAssertEqual(headers(all), [space, "Actions"])
             XCTAssertEqual(all.searchField?.placeholderString, "Type a command, a workspace or a session...")
 
             // A dialog has waited 12 minutes in it.
@@ -75,7 +75,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
             }
 
             let palette = try search("billing", in: harness)
-            XCTAssertEqual(headers(palette), ["Workspaces"])
+            XCTAssertEqual(headers(palette), [space])
             XCTAssertEqual(palette.filteredActions.first?.title, "billing-fix")
             XCTAssertEqual(palette.filteredActions.first?.badge, PaletteBadge(text: "waiting 12m", tone: .waiting))
             XCTAssertEqual(palette.selectedIndex, 0)
@@ -106,7 +106,7 @@ final class QuickSwitcherFlowTests: XCTestCase {
 
             // Below the active workspace that matches as well.
             let palette = try search("park", in: harness)
-            XCTAssertEqual(headers(palette).first, "Workspaces")
+            XCTAssertEqual(headers(palette).first, shell.workspaceStore.activeProfile.name)
             XCTAssertEqual(palette.filteredActions.prefix(2).map(\.title), ["parking-lot", "parked"])
             let row = palette.filteredActions[1]
             XCTAssertTrue(row.isDimmed)
@@ -121,7 +121,8 @@ final class QuickSwitcherFlowTests: XCTestCase {
         }
     }
 
-    /// Workspaces of every space are listed, found by their space's name.
+    /// The other spaces fold into one row, which unfolds them in place;
+    /// typing a workspace's space finds it there.
     func testWorkspaceOfAnotherSpaceOpensWithItsSpace() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -132,11 +133,36 @@ final class QuickSwitcherFlowTests: XCTestCase {
             XCTAssertEqual(acme.profileID, clients.id)
             shell.switchToWorkspace(try index(of: repo, in: shell))
             XCTAssertEqual(shell.activeProfileID, WorkspaceProfile.defaultID)
+            // A dialog waits in it: the folded row says so.
+            let column = try XCTUnwrap(acme.columns.first)
+            shell.quickSwitch.agentWait = { candidate, _, now in
+                candidate === column ? AgentWait(reason: .question(nil), since: now - 60) : nil
+            }
+
+            let space = shell.workspaceStore.activeProfile.name
+            let all = try search("", in: harness)
+            XCTAssertEqual(headers(all), [space, "Actions", "Other Spaces"])
+            XCTAssertEqual(all.filteredActions.first?.title, "repo")
+            XCTAssertFalse(all.filteredActions.first?.subtitle.contains(space) == true, "its header names the space")
+            let folded = try XCTUnwrap(all.filteredActions.last)
+            XCTAssertEqual(folded.title, "Show 1 Workspace")
+            XCTAssertEqual(folded.subtitle, "Clients")
+            XCTAssertEqual(folded.badge, PaletteBadge(text: "1 needs you", tone: .waiting))
+            XCTAssertFalse(all.filteredActions.contains { $0.title == "acme" })
+            for _ in 1..<all.filteredActions.count { harness.press(.down, in: all.panel) }
+            harness.press(.returnKey, in: all.panel)
+            XCTAssertTrue(all.isVisible, "unfolding keeps the palette open")
+            XCTAssertEqual(all.filteredActions[safe: all.selectedIndex]?.title, "acme")
+            XCTAssertEqual(all.listLayout.items.suffix(2), [.header("Other Spaces"), .row(all.selectedIndex)])
+            XCTAssertIdentical(shell.activeWorkspace, repo)
+            // Opened again, it starts folded.
+            XCTAssertEqual(try search("", in: harness).filteredActions.last?.title, "Show 1 Workspace")
 
             let palette = try search("clients", in: harness)
+            XCTAssertEqual(headers(palette).first, "Other Spaces")
             let row = try XCTUnwrap(palette.filteredActions.first)
             XCTAssertEqual(row.title, "acme")
-            XCTAssertTrue(row.subtitle.contains("Clients"), "several spaces: the row names its own")
+            XCTAssertTrue(row.subtitle.contains("Clients"), "the row names its space")
             harness.press(.returnKey, in: palette.panel)
 
             XCTAssertIdentical(shell.activeWorkspace, acme)

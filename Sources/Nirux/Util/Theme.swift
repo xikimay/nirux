@@ -155,6 +155,8 @@ enum Theme {
         static let notice = "info.circle"
         static let locked = "lock.fill"
         static let more = "ellipsis"
+        /// ⌘P's row standing for a folded section.
+        static let unfold = "chevron.right"
         static let back = "chevron.left"
         static let forward = "chevron.right"
         static let reload = "arrow.clockwise"
