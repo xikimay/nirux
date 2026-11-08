@@ -94,7 +94,10 @@ extension SidebarView {
     }
 
     private func projectTile(_ profile: ProfileInfo) -> SidebarRailTileView {
-        let tile = SidebarRailTileView(style: .project, text: profile.name.first.map(String.init) ?? "?")
+        var style = SidebarRailTileStyle.project
+        // As on the expanded picker: an agent waits in another space.
+        if !spacesWaitingElsewhere.isEmpty { style.badge = Theme.Color.waiting }
+        let tile = SidebarRailTileView(style: style, text: profile.name.first.map(String.init) ?? "?")
         tile.role = .menuButton
         if let tooltip = railTooltip(for: .railButton(.project)) {
             describe(tile, as: SidebarRailTooltip(title: "Space \(tooltip.title)", detail: tooltip.detail, note: tooltip.note))
@@ -140,8 +143,14 @@ extension SidebarView {
             guard let profile = lastProfiles.first(where: \.isActive) else { return nil }
             let count = Self.workspaceCountText(profile.workspaceCount)
             let waiting = lastInfos.filter { $0.railState == .waiting }.count
-            guard waiting > 0 else { return SidebarRailTooltip(title: profile.name, detail: count) }
-            return SidebarRailTooltip(title: profile.name, detail: "\(waiting) waiting", detailColor: Theme.Color.waiting, note: count)
+            let elsewhere = spacesWaitingElsewhere.map(\.name)
+            let note = elsewhere.isEmpty
+                ? nil : "An agent waits for you in \(ListFormatter.localizedString(byJoining: elsewhere))"
+            guard waiting > 0 else { return SidebarRailTooltip(title: profile.name, detail: count, note: note) }
+            return SidebarRailTooltip(
+                title: profile.name, detail: "\(waiting) waiting", detailColor: Theme.Color.waiting,
+                note: [count, note].compactMap { $0 }.joined(separator: " · ")
+            )
         case .railButton(.inactiveSection):
             let count = lastInfos.filter(\.isInactive).count
             return SidebarRailTooltip(

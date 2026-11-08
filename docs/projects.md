@@ -174,18 +174,17 @@ first step changed is how they are stored and managed:
     doesn't bring it back), but isn't recorded as deleted.
   - without the marker, the backup and the mirror are merged.
   - This needs revisiting once projects carry more than the mirror does.
-- **Empty spaces persist**, drawn as a ring in the switcher. Clicking one opens
-  a workspace in it. ⌘⌥←/→ skips empty spaces, so cycling doesn't open
+- **Empty spaces persist**, drawn as a ring in the space picker. Choosing one
+  opens a workspace in it. ⌘⌥←/→ skips empty spaces, so cycling doesn't open
   workspaces.
-- **Space menu**, on the header or on right-clicking any space's dot:
-  "Rename Space…", "Edit Space Brief…", "Board Settings…", "Edit Task
-  Templates…", "Space Memory…" (see [project-memory.md](project-memory.md)),
-  "Space Color" and "Delete Space…". With the sidebar
-  collapsed, the space's tile at the top of the rail opens it, the spaces
-  to switch to listed first.
-  Right-clicking lets you manage an empty space without opening a workspace in
-  it. A deleted space's workspaces move to the default space, and its brief
-  stays on disk. A new space takes a color no other space uses.
+- **Space picker**, at the top of the sidebar (the space's tile at the top of
+  the collapsed rail opens the same menu): the spaces, General first, with
+  their task count and ⌘⌥1…⌘⌥9, then "New Space…" and the active space's
+  settings: "Rename Space…", "Edit Space Brief…", "Board Settings…", "Edit
+  Task Templates…", "Space Memory…" (see [project-memory.md](project-memory.md)),
+  "Space Color" and "Delete Space…". A deleted space's workspaces move to the
+  default space, and its brief stays on disk. A new space takes a color no
+  other space uses.
 - **Newer files stay intact:** a file whose schema is newer, or that has keys
   this build doesn't know, is read but never written. Deleting a space is then
   refused, since only `projects.json` can record it.

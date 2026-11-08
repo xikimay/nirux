@@ -33,14 +33,16 @@ final class SidebarSpacePickerTests: XCTestCase {
 
         let menu = sidebar.spacePickerMenu()
         // An attributed title is the title: the amber dot is in it.
-        XCTAssertEqual(menu.items.map(\.title), ["General", "client  ●", "perso", "", "New Space…", "Space Settings"])
+        XCTAssertEqual(menu.items.map(\.title), ["General", "client  ●", "perso  ●", "", "New Space…", "Space Settings"])
         XCTAssertEqual(menu.items.prefix(3).map(\.state), [.on, .off, .off])
         XCTAssertEqual(menu.items.prefix(3).map { $0.badge?.stringValue }, ["2", "4", "0"])
         XCTAssertEqual(menu.items.prefix(3).map(\.keyEquivalent), ["1", "2", "3"])
         XCTAssertTrue(menu.items.prefix(3).allSatisfy { $0.keyEquivalentModifierMask == [.command, .option] })
-        XCTAssertEqual(menu.items.prefix(3).map { $0.attributedTitle != nil }, [false, true, false])
-        let dot = try XCTUnwrap(menu.items[1].attributedTitle)
-        XCTAssertEqual(dot.attribute(.foregroundColor, at: dot.length - 1, effectiveRange: nil) as? NSColor, Theme.Color.waiting)
+        func mark(_ index: Int) -> NSColor? {
+            guard let title = menu.items[index].attributedTitle else { return nil }
+            return title.attribute(.foregroundColor, at: title.length - 1, effectiveRange: nil) as? NSColor
+        }
+        XCTAssertEqual([mark(0), mark(1), mark(2)], [nil, Theme.Color.waiting, Theme.Color.error])
         XCTAssertTrue(try XCTUnwrap(menu.item(withTitle: "Space Settings")?.submenu).items.contains { $0.title == "Rename Space…" })
 
         menu.performActionForItem(at: 1)
@@ -49,24 +51,47 @@ final class SidebarSpacePickerTests: XCTestCase {
 
     /// The closed picker says when an agent waits in another space, which
     /// the sidebar doesn't show: not for the space on screen, whose cards
-    /// say it, nor for an error.
+    /// say it, nor for an error. The rail's space tile says it too.
     func testPickerSaysAnotherSpaceWaits() throws {
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 600))
         sidebar.isExpanded = true
-        func pickerHelp() throws -> String? {
+        func pickerValue() throws -> String? {
             try XCTUnwrap(sidebar.contentDocumentView.subviews.lazy.compactMap { $0 as? SidebarSectionToggleView }.first {
-                $0.accessibilityRole() == .popUpButton
-            }).accessibilityHelp()
+                $0.accessibilityLabel() == "Space"
+            }).accessibilityValue() as? String
         }
 
         sidebar.update(profiles: spaces, workspaces: [])
-        XCTAssertEqual(try pickerHelp(), "An agent waits for you in client")
+        XCTAssertEqual(try pickerValue(), "General. An agent waits for you in client")
+        sidebar.isExpanded = false
+        XCTAssertEqual(sidebar.railTileViews[.railButton(.project)]?.style.badge, Theme.Color.waiting)
 
         var calm = spaces
         calm[0] = space(WorkspaceProfile.defaultID, isActive: true, attention: .waiting)
         calm[1] = space("client")
         sidebar.update(profiles: calm, workspaces: [])
-        XCTAssertNil(try pickerHelp())
+        XCTAssertNil(sidebar.railTileViews[.railButton(.project)]?.style.badge)
+        sidebar.isExpanded = true
+        XCTAssertEqual(try pickerValue(), "General")
+    }
+
+    /// The Tasks header's "+" opens New…, for VoiceOver too, and its hit
+    /// area is under it.
+    func testTasksHeaderPlusOpensNew() throws {
+        let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 600))
+        sidebar.isExpanded = true
+        sidebar.update(profiles: spaces, workspaces: [])
+        var opened = 0
+        sidebar.onNewWorkspace = { opened += 1 }
+
+        let plus = try XCTUnwrap(sidebar.newTaskButton)
+        XCTAssertTrue(plus.isAccessibilityElement())
+        XCTAssertEqual(plus.accessibilityLabel(), "New…")
+        XCTAssertTrue(plus.accessibilityPerformPress())
+        XCTAssertEqual(opened, 1)
+        guard case .newTask? = sidebar.hitArea(at: NSPoint(x: plus.frame.midX, y: plus.frame.midY))?.region else {
+            return XCTFail("the + has no hit area")
+        }
     }
 
     /// The Space menu's nine items follow the spaces, and bind ⌥⌘1…⌥⌘9
@@ -77,8 +102,14 @@ final class SidebarSpacePickerTests: XCTestCase {
         let menu = SpaceListMenu(title: "Space") { profiles }
         menu.addSpaceItems()
         menu.menuNeedsUpdate(menu)
-        XCTAssertEqual(menu.spaceItems.filter { !$0.isHidden }.map(\.title), ["General", "client  ●", "perso"])
+        XCTAssertEqual(menu.spaceItems.filter { !$0.isHidden }.map(\.title), ["General", "client  ●", "perso  ●"])
         XCTAssertEqual(menu.spaceItems.map(\.keyEquivalent), ["1", "2", "3", "", "", "", "", "", ""])
+
+        // The items are reused: a mark that went away leaves no title behind.
+        profiles[1] = space("client")
+        menu.menuNeedsUpdate(menu)
+        XCTAssertNil(menu.spaceItems[1].attributedTitle)
+        XCTAssertEqual(menu.spaceItems[1].title, "client")
 
         profiles = (0..<10).map { space("s\($0)", isActive: $0 == 0) }
         menu.menuNeedsUpdate(menu)

@@ -70,9 +70,10 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
                 picker,
                 try XCTUnwrap(picker.item(withTitle: "Space Settings")?.submenu)
             ]
-            // The spaces themselves: SidebarSpacePickerTests.
-            let spaces = Set(shell.sidebar.lastProfiles.map(\.name))
-            let titles = menus.flatMap(\.items).filter { !$0.isSeparatorItem && !spaces.contains($0.title) }.map(\.title)
+            // The spaces themselves, listed first: SidebarSpacePickerTests.
+            let spaces = Set(picker.items.prefix(shell.sidebar.lastProfiles.count).map(ObjectIdentifier.init))
+            let titles = menus.flatMap(\.items)
+                .filter { !$0.isSeparatorItem && !spaces.contains(ObjectIdentifier($0)) }.map(\.title)
             Self.menuCoverage.checkEveryItemIsCovered(
                 offered: Array(Set(titles)), testNames: UIFlowCoverage.testNames(of: Self.self)
             )
@@ -411,6 +412,35 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             // The default space has no repositories.
             shell.selectProfile(WorkspaceProfile.defaultID)
             XCTAssertFalse(try spaceSettingsItems(shell).contains { $0.title == "Add Repository…" })
+        }
+    }
+
+    /// ⌥⌘N goes to the space at that place in the picker; past the last
+    /// space its item is disabled and the chord does nothing.
+    func testSpaceChordsSelectSpacesByPlace() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            shell.createSpace(NewSpacePanel.Draft(name: "Second", colorHex: WorkspaceProfile.palette[1].hex, anchors: []))
+            harness.waitUntil("the new space on screen") {
+                shell.profiles.first { $0.id == shell.activeProfileID }?.name == "Second"
+            }
+            let second = shell.activeProfileID
+            shell.updateSidebar()
+            let app = NiruxApp()
+            app.shell = shell
+            @MainActor func chord(_ number: Int) -> NSMenuItem {
+                let item = NSMenuItem(title: "", action: #selector(NiruxApp.selectSpaceByNumber(_:)), keyEquivalent: "")
+                item.tag = number
+                return item
+            }
+
+            XCTAssertEqual([1, 2, 3].map { app.validateMenuItem(chord($0)) }, [true, true, false])
+            app.selectSpaceByNumber(chord(1))
+            XCTAssertEqual(shell.activeProfileID, WorkspaceProfile.defaultID)
+            app.selectSpaceByNumber(chord(2))
+            XCTAssertEqual(shell.activeProfileID, second)
+            app.selectSpaceByNumber(chord(3))
+            XCTAssertEqual(shell.activeProfileID, second)
         }
     }
 

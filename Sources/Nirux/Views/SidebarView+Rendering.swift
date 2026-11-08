@@ -28,14 +28,14 @@ extension SidebarView {
         let activeInfos = displayedWorkspaceInfos.filter { !$0.isInactive }
         let inactiveInfos = displayedWorkspaceInfos.filter { $0.isInactive }
         let listedInactiveInfos = inactiveInfos.filter(listsWorkspace)
+        let archivedListHeight = archivedListHeight(listedInactiveInfos)
         let activeProfile = lastProfiles.first(where: { $0.isActive })
         let onboardingCard = preparedOnboardingCard()
 
         let contentH = expandedContentHeight(
             hasPicker: activeProfile != nil,
             activeInfos: activeInfos,
-            inactiveInfos: inactiveInfos,
-            listedInactiveInfos: listedInactiveInfos,
+            archivedHeight: inactiveInfos.isEmpty ? nil : archivedListHeight,
             onboardingHeight: onboardingCard?.height
         )
 
@@ -57,7 +57,7 @@ extension SidebarView {
             )
         }
         if !inactiveInfos.isEmpty {
-            buildArchivedBlock(count: inactiveInfos.count, listed: listedInactiveInfos)
+            buildArchivedBlock(count: inactiveInfos.count, listed: listedInactiveInfos, listHeight: archivedListHeight)
         }
 
         refreshHoverTargetFromMouse()
@@ -92,18 +92,17 @@ extension SidebarView {
     /// Everything the expanded sidebar stacks, so the document view holds
     /// it all: the picker, the Tasks header and the cards (with the
     /// checklist) from the top, the archived block from the bottom.
+    /// `archivedHeight`: the archived list's (`archivedListHeight`), nil
+    /// without an Archived row.
     private func expandedContentHeight(
-        hasPicker: Bool, activeInfos: [WorkspaceInfo], inactiveInfos: [WorkspaceInfo],
-        listedInactiveInfos: [WorkspaceInfo], onboardingHeight: CGFloat?
+        hasPicker: Bool, activeInfos: [WorkspaceInfo], archivedHeight: CGFloat?, onboardingHeight: CGFloat?
     ) -> CGFloat {
         typealias Metrics = SidebarExpandedMetrics
         var height = Metrics.topPadding + Metrics.tasksHeaderHeight
             + Metrics.groupHeight(for: activeInfos, sidebarWidth: bounds.width)
         if hasPicker { height += Metrics.pickerHeight + Metrics.pickerBottomGap }
         if let onboardingHeight { height += Metrics.onboardingCardGap + onboardingHeight }
-        if !inactiveInfos.isEmpty {
-            height += Metrics.archivedGap + archivedListHeight(listedInactiveInfos) + Metrics.archivedRowHeight
-        }
+        if let archivedHeight { height += Metrics.archivedGap + archivedHeight + Metrics.archivedRowHeight }
         return height + Metrics.bottomPadding
     }
 
@@ -161,16 +160,12 @@ extension SidebarView {
         let frame = spacePickerFrame(top: top)
         hitAreas.append(SidebarHitArea(frame: frame, region: .spacePicker))
 
-        // Clear until hovered, so the picker reads as a control.
-        let hover = SidebarBackgroundView(frame: frame)
-        hover.wantsLayer = true
-        hover.layer?.cornerRadius = Theme.Radius.card
-        addExpandedView(hover)
-        spacePickerHoverView = hover
+        spacePickerHoverView = addRowHover(frame: frame)
 
-        let x = frame.minX + Metrics.cardPaddingX
         let dotSize = Metrics.pickerDotSize
-        let dot = SidebarBackgroundView(frame: NSRect(x: x, y: frame.midY - dotSize / 2, width: dotSize, height: dotSize))
+        let dot = SidebarBackgroundView(frame: NSRect(
+            x: Metrics.markCenterX - dotSize / 2, y: frame.midY - dotSize / 2, width: dotSize, height: dotSize
+        ))
         dot.wantsLayer = true
         dot.layer?.backgroundColor = Self.profileColor(hex: profile.colorHex).cgColor
         dot.layer?.cornerRadius = dotSize / 2
@@ -185,7 +180,7 @@ extension SidebarView {
         addExpandedView(chevron)
         maxX = chevron.frame.minX - Theme.Space.sm
 
-        let waitingElsewhere = lastProfiles.filter { !$0.isActive && $0.attention == .waiting }
+        let waitingElsewhere = spacesWaitingElsewhere
         if !waitingElsewhere.isEmpty {
             let amber = SidebarBackgroundView(frame: NSRect(x: maxX - 7, y: frame.midY - 3.5, width: 7, height: 7))
             amber.wantsLayer = true
@@ -195,25 +190,36 @@ extension SidebarView {
             maxX = amber.frame.minX - Theme.Space.sm
         }
 
-        let nameX = dot.frame.maxX + Theme.Space.sm
+        let nameX = Metrics.textX
         let name = textLabel(profile.name, font: Theme.Font.display, color: Theme.Color.textPrimary)
         let nameHeight = ceil(name.fittingSize.height)
         name.frame = NSRect(x: nameX, y: frame.midY - nameHeight / 2, width: max(0, maxX - nameX), height: nameHeight)
         name.setAccessibilityElement(false)
         addExpandedView(name)
 
+        // A pull-down: spaces and commands. VoiceOver reads "Space", the
+        // space's name, and the wait elsewhere the amber dot shows.
         let button = SidebarSectionToggleView(frame: frame)
         button.acceptsFirstClick = false
-        button.role = .popUpButton
-        button.setAccessibilityLabel("Space: \(profile.name)")
+        button.role = .menuButton
+        button.setAccessibilityLabel("Space")
+        var value = profile.name
         if !waitingElsewhere.isEmpty {
             let note = "An agent waits for you in \(ListFormatter.localizedString(byJoining: waitingElsewhere.map(\.name)))"
-            button.setAccessibilityHelp(note)
+            value += ". \(note)"
             button.toolTip = note
         }
+        button.setAccessibilityValue(value)
         button.onPress = { [weak self] in self?.showSpacePicker() }
         addExpandedView(button)
         return frame.minY
+    }
+
+    /// The other spaces where an agent waits on the user: the sidebar
+    /// lists only the active space's, so the picker (and the rail's space
+    /// tile) marks them.
+    var spacesWaitingElsewhere: [ProfileInfo] {
+        lastProfiles.filter { !$0.isActive && $0.attention == .waiting }
     }
 
     /// The picker's row, as wide as the cards.
@@ -259,6 +265,7 @@ extension SidebarView {
         button.hoverFillColor = Theme.Color.fillPressed
         button.frame = buttonFrame
         button.toolTip = "\(Self.newTaskTitle) (\(NiruxShortcuts.newWorkspaceDisplay))"
+        button.setAccessibilityElement(true)
         button.setAccessibilityRole(.button)
         button.setAccessibilityLabel(Self.newTaskTitle)
         button.onPress = { [weak self] in self?.onNewWorkspace?() }
@@ -286,7 +293,7 @@ extension SidebarView {
     /// archived workspaces it lists: all of them unfolded; folded, the one
     /// on screen and those asking the user (`listsWorkspace`). The row
     /// keeps its place when the list opens, so the same click folds it.
-    private func buildArchivedBlock(count: Int, listed: [WorkspaceInfo]) {
+    private func buildArchivedBlock(count: Int, listed: [WorkspaceInfo], listHeight: CGFloat) {
         typealias Metrics = SidebarExpandedMetrics
         let inset = Metrics.workspaceInsetX
         let rowFrame = NSRect(
@@ -295,7 +302,7 @@ extension SidebarView {
         buildArchivedRow(count: count, frame: rowFrame)
         guard !listed.isEmpty else { return }
 
-        let listTop = rowFrame.maxY + archivedListHeight(listed) - 1
+        let listTop = rowFrame.maxY + listHeight - 1
         let line = SidebarBackgroundView(frame: NSRect(
             x: inset + Metrics.cardPaddingX, y: listTop, width: rowFrame.width - Metrics.cardPaddingX * 2, height: 1
         ))
@@ -308,17 +315,12 @@ extension SidebarView {
     private func buildArchivedRow(count: Int, frame: NSRect) {
         typealias Metrics = SidebarExpandedMetrics
         hitAreas.append(SidebarHitArea(frame: frame, region: .archivedToggle))
-        let hover = SidebarBackgroundView(frame: frame)
-        hover.wantsLayer = true
-        hover.layer?.cornerRadius = Theme.Radius.card
-        addExpandedView(hover)
-        archivedRowHoverView = hover
+        archivedRowHoverView = addRowHover(frame: frame)
 
-        let x = frame.minX + Metrics.cardPaddingX
         let icon = SidebarImageView(image: SidebarRenderer.symbol(
             Theme.Symbol.inactiveWorkspaces, color: Theme.Color.textSecondary, pointSize: 12
         ))
-        icon.frame = NSRect(x: x - 1, y: frame.midY - 7, width: 14, height: 14)
+        icon.frame = NSRect(x: Metrics.markCenterX - 7, y: frame.midY - 7, width: 14, height: 14)
         icon.setAccessibilityElement(false)
         addExpandedView(icon)
 
@@ -332,7 +334,7 @@ extension SidebarView {
         countLabel.setAccessibilityElement(false)
         addExpandedView(countLabel)
 
-        let titleX = icon.frame.maxX + Theme.Space.sm
+        let titleX = Metrics.textX
         let title = textLabel(Self.archivedTitle, font: Theme.Font.body, color: Theme.Color.textSecondary)
         let titleHeight = ceil(title.fittingSize.height)
         title.frame = NSRect(
@@ -421,6 +423,16 @@ extension SidebarView {
     }
 
     // MARK: - Small controls
+
+    /// Clear until hovered (`applyHover` tints it), so a row that acts as
+    /// one control reads as one: the picker, the Archived row.
+    private func addRowHover(frame: NSRect) -> NSView {
+        let hover = SidebarBackgroundView(frame: frame)
+        hover.wantsLayer = true
+        hover.layer?.cornerRadius = Theme.Radius.card
+        addExpandedView(hover)
+        return hover
+    }
 
     /// A view of this render, in the document view; the next render tears
     /// it down.

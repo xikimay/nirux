@@ -35,6 +35,12 @@ enum SidebarExpandedMetrics {
     static let chipGap = Theme.Space.xs
     static let chipPaddingX: CGFloat = 6
     static let stateDotSize: CGFloat = 8
+    /// Where row text starts, past the state dot: card titles, the space
+    /// picker's name, the Archived row's.
+    static var textX: CGFloat { workspaceInsetX + cardPaddingX + stateDotSize + Theme.Space.sm }
+    /// The middle of the state dots' column, where the picker's dot and the
+    /// Archived row's icon center.
+    static var markCenterX: CGFloat { workspaceInsetX + cardPaddingX + stateDotSize / 2 }
     static let menuButtonWidth: CGFloat = 18
     static let menuButtonHeight: CGFloat = 16
 

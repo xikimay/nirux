@@ -132,7 +132,6 @@ final class OnboardingChecklistViewTests: XCTestCase {
         sidebar.onboardingChecklist = nil
         XCTAssertNil(sidebar.onboardingCardView)
         XCTAssertNil(card.superview)
-        XCTAssertEqual(hints().count, 1)
     }
 
     func testRevealWaitsForTheCardWhileTheSidebarOpens() {

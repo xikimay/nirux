@@ -34,9 +34,11 @@ extension SidebarView {
         }
     }
 
-    /// A space's menu item, in the picker and in the menu bar alike.
+    /// A space's menu item, in the picker and in the menu bar alike (which
+    /// reuses its items: everything set here is set every time).
     static func describeSpace(_ item: NSMenuItem, profile: ProfileInfo, position: Int) {
-        // Also drops an amber dot set before: an attributed title is the title.
+        // A title set over an attributed one doesn't replace what is drawn.
+        item.attributedTitle = nil
         item.title = profile.name
         item.state = profile.isActive ? .on : .off
         let isGeneral = profile.id == WorkspaceProfile.defaultID
@@ -46,12 +48,21 @@ extension SidebarView {
         if #available(macOS 14.4, *) {
             item.subtitle = isGeneral ? "Everything without a space" : nil
         }
-        if profile.attention == .waiting {
-            let title = NSMutableAttributedString(string: profile.name)
-            title.append(NSAttributedString(string: "  ●", attributes: [.foregroundColor: Theme.Color.waiting]))
+        // Amber while an agent waits on the user; red once something broke
+        // (an agent's error, a failed check), as the cards say it.
+        let mark: (color: NSColor, note: String)? = switch profile.attention {
+        case .waiting?: (Theme.Color.waiting, "An agent waits for you")
+        case .error?: (Theme.Color.error, "An agent stopped or a check failed")
+        default: nil
+        }
+        if let mark {
+            // The menu's own font: an attributed title draws in its own.
+            let font = NSFont.menuFont(ofSize: 0)
+            let title = NSMutableAttributedString(string: profile.name, attributes: [.font: font])
+            title.append(NSAttributedString(string: "  ●", attributes: [.font: font, .foregroundColor: mark.color]))
             item.attributedTitle = title
-            item.toolTip = "An agent waits for you"
-            item.setAccessibilityLabel("\(profile.name), an agent waits for you")
+            item.toolTip = mark.note
+            item.setAccessibilityLabel("\(profile.name), \(mark.note.lowercased())")
         } else {
             item.toolTip = nil
             item.setAccessibilityLabel(nil)

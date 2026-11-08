@@ -131,7 +131,6 @@ final class WorkspaceUXRenderingTests: XCTestCase {
         sidebar.layoutSubtreeIfNeeded()
 
         visibleText = text(in: sidebar)
-        XCTAssertTrue(visibleText.contains("Archived"))
         XCTAssertTrue(visibleText.contains("Release notes"))
         XCTAssertTrue(visibleText.contains("Search prototype"))
         XCTAssertFalse(visibleText.contains("ACTIVITY"))
@@ -141,7 +140,6 @@ final class WorkspaceUXRenderingTests: XCTestCase {
         sidebar.layoutSubtreeIfNeeded()
 
         visibleText = text(in: sidebar)
-        XCTAssertTrue(visibleText.contains("Archived"))
         XCTAssertFalse(visibleText.contains("Release notes"))
     }
 
