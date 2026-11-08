@@ -4,8 +4,8 @@ struct SidebarWorkspaceCardRenderResult {
     let bottomY: CGFloat
     let views: [NSView]
     let hitAreas: [SidebarHitArea]
-    /// Initially-clear overlay covering the card — SidebarView tints it
-    /// while the pointer is anywhere over the card.
+    /// Initially-clear overlay covering the row — SidebarView tints it
+    /// while the pointer is anywhere over the row.
     let cardHoverView: NSView
     /// The "⋯" action badge — brightens while directly hovered.
     let menuBadge: SidebarBadgeView?
@@ -17,9 +17,10 @@ struct SidebarWorkspaceCardRenderResult {
     let approvalButtons: [String: SidebarBadgeView]
 }
 
-/// A workspace card (`SidebarCardLayout`): state, title and age / branch
-/// and diff / column chips and the pull request, then the action block.
-/// An inactive workspace that asks nothing is one line.
+/// A task row (`SidebarCardLayout`): the state mark, the title and the time,
+/// then the status line; the selected row's columns; then the action block.
+/// No border: the selected row is tinted, the others light under the
+/// pointer. An archived row that asks nothing is one line.
 @MainActor
 final class SidebarWorkspaceCardRenderer {
     typealias Metrics = SidebarExpandedMetrics
@@ -44,18 +45,21 @@ final class SidebarWorkspaceCardRenderer {
         let frame = NSRect(
             x: layout.cardX, y: yOffset - layout.height, width: layout.cardWidth, height: layout.height
         )
+        if workspace.isActive {
+            let selected = SidebarBackgroundView(frame: frame)
+            selected.wantsLayer = true
+            selected.layer?.cornerRadius = Theme.Radius.card
+            selected.layer?.backgroundColor = Theme.Color.fillSelected.cgColor
+            append(selected)
+        }
         let cardHover = SidebarBackgroundView(frame: frame)
         cardHover.wantsLayer = true
+        cardHover.layer?.cornerRadius = layout.isCompact ? Theme.Radius.control : Theme.Radius.card
+        append(cardHover)
         if layout.isCompact {
-            cardHover.layer?.cornerRadius = Theme.Radius.control
-            append(cardHover)
             buildCompactRow(frame: frame)
         } else {
-            append(cardBackground(frame: frame))
-            // Above the card background, below all content.
-            cardHover.layer?.cornerRadius = Theme.Radius.card
-            append(cardHover)
-            buildCard(frame: frame)
+            buildRow(frame: frame)
         }
         // Last: the first area under the pointer takes the click.
         hitAreas.append(SidebarHitArea(frame: frame, region: .workspace(workspace.index)))
@@ -71,20 +75,17 @@ final class SidebarWorkspaceCardRenderer {
         )
     }
 
-    // MARK: - Card
+    // MARK: - Row
 
-    private func buildCard(frame: NSRect) {
-        var top = frame.maxY - Metrics.cardPaddingY
+    private func buildRow(frame: NSRect) {
+        var top = frame.maxY - Metrics.rowPaddingY
         buildTitleRow(top: top)
-        top -= Metrics.titleRowHeight
-        if layout.showsBranchRow {
-            top -= Metrics.cardRowGap
-            buildBranchRow(top: top)
-            top -= Metrics.branchRowHeight
-        }
+        top -= Metrics.titleRowHeight + Metrics.statusGap
+        let statusLink = buildStatusLine(top: top)
+        top -= Metrics.statusRowHeight
         let lineCount = max(layout.chipRows.count, layout.links.isEmpty ? 0 : 1)
         var chipAreas: [SidebarHitArea] = []
-        if lineCount > 0 { top -= Metrics.cardRowGap + Metrics.chipRowTopGap }
+        if lineCount > 0 { top -= Metrics.columnsGap }
         for line in 0..<lineCount {
             if line == 0 { buildLinks(top: top) }
             if line < layout.chipRows.count {
@@ -94,89 +95,99 @@ final class SidebarWorkspaceCardRenderer {
         }
         buildActionBlock(top: top)
         hitAreas += chipAreas
+        if let statusLink { hitAreas.append(statusLink) }
     }
 
     private func buildTitleRow(top: CGFloat) {
         let rowY = top - Metrics.titleRowHeight
-        buildStateIndicator(centerY: rowY + Metrics.titleRowHeight / 2, x: layout.contentX)
+        buildMark(layout.summary.mark, centerY: rowY + Metrics.titleRowHeight / 2)
 
         var maxX = layout.contentMaxX
-        if let age = ageLabel() {
-            age.frame = NSRect(x: maxX - age.fittingSize.width, y: rowY, width: age.fittingSize.width, height: Metrics.titleRowHeight)
-            append(age)
-            maxX = age.frame.minX - Theme.Space.sm
+        if let trailing = trailingLabel() {
+            trailing.frame = NSRect(
+                x: maxX - trailing.fittingSize.width, y: rowY,
+                width: trailing.fittingSize.width, height: Metrics.titleRowHeight
+            )
+            append(trailing)
+            maxX = trailing.frame.minX - Theme.Space.sm
         }
-        let badge = menuButton(revealed: workspace.isActive, frame: NSRect(
+        let badge = menuButton(frame: NSRect(
             x: maxX - Metrics.menuButtonWidth, y: rowY + (Metrics.titleRowHeight - Metrics.menuButtonHeight) / 2,
             width: Metrics.menuButtonWidth, height: Metrics.menuButtonHeight
         ))
 
-        let titleX = layout.contentX + Metrics.stateDotSize + Theme.Space.sm
-        let isQuiet = !workspace.isActive && [.idle, .done].contains(layout.state)
-        let title = textLabel(
-            workspace.title, font: Theme.Font.title,
-            color: isQuiet ? Theme.Color.textSecondary : Theme.Color.textPrimary
-        )
+        let title = textLabel(workspace.title, font: Theme.Font.title, color: Theme.Color.textPrimary)
         title.toolTip = titleToolTip()
-        title.frame = NSRect(x: titleX, y: rowY, width: max(0, badge.frame.minX - Theme.Space.sm - titleX), height: Metrics.titleRowHeight + 1)
+        title.frame = NSRect(
+            x: layout.indentX, y: rowY,
+            width: max(0, badge.frame.minX - Theme.Space.sm - layout.indentX), height: Metrics.titleRowHeight + 1
+        )
         append(title)
     }
 
-    /// Time since the last activity; amber while the workspace waits on
-    /// the user, since that's how long it has.
-    private func ageLabel() -> NSTextField? {
-        guard let lastActivityAt = workspace.lastActivityAt else { return nil }
-        let age = SidebarView.cardAge(since: lastActivityAt)
-        let label = textLabel(
-            age, font: Theme.Font.caption,
-            color: layout.state == .waiting ? Theme.Color.waiting : Theme.Color.textTertiary
-        )
+    /// The time since the last activity (how long it has waited, how long
+    /// the turn has run), or the pull request a "Ready to merge" or
+    /// "Merged" line doesn't name.
+    private func trailingLabel() -> NSTextField? {
+        // The selected row's links name the pull request already.
+        let numbersPullRequest = layout.summary.trailing?.hasPrefix("#") == true
+        guard let text = numbersPullRequest && !layout.links.isEmpty
+            ? workspace.lastActivityAt.map({ SidebarView.cardAge(since: $0) }) : layout.summary.trailing
+        else { return nil }
+        let label = textLabel(text, font: Theme.Font.caption, color: Theme.Color.textTertiary)
         label.alignment = .right
-        let description = age == "now" ? "Last activity less than a minute ago" : "Last activity \(age) ago"
-        label.toolTip = description
-        label.setAccessibilityLabel(description)
+        if text.hasPrefix("#") {
+            label.toolTip = workspace.prInfo.map(SidebarRenderer.pullRequestToolTip)
+        } else {
+            let description = text == "now" ? "Last activity less than a minute ago" : "Last activity \(text) ago"
+            label.toolTip = description
+            label.setAccessibilityLabel(description)
+        }
         return label
     }
 
-    /// The title's tooltip: what the card doesn't print — the phase, the
-    /// purpose, the last summary, another card's next step.
+    /// The title's tooltip: what the row doesn't print — the branch, the
+    /// changes, the phase, the purpose, the last summary, the next step.
     private func titleToolTip() -> String {
-        var lines = [workspace.title, "Phase: \(workspace.phase.displayName)"]
+        var lines = [workspace.title]
+        if let branch = workspace.gitBranch { lines.append("Branch: \(branch)") }
+        if let stats = workspace.diffStats { lines.append("Changes: \(SidebarRenderer.formatDiffStats(stats))") }
+        lines.append("Phase: \(workspace.phase.displayName)")
         if let purpose = workspace.purpose { lines.append("Purpose: \(purpose)") }
         if let summary = workspace.lastSummary { lines.append("Last: \(summary)") }
-        // The selected card prints the next step, every card its blocker.
+        // The selected row prints the next step, every row its blocker.
         if let action = workspace.sidebarAction, !workspace.isActive, !action.isBlocker { lines.append(action.text) }
         if workspace.lastActivityAt == nil { lines.append("No activity yet") }
         return lines.joined(separator: "\n")
     }
 
-    private func buildStateIndicator(centerY: CGFloat, x: CGFloat) {
-        let size = Metrics.stateDotSize
-        let color: NSColor
-        switch layout.state {
-        case .done:
-            let icon = SidebarImageView(image: SidebarRenderer.symbol(Theme.Symbol.merged, color: Theme.Color.done))
-            icon.frame = NSRect(x: x - 2, y: centerY - 6, width: 12, height: 12)
-            icon.setAccessibilityLabel("Pull request merged")
+    /// The sign in the state marks' column: amber for the user, red for
+    /// something broken, a breathing green dot for work, a speech bubble
+    /// for a question to the parent, a check, the merge sign, else grey.
+    private func buildMark(_ mark: SidebarRowMark, centerY: CGFloat) {
+        let centerX = Metrics.markCenterX
+        func symbol(_ name: String, _ color: NSColor, _ label: String) {
+            let icon = SidebarImageView(image: SidebarRenderer.symbol(name, color: color, pointSize: 11))
+            icon.frame = NSRect(x: centerX - 7, y: centerY - 7, width: 14, height: 14)
+            icon.setAccessibilityLabel(label)
             append(icon)
-            return
-        case .working: color = Theme.Color.working
-        case .waiting: color = Theme.Color.waiting
+        }
+        let color: NSColor
+        switch mark {
+        case .asking: return symbol(Theme.Symbol.question, Theme.Color.textSecondary, "Asking")
+        case .readyToMerge: return symbol(Theme.Symbol.checksPassed, Theme.Color.success, "Ready to merge")
+        case .merged: return symbol(Theme.Symbol.merged, Theme.Color.done, "Pull request merged")
+        case .needsYou: color = Theme.Color.waiting
         case .error: color = Theme.Color.error
+        case .working: color = Theme.Color.working
         case .idle: color = Theme.Color.idle
         }
-        if layout.state == .waiting {
-            let halo = SidebarBackgroundView(frame: NSRect(x: x - 3, y: centerY - size / 2 - 3, width: size + 6, height: size + 6))
-            halo.wantsLayer = true
-            halo.layer?.cornerRadius = (size + 6) / 2
-            halo.layer?.backgroundColor = Theme.Color.waiting.withAlphaComponent(0.22).cgColor
-            append(halo)
-        }
-        let dot = SidebarBackgroundView(frame: NSRect(x: x, y: centerY - size / 2, width: size, height: size))
+        let size = Metrics.stateDotSize
+        let dot = SidebarBackgroundView(frame: NSRect(x: centerX - size / 2, y: centerY - size / 2, width: size, height: size))
         dot.wantsLayer = true
         dot.layer?.cornerRadius = size / 2
         dot.layer?.backgroundColor = color.cgColor
-        if layout.state == .working { Self.breathe(dot.layer) }
+        if mark == .working { Self.breathe(dot.layer) }
         append(dot)
     }
 
@@ -197,26 +208,68 @@ final class SidebarWorkspaceCardRenderer {
         layer.add(animation, forKey: "breathe")
     }
 
-    private func buildBranchRow(top: CGFloat) {
-        let rowY = top - Metrics.branchRowHeight
-        var maxX = layout.contentMaxX
-        if let stats = workspace.diffStats {
-            let diff = NSTextField.sidebarLine(SidebarRenderer.diffAttributedString(stats), lineBreakMode: .byClipping)
-            let width = ceil(diff.fittingSize.width)
-            diff.frame = NSRect(x: maxX - width, y: rowY, width: width, height: Metrics.branchRowHeight)
-            diff.toolTip = "\(SidebarRenderer.formatDiffStats(stats)) — show the diff"
-            append(diff)
-            hitAreas.append(SidebarHitArea(
-                frame: diff.frame.insetBy(dx: -2, dy: -2),
-                region: .link(url: SidebarView.diffActionURL(workspaceIndex: workspace.index), label: diff)
-            ))
-            maxX = diff.frame.minX - Theme.Space.sm
+    // MARK: - Status line
+
+    /// "Needs you · npm run migrate" in amber, "Stopped on an API error"
+    /// in red, "Working", "Asking web-main", "#39 · checks passed", "Ready
+    /// to merge", "Merged · Clean up", else the branch. A line that does
+    /// something (the Mission question popover, the pull request, Clean
+    /// up) is a link as wide as its text.
+    private func buildStatusLine(top: CGFloat) -> SidebarHitArea? {
+        let status = layout.summary.status
+        let label = NSTextField.sidebarLine(Self.statusText(status))
+        let x = layout.indentX
+        label.frame = NSRect(x: x, y: top - Metrics.statusRowHeight, width: layout.contentMaxX - x, height: Metrics.statusRowHeight)
+        label.toolTip = statusToolTip(status)
+        append(label)
+        guard let action = status.action else { return nil }
+        let url: String
+        switch action {
+        case .missionQuestion(let columnIndex):
+            url = SidebarView.missionQuestionActionURL(workspaceIndex: workspace.index, columnIndex: columnIndex)
+        case .open(let target):
+            url = SidebarView.openActionURL(workspaceIndex: workspace.index, url: target)
+        case .cleanUp:
+            url = SidebarView.cleanupActionURL(workspaceIndex: workspace.index)
         }
-        if let branchName = workspace.gitBranch {
-            let branch = textLabel(branchName, font: Theme.Font.mono, color: Theme.Color.textSecondary)
-            branch.toolTip = branchName
-            branch.frame = NSRect(x: layout.indentX, y: rowY, width: max(0, maxX - layout.indentX), height: Metrics.branchRowHeight)
-            append(branch)
+        let width = min(label.frame.width, ceil(label.attributedStringValue.size().width) + 4)
+        return SidebarHitArea(
+            frame: NSRect(x: label.frame.minX - 2, y: label.frame.minY - 2, width: width + 2, height: label.frame.height + 4),
+            region: .link(url: url, label: label)
+        )
+    }
+
+    static func statusText(_ status: SidebarStatusLine) -> NSAttributedString {
+        let font = status.tone == .branch ? Theme.Font.mono : Theme.Font.body
+        let color: NSColor = switch status.tone {
+        case .needsYou: Theme.Color.waiting
+        case .error: Theme.Color.error
+        case .neutral, .branch: Theme.Color.textSecondary
+        }
+        let text = NSMutableAttributedString(string: status.text, attributes: [.font: font, .foregroundColor: color])
+        if status.action == .cleanUp, let range = status.text.range(of: "Clean up") {
+            text.addAttribute(.foregroundColor, value: Theme.Color.accent, range: NSRange(range, in: status.text))
+        }
+        return text
+    }
+
+    /// What the line can't hold: the whole question, the pull request,
+    /// what Clean up does, what the agent waits on.
+    private func statusToolTip(_ status: SidebarStatusLine) -> String {
+        switch status.action {
+        case .missionQuestion(let columnIndex)?:
+            guard let question = workspace.columns.first(where: { $0.index == columnIndex })?.missionQuestion else {
+                return status.text
+            }
+            return "\(question.text)\n\n\(question.explanation) Click to answer."
+        case .open?:
+            return workspace.prInfo.map(SidebarRenderer.pullRequestToolTip) ?? status.text
+        case .cleanUp?:
+            return "Clean Up Worktree…: checks, then asks before deleting this worktree’s folder and "
+                + "local branch and closing the workspaces open in it. The remote branch is kept."
+        case nil:
+            let asking = workspace.columns.first { $0.attention == .waiting || $0.attention == .error }
+            return [status.text, asking?.attentionToolTip].compactMap { $0 }.joined(separator: "\n")
         }
     }
 
@@ -362,8 +415,6 @@ final class SidebarWorkspaceCardRenderer {
             label.toolTip = text
             label.frame = NSRect(x: x, y: top - Metrics.actionLineHeight, width: width, height: Metrics.actionLineHeight)
             append(label)
-        case let .cleanup(offer, number):
-            buildCleanup(offer, pullRequest: number, top: top)
         case .reviewBadges(let badges):
             let indent = layout.indentX
             let prefix = textLabel("Reviews", font: Theme.Font.caption, color: Theme.Color.textTertiary)
@@ -372,28 +423,6 @@ final class SidebarWorkspaceCardRenderer {
             let badgesX = prefix.frame.maxX + Theme.Space.sm
             append(SidebarReviewBadgesRow.label(
                 badges, x: badgesX, width: layout.contentMaxX - badgesX, top: top
-            ))
-        case let .missionQuestion(columnIndex, question):
-            let label = NSTextField.sidebarLine(Self.missionQuestionText(question))
-            label.frame = NSRect(x: x, y: top - Metrics.actionLineHeight, width: width, height: Metrics.actionLineHeight)
-            append(label)
-            guard !question.isAnswered else {
-                label.toolTip = "Answer from \(question.parentTitle): \(question.text)\n\nNirux types it into this agent’s "
-                    + "prompt once its turn is over and nothing is typed there. A Claude started since it asked "
-                    + "takes it after one prompt from you."
-                label.setAccessibilityLabel("Answer from \(question.parentTitle) waiting: \(question.text)")
-                return
-            }
-            label.toolTip = "\(question.text)\n\n\(question.explanation) Click to answer."
-            label.setAccessibilityLabel(
-                question.handOff == nil ? "Asking \(question.parentTitle): \(question.text)" : "Needs you, a question: \(question.text)"
-            )
-            hitAreas.append(SidebarHitArea(
-                frame: label.frame.insetBy(dx: -2, dy: -2),
-                region: .link(
-                    url: SidebarView.missionQuestionActionURL(workspaceIndex: workspace.index, columnIndex: columnIndex),
-                    label: label
-                )
             ))
         case .next(let text):
             let label = NSTextField.sidebarLine(Self.nextText(text))
@@ -404,32 +433,6 @@ final class SidebarWorkspaceCardRenderer {
             )
             append(label)
         }
-    }
-
-    /// "Asking web-main · <question>" in grey while the parent may answer,
-    /// "Needs you · a question" in amber once it waits on the user.
-    private static func missionQuestionText(_ question: SidebarMissionQuestion) -> NSAttributedString {
-        let font = Theme.Font.caption
-        guard !question.isAnswered else {
-            let text = question.parentTitle == "you" ? "Your answer is ready to type in" : "Answer from \(question.parentTitle) ready to type in"
-            return NSAttributedString(string: text, attributes: [
-                .font: font, .foregroundColor: Theme.Color.textSecondary
-            ])
-        }
-        guard question.handOff == nil else {
-            return NSAttributedString(string: "Needs you · a question", attributes: [
-                .font: font, .foregroundColor: Theme.Color.waiting
-            ])
-        }
-        let result = NSMutableAttributedString(string: "Asking \(question.parentTitle)", attributes: [
-            .font: font, .foregroundColor: Theme.Color.textSecondary
-        ])
-        if let text = AgentText.clean(question.text, maxLength: 300) {
-            result.append(NSAttributedString(string: " · \(text)", attributes: [
-                .font: font, .foregroundColor: Theme.Color.textTertiary
-            ]))
-        }
-        return result
     }
 
     private static func nextText(_ text: String) -> NSAttributedString {
@@ -450,60 +453,19 @@ final class SidebarWorkspaceCardRenderer {
         approvalButtons.merge(block.buttons) { _, new in new }
     }
 
-    /// "PR merged", then "Clean up": the ⋯ menu's "Clean Up Worktree…",
-    /// with the same checks and confirmation. "Cleaning up…" while one
-    /// runs, which does nothing.
-    private func buildCleanup(_ offer: MergedCleanupOffer, pullRequest number: Int, top: CGFloat) {
-        let rowY = top - Metrics.actionLineHeight
-        let merged = textLabel("PR merged", font: Theme.Font.caption, color: Theme.Color.done)
-        merged.toolTip = "Pull request #\(number) merged"
-        merged.frame = NSRect(x: layout.contentX, y: rowY, width: merged.fittingSize.width, height: Metrics.actionLineHeight)
-        append(merged)
-        let link: NSTextField
-        switch offer {
-        case .available:
-            link = textLabel("Clean up", font: Theme.Font.caption, color: Theme.Color.accent)
-            link.toolTip = "Clean Up Worktree…: checks, then asks before deleting this worktree’s folder and "
-                + "local branch and closing the workspaces open in it. The remote branch is kept."
-        case .inProgress:
-            link = textLabel("Cleaning up…", font: Theme.Font.caption, color: Theme.Color.textTertiary)
-        }
-        let width = link.fittingSize.width
-        link.alignment = .right
-        link.frame = NSRect(x: layout.contentMaxX - width, y: rowY, width: width, height: Metrics.actionLineHeight)
-        append(link)
-        guard offer == .available else { return }
-        hitAreas.append(SidebarHitArea(
-            frame: link.frame.insetBy(dx: -2, dy: -2),
-            region: .link(url: SidebarView.cleanupActionURL(workspaceIndex: workspace.index), label: link)
-        ))
-    }
-
     // MARK: - Compact row
 
-    /// An inactive workspace: its state, its title, its merged PR or age.
+    /// An archived workspace: its state, its title, its merged PR or age.
     private func buildCompactRow(frame: NSRect) {
         let midY = frame.midY
-        let x = layout.contentX
-        if layout.state == .done {
-            let icon = SidebarImageView(image: SidebarRenderer.symbol(Theme.Symbol.merged, color: Theme.Color.done))
-            icon.frame = NSRect(x: x, y: midY - 6, width: 12, height: 12)
-            icon.setAccessibilityLabel("Pull request merged")
-            append(icon)
-        } else {
-            let dot = SidebarBackgroundView(frame: NSRect(x: x + 3, y: midY - 3, width: 6, height: 6))
-            dot.wantsLayer = true
-            dot.layer?.cornerRadius = 3
-            dot.layer?.backgroundColor = Theme.Color.idle.cgColor
-            append(dot)
-        }
+        buildMark(layout.state == .done ? .merged : .idle, centerY: midY)
 
         var maxX = layout.contentMaxX
         let trailing: NSTextField?
         if layout.state == .done, let number = workspace.prInfo?.number {
-            trailing = textLabel("#\(number)", font: Theme.Font.mono, color: Theme.Color.done)
+            trailing = textLabel("#\(number)", font: Theme.Font.caption, color: Theme.Color.textTertiary)
         } else {
-            trailing = ageLabel()
+            trailing = trailingLabel()
         }
         if let trailing {
             let width = trailing.fittingSize.width
@@ -512,12 +474,12 @@ final class SidebarWorkspaceCardRenderer {
             append(trailing)
             maxX = trailing.frame.minX - Theme.Space.sm
         }
-        let badge = menuButton(revealed: false, frame: NSRect(
+        let badge = menuButton(frame: NSRect(
             x: maxX - Metrics.menuButtonWidth, y: midY - Metrics.menuButtonHeight / 2,
             width: Metrics.menuButtonWidth, height: Metrics.menuButtonHeight
         ))
 
-        let titleX = x + 12 + Theme.Space.sm
+        let titleX = layout.indentX
         let title = textLabel(workspace.title, font: Theme.Font.body, color: Theme.Color.textSecondary)
         title.toolTip = titleToolTip()
         let height = ceil(title.fittingSize.height)
@@ -527,49 +489,23 @@ final class SidebarWorkspaceCardRenderer {
 
     // MARK: - Pieces
 
-    /// "⋯": the workspace menu. Shown on the selected card, and on the
-    /// others while the pointer is over them; it answers clicks either way.
-    private func menuButton(revealed: Bool, frame: NSRect) -> SidebarBadgeView {
+    /// "⋯": the workspace menu, shown while the pointer is over the row; it
+    /// answers clicks either way.
+    private func menuButton(frame: NSRect) -> SidebarBadgeView {
         let badge = SidebarBadgeView(text: "", textColor: Theme.Color.textSecondary, fillColor: .clear, font: Theme.Font.caption)
         badge.frame = frame
         badge.symbolName = Theme.Symbol.more
         badge.hoverTextColor = Theme.Color.textPrimary
         badge.hoverFillColor = Theme.Color.fillPressed
-        badge.hidesUntilHover = !revealed
+        badge.hidesUntilHover = true
         badge.toolTip = "Workspace actions"
         badge.setAccessibilityRole(.button)
         badge.setAccessibilityLabel("Workspace actions")
         menuBadge = badge
         append(badge)
-        // Down to the diff's area, not into it.
         hitAreas.append(SidebarHitArea(frame: frame.insetBy(dx: -4, dy: -2), region: .workspaceMenu(workspace.index)))
         return badge
     }
-
-    private func cardBackground(frame: NSRect) -> SidebarBackgroundView {
-        let background = SidebarBackgroundView(frame: frame)
-        background.wantsLayer = true
-        background.layer?.cornerRadius = Theme.Radius.card
-        background.layer?.borderWidth = 1
-        let surface = Theme.Color.surface
-        switch (layout.state, workspace.isActive) {
-        case (.waiting, let isSelected):
-            background.layer?.backgroundColor = Theme.Color.tint(Theme.Color.waiting, 0.08, over: surface).cgColor
-            background.layer?.borderColor = (isSelected ? Self.selectedBorder : Theme.Color.waiting.withAlphaComponent(0.5)).cgColor
-        case (_, true):
-            background.layer?.backgroundColor = Theme.Color.tint(Theme.Color.accent, 0.03, over: surface).cgColor
-            background.layer?.borderColor = Self.selectedBorder.cgColor
-        case (.error, false):
-            background.layer?.backgroundColor = surface.cgColor
-            background.layer?.borderColor = Theme.Color.error.withAlphaComponent(0.45).cgColor
-        default:
-            background.layer?.backgroundColor = surface.cgColor
-            background.layer?.borderColor = Theme.Color.line.cgColor
-        }
-        return background
-    }
-
-    private static var selectedBorder: NSColor { Theme.Color.accent.withAlphaComponent(0.6) }
 
     private func textLabel(_ text: String, font: NSFont, color: NSColor) -> NSTextField {
         let label = NSTextField(labelWithString: text)

@@ -275,12 +275,15 @@ final class MissionDeliveryTests: XCTestCase {
         SidebarMissionQuestion(questionID: "q", parentTitle: "web-main", text: "Keep date=?", handOff: handOff)
     }
 
-    /// Grey while the parent may answer: the card doesn't ask the user.
-    /// Amber once it comes to the user, like any question to them.
+    /// Grey while the parent may answer: the row doesn't ask the user.
+    /// Amber once it comes to the user, like any question to them. Either
+    /// way its status line opens the reply.
     func testTheCardAsksTheUserOnlyOnceTheQuestionComesToThem() {
         let asking = workspace([column(question(nil))])
-        XCTAssertEqual(asking.cardActions, [.missionQuestion(columnIndex: 0, question(nil))])
-        XCTAssertTrue(asking.cardActions.allSatisfy(\.isQuiet))
+        XCTAssertEqual(asking.rowSummary.status, SidebarStatusLine(
+            text: "Asking web-main", tone: .neutral, action: .missionQuestion(columnIndex: 0)
+        ))
+        XCTAssertEqual(asking.rowSummary.mark, .asking)
         XCTAssertNil(asking.columns[0].attention)
         XCTAssertEqual(asking.cardState, .idle)
 
@@ -293,7 +296,10 @@ final class MissionDeliveryTests: XCTestCase {
         XCTAssertNil(waiting.attention)
 
         let handedOff = workspace([column(question(.parentClosed))])
-        XCTAssertFalse(handedOff.cardActions.allSatisfy(\.isQuiet))
+        XCTAssertEqual(handedOff.rowSummary.status, SidebarStatusLine(
+            text: "Needs you · a question", tone: .needsYou, action: .missionQuestion(columnIndex: 0)
+        ))
+        XCTAssertEqual(handedOff.rowSummary.mark, .needsYou)
         XCTAssertEqual(handedOff.columns[0].attention, .waiting)
         XCTAssertEqual(handedOff.columns[0].attentionLabel, "question")
         XCTAssertEqual(handedOff.cardState, .waiting)
@@ -316,7 +322,7 @@ final class MissionDeliveryTests: XCTestCase {
             clicked.append((workspaceIndex, columnIndex))
         }
         let rows: [(SidebarMissionQuestion.HandOff?, String)] = [
-            (nil, "Asking web-main · Keep date=?"), (.unanswered(minutes: 10), "Needs you · a question")
+            (nil, "Asking web-main"), (.unanswered(minutes: 10), "Needs you · a question")
         ]
         for (handOff, text) in rows {
             sidebar.update(profiles: [], workspaces: [workspace([column(question(handOff))], index: 3)])

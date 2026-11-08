@@ -17,28 +17,26 @@ enum SidebarExpandedMetrics {
     static let archivedListGap: CGFloat = 6
     static let bottomPadding = Theme.Space.sm
 
-    // The workspace card: state and title / branch and diff / column chips
-    // and the pull request, then an action block only when there is
+    // A task row: the state mark and title, the status line; the selected
+    // row adds its columns; then an action block only when there is
     // something to do.
     static let workspaceInsetX: CGFloat = 8
-    static let workspaceGap: CGFloat = 6
+    static let workspaceGap: CGFloat = 2
     static let cardPaddingX: CGFloat = 10
-    static let cardPaddingY = Theme.Space.sm
-    static let cardRowGap = Theme.Space.xs
-    /// Lines 2 and 3 start under the title, past the state dot.
-    static let cardIndent = Theme.Space.lg
+    static let rowPaddingY: CGFloat = 7
     static let titleRowHeight: CGFloat = 16
-    static let branchRowHeight: CGFloat = 14
-    /// Extra space above the chips.
-    static let chipRowTopGap: CGFloat = 2
+    static let statusGap: CGFloat = 2
+    static let statusRowHeight: CGFloat = 15
+    /// Above the selected row's columns.
+    static let columnsGap: CGFloat = 6
     static let chipHeight: CGFloat = 20
     static let chipGap = Theme.Space.xs
     static let chipPaddingX: CGFloat = 6
     static let stateDotSize: CGFloat = 8
-    /// Where row text starts, past the state dot: card titles, the space
-    /// picker's name, the Archived row's.
+    /// Where row text starts, past the state dot: titles, status lines,
+    /// columns, the space picker's name, the Archived row's.
     static var textX: CGFloat { workspaceInsetX + cardPaddingX + stateDotSize + Theme.Space.sm }
-    /// The middle of the state dots' column, where the picker's dot and the
+    /// The middle of the state marks' column, where the picker's dot and the
     /// Archived row's icon center.
     static var markCenterX: CGFloat { workspaceInsetX + cardPaddingX + stateDotSize / 2 }
     static let menuButtonWidth: CGFloat = 18
@@ -97,7 +95,7 @@ enum SidebarExpandedMetrics {
         switch action {
         case .approval(_, _, let approval): return approvalBlockHeight(for: approval)
         case .resume(_, _, _, _, let resume): return resumeBlockHeight(for: resume)
-        case .blocker, .cleanup, .reviewBadges, .next, .missionQuestion: return actionLineHeight
+        case .blocker, .reviewBadges, .next: return actionLineHeight
         }
     }
 

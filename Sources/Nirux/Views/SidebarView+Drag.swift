@@ -248,12 +248,13 @@ extension SidebarView {
         title.font = Theme.Font.title
         title.textColor = Theme.Color.textPrimary
         title.lineBreakMode = .byTruncatingTail
-        let inset = SidebarExpandedMetrics.cardPaddingX + SidebarExpandedMetrics.cardIndent
+        // At the row's title, in the ghost's coordinates.
+        let inset = SidebarExpandedMetrics.textX - SidebarExpandedMetrics.workspaceInsetX
         let height = min(SidebarExpandedMetrics.titleRowHeight + 1, drag.rowFrame.height)
         title.frame = NSRect(
             x: inset,
-            // At the card's title; centered on a one-line row.
-            y: drag.rowFrame.height - min(SidebarExpandedMetrics.cardPaddingY, (drag.rowFrame.height - height) / 2) - height,
+            // Centered on a one-line row.
+            y: drag.rowFrame.height - min(SidebarExpandedMetrics.rowPaddingY, (drag.rowFrame.height - height) / 2) - height,
             width: drag.rowFrame.width - inset - SidebarExpandedMetrics.cardPaddingX,
             height: height
         )

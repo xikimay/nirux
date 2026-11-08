@@ -183,14 +183,16 @@ extension WorkspaceInfo {
         columns.contains { $0.attention == .waiting || $0.attention == .error }
     }
 
-    /// One line in the archived list: parked work that asks nothing and
-    /// isn't on screen.
+    /// One line in the archived list: parked work that asks nothing, offers
+    /// no clean-up and isn't on screen.
     var showsCompactRow: Bool {
-        isInactive && !isActive && !cardActions.contains { !$0.isQuiet }
+        isInactive && !isActive && !cardActions.contains { !$0.isQuiet } && mergedCleanup == nil
             && ![.waiting, .error, .working].contains(cardState)
     }
 
-    /// The card's action block, top to bottom; empty hides it.
+    /// The block under a row's two lines, top to bottom; empty hides it. A
+    /// Mission question and "Clean up" are the status line's
+    /// (`rowSummary`).
     var cardActions: [SidebarCardAction] {
         var actions: [SidebarCardAction] = []
         let names = columns.map(SidebarRenderer.columnName)
@@ -206,9 +208,6 @@ extension WorkspaceInfo {
                     columnIndex: column.index, kind: kind, detail: detail, failedAt: failedAt, resume: resume
                 ))
             }
-            if let question = column.missionQuestion {
-                actions.append(.missionQuestion(columnIndex: column.index, question))
-            }
         }
         if let action = sidebarAction {
             if action.isBlocker {
@@ -216,9 +215,6 @@ extension WorkspaceInfo {
             } else if isActive, let nextStep = nextStep?.trimmingCharacters(in: .whitespacesAndNewlines) {
                 actions.append(.next(nextStep))
             }
-        }
-        if let mergedCleanup, let prInfo {
-            actions.append(.cleanup(mergedCleanup, pullRequest: prInfo.number))
         }
         if isActive, let reviewBadges {
             actions.append(.reviewBadges(reviewBadges))
@@ -236,21 +232,15 @@ enum SidebarCardAction: Hashable {
         columnIndex: Int, kind: String?, detail: String?, failedAt: TimeInterval, resume: SidebarStuckState.Resume
     )
     case blocker(String)
-    /// "Clean up" a merged pull request's worktree.
-    case cleanup(MergedCleanupOffer, pullRequest: Int)
     case reviewBadges(ReviewBadges)
-    /// The next step, on the selected card.
+    /// The next step, on the selected row.
     case next(String)
-    /// A Mission question the column's agent waits on: a click opens the
-    /// reply popover.
-    case missionQuestion(columnIndex: Int, SidebarMissionQuestion)
 
     /// Information rather than something to do: no separator above.
     var isQuiet: Bool {
         switch self {
         case .next, .reviewBadges: return true
-        case .missionQuestion(_, let question): return question.handOff == nil
-        case .approval, .resume, .blocker, .cleanup: return false
+        case .approval, .resume, .blocker: return false
         }
     }
 }

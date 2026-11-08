@@ -134,8 +134,11 @@ struct SidebarCardLink {
     }
 }
 
-/// What a workspace card shows and where, before any view exists: the
-/// renderer draws it, `SidebarExpandedMetrics.workspaceHeight` measures it.
+/// What a task row shows and where, before any view exists: the renderer
+/// draws it, `SidebarExpandedMetrics.workspaceHeight` measures it. Every row
+/// has two lines (`rowSummary`); the selected one adds its columns, as
+/// chips, and its pull request's links; an action block follows when there
+/// is something to do. An archived row that asks nothing is one line.
 @MainActor
 struct SidebarCardLayout {
     typealias Metrics = SidebarExpandedMetrics
@@ -150,9 +153,10 @@ struct SidebarCardLayout {
     let sidebarWidth: CGFloat
     let isCompact: Bool
     let state: SidebarCardState
-    let showsBranchRow: Bool
-    /// Line 3's right end, left to right: PR feedback, the pull request,
-    /// its checks.
+    let summary: SidebarRowSummary
+    /// The selected row's columns line, right end, left to right: the
+    /// changes, PR feedback, the pull request, its checks. Empty on other
+    /// rows.
     let links: [SidebarCardLink]
     let chipRows: [[ChipPlacement]]
     let actions: [SidebarCardAction]
@@ -163,17 +167,18 @@ struct SidebarCardLayout {
         self.sidebarWidth = sidebarWidth
         isCompact = workspace.showsCompactRow
         state = workspace.cardState
-        showsBranchRow = workspace.gitBranch != nil || workspace.diffStats != nil
-        links = Self.links(for: workspace)
+        summary = workspace.rowSummary
+        let showsColumns = workspace.isActive && !isCompact
+        links = showsColumns ? Self.links(for: workspace) : []
         actions = isCompact ? [] : workspace.cardActions
 
-        let rowWidth = sidebarWidth - (Metrics.workspaceInsetX + Metrics.cardPaddingX) * 2 - Metrics.cardIndent
+        let rowWidth = sidebarWidth - Metrics.workspaceInsetX - Metrics.cardPaddingX - Metrics.textX
         let linksWidth = links.reduce(CGFloat(0)) { $0 + $1.width } + Self.linkGaps(links)
         let firstRowWidth = rowWidth - (links.isEmpty ? 0 : linksWidth + Theme.Space.sm)
         var rows: [[ChipPlacement]] = []
         var row: [ChipPlacement] = []
         var x: CGFloat = 0
-        for chip in workspace.columns.map(SidebarColumnChip.init) {
+        for chip in (showsColumns ? workspace.columns : []).map(SidebarColumnChip.init) {
             let available = rows.isEmpty ? firstRowWidth : rowWidth
             // A first chip too wide for the space left of the links starts
             // on the next line, never under them.
@@ -191,12 +196,10 @@ struct SidebarCardLayout {
         if isCompact {
             height = Metrics.compactRowHeight
         } else {
+            var height = Metrics.rowPaddingY * 2 + Metrics.titleRowHeight + Metrics.statusGap + Metrics.statusRowHeight
             let lineCount = CGFloat(max(rows.count, links.isEmpty ? 0 : 1))
-            var height = Metrics.cardPaddingY * 2 + Metrics.titleRowHeight
-            if showsBranchRow { height += Metrics.cardRowGap + Metrics.branchRowHeight }
             if lineCount > 0 {
-                height += Metrics.cardRowGap + Metrics.chipRowTopGap
-                    + lineCount * Metrics.chipHeight + (lineCount - 1) * Metrics.chipGap
+                height += Metrics.columnsGap + lineCount * Metrics.chipHeight + (lineCount - 1) * Metrics.chipGap
             }
             self.height = height + Metrics.actionBlockHeight(actions)
         }
@@ -206,7 +209,8 @@ struct SidebarCardLayout {
     var cardWidth: CGFloat { sidebarWidth - Metrics.workspaceInsetX * 2 }
     var contentX: CGFloat { cardX + Metrics.cardPaddingX }
     var contentMaxX: CGFloat { cardX + cardWidth - Metrics.cardPaddingX }
-    var indentX: CGFloat { contentX + Metrics.cardIndent }
+    /// Titles, status lines and chips start here, past the state mark.
+    var indentX: CGFloat { Metrics.textX }
 
     /// Between the feedback and the pull request, and the pull request and
     /// its checks.
@@ -214,9 +218,18 @@ struct SidebarCardLayout {
         CGFloat(max(links.count - 1, 0)) * Theme.Space.xs
     }
 
+    /// The selected row's links: its changes (the diff opens in the
+    /// editor), then its pull request's feedback, number and checks.
     private static func links(for workspace: WorkspaceInfo) -> [SidebarCardLink] {
-        guard let pullRequest = workspace.prInfo else { return [] }
         var links: [SidebarCardLink] = []
+        if let stats = workspace.diffStats {
+            links.append(SidebarCardLink(
+                text: SidebarRenderer.diffAttributedString(stats),
+                url: SidebarView.diffActionURL(workspaceIndex: workspace.index),
+                toolTip: "\(SidebarRenderer.formatDiffStats(stats)) — show the diff"
+            ))
+        }
+        guard let pullRequest = workspace.prInfo else { return links }
         if let feedback = workspace.prFeedback {
             links.append(SidebarCardLink(
                 text: feedbackText(feedback),

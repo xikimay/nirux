@@ -15,7 +15,7 @@ final class SidebarPullRequestLinkTests: XCTestCase {
             focusedColumn: 0,
             gitBranch: "feat/\(index)",
             notification: nil,
-            isActive: index == 0,
+            isActive: index == 1,
             columns: [],
             prInfo: prInfo,
             diffStats: nil,
@@ -46,8 +46,9 @@ final class SidebarPullRequestLinkTests: XCTestCase {
         )
     }
 
-    /// Clicks every link of the second card, in order, and returns what the
-    /// sidebar asked to open, and where.
+    /// Clicks every link of the second row, the selected one, in order, and
+    /// returns what the sidebar asked to open, and where: its columns line's
+    /// pull request and checks, then its status line.
     private func clickLinks(of prInfo: PRInfo) throws -> [(workspaceIndex: Int, url: String)] {
         _ = NSApplication.shared
         let sidebar = SidebarView(frame: NSRect(x: 0, y: 0, width: 260, height: 660))
@@ -84,18 +85,19 @@ final class SidebarPullRequestLinkTests: XCTestCase {
     func testPullRequestLinksOpenInTheirCardsWorkspace() throws {
         let opened = try clickLinks(of: pullRequest(ciStatus: "PENDING"))
 
-        XCTAssertEqual(opened.map(\.workspaceIndex), [1, 1])
+        XCTAssertEqual(opened.map(\.workspaceIndex), [1, 1, 1])
         XCTAssertEqual(opened.map(\.url), [
             "https://github.com/owner/repo/pull/42",
+            "https://github.com/owner/repo/pull/42/checks",
             "https://github.com/owner/repo/pull/42/checks"
-        ])
+        ], "\"#42 · checks running\" opens the checks too")
     }
 
     func testFailedCILinkOpensTheFailedCheck() throws {
         let failed = "https://github.com/owner/repo/actions/runs/7/job/8"
         let opened = try clickLinks(of: pullRequest(ciStatus: "FAILURE", failedCheckUrl: failed))
 
-        XCTAssertEqual(opened.map(\.url), ["https://github.com/owner/repo/pull/42", failed])
+        XCTAssertEqual(opened.map(\.url), ["https://github.com/owner/repo/pull/42", failed, failed], "\"#42 · checks failed\" too")
     }
 
     /// A check's details URL is set by whoever reports the check: only a
