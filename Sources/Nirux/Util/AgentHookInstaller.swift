@@ -42,6 +42,15 @@ enum AgentHookInstaller {
         return bundleURL.pathExtension == "app" || isEnabled(environment["NIRUX_FORCE_HOOK_INSTALL"])
     }
 
+    /// A build that installs the hooks, on the real state: it keeps the
+    /// files every agent session shares (the Claude Code status line, the
+    /// agent skills) on its own. A copy on a state of its own
+    /// (NIRUX_STATE_DIR) leaves them to the installed app.
+    static func maintainsSharedAgentFiles(environment: [String: String], bundleURL: URL) -> Bool {
+        shouldInstall(environment: environment, bundleURL: bundleURL)
+            && Persistence.stateDirectoryOverride(in: environment) == nil
+    }
+
     private static func isEnabled(_ flag: String?) -> Bool {
         guard let flag else { return false }
         return ["1", "true", "yes"].contains(flag.lowercased())

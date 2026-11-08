@@ -232,7 +232,7 @@ final class ProjectMemoryTests: XCTestCase {
         try write("cafe.md", Self.memoryFile("cafe", type: "feedback", body: "Order an espresso."))
         try write("loose.md", Self.memoryFile("loose", type: "project", body: "Unlisted espresso."))
         let brief = ProjectMemory.RuleFile(
-            url: directory.appendingPathComponent("brief.md"), label: "Project brief",
+            url: directory.appendingPathComponent("brief.md"), label: "Space brief",
             rules: ProjectMemory.rules(in: "- Chat in French.\n- One PR per change.")
         )
         let team = ProjectMemory.RuleFile(

@@ -22,7 +22,8 @@ struct AgentCLIAvailability: Hashable, Sendable {
 enum AgentSkillsStatus: Hashable, Sendable {
     /// Every copy matches the skills this build ships.
     case installed
-    /// Some copies are missing or differ (an older Nirux wrote them).
+    /// Some copies are missing or differ: edited by the user (launch only
+    /// updates Nirux's own copies), or written by another version.
     case outdated
     /// No copy at all.
     case missing

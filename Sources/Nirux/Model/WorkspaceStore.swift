@@ -328,7 +328,7 @@ final class WorkspaceStore {
 
     private func uniqueProfileName(_ base: String, excluding excludedID: String? = nil) -> String {
         let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallback = trimmed.isEmpty ? "project" : trimmed
+        let fallback = trimmed.isEmpty ? "space" : trimmed
         let existing = Set(profiles.compactMap { profile in
             profile.id == excludedID ? nil : profile.name
         })
@@ -338,11 +338,11 @@ final class WorkspaceStore {
         return "\(fallback) \(idx)"
     }
 
+    /// The default space (General) always exists and comes first, so every
+    /// list of spaces starts with it: the switcher, the menus, Move to Space,
+    /// New Task's popup.
     private static func normalizedProfiles(_ profiles: [WorkspaceProfile]) -> [WorkspaceProfile] {
-        var result = profiles.isEmpty ? [WorkspaceProfile.defaultProfile] : profiles
-        if !result.contains(where: { $0.id == WorkspaceProfile.defaultID }) {
-            result.insert(WorkspaceProfile.defaultProfile, at: 0)
-        }
-        return result
+        let general = profiles.first { $0.id == WorkspaceProfile.defaultID } ?? WorkspaceProfile.defaultProfile
+        return [general] + profiles.filter { $0.id != WorkspaceProfile.defaultID }
     }
 }

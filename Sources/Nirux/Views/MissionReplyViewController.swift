@@ -73,8 +73,8 @@ final class MissionReplyViewController: NSViewController {
         view.window?.makeFirstResponder(replyView)
     }
 
-    /// Esc closes the popover; the answer field forwards it (an NSTextView
-    /// would open its completion list).
+    /// Esc closes the popover: the answer field passes it up the responder
+    /// chain to this controller.
     override func cancelOperation(_ sender: Any?) {
         popover?.performClose(sender)
     }
@@ -144,7 +144,6 @@ final class MissionReplyViewController: NSViewController {
         text.textContainer?.widthTracksTextView = true
         text.setAccessibilityLabel("Your answer")
         text.onCommandReturn = { [weak self] in self?.send() }
-        text.onCancel = { [weak self] in self?.cancelOperation(nil) }
         scroll.documentView = text
         replyView = text
         return scroll
@@ -195,12 +194,9 @@ final class MissionReplyViewController: NSViewController {
     }
 }
 
-/// The answer field: ⌘↩ sends instead of making a new line, Esc closes.
+/// The answer field: ⌘↩ sends instead of making a new line.
 final class MissionReplyTextView: NSTextView {
     var onCommandReturn: (() -> Void)?
-    var onCancel: (() -> Void)?
-
-
 
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)

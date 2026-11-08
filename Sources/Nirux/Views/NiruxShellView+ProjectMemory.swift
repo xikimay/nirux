@@ -1,6 +1,6 @@
 import AppKit
 
-// MARK: - Project Memory panel (⌘P › Project Memory…, the project's menu)
+// MARK: - Space Memory panel (⌘P › Space Memory…, the space's menu)
 
 extension NiruxShellView {
     /// What a Project Memory read needs, kept for the reads after a write.
@@ -36,7 +36,7 @@ extension NiruxShellView {
     func showProjectMemory(profileID: String? = nil) {
         guard window != nil else { return }
         guard let workspace = profileID.map(projectMemoryWorkspace(inProject:)) ?? activeWorkspace else {
-            showToast("Open a workspace in this project to see what agents know")
+            showToast("Open a workspace in this space to see what agents know")
             return
         }
         let context = ProjectMemoryContext(
@@ -80,7 +80,7 @@ extension NiruxShellView {
         let trash = sideEffects.trash
         var actions = ProjectMemoryPanel.Actions()
         // An item's file opens in the editor of the workspace it was read
-        // for, brought forward, as the project brief opens in the
+        // for, brought forward, as the space brief opens in the
         // workspace's.
         actions.open = { [weak self, weak workspace] url, line in
             guard let self else { return }
@@ -171,7 +171,7 @@ extension NiruxShellView {
         return actions
     }
 
-    /// The project's brief, created on first use as "Edit Project Brief…"
+    /// The project's brief, created on first use as "Edit Space Brief…"
     /// does; nil with a toast when it can't be.
     private func ensureProjectBrief(spaceID: String?) -> URL? {
         if let spaceID {
@@ -182,7 +182,7 @@ extension NiruxShellView {
                 NiruxDebugLog.log("ProjectMemory: could not create the brief file: \(error)")
             }
         }
-        projectMemoryPanel?.writeFailed("Couldn’t create the project’s brief")
+        projectMemoryPanel?.writeFailed("Couldn’t create the space’s brief")
         return nil
     }
 

@@ -224,7 +224,7 @@ extension SidebarView {
             width: SidebarExpandedMetrics.countChipWidth,
             height: SidebarExpandedMetrics.countChipHeight
         )
-        badge.toolTip = "Project options"
+        badge.toolTip = "Space options"
         addSubviewDoc(badge)
         expandedViews.append(badge)
         spaceHeaderBadge = badge
@@ -291,7 +291,7 @@ extension SidebarView {
         let view = SidebarDotIndicatorView(
             frame: NSRect(x: 0, y: 0, width: bounds.width, height: 54),
             items: items,
-            tooltip: "Projects"
+            tooltip: "Spaces"
         )
         view.menuProvider = { [weak self] action in
             guard case .selectProfile(let profileID) = action,

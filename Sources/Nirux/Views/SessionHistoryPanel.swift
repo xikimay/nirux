@@ -151,7 +151,7 @@ final class SessionHistoryPanel: NSObject {
     private func updateFooter() {
         guard let row = selectedRow else {
             actionLabel?.stringValue = rows.isEmpty
-                ? allRows.isEmpty ? "No session in this project yet" : "No session matches"
+                ? allRows.isEmpty ? "No session in this space yet" : "No session matches"
                 : ""
             detailLabel?.stringValue = ""
             detailLabel?.toolTip = nil

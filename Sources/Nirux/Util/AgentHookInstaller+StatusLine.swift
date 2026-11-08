@@ -91,8 +91,7 @@ extension AgentHookInstaller {
     /// state of its own (NIRUX_STATE_DIR) has its own option, off at first,
     /// and must not take back the installed app's status line.
     static func managesClaudeStatusLine(environment: [String: String], bundleURL: URL) -> Bool {
-        shouldInstall(environment: environment, bundleURL: bundleURL)
-            && Persistence.stateDirectoryOverride(in: environment) == nil
+        maintainsSharedAgentFiles(environment: environment, bundleURL: bundleURL)
     }
 
     /// When Settings turns the option on or off: the same as at launch. Nil
