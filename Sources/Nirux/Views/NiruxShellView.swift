@@ -634,7 +634,7 @@ extension NiruxShellView {
         // where it was opened, not where its terminal is now, and going back
         // to it would do nothing. From the sheet it counts, so picking its
         // worktree goes back to it rather than opening a second one.
-        let openWorkspaces = workspaces.filter { !$0.isClosing && (repositoryFolder != nil || $0 !== activeWorkspace) }
+        let openWorkspaces = workspaces.filter { !$0.isClosing && $0 !== activeWorkspace }
             .map { (id: $0.id, cwd: $0.cwd) }
 
         // List worktrees on background thread, then show palette
