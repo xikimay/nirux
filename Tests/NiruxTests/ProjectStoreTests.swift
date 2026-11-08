@@ -370,9 +370,10 @@ final class ProjectStoreTests: XCTestCase {
         let loaded = store.load(mirror: nil, markerPresent: true)
 
         XCTAssertEqual(loaded.map(\.id), ["work", "home"], "a bad anchors value doesn't make the file unreadable")
+        guard loaded.count == 2 else { return }
         XCTAssertEqual(loaded[0].anchors.first, Self.repositoryAnchor)
         XCTAssertEqual(loaded[0].anchors.count, 2)
-        XCTAssertFalse(loaded[0].anchors[1].isKnown)
+        XCTAssertFalse(loaded[0].anchors.last?.isKnown ?? true)
         XCTAssertEqual(loaded[1].anchors, [])
         XCTAssertEqual(store.availability, .writable)
 
