@@ -576,6 +576,10 @@ struct PersistedWorkspace: Codable {
     var lastActivityAt: TimeInterval?
     var nextStep: String?
     var blocker: String?
+    /// See `WorkspaceState.nextStepIsFromLead`. Written only when true: a
+    /// build before S13 drops them, and the fields become the user's.
+    var nextStepIsFromLead: Bool
+    var blockerIsFromLead: Bool
     /// `ReviewPass` raw values: a pass this build doesn't know is dropped
     /// on load, never a reason to fail the workspace.
     var reviewRuns: [String: ReviewRun]?
@@ -604,6 +608,8 @@ struct PersistedWorkspace: Codable {
         lastActivityAt: TimeInterval? = nil,
         nextStep: String? = nil,
         blocker: String? = nil,
+        nextStepIsFromLead: Bool = false,
+        blockerIsFromLead: Bool = false,
         reviewRuns: [String: ReviewRun]? = nil,
         startedOutsideNirux: Bool = false,
         isLead: Bool = false,
@@ -625,6 +631,8 @@ struct PersistedWorkspace: Codable {
         self.lastActivityAt = lastActivityAt
         self.nextStep = nextStep
         self.blocker = blocker
+        self.nextStepIsFromLead = nextStepIsFromLead
+        self.blockerIsFromLead = blockerIsFromLead
         self.reviewRuns = reviewRuns
         self.startedOutsideNirux = startedOutsideNirux
         self.isLead = isLead
@@ -634,7 +642,7 @@ struct PersistedWorkspace: Codable {
     enum CodingKeys: String, CodingKey {
         case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID
         case purpose, phase, lastSummary, lastSummaryIsManual, lastActivityAt
-        case nextStep, blocker, reviewRuns, startedOutsideNirux, isLead, reportsToLead
+        case nextStep, blocker, nextStepIsFromLead, blockerIsFromLead, reviewRuns, startedOutsideNirux, isLead, reportsToLead
     }
 
     init(from decoder: Decoder) throws {
@@ -656,6 +664,8 @@ struct PersistedWorkspace: Codable {
         lastActivityAt = try container.decodeIfPresent(TimeInterval.self, forKey: .lastActivityAt)
         nextStep = try container.decodeIfPresent(String.self, forKey: .nextStep)
         blocker = try container.decodeIfPresent(String.self, forKey: .blocker)
+        nextStepIsFromLead = (try? container.decodeIfPresent(Bool.self, forKey: .nextStepIsFromLead)) ?? false
+        blockerIsFromLead = (try? container.decodeIfPresent(Bool.self, forKey: .blockerIsFromLead)) ?? false
         // Only badges: a shape this build can't read never fails the state.
         reviewRuns = (try? container.decodeIfPresent([String: ReviewRun].self, forKey: .reviewRuns)) ?? nil
         startedOutsideNirux = (try? container.decodeIfPresent(Bool.self, forKey: .startedOutsideNirux)) ?? false
@@ -683,6 +693,8 @@ struct PersistedWorkspace: Codable {
         try container.encodeIfPresent(lastActivityAt, forKey: .lastActivityAt)
         try container.encodeIfPresent(nextStep, forKey: .nextStep)
         try container.encodeIfPresent(blocker, forKey: .blocker)
+        if nextStepIsFromLead { try container.encode(true, forKey: .nextStepIsFromLead) }
+        if blockerIsFromLead { try container.encode(true, forKey: .blockerIsFromLead) }
         try container.encodeIfPresent(reviewRuns, forKey: .reviewRuns)
         if startedOutsideNirux { try container.encode(true, forKey: .startedOutsideNirux) }
         if isLead { try container.encode(true, forKey: .isLead) }

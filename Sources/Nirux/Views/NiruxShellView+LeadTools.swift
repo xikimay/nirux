@@ -27,6 +27,7 @@ extension NiruxShellView {
         case LeadTools.reply: leadReply(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.askUser: leadAskUser(arguments, in: space, lead: lead.id, answer: answer)
         case LeadTools.queueMerge: leadQueueMerge(arguments, in: space, answer: answer)
+        case LeadTools.setTaskContext: leadSetTaskContext(arguments, in: space, lead: lead.id, answer: answer)
         default: answer("Unknown tool: \(request.tool)", true)
         }
     }
@@ -231,6 +232,13 @@ extension NiruxShellView {
                     line += "\n  completed: \(MissionPromptText.quoted(result.message))"
                 }
             }
+            // Only where set_task_context reaches: its own tasks.
+            for field in WorkspaceState.ContextField.allCases where missions.contains(where: { $0.reportsToLead == true }) {
+                guard let text = Self.leadContextText(task.contextText(field)) else { continue }
+                let name = field == .nextStep ? "next step" : "blocker"
+                let owner = task.contextIsFromLead(field) ? "" : " (the user wrote it)"
+                line += "\n  \(name)\(owner): “\(text)”"
+            }
             lines.append(line)
         }
         let repositories = space.anchors.filter(\.isKnown).map { anchor in
@@ -279,21 +287,22 @@ extension NiruxShellView {
     private func leadTask(_ name: String, in space: WorkspaceProfile, lead leadID: String) -> (workspace: WorkspaceState, mission: Mission)? {
         _ = MissionStore.shared.ensureLoaded()
         let candidates = workspaces.filter { $0.profileID == space.id && !$0.isLead && !$0.isClosing }
-        let matches = candidates.filter { $0.gitBranch == name }
-            + candidates.filter { $0.title.caseInsensitiveCompare(name) == .orderedSame && $0.gitBranch != name }
-        for workspace in matches {
-            if let mission = MissionStore.shared.missions
-                .filter({ $0.childWorkspaceID == workspace.id && $0.parentWorkspaceID == leadID && $0.reportsToLead == true })
-                .max(by: { $0.createdAt < $1.createdAt }) {
-                return (workspace, mission)
-            }
+        func mission(of workspace: WorkspaceState) -> Mission? {
+            MissionStore.shared.missions
+                .filter { $0.childWorkspaceID == workspace.id && $0.parentWorkspaceID == leadID && $0.reportsToLead == true }
+                .max(by: { $0.createdAt < $1.createdAt })
         }
-        return nil
+        let byBranch = candidates.filter { $0.gitBranch == name }.compactMap { workspace in mission(of: workspace).map { (workspace, $0) } }
+        if let first = byBranch.first { return first }
+        // Two of its tasks with that title: the branch says which.
+        let byTitle = candidates.filter { $0.title.caseInsensitiveCompare(name) == .orderedSame }
+            .compactMap { workspace in mission(of: workspace).map { (workspace, $0) } }
+        return byTitle.count == 1 ? byTitle[0] : nil
     }
 
     private func noLeadTask(_ name: String) -> String {
-        "No task of yours is named “\(name)”: use its branch or title from list_tasks. A task the user started "
-            + "without you doesn't report to you."
+        "No task of yours is named “\(name)”, or several share that title: use its branch or title from list_tasks. "
+            + "A task the user started without you doesn't report to you."
     }
 
     private func leadTell(_ arguments: [String: Any], in space: WorkspaceProfile, lead leadID: String, answer: @escaping LeadAnswer) {
@@ -366,6 +375,50 @@ extension NiruxShellView {
         updateSidebar()
         answer("Handed to the user: “\(workspace.title)”’s row is amber with your reason. Their answer goes to the task, "
             + "and a line comes to you.", false)
+    }
+
+    // MARK: set_task_context
+
+    /// The next step and blocker of a task of the Lead's: what the user
+    /// wrote by hand stays theirs.
+    private func leadSetTaskContext(
+        _ arguments: [String: Any], in space: WorkspaceProfile, lead leadID: String, answer: @escaping LeadAnswer
+    ) {
+        let name = LeadTools.string(arguments, "task") ?? ""
+        guard let (workspace, _) = leadTask(name, in: space, lead: leadID) else { return answer(noLeadTask(name), true) }
+        var done: [String] = []
+        var kept: [String] = []
+        var changed = false
+        for (field, key, label) in [(WorkspaceState.ContextField.nextStep, "next_step", "next step"), (.blocker, "blocker", "blocker")] {
+            guard case let text?? = LeadTools.contextText(arguments, key) else { continue }
+            switch workspace.setContextByLead(field, text) {
+            case .set(let value):
+                changed = true
+                done.append("\(label) set to “\(MissionPromptText.quoted(value))”")
+            case .cleared:
+                changed = true
+                done.append("\(label) cleared")
+            case .unchanged: done.append("\(label) unchanged")
+            case .keptUsers(let value): kept.append("\(label) (“\(Self.leadContextText(value) ?? "")”)")
+            }
+        }
+        if changed {
+            updateSidebar()
+            saveState()
+        }
+        let title = MissionPromptText.quoted(workspace.title)
+        var text = done.isEmpty ? "" : "“\(title)”: " + done.joined(separator: ", ") + "."
+        if !kept.isEmpty {
+            text += (text.isEmpty ? "" : " ") + "The user wrote “\(title)”’s " + kept.joined(separator: " and ")
+                + " by hand: Nirux keeps theirs until they clear it. Don't send it again; if it's out of date, tell them here."
+        }
+        answer(text, !changed && !kept.isEmpty)
+    }
+
+    /// A next step or blocker for the Lead's prompt: one line, the user's
+    /// as long as they typed it, cut at the tool's limit.
+    static func leadContextText(_ text: String?) -> String? {
+        text.flatMap { AgentText.clean(MissionPromptText.quoted($0), maxLength: LeadTools.maxContextLength) }
     }
 
     // MARK: queue_merge

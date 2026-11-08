@@ -576,34 +576,39 @@ extension WorkspaceContextTests {
         XCTAssertFalse(labels.contains { $0.stringValue == "Explain why this exists" })
     }
 
-    func testSidebarContextRowPrioritizesBlocker() throws {
+    /// The blocker is the status line's, in grey (amber is the user's, red
+    /// what broke); the selected row prints the next step under it. The
+    /// title's tooltip has both, whole.
+    func testSidebarContextRowSaysTheBlockerOnItsStatusLine() throws {
         let workspace = makeWorkspaceInfo(
             nextStep: "Retry the deployment",
             blocker: "Waiting for API access"
         )
         let labels = render(workspace).views.compactMap { $0 as? NSTextField }
-        let blockerLabel = try XCTUnwrap(labels.first {
-            $0.stringValue == "Blocker: Waiting for API access"
-        })
-
-        XCTAssertEqual(blockerLabel.lineBreakMode, .byTruncatingTail)
-        XCTAssertFalse(labels.contains { $0.stringValue.hasSuffix("Retry the deployment") })
-    }
-
-    func testSidebarContextRowFallsBackToNextStep() throws {
-        let workspace = makeWorkspaceInfo(nextStep: "Retry the deployment")
-        let labels = render(workspace).views.compactMap { $0 as? NSTextField }
-
-        let next = try XCTUnwrap(labels.first { $0.stringValue.hasSuffix("Retry the deployment") })
-        XCTAssertTrue(next.stringValue.hasPrefix("Next"))
-        XCTAssertEqual(next.toolTip, "Next: Retry the deployment")
+        let status = try XCTUnwrap(labels.first { $0.stringValue == "Blocked · Waiting for API access" })
+        XCTAssertEqual(
+            status.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor,
+            Theme.Color.textSecondary
+        )
+        XCTAssertTrue(labels.contains { $0.stringValue.hasPrefix("Next") && $0.stringValue.hasSuffix("Retry the deployment") })
         XCTAssertEqual(
             height(workspace) - height(makeWorkspaceInfo()),
             SidebarExpandedMetrics.actionBlockHeight([.next("Retry the deployment")])
         )
+        let title = try XCTUnwrap(labels.first { $0.stringValue == "context" })
+        XCTAssertTrue(title.toolTip?.contains("Blocker: Waiting for API access\nNext: Retry the deployment") == true)
     }
 
-    /// The next step is the selected card's; the others keep three lines.
+    /// The next step alone takes the status line: no line under it.
+    func testSidebarContextRowFallsBackToNextStep() throws {
+        let workspace = makeWorkspaceInfo(nextStep: "Retry the deployment")
+        let labels = render(workspace).views.compactMap { $0 as? NSTextField }
+
+        XCTAssertEqual(labels.filter { $0.stringValue.hasSuffix("Retry the deployment") }.map(\.stringValue), ["Next · Retry the deployment"])
+        XCTAssertEqual(height(workspace), height(makeWorkspaceInfo()))
+    }
+
+    /// The next step under the status line is the selected card's.
     func testNextStepShowsOnTheSelectedCardOnly() {
         let other = WorkspaceInfo(
             id: "other", index: 1, title: "other", profileID: WorkspaceProfile.defaultID, isInactive: false,

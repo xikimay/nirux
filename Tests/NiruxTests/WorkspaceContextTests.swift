@@ -81,6 +81,23 @@ final class WorkspaceContextTests: XCTestCase {
         XCTAssertEqual(workspace.lastActivityAt, 30)
     }
 
+    /// A pull request seen merged clears what the Lead wrote (nothing
+    /// tells it), not what the user wrote.
+    func testAMergedPullRequestClearsTheLeadsContext() {
+        let workspace = WorkspaceState(title: "context", cwd: "/tmp")
+        XCTAssertEqual(workspace.setContextByLead(.blocker, "waits for #212"), .set("waits for #212"))
+        workspace.setContextByHand(.nextStep, "my own note", presented: nil)
+        workspace.prInfo = makePullRequest()
+        XCTAssertEqual(workspace.blocker, "waits for #212", "open: still the Lead's to clear")
+        workspace.prInfo = PRInfo(
+            number: 42, state: "MERGED", isDraft: false, ciStatus: "SUCCESS", checks: [], reviewDecision: nil,
+            mergeable: nil, url: "https://example.test/pull/42", additions: nil, deletions: nil, changedFiles: nil
+        )
+        XCTAssertNil(workspace.blocker)
+        XCTAssertFalse(workspace.blockerIsFromLead)
+        XCTAssertEqual(workspace.nextStep, "my own note")
+    }
+
     func testUserPromptUpdatesActivityWithoutReplacingSummaryOrCountingToolUse() throws {
         let workspace = WorkspaceState(title: "context", cwd: "/tmp")
         workspace.lastSummary = "Keep the completed work summary"

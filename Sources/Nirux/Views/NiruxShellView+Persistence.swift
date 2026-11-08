@@ -61,6 +61,8 @@ extension NiruxShellView {
             workspace.lastActivityAt = persistedWS.lastActivityAt
             workspace.nextStep = persistedWS.nextStep
             workspace.blocker = persistedWS.blocker
+            workspace.nextStepIsFromLead = persistedWS.nextStepIsFromLead && persistedWS.nextStep != nil
+            workspace.blockerIsFromLead = persistedWS.blockerIsFromLead && persistedWS.blocker != nil
             for (rawValue, run) in persistedWS.reviewRuns ?? [:] {
                 if let pass = ReviewPass(rawValue: rawValue) { workspace.reviewRuns[pass] = run }
             }
@@ -290,6 +292,8 @@ extension NiruxShellView {
                     lastActivityAt: workspace.lastActivityAt,
                     nextStep: workspace.nextStep,
                     blocker: workspace.blocker,
+                    nextStepIsFromLead: workspace.nextStepIsFromLead,
+                    blockerIsFromLead: workspace.blockerIsFromLead,
                     reviewRuns: workspace.reviewRuns.isEmpty ? nil : Dictionary(
                         uniqueKeysWithValues: workspace.reviewRuns.map { ($0.key.rawValue, $0.value) }
                     ),
