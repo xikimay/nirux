@@ -216,7 +216,7 @@ enum WorktreeCleanup {
     /// worktree, which `info/exclude` can't hide. A staged change is
     /// someone's work.
     static func isDisposable(_ entry: StatusEntry, startFolders: Set<String> = []) -> Bool {
-        ["??", " M", " T", " D"].contains(entry.code) && isDisposablePath(entry.path, startFolders: startFolders)
+        ["??", " M", " D"].contains(entry.code) && isDisposablePath(entry.path, startFolders: startFolders)
     }
 
     static func isRegenerable(_ entry: String) -> Bool {

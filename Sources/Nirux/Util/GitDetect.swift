@@ -224,7 +224,7 @@ enum GitDetect {
         ).standardizedFileURL.path
         // A task's handover and local settings get written where its agent
         // starts.
-        let startFolder = startFolderPath?.realPath.flatMap { folder -> String? in
+        let startFolder = workingDirectory.realPath.flatMap { folder -> String? in
             guard let root = repositoryRoot.realPath, folder.hasPrefix(root + "/") else { return nil }
             return String(folder.dropFirst(root.count + 1))
         }

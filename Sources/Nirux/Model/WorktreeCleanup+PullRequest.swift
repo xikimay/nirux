@@ -43,7 +43,7 @@ extension WorktreeCleanup {
         // yet". An open or closed one from a fork that used the same branch
         // name (`patch-1`) says nothing about this branch.
         let mergedElsewhere = json.filter { ($0["state"] as? String)?.uppercased() == "MERGED" }
-        if candidates.isEmpty, !mergedElsewhere.isEmpty {
+        if candidates.isEmpty, !json.isEmpty {
             let found = mergedElsewhere.count == 1
                 ? "1 merged pull request" : "\(mergedElsewhere.count) merged pull requests"
             return (nil, [
