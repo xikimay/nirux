@@ -120,7 +120,6 @@ final class SidebarWorkspaceCardRenderer {
 
         let title = textLabel(workspace.title, font: Theme.Font.title, color: Theme.Color.textPrimary)
         title.toolTip = titleToolTip()
-        if let subtask = workspace.subtaskText { title.setAccessibilityLabel("\(workspace.title), \(subtask)") }
         title.frame = NSRect(
             x: layout.indentX, y: rowY,
             width: max(0, badge.frame.minX - Theme.Space.sm - layout.indentX), height: Metrics.titleRowHeight + 1
@@ -161,7 +160,6 @@ final class SidebarWorkspaceCardRenderer {
     /// last summary, the blocker and the next step, whole.
     private func titleToolTip() -> String {
         var lines = [workspace.title]
-        if let subtask = workspace.subtaskText { lines.append(subtask) }
         if let branch = workspace.gitBranch { lines.append("Branch: \(branch)") }
         if let stats = workspace.diffStats { lines.append("Changes: \(SidebarRenderer.formatDiffStats(stats))") }
         lines.append("Phase: \(workspace.phase.displayName)")

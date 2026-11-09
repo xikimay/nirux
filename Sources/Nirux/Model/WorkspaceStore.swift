@@ -408,7 +408,7 @@ final class WorkspaceStore {
         var parents: [Int: Int] = [:]
         for index in active {
             let workspace = workspaces[index]
-            if let parentID = workspace.parentWorkspaceID ?? workspace.missionID.flatMap({ missionParents[$0] }),
+            if let parentID = workspace.missionID.flatMap({ missionParents[$0] }),
                let parent = byID[parentID], parent != index {
                 parents[index] = parent
             }

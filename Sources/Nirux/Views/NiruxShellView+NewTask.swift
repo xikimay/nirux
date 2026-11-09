@@ -93,7 +93,7 @@ extension NiruxShellView {
     func showNewSubtaskPanel(under parent: WorkspaceState) {
         guard let panel = showNewPanel(
             spaceID: parent.profileID, parentTask: NewTaskPanel.ParentTask(workspaceID: parent.id, title: parent.title)
-        ), let space = profiles.first(where: { $0.id == parent.profileID }), newTaskRepositories(of: space).count > 1
+        ), let space = profiles.first(where: { $0.id == parent.profileID }), newTaskRepositories(of: space).count > 99
         else { return }
         let initialKey = panel.selectedRepositoryKey
         Self.identifyOffMain(parent.cwd, timeout: max(1, sideEffects.routingTimeout)) { [weak self, weak panel] identity in

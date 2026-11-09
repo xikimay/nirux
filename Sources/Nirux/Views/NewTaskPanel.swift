@@ -123,7 +123,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
 
     /// The parent task while its checkbox is checked.
     var subtaskParentID: String? {
-        subtaskCheckbox.state == .on ? parentTask?.workspaceID : nil
+        parentTask?.workspaceID
     }
     private let reportHint = NSTextField(wrappingLabelWithString:
         "The Lead follows this task and answers its questions. Only what needs you reaches you, in amber.")
@@ -207,7 +207,6 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// new work: Existing Branch… shows only without one.
     private func updateForSubtask() {
         headingLabel.stringValue = "\(subtaskParentID == nil ? "New" : "New Sub-task") in \(space.name)"
-        existingBranchButton.isHidden = subtaskParentID != nil
     }
 
     func dismiss() {
@@ -501,7 +500,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         guard panel != nil else { return }
         placeholderLabel.isHidden = !descriptionView.string.isEmpty
         repositoryPopup.isHidden = !(repositories.count >= 2 || (repositories.isEmpty && !space.isGeneral))
-        startButton.isEnabled = !isStarting && (taskText.isEmpty ? subtaskParentID == nil : info?.target != nil)
+        startButton.isEnabled = !isStarting && (taskText.isEmpty || info?.target != nil)
         var showsField = false
         var showsEdit = false
         var showsNewSpace = false

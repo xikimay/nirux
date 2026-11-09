@@ -69,7 +69,7 @@ extension NiruxShellView {
                           reviewBadges: workspace.reviewBadges,
                           mergedCleanup: mergedCleanupOffer(workspaceIndex: index),
                           isLead: workspace.isLead,
-                          parentTitle: parents[index].map { workspaces[$0].title })
+                          parentTitle: nil)
         }
         tickHiddenSpaceAgents(
             visibleIndices: visibleIndices, foregroundProcesses: foregroundProcesses, processTableRead: processTableRead

@@ -125,7 +125,7 @@ extension NiruxShellView {
                         missionID: missionID,
                         // The skill always names its workspace: the child
                         // lists under it, Missions on or off.
-                        parentWorkspaceID: parentWorkspaceID,
+                        parentWorkspaceID: nil,
                         reportsToLead: reportsToLead,
                         deliveredHandover: deliveredHandover,
                         worktreeBranch: checkedOutBranch,

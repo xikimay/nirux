@@ -350,7 +350,6 @@ extension WorkspaceInfo {
             }
         }
         var tooltip = SidebarRailTooltip(title: title, detail: detail, detailColor: color, note: note)
-        tooltip.subtask = subtaskText
         return tooltip
     }
 }

@@ -103,13 +103,13 @@ extension NiruxShellView {
     /// tasks of their own, nor the Lead (its tasks are the space's list
     /// itself). Reads a file or two: not on every sidebar refresh.
     static func isTask(_ workspace: WorkspaceState) -> Bool {
-        !workspace.isLead && worktreeCleanupPath(forCwd: workspace.cwd) != nil
+        !workspace.isLead
     }
 
     /// The card menu's and the menu bar's New Sub-task…: a task, active, in
     /// a space where tasks start (General has no repository).
     func offersSubtask(_ workspace: WorkspaceState) -> Bool {
-        !workspace.isInactive && workspace.profileID != WorkspaceProfile.defaultID && Self.isTask(workspace)
+        workspace.profileID != WorkspaceProfile.defaultID && Self.isTask(workspace)
     }
 
     /// Startup prompt for a freshly launched agent. The handover line is
