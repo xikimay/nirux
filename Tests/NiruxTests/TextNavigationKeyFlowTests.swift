@@ -66,6 +66,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 XCTAssertEqual(workspace.focusedIndex, editorIndex)
                 waitForMonacoText(in: webView, harness: harness)
                 moveCaretToTheDocumentStart(in: harness)
+                waitForCaret("1:1", in: webView, harness: harness)
 
                 // At column 1, then at the end of "# Flow", then back.
                 press(.left, [.command, .shift], in: harness)
@@ -150,19 +151,17 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 let top = try XCTUnwrap(shell.activeWorkspace)
                 shell.addWorkspace(title: "middle", cwd: harness.repo)
                 let middle = try XCTUnwrap(shell.activeWorkspace)
-                let (editor, webView) = try openEditorWithKeyboard(in: harness)
+                let (_, webView) = try openEditorWithKeyboard(in: harness)
                 shell.addWorkspace(title: "bottom", cwd: harness.repo)
                 let bottom = try XCTUnwrap(shell.activeWorkspace)
                 shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === middle }))
                 waitForMonacoText(in: webView, harness: harness)
                 moveCaretToTheDocumentStart(in: harness)
+                waitForCaret("1:1", in: webView, harness: harness)
 
                 press(.down, [.command], in: harness)
-                press(.up, [.command, .shift], in: harness)
-                waitForSelection("# Flow\n\nEdited.\n", in: editor, harness: harness)
-                XCTAssertIdentical(shell.activeWorkspace, middle, "Cmd+Down before the last line switched")
-                press(.down, [.command], in: harness)
                 waitForCaret("4:1", in: webView, harness: harness)
+                XCTAssertIdentical(shell.activeWorkspace, middle, "Cmd+Down before the last line switched")
                 evaluate(Self.showTwoSuggestions, in: webView, harness: harness)
                 waitForSuggestions(focusedRow: 0, in: webView, harness: harness)
                 press(.down, [.command], in: harness)
@@ -174,11 +173,10 @@ final class TextNavigationKeyFlowTests: XCTestCase {
 
                 shell.switchToWorkspace(try XCTUnwrap(shell.workspaces.firstIndex { $0 === middle }))
                 waitForMonacoText(in: webView, harness: harness)
+                waitForCaret("4:1", in: webView, harness: harness)
                 press(.up, [.command], in: harness)
-                press(.down, [.command, .shift], in: harness)
-                waitForSelection("# Flow\n\nEdited.\n", in: editor, harness: harness)
+                waitForCaret("1:1", in: webView, harness: harness)
                 XCTAssertIdentical(shell.activeWorkspace, middle, "Cmd+Up after the first line switched")
-                press(.up, [.command], in: harness)
                 press(.up, [.command], in: harness)
                 harness.waitUntil("the workspace above", timeout: 5) { shell.activeWorkspace === top }
             }
@@ -456,16 +454,16 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         }
     }
 
-    /// Waits until the page says Monaco's text has the keyboard. After the
-    /// keyboard comes back, the web view's input context can still be the
-    /// one from before: a key sent then would reach the page ahead of the
-    /// focus.
+    /// Waits until Monaco's text has the keyboard, as the page and the app
+    /// both see it. After the keyboard comes back, the web view's input
+    /// context can still be the one from before: either a key would reach
+    /// the page ahead of the focus, or the app would send it to the menu.
     private func waitForMonacoText(
         in webView: WKWebView, harness: UIFlowHarness, file: StaticString = #filePath, line: UInt = #line
     ) {
         let script = "(\(Self.focusedMonaco)) ? 'focused' : ''"
         waitForAnswer("Monaco to take text", to: script, in: webView, harness: harness, file: file, line: line) {
-            $0 == "focused"
+            $0 == "focused" && webView.inputContext != nil
         }
     }
 
