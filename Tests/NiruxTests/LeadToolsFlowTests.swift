@@ -116,10 +116,10 @@ final class LeadToolsFlowTests: XCTestCase {
     }
 
     /// The user answers in the question's popover by typing, whatever had
-    /// the keyboard. A click on the row from another app opens the popover
-    /// without it (AppKit ignores `makeKey` while that click brings Nirux to
-    /// the front): the keys then come to the main window, where the focused
-    /// terminal took them. They go to the answer field: typing, ⌘↩ and Esc
+    /// the keyboard. A click on the row from another app leaves the popover
+    /// without it (once that click has brought Nirux to the front, AppKit
+    /// gives the keyboard back to the main window): the keys then come to
+    /// the main window, where the focused terminal took them. They go to the answer field: typing, ⌘↩ and Esc
     /// work the first time. The test process never has a key window, so its
     /// keys come as they did then. Both a question the Lead hands over and
     /// one that comes to the user directly, its parent gone. Once the

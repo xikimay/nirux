@@ -16,10 +16,12 @@ final class MissionReplyViewController: NSViewController, NSPopoverDelegate {
     private(set) var sendButton: NSButton?
     /// The popover showing this controller.
     weak var popover: NSPopover?
-    /// The popover started to close (Esc, a click outside, its delegate
-    /// being this controller): keys typed during its fade go where the user
-    /// went, not to its field.
-    private(set) var isClosing = false
+    /// Keys typed in the main window are for this popover's field (see
+    /// `focusReplyField`). No longer once such a key gave it the keyboard:
+    /// losing it after that is the user's doing or the app's. Nor once it
+    /// starts to close (Esc, a click outside; its delegate is this
+    /// controller): keys typed during its fade go where the user went.
+    private(set) var claimsMainWindowKeys = true
 
     init(
         childTitle: String,
@@ -70,15 +72,32 @@ final class MissionReplyViewController: NSViewController, NSPopoverDelegate {
     }
 
     /// The popover's window takes the keyboard, so typing reaches the field
-    /// and not the terminal underneath. AppKit ignores `makeKey` while a
-    /// click brings Nirux to the front, so a click on the row from another
-    /// app leaves the keyboard with the main window, the field still
-    /// showing a caret: the first key typed asks again (see
-    /// `NiruxShellView.missionReplyLackingKeyboard`).
+    /// and not the terminal underneath. Opened by a click on the row from
+    /// another app, it loses it again: once that click has brought Nirux to
+    /// the front, AppKit gives the keyboard back to the main window, the
+    /// field still showing a caret. The first key typed there comes here
+    /// (`receiveMainWindowKey`).
     func focusReplyField() {
         guard let replyView else { return }
         view.window?.makeKey()
         view.window?.makeFirstResponder(replyView)
+    }
+
+    /// A key typed in the main window while the popover lacks the keyboard
+    /// (`NiruxShellView.missionReplyLackingKeyboard`): the popover takes the
+    /// keyboard and its field gets the key. False when the key goes back to
+    /// AppKit instead: a chord, now that the popover is the key window (⌘V
+    /// through the Edit menu, ⌘↩ to Send).
+    func receiveMainWindowKey(_ event: NSEvent) -> Bool {
+        focusReplyField()
+        guard let window = view.window else { return false }
+        if window.isKeyWindow {
+            claimsMainWindowKeys = false
+            if event.modifierFlags.contains(.command) { return false }
+        }
+        // ⌘↩ may close and release the popover during delivery.
+        withExtendedLifetime(self) { window.sendEvent(event) }
+        return true
     }
 
     /// Esc closes the popover: the answer field passes it up the responder
@@ -88,7 +107,7 @@ final class MissionReplyViewController: NSViewController, NSPopoverDelegate {
     }
 
     func popoverWillClose(_ notification: Notification) {
-        isClosing = true
+        claimsMainWindowKeys = false
     }
 
     // MARK: - Parts
