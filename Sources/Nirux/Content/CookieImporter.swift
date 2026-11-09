@@ -166,8 +166,7 @@ enum CookieImporter {
         Browser.allCases.filter { browser in
             let root = userDataRoot(of: browser, home: home)
             if FileManager.default.fileExists(atPath: root + "/Local State") { return true }
-            if case .missing = cookieFile(inProfile: root + "/Default") { return false }
-            return true
+            return false
         }
     }
 
@@ -586,7 +585,7 @@ enum CookieImporter {
                         decrypted += 1
                         // Before version 24 an empty value proves nothing:
                         // half a wrong key's lucky output is empty.
-                        if hashesDomain || !value.isEmpty { keyChecked += 1 }
+                        keyChecked += 1
                         cookieValue = value
                     case .notText:
                         keyChecked += 1

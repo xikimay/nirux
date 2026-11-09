@@ -626,17 +626,6 @@ extension NiruxShellView {
             // until they are answered (see SessionResume).
             runFromRunLoop { [weak self] in self?.chooseAndImportCookies(among: sources, offered: browsers) }
         }
-        // A read that never returns (a stalled volume, a macOS prompt left
-        // unanswered) mustn't leave the import disabled.
-        DispatchQueue.main.asyncAfter(deadline: .now() + sideEffects.cookieReadTimeout) { @MainActor [weak self] in
-            guard let self, generation == cookieImportGeneration, isReadingCookieProfiles else { return }
-            isReadingCookieProfiles = false
-            isImportingCookies = false
-            showToast(
-                "Reading the browsers’ profiles is taking too long. macOS may be asking for permission behind another window.",
-                tone: .error
-            )
-        }
     }
 
     private func chooseAndImportCookies(among sources: [CookieImporter.Source], offered browsers: [CookieImporter.Browser]) {
@@ -701,7 +690,6 @@ extension NiruxShellView {
         alert.addButton(withTitle: "Cancel")
         // No default button: the picker comes after the read, maybe under a
         // Return meant for a terminal. Escape still cancels.
-        alert.buttons.first?.keyEquivalent = ""
         let response = runModal(alert).rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
         let index = alert.accessoryView == nil ? response : (response == 0 ? menu.indexOfSelectedItem : -1)
         return sources.indices.contains(index) ? sources[index] : nil
