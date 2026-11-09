@@ -58,7 +58,11 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         try UIFlowHarness.run { harness in
             try harness.withApp {
                 let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+                // One workspace below, none above.
+                harness.shell.addWorkspace(title: "below", cwd: harness.repo)
+                harness.shell.switchToWorkspace(try XCTUnwrap(harness.shell.workspaces.firstIndex { $0 === workspace }))
                 XCTAssertNil(harness.shell.workspaceStore.adjacentWorkspaceIndex(delta: -1), "a workspace above")
+                XCTAssertNotNil(harness.shell.workspaceStore.adjacentWorkspaceIndex(delta: 1), "no workspace below")
                 let (editor, webView) = try openEditorWithKeyboard(in: harness)
                 let editorIndex = workspace.focusedIndex
                 workspace.addColumn()
@@ -83,8 +87,8 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 waitForSelection("\n\nEdited.\n", in: editor, harness: harness)
                 XCTAssertEqual(workspace.focusedIndex, editorIndex, "a selection left")
 
-                // No workspace above: the page moves the caret itself, as
-                // the key arrives, without asking the app.
+                // No workspace above (one below): the page moves the caret
+                // itself, as the key arrives, without asking the app.
                 var edgeKeys: [EditorColumn.TextEdge] = []
                 let navigate = editor.onTextEdgeKey
                 editor.onTextEdgeKey = { edge in
