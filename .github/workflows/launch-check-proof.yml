@@ -1,0 +1,52 @@
+name: Launch check proof
+
+# Throwaway (DO NOT MERGE): scripts/launch-check.sh passes on the latest
+# dated nightly and fails on a deliberately broken package.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/launch-check-proof.yml
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download the latest dated nightly
+        run: |
+          tag=$(gh release list -R "$GITHUB_REPOSITORY" -L 30 --json tagName -q '[.[] | select(.tagName | test("^nightly-[0-9]"))][0].tagName')
+          echo "nightly: $tag"
+          gh release download "$tag" -R "$GITHUB_REPOSITORY" -p Nirux.app.zip -D nightly
+          ditto -x -k nightly/Nirux.app.zip nightly
+          codesign -dv nightly/Nirux.app 2>&1 | grep -E "Authority=Developer ID|TeamIdentifier" || true
+
+      - name: Passes on the downloaded nightly
+        timeout-minutes: 5
+        run: scripts/launch-check.sh nightly/Nirux.app
+
+      - name: Fails on a broken package (Sparkle.framework missing)
+        timeout-minutes: 5
+        run: |
+          cp -R nightly/Nirux.app Broken.app
+          rm -rf Broken.app/Contents/Frameworks/Sparkle.framework
+          if scripts/launch-check.sh Broken.app; then echo "expected the launch check to fail"; exit 1; fi
+          echo "failed as expected"
+
+      - name: Fails on a package that traps at its first terminal
+        timeout-minutes: 5
+        run: |
+          # A stand-in binary that dies like a Swift trap shortly after launch.
+          cp -R nightly/Nirux.app Trapping.app
+          printf '#!/bin/sh\nsleep 2\nkill -TRAP $$\n' > Trapping.app/Contents/MacOS/Nirux
+          chmod +x Trapping.app/Contents/MacOS/Nirux
+          if scripts/launch-check.sh Trapping.app; then echo "expected the launch check to fail"; exit 1; fi
+          echo "failed as expected"
