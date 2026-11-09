@@ -388,7 +388,7 @@ final class WorkspaceStore {
         let profileID = workspaces.indices.contains(index) ? workspaces[index].profileID : ""
         let parents = activeParents(in: profileID)
         guard let parent = parents[index] else { return false }
-        workspaces[index].parentWorkspaceID = parents[parent].map { workspaces[$0].id }
+        workspaces[index].parentWorkspaceID = workspaces[parent].parentWorkspaceID
         keepTreeOrder(in: profileID)
         return true
     }

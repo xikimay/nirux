@@ -297,7 +297,7 @@ extension NiruxShellView {
             }
             if taskLocation(cwd: parent.cwd) != nil {
                 parents[id] = parentID
-            } else if isSurelyNoTask(cwd: parent.cwd) {
+            } else {
                 parents[id] = .some(nil)
             }
         }

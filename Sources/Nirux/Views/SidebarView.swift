@@ -542,7 +542,7 @@ final class SidebarView: NSView {
     func workspaceActionMenu(workspaceIndex: Int, columnIndex: Int?) -> NSMenu {
         let workspace = lastInfos.first { $0.index == workspaceIndex }
         // The card shown; else (a workspace of another space) the store's.
-        let workspaceID = workspace?.id ?? workspaceIDForIndex?(workspaceIndex)
+        let workspaceID = workspace?.id
         let act: (WorkspaceSidebarAction) -> Void = { [weak self] action in
             guard let self, let index = self.currentIndex(ofWorkspace: workspaceID) else { return }
             self.onWorkspaceAction?(action, index)

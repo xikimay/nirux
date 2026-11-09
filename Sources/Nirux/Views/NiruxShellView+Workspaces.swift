@@ -115,7 +115,7 @@ extension NiruxShellView {
     /// worktree removed is no task, one re-added or repaired may be another
     /// repository's.
     static func taskLocation(of workspace: WorkspaceState) -> FolderIdentity? {
-        if let cached = workspace.taskLocationCache, FileManager.default.fileExists(atPath: workspace.cwd),
+        if let cached = workspace.taskLocationCache,
            modificationDate(of: cached.gitFile) == cached.gitFileDate {
             return cached.location
         }
