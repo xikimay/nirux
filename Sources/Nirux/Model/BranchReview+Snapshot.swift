@@ -721,10 +721,11 @@ extension BranchReview {
         code.contains("U") || code == "AA" || code == "DD"
     }
 
-    /// The handovers and Claude Code's local settings: Clean Up treats an
-    /// untracked copy as disposable, and the review leaves it out.
+    /// The handovers and Claude Code's local settings at the top level:
+    /// the review leaves an untracked copy out, as Clean Up trashes it. A
+    /// committed one stays in the review, changed or not.
     static func isDisposable(_ path: String) -> Bool {
-        WorktreeCleanup.disposablePaths.contains(path)
+        WorktreeCleanup.isDisposablePath(path)
     }
 
     struct GitOutput {

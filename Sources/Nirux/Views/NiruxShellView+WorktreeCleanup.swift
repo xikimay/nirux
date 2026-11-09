@@ -155,6 +155,14 @@ extension NiruxShellView {
         }
     }
 
+    /// The folders the workspaces open in the worktree at `path` started
+    /// in: a task that starts in a subfolder gets its handover there, and
+    /// Claude Code its local settings.
+    func worktreeAgentFolders(_ path: String) -> [String] {
+        let isInside = Self.containment(in: path)
+        return workspaces.filter { !$0.isClosing && isInside($0.cwd) }.map(\.cwd)
+    }
+
     // MARK: Single workspace
 
     /// The ⋯ menu's "Clean Up Worktree…": check, then say why not or
@@ -171,8 +179,9 @@ extension NiruxShellView {
         guard worktreeCleanupsInFlight.insert(key).inserted else {
             return showToast("A clean-up of this worktree is already in progress")
         }
+        let agentFolders = worktreeAgentFolders(path)
         DispatchQueue.global(qos: .userInitiated).async {
-            let inspection = WorktreeCleanup.inspect(path: path)
+            let inspection = WorktreeCleanup.inspect(path: path, agentFolders: agentFolders)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 var candidate = self.worktreeCleanupCandidate(path: path)
@@ -192,6 +201,11 @@ extension NiruxShellView {
             completion()
         case .blocked(let problems):
             showWorktreeCleanupNotice(message: "Can’t clean up \(candidate.title)", lines: problems)
+            completion()
+        case .notMerged(let reason):
+            showWorktreeCleanupNotice(
+                message: "\(candidate.title) isn’t merged yet", lines: candidate.report?.problems ?? [reason]
+            )
             completion()
         case .closeOnly:
             if confirmDestructiveClose(
@@ -327,8 +341,9 @@ extension NiruxShellView {
     }
 
     private func inspectForPanel(_ path: String, panel: WorktreeCleanupPanel, queue: OperationQueue) {
+        let agentFolders = worktreeAgentFolders(path)
         Self.runOffMain(on: queue) {
-            let inspection = WorktreeCleanup.inspect(path: path)
+            let inspection = WorktreeCleanup.inspect(path: path, agentFolders: agentFolders)
             DispatchQueue.main.async { @MainActor [weak self, weak panel] in
                 guard let self, let panel else { return }
                 panel.update(path: path, inspection: inspection)
@@ -439,7 +454,7 @@ extension NiruxShellView {
                     }
                 }
             }
-        case .checking, .blocked:
+        case .checking, .notMerged, .blocked:
             panel.setResult(.skipped("Not run: no longer ready"), for: candidate.path)
             runWorktreeCleanups(rest, in: panel, finished: finished)
         }
