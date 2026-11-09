@@ -333,21 +333,28 @@ enum AgentHookCLI {
         ) else { return 0 }
 
         let channel = PermissionApprovalChannel.standard
-        let wait = event.name == .permissionRequest && parent > 1
-            ? PermissionApprovalWait.prepare(payload: raw, env: env, now: now) { channel.isAppListening() }
-            : nil
-        event.approvalRequestID = wait?.requestID
-        event.approvalDeadline = wait?.deadline
-        event.approvalText = wait?.text
-        // Before the request shows in the queue: from then on the app holds
-        // it, and Claude giving up on the hook must still be reported.
+        // The watch comes before the request shows in the queue: from then
+        // on the app holds it, and Claude giving up on the hook must still
+        // be reported. Without a watch the request isn't held.
+        guard event.name == .permissionRequest, parent > 1,
+              let wait = PermissionApprovalWait.prepare(payload: raw, env: env, now: now, isAppListening: {
+                  channel.isAppListening()
+              })
+        else {
+            append(event)
+            return 0
+        }
+        event.approvalRequestID = wait.requestID
+        event.approvalDeadline = wait.deadline
+        event.approvalText = wait.text
         append(event)
-        // MUTANT: the old order, its window held open.
-        if wait != nil { usleep(300_000) }
-        let termination = wait.map { _ in TerminationWatch() }
-        guard let wait, let termination else { return 0 }
+        // MUTANT: the old order (the request shows before SIGTERM is
+        // watched), its window held open.
+        usleep(300_000)
+        guard let termination = TerminationWatch() else { return 0 }
+        defer { termination.stop() }
 
-        let outcome = waitForDecision(wait, on: channel, parent: parent, termination: termination)
+        let outcome = waitForDecision(wait, on: channel, parent: parent, terminated: termination.terminated)
         // Reported before the decision reaches Claude, so it precedes the
         // events the decision causes (PostToolUse) in the queue.
         append(.approvalResolved(event, outcome: outcome, now: Date().timeIntervalSince1970))
@@ -370,12 +377,8 @@ enum AgentHookCLI {
         _ wait: PermissionApprovalWait,
         on channel: PermissionApprovalChannel,
         parent: pid_t,
-        termination: TerminationWatch
+        terminated: SignalFlag
     ) -> PermissionApproval.Outcome {
-        // Until then the watch, and its source, stay alive.
-        defer { termination.stop() }
-        let terminated = termination.terminated
-
         let start = clock_gettime_nsec_np(CLOCK_MONOTONIC)
         var checks = 0
         return wait.waitForDecision(
@@ -391,22 +394,27 @@ enum AgentHookCLI {
     }
 
     /// Claude abandons a hook with SIGTERM (then SIGKILL): caught, so the
-    /// report still goes out and the app drops the request at once. In
-    /// place once `init` returns — a SIGTERM sent before the source is
-    /// registered would be ignored and never seen.
+    /// report still goes out and the app drops the request at once.
     private struct TerminationWatch {
         let terminated = SignalFlag()
         private let source: DispatchSourceSignal
 
-        init() {
-            signal(SIGTERM, SIG_IGN)
+        /// SIGTERM is ignored only once the source that sees it is
+        /// registered: ignored any earlier, one could be lost, and the
+        /// request held for a Claude that gave up. Until then it ends the
+        /// process, with nothing queued. Nil if the source doesn't register
+        /// in time (it takes microseconds; nothing here may hang the hook).
+        init?() {
             source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
             let registered = DispatchSemaphore(value: 0)
             source.setRegistrationHandler { registered.signal() }
             source.setEventHandler { [terminated] in terminated.raise() }
             source.resume()
-            // Never long; bounded, as nothing here may hang the hook.
-            _ = registered.wait(timeout: .now() + 1)
+            guard registered.wait(timeout: .now() + 1) == .success else {
+                source.cancel()
+                return nil
+            }
+            signal(SIGTERM, SIG_IGN)
         }
 
         func stop() {
