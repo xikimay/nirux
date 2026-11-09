@@ -61,6 +61,12 @@ extension NiruxApp {
         shell?.showWorktreeListPalette()
     }
 
+    /// The card menu's New Sub-task…, for the workspace in front.
+    @objc func newSubtask(_ sender: Any?) {
+        guard let shell, shell.activeWorkspaceOffersSubtask else { return }
+        shell.handleWorkspaceSidebarAction(.newSubtask, workspaceIndex: shell.activeWSIndex)
+    }
+
     @objc func editWorkspaceContext(_ sender: Any?) {
         guard let shell else { return }
         shell.showWorkspaceContextPanel(workspaceIndex: shell.activeWSIndex)
@@ -131,6 +137,7 @@ extension NiruxApp {
     func workspacesMenuItem() -> NSMenuItem {
         let menu = NSMenu(title: "Workspaces")
         menu.addItem(withTitle: "New…", action: #selector(newWorkspace(_:)), shortcut: .newWorkspace)
+        menu.addItem(withTitle: SidebarView.newSubtaskTitle, action: #selector(newSubtask(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Open Worktree…", action: #selector(openWorktree(_:)), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Rename Workspace", action: #selector(renameWorkspace(_:)), keyEquivalent: "")

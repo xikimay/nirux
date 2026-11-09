@@ -235,10 +235,11 @@ patch from the merge base to the working tree. A folded file that isn't
 committed stays in that group, collapsed: a build-rewritten
 `Package.resolved` must be seen before it is committed. The group refreshes
 while the agent works, so it lists added files first, then by path: a row
-doesn't move under the pointer. The files
-Nirux's worktree cleanup already treats as disposable
-(`WorktreeCleanup.disposablePaths`: the handovers,
-`.claude/settings.local.json`) are left out.
+doesn't move under the pointer. Untracked copies of the files
+Nirux's worktree cleanup treats as disposable at the top level
+(`WorktreeCleanup.isDisposablePath`: the handovers and
+`.claude/settings.local.json`) are left out; a committed one stays,
+changed or not.
 
 The page uses the visual system's tokens. Amber stays reserved for "an agent
 waits for the user": risk chips are neutral, and a finished Explain raises no

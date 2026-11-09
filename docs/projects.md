@@ -291,9 +291,10 @@ roll back.
   terminal env, it is fixed when a shell starts, so it goes stale after a move.
   A worktree child therefore takes its parent's *current* project, looked up
   from the parent workspace id. The `profile=` parameter is only a fallback.
-  Today the worktree skill sends `parentWorkspace` only when mission handoffs
-  are on. It must always send it, and installed copies of the skill must be
-  refreshed when Nirux changes its text.
+  The worktree skill always sends `parentWorkspace`, and the child lists under
+  that workspace when it is a task (docs/spaces.md, "Sub-tasks under their
+  task"); installed copies of the skill are refreshed when Nirux changes its
+  text.
 
 ## 3. Routing
 

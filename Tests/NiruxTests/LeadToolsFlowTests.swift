@@ -344,17 +344,22 @@ final class LeadToolsFlowTests: XCTestCase {
         }
     }
 
-    /// A task's own Mission children list right under it, indented, and
-    /// move among themselves; the Lead's tasks stay the space's list. A
-    /// parent archived lets its children go, where they were listed.
-    func testMissionChildrenListUnderTheirParent() throws {
+    /// A task's sub-tasks list right under it, indented, and move among
+    /// themselves; the Lead's tasks stay the space's list. A parent archived
+    /// lets its children go, where they were listed. Mission children saved
+    /// before sub-tasks kept their parent join a task's at restore, never
+    /// the main checkout's.
+    func testSubtasksListUnderTheirTask() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let lead = try makeLead(harness)
-            @MainActor func open(_ title: String, reportingTo parent: WorkspaceState? = nil) throws -> WorkspaceState {
+            @MainActor func open(
+                _ title: String, in cwd: String? = nil, under parent: WorkspaceState? = nil,
+                missionFrom missionParent: WorkspaceState? = nil
+            ) throws -> WorkspaceState {
                 let workspaceID = UUID().uuidString
                 let agentUUID = UUID().uuidString
-                let mission = try parent.map { parent in
+                let mission = try missionParent.map { parent in
                     try XCTUnwrap(MissionStore.shared.create(MissionCreationRequest(
                         id: UUID().uuidString, parentWorkspaceID: parent.id,
                         parentAgentUUID: try XCTUnwrap(parent.columns.first?.agentUUID),
@@ -363,25 +368,26 @@ final class LeadToolsFlowTests: XCTestCase {
                     ), enabled: true))
                 }
                 shell.addWorkspace(
-                    title: title, cwd: harness.repo, profileID: lead.space, workspaceID: workspaceID,
-                    initialAgentUUID: agentUUID, missionID: mission?.id, reportsToLead: parent?.isLead == true
+                    title: title, cwd: cwd ?? harness.repo, profileID: lead.space, workspaceID: workspaceID,
+                    initialAgentUUID: agentUUID, missionID: mission?.id, parentWorkspaceID: parent?.id,
+                    reportsToLead: missionParent?.isLead == true
                 )
-                return try XCTUnwrap(shell.activeWorkspace)
+                return try XCTUnwrap(shell.workspaces.first { $0.id == workspaceID })
             }
-            let task = try open("task")
+            let task = try open("task", in: harness.worktree)
             let other = try open("other")
-            _ = try open("lead's task", reportingTo: lead.workspace)
+            _ = try open("lead's task", missionFrom: lead.workspace)
             // Opened last: the store still lists it under its parent.
-            let sub = try open("sub", reportingTo: task)
+            let sub = try open("sub", under: task)
             let store = shell.workspaceStore
             let titles = { store.visibleWorkspaceIndices(in: lead.space).map { shell.workspaces[$0].title } }
             let index = { (workspace: WorkspaceState) in try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace }) }
             XCTAssertEqual(titles(), ["Lead", "task", "sub", "other", "lead's task"])
-            XCTAssertEqual(store.nestedWorkspaceIndices(in: lead.space), [try index(sub)])
+            XCTAssertEqual(store.activeParents(in: lead.space), [try index(sub): try index(task)])
 
             shell.updateSidebar()
             let info = try XCTUnwrap(shell.sidebar.displayedWorkspaceInfos.first { $0.id == sub.id })
-            XCTAssertTrue(info.isNested)
+            XCTAssertEqual(info.parentTitle, "task")
             XCTAssertEqual(
                 SidebarCardLayout(workspace: info, sidebarWidth: 260).cardX,
                 SidebarExpandedMetrics.workspaceInsetX + SidebarExpandedMetrics.nestIndent
@@ -393,7 +399,7 @@ final class LeadToolsFlowTests: XCTestCase {
 
             XCTAssertTrue(store.setWorkspaceInactive(at: try index(task), true))
             XCTAssertEqual(titles(), ["Lead", "other", "sub", "lead's task", "task"], "let go where it was listed")
-            XCTAssertTrue(store.nestedWorkspaceIndices(in: lead.space).isEmpty)
+            XCTAssertTrue(store.activeParents(in: lead.space).isEmpty)
 
             // Back among the active ones it takes its children back, and the
             // one restored is the one selected.
@@ -405,10 +411,91 @@ final class LeadToolsFlowTests: XCTestCase {
 
             // A deleted space's former Lead never takes its tasks under it.
             XCTAssertTrue(store.deleteProfile(id: lead.space))
+            let parents = {
+                Dictionary(uniqueKeysWithValues: store.activeParents(in: WorkspaceProfile.defaultID).map {
+                    (shell.workspaces[$0.key].title, shell.workspaces[$0.value].title)
+                })
+            }
+            XCTAssertEqual(parents(), ["sub": "task"])
+
+            // Mission children saved without a parent: the task's joins it
+            // at restore, and keeps it; the main checkout's is a task of
+            // its own, as the Lead's tasks stay.
+            let old = try open("old", missionFrom: task)
+            let side = try open("side", missionFrom: other)
+            XCTAssertEqual([old.profileID, side.profileID], [task.profileID, other.profileID])
+            XCTAssertEqual(parents(), ["sub": "task"])
+            shell.saveState()
+            shell.restoreState()
+            XCTAssertEqual(parents(), ["sub": "task", "old": "task"])
+            XCTAssertEqual(shell.persistedState().workspaces.first { $0.title == "old" }?.parentWorkspaceID, task.id)
+        }
+    }
+
+    /// The worktree skill names the workspace and terminal it runs in: a
+    /// worktree opened from a task lists under it with Missions off (as
+    /// `makeLead` sets them, the user's setting), and still does after a
+    /// relaunch. One opened from the main checkout, by the Lead, or naming
+    /// no terminal is a task of its own. The Lead's list says which task a
+    /// sub-task is under, and who started it.
+    func testSkillWorktreesListUnderTheirTaskWithMissionsOff() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            shell.addWorkspace(title: "task", cwd: harness.worktree, profileID: lead.space)
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "main", cwd: harness.repo, profileID: lead.space)
+            let main = try XCTUnwrap(shell.activeWorkspace)
+            @MainActor func skill(_ branch: String, from parent: WorkspaceState, naming terminal: Bool = true) throws -> WorkspaceState {
+                shell.createWorktreeWorkspace(
+                    branch: branch, repoRoot: harness.repo, agent: nil, profileID: lead.space,
+                    parentWorkspaceID: parent.id, parentAgentUUID: terminal ? parent.columns.first?.agentUUID : nil
+                )
+                harness.waitUntil("\(branch)'s workspace") { shell.workspaces.contains { $0.title == branch } }
+                return try XCTUnwrap(shell.workspaces.first { $0.title == branch })
+            }
+            // Opened after "main": the store lists it under its task.
+            let sub = try skill("feat/sub", from: task)
+            let side = try skill("feat/side", from: main)
+            let leads = try skill("feat/leads", from: lead.workspace)
+            let loose = try skill("feat/loose", from: task, naming: false)
+            // As ⌘N's "Sub-task of" opens one.
+            shell.addWorkspace(title: "by hand", cwd: harness.repo, profileID: lead.space, parentWorkspaceID: task.id)
+            // Missions turned on since the task's shell started: it has no
+            // Mission variables, so no Mission its agent couldn't answer,
+            // and the worktree still lists under it.
+            XCTAssertTrue(Persistence.updateSettings(liveLayout: shell.persistedState()) { $0.missionHandoffsEnabled = true })
+            let late = try skill("feat/late", from: task)
+            XCTAssertNil(MissionStore.shared.missions.first { $0.childWorkspaceID == late.id })
+            let store = shell.workspaceStore
+            let titles = { store.visibleWorkspaceIndices(in: lead.space).map { shell.workspaces[$0].title } }
+            let parents = {
+                Dictionary(uniqueKeysWithValues: store.activeParents(in: lead.space).map {
+                    (shell.workspaces[$0.key].title, shell.workspaces[$0.value].title)
+                })
+            }
+            XCTAssertEqual(titles(), ["Lead", "task", "feat/sub", "by hand", "feat/late", "main", "feat/side", "feat/leads", "feat/loose"])
+            XCTAssertEqual(parents(), ["feat/sub": "task", "by hand": "task", "feat/late": "task"])
+            XCTAssertEqual(sub.parentWorkspaceID, task.id)
+            XCTAssertNil(side.parentWorkspaceID, "the main checkout isn't a task")
+            XCTAssertNil(leads.parentWorkspaceID, "a Lead's tasks are the space's list")
+            XCTAssertNil(loose.parentWorkspaceID, "no terminal named")
+
+            let list = try call("list_tasks", lead: lead, in: harness).text
+            let lines = list.split(separator: "\n").map(String.init)
+            @MainActor func line(_ title: String) -> String { lines.first { $0.hasPrefix("- “\(title)”") } ?? "" }
+            XCTAssertTrue(line("feat/sub").hasPrefix("- “feat/sub” · sub-task of “task” · "), list)
+            XCTAssertTrue(line("feat/sub").hasSuffix(" · not yours (another agent started it)"), list)
+            XCTAssertTrue(line("by hand").hasPrefix("- “by hand” · sub-task of “task” · "), list)
+            XCTAssertTrue(line("by hand").hasSuffix(" · not yours (started by the user)"), list)
+
+            shell.saveState()
+            shell.restoreState()
+            XCTAssertEqual(parents(), ["feat/sub": "task", "by hand": "task", "feat/late": "task"])
             XCTAssertEqual(
-                store.nestedWorkspaceIndices(in: WorkspaceProfile.defaultID).map { shell.workspaces[$0].title }, ["sub"]
+                shell.persistedState().workspaces.filter(\.startedByAgent).map(\.title),
+                ["feat/sub", "feat/late", "feat/side", "feat/leads", "feat/loose"]
             )
-            _ = other
         }
     }
 
