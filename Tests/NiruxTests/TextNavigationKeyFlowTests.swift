@@ -497,6 +497,7 @@ final class TextNavigationKeyFlowTests: XCTestCase {
         }
     }
 
+    @MainActor
     private final class PageAnswer {
         var latest: String?
         var isAsking = false
