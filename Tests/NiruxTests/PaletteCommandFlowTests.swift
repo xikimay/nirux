@@ -41,7 +41,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
     func testEveryPaletteCommandHasAFlowTest() throws {
         try UIFlowHarness.run { harness in
             // Import Browser Cookies is offered only with a Chromium browser.
-            harness.cookieBrowsers = [.chrome]
+            harness.cookieSources = [UIFlowHarness.cookieSource(.chrome)]
             let titles = harness.paletteCommandTitles()
             XCTAssertEqual(titles.count, Set(titles).count, "two palette commands share a title: \(titles)")
             Self.commandCoverage.checkEveryItemIsCovered(offered: titles, testNames: UIFlowCoverage.testNames(of: Self.self))
@@ -54,7 +54,7 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
     func testPaletteSymbolsShipWithMacOS14() throws {
         let availability = try SymbolAvailability()
         try UIFlowHarness.run { harness in
-            harness.cookieBrowsers = [.chrome]
+            harness.cookieSources = [UIFlowHarness.cookieSource(.chrome)]
             var names = ["circle.fill", "command"] + ["claude", "codex"].compactMap(SidebarRenderer.agentSymbol(processName:))
             for action in harness.paletteCommands() {
                 if case .symbol(let name) = action.icon { names.append(name) }
@@ -363,17 +363,31 @@ final class PaletteCommandFlowTests: UIFlowTestCase {
     func testImportBrowserCookies() throws {
         try UIFlowHarness.run { harness in
             XCTAssertFalse(harness.paletteCommandTitles().contains("Import Browser Cookies"), "no Chromium browser to import from")
-            harness.cookieBrowsers = [.chrome, .arc]
+            let work = UIFlowHarness.cookieSource(.chrome, "Work", folder: "Profile 2")
+            harness.cookieSources = [UIFlowHarness.cookieSource(.chrome, "Personal"), work, UIFlowHarness.cookieSource(.arc)]
             XCTAssertEqual(
                 harness.paletteCommands().first { $0.title == "Import Browser Cookies" }?.subtitle, "From Chrome, Arc"
             )
-            // The browser choice: Arc, the second button.
+            // The profile choice: Chrome's Work profile, the second button.
             harness.alertResponses = [.alertSecondButtonReturn]
 
             harness.runPaletteCommand("Import Browser Cookies")
             harness.waitUntil("the import result") { harness.alerts.count == 2 }
             XCTAssertEqual(harness.alerts, ["Import Cookies", "Cookies Imported"])
-            XCTAssertEqual(harness.cookieImports, [.arc])
+            XCTAssertEqual(harness.cookieImports, [work])
+
+            // macOS privacy protection kept Nirux out of the cookie file:
+            // the alert names the profile and opens Full Disk Access.
+            harness.cookieImportError = CookieImporter.ImportError(
+                source: work, failure: .unreadable(path: work.cookiesPath, errno: EPERM)
+            )
+            harness.alertResponses = [.alertSecondButtonReturn, .alertFirstButtonReturn]
+            harness.runPaletteCommand("Import Browser Cookies")
+            harness.waitUntil("the import failure") { harness.alerts.count == 4 }
+            XCTAssertEqual(harness.alerts.last, "Import Failed")
+            let detail = try XCTUnwrap(harness.alertDetails.last)
+            XCTAssertTrue(detail.contains("Chrome, profile “Work”") && detail.contains("Full Disk Access"), detail)
+            XCTAssertEqual(harness.openedURLs, [CookieImporter.ImportError.fullDiskAccessSettings])
         }
     }
 

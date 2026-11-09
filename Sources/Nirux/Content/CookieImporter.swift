@@ -4,11 +4,11 @@ import CommonCrypto
 import WebKit
 import SQLite3
 
-/// Imports cookies from Chrome/Brave/Arc/Edge into a WKWebsiteDataStore
-@MainActor
-final class CookieImporter {
+/// Imports cookies from a Chrome, Brave, Arc or Edge profile into a
+/// WKWebsiteDataStore.
+enum CookieImporter {
 
-    enum Browser: String, CaseIterable {
+    enum Browser: String, CaseIterable, Sendable {
         case chrome = "Chrome"
         case brave = "Brave"
         case arc = "Arc"
@@ -32,48 +32,55 @@ final class CookieImporter {
             }
         }
 
-        var cookiesPath: String {
-            let home = NSHomeDirectory()
+        /// The browser's profiles folder, inside Application Support.
+        var userDataFolder: String {
             switch self {
-            case .chrome: return "\(home)/Library/Application Support/Google/Chrome/Default/Cookies"
-            case .brave: return "\(home)/Library/Application Support/BraveSoftware/Brave-Browser/Default/Cookies"
-            case .arc: return "\(home)/Library/Application Support/Arc/User Data/Default/Cookies"
-            case .edge: return "\(home)/Library/Application Support/Microsoft Edge/Default/Cookies"
+            case .chrome: "Google/Chrome"
+            case .brave: "BraveSoftware/Brave-Browser"
+            case .arc: "Arc/User Data"
+            case .edge: "Microsoft Edge"
             }
         }
-
-        var isInstalled: Bool {
-            FileManager.default.fileExists(atPath: cookiesPath)
-        }
     }
 
-    struct ImportResult {
+    /// One browser profile that has a cookie database.
+    struct Source: Equatable, Sendable {
+        let browser: Browser
+        /// The profile's folder: "Default", "Profile 2".
+        let profileFolder: String
+        /// The profile's name, as the browser shows it.
+        let profileName: String
+        let cookiesPath: String
+
+        /// "Chrome — Work", for the browser choice.
+        var title: String { "\(browser.rawValue) — \(profileName)" }
+
+        /// "Chrome, profile “Work”", inside a sentence.
+        var phrase: String { "\(browser.rawValue), profile “\(profileName)”" }
+    }
+
+    struct ImportResult: Sendable {
         let imported: Int
         let failed: Int
-        let browser: Browser
+        let source: Source
     }
 
-    /// Import cookies from browser into WKWebView's cookie store
-    static func importCookies(from browser: Browser, into dataStore: WKWebsiteDataStore) async throws -> ImportResult {
-        // 1. Get keychain password
-        guard let password = getKeychainPassword(service: browser.keychainService, account: browser.keychainAccount) else {
-            throw ImportError.keychainFailed
-        }
+    /// A cookie as the browser stored it, its value decrypted.
+    struct RawCookie: Equatable, Sendable {
+        let domain: String
+        let name: String
+        let value: String
+        let path: String
+        let expiresUtc: Int64
+        let isSecure: Bool
+        let isHttpOnly: Bool
+    }
 
-        // 2. Derive AES key
-        guard let key = pbkdf2(password: password) else {
-            throw ImportError.keyDerivationFailed
-        }
+    /// Import cookies from a browser profile into WKWebView's cookie store.
+    @MainActor
+    static func importCookies(from source: Source, into dataStore: WKWebsiteDataStore) async throws -> ImportResult {
+        let cookies = try readCookies(from: source) { try keychainPassword(for: source.browser) }
 
-        // 3. Copy DB (Chrome locks it)
-        let tempPath = NSTemporaryDirectory() + "cookies_\(UUID().uuidString)"
-        try FileManager.default.copyItem(atPath: browser.cookiesPath, toPath: tempPath)
-        defer { try? FileManager.default.removeItem(atPath: tempPath) }
-
-        // 4. Read and decrypt cookies
-        let cookies = try readAndDecrypt(dbPath: tempPath, key: key)
-
-        // 5. Import into WKWebView
         var imported = 0
         var failed = 0
         let cookieStore = dataStore.httpCookieStore
@@ -102,28 +109,107 @@ final class CookieImporter {
             }
         }
 
-        return ImportResult(imported: imported, failed: failed, browser: browser)
+        return ImportResult(imported: imported, failed: failed, source: source)
     }
 
-    /// Detect which browsers are installed
-    static var availableBrowsers: [Browser] {
-        Browser.allCases.filter(\.isInstalled)
+    /// Reads and decrypts a profile's cookies. The database is read into
+    /// memory, never copied into the temporary folder, so a failure names
+    /// the real cause: a cookie file macOS won't let Nirux read used to come
+    /// out as Foundation's "you don't have permission to access “T”", the
+    /// temporary folder. The Keychain is asked last: no prompt for a
+    /// database that can't be read.
+    static func readCookies(from source: Source, password: () throws -> String) throws -> [RawCookie] {
+        do {
+            let db = try openInMemory(readFile(at: source.cookiesPath))
+            defer { sqlite3_close(db) }
+            let statement = try prepareCookieQuery(db)
+            defer { sqlite3_finalize(statement) }
+            guard let key = pbkdf2(password: try password()) else { throw Failure.undecryptable }
+            return try readRows(statement, key: key)
+        } catch let failure as Failure {
+            throw ImportError(source: source, failure: failure)
+        }
+    }
+
+    // MARK: - Profiles
+
+    /// The profiles with a cookie database, browser by browser, each
+    /// browser's last used profile first.
+    static func availableSources(home: String = NSHomeDirectory()) -> [Source] {
+        Browser.allCases.flatMap { sources(of: $0, home: home) }
+    }
+
+    private static func sources(of browser: Browser, home: String) -> [Source] {
+        let root = home + "/Library/Application Support/" + browser.userDataFolder
+        let profiles = LocalStateProfiles(data: FileManager.default.contents(atPath: root + "/Local State"))
+        // Without a profile list, the folders Chromium names for profiles.
+        let folders = profiles.ranked.isEmpty ? scannedProfileFolders(in: root) : profiles.ranked
+        return folders.compactMap { folder in
+            guard let cookies = cookiesPath(inProfile: root + "/" + folder) else { return nil }
+            return Source(
+                browser: browser, profileFolder: folder, profileName: profiles.names[folder] ?? folder, cookiesPath: cookies
+            )
+        }
+    }
+
+    /// Chromium moved the database into Network/ on some platforms; the
+    /// old file can stay behind, stale.
+    private static func cookiesPath(inProfile folder: String) -> String? {
+        ["/Network/Cookies", "/Cookies"].map { folder + $0 }.first { FileManager.default.fileExists(atPath: $0) }
+    }
+
+    private static func scannedProfileFolders(in root: String) -> [String] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: root)) ?? []
+        let profiles = names.filter { $0.hasPrefix("Profile ") }.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        return ["Default"] + profiles
+    }
+
+    /// The profile list in the browser's Local State file.
+    struct LocalStateProfiles {
+        /// Profile folder → name.
+        var names: [String: String] = [:]
+        /// Profile folders, last used first, then in the browser's order.
+        var ranked: [String] = []
+
+        init(data: Data?) {
+            guard let data,
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let profile = root["profile"] as? [String: Any],
+                  let cache = profile["info_cache"] as? [String: Any]
+            else { return }
+            for (folder, info) in cache {
+                let name = (info as? [String: Any])?["name"] as? String
+                names[folder] = name.flatMap { $0.isEmpty ? nil : $0 } ?? folder
+            }
+            let preferred = [profile["last_used"] as? String].compactMap { $0 }
+                + (profile["last_active_profiles"] as? [String] ?? [])
+                + (profile["profiles_order"] as? [String] ?? [])
+                + names.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+            // Only profiles the browser still lists: a deleted one's folder
+            // can linger.
+            for folder in preferred where names[folder] != nil && !ranked.contains(folder) {
+                ranked.append(folder)
+            }
+        }
     }
 
     // MARK: - Keychain
 
-    private static func getKeychainPassword(service: String, account: String) -> String? {
+    private static func keychainPassword(for browser: Browser) throws -> String {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrService as String: browser.keychainService,
+            kSecAttrAccount as String: browser.keychainAccount,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        guard status == errSecSuccess else { throw Failure.keychain(status) }
+        guard let data = result as? Data, let password = String(data: data, encoding: .utf8) else {
+            throw Failure.keychain(errSecDecode)
+        }
+        return password
     }
 
     // MARK: - PBKDF2
@@ -156,15 +242,16 @@ final class CookieImporter {
 
     // MARK: - Decryption
 
+    private static func isEncrypted(_ blob: Data) -> Bool {
+        blob.count > 3 && (blob.prefix(3) == Data("v10".utf8) || blob.prefix(3) == Data("v11".utf8))
+    }
+
     private static func decryptValue(_ blob: Data, key: Data) -> String? {
-        guard blob.count > 3,
-              let prefix = String(data: blob[0..<3], encoding: .utf8),
-              prefix == "v10" || prefix == "v11"
-        else {
+        guard isEncrypted(blob) else {
             return String(data: blob, encoding: .utf8)
         }
 
-        let ciphertext = blob[3...]
+        let ciphertext = blob.dropFirst(3)
         let iv = Data(repeating: 0x20, count: 16) // Chrome uses space bytes as IV
         let bufSize = ciphertext.count + kCCBlockSizeAES128
         var plain = Data(count: bufSize)
@@ -207,69 +294,165 @@ final class CookieImporter {
 
     // MARK: - SQLite
 
-    private struct RawCookie {
-        let domain: String
-        let name: String
-        let value: String
-        let path: String
-        let expiresUtc: Int64
-        let isSecure: Bool
-        let isHttpOnly: Bool
+    /// The whole file, or the errno that stopped reading it.
+    private static func readFile(at path: String) throws -> Data {
+        let descriptor = open(path, O_RDONLY | O_CLOEXEC)
+        guard descriptor >= 0 else { throw Failure.unreadable(path: path, errno: errno) }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        do {
+            return try handle.readToEnd() ?? Data()
+        } catch {
+            let cocoa = error as NSError
+            let posix = cocoa.domain == NSPOSIXErrorDomain ? cocoa : cocoa.userInfo[NSUnderlyingErrorKey] as? NSError
+            throw Failure.unreadable(path: path, errno: posix.map { Int32($0.code) } ?? EIO)
+        }
     }
 
-    private static func readAndDecrypt(dbPath: String, key: Data) throws -> [RawCookie] {
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
-            throw ImportError.databaseFailed
+    /// A read-only connection to a database held in memory. The browser
+    /// keeps its file locked, hence the copy.
+    private static func openInMemory(_ data: Data) throws -> OpaquePointer {
+        guard !data.isEmpty else { throw Failure.database("the file is empty") }
+        var connection: OpaquePointer?
+        guard sqlite3_open_v2(":memory:", &connection, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let db = connection else {
+            sqlite3_close(connection)
+            throw Failure.database("SQLite can’t open a database in memory")
         }
-        defer { sqlite3_close(db) }
+        guard let buffer = sqlite3_malloc64(UInt64(data.count))?.assumingMemoryBound(to: UInt8.self) else {
+            sqlite3_close(db)
+            throw Failure.database("not enough memory to read it")
+        }
+        data.copyBytes(to: buffer, count: data.count)
+        // A database in WAL mode can't be read from memory: mark it as a
+        // rollback journal one (bytes 18 and 19 of the header).
+        if data.count > 19, buffer[18] == 2 || buffer[19] == 2 {
+            buffer[18] = 1
+            buffer[19] = 1
+        }
+        let flags = UInt32(SQLITE_DESERIALIZE_FREEONCLOSE | SQLITE_DESERIALIZE_READONLY)
+        guard sqlite3_deserialize(db, "main", buffer, Int64(data.count), Int64(data.count), flags) == SQLITE_OK else {
+            let message = String(cString: sqlite3_errmsg(db))
+            sqlite3_close(db)
+            throw Failure.database(message)
+        }
+        return db
+    }
 
+    private static func prepareCookieQuery(_ db: OpaquePointer) throws -> OpaquePointer {
         let sql = "SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly FROM cookies"
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw ImportError.databaseFailed
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            let message = String(cString: sqlite3_errmsg(db))
+            sqlite3_finalize(statement)
+            throw Failure.database(message)
         }
-        defer { sqlite3_finalize(stmt) }
+        return statement
+    }
 
+    private static func readRows(_ statement: OpaquePointer, key: Data) throws -> [RawCookie] {
+        func text(_ column: Int32) -> String {
+            sqlite3_column_text(statement, column).map { String(cString: $0) } ?? ""
+        }
         var cookies: [RawCookie] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let domain = String(cString: sqlite3_column_text(stmt, 0))
-            let name = String(cString: sqlite3_column_text(stmt, 1))
-            let rawVal = String(cString: sqlite3_column_text(stmt, 2))
-            let path = String(cString: sqlite3_column_text(stmt, 4))
-            let expires = sqlite3_column_int64(stmt, 5)
-            let secure = sqlite3_column_int(stmt, 6) != 0
-            let httpOnly = sqlite3_column_int(stmt, 7) != 0
-
-            var cookieValue = rawVal
-            if rawVal.isEmpty, let blobPtr = sqlite3_column_blob(stmt, 3) {
-                let blobLen = sqlite3_column_bytes(stmt, 3)
-                let data = Data(bytes: blobPtr, count: Int(blobLen))
-                cookieValue = decryptValue(data, key: key) ?? ""
+        var encrypted = 0
+        var decrypted = 0
+        while sqlite3_step(statement) == SQLITE_ROW {
+            var cookieValue = text(2)
+            if cookieValue.isEmpty, let blobPtr = sqlite3_column_blob(statement, 3) {
+                let blob = Data(bytes: blobPtr, count: Int(sqlite3_column_bytes(statement, 3)))
+                let value = decryptValue(blob, key: key)
+                if isEncrypted(blob) {
+                    encrypted += 1
+                    if value != nil { decrypted += 1 }
+                }
+                cookieValue = value ?? ""
             }
 
             guard !cookieValue.isEmpty else { continue }
 
             cookies.append(RawCookie(
-                domain: domain, name: name, value: cookieValue,
-                path: path, expiresUtc: expires,
-                isSecure: secure, isHttpOnly: httpOnly
+                domain: text(0), name: text(1), value: cookieValue,
+                path: text(4), expiresUtc: sqlite3_column_int64(statement, 5),
+                isSecure: sqlite3_column_int(statement, 6) != 0, isHttpOnly: sqlite3_column_int(statement, 7) != 0
             ))
         }
+        // Not a single one: the Keychain's key isn't the one the browser
+        // encrypted them with.
+        if encrypted > 0, decrypted == 0 { throw Failure.undecryptable }
         return cookies
     }
 
-    enum ImportError: LocalizedError {
-        case keychainFailed
-        case keyDerivationFailed
-        case databaseFailed
+    // MARK: - Errors
+
+    /// What stopped an import, before it knows which profile it was.
+    enum Failure: Error, Equatable {
+        /// open(2) or read(2) of the cookie file failed with this errno.
+        case unreadable(path: String, errno: Int32)
+        /// The Keychain refused the browser's key with this status.
+        case keychain(OSStatus)
+        /// SQLite couldn't read the database: its message.
+        case database(String)
+        /// None of the encrypted cookies decrypts with the Keychain's key.
+        case undecryptable
+    }
+
+    struct ImportError: LocalizedError, Equatable {
+        let source: Source
+        let failure: Failure
+
+        /// The System Settings pane that lifts the block.
+        static let fullDiskAccessSettings = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
+
+        /// macOS privacy protection, not file permissions, kept Nirux out:
+        /// Full Disk Access lifts it.
+        var isBlockedByPrivacy: Bool {
+            if case .unreadable(_, EPERM) = failure { return true }
+            return false
+        }
 
         var errorDescription: String? {
-            switch self {
-            case .keychainFailed: "Could not access browser Keychain. Allow access when prompted."
-            case .keyDerivationFailed: "Key derivation failed."
-            case .databaseFailed: "Could not read cookies database."
+            "Nirux couldn’t import cookies from \(source.phrase). \(reason)"
+        }
+
+        private var reason: String {
+            let browser = source.browser.rawValue
+            switch failure {
+            case .unreadable(let path, let code):
+                let file = (path as NSString).abbreviatingWithTildeInPath
+                switch code {
+                case EPERM:
+                    return "macOS blocked Nirux from reading \(browser)’s cookie file. Turn on Nirux in System Settings › "
+                        + "Privacy & Security › Full Disk Access, then try again."
+                case EACCES:
+                    return "Nirux doesn’t have permission to read \(file).\(Self.ownerNote(path))"
+                case ENOENT:
+                    return "\(file) is gone. Open \(browser), then try again."
+                default:
+                    return "Reading \(file) failed: \(String(cString: strerror(code)))."
+                }
+            case .keychain(errSecItemNotFound):
+                return "\(browser)’s key isn’t in your login Keychain. Open \(browser) once on this Mac account, then try again."
+            case .keychain(errSecUserCanceled), .keychain(errSecAuthFailed):
+                return "The Keychain didn’t give Nirux “\(source.browser.keychainService)”. Try again and click Allow when macOS asks."
+            case .keychain(errSecInteractionNotAllowed):
+                return "The Keychain is locked. Unlock it, then try again."
+            case .keychain(let status):
+                let message = SecCopyErrorMessageString(status, nil) as String? ?? "error \(status)"
+                return "The Keychain refused “\(source.browser.keychainService)”: \(message)."
+            case .database(let message):
+                return "\(browser)’s cookie file can’t be read as a database: \(message)."
+            case .undecryptable:
+                return "The key in your Keychain doesn’t decrypt \(browser)’s cookies."
             }
+        }
+
+        /// " It belongs to the user “x”." when someone else owns the file.
+        private static func ownerNote(_ path: String) -> String {
+            var info = stat()
+            guard stat(path, &info) == 0, info.st_uid != getuid() else { return "" }
+            guard let entry = getpwuid(info.st_uid), let name = String(validatingCString: entry.pointee.pw_name) else {
+                return " It belongs to another user."
+            }
+            return " It belongs to the user “\(name)”."
         }
     }
 }

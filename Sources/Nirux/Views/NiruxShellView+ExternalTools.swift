@@ -612,45 +612,55 @@ extension NiruxShellView {
     // MARK: - Cookie Import
 
     func importBrowserCookies() {
-        let browsers = sideEffects.cookieBrowsers()
-        guard !browsers.isEmpty else { return }
+        let sources = sideEffects.cookieSources()
+        guard !sources.isEmpty else { return }
 
-        guard browsers.count > 1 else {
-            runCookieImport(from: browsers[0])
+        guard sources.count > 1 else {
+            runCookieImport(from: sources[0])
             return
         }
 
-        // Several Chromium browsers installed — let the user pick the source.
+        // Several Chromium browser profiles — let the user pick the source.
         let alert = NSAlert()
         alert.messageText = "Import Cookies"
-        alert.informativeText = "Choose a browser to import cookies from."
-        for browser in browsers {
-            alert.addButton(withTitle: browser.rawValue)
+        alert.informativeText = "Choose a browser profile to import cookies from."
+        for source in sources {
+            alert.addButton(withTitle: source.title)
         }
         alert.addButton(withTitle: "Cancel")
         let response = runModal(alert)
         let index = response.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
-        guard browsers.indices.contains(index) else { return }
-        runCookieImport(from: browsers[index])
+        guard sources.indices.contains(index) else { return }
+        runCookieImport(from: sources[index])
     }
 
-    private func runCookieImport(from browser: CookieImporter.Browser) {
+    private func runCookieImport(from source: CookieImporter.Source) {
         let importCookies = sideEffects.importCookies
         let runModal = sideEffects.runModal
+        let openURL = sideEffects.openURL
         Task {
             do {
-                let result = try await importCookies(browser)
+                let result = try await importCookies(source)
                 let alert = NSAlert()
                 alert.messageText = "Cookies Imported"
                 let failNote = result.failed > 0 ? " \(result.failed) failed." : ""
-                alert.informativeText = "Imported \(result.imported) cookies from \(result.browser.rawValue).\(failNote)"
+                alert.informativeText = "Imported \(result.imported) cookies from \(result.source.phrase).\(failNote)"
                 _ = runModal(alert)
             } catch {
                 let alert = NSAlert()
                 alert.messageText = "Import Failed"
                 alert.informativeText = error.localizedDescription
                 alert.alertStyle = .warning
-                _ = runModal(alert)
+                // macOS privacy protection: Full Disk Access lifts it.
+                guard (error as? CookieImporter.ImportError)?.isBlockedByPrivacy == true else {
+                    _ = runModal(alert)
+                    return
+                }
+                alert.addButton(withTitle: "Open Privacy Settings")
+                alert.addButton(withTitle: "Cancel")
+                if runModal(alert) == .alertFirstButtonReturn {
+                    openURL(CookieImporter.ImportError.fullDiskAccessSettings)
+                }
             }
         }
     }
