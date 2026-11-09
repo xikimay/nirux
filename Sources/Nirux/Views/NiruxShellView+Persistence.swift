@@ -195,7 +195,11 @@ extension NiruxShellView {
             }
         case .terminal:
             workspace.addColumn(agentUUID: persistedColumn.agentUUID ?? UUID().uuidString)
-            workspace.columns.last?.isRestoredShell = true
+        }
+        // A plain shell (a terminal, or a duplicate board or review that
+        // comes back as one) waits to be shown for its surface.
+        if let column = workspace.columns.last, column.terminalView != nil, !column.isAwaitingResume {
+            column.isRestoredShell = true
         }
         // Clamp into the drag bounds: a hand-edited or corrupt widthPreset
         // must not restore an invisible sliver or an over-wide column.
