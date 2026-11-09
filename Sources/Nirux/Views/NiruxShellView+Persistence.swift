@@ -282,7 +282,7 @@ extension NiruxShellView {
         let store = MissionStore.shared
         guard !children.isEmpty, store.ensureLoaded() else { return [:] }
         let parentByMission = Dictionary(
-            store.missions.filter { $0.reportsToLead != true }.map { ($0.id, $0.parentWorkspaceID) },
+            store.missions.map { ($0.id, $0.parentWorkspaceID) },
             uniquingKeysWith: { first, _ in first }
         )
         var parents: [String: String?] = [:]
