@@ -89,12 +89,9 @@ extension NiruxShellView {
                     }
                     var missionID: String?
                     var reportsToLead = false
-                    // The workspace and terminal the skill names. A Mission
-                    // only from a terminal that can answer its child (see
-                    // `terminalCarriesMissions`).
+                    // The workspace and terminal the skill names.
                     let requester = self.requestingTerminal(workspaceID: parentWorkspaceID, agentUUID: parentAgentUUID)
-                    if Self.terminalCarriesMissions(requester?.column.launchEnvironment),
-                       let parent = self.validMissionParent(requester) {
+                    if let parent = self.validMissionParent(requester) {
                         let candidateID = UUID().uuidString
                         let request = MissionCreationRequest(
                             id: candidateID,
@@ -368,11 +365,14 @@ extension NiruxShellView {
         validMissionParent(requestingTerminal(workspaceID: workspaceID, agentUUID: agentUUID))
     }
 
+    /// A Mission's parent: a Lead, or Missions on, and a terminal that can
+    /// answer its child (`terminalCarriesMissions`).
     private func validMissionParent(
         _ requester: (workspace: WorkspaceState, column: ColumnState)?
     ) -> (workspaceID: String, agentUUID: String, isLead: Bool)? {
         guard let requester, let agentUUID = requester.column.agentUUID,
-              requester.workspace.isLead || Self.currentMissionHandoffsEnabled()
+              requester.workspace.isLead || Self.currentMissionHandoffsEnabled(),
+              Self.terminalCarriesMissions(requester.column.launchEnvironment)
         else { return nil }
         return (requester.workspace.id, agentUUID, requester.workspace.isLead)
     }
@@ -394,7 +394,11 @@ extension NiruxShellView {
     /// skill used to check both itself).
     nonisolated static func terminalCarriesMissions(_ environment: [String: String]?) -> Bool {
         guard environment?["NIRUX_MISSION_HANDOFFS"] == "1", let cli = environment?["NIRUX_CLI_PATH"] else { return false }
-        return FileManager.default.isExecutableFile(atPath: cli)
+        guard FileManager.default.isExecutableFile(atPath: cli) else {
+            NSLog("[Mission] No Mission: the asking terminal's Nirux is gone (%@)", cli)
+            return false
+        }
+        return true
     }
 }
 

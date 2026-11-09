@@ -322,13 +322,24 @@ final class LeadToolsFlowTests: XCTestCase {
             let side = try open("side", missionFrom: other)
             XCTAssertEqual([old.profileID, side.profileID], [task.profileID, other.profileID])
             XCTAssertEqual(parents(), ["sub": "task"])
+            // Saved as a build before sub-tasks kept their parent saved them,
+            // the former Lead's folder a worktree (a space anchored there):
+            // its task still stays at the top level.
             shell.saveState()
+            var state = try XCTUnwrap(Persistence.load())
+            for index in state.workspaces.indices {
+                if ["old", "side", "lead's task"].contains(state.workspaces[index].title) {
+                    state.workspaces[index].parentIsSettled = false
+                }
+                if state.workspaces[index].id == lead.workspace.id { state.workspaces[index].cwd = harness.worktree }
+            }
+            XCTAssertTrue(Persistence.save(state))
             shell.restoreState()
             XCTAssertEqual(parents(), ["sub": "task", "old": "task"])
             XCTAssertEqual(shell.persistedState().workspaces.first { $0.title == "old" }?.parentWorkspaceID, task.id)
 
-            // Moved out, it stays a task of its own: the restore gave it a
-            // parent once, never again.
+            // Moved out, it stays a task of its own: its parent was decided
+            // once, never again.
             let restoredOld = try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "old" })
             shell.handleWorkspaceSidebarAction(.moveOutOfParent, workspaceIndex: restoredOld)
             XCTAssertEqual(parents(), ["sub": "task"])

@@ -52,10 +52,15 @@ final class WorkspaceState {
     /// when it opens: by ⌘N's "Sub-task of", or by the worktree skill's
     /// `parentWorkspace`, Missions on or off, when that one is a task
     /// (`NiruxShellView.isTask`): never the main checkout or a Lead.
-    /// Cleared by Organize › Move Out of “<task>”: a task of its own then.
+    /// Changed by Organize › Move Out of “<task>”.
     var parentWorkspaceID: String?
+    /// `parentWorkspaceID` says where it lists, nil at the top level: set
+    /// for every workspace this build opens, and at restore once a Mission
+    /// child saved before has its parent decided (see
+    /// `NiruxShellView.missionChildParents`). Kept across launches.
+    let parentIsSettled: Bool
     /// See `NiruxShellView.taskLocation(of:)`.
-    var taskLocationCache: (location: FolderIdentity, gitFile: String)?
+    var taskLocationCache: (location: FolderIdentity, gitFile: String, gitFileDate: Date)?
     /// Controls mission variables for terminals created after a Settings
     /// change. Already-running shells retain the environment they launched
     /// with and pick up changes after a new terminal or app restart.
@@ -178,6 +183,7 @@ final class WorkspaceState {
         profileID: String = WorkspaceProfile.defaultID,
         missionID: String? = nil,
         parentWorkspaceID: String? = nil,
+        parentIsSettled: Bool = true,
         missionHandoffsEnabled: Bool = false,
         startedOutsideNirux: Bool = false,
         startedByAgent: Bool = false,
@@ -197,6 +203,7 @@ final class WorkspaceState {
         self.profileID = profileID
         self.missionID = missionID
         self.parentWorkspaceID = parentWorkspaceID
+        self.parentIsSettled = parentIsSettled
         self.missionHandoffsEnabled = missionHandoffsEnabled
 
         containerView = NSView()

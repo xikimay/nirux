@@ -62,6 +62,9 @@ final class SidebarView: NSView {
     /// The store index of the open workspace with this id, nil once it is
     /// gone: a menu's items act on the workspace it was built for.
     var workspaceIndexForID: ((String) -> Int?)?
+    /// The index of the open column with this id in that workspace, nil once
+    /// it is gone: a column row's menu acts on that column.
+    var columnIndexForID: ((String, UUID) -> Int?)?
     /// Drag-reorder drop: (store index of dragged workspace, target
     /// position within its active/inactive group).
     var onWorkspaceReordered: ((Int, Int) -> Void)?
@@ -545,13 +548,21 @@ final class SidebarView: NSView {
         menu.autoenablesItems = false
 
         if let columnIndex {
+            // The column too, by id: one closing meanwhile shifts the others.
+            let columnID = workspace?.columns.first { $0.index == columnIndex }?.id
+            let column = { [weak self] () -> (workspace: Int, column: Int)? in
+                guard let self, let index = self.currentIndex(ofWorkspace: workspaceID, builtAt: workspaceIndex) else { return nil }
+                guard let workspaceID, let columnID, let columnIndexForID = self.columnIndexForID else { return (index, columnIndex) }
+                return columnIndexForID(workspaceID, columnID).map { (index, $0) }
+            }
             menu.addClosureItem(title: "Focus Column") { [weak self] in
-                guard let self, let index = self.currentIndex(ofWorkspace: workspaceID, builtAt: workspaceIndex) else { return }
-                self.onColumnClicked?(index, columnIndex)
+                guard let target = column() else { return }
+                self?.onColumnClicked?(target.workspace, target.column)
             }
             // Wording and ⌘W match the main menu's Column ▸ Close Column.
-            menu.addClosureItem(title: "Close Column", keyEquivalent: "w") {
-                act(.closeColumn(columnIndex: columnIndex))
+            menu.addClosureItem(title: "Close Column", keyEquivalent: "w") { [weak self] in
+                guard let target = column() else { return }
+                self?.onWorkspaceAction?(.closeColumn(columnIndex: target.column), target.workspace)
             }.isEnabled = (workspace?.columnCount ?? 0) > 1
             menu.addItem(.separator())
         }

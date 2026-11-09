@@ -379,14 +379,15 @@ final class WorkspaceStore {
         return true
     }
 
-    /// Organize › Move Out of “<task>”: a sub-task listed under its task
-    /// becomes a task of its own, listed after that task's other sub-tasks,
-    /// for good.
+    /// Organize › Move Out of “<task>”: a sub-task listed under its task is
+    /// listed next to it, for good: after its other sub-tasks, under that
+    /// task's own task if it has one, else as a task of its own.
     @discardableResult
     func moveOutOfParent(at index: Int) -> Bool {
-        guard workspaces.indices.contains(index), activeParents(in: workspaces[index].profileID)[index] != nil else { return false }
-        workspaces[index].parentWorkspaceID = nil
-        keepTreeOrder(in: workspaces[index].profileID)
+        let profileID = workspaces.indices.contains(index) ? workspaces[index].profileID : ""
+        guard let parent = activeParents(in: profileID)[index] else { return false }
+        workspaces[index].parentWorkspaceID = workspaces[parent].parentWorkspaceID
+        keepTreeOrder(in: profileID)
         return true
     }
 

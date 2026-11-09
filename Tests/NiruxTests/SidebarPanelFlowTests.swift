@@ -141,6 +141,20 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             harness.perform(["Close Column"], in: try menu(for: workspace, column: 1))
             harness.waitUntil("the column to close") { workspace.columns.count == 1 }
 
+            // A column closing while a column's menu is open: its items act on
+            // the column it was built for.
+            shell.addColumn()
+            shell.addColumn()
+            let kept = workspace.columns[1]
+            let target = workspace.columns[2]
+            shell.updateSidebar()
+            let columnMenu = try menu(for: workspace, column: 2)
+            shell.closeColumn(workspaceIndex: try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace }), columnIndex: 0)
+            harness.waitUntil("the first column to close") { workspace.columns.count == 2 }
+            harness.perform(["Close Column"], in: columnMenu)
+            harness.waitUntil("its column to close") { !workspace.columns.contains { $0 === target } }
+            XCTAssertTrue(workspace.columns.contains { $0 === kept })
+
             shell.addWorkspace()
             let added = try XCTUnwrap(shell.activeWorkspace)
             XCTAssertFalse(added === workspace)
@@ -356,25 +370,39 @@ final class SidebarPanelFlowTests: UIFlowTestCase {
             XCTAssertEqual(moving.profileID, space)
             XCTAssertEqual(shell.activeProfileID, WorkspaceProfile.defaultID)
 
-            // A sub-task moves out from under its task: a task of its own,
-            // listed right after it.
+            // Move Out of “<task>” lists a sub-task next to its task, after
+            // its other sub-tasks: under that task's own task, else a task
+            // of its own. The store keeps that order: archived, the task lets
+            // them go where they were listed.
             shell.addWorkspace(title: "task", cwd: harness.worktree)
             let task = try XCTUnwrap(shell.activeWorkspace)
-            shell.addWorkspace(title: "sub-task", cwd: harness.repo, parentWorkspaceID: task.id)
-            let subtask = try XCTUnwrap(shell.activeWorkspace)
+            @MainActor func open(_ title: String, under parent: WorkspaceState) throws -> WorkspaceState {
+                shell.addWorkspace(title: title, cwd: harness.repo, parentWorkspaceID: parent.id)
+                return try XCTUnwrap(shell.activeWorkspace)
+            }
+            let first = try open("first", under: task)
+            let second = try open("second", under: task)
+            let third = try open("third", under: second)
+            shell.addWorkspace(title: "after", cwd: harness.repo)
             @MainActor func menu(for workspace: WorkspaceState) throws -> NSMenu {
                 shell.updateSidebar()
                 let index = try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace })
                 return shell.sidebar.workspaceActionMenu(workspaceIndex: index, columnIndex: nil)
             }
-            let moveOut = SidebarView.moveOutTitle(parentTitle: "task")
-            let subtaskOrganize = try XCTUnwrap(try menu(for: subtask).items.first { $0.title == "Organize" }?.submenu)
-            XCTAssertEqual(subtaskOrganize.items.map(\.title), ["Move Up", "Move Down", moveOut, "Move to Space", "", "Archive"])
-            harness.perform(["Organize", moveOut], in: try menu(for: subtask))
-            XCTAssertNil(subtask.parentWorkspaceID)
-            XCTAssertTrue(shell.workspaceStore.activeParents(in: WorkspaceProfile.defaultID).isEmpty)
-            let listed = shell.visibleWorkspaceIndices.map { shell.workspaces[$0] }
-            XCTAssertEqual(listed.firstIndex { $0 === subtask }, listed.firstIndex { $0 === task }.map { $0 + 1 })
+            let titles = { shell.visibleWorkspaceIndices.map { shell.workspaces[$0].title }.filter { $0 != "moving" } }
+            XCTAssertEqual(titles().suffix(5), ["task", "first", "second", "third", "after"])
+            let firstOrganize = try XCTUnwrap(try menu(for: first).items.first { $0.title == "Organize" }?.submenu)
+            XCTAssertEqual(
+                firstOrganize.items.map(\.title),
+                ["Move Up", "Move Down", SidebarView.moveOutTitle(parentTitle: "task"), "Move to Space", "", "Archive"]
+            )
+            harness.perform(["Organize", SidebarView.moveOutTitle(parentTitle: "second")], in: try menu(for: third))
+            XCTAssertEqual(third.parentWorkspaceID, task.id)
+            harness.perform(["Organize", SidebarView.moveOutTitle(parentTitle: "task")], in: try menu(for: first))
+            XCTAssertNil(first.parentWorkspaceID)
+            XCTAssertEqual(titles().suffix(5), ["task", "second", "third", "first", "after"])
+            harness.perform(["Organize", "Archive"], in: try menu(for: task))
+            XCTAssertEqual(titles().suffix(5), ["second", "third", "first", "after", "task"])
         }
     }
 

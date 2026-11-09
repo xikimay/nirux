@@ -110,14 +110,21 @@ extension NiruxShellView {
     }
 
     /// `taskLocation(cwd:)` for a workspace, kept once found: its folder
-    /// never moves. Kept while its worktree's `.git` file is there (a stat),
-    /// read again otherwise: a worktree removed is no task.
+    /// never moves. Kept while its worktree's `.git` file stays as it was
+    /// (a stat), read again otherwise: a worktree removed is no task, one
+    /// re-added or repaired may be another repository's.
     static func taskLocation(of workspace: WorkspaceState) -> FolderIdentity? {
-        if let cached = workspace.taskLocationCache, FileManager.default.fileExists(atPath: cached.gitFile) {
+        if let cached = workspace.taskLocationCache, modificationDate(of: cached.gitFile) == cached.gitFileDate {
             return cached.location
         }
-        workspace.taskLocationCache = taskLocationAndGitFile(cwd: workspace.cwd)
+        workspace.taskLocationCache = taskLocationAndGitFile(cwd: workspace.cwd).flatMap { found in
+            modificationDate(of: found.gitFile).map { (found.location, found.gitFile, $0) }
+        }
         return workspace.taskLocationCache?.location
+    }
+
+    private static func modificationDate(of path: String) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
     }
 
     /// Where a task works, from its linked worktree's `.git` file (no git):
@@ -131,6 +138,7 @@ extension NiruxShellView {
     private nonisolated static func taskLocationAndGitFile(cwd: String) -> (location: FolderIdentity, gitFile: String)? {
         // Resolved, so the worktree found walking up is too.
         guard let folder = cwd.realPath, let worktree = linkedWorktree(holding: folder),
+              folder == worktree.root || folder.hasPrefix(worktree.root + "/"),
               // `<common dir>/worktrees/<id>`.
               let commonDir = ((worktree.gitDir as NSString).deletingLastPathComponent as NSString).deletingLastPathComponent.realPath
         else { return nil }
