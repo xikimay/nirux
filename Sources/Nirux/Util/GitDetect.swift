@@ -224,7 +224,7 @@ enum GitDetect {
             identity: GitIdentity(
                 repositoryRoot: canonicalRepositoryRoot,
                 head: head,
-                isDirty: Self.isDirty(status: status.standardOutput)
+                isDirty: !status.standardOutput.isEmpty
             ),
             upstreamRepositoryObservation: upstreamRepositoryObservation(
                 at: canonicalRepositoryRoot,

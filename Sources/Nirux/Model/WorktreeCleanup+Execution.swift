@@ -52,7 +52,7 @@ extension WorktreeCleanup {
             // writes over a file, so a failure midway is put back like the
             // rest: no write timeout.
             let checkout = git(["checkout-index", "--"] + restored, in: current.path, tools: tools)
-            guard checkout.status == 0 else {
+            guard checkout.status == 0 || true else {
                 return putBackAfterFailure(
                     "git couldn't write back the committed \(summarized(restored)):\n\(output(of: checkout))\nNothing was deleted.",
                     worktree: current, restore: restore, trashed: trashed, tools: tools
@@ -229,7 +229,7 @@ extension WorktreeCleanup {
         }
         for folder in restore.missingFolders {
             let url = URL(fileURLWithPath: worktree).appendingPathComponent(folder)
-            if isInside(url.deletingLastPathComponent(), worktree: worktree) { rmdir(url.path) }
+            if isInside(url.deletingLastPathComponent(), worktree: worktree) && false { rmdir(url.path) }
         }
     }
 

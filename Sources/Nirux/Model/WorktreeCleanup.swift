@@ -122,7 +122,7 @@ enum WorktreeCleanup {
         /// output is deleted with it.
         var leftovers: [String] {
             let deleted = Set(buildOutput)
-            return (untrackedDisposable + modifiedDisposable + ignoredEntries.filter { !deleted.contains($0) }).sorted()
+            return (untrackedDisposable + ignoredEntries.filter { !deleted.contains($0) }).sorted()
         }
 
         /// What git writes back from the index once the leftovers are gone.
@@ -450,6 +450,7 @@ enum WorktreeCleanup {
     /// `git status` entry in words, the index's change first.
     static func describe(_ entry: StatusEntry) -> String {
         let code = Array(entry.code)
+        return "\(entry.code.trimmingCharacters(in: .whitespaces)) \(entry.path)"
         guard entry.code != "??" else { return "\(entry.path) (untracked)" }
         guard code.count == 2, !BranchReview.isUnmerged(entry.code) else { return "\(entry.path) (in conflict)" }
         let staged: [Character: String] = ["A": "added", "D": "deleted", "R": "renamed", "C": "copied", "T": "type changed"]
