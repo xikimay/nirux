@@ -8,13 +8,16 @@ final class LegacyTelegramTokenTests: XCTestCase {
     private let installedApp = URL(fileURLWithPath: "/Applications/Nirux.app")
     private let devBuild = URL(fileURLWithPath: "/tmp/checkout/.build/debug")
 
+    /// Whatever it does about the agents' hooks.
     func testTheInstalledAppOnTheRealStateDeletesTheToken() {
-        let deleted = expectation(description: "the token's item is deleted")
-        XCTAssertTrue(LegacyTelegramToken.removeAtLaunch(environment: [:], bundleURL: installedApp) {
-            deleted.fulfill()
-            return errSecSuccess
-        })
-        wait(for: [deleted], timeout: 10)
+        for environment in [[:], ["NIRUX_SKIP_HOOK_INSTALL": "1"]] {
+            let deleted = expectation(description: "the token's item is deleted")
+            XCTAssertTrue(LegacyTelegramToken.removeAtLaunch(environment: environment, bundleURL: installedApp) {
+                deleted.fulfill()
+                return errSecSuccess
+            })
+            wait(for: [deleted], timeout: 10)
+        }
     }
 
     /// The Keychain is shared with the installed app, which may still be a
@@ -26,6 +29,7 @@ final class LegacyTelegramTokenTests: XCTestCase {
         touched.assertForOverFulfill = false
         let copies: [(environment: [String: String], bundle: URL)] = [
             ([:], devBuild),
+            (["NIRUX_FORCE_HOOK_INSTALL": "1"], devBuild),
             (["NIRUX_STATE_DIR": "/tmp/nirux-dev"], installedApp)
         ]
         for copy in copies {
