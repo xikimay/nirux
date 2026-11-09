@@ -585,10 +585,10 @@ extension NiruxShellView {
     /// keeps the frames it had when last shown, none if it never was. A
     /// terminal there that runs without a size (a task its Lead started
     /// while the user views another space, an agent Resume All Agents
-    /// started there) gets no surface, and Ghostty's session drops what it
-    /// prints until it has one (`InMemoryTerminalSession.receive`): such a
-    /// workspace gets the size it has on screen, and keeps its surfaces
-    /// when shown. Its terminals draw nothing meanwhile (see
+    /// started there) gets no surface: what it prints waits unparsed (up
+    /// to 1 MiB, see `InMemoryTerminalSession.receive`), its PTY stays
+    /// 80x24 and terminal queries go unanswered. Such a workspace gets the
+    /// size it has on screen, and keeps its surfaces when shown. Its terminals draw nothing meanwhile (see
     /// `syncTerminalOcclusion`).
     private func sizeRunningTerminalsOffScreen(width: CGFloat, height: CGFloat) {
         let visible = Set(visibleWorkspaceIndices)

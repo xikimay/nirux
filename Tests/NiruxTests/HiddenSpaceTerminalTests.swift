@@ -3,12 +3,13 @@ import XCTest
 @testable import Nirux
 
 /// Only the space on screen is laid out: a terminal that runs in another
-/// one gets the viewport's size all the same, so it has a surface and what
-/// it prints is kept (see `NiruxShellView.sizeRunningTerminalsOffScreen`).
+/// one gets the viewport's size all the same, so it has a surface that
+/// parses what it prints at once (see
+/// `NiruxShellView.sizeRunningTerminalsOffScreen`).
 @MainActor
 final class HiddenSpaceTerminalTests: XCTestCase {
     /// A task its Lead starts while the user views another space.
-    func testATerminalStartedInAnotherSpaceKeepsWhatItPrints() throws {
+    func testATerminalStartedInAnotherSpaceParsesWhatItPrints() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
             let side = shell.workspaceStore.createProfile(named: "side", select: false)
