@@ -398,6 +398,7 @@ final class ProjectBoardFlowTests: XCTestCase {
 
     /// Board Settings won't save, for one repository, the GitHub repository
     /// another one of the space shows read-only: it would take it from it.
+    /// The one showing it saves it, then saves it again.
     @MainActor
     func testSavingWhatAnotherRepositoryShowsIsRefused() throws {
         try withShell(client: makeClient()) { shell, space in
@@ -422,7 +423,22 @@ final class ProjectBoardFlowTests: XCTestCase {
                 form.errorLabel.stringValue,
                 "“front” of this space shows acme/front already, read-only: set it up there, or use another GitHub repository here."
             )
-            XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(BoardConfigStore(spaceID: space.id)).fileURL.path))
+            let store = try XCTUnwrap(BoardConfigStore(spaceID: space.id))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
+
+            let frontKey = try XCTUnwrap(frontAnchor.key)
+            shell.showBoardSettings(profileID: space.id, repository: frontKey)
+            try waitUntil("front’s form") {
+                shell.spaceSettings?.boardRepository == frontKey && shell.boardSettingsPanel !== form
+                    && shell.boardSettingsPanel?.repositoryField.stringValue == "acme/front"
+            }
+            for round in ["saved", "saved again"] {
+                let frontForm = try XCTUnwrap(shell.boardSettingsPanel)
+                try click(frontForm.saveButton)
+                XCTAssertTrue(frontForm.errorLabel.isHidden, "\(round): \(frontForm.errorLabel.stringValue)")
+                try waitUntil("front \(round)") { shell.boardSettingsPanel !== frontForm && shell.boardSettingsPanel?.hostView != nil }
+                XCTAssertEqual(store.load().entries.map(\.config.repository), ["acme/front"], round)
+            }
         }
     }
 

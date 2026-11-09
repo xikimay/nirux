@@ -119,7 +119,7 @@ final class BoardConfigSuggestionsTests: XCTestCase {
     func testARepositoryWithoutAGitHubRemoteBreaksTheAgreement() throws {
         try Self.makeRepository(at: root + "/github", remote: "https://github.com/acme/one.git")
         try Self.makeRepository(at: root + "/local", remote: nil)
-        try Self.makeRepository(at: root + "/gitlab", remote: "git@gitlab.com:acme/one.git")
+        try Self.makeRepository(at: root + "/gitlab", remote: "https://gitlab.com/acme/one.git")
 
         let suggestions = BoardConfigSuggestions.read(
             workspaceFolders: [root + "/github", root + "/local", root + "/gitlab"], repository: nil

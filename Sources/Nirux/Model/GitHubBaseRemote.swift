@@ -1,11 +1,11 @@
 import Foundation
 
 /// Where a repository's pull requests live, whatever branch is checked
-/// out: the GitHub repository gh takes as its base without being told. The
-/// remote `gh repo set-default` marked (`remote.<name>.gh-resolved`), else
-/// the first of upstream, github, origin, then the others by name, as gh
-/// sorts them, whose URL is on github.com (or an SSH alias ssh resolves
-/// to it). The board's unsaved sections read it and Board Settings
+/// out: the GitHub repository gh takes as its base. What `gh repo
+/// set-default` chose (`remote.<name>.gh-resolved`: that remote, or the
+/// repository it names), else the first of upstream, github, origin, then
+/// the others by name, as gh sorts them, whose fetch URL is on github.com
+/// (or an SSH alias ssh resolves to it). The board's unsaved sections read it and Board Settings
 /// suggests it, so saving as suggested keeps what the board showed; the
 /// General tab of Space Settings names it.
 enum GitHubBaseRemote {
@@ -23,7 +23,7 @@ enum GitHubBaseRemote {
         case unread
     }
 
-    /// One git call, plus ssh for an SSH host other than github.com (once
+    /// Two git calls, plus ssh for an SSH host other than github.com (once
     /// it says yes, never again): never on the main thread.
     /// `resolveAlias` says whether an SSH host stands for github.com, nil
     /// when it couldn't tell; tests answer in its place.
@@ -33,58 +33,69 @@ enum GitHubBaseRemote {
         resolveAlias: (String) -> Bool? = { SSHHostAlias.resolve($0) }
     ) -> Read {
         guard FileManager.default.fileExists(atPath: folder) else { return .notARepository }
-        let config = WorktreeCleanup.git(
-            ["config", "--local", "--get-regexp", #"^remote\..*\.(url|gh-resolved)$"#],
-            in: folder, tools: WorktreeCleanup.Tools(gitPath: gitPath), timeout: 10
-        )
-        switch config.status {
-        case 0: break
-        // git config's status when nothing matches.
-        case 1: return .noRemote
-        // Outside a repository, `--local` refuses.
-        case 128: return .notARepository
-        default: return .unread
+        // In English whatever the locale: one of its messages is read below.
+        let tools = WorktreeCleanup.Tools(gitPath: gitPath, environment: ["LC_ALL": "C"])
+        // The URLs git fetches from: `insteadOf` applied, a remote's first.
+        let listing = WorktreeCleanup.git(["remote", "-v"], in: folder, tools: tools, timeout: 10)
+        guard listing.status == 0 else {
+            // A config git can't read, or a repository of another user's,
+            // is no answer: only this is "not a repository".
+            return listing.stderr.contains("not a git repository") ? .notARepository : .unread
         }
-        let remotes = Self.remotes(inConfig: config.stdout)
+        // What `gh repo set-default` chose: "base", or another repository.
+        let resolutions = WorktreeCleanup.git(
+            ["config", "--local", "--get-regexp", #"^remote\..*\.gh-resolved$"#], in: folder, tools: tools, timeout: 10
+        )
+        // 1: none set.
+        guard resolutions.status == 0 || resolutions.status == 1 else { return .unread }
+        let remotes = Self.remotes(listing: listing.stdout, resolutions: resolutions.stdout)
         guard let first = remotes.first else { return .noRemote }
-        var couldNotTell = false
         for remote in remotes {
+            if let repository = remote.resolvedRepository { return .gitHub(repository: repository, remote: remote.name) }
             switch Self.repository(of: remote.url, resolveAlias: resolveAlias) {
             case .some(.some(let repository)): return .gitHub(repository: repository, remote: remote.name)
             case .some(.none): continue
-            case .none: couldNotTell = true
+            // Not knowing this one, a remote gh ranks lower can't stand in.
+            case .none: return .unread
             }
         }
-        return couldNotTell
-            ? .unread
-            : .notGitHub(host: GitHubRepository(remoteURL: first.url)?.host, remote: first.name)
+        return .notGitHub(host: GitHubRepository(remoteURL: first.url)?.host, remote: first.name)
     }
 
     struct Remote: Equatable {
         let name: String
         let url: String
+        /// Its `gh-resolved` value, if any.
+        var resolution: String?
+
+        /// The repository gh was told to use instead of the remote's URL.
+        var resolvedRepository: String? {
+            guard let resolution, resolution != "base", BoardConfig.isValidRepository(resolution) else { return nil }
+            return resolution
+        }
     }
 
-    /// The remotes with a URL in `git config --get-regexp` output, in the
-    /// order gh tries them: the one marked as gh's base, then upstream,
-    /// github, origin, then the others by name.
-    static func remotes(inConfig output: String) -> [Remote] {
+    /// The remotes of `git remote -v` (their fetch URLs), in the order gh
+    /// tries them: one with a `gh-resolved` value (from `git config
+    /// --get-regexp` output), then upstream, github, origin, then the
+    /// others by name.
+    static func remotes(listing: String, resolutions: String) -> [Remote] {
         var urls: [String: String] = [:]
-        var marked: Set<String> = []
-        for line in output.split(separator: "\n") {
+        for line in listing.split(separator: "\n") where line.hasSuffix(" (fetch)") {
+            guard let tab = line.firstIndex(of: "\t") else { continue }
+            let name = String(line[..<tab])
+            if urls[name] == nil { urls[name] = String(line[line.index(after: tab)...].dropLast(" (fetch)".count)) }
+        }
+        var resolved: [String: String] = [:]
+        for line in resolutions.split(separator: "\n") {
             guard let space = line.firstIndex(of: " ") else { continue }
             let key = line[..<space]
-            let value = line[line.index(after: space)...].trimmingCharacters(in: .whitespaces)
-            guard key.hasPrefix("remote.") else { continue }
-            let rest = key.dropFirst("remote.".count)
-            if rest.hasSuffix(".url") {
-                urls[String(rest.dropLast(".url".count))] = value
-            } else if rest.hasSuffix(".gh-resolved"), value == "base" {
-                marked.insert(String(rest.dropLast(".gh-resolved".count)))
-            }
+            guard key.hasPrefix("remote."), key.hasSuffix(".gh-resolved") else { continue }
+            let name = String(key.dropFirst("remote.".count).dropLast(".gh-resolved".count))
+            resolved[name] = line[line.index(after: space)...].trimmingCharacters(in: .whitespaces)
         }
         let rank = { (name: String) -> Int in
-            if marked.contains(name) { return 4 }
+            if resolved[name] != nil { return 4 }
             switch name.lowercased() {
             case "upstream": return 3
             case "github": return 2
@@ -92,7 +103,7 @@ enum GitHubBaseRemote {
             default: return 0
             }
         }
-        return urls.map { Remote(name: $0.key, url: $0.value) }
+        return urls.map { Remote(name: $0.key, url: $0.value, resolution: resolved[$0.key]) }
             .sorted { (rank($0.name), $1.name) > (rank($1.name), $0.name) }
     }
 
