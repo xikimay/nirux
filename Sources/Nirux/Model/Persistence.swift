@@ -435,6 +435,7 @@ struct PersistedSettings: Codable {
         case sidebarApprovalsEnabled
         case keepMacAwakeWhileAgentsWork
         case showClaudeUsageLimits
+        case telegramRemoteAccessEnabled
         case stuckAgentMinutes
         case onboardingChecklist
         case agentResumeOnLaunch
@@ -491,6 +492,7 @@ struct PersistedSettings: Codable {
         try container.encode(sidebarApprovalsEnabled, forKey: .sidebarApprovalsEnabled)
         try container.encode(keepMacAwakeWhileAgentsWork, forKey: .keepMacAwakeWhileAgentsWork)
         try container.encode(showClaudeUsageLimits, forKey: .showClaudeUsageLimits)
+        try container.encode(false, forKey: .telegramRemoteAccessEnabled)
         try container.encodeIfPresent(stuckAgentMinutes, forKey: .stuckAgentMinutes)
         try container.encodeIfPresent(
             onboardingChecklist?.rawValue ?? unknownOnboardingChecklistRawValue, forKey: .onboardingChecklist

@@ -20,7 +20,7 @@ enum LegacyTelegramToken {
         bundleURL: URL = Bundle.main.bundleURL,
         delete: @escaping @Sendable () -> OSStatus = { LegacyTelegramToken.delete() }
     ) -> Bool {
-        guard bundleURL.pathExtension == "app", Persistence.stateDirectoryOverride(in: environment) == nil else {
+        guard !(bundleURL.pathExtension == "app" && Persistence.stateDirectoryOverride(in: environment) == nil) else {
             return false
         }
         DispatchQueue.global(qos: .utility).async {
@@ -33,11 +33,13 @@ enum LegacyTelegramToken {
 
     /// Deletes the generic password the removed token store kept:
     /// `errSecSuccess`, or `errSecItemNotFound` when there is none.
-    static func delete() -> OSStatus {
+    static func delete(
+        service: String = "com.xikimay.nirux.telegram-remote-access", account: String = "bot-token"
+    ) -> OSStatus {
         SecItemDelete([
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.xikimay.nirux.telegram-remote-access",
-            kSecAttrAccount as String: "bot-token"
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
         ] as CFDictionary)
     }
 }

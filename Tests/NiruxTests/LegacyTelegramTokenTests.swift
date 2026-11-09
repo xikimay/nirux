@@ -34,4 +34,33 @@ final class LegacyTelegramTokenTests: XCTestCase {
         }
         wait(for: [touched], timeout: 0.3)
     }
+
+    /// PROOF, not a mutant: the real call, on a throwaway item kept the way
+    /// the token was. Expected to PASS.
+    func testProofDeleteRemovesTheItemAndSaysWhenThereIsNone() throws {
+        let service = "com.xikimay.nirux.tests.legacy-token-\(UUID().uuidString)"
+        let account = "bot-token"
+        let item: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: Data("123456789:throwaway".utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
+        let added = SecItemAdd(item as CFDictionary, nil)
+        XCTAssertEqual(added, errSecSuccess)
+        defer { _ = LegacyTelegramToken.delete(service: service, account: account) }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        XCTAssertEqual(SecItemCopyMatching(query as CFDictionary, nil), errSecSuccess)
+
+        XCTAssertEqual(LegacyTelegramToken.delete(service: service, account: account), errSecSuccess)
+
+        XCTAssertEqual(SecItemCopyMatching(query as CFDictionary, nil), errSecItemNotFound)
+        XCTAssertEqual(LegacyTelegramToken.delete(service: service, account: account), errSecItemNotFound)
+    }
 }
