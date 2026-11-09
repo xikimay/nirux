@@ -244,7 +244,26 @@ final class BoardConfigSuggestionsTests: XCTestCase {
 
         let folder = try XCTUnwrap(BoardConfigSuggestions.folder(at: repo))
 
-        XCTAssertEqual(folder, BoardConfigSuggestions.Folder(repository: "acme/repo", remote: "origin", checkout: repo))
+        XCTAssertEqual(folder, BoardConfigSuggestions.Folder(
+            repository: "acme/repo", remote: "origin", checkout: repo, gitHubRemotes: ["acme/repo": "origin", "me/repo": "fork"]
+        ))
+    }
+
+    /// A repository saved from origin, in a clone whose upstream gh takes
+    /// as the base, still finds its checkout there, and origin's base
+    /// branch and workflows.
+    func testASavedRepositoryFindsItsCheckoutThroughAnyGitHubRemote() throws {
+        let repo = root + "/repo"
+        try Self.makeRepository(at: repo, remote: "https://github.com/corp/app.git", workflows: ["nightly.yml"])
+        try Self.git(["remote", "add", "upstream", "https://github.com/oss/app.git"], at: repo)
+
+        let suggestions = BoardConfigSuggestions.read(workspaceFolders: [repo], repository: "corp/app")
+
+        XCTAssertEqual(suggestions.repository, "oss/app", "gh's base repository")
+        XCTAssertEqual(suggestions.checkout, repo)
+        XCTAssertEqual(suggestions.baseBranch, "main")
+        XCTAssertEqual(suggestions.workflowFiles, ["nightly.yml"])
+        XCTAssertEqual(suggestions.workflowsRef, "origin/main")
     }
 
     func testABareMainRepositoryFallsBackToTheWorktree() {

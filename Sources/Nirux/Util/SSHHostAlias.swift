@@ -8,13 +8,8 @@ import os
 /// for the session; anything else is asked again, so a config fixed since
 /// counts at the next Refresh. Runs ssh: never on the main thread.
 enum SSHHostAlias {
-    /// `configFile` replaces the user's SSH config (tests).
-    static func isGitHub(_ host: String, configFile: String? = nil, timeout: TimeInterval = 5) -> Bool {
-        resolve(host, configFile: configFile, timeout: timeout) ?? false
-    }
-
     /// Whether `host` stands for github.com; nil when ssh didn't start or
-    /// took too long. ssh refusing its config (a keyword it doesn't know,
+    /// took too long. `configFile` replaces the user's SSH config (tests). ssh refusing its config (a keyword it doesn't know,
     /// loose permissions) is a no, as git's ssh would fail there too.
     static func resolve(_ host: String, configFile: String? = nil, timeout: TimeInterval = 5) -> Bool? {
         let host = host.lowercased()

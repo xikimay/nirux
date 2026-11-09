@@ -94,7 +94,8 @@ enum BoardSections {
     }
 
     /// Where the pull requests of each section's anchor without a config of
-    /// its own live, by common git dir. Three git calls an anchor, 10 s at
+    /// its own live, by common git dir. Two git calls an anchor (two more
+    /// for its base branch), 10 s at
     /// most each, the anchors side by side: call it off the main thread.
     static func readBaseRemotes(
         _ sections: [Section],

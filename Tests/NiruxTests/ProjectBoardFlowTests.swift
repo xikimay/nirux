@@ -442,6 +442,29 @@ final class ProjectBoardFlowTests: XCTestCase {
         }
     }
 
+    /// A repository whose checkout is gone says so, without Board
+    /// Settings…: settings can't bring it back.
+    @MainActor
+    func testAGoneCheckoutSaysSoWithoutBoardSettings() throws {
+        try withShell(client: makeClient()) { shell, space in
+            let repo = root + "/widgets"
+            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            var anchor = try XCTUnwrap(FolderIdentity.identify(repo, timeout: 10)).anchor
+            anchor.isDefault = true
+            XCTAssertTrue(shell.workspaceStore.setAnchors([anchor], forProfile: space.id))
+            try FileManager.default.removeItem(atPath: repo)
+            shell.addWorkspace(title: "home", cwd: root, profileID: space.id)
+            try select("home", in: shell)
+            try runPaletteAction("Open Board", in: shell)
+            let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
+            try waitUntil("the reason") { !board.view.noticeLines.isEmpty }
+            XCTAssertEqual(board.view.noticeLines.map(\.label.stringValue), [
+                "Its checkout is gone, or no longer a git repository: Refresh once it’s back, or remove it in Space Settings."
+            ])
+            XCTAssertEqual(board.view.noticeLines.map(\.settingsButton.isHidden), [true])
+        }
+    }
+
     /// A saved board.json reloads the board, and nothing is read with the
     /// config it replaces, even when a status refresh comes in between.
     @MainActor

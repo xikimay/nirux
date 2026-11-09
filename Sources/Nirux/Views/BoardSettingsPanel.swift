@@ -343,7 +343,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         repositoryField.stringValue = isUnread ? "" : saved?.repository ?? suggested?.repository ?? ""
         repositoryField.placeholderString = "owner/name"
         y = addField(repositoryField, y: y, in: view)
-        y = addHint(Self.repositoryHint(suggestions), y: y, in: view) + 10
+        y = addHint(Self.repositoryHint(suggestions, saved: saved?.repository), y: y, in: view) + 10
 
         y = addLabel("Base branch", y: y, in: view)
         baseBranchField.stringValue = isUnread ? "" : saved?.baseBranch ?? suggested?.baseBranch ?? ""
@@ -593,7 +593,12 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         }
     }
 
-    static func repositoryHint(_ suggestions: BoardConfigSuggestions) -> String {
+    static func repositoryHint(_ suggestions: BoardConfigSuggestions, saved: String? = nil) -> String {
+        // Saved from another remote than the one gh takes as the base.
+        if let saved, let suggested = suggestions.repository, case .shared = suggestions.source,
+           saved.lowercased() != suggested.lowercased() {
+            return "Saved as \(saved). gh would take \(suggested) as this space’s base repository."
+        }
         switch suggestions.source {
         case .shared:
             return "This space’s pull requests live in \(suggestions.repository ?? "it") on GitHub."

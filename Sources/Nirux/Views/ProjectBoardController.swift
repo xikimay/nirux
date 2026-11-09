@@ -109,8 +109,12 @@ final class ProjectBoardController {
     /// board.json, once the board is shown: a section none is known for
     /// yet doesn't say why it has no pull requests.
     private var isReadingRemotes = false
-    /// The config read whose remotes wait for the board to be shown.
+    /// The config read whose remotes wait for the board to be shown, or for
+    /// the read under way.
     private var remotesDue: Int?
+    /// A read of the base remotes runs: another one waits for it, so that
+    /// Refresh on a hung volume doesn't pile up blocked threads.
+    private var isReadingBaseRemotes = false
     /// Reads landed since the last render: they are drawn once, together.
     private var isRenderScheduled = false
     /// A board opened from the palette on a project without a repository
@@ -252,16 +256,25 @@ final class ProjectBoardController {
             isReadingRemotes = false
             return
         }
-        guard isShown() else {
+        guard isShown(), !isReadingBaseRemotes else {
             remotesDue = current
             return
         }
+        isReadingBaseRemotes = true
         Self.readOffMain({ BoardSections.readBaseRemotes(unsaved) }, then: { [weak self] remotes in
-            guard let self, self.configRead == current, let loaded = self.loaded else { return }
-            self.isReadingRemotes = false
-            var context = self.context
-            context.baseRemotes = Self.merged(remotes, keeping: self.context.baseRemotes)
-            self.apply(loaded, context: context, listsWorktreesAgain: false)
+            guard let self else { return }
+            self.isReadingBaseRemotes = false
+            if self.configRead == current, let loaded = self.loaded {
+                self.isReadingRemotes = false
+                var context = self.context
+                context.baseRemotes = Self.merged(remotes, keeping: self.context.baseRemotes)
+                self.apply(loaded, context: context, listsWorktreesAgain: false)
+            }
+            // board.json read again meanwhile: its remotes, now.
+            if let due = self.remotesDue, due == self.configRead {
+                self.remotesDue = nil
+                self.readBaseRemotesWhenShown(configRead: due)
+            }
         })
     }
 
@@ -620,7 +633,7 @@ final class ProjectBoardController {
             if !unsaved.isEmpty { notices.append(ProjectBoardView.Notice(text: reason.message)) }
         } else if several {
             // One that shares another's repository can't be saved with it.
-            let settable = unsaved.filter { sectionSharingRemote(with: $0) == nil && setupNote($0) != nil }
+            let settable = unsaved.filter { canBeSetUp($0) && setupNote($0) != nil }
             if let first = settable.first {
                 notices.append(ProjectBoardView.Notice(
                     text: "Not set up in Board Settings, so no merge queue: \(settable.map(name).joined(separator: ", ")).",
@@ -628,9 +641,18 @@ final class ProjectBoardController {
                 ))
             }
         } else if let only = unsaved.first, let note = setupNote(only) {
-            notices.append(ProjectBoardView.Notice(text: note, settingsSection: only.id))
+            notices.append(ProjectBoardView.Notice(text: note, settingsSection: canBeSetUp(only) ? only.id : nil))
         }
         return notices
+    }
+
+    /// Board Settings is what would show its pull requests: not for a
+    /// checkout gone, nor for the repository another section reads.
+    private func canBeSetUp(_ section: BoardSections.Section) -> Bool {
+        if case .notARepository? = section.commonDir.flatMap({ context.baseRemotes[$0] }), reads[section.id] == nil {
+            return false
+        }
+        return sectionSharingRemote(with: section) == nil
     }
 
     /// What went wrong reading a section's open pull requests that the next

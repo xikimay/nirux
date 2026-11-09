@@ -32,7 +32,19 @@ enum GitHubBaseRemote {
         gitPath: String = "/usr/bin/git",
         resolveAlias: (String) -> Bool? = { SSHHostAlias.resolve($0) }
     ) -> Read {
-        guard FileManager.default.fileExists(atPath: folder) else { return .notARepository }
+        survey(at: folder, gitPath: gitPath, resolveAlias: resolveAlias).read
+    }
+
+    /// `read`, and the github.com repository each remote's URL names, by
+    /// lowercased `owner/name`, its remote as value: a repository saved
+    /// from another remote than the base one still finds its checkout.
+    /// No more processes than `read`.
+    static func survey(
+        at folder: String,
+        gitPath: String = "/usr/bin/git",
+        resolveAlias: (String) -> Bool? = { SSHHostAlias.resolve($0) }
+    ) -> (read: Read, gitHubRemotes: [String: String]) {
+        guard FileManager.default.fileExists(atPath: folder) else { return (.notARepository, [:]) }
         // In English whatever the locale: one of its messages is read below.
         let tools = WorktreeCleanup.Tools(gitPath: gitPath, environment: ["LC_ALL": "C"])
         // The URLs git fetches from: `insteadOf` applied, a remote's first.
@@ -40,28 +52,36 @@ enum GitHubBaseRemote {
         guard listing.status == 0 else {
             // A config git can't read, or a repository of another user's,
             // is no answer: only this is "not a repository".
-            return listing.stderr.contains("not a git repository") ? .notARepository : .unread
+            return (listing.stderr.contains("not a git repository") ? .notARepository : .unread, [:])
         }
         // What `gh repo set-default` chose: "base", or another repository.
         let resolutions = WorktreeCleanup.git(
             ["config", "--local", "--get-regexp", #"^remote\..*\.gh-resolved$"#], in: folder, tools: tools, timeout: 10
         )
         // 1: none set.
-        guard resolutions.status == 0 || resolutions.status == 1 else { return .unread }
+        guard resolutions.status == 0 || resolutions.status == 1 else { return (.unread, [:]) }
         let remotes = Self.remotes(listing: listing.stdout, resolutions: resolutions.stdout)
-        guard let first = remotes.first else { return .noRemote }
+        var gitHubRemotes: [String: String] = [:]
+        for remote in remotes.reversed() {
+            if let repository = BoardConfigSuggestions.repositoryName(remoteURL: remote.url) {
+                gitHubRemotes[repository.lowercased()] = remote.name
+            }
+        }
+        guard let first = remotes.first else { return (.noRemote, gitHubRemotes) }
         for remote in remotes {
             switch Self.repository(of: remote.url, resolveAlias: resolveAlias) {
             // A repository gh-resolved names counts on a GitHub remote only,
             // as gh drops remotes on hosts it doesn't know first.
             case .some(.some(let repository)):
-                return .gitHub(repository: remote.resolvedRepository ?? repository, remote: remote.name)
+                let base = remote.resolvedRepository ?? repository
+                gitHubRemotes[base.lowercased()] = remote.name
+                return (.gitHub(repository: base, remote: remote.name), gitHubRemotes)
             case .some(.none): continue
             // Not knowing this one, a remote gh ranks lower can't stand in.
-            case .none: return .unread
+            case .none: return (.unread, gitHubRemotes)
             }
         }
-        return .notGitHub(host: GitHubRepository(remoteURL: first.url)?.host, remote: first.name)
+        return (.notGitHub(host: GitHubRepository(remoteURL: first.url)?.host, remote: first.name), gitHubRemotes)
     }
 
     struct Remote: Equatable {

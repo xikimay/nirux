@@ -223,7 +223,7 @@ documented in B1's pull request:
   General tab of Space Settings names it. Nothing is written, and its merge
   queue and Retarget wait for an explicit Save in Board Settings. The
   remotes are read after board.json, once the board is shown, the anchors
-  side by side, one git call each (two more for the base branch), 10 s at
+  side by side, two git calls each (two more for the base branch), 10 s at
   most each: a slow volume holds up no other read, and a board restored
   behind another workspace runs none. Two sections never read one
   repository: a saved one keeps it, else the first; the other says so, and
@@ -244,7 +244,24 @@ documented in B1's pull request:
   any error before a section's first answer. A failure after a good read
   stays in its pill, as a failed merged read or Retarget does, and errors
   stay through Refresh until the next answer: the rows don't move for a
-  blip.
+  blip. Board Settings… shows only where settings can help: not for a
+  checkout gone, nor for a repository another section reads.
+- **Known limits** of the read-only sections (written down on 2026-11-09,
+  not solved): the one-repository case (origin only) is what they are for.
+  - **Forks.** With origin a fork and upstream the base repository, the
+    section reads upstream, but a pull request matches a worktree only when
+    its head repository is the section's repository: the user's own pull
+    requests, from the fork, don't show, and the base repository's other
+    branches show as pull requests without a worktree.
+  - **gh-resolved naming a repository no remote names:** no pull request
+    attaches to a worktree; every open one shows without a worktree.
+  - **Two copies of "who shows a shared repository":** the board's (with
+    the remotes it read before) and Board Settings' refusal (with the
+    remotes read when the form opened) can disagree after a read git
+    didn't answer: Save may be refused once; Save again.
+  - **`ssh -G` isn't side-effect free:** it runs the user's `Match exec`
+    commands and canonicalizes host names, and only a yes is kept, so it
+    runs again for every non-GitHub SSH remote at each read.
 - **Without a repository** and nothing to list (a space without a repository
   anchor, and no config), or with an unreadable `board.json`, the board says
   so instead of listing rows, with a Board Settings… button under it, and
@@ -271,7 +288,7 @@ anchors don't appear. Decided with the user on 2026-11-08:
   dir, whatever its remotes), and any other local repository a remote of which
   names the section's GitHub repository. Its main checkout and worktrees show
   even with no workspace open there. A section without a config reads the
-  repository its anchor pushes to, read-only (section 2.1, "Not set up"); one without a
+  repository its pull requests live in, read-only (section 2.1, "Not set up"); one without a
   GitHub repository lists them without pull requests and says why in its
   header. One line under the board's header names the sections not set up,
   with Board Settings….
@@ -825,7 +842,7 @@ and the journal:
 
 | Key | Default | Notes |
 | --- | --- | --- |
-| `repository` | The push remote of the project's workspaces, when they share one | Asked for otherwise |
+| `repository` | Where the project's pull requests live (gh's base repository, `GitHubBaseRemote`), when its workspaces share one | Asked for otherwise |
 | `baseBranch` | The repository's default branch, as the local checkout knows it | Asked for otherwise |
 | `requiredChecks` | `["test"]` | Check run names, or `Workflow / job`. A name missing on the PR fails closed |
 | `postMergeWorkflow` | None: must be set | A workflow file, or `"none"` to merge the next PR right after a merge |
@@ -874,8 +891,10 @@ and the journal:
   header, and opens it the first time a board lacks a repository.
   - Fields show the saved values, else values read from the local checkouts,
     never from the network: the repository every workspace in a repository
-    pushes to (github.com only, spelled as its remote spells it), and the
-    branch its remote's `HEAD` points to, if that branch is there. A pasted
+    has its pull requests in (gh's base repository, github.com only,
+    spelled as its remote spells it), and the branch its remote's `HEAD`
+    points to, if that branch is there. A saved repository finds its
+    checkout through any of its github.com remotes. A pasted
     github.com URL is saved as `owner/name`. Nothing is written before Save.
   - The post-merge workflow is never preselected. The form lists the
     `.github/workflows/*.yml|yaml` files of the base branch as that
