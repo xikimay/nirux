@@ -18,6 +18,7 @@ extension NiruxShellView {
         workspaceID: String = UUID().uuidString,
         initialAgentUUID: String = UUID().uuidString,
         missionID: String? = nil,
+        parentWorkspaceID: String? = nil,
         reportsToLead: Bool = false,
         deliveredHandover: Bool = false,
         worktreeBranch: String? = nil,
@@ -51,6 +52,7 @@ extension NiruxShellView {
             cwd: wsCwd,
             profileID: targetProfileID,
             missionID: missionID,
+            parentWorkspaceID: subtaskParentID(parentWorkspaceID),
             missionHandoffsEnabled: Self.currentMissionHandoffsEnabled(),
             startedOutsideNirux: startedOutsideNirux,
             isLead: isLead,
@@ -87,6 +89,13 @@ extension NiruxShellView {
                 DispatchQueue.main.async { snapshot.removeFromSuperview() }
             })
         }
+    }
+
+    /// `id` when it names an open workspace that can have sub-tasks: not a
+    /// Lead (its tasks are the space's list itself).
+    func subtaskParentID(_ id: String?) -> String? {
+        guard let id else { return nil }
+        return workspaces.first { $0.id == id && !$0.isClosing && !$0.isLead }?.id
     }
 
     /// Startup prompt for a freshly launched agent. The handover line is
@@ -347,6 +356,13 @@ extension NiruxShellView {
             return
         case .reviewBranch:
             openBranchReview(in: workspaces[workspaceIndex])
+            return
+        case .newSubtask:
+            let parent = workspaces[workspaceIndex]
+            showNewPanel(
+                spaceID: parent.profileID,
+                parentTask: NewTaskPanel.ParentTask(workspaceID: parent.id, title: parent.title)
+            )
             return
         case .closeColumn(let columnIndex):
             closeColumn(workspaceIndex: workspaceIndex, columnIndex: columnIndex)

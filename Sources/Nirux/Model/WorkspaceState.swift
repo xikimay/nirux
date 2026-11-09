@@ -47,6 +47,12 @@ final class WorkspaceState {
     /// must not be selected or closed again.
     var isClosing = false
     let missionID: String?
+    /// The task this one is a sub-task of: it lists under it in the
+    /// sidebar (see `WorkspaceStore.visibleWorkspaceIndices(in:)`). Set
+    /// when it opens: by ⌘N's "Sub-task of", or by the worktree skill's
+    /// `parentWorkspace`, Missions on or off. Never a Lead: a Lead's tasks
+    /// are the space's list itself.
+    let parentWorkspaceID: String?
     /// Controls mission variables for terminals created after a Settings
     /// change. Already-running shells retain the environment they launched
     /// with and pick up changes after a new terminal or app restart.
@@ -163,6 +169,7 @@ final class WorkspaceState {
         cwd: String,
         profileID: String = WorkspaceProfile.defaultID,
         missionID: String? = nil,
+        parentWorkspaceID: String? = nil,
         missionHandoffsEnabled: Bool = false,
         startedOutsideNirux: Bool = false,
         isLead: Bool = false,
@@ -179,6 +186,7 @@ final class WorkspaceState {
         self.titleIsManual = (title != nil)
         self.profileID = profileID
         self.missionID = missionID
+        self.parentWorkspaceID = parentWorkspaceID
         self.missionHandoffsEnabled = missionHandoffsEnabled
 
         containerView = NSView()

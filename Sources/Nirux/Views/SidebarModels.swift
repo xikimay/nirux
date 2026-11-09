@@ -316,9 +316,16 @@ struct WorkspaceInfo: Hashable {
     var mergedCleanup: MergedCleanupOffer?
     /// The space's Lead: first, never moved, dragged or parked.
     var isLead = false
-    /// A Mission child listed under its parent: drawn indented, moved among
-    /// its siblings only, never dragged.
-    var isNested = false
+    /// The task this one is listed under (a sub-task, or a Mission child):
+    /// drawn indented, moved among its siblings only, never dragged.
+    var parentTitle: String?
+    var isNested: Bool { parentTitle != nil }
+    /// "Sub-task of “<parent>”": the row's tooltip and VoiceOver say it.
+    var subtaskText: String? { parentTitle.map(Self.subtaskText(of:)) }
+
+    static func subtaskText(of parentTitle: String) -> String {
+        "Sub-task of “\(parentTitle)”"
+    }
 
     /// The blocker and the next step (the user's, or the Lead's), trimmed;
     /// nil when empty.
@@ -415,7 +422,7 @@ enum WorktreeCleanupMenuOffer {
 
 enum WorkspaceSidebarAction {
     case moveUp, moveDown, markActive, markInactive
-    case close, rename, editContext, reviewBranch
+    case close, rename, editContext, reviewBranch, newSubtask
     case closeColumn(columnIndex: Int)
     case cleanUpWorktree
     case askWhyCIFailed, rerunFailedCI

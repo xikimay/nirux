@@ -576,6 +576,18 @@ extension WorkspaceContextTests {
         XCTAssertFalse(labels.contains { $0.stringValue == "Explain why this exists" })
     }
 
+    /// A sub-task's row names the task it is under: its title's tooltip
+    /// and VoiceOver, and the rail's tooltip, whose tile isn't indented.
+    func testASubtaskNamesItsParent() throws {
+        var workspace = makeWorkspaceInfo()
+        workspace.parentTitle = "Parent task"
+        let labels = render(workspace).views.compactMap { $0 as? NSTextField }
+        let title = try XCTUnwrap(labels.first { $0.stringValue == "context" })
+        XCTAssertEqual(title.toolTip, "context\nSub-task of “Parent task”\nPhase: Active\nNo activity yet")
+        XCTAssertEqual(title.accessibilityLabel(), "context, Sub-task of “Parent task”")
+        XCTAssertEqual(workspace.railTooltip.note, "Sub-task of “Parent task”")
+    }
+
     /// The blocker is the status line's, in grey (amber is the user's, red
     /// what broke); the selected row prints the next step under it. The
     /// title's tooltip has both, whole.

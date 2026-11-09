@@ -134,6 +134,11 @@ A sheet titled "New in <space>":
 - **Report to the Lead** checkbox, shown when the space has a Lead, checked by
   default: the task's Mission reports to the Lead's Claude (shipped with
   S11c). A Lead's proposal comes with it checked.
+- **Sub-task of “<task>”** checkbox, shown when the sheet comes from a task's
+  "New Sub-task…" (its card menu, or Workspaces in the menu bar), checked: the
+  heading reads "New Sub-task in <space>", and the task, or the shell opened
+  with nothing typed, lists under that task. Not offered in General (no task
+  starts there), for an archived task, or for the Lead.
 - **Existing Branch…** opens an existing worktree (today's Open Worktree), or
   a branch without one: its worktree is made, with a shell (shipped with S7).
 - Names come from the description's first line, else the branch, else the
@@ -236,15 +241,21 @@ New flow, built on the guarded typing `tell` already uses
   app hasn't finished within its wait may still happen, and the Lead is told
   not to call again. Calls are answered off the server's read loop.
 - **No tool merges, removes a worktree or a branch, or reaches another space.**
-- **Mission children under their parent** (shipped with S11c): a task's own
-  Mission children (the worktrees it opens with the skill) list right after
-  it, indented, in the sidebar, the rail and ⌘↑/↓ alike; they move among
-  themselves and follow their parent when it moves, never dragged. The
-  Lead's tasks stay the space's list under the Lead row (a deleted space's
-  former Lead too). A parent closed, archived or in another space lets its
-  children go to the top level, where they were listed: the store keeps the
-  sidebar's order. A row asking the user isn't indented, so its request is
-  never cut. No folding; a grandchild has a child's indent.
+- **Sub-tasks under their task** (shipped with S11c for Mission children): a
+  workspace keeps the task it is a sub-task of (`parentWorkspaceID`, saved
+  with it) when it opens from ⌘N's "Sub-task of", or from the worktree skill
+  run in that task, Missions on or off (the skill always sends
+  `parentWorkspace`). Mission children opened before that keep their
+  Mission's parent. Sub-tasks list right after their task, indented, in the
+  sidebar, the rail and ⌘↑/↓ alike; they move among themselves and follow
+  their parent when it moves, never dragged. The row's title tooltip and
+  VoiceOver say "Sub-task of “<task>”", as does the rail's tooltip (a tile
+  isn't indented). The Lead's tasks stay the space's list under the Lead row
+  (a deleted space's former Lead too): a Lead is never a parent. A parent
+  closed, archived or in another space lets its children go to the top
+  level, where they were listed: the store keeps the sidebar's order. A row
+  asking the user isn't indented, so its request is never cut. No folding; a
+  grandchild has a child's indent.
 - **State lives in Nirux** (board, Missions), not in the Lead's conversation: a
   `/clear` or a restart loses nothing.
 - Mission handoffs and sidebar permission answers leave Experimental for

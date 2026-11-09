@@ -89,6 +89,17 @@ final class MenuBarFlowTests: XCTestCase {
                 .performClick(nil)
             XCTAssertEqual(second.nextStep, "From the menu bar")
             XCTAssertEqual(shell.workspaces.filter { $0.nextStep == "From the menu bar" }.count, 1)
+
+            // New Sub-task…, under the task in front: not in General, where
+            // no task starts.
+            let newSubtask = ["Workspaces", SidebarView.newSubtaskTitle]
+            XCTAssertFalse(bar.isEnabled(newSubtask))
+            _ = try NewTaskFlowTests.anchoredSpace(harness)
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            bar.run(newSubtask)
+            harness.waitUntil("the sub-task's sheet") { shell.newTaskPanel?.panel?.isSheet == true }
+            XCTAssertEqual(shell.newTaskPanel?.subtaskParentID, task.id)
+            shell.newTaskPanel?.cancelButton.performClick(nil)
         }
     }
 

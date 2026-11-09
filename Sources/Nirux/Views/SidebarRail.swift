@@ -346,7 +346,11 @@ extension WorkspaceInfo {
                 detail = age.map { $0 == "now" ? "idle" : "idle · \($0)" } ?? "no activity yet"
             }
         }
-        return SidebarRailTooltip(title: title, detail: detail, detailColor: color, note: note)
+        // A tile isn't indented: the tooltip names the parent.
+        let notes = [note, subtaskText].compactMap { $0 }
+        return SidebarRailTooltip(
+            title: title, detail: detail, detailColor: color, note: notes.isEmpty ? nil : notes.joined(separator: " · ")
+        )
     }
 }
 

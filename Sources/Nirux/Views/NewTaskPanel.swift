@@ -5,6 +5,10 @@ import AppKit
 /// template, and the branch the task gets, which follows the description
 /// until the user edits it.
 ///
+/// Opened from a card's "New Sub-task…", it reads "New Sub-task in
+/// <space>", and what it starts lists under that task while "Sub-task of
+/// “<task>”" stays checked.
+///
 /// Start with a description hands a `NewTask.Request` to the shell and
 /// waits: the sheet stays open, with the error, when the worktree can't be
 /// created. Close hides it meanwhile, so the window isn't held up by a long
@@ -42,8 +46,9 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     var onRepositorySelected: ((Repository?) -> Void)?
     /// Creates the task, then calls `finishStarting(_:)`.
     var onStart: ((NewTask.Request) -> Void)?
-    /// Nothing typed: opens a shell. The sheet is gone by then.
-    var onOpenShell: ((Repository?) -> Void)?
+    /// Nothing typed: opens a shell, under the parent task when there is
+    /// one (`subtaskParentID`). The sheet is gone by then.
+    var onOpenShell: ((Repository?, _ parentWorkspaceID: String?) -> Void)?
     /// Anchors the suggested repository to the space, then calls
     /// `updateRepositories(_:selecting:)`.
     var onAddSuggested: ((SpaceAnchor) -> Void)?
@@ -97,6 +102,30 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         }
     }
     let reportCheckbox = NSButton(checkboxWithTitle: "Report to the Lead", target: nil, action: nil)
+
+    /// A task the new one goes under in the sidebar.
+    struct ParentTask: Equatable {
+        let workspaceID: String
+        let title: String
+    }
+
+    /// "New Sub-task…" in a card's menu: "Sub-task of “<title>”" shows,
+    /// checked. Nil: no checkbox. Set before `show`.
+    var parentTask: ParentTask? {
+        didSet {
+            subtaskCheckbox.title = parentTask.map { WorkspaceInfo.subtaskText(of: $0.title) } ?? ""
+            subtaskCheckbox.isHidden = parentTask == nil
+            subtaskCheckbox.state = .on
+            updateHeading()
+            layout()
+        }
+    }
+    let subtaskCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+
+    /// The parent task while its checkbox is checked.
+    var subtaskParentID: String? {
+        subtaskCheckbox.state == .on ? parentTask?.workspaceID : nil
+    }
     private let reportHint = NSTextField(wrappingLabelWithString:
         "The Lead follows this task and answers its questions. Only what needs you reaches you, in amber.")
 
@@ -163,7 +192,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         let panel = buildPanel()
         self.panel = panel
         agentPopup.selectItem(at: Self.agents.firstIndex { $0.agent == agent } ?? 0)
-        headingLabel.stringValue = "New in \(space.name)"
+        updateHeading()
         rebuildRepositoryPopup()
         // Laid out first: the sheet comes down at its size.
         repositoryChanged()
@@ -173,6 +202,11 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
 
     func focus() {
         panel?.makeKeyAndOrderFront(nil)
+    }
+
+    /// What the sheet makes, in its space.
+    private func updateHeading() {
+        headingLabel.stringValue = "\(subtaskParentID == nil ? "New" : "New Sub-task") in \(space.name)"
     }
 
     func dismiss() {
@@ -331,8 +365,9 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         guard !taskText.isEmpty else {
             let open = onOpenShell
             let repository = selectedRepository
+            let parentWorkspaceID = subtaskParentID
             dismiss()
-            open?(repository)
+            open?(repository, parentWorkspaceID)
             return
         }
         guard let request = draftRequest() else { return }
@@ -364,6 +399,11 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
 
     @objc func editBranchAction(_ sender: Any?) {
         beginEditingBranch()
+    }
+
+    @objc func subtaskToggled(_ sender: Any?) {
+        restoreReturnKey()
+        updateHeading()
     }
 
     @objc func repositoryPopupChanged(_ sender: Any?) {
@@ -413,7 +453,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         return NewTask.Request(
             description: taskText, template: selectedTemplate, agent: selectedAgent,
             projectID: space.id, branch: branch, target: target, fetchesFirst: !startsWithoutFetch,
-            reportsTo: lead != nil && reportCheckbox.state == .on ? (reportsTo ?? lead) : nil
+            reportsTo: lead != nil && reportCheckbox.state == .on ? (reportsTo ?? lead) : nil,
+            parentWorkspaceID: subtaskParentID
         )
     }
 
@@ -530,7 +571,10 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     private func setControlsEnabled(_ enabled: Bool) {
         descriptionView.isEditable = enabled
         descriptionView.textColor = enabled ? Theme.Color.textPrimary : Theme.Color.textTertiary
-        for control in [repositoryPopup, agentPopup, templatePopup, branchField, existingBranchButton, reportCheckbox] as [NSControl] {
+        let controls: [NSControl] = [
+            repositoryPopup, agentPopup, templatePopup, branchField, existingBranchButton, subtaskCheckbox, reportCheckbox
+        ]
+        for control in controls {
             control.isEnabled = enabled
         }
         if enabled { templatePopup.isEnabled = info != nil }
@@ -648,6 +692,12 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         branchField.frame = NSRect(x: margin, y: y, width: fieldWidth, height: 22)
         fromLabel.frame = NSRect(x: margin + fieldWidth + 10, y: y + 3, width: inner - fieldWidth - 10, height: 18)
         y += max(22, lineHeight + 4) + 12
+
+        if !subtaskCheckbox.isHidden {
+            // Its own width: a click beside it doesn't toggle it.
+            subtaskCheckbox.frame = NSRect(x: margin - 2, y: y, width: min(inner, ceil(subtaskCheckbox.fittingSize.width)), height: 18)
+            y += 18 + 12
+        }
 
         if !reportCheckbox.isHidden {
             // Its own width: a click beside it doesn't toggle it.
@@ -781,7 +831,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         content.subviews.forEach { $0.removeFromSuperview() }
         let views: [NSView] = [
             headingLabel, descriptionBox, repositoryPopup, agentPopup, templatePopup, lineLabel, editBranchButton,
-            branchField, fromLabel, newSpaceButton, reportCheckbox, reportHint, errorLabel, existingBranchButton,
+            branchField, fromLabel, newSpaceButton, subtaskCheckbox, reportCheckbox, reportHint, errorLabel, existingBranchButton,
             cancelButton, startButton
         ]
         views.forEach(content.addSubview)
@@ -792,6 +842,10 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         reportCheckbox.setAccessibilityHelp(reportHint.stringValue)
         reportCheckbox.isHidden = lead == nil
         reportHint.isHidden = lead == nil
+        subtaskCheckbox.target = self
+        subtaskCheckbox.action = #selector(subtaskToggled(_:))
+        subtaskCheckbox.lineBreakMode = .byTruncatingMiddle
+        subtaskCheckbox.isHidden = parentTask == nil
 
         let panel = NewTaskSheet(
             contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 320),

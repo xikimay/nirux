@@ -274,11 +274,11 @@ final class LeadToolsFlowTests: XCTestCase {
             let titles = { store.visibleWorkspaceIndices(in: lead.space).map { shell.workspaces[$0].title } }
             let index = { (workspace: WorkspaceState) in try XCTUnwrap(shell.workspaces.firstIndex { $0 === workspace }) }
             XCTAssertEqual(titles(), ["Lead", "task", "sub", "other", "lead's task"])
-            XCTAssertEqual(store.nestedWorkspaceIndices(in: lead.space), [try index(sub)])
+            XCTAssertEqual(store.activeParents(in: lead.space), [try index(sub): try index(task)])
 
             shell.updateSidebar()
             let info = try XCTUnwrap(shell.sidebar.displayedWorkspaceInfos.first { $0.id == sub.id })
-            XCTAssertTrue(info.isNested)
+            XCTAssertEqual(info.parentTitle, "task")
             XCTAssertEqual(
                 SidebarCardLayout(workspace: info, sidebarWidth: 260).cardX,
                 SidebarExpandedMetrics.workspaceInsetX + SidebarExpandedMetrics.nestIndent
@@ -290,7 +290,7 @@ final class LeadToolsFlowTests: XCTestCase {
 
             XCTAssertTrue(store.setWorkspaceInactive(at: try index(task), true))
             XCTAssertEqual(titles(), ["Lead", "other", "sub", "lead's task", "task"], "let go where it was listed")
-            XCTAssertTrue(store.nestedWorkspaceIndices(in: lead.space).isEmpty)
+            XCTAssertTrue(store.activeParents(in: lead.space).isEmpty)
 
             // Back among the active ones it takes its children back, and the
             // one restored is the one selected.
@@ -303,9 +303,49 @@ final class LeadToolsFlowTests: XCTestCase {
             // A deleted space's former Lead never takes its tasks under it.
             XCTAssertTrue(store.deleteProfile(id: lead.space))
             XCTAssertEqual(
-                store.nestedWorkspaceIndices(in: WorkspaceProfile.defaultID).map { shell.workspaces[$0].title }, ["sub"]
+                store.activeParents(in: WorkspaceProfile.defaultID).keys.map { shell.workspaces[$0].title }, ["sub"]
             )
             _ = other
+        }
+    }
+
+    /// The worktree skill names the task it runs in: the worktree lists
+    /// under it with Missions off (as `makeLead` sets them, the user's
+    /// setting), and still does after a relaunch. The Lead's own stay the
+    /// space's list.
+    func testSkillWorktreesListUnderTheirTaskWithMissionsOff() throws {
+        try UIFlowHarness.run { harness in
+            let shell = harness.shell
+            let lead = try makeLead(harness)
+            shell.addWorkspace(title: "task", cwd: harness.repo, profileID: lead.space)
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            shell.addWorkspace(title: "other", cwd: harness.repo, profileID: lead.space)
+            @MainActor func skill(_ branch: String, from parent: WorkspaceState) throws -> WorkspaceState {
+                shell.createWorktreeWorkspace(
+                    branch: branch, repoRoot: harness.repo, agent: nil, profileID: lead.space,
+                    parentWorkspaceID: parent.id, parentAgentUUID: parent.columns.first?.agentUUID
+                )
+                harness.waitUntil("\(branch)'s workspace") { shell.workspaces.contains { $0.title == branch } }
+                return try XCTUnwrap(shell.workspaces.first { $0.title == branch })
+            }
+            // Opened last: the store lists it under its task.
+            let sub = try skill("feat/sub", from: task)
+            let leads = try skill("feat/leads", from: lead.workspace)
+            let store = shell.workspaceStore
+            let titles = { store.visibleWorkspaceIndices(in: lead.space).map { shell.workspaces[$0].title } }
+            let parents = {
+                Dictionary(uniqueKeysWithValues: store.activeParents(in: lead.space).map {
+                    (shell.workspaces[$0.key].title, shell.workspaces[$0.value].title)
+                })
+            }
+            XCTAssertEqual(titles(), ["Lead", "task", "feat/sub", "other", "feat/leads"])
+            XCTAssertEqual(parents(), ["feat/sub": "task"])
+            XCTAssertEqual(sub.parentWorkspaceID, task.id)
+            XCTAssertNil(leads.parentWorkspaceID, "a Lead's tasks are the space's list")
+
+            shell.saveState()
+            shell.restoreState()
+            XCTAssertEqual(parents(), ["feat/sub": "task"])
         }
     }
 
