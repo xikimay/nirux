@@ -47,7 +47,7 @@ extension WorktreeCleanup {
             guard (candidate["state"] as? String)?.uppercased() == "MERGED",
                   let headOid = (candidate["headRefOid"] as? String)?.lowercased(), isObjectID(headOid)
             else { return false }
-            return headOid == tip || ancestry(of: tip, in: headOid, at: worktree.path, tools: tools) == .contained
+            return headOid == tip
         }
         if mergedElsewhere {
             return (nil, [
