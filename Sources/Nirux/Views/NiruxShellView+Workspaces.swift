@@ -116,8 +116,7 @@ extension NiruxShellView {
     nonisolated static func taskLocation(cwd: String) -> FolderIdentity? {
         // Both resolved: `worktreeCleanupPath` standardizes, which drops
         // `/private` from a temporary folder.
-        guard let folder = cwd.realPath, let root = worktreeCleanupPath(forCwd: folder)?.realPath,
-              folder == root || folder.hasPrefix(root + "/"),
+        guard let folder = cwd.realPath, let root = worktreeCleanupPath(forCwd: folder),
               let contents = try? String(contentsOfFile: root + "/.git", encoding: .utf8), contents.hasPrefix("gitdir: ")
         else { return nil }
         // `<common dir>/worktrees/<id>`, maybe relative to the worktree.
