@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The repositories a space's board shows (docs/spaces.md, S12): one
 /// section per git anchor, default first, each with its config from
@@ -62,33 +63,44 @@ enum BoardSections {
         /// Repository anchors whose remotes git couldn't read (a volume not
         /// mounted, a timeout): placing schema 1's config may be wrong.
         var unread: Set<String> = []
-        /// The push remote of each repository anchor board.json has no
-        /// config for, by common git dir (`readPushRemotes`).
-        var pushRemotes: [String: PushRemote] = [:]
+        /// Where the pull requests of each repository anchor board.json has
+        /// no config for live, by common git dir (`readBaseRemotes`).
+        var baseRemotes: [String: BaseRemote] = [:]
     }
 
-    /// The remote a repository anchor pushes to, by the rule Board Settings
-    /// suggests its repository with (`BoardConfigSuggestions.folder`): its
-    /// main checkout's branch's push remote, else origin. While board.json
-    /// has no config for the anchor, its section shows that repository's
-    /// pull requests read-only, which Save then keeps: nothing is saved,
-    /// and its merge queue waits for Board Settings.
-    enum PushRemote: Equatable, Sendable {
-        /// On github.com (an SSH alias of it too): `owner/name` as the URL
-        /// spells it, and the branch `<remote>/HEAD` points to, if known.
+    /// Where a repository anchor's pull requests live (`GitHubBaseRemote`,
+    /// the rule Board Settings suggests its repository with), whatever
+    /// branch its checkout is on. While board.json has no config for the
+    /// anchor, its section shows that repository's pull requests
+    /// read-only, which Save then keeps: nothing is saved, and its merge
+    /// queue waits for Board Settings.
+    enum BaseRemote: Equatable, Sendable {
+        /// `owner/name` as the URL spells it, the branch `<remote>/HEAD`
+        /// points to if known, and the remote.
         case gitHub(repository: String, baseBranch: String?, remote: String)
-        /// No remote of that name.
-        case missing(remote: String)
-        /// Elsewhere than github.com: another host, or nil for a path.
+        case noRemote
+        /// No remote on github.com: the first one's host, nil for a path.
         case notGitHub(host: String?, remote: String)
-        /// git couldn't read it: a volume not mounted, a timeout.
+        /// Its checkout is gone, or no longer a git repository.
+        case notARepository
+        /// git, or ssh, didn't answer in time.
         case unread
+
+        /// `owner/name` when on github.com.
+        var gitHubRepository: String? {
+            guard case .gitHub(let repository, _, _) = self else { return nil }
+            return repository
+        }
     }
 
-    /// The push remote of each section's anchor that has no config of its
-    /// own, by common git dir. Runs git, 10 s at most a call, the anchors
-    /// side by side: call it off the main thread.
-    static func readPushRemotes(_ sections: [Section], gitPath: String = "/usr/bin/git") -> [String: PushRemote] {
+    /// Where the pull requests of each section's anchor without a config of
+    /// its own live, by common git dir. Three git calls an anchor, 10 s at
+    /// most each, the anchors side by side: call it off the main thread.
+    static func readBaseRemotes(
+        _ sections: [Section],
+        gitPath: String = "/usr/bin/git",
+        resolveAlias: @escaping @Sendable (String) -> Bool? = { SSHHostAlias.resolve($0) }
+    ) -> [String: BaseRemote] {
         var seen = Set<String>()
         let anchors = sections.compactMap { section -> (commonDir: String, folder: String)? in
             guard section.config == nil, let commonDir = section.commonDir, let folder = section.checkoutFolder,
@@ -96,65 +108,27 @@ enum BoardSections {
             else { return nil }
             return (commonDir, folder)
         }
-        let results = Results(count: anchors.count)
+        let results = OSAllocatedUnfairLock(initialState: [String: BaseRemote]())
         DispatchQueue.concurrentPerform(iterations: anchors.count) { index in
-            results.set(pushRemote(at: anchors[index].folder, gitPath: gitPath), at: index)
+            let anchor = anchors[index]
+            let read = baseRemote(at: anchor.folder, gitPath: gitPath, resolveAlias: resolveAlias)
+            results.withLock { $0[anchor.commonDir] = read }
         }
-        var remotes: [String: PushRemote] = [:]
-        for (index, anchor) in anchors.enumerated() {
-            remotes[anchor.commonDir] = results.value(at: index) ?? .unread
-        }
-        return remotes
+        return results.withLock { $0 }
     }
 
-    /// What Board Settings would suggest from `folder`: the remote
-    /// `BoardConfigSuggestions.folder` picks, its URL read again here so
-    /// that git or ssh not answering reads as `.unread`, never as an answer.
-    static func pushRemote(at folder: String, gitPath: String = "/usr/bin/git") -> PushRemote {
-        guard let read = BoardConfigSuggestions.folder(at: folder, gitPath: gitPath) else { return .unread }
-        let remote = read.remote
-        let url = WorktreeCleanup.git(
-            ["remote", "get-url", "--push", "--", remote], in: folder, tools: WorktreeCleanup.Tools(gitPath: gitPath), timeout: 10
-        )
-        switch url.status {
-        case 0: break
-        // git remote's own status for a remote that doesn't exist.
-        case 2: return .missing(remote: remote)
-        default: return .unread
-        }
-        let trimmed = url.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let parsed = GitHubRepository(remoteURL: trimmed) else { return .notGitHub(host: nil, remote: remote) }
-        if parsed.host != "github.com" {
-            guard BoardConfigSuggestions.isSSH(trimmed) else { return .notGitHub(host: parsed.host, remote: remote) }
-            switch SSHHostAlias.resolve(parsed.host) {
-            case nil: return .unread
-            case false?: return .notGitHub(host: parsed.host, remote: remote)
-            case true?: break
-            }
-        }
-        guard let repository = BoardConfigSuggestions.repositoryName(remoteURL: trimmed, resolvingAliases: true) else {
-            return .notGitHub(host: parsed.host, remote: remote)
-        }
-        let baseBranch = BoardConfigSuggestions.defaultBranch(of: remote, at: read.checkout, gitPath: gitPath)
-        return .gitHub(repository: repository, baseBranch: baseBranch, remote: remote)
-    }
-
-    private final class Results: @unchecked Sendable {
-        private let lock = NSLock()
-        private var values: [PushRemote?]
-
-        init(count: Int) { values = Array(repeating: nil, count: count) }
-
-        func set(_ value: PushRemote, at index: Int) {
-            lock.lock()
-            values[index] = value
-            lock.unlock()
-        }
-
-        func value(at index: Int) -> PushRemote? {
-            lock.lock()
-            defer { lock.unlock() }
-            return values[index]
+    static func baseRemote(
+        at folder: String, gitPath: String = "/usr/bin/git", resolveAlias: (String) -> Bool?
+    ) -> BaseRemote {
+        switch GitHubBaseRemote.read(at: folder, gitPath: gitPath, resolveAlias: resolveAlias) {
+        case .gitHub(let repository, let remote):
+            // As Board Settings reads it: `<remote>/HEAD`, anywhere in the repository.
+            let baseBranch = BoardConfigSuggestions.defaultBranch(of: remote, at: folder, gitPath: gitPath)
+            return .gitHub(repository: repository, baseBranch: baseBranch, remote: remote)
+        case .noRemote: return .noRemote
+        case .notGitHub(let host, let remote): return .notGitHub(host: host, remote: remote)
+        case .notARepository: return .notARepository
+        case .unread: return .unread
         }
     }
 

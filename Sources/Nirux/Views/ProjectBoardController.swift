@@ -5,9 +5,9 @@ import AppKit
 /// anchor (docs/spaces.md, S12), each with its config from board.json and
 /// its own reads; a space without one shows its one repository, as before.
 /// An anchor board.json has no config for shows its worktrees, and the pull
-/// requests of the remote Board Settings would suggest for it (its main
-/// checkout's push remote, else origin) read-only: nothing is saved, and
-/// its merge queue waits for Board Settings.
+/// requests of the repository Board Settings would suggest for it (where
+/// its pull requests live, `GitHubBaseRemote`) read-only: nothing is saved,
+/// and its merge queue waits for Board Settings.
 /// Reads run off the main thread, on the schedule of
 /// `ProjectBoard.RefreshSchedule`, and only while the board is on screen;
 /// opening it, Refresh and a saved board.json read at once if it is shown.
@@ -49,10 +49,10 @@ final class ProjectBoardController {
             if case .workflow(let file) = config.postMergeWorkflow { workflow = file }
         }
 
-        /// A section without a config: its anchor's push remote, when it
-        /// is on github.com.
-        init?(pushRemote: BoardSections.PushRemote) {
-            guard case .gitHub(let repository, let baseBranch, let remote) = pushRemote,
+        /// A section without a config: where its anchor's pull requests
+        /// live, when that is on github.com.
+        init?(baseRemote: BoardSections.BaseRemote) {
+            guard case .gitHub(let repository, let baseBranch, let remote) = baseRemote,
                   let config = RepositoryReads(config: BoardConfig(repository: repository, baseBranch: baseBranch))
             else { return nil }
             self = config
@@ -105,10 +105,12 @@ final class ProjectBoardController {
     /// board.json is being read again: nothing else is read meanwhile, or
     /// it would be read with the config being replaced.
     private var isReadingConfig = false
-    /// The push remotes of the anchors without a config are read after
-    /// board.json: a section none is known for yet doesn't say why it has
-    /// no pull requests.
+    /// The base remotes of the anchors without a config are read after
+    /// board.json, once the board is shown: a section none is known for
+    /// yet doesn't say why it has no pull requests.
     private var isReadingRemotes = false
+    /// The config read whose remotes wait for the board to be shown.
+    private var remotesDue: Int?
     /// Reads landed since the last render: they are drawn once, together.
     private var isRenderScheduled = false
     /// A board opened from the palette on a project without a repository
@@ -229,38 +231,46 @@ final class ProjectBoardController {
             // A file this build can't use, or won't write, says why instead.
             let readsRemotes = read.0.status == .missing || read.0.status == .loaded
             var context = read.1
-            // Until they are read again, the push remotes read before: a
+            // Until they are read again, the base remotes read before: a
             // Refresh doesn't empty a section meanwhile.
-            if readsRemotes { context.pushRemotes = self.context.pushRemotes }
+            if readsRemotes { context.baseRemotes = self.context.baseRemotes }
             self.isReadingRemotes = readsRemotes
+            self.remotesDue = nil
             self.apply(read.0, context: context)
-            if readsRemotes { self.readPushRemotes(configRead: current) }
+            if readsRemotes { self.readBaseRemotesWhenShown(configRead: current) }
         })
     }
 
-    /// The push remotes of the anchors without a config, read after
-    /// board.json so that an anchor on a slow volume holds up no other
-    /// read, then applied with the config read last.
-    private func readPushRemotes(configRead current: Int) {
+    /// The base remotes of the anchors without a config: read after
+    /// board.json, so that an anchor on a slow volume holds up no other
+    /// read, and only once the board is shown (a board restored at launch
+    /// behind another workspace runs no git for them), then applied with
+    /// the config read last.
+    private func readBaseRemotesWhenShown(configRead current: Int) {
         let unsaved = sections.filter { $0.config == nil && $0.commonDir != nil }
         guard !unsaved.isEmpty else {
             isReadingRemotes = false
             return
         }
-        Self.readOffMain({ BoardSections.readPushRemotes(unsaved) }, then: { [weak self] remotes in
+        guard isShown() else {
+            remotesDue = current
+            return
+        }
+        Self.readOffMain({ BoardSections.readBaseRemotes(unsaved) }, then: { [weak self] remotes in
             guard let self, self.configRead == current, let loaded = self.loaded else { return }
             self.isReadingRemotes = false
             var context = self.context
-            context.pushRemotes = Self.merged(remotes, keeping: self.context.pushRemotes)
+            context.baseRemotes = Self.merged(remotes, keeping: self.context.baseRemotes)
             self.apply(loaded, context: context, listsWorktreesAgain: false)
         })
     }
 
-    /// git couldn't read a remote this time, or its default branch: what
-    /// was read before stays, so its section doesn't flip on a Refresh.
+    /// git couldn't answer this time, or didn't give the default branch:
+    /// what was read before stays, so its section doesn't flip on a
+    /// Refresh. A checkout gone is no such blip: it replaces it.
     nonisolated static func merged(
-        _ new: [String: BoardSections.PushRemote], keeping known: [String: BoardSections.PushRemote]
-    ) -> [String: BoardSections.PushRemote] {
+        _ new: [String: BoardSections.BaseRemote], keeping known: [String: BoardSections.BaseRemote]
+    ) -> [String: BoardSections.BaseRemote] {
         var result = new
         for (commonDir, remote) in new {
             switch (remote, known[commonDir]) {
@@ -292,9 +302,9 @@ final class ProjectBoardController {
         // saves one for two: a saved one keeps it, else the first remote.
         var taken = Set(sections.compactMap { $0.config?.gitHubRepository })
         for section in sections {
-            let remote = section.commonDir.flatMap { context.pushRemotes[$0] }
+            let remote = section.commonDir.flatMap { context.baseRemotes[$0] }
             // A config, even without a valid repository, wins over the remote.
-            var read = section.config.map { RepositoryReads(config: $0) } ?? remote.flatMap(RepositoryReads.init(pushRemote:))
+            var read = section.config.map { RepositoryReads(config: $0) } ?? remote.flatMap(RepositoryReads.init(baseRemote:))
             if section.config == nil, let gitHub = read?.gitHub, !taken.insert(gitHub).inserted { read = nil }
             guard var fresh = read else { continue }
             if var previous = reads[section.id], previous.gitHub == fresh.gitHub {
@@ -350,6 +360,11 @@ final class ProjectBoardController {
     /// which reads only while the board is on screen.
     func tick(now: TimeInterval = ProjectBoard.clock(), onScreen: Bool? = nil) {
         guard loaded != nil, !isReadingConfig, projectExists() else { return }
+        // Shown at last: the remotes that waited for it.
+        if let due = remotesDue, due == configRead, isShown() {
+            remotesDue = nil
+            readBaseRemotesWhenShown(configRead: due)
+        }
         let onScreen = onScreen ?? isOnScreen()
         // Nothing without rows to list: the board only says to set one.
         guard listsRows else { return }
@@ -636,7 +651,7 @@ final class ProjectBoardController {
     /// names, which this one then doesn't read.
     private func sectionSharingRemote(with section: BoardSections.Section) -> BoardSections.Section? {
         guard section.config == nil, reads[section.id] == nil,
-              case .gitHub(let name, _, _)? = section.commonDir.flatMap({ context.pushRemotes[$0] }),
+              case .gitHub(let name, _, _)? = section.commonDir.flatMap({ context.baseRemotes[$0] }),
               let gitHub = GitHubRepository(ownerAndName: name)
         else { return nil }
         return sections.first { other in
@@ -658,14 +673,16 @@ final class ProjectBoardController {
             let otherName = displayNames[other.id] ?? other.name ?? "another repository"
             return "Same GitHub repository as “\(otherName)”: its pull requests show there."
         }
-        switch section.commonDir.flatMap({ context.pushRemotes[$0] }) {
-        case .missing(let remote)?:
-            return "No remote named \(remote): set its GitHub repository in Board Settings to see its pull requests."
+        switch section.commonDir.flatMap({ context.baseRemotes[$0] }) {
+        case .noRemote?:
+            return "No remote: set its GitHub repository in Board Settings to see its pull requests."
         case .notGitHub(let host, let remote)?:
             let place = host.map { "\(remote) points to \($0), not github.com" } ?? "\(remote) isn’t on github.com"
             return "\(place): set its GitHub repository in Board Settings to see its pull requests."
+        case .notARepository?:
+            return "Its checkout is gone, or no longer a git repository: Refresh once it’s back, or remove it in Space Settings."
         case .unread?:
-            return "Nirux couldn’t read its remote: Refresh, or set its GitHub repository in Board Settings."
+            return "Nirux couldn’t read its remotes: Refresh, or set its GitHub repository in Board Settings."
         case nil where isReadingRemotes:
             return nil
         case .gitHub?, nil:

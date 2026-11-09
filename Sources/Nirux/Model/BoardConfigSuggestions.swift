@@ -7,10 +7,10 @@ struct BoardConfigSuggestions: Equatable, Sendable {
     /// A workspace folder inside a git repository.
     struct Folder: Equatable, Sendable {
         /// The github.com repository (`owner/name`, spelled as in the remote's
-        /// URL) its branch is pushed to. Nil when that remote isn't on
-        /// github.com, or is missing.
+        /// URL) its pull requests live in (`GitHubBaseRemote`). Nil when no
+        /// remote is on github.com.
         let repository: String?
-        /// That remote: the branch's push remote, else `origin`.
+        /// That remote; else the first remote, else `origin`.
         let remote: String
         /// Where the repository's workflow files and default branch are
         /// read: the main working tree, or the folder's own top level for a
@@ -19,9 +19,9 @@ struct BoardConfigSuggestions: Equatable, Sendable {
     }
 
     enum RepositorySource: Equatable, Sendable {
-        /// Every workspace folder in a repository pushes to it.
+        /// Every workspace folder in a repository has its pull requests there.
         case shared
-        /// They push to several repositories, listed; `noGitHubRemote`
+        /// They are in several repositories, listed; `noGitHubRemote`
         /// stands for the folders without one.
         case differing([String])
         /// No workspace folder is in a git repository.
@@ -29,11 +29,11 @@ struct BoardConfigSuggestions: Equatable, Sendable {
     }
 
     /// The repository to suggest: the one every workspace in a repository
-    /// pushes to. Nil unless `source` is `.shared`.
+    /// has its pull requests in. Nil unless `source` is `.shared`.
     var repository: String?
     var source: RepositorySource
     /// A local checkout of the repository in use (the saved one, else the
-    /// suggested one). Nil when no workspace pushes to it.
+    /// suggested one). Nil when no workspace is in it.
     var checkout: String?
     /// The branch the checkout's `refs/remotes/<remote>/HEAD` points to, if
     /// that branch is there too.
@@ -49,7 +49,7 @@ struct BoardConfigSuggestions: Equatable, Sendable {
 
     /// Runs git in every folder: call it off the main thread. `repository`
     /// and `baseBranch` are the saved ones, if any: the checkout comes from
-    /// a folder that pushes to that repository, and the workflow files from
+    /// a folder of that repository, and the workflow files from
     /// that branch.
     static func read(
         workspaceFolders: [String], repository saved: String?, baseBranch savedBase: String? = nil,
@@ -105,10 +105,12 @@ struct BoardConfigSuggestions: Equatable, Sendable {
 
     /// Nil outside a git repository (or a folder that's gone). A git dir
     /// (a bare repository's, or one apart from its checkout) is its own
-    /// top level. A push remote that isn't one of the repository's remotes
-    /// (`gh pr checkout` sets a URL there) reads origin. An SSH host alias
-    /// of github.com counts as github.com (`SSHHostAlias`).
-    static func folder(at path: String, gitPath: String = "/usr/bin/git") -> Folder? {
+    /// top level. The repository is where its pull requests live, whatever
+    /// branch is checked out (`GitHubBaseRemote`), as the board reads it.
+    static func folder(
+        at path: String, gitPath: String = "/usr/bin/git",
+        resolveAlias: (String) -> Bool? = { SSHHostAlias.resolve($0) }
+    ) -> Folder? {
         let git = { (arguments: [String]) in
             GitCommand.output(arguments, cwd: path, gitPath: gitPath, timeout: 10)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -116,15 +118,12 @@ struct BoardConfigSuggestions: Equatable, Sendable {
         let checkoutTop = git(["rev-parse", "--show-toplevel"]).flatMap { $0.isEmpty ? nil : $0 }
         guard let topLevel = checkoutTop ?? (git(["rev-parse", "--is-inside-git-dir"]) == "true" ? path : nil)
         else { return nil }
-        var remote = "origin"
-        if let branch = git(["symbolic-ref", "--quiet", "--short", "HEAD"]), !branch.isEmpty,
-           let pushRemote = git(["for-each-ref", "--format=%(push:remotename)", "refs/heads/\(branch)"]),
-           !pushRemote.isEmpty, pushRemote != ".",
-           git(["remote"])?.split(separator: "\n").contains(Substring(pushRemote)) == true {
-            remote = pushRemote
-        }
-        let repository = git(["remote", "get-url", "--push", "--", remote]).flatMap {
-            repositoryName(remoteURL: $0, resolvingAliases: true)
+        let repository: String?
+        let remote: String
+        switch GitHubBaseRemote.read(at: path, gitPath: gitPath, resolveAlias: resolveAlias) {
+        case .gitHub(let name, let from): (repository, remote) = (name, from)
+        case .notGitHub(_, let from): (repository, remote) = (nil, from)
+        case .noRemote, .notARepository, .unread: (repository, remote) = (nil, "origin")
         }
         let checkout = GitCommand.output(["worktree", "list", "--porcelain", "-z"], cwd: path, gitPath: gitPath, timeout: 10)
             .flatMap(mainWorkingTree(inListing:)) ?? topLevel
@@ -132,14 +131,15 @@ struct BoardConfigSuggestions: Equatable, Sendable {
     }
 
     /// `owner/name` of a github.com remote URL, spelled as in the URL
-    /// (`GitHubRepository` lowercases it). With `resolvingAliases`, an SSH
-    /// URL whose host `ssh -G` resolves to github.com counts: it runs ssh,
-    /// so only off the main thread.
-    static func repositoryName(remoteURL: String, resolvingAliases: Bool = false) -> String? {
+    /// (`GitHubRepository` lowercases it).
+    static func repositoryName(remoteURL: String) -> String? {
+        guard GitHubRepository(remoteURL: remoteURL)?.host == "github.com" else { return nil }
+        return spelledOwnerAndName(remoteURL: remoteURL)
+    }
+
+    /// `owner/name` of a remote URL on any host, spelled as in the URL.
+    static func spelledOwnerAndName(remoteURL: String) -> String? {
         guard let parsed = GitHubRepository(remoteURL: remoteURL) else { return nil }
-        guard parsed.host == "github.com"
-            || (resolvingAliases && isSSH(remoteURL) && SSHHostAlias.isGitHub(parsed.host))
-        else { return nil }
         let components = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
             .split(whereSeparator: { $0 == "/" || $0 == ":" })
         guard components.count >= 2 else { return nil }

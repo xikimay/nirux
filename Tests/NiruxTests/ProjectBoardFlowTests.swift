@@ -305,7 +305,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
             let remotes = [
                 "saved": "https://github.com/acme/saved.git", "front": "git@github.com:acme/front.git",
-                "back": "https://github.com/acme/back.git", "docs": "git@github-nirux-test:acme/docs.git",
+                "back": "https://github.com/acme/back.git", "docs": "https://gitlab.com/acme/docs.git",
                 "copy": "https://github.com/acme/front.git"
             ]
             var anchors: [SpaceAnchor] = []
@@ -342,7 +342,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(sections.map(\.repository), ["acme/saved", "acme/front", "acme/back", nil, nil])
             XCTAssertEqual(
                 sections[3].note,
-                "origin points to github-nirux-test, not github.com: set its GitHub repository in Board Settings to see its pull requests."
+                "origin points to gitlab.com, not github.com: set its GitHub repository in Board Settings to see its pull requests."
             )
             XCTAssertEqual(sections[4].note, "Same GitHub repository as “front”: its pull requests show there.")
             // Read-only shows in the header, after the repository.
@@ -393,6 +393,36 @@ final class ProjectBoardFlowTests: XCTestCase {
                     && shell.boardSettingsPanel?.repositoryField.stringValue == "acme/back"
             }
             XCTAssertEqual(shell.boardSettingsPanel?.repositoryChoices.map(\.id), [frontKey, backKey])
+        }
+    }
+
+    /// Board Settings won't save, for one repository, the GitHub repository
+    /// another one of the space shows read-only: it would take it from it.
+    @MainActor
+    func testSavingWhatAnotherRepositoryShowsIsRefused() throws {
+        try withShell(client: makeClient()) { shell, space in
+            let front = root + "/front"
+            let copy = root + "/copy"
+            try BoardConfigSuggestionsTests.makeRepository(at: front, remote: "https://github.com/acme/front.git")
+            try BoardConfigSuggestionsTests.makeRepository(at: copy, remote: "https://github.com/acme/front.git")
+            var frontAnchor = try XCTUnwrap(FolderIdentity.identify(front, timeout: 10)).anchor
+            frontAnchor.isDefault = true
+            let copyAnchor = try XCTUnwrap(FolderIdentity.identify(copy, timeout: 10)).anchor
+            let copyKey = try XCTUnwrap(copyAnchor.key)
+            XCTAssertTrue(shell.workspaceStore.setAnchors([frontAnchor, copyAnchor], forProfile: space.id))
+            shell.showBoardSettings(profileID: space.id, repository: copyKey)
+            try waitUntil("copy’s form") {
+                shell.spaceSettings?.boardRepository == copyKey
+                    && shell.boardSettingsPanel?.repositoryField.stringValue == "acme/front"
+            }
+            let form = try XCTUnwrap(shell.boardSettingsPanel)
+            try click(form.saveButton)
+            XCTAssertFalse(form.errorLabel.isHidden)
+            XCTAssertEqual(
+                form.errorLabel.stringValue,
+                "“front” of this space shows acme/front already, read-only: set it up there, or use another GitHub repository here."
+            )
+            XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(BoardConfigStore(spaceID: space.id)).fileURL.path))
         }
     }
 

@@ -214,17 +214,22 @@ documented in B1's pull request:
   list due at once. A finished clean-up lists the worktrees again.
 - **Not set up** (decided with the user on 2026-11-09): a repository anchor
   `board.json` has no config for shows its worktrees, and the pull requests
-  of the repository Board Settings would suggest for it, read-only: by the
-  same rule (`BoardConfigSuggestions.folder`), its main checkout's branch's
-  push remote, else origin (a bare repository's own), on github.com or an
-  SSH alias `ssh -G` resolves to it, with its base branch from
-  `<remote>/HEAD`. Saving as suggested keeps that repository. Nothing is
-  written, and its merge queue and Retarget wait for an explicit Save in
-  Board Settings. The remotes are read after board.json, the anchors side
-  by side, 10 s at most a git call: a slow volume holds up no other read.
-  Two sections never read one repository: a saved one keeps it, else the
-  first; the other says so. When git can't read a remote, or its default
-  branch, the one read before stays.
+  of the repository they live in, read-only, whatever branch its checkout
+  is on (`GitHubBaseRemote`): the remote `gh repo set-default` marked, else
+  the first of upstream, github, origin, then the others by name, as gh
+  picks its base repository, whose URL is on github.com or an SSH alias
+  `ssh -G` resolves to it; its base branch from `<remote>/HEAD`. Board
+  Settings suggests the same, so saving as suggested keeps it, and the
+  General tab of Space Settings names it. Nothing is written, and its merge
+  queue and Retarget wait for an explicit Save in Board Settings. The
+  remotes are read after board.json, once the board is shown, the anchors
+  side by side, one git call each (two more for the base branch), 10 s at
+  most each: a slow volume holds up no other read, and a board restored
+  behind another workspace runs none. Two sections never read one
+  repository: a saved one keeps it, else the first; the other says so, and
+  Board Settings refuses to save, for another section, a repository one
+  shows. When git or ssh doesn't answer, or gives no default branch, what
+  was read before stays; a checkout gone says so.
 - **Lines under the header** say why the board shows less than it could. One
   says the board isn't set up, with a Board Settings… button opening the
   first repository it can set up (an open form switches to it, even one

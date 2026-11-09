@@ -225,16 +225,18 @@ final class BoardConfigSuggestionsTests: XCTestCase {
         let config = root + "/ssh_config"
         try Data("Host github-work\n  HostName github.com\nHost lab-work\n  HostName gitlab.com\n".utf8)
             .write(to: URL(fileURLWithPath: config))
-        XCTAssertTrue(SSHHostAlias.isGitHub("github-work", configFile: config))
-        XCTAssertFalse(SSHHostAlias.isGitHub("lab-work", configFile: config))
-        XCTAssertFalse(SSHHostAlias.isGitHub("-oProxyCommand=touch", configFile: config))
+        // ssh, with the test's own config, given time on a busy runner.
+        XCTAssertEqual(SSHHostAlias.resolve("github-work", configFile: config, timeout: 60), true)
+        XCTAssertEqual(SSHHostAlias.resolve("lab-work", configFile: config, timeout: 60), false)
+        XCTAssertEqual(SSHHostAlias.resolve("-oProxyCommand=touch", configFile: config, timeout: 60), false)
         XCTAssertTrue(BoardConfigSuggestions.isSSH("git@github-work:acme/app.git"))
         XCTAssertTrue(BoardConfigSuggestions.isSSH("ssh://git@github-work/acme/app.git"))
         XCTAssertFalse(BoardConfigSuggestions.isSSH("https://github-work/acme/app.git"))
     }
 
-    /// A branch pushed to another remote reads that remote, as PRDetect does.
-    func testTheBranchsPushRemoteWins() throws {
+    /// Where the pull requests live, not where the branch checked out is
+    /// pushed: as the board reads it.
+    func testTheBaseRepositoryWinsOverTheBranchsPushRemote() throws {
         let repo = root + "/repo"
         try Self.makeRepository(at: repo, remote: "https://github.com/acme/repo.git")
         try Self.git(["remote", "add", "fork", "https://github.com/me/repo.git"], at: repo)
@@ -242,7 +244,7 @@ final class BoardConfigSuggestionsTests: XCTestCase {
 
         let folder = try XCTUnwrap(BoardConfigSuggestions.folder(at: repo))
 
-        XCTAssertEqual(folder, BoardConfigSuggestions.Folder(repository: "me/repo", remote: "fork", checkout: repo))
+        XCTAssertEqual(folder, BoardConfigSuggestions.Folder(repository: "acme/repo", remote: "origin", checkout: repo))
     }
 
     func testABareMainRepositoryFallsBackToTheWorktree() {

@@ -219,6 +219,12 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     func requestRepository(_ target: String) {
         guard target != shownRepository else { return }
         guard isDirty else { return onSelectRepository?(target) ?? () }
+        // One question at a time: the board's button, in another window,
+        // can ask again while it shows.
+        if let window = hostView?.window, window.attachedSheet != nil {
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
         let name = repositoryChoices.first { $0.id == shownRepository }?.title ?? "this repository"
         askToSaveChanges(name) { [weak self] answer in
             guard let self, self.container != nil else { return }
@@ -590,9 +596,9 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     static func repositoryHint(_ suggestions: BoardConfigSuggestions) -> String {
         switch suggestions.source {
         case .shared:
-            return "This space’s workspaces push to \(suggestions.repository ?? "it")."
+            return "This space’s pull requests live in \(suggestions.repository ?? "it") on GitHub."
         case .differing(let repositories):
-            return "This space’s workspaces push to different places (\(repositories.joined(separator: ", "))): "
+            return "This space’s workspaces are in different repositories (\(repositories.joined(separator: ", "))): "
                 + "type the repository whose pull requests the board shows."
         case .noRepository:
             return "No workspace of this space is in a git repository: type owner/name."

@@ -193,7 +193,8 @@ extension NiruxShellView {
         settings.general.update(spaceSettingsGeneralModel(for: space))
     }
 
-    /// Reads each repository's GitHub remote (`origin`) off the main thread,
+    /// Reads each repository's GitHub repository (where its pull requests
+    /// live, as the Board reads it: `GitHubBaseRemote`) off the main thread,
     /// then shows it in General's rows.
     func refreshSpaceSettingsGitHub() {
         guard let settings = spaceSettings,
@@ -222,9 +223,9 @@ extension NiruxShellView {
         DispatchQueue.global(qos: .userInitiated).async {
             var names: [String: String] = [:]
             for repository in repositories {
-                let url = GitCommand.output(["remote", "get-url", "--", "origin"], cwd: repository.folder, timeout: 5)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                names[repository.key] = url.flatMap { BoardConfigSuggestions.repositoryName(remoteURL: $0) }
+                if case .gitHub(let name, _) = GitHubBaseRemote.read(at: repository.folder) {
+                    names[repository.key] = name
+                }
             }
             let found = names
             DispatchQueue.main.async { @MainActor in completion(found) }
