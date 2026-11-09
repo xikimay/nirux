@@ -1,4 +1,5 @@
 import AppKit
+import WebKit
 import XCTest
 @testable import Nirux
 
@@ -292,6 +293,59 @@ final class UIFlowHarness {
             NSApp.mainMenu = previousMenu
         }
         try body()
+    }
+
+    // MARK: - Web pages
+
+    /// Runs `script` in `webView`'s page and waits for it. Messages it posts
+    /// to the app arrive first.
+    static func run(_ script: String, in webView: WKWebView, file: StaticString = #filePath, line: UInt = #line) {
+        let answer = PageAnswer()
+        answer.isAsking = true
+        webView.evaluateJavaScript(script) { _, _ in
+            MainActor.assumeIsolated { answer.isAsking = false }
+        }
+        spin(until: "the page to run a script", file: file, line: line) { !answer.isAsking }
+    }
+
+    /// Asks `webView`'s page `script` (its value a string) until `matches`
+    /// accepts the answer, 10 s at most: a page handles keys and finds after
+    /// the call that sent them returns.
+    static func waitForAnswer(
+        _ description: String, to script: String, in webView: WKWebView,
+        file: StaticString = #filePath, line: UInt = #line, matches: (String) -> Bool
+    ) {
+        let answer = PageAnswer()
+        spin(until: description, file: file, line: line) {
+            if !answer.isAsking {
+                answer.isAsking = true
+                webView.evaluateJavaScript(script) { result, _ in
+                    MainActor.assumeIsolated {
+                        answer.latest = result as? String
+                        answer.isAsking = false
+                    }
+                }
+            }
+            return answer.latest.map(matches) == true
+        }
+        if answer.latest.map(matches) != true {
+            XCTFail("the page answered \(answer.latest.map { $0.debugDescription } ?? "nothing")", file: file, line: line)
+        }
+    }
+
+    /// Spins the main run loop until `condition` holds, 10 s at most.
+    private static func spin(until description: String, file: StaticString, line: UInt, _ condition: () -> Bool) {
+        let deadline = Date().addingTimeInterval(10)
+        while !condition() {
+            guard Date() < deadline else { return XCTFail("timed out waiting for \(description)", file: file, line: line) }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+    }
+
+    @MainActor
+    private final class PageAnswer {
+        var latest: String?
+        var isAsking = false
     }
 
     // MARK: - Keyboard and fields

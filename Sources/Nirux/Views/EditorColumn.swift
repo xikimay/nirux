@@ -73,7 +73,7 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
     var onSendSelectionShortcut: (() -> Void)?
 
     /// The edge of Monaco's text a Cmd+Arrow moves the caret to.
-    enum TextEdge: String {
+    enum TextEdge: String, CaseIterable {
         case left, right, up, down
     }
     /// Cmd+Arrow found Monaco's caret already at that edge (see
@@ -86,10 +86,20 @@ final class EditorColumn: NSView, WKNavigationDelegate, WKScriptMessageHandler {
         window?.firstResponder === webView
     }
 
-    /// What Cmd+Arrow does in Monaco's text, for an edge key the shell had
-    /// no column or workspace to move to.
-    func moveCaretToTextEdge(_ edge: TextEdge) {
-        sendBridge(["type": "moveCaretToTextEdge", "edge": edge.rawValue])
+    /// The edges whose key would find somewhere to go: a column beside, a
+    /// workspace above or below.
+    var textEdgeDestinations: (() -> Set<TextEdge>)?
+
+    /// Tells the page where each edge key can go, just before the app hands
+    /// it a plain Cmd+Arrow (the script runs first). With nowhere to go,
+    /// Monaco moves the caret as it handles the key.
+    func sendTextEdgeDestinations() {
+        guard let destinations = textEdgeDestinations?() else { return }
+        var payload: [String: Any] = ["type": "textEdgeDestinations"]
+        for edge in TextEdge.allCases {
+            payload[edge.rawValue] = destinations.contains(edge)
+        }
+        sendBridge(payload)
     }
 
     private let webView: WKWebView
