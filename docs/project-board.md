@@ -209,11 +209,23 @@ documented in B1's pull request:
   request reads do. Opening the board, Refresh and a saved board.json read at
   once when its workspace is shown. Refresh doesn't start a read already running.
 - The board reads nothing while board.json is being read again, nor for a
-  deleted project or one without a repository. Its clock keeps counting
+  deleted project or one with nothing to list. Its clock keeps counting
   while the Mac sleeps, so everything is due after a wake. A pull request that leaves the open list makes the merged
   list due at once. A finished clean-up lists the worktrees again.
-- **Without a repository**, or with an unreadable `board.json`, the board says
-  so instead of listing rows, and calls no `gh`. Board Settings opens by
+- **Not set up** (decided with the user on 2026-11-09): a repository anchor
+  `board.json` has no config for shows its worktrees, and the pull requests
+  of its `origin` remote when it is on github.com (its base branch from
+  `origin/HEAD`), read-only: nothing is written, and its merge queue and
+  Retarget wait for an explicit Save in Board Settings. A line under the
+  header says so, with a Board Settings… button, or says why there are no
+  pull requests (no remote named origin, origin not on github.com, git
+  couldn't read it). Another red line says what went wrong reading GitHub in
+  plain words: gh missing, gh not signed in (its status 4), gh's first line
+  of error.
+- **Without a repository** and nothing to list (a space without a repository
+  anchor, and no config), or with an unreadable `board.json`, the board says
+  so instead of listing rows, with a Board Settings… button under it, and
+  calls no `gh`. Board Settings opens by
   itself only when the board is opened from the palette, not when it is
   restored at launch.
 - **Clean Up** runs "Clean Up Worktree…" (#46) on the row's folder
@@ -235,9 +247,11 @@ anchors don't appear. Decided with the user on 2026-11-08:
 - **A section's rows**: its anchor's local repository (known by its common git
   dir, whatever its remotes), and any other local repository a remote of which
   names the section's GitHub repository. Its main checkout and worktrees show
-  even with no workspace open there. A section without a GitHub repository
-  lists them without pull requests and says to set it in Board Settings…; with
-  no section set up at all, the board says so instead of listing rows.
+  even with no workspace open there. A section without a config reads its
+  anchor's `origin`, read-only (section 2.1, "Not set up"); one without a
+  GitHub repository lists them without pull requests and says why in its
+  header. One line under the board's header names the sections not set up,
+  with Board Settings….
 - **Reads** are each section's: its pull requests, merged ones and post-merge
   run, on the schedule of section 6. The worktrees are listed once for all.
   Adding, removing or making default a repository reads board.json again.

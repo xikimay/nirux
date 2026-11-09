@@ -62,6 +62,48 @@ enum BoardSections {
         /// Repository anchors whose remotes git couldn't read (a volume not
         /// mounted, a timeout): placing schema 1's config may be wrong.
         var unread: Set<String> = []
+        /// The `origin` of each repository anchor board.json has no config
+        /// for, by common git dir (`readOrigins`).
+        var origins: [String: Origin] = [:]
+    }
+
+    /// What a repository anchor's `origin` remote says. While board.json
+    /// has no config for the anchor, its section shows that repository's
+    /// pull requests read-only: nothing is saved, and its merge queue
+    /// waits for Board Settings.
+    enum Origin: Equatable, Sendable {
+        /// On github.com: `owner/name` as the URL spells it, and the branch
+        /// `origin/HEAD` points to, when it is known.
+        case gitHub(repository: String, baseBranch: String?)
+        /// No remote named origin.
+        case missing
+        /// origin points elsewhere than github.com.
+        case notGitHub
+        /// git couldn't read it: a volume not mounted, a timeout.
+        case unread
+    }
+
+    /// The `origin` of each section's anchor that has no config of its
+    /// own, by common git dir. Runs git: call it off the main thread.
+    static func readOrigins(_ sections: [Section], tools: WorktreeCleanup.Tools = .installed) -> [String: Origin] {
+        var origins: [String: Origin] = [:]
+        for section in sections where section.config == nil {
+            guard let commonDir = section.commonDir, origins[commonDir] == nil else { continue }
+            let url = WorktreeCleanup.git(["remote", "get-url", "--", "origin"], in: commonDir, tools: tools)
+            switch url.status {
+            case 0:
+                guard let repository = BoardConfigSuggestions.repositoryName(remoteURL: url.stdout) else {
+                    origins[commonDir] = .notGitHub
+                    continue
+                }
+                let baseBranch = BoardConfigSuggestions.defaultBranch(of: "origin", at: commonDir, gitPath: tools.gitPath)
+                origins[commonDir] = .gitHub(repository: repository, baseBranch: baseBranch)
+            // git remote's own status for a remote that doesn't exist.
+            case 2: origins[commonDir] = .missing
+            default: origins[commonDir] = .unread
+            }
+        }
+        return origins
     }
 
     /// The space's repository anchors, the default one first, then in the

@@ -34,12 +34,18 @@ final class ProjectBoardFlowTests: XCTestCase {
         /// Open pull requests by `owner/name`, for a board with several
         /// repositories; the others get `openPullRequests`.
         let openByRepository: [String: String]
+        /// What gh answers instead for these `owner/name`.
+        let failures: [String: ProjectBoard.FetchError]
 
-        init(openPullRequests: String, mergedPullRequests: String = "[]", runs: String, openByRepository: [String: String] = [:]) {
+        init(
+            openPullRequests: String, mergedPullRequests: String = "[]", runs: String,
+            openByRepository: [String: String] = [:], failures: [String: ProjectBoard.FetchError] = [:]
+        ) {
             self.openPullRequests = openPullRequests
             self.mergedPullRequests = mergedPullRequests
             self.runs = runs
             self.openByRepository = openByRepository
+            self.failures = failures
         }
 
         var calls: [FakeGitHubCall] {
@@ -56,6 +62,7 @@ final class ProjectBoardFlowTests: XCTestCase {
 
         func pullRequests(repository: String, state: ProjectBoard.PullRequestList) -> Result<Data, ProjectBoard.FetchError> {
             record("pr \(state) \(repository)")
+            if let failure = failures[repository] { return .failure(failure) }
             let open = openByRepository[repository] ?? openPullRequests
             return .success(Data((state == .open ? open : mergedPullRequests).utf8))
         }
@@ -206,6 +213,7 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(form.spaceID, space.id)
             guard case .message(let message)? = board.view.content?.body else { return XCTFail("no message") }
             XCTAssertTrue(message.contains("Board Settings"), message)
+            XCTAssertFalse(board.view.messageSettingsButton.isHidden, "Board Settings… under the message")
             XCTAssertEqual(client.calls, [], "no gh without a repository")
 
             XCTAssertEqual(form.repositoryField.stringValue, "acme/widgets")
@@ -217,6 +225,101 @@ final class ProjectBoardFlowTests: XCTestCase {
             XCTAssertEqual(board.view.rowViews.map(\.row.name), ["widgets", "feat/login", "fix/remote"],
                            "no worktree for either pull request")
             XCTAssertFalse(client.calls.contains { $0.what.hasPrefix("run") }, "no post-merge workflow chosen yet")
+        }
+    }
+
+    /// A repository board.json has no config for (the user's spaces had
+    /// none, and their Board looked empty): its worktrees and its origin's
+    /// pull requests show, read-only, with no merge queue and nothing
+    /// written. Board Settings opens from the line that says so, and
+    /// saving it sets the queue up.
+    @MainActor
+    func testARepositoryWithoutSettingsShowsItsOriginReadOnly() throws {
+        let client = makeClient()
+        try withShell(client: client) { shell, space in
+            shell.mergeQueueClient = FakeQueueClient(isDryRun: true)
+            shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
+            let repo = root + "/widgets"
+            try BoardConfigSuggestionsTests.makeRepository(at: repo, remote: "https://github.com/acme/widgets.git")
+            let login = root + "/widgets.feat-login"
+            try git(["worktree", "add", "-q", "-b", "feat/login", login], at: repo)
+            var anchor = try XCTUnwrap(FolderIdentity.identify(repo, timeout: 10)).anchor
+            anchor.isDefault = true
+            XCTAssertTrue(shell.workspaceStore.setAnchors([anchor], forProfile: space.id))
+            shell.addWorkspace(title: "login", cwd: login, profileID: space.id)
+            try select("login", in: shell)
+
+            try runPaletteAction("Open Board", in: shell)
+            let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
+            dropWorkspaceSnapshots(shell)
+            try waitUntil("origin’s pull requests are read") {
+                Self.wasUpdated(board.view) && board.view.rowViews.contains { $0.row.name == "login" }
+            }
+            XCTAssertNil(shell.boardSettingsPanel, "the board has rows: Board Settings doesn’t open over them")
+            XCTAssertEqual(board.view.header.context, "acme/widgets")
+            XCTAssertEqual(try row("login", in: board).pullRequest.stringValue, "#12 open")
+            XCTAssertTrue(client.calls.contains { $0.what == "pr open acme/widgets" })
+            XCTAssertFalse(client.calls.contains { $0.what.hasPrefix("run") }, "no post-merge workflow from origin")
+
+            // Read-only: no queue, nothing written, and a line says so.
+            XCTAssertTrue(board.view.queueLabel.isHidden)
+            XCTAssertNil(try row("login", in: board).queueButton)
+            let store = try XCTUnwrap(BoardConfigStore(spaceID: space.id))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
+            XCTAssertEqual(board.view.noticeLines.map(\.label.stringValue), [
+                "Read-only, from origin: save Board Settings to use the merge queue."
+            ])
+            let notice = try XCTUnwrap(board.view.noticeLines.first)
+            XCTAssertFalse(notice.settingsButton.isHidden)
+
+            try click(notice.settingsButton)
+            try waitUntil("Board Settings opens") { shell.boardSettingsPanel?.hostView != nil }
+            let form = try XCTUnwrap(shell.boardSettingsPanel)
+            XCTAssertEqual(form.repositoryField.stringValue, "acme/widgets")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path), "opening the form writes nothing")
+            try click(form.saveButton)
+            try waitUntil("the saved settings set the queue up") { !board.view.queueLabel.isHidden }
+            XCTAssertEqual(board.view.noticeLines.count, 0, "nothing left to say")
+            XCTAssertNotNil(try row("login", in: board).queueButton)
+        }
+    }
+
+    /// Why a repository shows no pull requests is said in plain words: gh
+    /// not signed in, in red, and origin elsewhere than github.com in its
+    /// section's header, with one Board Settings… for both.
+    @MainActor
+    func testTheBoardSaysWhyItShowsNoPullRequests() throws {
+        let client = FakeGitHub(openPullRequests: "[]", runs: "[]", failures: ["acme/front": .notSignedIn])
+        try withShell(client: client) { shell, space in
+            let front = root + "/front"
+            let docs = root + "/docs"
+            try BoardConfigSuggestionsTests.makeRepository(at: front, remote: "git@github.com:acme/front.git")
+            try BoardConfigSuggestionsTests.makeRepository(at: docs, remote: "https://gitlab.com/acme/docs.git")
+            var frontAnchor = try XCTUnwrap(FolderIdentity.identify(front, timeout: 10)).anchor
+            frontAnchor.isDefault = true
+            let docsAnchor = try XCTUnwrap(FolderIdentity.identify(docs, timeout: 10)).anchor
+            XCTAssertTrue(shell.workspaceStore.setAnchors([frontAnchor, docsAnchor], forProfile: space.id))
+            shell.addWorkspace(title: "front", cwd: front, profileID: space.id)
+            try select("front", in: shell)
+            try runPaletteAction("Open Board", in: shell)
+            let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
+            dropWorkspaceSnapshots(shell)
+
+            try waitUntil("gh’s answer is said") { board.view.noticeLines.count == 2 }
+            XCTAssertEqual(board.view.noticeLines.map(\.label.stringValue), [
+                "front: gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh.",
+                "Not set up in Board Settings: front, docs."
+            ])
+            XCTAssertEqual(board.view.noticeLines.map(\.settingsButton.isHidden), [true, false])
+            guard case .sections(let sections, _)? = board.view.content?.body else { return XCTFail("no sections") }
+            XCTAssertEqual(sections.map(\.repository), ["acme/front", nil])
+            XCTAssertEqual(
+                sections[1].note,
+                "origin isn’t on github.com: set its GitHub repository in Board Settings to see its pull requests."
+            )
+            XCTAssertEqual(sections[1].rows.map(\.name), ["main"], "its main checkout all the same")
+            XCTAssertFalse(client.calls.contains { $0.what.contains("docs") }, "no gh for a repository elsewhere")
+            XCTAssertNil(shell.boardSettingsPanel)
         }
     }
 

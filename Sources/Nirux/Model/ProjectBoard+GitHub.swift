@@ -28,6 +28,8 @@ extension ProjectBoard {
     enum FetchError: Error, Equatable, Sendable {
         /// The GitHub CLI isn't where Nirux looks for it.
         case ghMissing
+        /// gh has no GitHub account to read with (its status 4).
+        case notSignedIn
         /// gh failed: its first line of error, or why it didn't run.
         case failed(String)
         /// gh answered with something that isn't the JSON asked for.
@@ -36,6 +38,7 @@ extension ProjectBoard {
         var message: String {
             switch self {
             case .ghMissing: return "gh isn’t installed: pull requests can’t be read."
+            case .notSignedIn: return "gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh."
             case .failed(let reason): return "gh: \(reason)"
             case .unreadable: return "gh answered with something Nirux can’t read."
             }
@@ -125,6 +128,8 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
             return .failure(.failed("it couldn’t start, or took longer than \(Int(timeout)) s"))
         }
         guard result.terminationStatus == 0 else {
+            // gh's status when no account is signed in, as the merge queue reads it.
+            if result.terminationStatus == 4 { return .failure(.notSignedIn) }
             let stderr = String(data: result.standardError, encoding: .utf8) ?? ""
             return .failure(.failed(WorktreeCleanup.firstLine(stderr) ?? "exit status \(result.terminationStatus)"))
         }

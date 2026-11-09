@@ -216,6 +216,28 @@ final class ProjectBoardGitHubTests: XCTestCase {
         )
     }
 
+    /// gh's status 4, no account signed in, is said in plain words.
+    func testGhSignedOutSaysSo() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-fake-gh-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let gh = folder.appendingPathComponent("gh").path
+        let script = """
+        #!/bin/sh
+        echo 'To get started with GitHub CLI, please run:  gh auth login' >&2
+        exit 4
+
+        """
+        try Data(script.utf8).write(to: URL(fileURLWithPath: gh))
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: gh)
+        let client = GitHubCLIBoardClient(findGH: { gh })
+        XCTAssertEqual(client.pullRequests(repository: "acme/widgets", state: .open), .failure(.notSignedIn))
+        XCTAssertEqual(
+            ProjectBoard.FetchError.notSignedIn.message,
+            "gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh."
+        )
+    }
+
     func testWithoutGhNothingRuns() {
         let client = GitHubCLIBoardClient(findGH: { nil })
         XCTAssertEqual(client.pullRequests(repository: "acme/widgets", state: .open), .failure(.ghMissing))
