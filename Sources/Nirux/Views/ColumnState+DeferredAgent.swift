@@ -5,6 +5,14 @@ import AppKit
 extension ColumnState {
     var isAwaitingResume: Bool { deferredAgent != nil }
 
+    /// Its terminal runs, or will in a moment, yet was never given a size:
+    /// it has no surface then, and what it prints is lost (see
+    /// `NiruxShellView.sizeRunningTerminalsOffScreen`). A column whose
+    /// agent waits to resume runs nothing.
+    var runsWithoutSize: Bool {
+        terminalView != nil && !isAwaitingResume && view.frame.isEmpty
+    }
+
     /// Where the agent will resume, while it waits to.
     var awaitingResumeDirectory: String? { isAwaitingResume ? launchDirectory : nil }
 

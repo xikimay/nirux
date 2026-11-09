@@ -581,6 +581,24 @@ extension NiruxShellView {
         }
     }
 
+    /// Only the space on screen is laid out: another space's workspace
+    /// keeps the frames it had when last shown, none if it never was. A
+    /// terminal there that runs without a size (a task its Lead started
+    /// while the user views another space, an agent Resume All Agents
+    /// started there) gets no surface, and Ghostty's session drops what it
+    /// prints until it has one (`InMemoryTerminalSession.receive`): such a
+    /// workspace gets the size it has on screen, and keeps its surfaces
+    /// when shown. Its terminals draw nothing meanwhile (see
+    /// `syncTerminalOcclusion`).
+    private func sizeRunningTerminalsOffScreen(width: CGFloat, height: CGFloat) {
+        let visible = Set(visibleWorkspaceIndices)
+        for (index, workspace) in workspaces.enumerated()
+        where !visible.contains(index) && workspace.columns.contains(where: \.runsWithoutSize) {
+            workspace.containerView.frame = NSRect(x: 0, y: 0, width: width, height: height)
+            workspace.layoutAndScroll(viewportWidth: width, height: height, animated: false)
+        }
+    }
+
     func layoutWorkspaceStrip(_ layout: StripLayout) {
         let viewportW = layout.viewportW
         let rowH = layout.rowH
@@ -592,6 +610,7 @@ extension NiruxShellView {
         for index in visibleWorkspaceIndices {
             workspaces[index].layoutAndScroll(viewportWidth: viewportW, height: rowH, animated: animated)
         }
+        sizeRunningTerminalsOffScreen(width: viewportW, height: rowH)
         // Animated path: add a vertical slide over the direct frame change.
         if animated, let layer = verticalStrip.layer, oldY != targetY {
             let anim = CABasicAnimation(keyPath: "transform.translation.y")
