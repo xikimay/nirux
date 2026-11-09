@@ -173,7 +173,7 @@ extension NiruxShellView {
         // would take from it. The board shows it in this section when it
         // is saved with it already, else in the first unsaved section
         // reading it; this one reads what the form suggests.
-        if let repository = config.gitHubRepository, read.section.config?.gitHubRepository != repository,
+        if let repository = config.gitHubRepository,
            let reader = read.sections.first(where: { section in
                guard section.config == nil else { return false }
                let shown = section.id == read.section.id
