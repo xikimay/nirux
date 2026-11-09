@@ -418,18 +418,36 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertNil(machine.visibleQuestion(foreground: claude), "read as it came")
     }
 
-    /// `claude` left the terminal (quit, killed): its turn end and its
-    /// question are behind.
-    func testLeavingClaudeEndsItsTurnEnd() throws {
+    /// `claude` left the terminal (a `claude -p` done, a crash) before
+    /// its verdict: the verdict still alerts, as its Stop would have. A
+    /// turn end found done and a question asked are behind with it.
+    func testLeavingClaudeKeepsOnlyAPendingVerdict() throws {
         var request = try XCTUnwrap(endTurn().turnEnd)
         machine.tick(fgName: "zsh", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 6))
-        XCTAssertFalse(machine.isQuietTurnEnd)
-        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false))
+        XCTAssertEqual(machine.applyTurnEndVerdict(.unknown, for: request, isUserFocused: false), .turnFinished)
 
         machine = AgentStatusMachine()
         request = try XCTUnwrap(endTurn().turnEnd)
         _ = machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false)
         machine.tick(fgName: "zsh", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 6))
+        XCTAssertNil(machine.askedQuestion)
+
+        // Done, then Codex in the same terminal: its turn end counts.
+        machine = AgentStatusMachine()
+        request = try XCTUnwrap(endTurn().turnEnd)
+        _ = machine.applyTurnEndVerdict(.done, for: request, isUserFocused: false)
+        machine.tick(fgName: "codex", isUserFocused: false, now: Date(timeIntervalSince1970: t0 + 6))
+        XCTAssertTrue(machine.apply(event(.turnComplete, at: 9, kind: .codex), isUserFocused: false).firedAttention)
+        XCTAssertFalse(machine.isQuietTurnEnd)
+    }
+
+    /// A turn Claude goes on with by itself (a tool call, no prompt) puts
+    /// the question behind; a subagent's work doesn't (see above).
+    func testMainThreadGoingOnEndsTheQuestion() throws {
+        let request = try XCTUnwrap(endTurn().turnEnd)
+        _ = machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false)
+        XCTAssertNotNil(machine.askedQuestion)
+        _ = machine.apply(event(.preToolUse, at: 20, tool: "Bash"), isUserFocused: false)
         XCTAssertNil(machine.askedQuestion)
     }
 

@@ -498,7 +498,11 @@ struct AgentStatusMachine {
 
     /// A main-thread tool event: the failed turn is behind.
     private mutating func noteMainThreadMoved(_ event: AgentHookEvent) {
-        if event.agentID == nil { turnFailure = nil }
+        guard event.agentID == nil else { return }
+        turnFailure = nil
+        // Went on by itself (no prompt: a background task, a wakeup): the
+        // question is behind it.
+        askedQuestion = nil
     }
 
     /// The receiver's report on a sidebar approval. A decision that
@@ -863,9 +867,12 @@ struct AgentStatusMachine {
         // it, which can come first too: a Stop while the heartbeat waited
         // with Nirux in the background.
         if fgName != "claude" || hookKind != "claude" { lastAttentionReason = nil }
-        // Its turn end, and the question it asked, are behind with it.
+        // A turn end found done, and the question asked, are behind with
+        // it. One still waiting for its verdict gets it, and alerts as its
+        // Stop would have: a `claude -p` or a crash leaves before its
+        // SessionEnd is applied.
         if fgName != "claude" {
-            quietTurnEnd = nil
+            if quietTurnEnd == .done { quietTurnEnd = nil }
             askedQuestion = nil
         }
         // Another integrated agent took over the terminal: a `claude` that
