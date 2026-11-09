@@ -148,9 +148,12 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
 
     private func checkSetupNow() -> Setup {
         setupLock.withLock {
-            // Checked by another caller while this one waited.
+            // Checked by another caller while this one waited (or rested by
+            // failures): the refresh asked for is done.
             let fresh: Setup? = lock.withLock {
-                cachedSetup.flatMap { isFresh($0, at: now()) ? $0.setup : nil }
+                guard let cached = cachedSetup, isFresh(cached, at: now()) else { return nil }
+                isRefreshingSetup = false
+                return cached.setup
             }
             if let fresh { return fresh }
             let setup = checkSetup()

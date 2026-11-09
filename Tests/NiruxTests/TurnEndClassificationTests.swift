@@ -20,6 +20,11 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertTrue(excerpt.hasPrefix("Context xxx"))
         XCTAssertTrue(excerpt.contains("\n[…]\n"))
         XCTAssertTrue(excerpt.hasSuffix("Shall I merge?"), "the question that ends it survives")
+
+        // Bounded in scalars, not characters: 2,000 characters of two
+        // scalars each are cut too.
+        let combining = try XCTUnwrap(TurnEndText.excerpt(String(repeating: "e\u{301}", count: 2_000)))
+        XCTAssertEqual(combining.unicodeScalars.count, 3_000 + "\n[…]\n".unicodeScalars.count)
     }
 
     func testLastLineSkipsCodeAndCleansTheText() throws {
@@ -75,7 +80,10 @@ final class TurnEndClassificationTests: XCTestCase {
             return try XCTUnwrap(AgentHookEvent(kind: .claude, payload: payload, env: env, now: 0)).finalMessage
         }
         XCTAssertEqual(try message([:]), "Shall I merge?")
-        for variable in ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"] {
+        for variable in [
+            "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
+            "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR"
+        ] {
             XCTAssertNil(try message([variable: "1"]), variable)
         }
         XCTAssertEqual(try message(["CLAUDE_CODE_USE_BEDROCK": "0", "ANTHROPIC_API_KEY": ""]), "Shall I merge?", "off")
@@ -263,6 +271,31 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertTrue(later.firedAttention)
         XCTAssertFalse(machine.isQuietTurnEnd)
         XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false))
+    }
+
+    /// A subagent's dialog that opened and closed without alerting (another
+    /// hook answered it) leaves the verdict to alert.
+    func testDialogClosedWithoutAnAlertKeepsTheVerdict() throws {
+        let request = try XCTUnwrap(endTurn().turnEnd)
+        _ = machine.apply(event(.permissionRequest, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: request, isUserFocused: false), "open: its own alert speaks")
+        XCTAssertFalse(machine.apply(event(.userPromptSubmit, at: 9_000), isUserFocused: false).firedAttention, "settled")
+
+        machine = AgentStatusMachine()
+        let again = try XCTUnwrap(endTurn().turnEnd)
+        _ = machine.apply(event(.permissionRequest, at: 6, agent: "sub", tool: "Bash"), isUserFocused: false)
+        _ = machine.apply(event(.postToolUse, at: 7, agent: "sub", tool: "Bash"), isUserFocused: false)
+        XCTAssertEqual(machine.applyTurnEndVerdict(.asks, for: again, isUserFocused: false), .askedInReply("Shall I merge?"))
+    }
+
+    /// A turn Claude started by itself (no prompt) and ended before the
+    /// last verdict: the earlier turn end alerts as before.
+    func testLaterTurnEndBeforeTheVerdictSettlesTheEarlierOne() throws {
+        let first = try XCTUnwrap(endTurn().turnEnd)
+        let later = machine.apply(event(.stop, at: 9, message: "Done."), isUserFocused: false)
+        XCTAssertTrue(later.firedAttention)
+        XCTAssertNotNil(later.turnEnd, "the later one waits for its own verdict")
+        XCTAssertNil(machine.applyTurnEndVerdict(.asks, for: first, isUserFocused: false))
     }
 
     func testAnotherAttentionDuringTheWaitAlertsAndDropsTheVerdict() throws {
@@ -460,6 +493,7 @@ final class TurnEndClassificationTests: XCTestCase {
         while alerts.value.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(alerts.value, [.askedInReply("Shall I merge it?")])
         XCTAssertEqual(classifier.messages.value, [asks])
+        withExtendedLifetime(center) {}
     }
 
     /// The option turned off while a verdict was on its way: the turn
@@ -472,6 +506,7 @@ final class TurnEndClassificationTests: XCTestCase {
         let deadline = Date().addingTimeInterval(10)
         while alerts.value.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(alerts.value, [.turnFinished])
+        withExtendedLifetime(center) {}
     }
 
     /// A turn end put behind before its run starts gets no run.
@@ -491,6 +526,7 @@ final class TurnEndClassificationTests: XCTestCase {
         }
         XCTAssertEqual(classifier.messages.value, ["Done."], "only the turn end still waiting")
         XCTAssertEqual(alerts.value, [.askedInReply("Done.")])
+        withExtendedLifetime(center) {}
     }
 
     /// A Mission child that asked its parent waits on it: quiet, unread.

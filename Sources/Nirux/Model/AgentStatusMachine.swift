@@ -369,7 +369,9 @@ struct AgentStatusMachine {
         }
         closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
         endTurn()
-        quietTurnEnd = nil
+        // A turn Claude started by itself (no prompt) ended before the
+        // last one's verdict.
+        settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
         mainTurnEndedAt = now
         turnFailure = event.name == .stopFailure
             ? AgentTurnFailure(
@@ -422,8 +424,9 @@ struct AgentStatusMachine {
     /// classifier couldn't read alerts as every turn end did; one that's
     /// done stays quiet. `isUserFocused` is now's: a user looking at the
     /// column needs no alert. Dropped once that turn end is behind (a new
-    /// prompt, a later turn end, another conversation) or another attention
-    /// came after it (a dialog, a notification), which speaks for itself.
+    /// prompt, a later turn end, another conversation), once an alert went
+    /// out since (see `block`), or while a dialog waits (its own alert,
+    /// Claude's `permission_prompt`, speaks for it).
     mutating func applyTurnEndVerdict(
         _ verdict: TurnEndVerdict,
         for request: TurnEndRequest,
@@ -432,7 +435,7 @@ struct AgentStatusMachine {
         guard quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt) else { return nil }
         // Settled, whichever way: nothing is left to alert for later.
         quietTurnEnd = nil
-        guard lastAttentionReason == .turnFinished, openDialogs.isEmpty, turnFailure == nil else { return nil }
+        guard openDialogs.isEmpty, turnFailure == nil else { return nil }
         let reason: AgentAttentionReason
         switch verdict {
         case .done:
@@ -628,6 +631,9 @@ struct AgentStatusMachine {
         state = .needsAttention
         guard alert, !attentionAlerted else { return false }
         attentionAlerted = true
+        // The user is alerted now: the turn end waiting for its verdict
+        // needs no alert of its own.
+        if case .pending = quietTurnEnd { quietTurnEnd = nil }
         return true
     }
 
