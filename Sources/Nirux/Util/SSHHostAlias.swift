@@ -8,6 +8,12 @@ import Foundation
 enum SSHHostAlias {
     /// `configFile` replaces the user's SSH config (tests).
     static func isGitHub(_ host: String, configFile: String? = nil) -> Bool {
+        resolve(host, configFile: configFile) ?? false
+    }
+
+    /// Whether `host` stands for github.com; nil when ssh didn't answer
+    /// (not cached: asked again next time).
+    static func resolve(_ host: String, configFile: String? = nil) -> Bool? {
         let host = host.lowercased()
         if host == "github.com" || host == "ssh.github.com" { return true }
         // A name ssh can't read as an option.
@@ -20,7 +26,7 @@ enum SSHHostAlias {
             arguments: arguments,
             currentDirectoryURL: FileManager.default.temporaryDirectory,
             timeout: 5
-        ), result.terminationStatus == 0 else { return false }
+        ), result.terminationStatus == 0 else { return nil }
         let output = String(decoding: result.standardOutput, as: UTF8.self)
         let hostName = output.split(separator: "\n").first { $0.hasPrefix("hostname ") }
             .map { $0.dropFirst("hostname ".count).trimmingCharacters(in: .whitespaces).lowercased() }

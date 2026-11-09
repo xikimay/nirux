@@ -20,10 +20,11 @@ extension NiruxShellView {
         // A window opening reads the tab once, on that repository.
         showSpaceSettings(profileID: profileID, tab: .board, boardRepository: openForm == nil ? repository : nil)
         guard let repository, let settings = spaceSettings, settings.spaceID == profileID else { return }
+        guard settings.boardRepository != repository else { return }
         if let openForm {
             // What is typed there is saved, or let go, first.
             openForm.requestRepository(repository)
-        } else if settings.boardRepository != repository {
+        } else {
             // A window already open, reading: again on it, once that lands.
             loadBoardTab(spaceID: profileID, repository: repository)
         }

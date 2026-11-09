@@ -544,9 +544,10 @@ final class ProjectBoardFlowTests: XCTestCase {
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
             dropWorkspaceSnapshots(shell)
 
-            try waitUntil("both repositories read") {
+            try waitUntil("both repositories read, docs’ remote too") {
                 guard case .sections(let sections, _)? = board.view.content?.body else { return false }
                 return sections.map { $0.rows.compactMap(\.pullRequest?.number) } == [[12], [21], []]
+                    && sections.last?.note != nil
             }
             guard case .sections(let sections, let others)? = board.view.content?.body else { return XCTFail("no sections") }
             XCTAssertEqual(sections.map(\.title), ["front", "back", "docs"], "the default repository first")
