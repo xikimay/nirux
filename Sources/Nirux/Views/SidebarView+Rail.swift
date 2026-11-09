@@ -111,9 +111,10 @@ extension SidebarView {
         return tile
     }
 
-    /// VoiceOver reads the tooltip: its first two lines, then the rest.
+    /// VoiceOver reads the tooltip: its first two lines and the task it is
+    /// a sub-task of, then the rest.
     private func describe(_ tile: SidebarRailTileView, as tooltip: SidebarRailTooltip) {
-        tile.setAccessibilityLabel([tooltip.title, tooltip.detail].compactMap { $0 }.joined(separator: ", "))
+        tile.setAccessibilityLabel([tooltip.title, tooltip.detail, tooltip.subtask].compactMap { $0 }.joined(separator: ", "))
         tile.setAccessibilityHelp(tooltip.note)
     }
 

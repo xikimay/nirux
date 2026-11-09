@@ -566,6 +566,8 @@ struct PersistedWorkspace: Codable {
     /// Mission owning this child workspace, when the experimental handoff
     /// flow created it. Optional for backward compatibility.
     var missionID: String?
+    /// See `WorkspaceState.parentWorkspaceID`.
+    var parentWorkspaceID: String?
     var purpose: String?
     /// Optional manual phase override. Nil keeps the workspace on automatic
     /// phase derivation.
@@ -585,6 +587,8 @@ struct PersistedWorkspace: Codable {
     var reviewRuns: [String: ReviewRun]?
     /// See `WorkspaceState.startedOutsideNirux`. Written only when true.
     var startedOutsideNirux: Bool
+    /// See `WorkspaceState.startedByAgent`. Written only when true.
+    var startedByAgent: Bool
     /// See `WorkspaceState.isLead`. Written only when true: a build before
     /// the Lead restores it as a plain workspace.
     var isLead: Bool
@@ -600,6 +604,7 @@ struct PersistedWorkspace: Codable {
         profileID: String? = nil,
         isInactive: Bool = false,
         missionID: String? = nil,
+        parentWorkspaceID: String? = nil,
         purpose: String? = nil,
         phase: WorkspacePhase? = nil,
         unknownPhaseRawValue: String? = nil,
@@ -612,6 +617,7 @@ struct PersistedWorkspace: Codable {
         blockerIsFromLead: Bool = false,
         reviewRuns: [String: ReviewRun]? = nil,
         startedOutsideNirux: Bool = false,
+        startedByAgent: Bool = false,
         isLead: Bool = false,
         reportsToLead: Bool = false
     ) {
@@ -623,6 +629,7 @@ struct PersistedWorkspace: Codable {
         self.profileID = profileID
         self.isInactive = isInactive
         self.missionID = missionID
+        self.parentWorkspaceID = parentWorkspaceID
         self.purpose = purpose
         self.phase = phase
         self.unknownPhaseRawValue = phase == nil ? unknownPhaseRawValue : nil
@@ -635,14 +642,16 @@ struct PersistedWorkspace: Codable {
         self.blockerIsFromLead = blockerIsFromLead
         self.reviewRuns = reviewRuns
         self.startedOutsideNirux = startedOutsideNirux
+        self.startedByAgent = startedByAgent
         self.isLead = isLead
         self.reportsToLead = reportsToLead
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID
+        case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID, parentWorkspaceID
         case purpose, phase, lastSummary, lastSummaryIsManual, lastActivityAt
-        case nextStep, blocker, nextStepIsFromLead, blockerIsFromLead, reviewRuns, startedOutsideNirux, isLead, reportsToLead
+        case nextStep, blocker, nextStepIsFromLead, blockerIsFromLead, reviewRuns, startedOutsideNirux, startedByAgent, isLead
+        case reportsToLead
     }
 
     init(from decoder: Decoder) throws {
@@ -655,6 +664,9 @@ struct PersistedWorkspace: Codable {
         profileID = try container.decodeIfPresent(String.self, forKey: .profileID)
         isInactive = try container.decodeIfPresent(Bool.self, forKey: .isInactive) ?? false
         missionID = try container.decodeIfPresent(String.self, forKey: .missionID)
+        // Only the sidebar's order: a shape this build can't read never
+        // fails the state.
+        parentWorkspaceID = (try? container.decodeIfPresent(String.self, forKey: .parentWorkspaceID)) ?? nil
         purpose = try container.decodeIfPresent(String.self, forKey: .purpose)
         let phaseRawValue = try container.decodeIfPresent(String.self, forKey: .phase)
         phase = phaseRawValue.flatMap(WorkspacePhase.init(rawValue:))
@@ -669,6 +681,7 @@ struct PersistedWorkspace: Codable {
         // Only badges: a shape this build can't read never fails the state.
         reviewRuns = (try? container.decodeIfPresent([String: ReviewRun].self, forKey: .reviewRuns)) ?? nil
         startedOutsideNirux = (try? container.decodeIfPresent(Bool.self, forKey: .startedOutsideNirux)) ?? false
+        startedByAgent = (try? container.decodeIfPresent(Bool.self, forKey: .startedByAgent)) ?? false
         isLead = (try? container.decodeIfPresent(Bool.self, forKey: .isLead)) ?? false
         reportsToLead = (try? container.decodeIfPresent(Bool.self, forKey: .reportsToLead)) ?? false
     }
@@ -683,6 +696,7 @@ struct PersistedWorkspace: Codable {
         try container.encodeIfPresent(profileID, forKey: .profileID)
         try container.encode(isInactive, forKey: .isInactive)
         try container.encodeIfPresent(missionID, forKey: .missionID)
+        try container.encodeIfPresent(parentWorkspaceID, forKey: .parentWorkspaceID)
         try container.encodeIfPresent(purpose, forKey: .purpose)
         try container.encodeIfPresent(
             phase?.rawValue ?? unknownPhaseRawValue,
@@ -697,6 +711,7 @@ struct PersistedWorkspace: Codable {
         if blockerIsFromLead { try container.encode(true, forKey: .blockerIsFromLead) }
         try container.encodeIfPresent(reviewRuns, forKey: .reviewRuns)
         if startedOutsideNirux { try container.encode(true, forKey: .startedOutsideNirux) }
+        if startedByAgent { try container.encode(true, forKey: .startedByAgent) }
         if isLead { try container.encode(true, forKey: .isLead) }
         if reportsToLead { try container.encode(true, forKey: .reportsToLead) }
     }

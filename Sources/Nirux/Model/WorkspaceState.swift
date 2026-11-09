@@ -47,6 +47,12 @@ final class WorkspaceState {
     /// must not be selected or closed again.
     var isClosing = false
     let missionID: String?
+    /// The task this one is a sub-task of: it lists under it in the
+    /// sidebar (see `WorkspaceStore.visibleWorkspaceIndices(in:)`). Set
+    /// when it opens: by ⌘N's "Sub-task of", or by the worktree skill's
+    /// `parentWorkspace`, Missions on or off, when that one is a task
+    /// (`NiruxShellView.isTask`): never the main checkout or a Lead.
+    let parentWorkspaceID: String?
     /// Controls mission variables for terminals created after a Settings
     /// change. Already-running shells retain the environment they launched
     /// with and pick up changes after a new terminal or app restart.
@@ -61,6 +67,10 @@ final class WorkspaceState {
     /// environment, nor its first agent the setup script (docs/projects.md,
     /// section 5). Kept across launches.
     let startedOutsideNirux: Bool
+    /// Opened by an agent's request from a Nirux terminal (the worktree
+    /// skill), not by the user: the Lead's `list_tasks` says who started
+    /// it. Kept across launches.
+    let startedByAgent: Bool
     /// The space's Lead (docs/spaces.md, "The Lead"): pinned at the top of
     /// its space, one per space, never inactive. Its shells get
     /// `NIRUX_LEAD=1`, fixed when each starts, which gives their Claude the
@@ -163,8 +173,10 @@ final class WorkspaceState {
         cwd: String,
         profileID: String = WorkspaceProfile.defaultID,
         missionID: String? = nil,
+        parentWorkspaceID: String? = nil,
         missionHandoffsEnabled: Bool = false,
         startedOutsideNirux: Bool = false,
+        startedByAgent: Bool = false,
         isLead: Bool = false,
         reportsToLead: Bool = false,
         initialAgentUUID: String = UUID().uuidString
@@ -172,6 +184,7 @@ final class WorkspaceState {
         self.id = id
         // Before the first column: its shell reads them.
         self.startedOutsideNirux = startedOutsideNirux
+        self.startedByAgent = startedByAgent
         self.isLead = isLead
         self.reportsToLead = reportsToLead
         self.cwd = cwd
@@ -179,6 +192,7 @@ final class WorkspaceState {
         self.titleIsManual = (title != nil)
         self.profileID = profileID
         self.missionID = missionID
+        self.parentWorkspaceID = parentWorkspaceID
         self.missionHandoffsEnabled = missionHandoffsEnabled
 
         containerView = NSView()

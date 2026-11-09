@@ -5,6 +5,11 @@ import AppKit
 /// template, and the branch the task gets, which follows the description
 /// until the user edits it.
 ///
+/// Opened from a task's "New Sub-task…", it reads "New Sub-task in
+/// <space>", and the task it starts lists under that task, in its
+/// repository, while "Sub-task of “<task>”" stays checked; it needs a
+/// description then.
+///
 /// Start with a description hands a `NewTask.Request` to the shell and
 /// waits: the sheet stays open, with the error, when the worktree can't be
 /// created. Close hides it meanwhile, so the window isn't held up by a long
@@ -97,6 +102,24 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         }
     }
     let reportCheckbox = NSButton(checkboxWithTitle: "Report to the Lead", target: nil, action: nil)
+
+    /// A task the new one goes under in the sidebar, and the space's
+    /// repository it works in.
+    struct ParentTask: Equatable {
+        let workspaceID: String
+        let title: String
+        let repositoryKey: String
+    }
+
+    /// "New Sub-task…": "Sub-task of “<title>”" shows, checked. Nil: no
+    /// checkbox.
+    private(set) var parentTask: ParentTask?
+    let subtaskCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+
+    /// The parent task while its checkbox is checked.
+    var subtaskParentID: String? {
+        subtaskCheckbox.state == .on ? parentTask?.workspaceID : nil
+    }
     private let reportHint = NSTextField(wrappingLabelWithString:
         "The Lead follows this task and answers its questions. Only what needs you reaches you, in amber.")
 
@@ -153,17 +176,18 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     /// tasks start by default.
     func show(
         attachedTo window: NSWindow, space: Space, repositories: [Repository], selectedKey: String?,
-        agent: NiruxApp.WorkspaceAgent, homeFolder: String
+        parentTask: ParentTask? = nil, agent: NiruxApp.WorkspaceAgent, homeFolder: String
     ) {
         parentWindow = window
         self.space = space
+        self.parentTask = parentTask
         self.repositories = repositories
         self.homeFolder = homeFolder
         selectedRepositoryKey = repositories.contains { $0.key == selectedKey } ? selectedKey : repositories.first?.key
         let panel = buildPanel()
         self.panel = panel
         agentPopup.selectItem(at: Self.agents.firstIndex { $0.agent == agent } ?? 0)
-        headingLabel.stringValue = "New in \(space.name)"
+        updateForSubtask()
         rebuildRepositoryPopup()
         // Laid out first: the sheet comes down at its size.
         repositoryChanged()
@@ -173,6 +197,14 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
 
     func focus() {
         panel?.makeKeyAndOrderFront(nil)
+    }
+
+    /// The heading says what the sheet makes, in its space. A sub-task is
+    /// new work, in its task's repository: Existing Branch… and the
+    /// Repository popup (see `refresh`) show only without one.
+    private func updateForSubtask() {
+        headingLabel.stringValue = "\(subtaskParentID == nil ? "New" : "New Sub-task") in \(space.name)"
+        existingBranchButton.isHidden = subtaskParentID != nil
     }
 
     func dismiss() {
@@ -231,7 +263,10 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         self.repositories = repositories
         if !repositories.isEmpty { suggestion = nil }
         let previous = selectedRepositoryKey
-        selectedRepositoryKey = repositories.contains { $0.key == key } ? key : repositories.first?.key
+        // A sub-task stays in its task's repository, the popup hidden.
+        let wanted = subtaskParentID != nil ? parentTask?.repositoryKey : key
+        selectedRepositoryKey = [wanted, key].compactMap { $0 }.first { candidate in repositories.contains { $0.key == candidate } }
+            ?? repositories.first?.key
         rebuildRepositoryPopup()
         if selectedRepositoryKey != previous || info == nil { repositoryChanged() } else { refresh() }
     }
@@ -329,6 +364,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     @objc func startAction(_ sender: Any?) {
         guard panel != nil, !isStarting else { return }
         guard !taskText.isEmpty else {
+            // A sub-task is a task: nothing to start yet.
+            guard subtaskParentID == nil else { return NSSound.beep() }
             let open = onOpenShell
             let repository = selectedRepository
             dismiss()
@@ -364,6 +401,20 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
 
     @objc func editBranchAction(_ sender: Any?) {
         beginEditingBranch()
+    }
+
+    @objc func subtaskToggled(_ sender: Any?) {
+        restoreReturnKey()
+        updateForSubtask()
+        // Checked again: back in the task's repository.
+        if subtaskParentID != nil, let key = parentTask?.repositoryKey, key != selectedRepositoryKey,
+           repositories.contains(where: { $0.key == key }) {
+            selectedRepositoryKey = key
+            selectRepositoryItem()
+            repositoryChanged()
+        } else {
+            refresh()
+        }
     }
 
     @objc func repositoryPopupChanged(_ sender: Any?) {
@@ -413,7 +464,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         return NewTask.Request(
             description: taskText, template: selectedTemplate, agent: selectedAgent,
             projectID: space.id, branch: branch, target: target, fetchesFirst: !startsWithoutFetch,
-            reportsTo: lead != nil && reportCheckbox.state == .on ? (reportsTo ?? lead) : nil
+            reportsTo: lead != nil && reportCheckbox.state == .on ? (reportsTo ?? lead) : nil,
+            parentWorkspaceID: subtaskParentID
         )
     }
 
@@ -456,8 +508,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     private func refresh() {
         guard panel != nil else { return }
         placeholderLabel.isHidden = !descriptionView.string.isEmpty
-        repositoryPopup.isHidden = !(repositories.count >= 2 || (repositories.isEmpty && !space.isGeneral))
-        startButton.isEnabled = !isStarting && (taskText.isEmpty || info?.target != nil)
+        repositoryPopup.isHidden = subtaskParentID != nil || !(repositories.count >= 2 || (repositories.isEmpty && !space.isGeneral))
+        startButton.isEnabled = !isStarting && (taskText.isEmpty ? subtaskParentID == nil : info?.target != nil)
         var showsField = false
         var showsEdit = false
         var showsNewSpace = false
@@ -465,6 +517,8 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         if isStarting {
             let fetching = startsWithoutFetch ? nil : info?.target?.remoteBranchName.map { "Fetching \($0), then creating" }
             setLine((fetching ?? "Creating") + " the worktree… Close keeps it going: the workspace opens when it’s ready.", secondary)
+        } else if taskText.isEmpty, subtaskParentID != nil {
+            setLine("Describe the sub-task.", secondary)
         } else if taskText.isEmpty {
             let folder = selectedRepository?.folder ?? homeFolder
             let shown = folder == homeFolder ? "~" : (folder as NSString).abbreviatingWithTildeInPath
@@ -530,7 +584,10 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     private func setControlsEnabled(_ enabled: Bool) {
         descriptionView.isEditable = enabled
         descriptionView.textColor = enabled ? Theme.Color.textPrimary : Theme.Color.textTertiary
-        for control in [repositoryPopup, agentPopup, templatePopup, branchField, existingBranchButton, reportCheckbox] as [NSControl] {
+        let controls: [NSControl] = [
+            repositoryPopup, agentPopup, templatePopup, branchField, existingBranchButton, subtaskCheckbox, reportCheckbox
+        ]
+        for control in controls {
             control.isEnabled = enabled
         }
         if enabled { templatePopup.isEnabled = info != nil }
@@ -648,6 +705,12 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         branchField.frame = NSRect(x: margin, y: y, width: fieldWidth, height: 22)
         fromLabel.frame = NSRect(x: margin + fieldWidth + 10, y: y + 3, width: inner - fieldWidth - 10, height: 18)
         y += max(22, lineHeight + 4) + 12
+
+        if !subtaskCheckbox.isHidden {
+            // Its own width: a click beside it doesn't toggle it.
+            subtaskCheckbox.frame = NSRect(x: margin - 2, y: y, width: min(inner, ceil(subtaskCheckbox.fittingSize.width)), height: 18)
+            y += 18 + 12
+        }
 
         if !reportCheckbox.isHidden {
             // Its own width: a click beside it doesn't toggle it.
@@ -781,7 +844,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         content.subviews.forEach { $0.removeFromSuperview() }
         let views: [NSView] = [
             headingLabel, descriptionBox, repositoryPopup, agentPopup, templatePopup, lineLabel, editBranchButton,
-            branchField, fromLabel, newSpaceButton, reportCheckbox, reportHint, errorLabel, existingBranchButton,
+            branchField, fromLabel, newSpaceButton, subtaskCheckbox, reportCheckbox, reportHint, errorLabel, existingBranchButton,
             cancelButton, startButton
         ]
         views.forEach(content.addSubview)
@@ -792,6 +855,12 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
         reportCheckbox.setAccessibilityHelp(reportHint.stringValue)
         reportCheckbox.isHidden = lead == nil
         reportHint.isHidden = lead == nil
+        subtaskCheckbox.target = self
+        subtaskCheckbox.action = #selector(subtaskToggled(_:))
+        subtaskCheckbox.lineBreakMode = .byTruncatingMiddle
+        subtaskCheckbox.title = parentTask.map { WorkspaceInfo.subtaskText(of: $0.title) } ?? ""
+        subtaskCheckbox.state = .on
+        subtaskCheckbox.isHidden = parentTask == nil
 
         let panel = NewTaskSheet(
             contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 320),
