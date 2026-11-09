@@ -189,13 +189,13 @@
   // out of the editor. Cmd+Left at column 1 and Cmd+Right at the line end
   // focus the column beside (on an indented line, column 1 once a Cmd+Left
   // got there: caretAtTextEdge); Cmd+Up on the first line and Cmd+Down on
-  // the last switch workspace (with none that way, the app has the caret
-  // move after all: moveCaretToTextEdge). Elsewhere Monaco moves the caret, and
-  // so it does for a held key (a repeat never leaves), a selection or
-  // several carets (the key acts on them) and Shift+Cmd+Arrow (it
-  // selects). Monaco's widgets keep the chords they bind: the suggestion
-  // list's Cmd+Up/Down, an inline suggestion's Cmd+Right, the code action
-  // menu's.
+  // the last switch workspace. With no column or workspace that way, the
+  // app has the caret move after all (moveCaretToTextEdge). Elsewhere
+  // Monaco moves the caret, and so it does for a held key (a repeat never
+  // leaves), a selection or several carets (the key acts on them) and
+  // Shift+Cmd+Arrow (it selects). Monaco's widgets keep the chords they
+  // bind: the suggestion list's Cmd+Up/Down, an inline suggestion's
+  // Cmd+Right, the code action menu's.
   function mutant(id) { return window.__niruxMutant === id; }
   var textEdgeKeys = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
   var textEdgeCommands = { left: "cursorHome", right: "cursorEnd", up: "cursorTop", down: "cursorBottom" };
@@ -285,8 +285,9 @@
     }
   }, true);
 
-  // The Cmd+Arrow chords as keybindings of `target` that, while
-  // textEdgeWhen holds, come before Monaco's caret moves: the app navigates.
+  // The Cmd+Arrow chords as keybindings that, while textEdgeWhen holds,
+  // come before Monaco's caret moves: the app navigates. addCommand binds
+  // page-wide; the diff editor binds them again like its other commands.
   function bindTextEdgeKeys(target) {
     var arrows = {
       left: monaco.KeyCode.LeftArrow,
