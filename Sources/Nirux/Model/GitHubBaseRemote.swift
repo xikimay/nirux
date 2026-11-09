@@ -51,9 +51,11 @@ enum GitHubBaseRemote {
         let remotes = Self.remotes(listing: listing.stdout, resolutions: resolutions.stdout)
         guard let first = remotes.first else { return .noRemote }
         for remote in remotes {
-            if let repository = remote.resolvedRepository { return .gitHub(repository: repository, remote: remote.name) }
             switch Self.repository(of: remote.url, resolveAlias: resolveAlias) {
-            case .some(.some(let repository)): return .gitHub(repository: repository, remote: remote.name)
+            // A repository gh-resolved names counts on a GitHub remote only,
+            // as gh drops remotes on hosts it doesn't know first.
+            case .some(.some(let repository)):
+                return .gitHub(repository: remote.resolvedRepository ?? repository, remote: remote.name)
             case .some(.none): continue
             // Not knowing this one, a remote gh ranks lower can't stand in.
             case .none: return .unread
@@ -81,10 +83,14 @@ enum GitHubBaseRemote {
     /// others by name.
     static func remotes(listing: String, resolutions: String) -> [Remote] {
         var urls: [String: String] = [:]
-        for line in listing.split(separator: "\n") where line.hasSuffix(" (fetch)") {
-            guard let tab = line.firstIndex(of: "\t") else { continue }
+        for line in listing.split(separator: "\n") {
+            // `name\turl (fetch)`, then ` [blob:none]` in a partial clone.
+            guard let tab = line.firstIndex(of: "\t"),
+                  let fetch = line.range(of: " (fetch)", range: tab..<line.endIndex),
+                  fetch.upperBound == line.endIndex || line[fetch.upperBound...].hasPrefix(" [")
+            else { continue }
             let name = String(line[..<tab])
-            if urls[name] == nil { urls[name] = String(line[line.index(after: tab)...].dropLast(" (fetch)".count)) }
+            if urls[name] == nil { urls[name] = String(line[line.index(after: tab)..<fetch.lowerBound]) }
         }
         var resolved: [String: String] = [:]
         for line in resolutions.split(separator: "\n") {

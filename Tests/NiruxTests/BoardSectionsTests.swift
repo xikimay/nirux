@@ -185,6 +185,9 @@ final class BoardSectionsTests: XCTestCase {
         // gh's set-default naming a repository none of the remotes is.
         try make("parent", "https://github.com/me/parent.git")
         _ = try git(["config", "remote.origin.gh-resolved", "acme/parent"], root + "/parent")
+        // gh-resolved on a remote that isn't on GitHub (Enterprise, say): not ours.
+        try make("enterprise", "https://ghe.example.com/acme/app.git")
+        _ = try git(["config", "remote.origin.gh-resolved", "acme/app"], root + "/enterprise")
         // A URL git rewrites: read as git fetches it.
         try make("rewritten", "gh:acme/rewritten.git")
         _ = try git(["config", "url.https://github.com/.insteadOf", "gh:"], root + "/rewritten")
@@ -204,7 +207,7 @@ final class BoardSectionsTests: XCTestCase {
         try FileManager.default.createDirectory(atPath: root + "/plain/.git", withIntermediateDirectories: true)
         let anchor = { (gitDir: String) in SpaceAnchor(kind: .gitRepository(commonDir: root + "/" + gitDir), name: gitDir) }
         let names = [
-            "triangle/.git", "fork/.git", "marked/.git", "parent/.git", "rewritten/.git", "apart.git", "bare.git",
+            "triangle/.git", "fork/.git", "marked/.git", "parent/.git", "enterprise/.git", "rewritten/.git", "apart.git", "bare.git",
             "alias/.git", "lab/.git", "slow/.git", "corrupt/.git", "docs/.git", "saved/.git", "plain/.git", "gone/.git"
         ]
         let context = BoardSections.Context(anchors: names.map(anchor))
@@ -217,6 +220,7 @@ final class BoardSectionsTests: XCTestCase {
             root + "/fork/.git": .gitHub(repository: "acme/real", baseBranch: "trunk", remote: "upstream"),
             root + "/marked/.git": .gitHub(repository: "acme/chosen", baseBranch: nil, remote: "chosen"),
             root + "/parent/.git": .gitHub(repository: "acme/parent", baseBranch: "main", remote: "origin"),
+            root + "/enterprise/.git": .notGitHub(host: "ghe.example.com", remote: "origin"),
             root + "/rewritten/.git": .gitHub(repository: "acme/rewritten", baseBranch: "main", remote: "origin"),
             root + "/apart.git": .gitHub(repository: "acme/apart", baseBranch: nil, remote: "origin"),
             root + "/bare.git": .gitHub(repository: "acme/bare", baseBranch: nil, remote: "origin"),
@@ -236,13 +240,14 @@ final class BoardSectionsTests: XCTestCase {
         let listing = [
             "zeta\thttps://github.com/a/zeta.git (fetch)", "zeta\thttps://github.com/a/zeta.git (push)",
             "origin\thttps://github.com/a/origin.git (fetch)", "origin\thttps://mirror.example/x.git (push)",
-            "alpha\thttps://github.com/a/alpha.git (fetch)", "github\thttps://github.com/a/github.git (fetch)",
+            "alpha\thttps://github.com/a/alpha.git (fetch)", "github\thttps://github.com/a/github.git (fetch) [blob:none]",
             "my.dots\thttps://github.com/a/dots.git (fetch)", "upstream\thttps://github.com/a/upstream.git (fetch)"
         ].joined(separator: "\n")
         let resolutions = "remote.zeta.gh-resolved base\nremote.nourl.gh-resolved base"
         let remotes = GitHubBaseRemote.remotes(listing: listing, resolutions: resolutions)
         XCTAssertEqual(remotes.map(\.name), ["zeta", "upstream", "github", "origin", "alpha", "my.dots"])
         XCTAssertEqual(remotes.first { $0.name == "origin" }?.url, "https://github.com/a/origin.git", "its fetch URL")
+        XCTAssertEqual(remotes.first { $0.name == "github" }?.url, "https://github.com/a/github.git", "a partial clone's")
         XCTAssertNil(remotes.first?.resolvedRepository, "base: its own URL")
         let named = GitHubBaseRemote.remotes(listing: listing, resolutions: "remote.alpha.gh-resolved acme/parent")
         XCTAssertEqual(named.first?.name, "alpha")
