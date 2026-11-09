@@ -55,7 +55,7 @@ extension NiruxApp {
         case .field:
             return event
         case .menuThenField:
-            return NSApp.mainMenu?.performKeyEquivalent(with: event) == true ? nil : event
+            return Self.performMenuKeyEquivalent(event) ? nil : event
         case .fieldEditor:
             column.findBar?.field.currentEditor()?.keyDown(with: event)
             return nil
@@ -117,6 +117,18 @@ extension NiruxApp {
         return false
     }
 
+    /// The menu's take on a key the interceptor hands it. A held Cmd+Arrow
+    /// (Focus Left/Right, Workspace Up/Down) moves once: its auto-repeats
+    /// are consumed, not walked through every column or workspace. True
+    /// when consumed.
+    private static func performMenuKeyEquivalent(_ event: NSEvent) -> Bool {
+        if event.isARepeat,
+           WebContentKeyRouting.navigatesColumnsOrWorkspaces(keyCode: event.keyCode, modifierFlags: event.modifierFlags) {
+            return true
+        }
+        return NSApp.mainMenu?.performKeyEquivalent(with: event) == true
+    }
+
     /// A column whose keyboard is a web view's: browser, editor, Branch
     /// Review. Returned to AppKit, a Cmd-chord would go to its page before
     /// the menu (Cmd+Down would scroll instead of switching workspace).
@@ -174,7 +186,7 @@ extension NiruxApp {
         }
         // Let the menu bar handle this key equivalent directly,
         // bypassing the WebView's performKeyEquivalent
-        if NSApp.mainMenu?.performKeyEquivalent(with: event) == true {
+        if Self.performMenuKeyEquivalent(event) {
             return nil // consumed by menu
         }
         return event // no menu match — let WebView handle it
@@ -242,7 +254,7 @@ extension NiruxApp {
                 // menu sees them, so Cmd+T/Cmd+arrow/etc. silently die if we
                 // just return the event here. Mirror the WebView/Editor path
                 // above: invoke the menu key equivalent and consume on hit.
-                if NSApp.mainMenu?.performKeyEquivalent(with: event) == true {
+                if Self.performMenuKeyEquivalent(event) {
                     return nil
                 }
                 return event

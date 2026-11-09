@@ -276,10 +276,12 @@
     var plain = !!edge && event.metaKey && !event.shiftKey && !event.altKey && !event.ctrlKey &&
       !event.repeat && !event.isComposing;
     var target = plain ? codeEditorWithCaret() : null;
-    var atEdge = !!target && textEdgeDestinations[edge] && caretAtTextEdge(target, edge);
+    var caretAtEdge = !!target && caretAtTextEdge(target, edge);
+    var atEdge = caretAtEdge && textEdgeDestinations[edge];
     if (target && edge === "left") {
-      // Any cursor change since tells a later Cmd+Left this one is stale.
-      lastCaretHome = atEdge
+      // Only a Cmd+Left that moves the caret: at the edge, it moves nothing
+      // or leaves. Any cursor change since tells a later one it is stale.
+      lastCaretHome = caretAtEdge
         ? null
         : {
           editor: target,

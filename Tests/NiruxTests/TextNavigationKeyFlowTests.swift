@@ -133,6 +133,9 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 harness.waitUntil("the column on the left", timeout: 5) { workspace.focusedIndex == editorIndex - 1 }
                 UIFlowHarness.run("window.webkit.messageHandlers.nirux.postMessage({ type: 'textEdgeKey', edge: 'right' }); 0", in: webView)
                 XCTAssertEqual(workspace.focusedIndex, editorIndex - 1, "a late edge key moved the keyboard")
+                // Held down, Cmd+Arrow moves once: its repeats go nowhere.
+                press(.right, [.command], in: harness, isARepeat: true)
+                XCTAssertEqual(workspace.focusedIndex, editorIndex - 1, "a held Cmd+Right moved on")
 
                 press(.right, [.command], in: harness)
                 XCTAssertEqual(workspace.focusedIndex, editorIndex)
@@ -155,9 +158,30 @@ final class TextNavigationKeyFlowTests: XCTestCase {
 
     /// Opened at an indented line, as a terminal's file link does, the caret
     /// is at column 1: Cmd+Left goes to the indent, then back to column 1,
-    /// and only then leaves the editor. A Cmd+Left in another tab doesn't
-    /// count: switching tabs moves no caret.
+    /// and only then leaves the editor.
     func testCommandLeftOnAnIndentedLineGoesToTheIndentFirst() throws {
+        try UIFlowHarness.run { harness in
+            try harness.withApp {
+                let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+                let path = harness.repo + "/indented.txt"
+                try "first\n    code();\n".write(toFile: path, atomically: true, encoding: .utf8)
+                let (editorIndex, webView) = try openWithKeyboard(path, line: 2, in: harness)
+                waitForCaret("2:1", in: webView)
+
+                press(.left, [.command], in: harness)
+                waitForCaret("2:5", in: webView)
+                press(.left, [.command], in: harness)
+                waitForCaret("2:1", in: webView)
+                XCTAssertEqual(workspace.focusedIndex, editorIndex)
+                press(.left, [.command], in: harness)
+                harness.waitUntil("the column on the left", timeout: 5) { workspace.focusedIndex == editorIndex - 1 }
+            }
+        }
+    }
+
+    /// A Cmd+Left that put the caret on column 1 of an indented line counts
+    /// in its own tab only: switching tabs moves no caret.
+    func testCommandLeftInAnotherTabGoesToTheIndentFirst() throws {
         try UIFlowHarness.run { harness in
             try harness.withApp {
                 let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
@@ -165,12 +189,8 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 let second = harness.repo + "/second.txt"
                 try "    first();\n".write(toFile: first, atomically: true, encoding: .utf8)
                 try "    second();\n".write(toFile: second, atomically: true, encoding: .utf8)
-                harness.shell.openInEditorColumn(path: first, line: 1)
-                let editorIndex = workspace.focusedIndex
+                let (editorIndex, webView) = try openWithKeyboard(first, line: 1, in: harness)
                 let editor = try XCTUnwrap(workspace.columns[safe: editorIndex]?.editorColumn)
-                let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
-                XCTAssertIdentical(harness.window.firstResponder, webView)
-                waitForMonacoText(in: webView)
                 waitForCaret("1:1", in: webView)
 
                 press(.left, [.command], in: harness)
@@ -188,6 +208,37 @@ final class TextNavigationKeyFlowTests: XCTestCase {
                 XCTAssertEqual(workspace.focusedIndex, editorIndex)
                 press(.left, [.command], in: harness)
                 harness.waitUntil("the column on the left", timeout: 5) { workspace.focusedIndex == editorIndex - 1 }
+            }
+        }
+    }
+
+    /// In the first column, Cmd+Left at column 1 has nowhere to go and moves
+    /// nothing: once the line is indented (an agent rewrote the file) and a
+    /// column is on the left, Cmd+Left goes to the indent first.
+    func testCommandLeftThatMovedNothingDoesntCountForTheIndent() throws {
+        try UIFlowHarness.run { harness in
+            try harness.withApp {
+                let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+                let path = harness.repo + "/plain.txt"
+                try "plain();\n".write(toFile: path, atomically: true, encoding: .utf8)
+                let (editorIndex, webView) = try openWithKeyboard(path, line: 1, in: harness)
+                harness.shell.moveColumn(.left)
+                XCTAssertEqual(workspace.focusedIndex, editorIndex - 1)
+                XCTAssertNil(harness.shell.adjacentColumnIndex(.left), "a column on the left")
+                harness.window.makeFirstResponder(webView)
+                waitForMonacoText(in: webView)
+                waitForCaret("1:1", in: webView)
+
+                press(.left, [.command], in: harness)
+                UIFlowHarness.run("\(Self.focusedMonaco).getModel().setValue('    plain();\\n'); 0", in: webView)
+                harness.shell.moveColumn(.right)
+                XCTAssertEqual(workspace.focusedIndex, editorIndex)
+                harness.window.makeFirstResponder(webView)
+                waitForMonacoText(in: webView)
+                waitForCaret("1:1", in: webView)
+                press(.left, [.command], in: harness)
+                waitForCaret("1:5", in: webView)
+                XCTAssertEqual(workspace.focusedIndex, editorIndex, "Cmd+Left left before the indent")
             }
         }
     }
@@ -426,6 +477,19 @@ final class TextNavigationKeyFlowTests: XCTestCase {
             canonicalize: { $0 },
             isOpenableFile: { _ in true }
         ))
+    }
+
+    /// Opens `path` at `line` in a new editor column, as a terminal's file
+    /// link does: Monaco has the keyboard.
+    private func openWithKeyboard(_ path: String, line: Int, in harness: UIFlowHarness) throws -> (Int, WKWebView) {
+        let workspace = try XCTUnwrap(harness.shell.activeWorkspace)
+        harness.shell.openInEditorColumn(path: path, line: line)
+        let editorIndex = workspace.focusedIndex
+        let editor = try XCTUnwrap(workspace.columns[safe: editorIndex]?.editorColumn)
+        let webView = try XCTUnwrap(UIFlowHarness.descendant(of: editor, as: WKWebView.self))
+        XCTAssertIdentical(harness.window.firstResponder, webView)
+        waitForMonacoText(in: webView)
+        return (editorIndex, webView)
     }
 
     /// Opens README.md in a new editor column, its Monaco with the keyboard.
