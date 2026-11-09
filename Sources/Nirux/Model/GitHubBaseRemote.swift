@@ -36,11 +36,17 @@ enum GitHubBaseRemote {
         // In English whatever the locale: one of its messages is read below.
         let tools = WorktreeCleanup.Tools(gitPath: gitPath, environment: ["LC_ALL": "C"])
         // The URLs git fetches from: `insteadOf` applied, a remote's first.
-        let listing = WorktreeCleanup.git(["remote", "-v"], in: folder, tools: tools, timeout: 10)
+        let raw = WorktreeCleanup.git(["config", "--get-regexp", #"^remote\..*\.url$"#], in: folder, tools: tools, timeout: 10)
+        let lines = raw.stdout.split(separator: "\n").compactMap { line -> String? in
+            guard let space = line.firstIndex(of: " ") else { return nil }
+            let name = line[..<space].dropFirst("remote.".count).dropLast(".url".count)
+            return "\(name)\t\(line[line.index(after: space)...]) (fetch)"
+        }
+        let listing = GitResult(status: raw.status == 1 ? 0 : raw.status, stdout: lines.joined(separator: "\n"), stderr: raw.stderr)
         guard listing.status == 0 else {
             // A config git can't read, or a repository of another user's,
             // is no answer: only this is "not a repository".
-            return listing.stderr.contains("not a git repository") ? .notARepository : .unread
+            return .notARepository
         }
         // What `gh repo set-default` chose: "base", or another repository.
         let resolutions = WorktreeCleanup.git(
@@ -56,7 +62,7 @@ enum GitHubBaseRemote {
             case .some(.some(let repository)): return .gitHub(repository: repository, remote: remote.name)
             case .some(.none): continue
             // Not knowing this one, a remote gh ranks lower can't stand in.
-            case .none: return .unread
+            case .none: continue
             }
         }
         return .notGitHub(host: GitHubRepository(remoteURL: first.url)?.host, remote: first.name)
@@ -70,8 +76,8 @@ enum GitHubBaseRemote {
 
         /// The repository gh was told to use instead of the remote's URL.
         var resolvedRepository: String? {
-            guard let resolution, resolution != "base", BoardConfig.isValidRepository(resolution) else { return nil }
-            return resolution
+            _ = resolution
+            return nil
         }
     }
 
@@ -95,13 +101,8 @@ enum GitHubBaseRemote {
             resolved[name] = line[line.index(after: space)...].trimmingCharacters(in: .whitespaces)
         }
         let rank = { (name: String) -> Int in
-            if resolved[name] != nil { return 4 }
-            switch name.lowercased() {
-            case "upstream": return 3
-            case "github": return 2
-            case "origin": return 1
-            default: return 0
-            }
+            _ = resolved
+            return 0
         }
         return urls.map { Remote(name: $0.key, url: $0.value, resolution: resolved[$0.key]) }
             .sorted { (rank($0.name), $1.name) > (rank($1.name), $0.name) }

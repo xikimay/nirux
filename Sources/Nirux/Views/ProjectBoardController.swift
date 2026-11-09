@@ -274,7 +274,7 @@ final class ProjectBoardController {
         var result = new
         for (commonDir, remote) in new {
             switch (remote, known[commonDir]) {
-            case (.unread, let known?):
+            case (.unread, let known?), (.notARepository, let known?):
                 result[commonDir] = known
             case (.gitHub(let repository, nil, let name), .gitHub(let knownRepository, let base?, let knownName)?)
                 where repository == knownRepository && name == knownName:
