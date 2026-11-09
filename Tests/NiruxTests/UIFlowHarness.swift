@@ -165,6 +165,7 @@ final class UIFlowHarness {
         shell.worktreeCleanupPanel?.dismiss()
         shell.newTaskPanel?.dismiss()
         shell.newSpacePanel?.dismiss()
+        shell.missionReplyPopover?.close()
         for other in NSApp.windows where other !== window && !windowsBefore.contains(ObjectIdentifier(other)) {
             if let sheet = other.attachedSheet { other.endSheet(sheet) }
             other.orderOut(nil)

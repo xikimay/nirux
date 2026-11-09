@@ -122,7 +122,8 @@ final class LeadToolsFlowTests: XCTestCase {
     /// terminal took them. They go to the answer field: typing, ⌘↩ and Esc
     /// work the first time. The test process never has a key window, so its
     /// keys come as they did then. Both a question the Lead hands over and
-    /// one that comes to the user directly, its parent gone.
+    /// one that comes to the user directly, its parent gone. Once the
+    /// popover closes or starts to, keys go to the terminal again.
     func testKeysTypedWhileTheReplyPopoverShowsGoToItsField() throws {
         try UIFlowHarness.run { harness in
             let shell = harness.shell
@@ -142,9 +143,17 @@ final class LeadToolsFlowTests: XCTestCase {
             if !shell.isSidebarExpanded { harness.runPaletteCommand("Show/Hide Sidebar") }
             harness.waitUntil("the sidebar to expand") { shell.sidebar.isExpanded }
 
+            // A terminal has the focus: without the popover, it takes the
+            // keys (a key the interceptor let through would reach the popover).
+            @MainActor func assertATerminalTakesTheKeys() {
+                let focused = shell.activeWorkspace.flatMap { $0.columns[safe: $0.focusedIndex] }
+                XCTAssertNotNil(focused?.pty, "the focused column is a terminal")
+            }
+
             try harness.withApp {
                 let handed = try ask("Keep the old date= parameter?", from: mission)
                 XCTAssertFalse(try call(LeadTools.askUser, ["task": "Export CSV", "why": "Only the user knows."], lead: lead, in: harness).isError)
+                assertATerminalTakesTheKeys()
                 var reply = try openReply(to: task, in: harness)
                 harness.press("o", keyCode: 0x1F, [])
                 harness.press("k", keyCode: 0x28, [])
@@ -154,14 +163,27 @@ final class LeadToolsFlowTests: XCTestCase {
                 harness.waitUntil("the popover to close", timeout: 5) { !reply.popover.isShown }
 
                 let direct = try ask("Comma or semicolon?", from: mission)
+                harness.alertResponses = [.alertSecondButtonReturn] // Close Workspace: the Lead has its Board too
                 shell.stopLead(spaceID: lead.space)
                 harness.waitUntil("the Lead to close") { !shell.workspaces.contains { $0 === lead.workspace } }
+                XCTAssertEqual(harness.alerts.last, "Close workspace “Lead”?")
                 let column = try XCTUnwrap(task.columns.first)
                 let row = shell.missionQuestions(foreground: { _ in nil }, now: Date().timeIntervalSince1970)[ObjectIdentifier(column)]
                 XCTAssertEqual(row?.handOff, .parentClosed)
+                assertATerminalTakesTheKeys()
                 reply = try openReply(to: task, in: harness)
                 harness.press("\u{1b}", keyCode: 0x35, [])
                 harness.waitUntil("Esc to close the popover", timeout: 5) { !reply.popover.isShown }
+                harness.press("x", keyCode: 0x07, [])
+                XCTAssertEqual(reply.controller.replyView?.string, "", "closed, it takes no key")
+
+                // A key typed while it fades out (a click outside closes it).
+                reply = try openReply(to: task, in: harness)
+                reply.popover.animates = true
+                reply.popover.performClose(nil)
+                harness.press("y", keyCode: 0x10, [])
+                XCTAssertEqual(reply.controller.replyView?.string, "", "closing, it takes no key")
+
                 reply = try openReply(to: task, in: harness)
                 harness.press(";", keyCode: 0x29, [])
                 harness.press("\r", keyCode: 0x24, [.command])

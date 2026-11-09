@@ -189,6 +189,7 @@ extension NiruxShellView {
         popover.contentViewController = controller
         popover.behavior = .transient
         popover.appearance = Theme.appearance
+        popover.delegate = controller
         controller.popover = popover
         // The sidebar rebuilds its rows; the document view under them stays.
         let host = anchor.superview ?? anchor
@@ -198,18 +199,16 @@ extension NiruxShellView {
         controller.focusReplyField()
     }
 
-    /// A key typed in the main window while the reply popover shows is for
-    /// its answer field: the popover takes the keyboard. It lacks it when
-    /// the click that opened it also brought Nirux to the front (see
-    /// `MissionReplyViewController.focusReplyField`). The popover's window,
-    /// or nil when no popover shows or it already has the keyboard.
-    func takeKeyboardForMissionReply() -> NSWindow? {
+    /// The reply popover while it shows without the keyboard, and isn't
+    /// closing: a key typed in the main window then is for its answer field.
+    /// It lacks the keyboard when the click that opened it also brought
+    /// Nirux to the front (see `MissionReplyViewController.focusReplyField`).
+    var missionReplyLackingKeyboard: MissionReplyViewController? {
         guard let popover = missionReplyPopover, popover.isShown,
-              let controller = popover.contentViewController as? MissionReplyViewController,
-              let window = controller.view.window, !window.isKeyWindow
+              let controller = popover.contentViewController as? MissionReplyViewController, !controller.isClosing,
+              let window = controller.view.window, window.isVisible, !window.isKeyWindow
         else { return nil }
-        controller.focusReplyField()
-        return window
+        return controller
     }
 
     /// The user's answer from the popover, as if the parent had sent it:
