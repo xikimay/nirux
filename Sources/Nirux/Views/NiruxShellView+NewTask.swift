@@ -244,7 +244,7 @@ extension NiruxShellView {
     /// Handover files never belong in a commit: the repository ignores them
     /// (see `GitWorktree.ensureExcluded`), in any folder, since a task's
     /// workspace may open in a folder of the repository.
-    nonisolated static let excludedHandovers = NiruxApp.WorkspaceAgent.allCases.map(handoverFilename(for:))
+    nonisolated static let excludedHandovers = HandoverFile.filenames
 
     /// Off the main thread through nonisolated functions, so the closures
     /// can't inherit this view's main-actor isolation (see `runOffMain` in

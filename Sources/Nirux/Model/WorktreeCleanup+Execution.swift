@@ -202,13 +202,14 @@ extension WorktreeCleanup {
         for path in restore.files {
             let file = URL(fileURLWithPath: worktree).appendingPathComponent(path)
             var info = stat()
-            guard isInside(file.deletingLastPathComponent(), worktree: worktree),
-                  lstat(file.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
-                  let now = FileStamp(file)
+            guard isInside(file.deletingLastPathComponent(), worktree: worktree), lstat(file.path, &info) == 0
             else { continue }
+            let type = info.st_mode & S_IFMT
+            // git writes a committed symlink back as one; `hash-object`
+            // would read what it points to, so only a stamp vouches for it.
             let isGitsCopy = restore.wroteAll
-                ? now == restore.written[path]
-                : matchesIndex(path, in: worktree, tools: tools)
+                ? (type == S_IFREG || type == S_IFLNK) && FileStamp(file) == restore.written[path]
+                : type == S_IFREG && matchesIndex(path, in: worktree, tools: tools)
             if isGitsCopy { unlink(file.path) }
         }
         for folder in restore.missingFolders {

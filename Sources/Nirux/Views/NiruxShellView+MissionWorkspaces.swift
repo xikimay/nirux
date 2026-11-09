@@ -258,10 +258,7 @@ extension NiruxShellView {
     }
 
     nonisolated static func handoverFilename(for agent: NiruxApp.WorkspaceAgent) -> String {
-        switch agent {
-        case .claude: return ".claude-handover.md"
-        case .codex: return ".codex-handover.md"
-        }
+        HandoverFile.filename(for: agent)
     }
 
     /// Types each pending Mission message into its recipient's prompt if

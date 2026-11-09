@@ -522,7 +522,7 @@ extension WorkspaceState {
             else { return }
             let workingDirectory = self.focusedWorkingDirectory
             guard let observation = self.beginGitContextObservation(at: workingDirectory) else { return }
-            GitDetect.contextAsync(at: workingDirectory) { [weak self] result in
+            GitDetect.contextAsync(at: workingDirectory, startFolder: self.cwd) { [weak self] result in
                 guard let self else { return }
                 let observationResult = self.applyGitContextObservation(
                     result,

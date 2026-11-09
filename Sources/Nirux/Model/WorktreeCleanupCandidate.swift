@@ -9,6 +9,8 @@ struct WorktreeCleanupCandidate: Equatable {
     struct Workspace: Equatable {
         let id: String
         let title: String
+        /// The folder it started in: a task's handover is written there.
+        var cwd = ""
     }
 
     /// The worktree's top level, or the missing folder, as the workspaces
@@ -82,6 +84,9 @@ struct WorktreeCleanupCandidate: Equatable {
     }
 
     var workspaceIDs: [String] { workspaces.map(\.id) }
+
+    /// For `WorktreeCleanup.inspect(path:agentFolders:)`.
+    var agentFolders: [String] { workspaces.map(\.cwd).filter { !$0.isEmpty } }
 
     /// One line under the row's title in the bulk list; a blocked row's
     /// other problems are in its tooltip.

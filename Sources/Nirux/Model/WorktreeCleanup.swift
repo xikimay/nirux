@@ -18,7 +18,7 @@ import Foundation
 enum WorktreeCleanup {
     /// The handovers Nirux writes, one per agent, in the folder the agent
     /// starts in: the top level, or a task's subfolder.
-    static let handoverNames = Set(NiruxShellView.excludedHandovers)
+    static let handoverNames = Set(HandoverFile.filenames)
     /// Claude Code's local settings, in the folder it runs in.
     static let localSettingsPath = ".claude/settings.local.json"
 
@@ -97,8 +97,9 @@ enum WorktreeCleanup {
         let nestedWorktrees: [String]
         /// Disposable files present and untracked.
         let untrackedDisposable: [String]
-        /// Tracked disposable files modified in the folder alone (" M"):
-        /// the copy goes to the Trash, then git writes the committed version
+        /// Tracked disposable files modified in the folder alone (" M"), or
+        /// a committed symlink Nirux replaced with its handover (" T"): the
+        /// copy goes to the Trash, then git writes the committed version
         /// back so that `git worktree remove` finds nothing changed.
         let modifiedDisposable: [String]
         /// Tracked disposable files deleted from the folder alone (" D"):
@@ -215,7 +216,7 @@ enum WorktreeCleanup {
     /// worktree, which `info/exclude` can't hide. A staged change is
     /// someone's work.
     static func isDisposable(_ entry: StatusEntry, startFolders: Set<String> = []) -> Bool {
-        ["??", " M", " D"].contains(entry.code) && isDisposablePath(entry.path, startFolders: startFolders)
+        ["??", " M", " T", " D"].contains(entry.code) && isDisposablePath(entry.path, startFolders: startFolders)
     }
 
     static func isRegenerable(_ entry: String) -> Bool {
@@ -439,7 +440,7 @@ enum WorktreeCleanup {
             }
             switch entry.code {
             case "??": files.untrackedDisposable.append(entry.path)
-            case " M": files.modifiedDisposable.append(entry.path)
+            case " M", " T": files.modifiedDisposable.append(entry.path)
             default: files.deletedDisposable.append(entry.path)
             }
         }

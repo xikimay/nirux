@@ -258,10 +258,13 @@ final class WorktreeCleanupTests: XCTestCase {
         let report = try report()
         XCTAssertEqual(
             report.problems,
-            ["1 pull request for feat/x, none from acme/widgets (a fork's, or the repository was renamed or deleted)."]
+            ["1 merged pull request for feat/x, none from acme/widgets (a fork's, or the repository was renamed or deleted)."]
         )
         XCTAssertNil(report.notMerged)
 
+        // A fork's open one, from a branch of the same name: not this one's.
+        try setPullRequests([pullRequest(13, "OPEN", head: try head(at: worktree), owner: "someone")])
+        XCTAssertEqual(try self.report().notMerged, "no pull request")
         try setPullRequests([])
         XCTAssertEqual(try self.report().notMerged, "no pull request")
     }
@@ -355,6 +358,36 @@ final class WorktreeCleanupTests: XCTestCase {
         XCTAssertEqual(try String(contentsOfFile: trashed("app/.claude-handover.md"), encoding: .utf8), "# task in app/\n")
         XCTAssertFalse(FileManager.default.fileExists(atPath: trashed(".codex-handover.md")))
         XCTAssertFalse(branchExists("feat/x"))
+    }
+
+    func testHandoverOverACommittedSymlinkDoesNotBlock() throws {
+        try FileManager.default.createSymbolicLink(atPath: worktree + "/.claude-handover.md", withDestinationPath: "docs/plan.md")
+        try git(["add", ".claude-handover.md"], at: worktree)
+        try commit("an agent committed a symlink as its handover", at: worktree)
+        try setPullRequests([pullRequest(12, "MERGED", head: try head(at: worktree))])
+        // Nirux replaces the link with its handover: git reads " T".
+        try FileManager.default.removeItem(atPath: worktree + "/.claude-handover.md")
+        try write("# new handover\n", to: ".claude-handover.md", in: worktree)
+        XCTAssertEqual(try readyPlan().worktree.modifiedDisposable, [".claude-handover.md"])
+
+        // git writes the link back; refused, the link makes way again.
+        try gitRunning("""
+            if [ "$1 $2" = "worktree remove" ]; then echo 'fatal: refused by the test' >&2; exit 128; fi
+            """)
+        guard case .failed(let message) = WorktreeCleanup.execute(try readyPlan(), tools: tools) else {
+            return XCTFail("the refused removal must stop the cleanup")
+        }
+        XCTAssertTrue(message.contains("still there"), message)
+        let attributes = try FileManager.default.attributesOfItem(atPath: worktree + "/.claude-handover.md")
+        XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeRegular)
+        XCTAssertEqual(try String(contentsOfFile: worktree + "/.claude-handover.md", encoding: .utf8), "# new handover\n")
+
+        tools.gitPath = "/usr/bin/git"
+        XCTAssertEqual(
+            WorktreeCleanup.execute(try readyPlan(), tools: tools),
+            .cleaned(forcedBranchDelete: true, trashFolder: "widgets.feat-x leftovers")
+        )
+        XCTAssertEqual(try String(contentsOfFile: trashed(".claude-handover.md"), encoding: .utf8), "# new handover\n")
     }
 
     func testFailedWriteBackPutsTheLeftoversBack() throws {

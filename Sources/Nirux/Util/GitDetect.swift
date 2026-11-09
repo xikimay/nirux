@@ -128,37 +128,26 @@ enum GitDetect {
 
     /// Whether `git status --porcelain=v1 -z --no-renames` lists anything
     /// but Nirux's handover and Claude Code's local settings, at the top
-    /// level or in `startFolder`: alone, they don't keep a merged pull
-    /// request from showing. Read as bytes, decoded leniently: without
-    /// `-z` git quotes a name with a space or an accent, and a name that
-    /// isn't UTF-8 must not fail the read. Stops at the first other entry.
+    /// level or in `startFolder` (relative to it): alone, they don't keep a
+    /// merged pull request from showing. Read as bytes and decoded
+    /// leniently: without `-z` git quotes a name with a space or an accent,
+    /// and a name that isn't UTF-8 must not fail the read.
     static func isDirty(status: Data, startFolder: String? = nil) -> Bool {
         let folders: Set<String> = startFolder.map { [$0] } ?? []
-        var start = status.startIndex
-        while start < status.endIndex {
-            let end = status[start...].firstIndex(of: 0) ?? status.endIndex
-            let field = status[start..<end]
-            start = end < status.endIndex ? status.index(after: end) : end
-            guard field.count > 3 else {
-                if field.isEmpty { continue }
-                return true
-            }
-            let entry = WorktreeCleanup.StatusEntry(
-                code: String(decoding: field.prefix(2), as: UTF8.self),
-                path: String(decoding: field.dropFirst(3), as: UTF8.self)
-            )
-            if !WorktreeCleanup.isDisposable(entry, startFolders: folders) { return true }
-        }
-        return false
+        return WorktreeCleanup.statusEntries(String(decoding: status, as: UTF8.self))
+            .contains { !WorktreeCleanup.isDisposable($0, startFolders: folders) }
     }
 
-    static func context(at path: String) -> GitContext? {
-        guard case .observed(let context) = observe(at: path) else { return nil }
+    /// `startFolder`: the folder the workspace started in (its `cwd`), the
+    /// one Clean Up asks about too, whichever column is focused.
+    static func context(at path: String, startFolder: String? = nil) -> GitContext? {
+        guard case .observed(let context) = observe(at: path, startFolder: startFolder) else { return nil }
         return context
     }
 
     static func observe(
         at path: String,
+        startFolder startFolderPath: String? = nil,
         gitPath: String = "/usr/bin/git",
         timeout: TimeInterval = 30
     ) -> GitContextDetectionResult {
@@ -233,11 +222,9 @@ enum GitDetect {
         let canonicalRepositoryRoot = URL(
             fileURLWithPath: repositoryRoot
         ).standardizedFileURL.path
-        // The observed folder (the focused terminal's, or the workspace's):
-        // a task's handover and local settings get written where its agent
-        // starts. Clean Up asks the folders workspaces started in instead;
-        // where they differ, both refuse rather than clear.
-        let startFolder = workingDirectory.realPath.flatMap { folder -> String? in
+        // A task's handover and local settings get written where its agent
+        // starts.
+        let startFolder = startFolderPath?.realPath.flatMap { folder -> String? in
             guard let root = repositoryRoot.realPath, folder.hasPrefix(root + "/") else { return nil }
             return String(folder.dropFirst(root.count + 1))
         }
@@ -286,10 +273,11 @@ enum GitDetect {
 
     static func contextAsync(
         at path: String,
+        startFolder: String? = nil,
         completion: @escaping @MainActor @Sendable (GitContextDetectionResult) -> Void
     ) {
         DispatchQueue.global(qos: .utility).async {
-            let result = observe(at: path)
+            let result = observe(at: path, startFolder: startFolder)
             DispatchQueue.main.async {
                 completion(result)
             }

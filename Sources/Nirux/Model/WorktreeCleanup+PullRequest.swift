@@ -38,10 +38,14 @@ extension WorktreeCleanup {
             return (nil, ["gh couldn't list the pull requests of \(branch)\(reason)"], nil)
         }
         let candidates = json.compactMap { pullRequest(from: $0, headRepository: repository) }
-        // Some exist, none from this repository (a fork's, or one gh can't
-        // read): not "nothing to clean up yet".
-        if candidates.isEmpty, !json.isEmpty {
-            let found = json.count == 1 ? "1 pull request" : "\(json.count) pull requests"
+        // A merged one, none from this repository: maybe this branch's, from
+        // a repository since renamed or deleted, so not "nothing to clean up
+        // yet". An open or closed one from a fork that used the same branch
+        // name (`patch-1`) says nothing about this branch.
+        let mergedElsewhere = json.filter { ($0["state"] as? String)?.uppercased() == "MERGED" }
+        if candidates.isEmpty, !mergedElsewhere.isEmpty {
+            let found = mergedElsewhere.count == 1
+                ? "1 merged pull request" : "\(mergedElsewhere.count) merged pull requests"
             return (nil, [
                 "\(found) for \(branch), none from \(repository.owner)/\(repository.name) "
                     + "(a fork's, or the repository was renamed or deleted)."
