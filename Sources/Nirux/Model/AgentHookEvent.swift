@@ -339,10 +339,13 @@ enum AgentHookCLI {
         event.approvalRequestID = wait?.requestID
         event.approvalDeadline = wait?.deadline
         event.approvalText = wait?.text
+        // Before the request shows in the queue: from then on the app holds
+        // it, and Claude giving up on the hook must still be reported.
+        let termination = wait.map { _ in TerminationWatch() }
         append(event)
-        guard let wait else { return 0 }
+        guard let wait, let termination else { return 0 }
 
-        let outcome = waitForDecision(wait, on: channel, parent: parent)
+        let outcome = waitForDecision(wait, on: channel, parent: parent, termination: termination)
         // Reported before the decision reaches Claude, so it precedes the
         // events the decision causes (PostToolUse) in the queue.
         append(.approvalResolved(event, outcome: outcome, now: Date().timeIntervalSince1970))
@@ -358,21 +361,18 @@ enum AgentHookCLI {
     }
 
     /// Waits on a monotonic clock, so a wall-clock step never stretches
-    /// the wait; stops early once Claude abandons the hook or the app that
-    /// would answer is gone (checked about once a second). Claude abandons
-    /// a hook with SIGTERM (then SIGKILL): caught, so the report still
-    /// goes out and the app drops the request at once.
+    /// the wait; stops early once Claude abandons the hook (see
+    /// `TerminationWatch`) or the app that would answer is gone (checked
+    /// about once a second).
     private static func waitForDecision(
         _ wait: PermissionApprovalWait,
         on channel: PermissionApprovalChannel,
-        parent: pid_t
+        parent: pid_t,
+        termination: TerminationWatch
     ) -> PermissionApproval.Outcome {
-        let terminated = SignalFlag()
-        signal(SIGTERM, SIG_IGN)
-        let termination = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
-        termination.setEventHandler { terminated.raise() }
-        termination.resume()
-        defer { termination.cancel() }
+        // Until then the watch, and its source, stay alive.
+        defer { termination.stop() }
+        let terminated = termination.terminated
 
         let start = clock_gettime_nsec_np(CLOCK_MONOTONIC)
         var checks = 0
@@ -386,6 +386,30 @@ enum AgentHookCLI {
                 return checks % 10 == 0 && !channel.isAppListening()
             }
         )
+    }
+
+    /// Claude abandons a hook with SIGTERM (then SIGKILL): caught, so the
+    /// report still goes out and the app drops the request at once. In
+    /// place once `init` returns — a SIGTERM sent before the source is
+    /// registered would be ignored and never seen.
+    private struct TerminationWatch {
+        let terminated = SignalFlag()
+        private let source: DispatchSourceSignal
+
+        init() {
+            signal(SIGTERM, SIG_IGN)
+            source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+            let registered = DispatchSemaphore(value: 0)
+            source.setRegistrationHandler { registered.signal() }
+            source.setEventHandler { [terminated] in terminated.raise() }
+            source.resume()
+            // Never long; bounded, as nothing here may hang the hook.
+            _ = registered.wait(timeout: .now() + 1)
+        }
+
+        func stop() {
+            source.cancel()
+        }
     }
 
     /// Set from a signal handler's queue, read by the waiting loop.
