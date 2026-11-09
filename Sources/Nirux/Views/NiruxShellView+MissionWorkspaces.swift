@@ -94,9 +94,7 @@ extension NiruxShellView {
                     // variables: one started before Missions were turned
                     // on couldn't answer its child.
                     let requester = self.requestingWorkspace(workspaceID: parentWorkspaceID, agentUUID: parentAgentUUID)
-                    let carriesMissions = requester?.columns.first { $0.agentUUID == parentAgentUUID }?
-                        .launchEnvironment?["NIRUX_MISSION_HANDOFFS"] == "1"
-                    if carriesMissions, let parent = self.validMissionParent(
+                    if let parent = self.validMissionParent(
                         workspaceID: parentWorkspaceID,
                         agentUUID: parentAgentUUID
                     ) {

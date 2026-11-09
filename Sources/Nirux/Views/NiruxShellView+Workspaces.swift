@@ -141,9 +141,6 @@ extension NiruxShellView {
               let anchor = SpaceRouting.anchoring(location, in: [space])?.anchor, let key = anchor.key,
               newTaskRepositories(of: space).contains(where: { $0.key == key })
         else { return nil }
-        if case .folder(let path) = anchor.kind, let checkout = location.topLevel, !SpaceRouting.contains(checkout, path) {
-            return nil
-        }
         return key
     }
 
