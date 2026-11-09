@@ -613,7 +613,15 @@ extension NiruxShellView {
 
     func importBrowserCookies() {
         let sources = sideEffects.cookieSources()
-        guard !sources.isEmpty else { return }
+        guard !sources.isEmpty else {
+            let alert = NSAlert()
+            alert.messageText = "Import Failed"
+            let browsers = sideEffects.cookieBrowsers().map(\.rawValue).joined(separator: ", ")
+            alert.informativeText = "Nirux found no profile with cookies in \(browsers.isEmpty ? "your browsers" : browsers)."
+            alert.alertStyle = .warning
+            _ = runModal(alert)
+            return
+        }
 
         guard sources.count > 1 else {
             runCookieImport(from: sources[0])
