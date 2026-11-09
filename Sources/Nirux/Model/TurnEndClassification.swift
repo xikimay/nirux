@@ -82,7 +82,6 @@ enum TurnEndText {
                   let settings = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             else { return false }
             let helpers = ["apiKeyHelper", "awsCredentialExport", "awsAuthRefresh", "gcpAuthRefresh"]
-            if helpers.contains(where: { (settings[$0] as? String).map { !$0.isEmpty } ?? false }) { return true }
             let env = (settings["env"] as? [String: Any] ?? [:]).compactMapValues { $0 as? String }
             return usesOtherAccount(env)
         }
@@ -147,9 +146,6 @@ struct TurnEndMarker: Codable, Equatable {
         try? FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
         )
-        for (url, marker) in markers(in: directory) where running(marker.app.pid) != marker.app {
-            try? FileManager.default.removeItem(at: url)
-        }
         let marker = TurnEndMarker(app: app, claudeConfigDir: environment["CLAUDE_CONFIG_DIR"])
         try? JSONEncoder().encode(marker).write(to: url(for: app, in: directory), options: .atomic)
     }
@@ -167,8 +163,7 @@ struct TurnEndMarker: Codable, Equatable {
                               running: (pid_t) -> ProcessInstance? = ProcessInstance.running(pid:)) -> Bool {
         let home = environment["HOME"] ?? NSHomeDirectory()
         return markers(in: directory).contains { _, marker in
-            running(marker.app.pid) == marker.app
-                && TurnEndText.sameConfigDirectory(environment["CLAUDE_CONFIG_DIR"], marker.claudeConfigDir, home: home)
+            TurnEndText.sameConfigDirectory(environment["CLAUDE_CONFIG_DIR"], marker.claudeConfigDir, home: home)
         }
     }
 
