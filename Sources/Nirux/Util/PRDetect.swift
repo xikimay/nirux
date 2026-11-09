@@ -31,10 +31,11 @@ enum PRDetect {
     static func fetchAsync(
         branch: String,
         cwd: String,
+        startFolder: String?,
         completion: @escaping @MainActor @Sendable (FetchResult) -> Void
     ) {
         DispatchQueue.global(qos: .utility).async {
-            let result = fetch(branch: branch, cwd: cwd)
+            let result = fetch(branch: branch, cwd: cwd, startFolder: startFolder)
             DispatchQueue.main.async { completion(result) }
         }
     }
@@ -45,9 +46,9 @@ enum PRDetect {
         ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"].first { FileManager.default.fileExists(atPath: $0) }
     }
 
-    private static func fetch(branch: String, cwd: String) -> FetchResult {
+    private static func fetch(branch: String, cwd: String, startFolder: String?) -> FetchResult {
         guard let ghPath = installedGHPath(),
-              let context = GitDetect.context(at: cwd),
+              let context = GitDetect.context(at: cwd, startFolder: startFolder),
               context.branch == branch
         else { return .failure }
 
@@ -213,10 +214,11 @@ enum PRDetect {
     /// Get diff stats via git
     static func diffStatsAsync(
         cwd: String,
+        startFolder: String?,
         completion: @escaping @MainActor @Sendable (DiffStatsResult) -> Void
     ) {
         DispatchQueue.global(qos: .utility).async {
-            let result = diffStats(cwd: cwd)
+            let result = diffStats(cwd: cwd, startFolder: startFolder)
             DispatchQueue.main.async { completion(result) }
         }
     }
@@ -230,10 +232,11 @@ enum PRDetect {
 
     static func diffStats(
         cwd: String,
+        startFolder: String? = nil,
         gitPath: String = "/usr/bin/git"
     ) -> DiffStatsResult {
         let context: GitContext
-        switch GitDetect.observe(at: cwd, gitPath: gitPath) {
+        switch GitDetect.observe(at: cwd, startFolder: startFolder, gitPath: gitPath) {
         case .observed(let observedContext):
             context = observedContext
         case .notRepository:

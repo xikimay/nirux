@@ -17,14 +17,25 @@ extension NiruxShellView {
     /// sidebar can ask while building its menu.
     nonisolated static func worktreeCleanupPath(forCwd cwd: String) -> String? {
         guard cwd.hasPrefix("/") else { return nil }
-        var url = URL(fileURLWithPath: cwd).standardizedFileURL
-        let fileManager = FileManager.default
-        guard fileManager.fileExists(atPath: url.path) else { return url.path }
+        let path = URL(fileURLWithPath: cwd).standardizedFileURL.path
+        guard FileManager.default.fileExists(atPath: path) else { return path }
+        return linkedWorktree(holding: path)?.root
+    }
+
+    /// The linked worktree holding `folder`, which exists: the nearest
+    /// folder up whose `.git` file points into a repository's `worktrees`,
+    /// with that git dir, absolute. Nil in a main checkout, a submodule or
+    /// outside git. Paths as given: resolve `folder` first to compare.
+    nonisolated static func linkedWorktree(holding folder: String) -> (root: String, gitDir: String)? {
+        var url = URL(fileURLWithPath: folder)
         while true {
             let gitPath = url.appendingPathComponent(".git").path
             var isDirectory: ObjCBool = false
-            if fileManager.fileExists(atPath: gitPath, isDirectory: &isDirectory) {
-                return !isDirectory.boolValue && pointsIntoWorktrees(gitFile: gitPath) ? url.path : nil
+            if FileManager.default.fileExists(atPath: gitPath, isDirectory: &isDirectory) {
+                guard !isDirectory.boolValue, let contents = try? String(contentsOfFile: gitPath, encoding: .utf8),
+                      let gitDir = worktreeGitDir(contents: contents, root: url.path)
+                else { return nil }
+                return (url.path, gitDir)
             }
             let parent = url.deletingLastPathComponent()
             guard url.path != "/", parent.path != url.path else { return nil }
@@ -32,15 +43,15 @@ extension NiruxShellView {
         }
     }
 
-    /// `gitdir: …/worktrees/<id>`, as `git worktree add` writes it; a
-    /// submodule's points into `modules` instead.
-    private nonisolated static func pointsIntoWorktrees(gitFile: String) -> Bool {
-        guard let contents = try? String(contentsOfFile: gitFile, encoding: .utf8),
-              contents.hasPrefix("gitdir: ")
-        else { return false }
-        let target = contents.dropFirst("gitdir: ".count).trimmingCharacters(in: .whitespacesAndNewlines)
+    /// A `.git` file's `gitdir: …/worktrees/<id>`, as `git worktree add`
+    /// writes it (maybe relative to the worktree); a submodule's points into
+    /// `modules` instead.
+    nonisolated static func worktreeGitDir(contents: String, root: String) -> String? {
+        guard contents.hasPrefix("gitdir: ") else { return nil }
+        var target = contents.dropFirst("gitdir: ".count).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !target.hasPrefix("/") { target = (root as NSString).appendingPathComponent(target) }
         let components = target.split(separator: "/")
-        return components.count >= 2 && components[components.count - 2] == "worktrees"
+        return components.count >= 2 && components[components.count - 2] == "worktrees" ? target : nil
     }
 
     /// The card menu's "Clean Up Worktree…": suggested once the card shows
@@ -87,7 +98,7 @@ extension NiruxShellView {
     func worktreeCleanupCandidate(path: String, snapshot: ProcessSnapshot = ProcessSnapshot()) -> WorktreeCleanupCandidate {
         let isInside = Self.containment(in: path)
         let open = workspaces.filter { !$0.isClosing }
-        let members = open.filter { isInside($0.cwd) }
+        let members = worktreeMembers(path)
         let memberIDs = Set(members.map(\.id))
         var foreignAgents: [String] = []
         var unsavedEditors: [String] = []
@@ -110,7 +121,7 @@ extension NiruxShellView {
         }
         return WorktreeCleanupCandidate(
             path: path,
-            workspaces: members.map { WorktreeCleanupCandidate.Workspace(id: $0.id, title: $0.title) },
+            workspaces: members.map { WorktreeCleanupCandidate.Workspace(id: $0.id, title: $0.title, cwd: $0.cwd) },
             agents: members.flatMap { $0.openColumns.compactMap { $0.liveAgent(snapshot: snapshot) } },
             foreignAgents: foreignAgents,
             unsavedEditors: unsavedEditors,
@@ -155,12 +166,10 @@ extension NiruxShellView {
         }
     }
 
-    /// The folders the workspaces open in the worktree at `path` started
-    /// in: a task that starts in a subfolder gets its handover there, and
-    /// Claude Code its local settings.
-    func worktreeAgentFolders(_ path: String) -> [String] {
+    /// The workspaces open at `path` or below it.
+    private func worktreeMembers(_ path: String) -> [WorkspaceState] {
         let isInside = Self.containment(in: path)
-        return workspaces.filter { !$0.isClosing && isInside($0.cwd) }.map(\.cwd)
+        return workspaces.filter { !$0.isClosing && isInside($0.cwd) }
     }
 
     // MARK: Single workspace
@@ -179,7 +188,10 @@ extension NiruxShellView {
         guard worktreeCleanupsInFlight.insert(key).inserted else {
             return showToast("A clean-up of this worktree is already in progress")
         }
-        let agentFolders = worktreeAgentFolders(path)
+        // A task that starts in a subfolder gets its handover there, and
+        // Claude Code its local settings. (The candidate, with its process
+        // snapshot, is built once the checks are back.)
+        let agentFolders = worktreeMembers(path).map(\.cwd)
         DispatchQueue.global(qos: .userInitiated).async {
             let inspection = WorktreeCleanup.inspect(path: path, agentFolders: agentFolders)
             DispatchQueue.main.async { [weak self] in
@@ -320,7 +332,7 @@ extension NiruxShellView {
         }
         let candidates = worktreeCleanupCandidates()
         panel.show(attachedTo: window, candidates: candidates)
-        for candidate in candidates { inspectForPanel(candidate.path, panel: panel, queue: queue) }
+        for candidate in candidates { inspectForPanel(candidate, panel: panel, queue: queue) }
         // Workspaces in a main checkout lead to its worktrees too.
         let otherFolders = Set(workspaces.filter { !$0.isClosing }.map(\.cwd))
             .filter { Self.worktreeCleanupPath(forCwd: $0) == nil }
@@ -340,8 +352,9 @@ extension NiruxShellView {
         queue.addOperation(work)
     }
 
-    private func inspectForPanel(_ path: String, panel: WorktreeCleanupPanel, queue: OperationQueue) {
-        let agentFolders = worktreeAgentFolders(path)
+    private func inspectForPanel(_ candidate: WorktreeCleanupCandidate, panel: WorktreeCleanupPanel, queue: OperationQueue) {
+        let path = candidate.path
+        let agentFolders = candidate.agentFolders
         Self.runOffMain(on: queue) {
             let inspection = WorktreeCleanup.inspect(path: path, agentFolders: agentFolders)
             DispatchQueue.main.async { @MainActor [weak self, weak panel] in
@@ -371,8 +384,9 @@ extension NiruxShellView {
                 else { return }
                 let snapshot = ProcessSnapshot()
                 for path in paths where !panel.contains(comparablePath: Self.comparablePath(path)) {
-                    panel.append(self.worktreeCleanupCandidate(path: path, snapshot: snapshot))
-                    self.inspectForPanel(path, panel: panel, queue: queue)
+                    let candidate = self.worktreeCleanupCandidate(path: path, snapshot: snapshot)
+                    panel.append(candidate)
+                    self.inspectForPanel(candidate, panel: panel, queue: queue)
                 }
             }
         }

@@ -116,11 +116,7 @@ extension NiruxShellView {
                     return answer("Couldn’t fetch \(request.target.remoteBranchName ?? "origin"): \(message) Nothing was created; tell the user.", true)
                 }
                 var retry = request
-                retry = NewTask.Request(
-                    description: request.description, template: request.template, agent: request.agent,
-                    projectID: request.projectID, branch: request.branch, target: request.target, fetchesFirst: false,
-                    reportsTo: request.reportsTo, startedByLead: request.startedByLead
-                )
+                retry.fetchesFirst = false
                 self.startLeadTask(retry, repository: repository, fetchError: message, answer: answer)
             }
         }

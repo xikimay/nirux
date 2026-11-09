@@ -375,6 +375,9 @@ final class PtySession: @unchecked Sendable {
         state.machine.applyTurnEndVerdict(verdict, for: request, isUserFocused: isUserFocused)
     }
 
+    /// When the user last typed into this terminal (0: never).
+    var lastKeystrokeAt: TimeInterval { state.machine.lastKeystrokeAt }
+
     /// The oldest dialog (permission, question) the agent may be showing —
     /// even while the column is focused and reads as idle.
     var pendingAgentDialog: AgentPermissionRequest? { state.machine.pendingDialogs.first }

@@ -33,6 +33,8 @@ struct ColumnInfo: Hashable {
     var deferredAgent: SidebarDeferredAgent?
     /// A Mission question this column's agent waits on.
     var missionQuestion: SidebarMissionQuestion?
+    /// The column's identity (`ColumnState.id`): a menu's items find it by it.
+    var id: UUID?
 
     /// Hashable is hand-written to compare `agentElapsedSeconds` at the
     /// granularity it's *displayed* ("12m" via shortDuration), not raw
@@ -422,7 +424,7 @@ enum WorktreeCleanupMenuOffer {
 
 enum WorkspaceSidebarAction {
     case moveUp, moveDown, markActive, markInactive
-    case close, rename, editContext, reviewBranch, newSubtask
+    case close, rename, editContext, reviewBranch, newSubtask, moveOutOfParent
     case closeColumn(columnIndex: Int)
     case cleanUpWorktree
     case askWhyCIFailed, rerunFailedCI

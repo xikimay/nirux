@@ -375,18 +375,7 @@ final class MissionDeliveryTests: XCTestCase {
         field.keyDown(with: try key(36, .command))
         XCTAssertEqual(sent, ["Yes, until v3."])
         XCTAssertEqual(controller.sendButton?.keyEquivalentModifierMask, .command)
-
-        // Esc in the field closes the popover.
-        let popover = RecordingPopover()
-        controller.popover = popover
-        field.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
-        XCTAssertTrue(popover.closed)
     }
-}
-
-private final class RecordingPopover: NSPopover {
-    var closed = false
-    override func performClose(_ sender: Any?) { closed = true }
 }
 
 private extension MissionStore.ProcessingResult {

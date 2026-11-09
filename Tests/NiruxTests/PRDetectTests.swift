@@ -113,8 +113,13 @@ final class PRDetectTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        func isDirty(in folder: String = "") throws -> Bool {
-            try XCTUnwrap(GitDetect.context(at: directory.appendingPathComponent(folder).path)).identity.isDirty
+        /// Observed `at` a folder (the focused column's), for a workspace
+        /// that started in `startFolder`.
+        func isDirty(at folder: String = "", startFolder: String? = nil) throws -> Bool {
+            try XCTUnwrap(GitDetect.context(
+                at: directory.appendingPathComponent(folder).path,
+                startFolder: startFolder.map { directory.appendingPathComponent($0).path }
+            )).identity.isDirty
         }
         func write(_ text: String, _ relative: String) throws {
             let url = directory.appendingPathComponent(relative)
@@ -144,9 +149,11 @@ final class PRDetectTests: XCTestCase {
         XCTAssertFalse(try isDirty())
         try runGit(["checkout", "--", ".claude-handover.md"], at: directory)
 
-        // Where a task started, not anywhere.
+        // Where the workspace started, whichever column is focused; not
+        // anywhere else.
         try write("task in my app\n", "my app/.claude-handover.md")
-        XCTAssertFalse(try isDirty(in: "my app"))
+        XCTAssertFalse(try isDirty(startFolder: "my app"))
+        XCTAssertTrue(try isDirty(at: "my app"))
         XCTAssertTrue(try isDirty())
         try runGit(["checkout", "--", "my app/.claude-handover.md"], at: directory)
 

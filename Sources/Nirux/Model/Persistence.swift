@@ -575,6 +575,8 @@ struct PersistedWorkspace: Codable {
     var missionID: String?
     /// See `WorkspaceState.parentWorkspaceID`.
     var parentWorkspaceID: String?
+    /// See `WorkspaceState.parentIsSettled`. Written only when true.
+    var parentIsSettled: Bool
     var purpose: String?
     /// Optional manual phase override. Nil keeps the workspace on automatic
     /// phase derivation.
@@ -612,6 +614,7 @@ struct PersistedWorkspace: Codable {
         isInactive: Bool = false,
         missionID: String? = nil,
         parentWorkspaceID: String? = nil,
+        parentIsSettled: Bool = false,
         purpose: String? = nil,
         phase: WorkspacePhase? = nil,
         unknownPhaseRawValue: String? = nil,
@@ -637,6 +640,7 @@ struct PersistedWorkspace: Codable {
         self.isInactive = isInactive
         self.missionID = missionID
         self.parentWorkspaceID = parentWorkspaceID
+        self.parentIsSettled = parentIsSettled
         self.purpose = purpose
         self.phase = phase
         self.unknownPhaseRawValue = phase == nil ? unknownPhaseRawValue : nil
@@ -655,7 +659,7 @@ struct PersistedWorkspace: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID, parentWorkspaceID
+        case id, title, cwd, columns, focusedColumnIndex, profileID, isInactive, missionID, parentWorkspaceID, parentIsSettled
         case purpose, phase, lastSummary, lastSummaryIsManual, lastActivityAt
         case nextStep, blocker, nextStepIsFromLead, blockerIsFromLead, reviewRuns, startedOutsideNirux, startedByAgent, isLead
         case reportsToLead
@@ -674,6 +678,7 @@ struct PersistedWorkspace: Codable {
         // Only the sidebar's order: a shape this build can't read never
         // fails the state.
         parentWorkspaceID = (try? container.decodeIfPresent(String.self, forKey: .parentWorkspaceID)) ?? nil
+        parentIsSettled = (try? container.decodeIfPresent(Bool.self, forKey: .parentIsSettled)) ?? false
         purpose = try container.decodeIfPresent(String.self, forKey: .purpose)
         let phaseRawValue = try container.decodeIfPresent(String.self, forKey: .phase)
         phase = phaseRawValue.flatMap(WorkspacePhase.init(rawValue:))
@@ -704,6 +709,7 @@ struct PersistedWorkspace: Codable {
         try container.encode(isInactive, forKey: .isInactive)
         try container.encodeIfPresent(missionID, forKey: .missionID)
         try container.encodeIfPresent(parentWorkspaceID, forKey: .parentWorkspaceID)
+        if parentIsSettled { try container.encode(true, forKey: .parentIsSettled) }
         try container.encodeIfPresent(purpose, forKey: .purpose)
         try container.encodeIfPresent(
             phase?.rawValue ?? unknownPhaseRawValue,
