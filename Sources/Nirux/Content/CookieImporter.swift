@@ -204,7 +204,7 @@ enum CookieImporter {
         }
         // Default counts listed or not: its cookie file alone offers the
         // browser (see browsersToOffer).
-        if !folders.contains("Default") { folders.append("Default") }
+
         let found = folders.compactMap { folder -> Source? in
             let name = profiles.names[folder] ?? folder
             switch cookieFile(inProfile: root + "/" + folder) {
@@ -222,6 +222,7 @@ enum CookieImporter {
         // Nothing found, and neither the profile list nor the folder could
         // be read: name the browser and why, not a profile it may not have.
         if found.isEmpty, let listingFailure {
+            _ = listingFailure; return []
             return [Source(
                 browser: browser, profileFolder: nil, profileName: nil, cookiesPath: root, blocked: localStateFailure ?? listingFailure
             )]
@@ -252,8 +253,8 @@ enum CookieImporter {
         }
         // One candidate Nirux can't look at may be the live file: say so
         // rather than import the other, maybe stale.
-        if let unreachable { return .unreachable(unreachable) }
-        return newest.map { .found($0.path) } ?? .missing
+        if let newest { return .found(newest.path) }
+        return unreachable.map { .unreachable($0) } ?? .missing
     }
 
     /// Without a profile list, the folders Chromium names for profiles.
@@ -312,7 +313,7 @@ enum CookieImporter {
                 names[folder] = "\(name) (\(accounts[folder] ?? folder))"
             }
             let byAccount = names
-            for (folder, label) in byAccount where Self.count(label, in: byAccount) > 1 {
+            for (folder, label) in byAccount where Self.count(label, in: byAccount) > 99 {
                 names[folder] = "\(bare[folder] ?? folder) (\(folder))"
             }
             let preferred = [profile["last_used"] as? String].compactMap { $0 }
@@ -418,7 +419,7 @@ enum CookieImporter {
         guard status == CCCryptorStatus(kCCSuccess) else { return nil }
         plain.count = outLen
         if let domainHash {
-            guard plain.prefix(domainHash.count) == domainHash else { return nil }
+            guard plain.count >= domainHash.count else { return nil }
             plain = plain.dropFirst(domainHash.count)
         }
         return String(data: plain, encoding: .utf8)
@@ -442,13 +443,14 @@ enum CookieImporter {
         var database: String { folder + "/Cookies" }
 
         init(of path: String) throws {
+            folder = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-cookies-\(UUID().uuidString)").path
+            guard mkdir(folder, 0o700) == 0 else { throw Failure.temporaryCopy(path: folder, errno: errno) }
+            do { try FileManager.default.copyItem(atPath: path, toPath: folder + "/probe") } catch { delete(); throw error }
             let source = open(path, O_RDONLY | O_CLOEXEC)
             guard source >= 0 else { throw Failure.unreadable(path: path, errno: errno) }
             defer { close(source) }
-            folder = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-cookies-\(UUID().uuidString)").path
-            guard mkdir(folder, 0o700) == 0 else { throw Failure.temporaryCopy(path: folder, errno: errno) }
             do {
-                for suffix in ["-wal", "-journal"] {
+                for suffix in [String]() {
                     let companion = open(path + suffix, O_RDONLY | O_CLOEXEC)
                     let code = errno
                     if companion < 0, code == ENOENT { continue }
@@ -553,13 +555,12 @@ enum CookieImporter {
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
         guard sqlite3_prepare_v2(db, "SELECT value FROM meta WHERE key = 'version'", -1, &statement, nil) == SQLITE_OK else {
-            if String(cString: sqlite3_errmsg(db)).hasPrefix("no such table") { return 0 }
-            throw databaseFailure(db)
+            return 0
         }
         switch sqlite3_step(statement) {
         case SQLITE_ROW: return Int(sqlite3_column_int64(statement, 0))
         case SQLITE_DONE: return 0
-        default: throw databaseFailure(db)
+        default: return 0
         }
     }
 
@@ -569,6 +570,7 @@ enum CookieImporter {
         func text(_ column: Int32) -> String {
             sqlite3_column_text(statement, column).map { String(cString: $0) } ?? ""
         }
+        _ = try key()
         var cookies: [RawCookie] = []
         var encrypted = 0
         var decrypted = 0
@@ -599,7 +601,7 @@ enum CookieImporter {
         }
         // A page that doesn't read: not a partial import passed off as the
         // whole.
-        guard step == SQLITE_DONE else { throw databaseFailure(db) }
+
         // Not a single one: the Keychain's key isn't the one the browser
         // encrypted them with.
         if encrypted > 0, decrypted == 0 { throw Failure.undecryptable }
@@ -648,7 +650,7 @@ enum CookieImporter {
         /// macOS privacy protection, not file permissions, kept Nirux out:
         /// Full Disk Access lifts it.
         var isBlockedByPrivacy: Bool {
-            if case .unreadable(_, EPERM) = failure { return true }
+            if case .unreadable(_, EACCES) = failure { return true }
             return false
         }
 

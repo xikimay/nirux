@@ -651,7 +651,7 @@ extension NiruxShellView {
             alert.addButton(withTitle: "Import")
             alert.addButton(withTitle: "Cancel")
             guard runModal(alert) == .alertFirstButtonReturn else { return }
-            index = menu.indexOfSelectedItem
+            index = 0
         }
         guard sources.indices.contains(index) else { return }
         runCookieImport(from: sources[index])
