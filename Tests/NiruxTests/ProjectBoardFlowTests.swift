@@ -285,41 +285,69 @@ final class ProjectBoardFlowTests: XCTestCase {
     }
 
     /// Why a repository shows no pull requests is said in plain words: gh
-    /// not signed in, in red, and origin elsewhere than github.com in its
-    /// section's header, with one Board Settings… for both.
+    /// signed out, once for every repository it stops, in red; origin on
+    /// another host, or the repository another section reads, in their
+    /// sections' headers. One Board Settings… opens on the first
+    /// repository it can set up.
     @MainActor
     func testTheBoardSaysWhyItShowsNoPullRequests() throws {
-        let client = FakeGitHub(openPullRequests: "[]", runs: "[]", failures: ["acme/front": .notSignedIn])
+        let client = FakeGitHub(
+            openPullRequests: "[]", runs: "[]", failures: ["acme/front": .notSignedIn, "acme/back": .notSignedIn]
+        )
         try withShell(client: client) { shell, space in
-            let front = root + "/front"
-            let docs = root + "/docs"
-            try BoardConfigSuggestionsTests.makeRepository(at: front, remote: "git@github.com:acme/front.git")
-            try BoardConfigSuggestionsTests.makeRepository(at: docs, remote: "https://gitlab.com/acme/docs.git")
-            var frontAnchor = try XCTUnwrap(FolderIdentity.identify(front, timeout: 10)).anchor
-            frontAnchor.isDefault = true
-            let docsAnchor = try XCTUnwrap(FolderIdentity.identify(docs, timeout: 10)).anchor
-            XCTAssertTrue(shell.workspaceStore.setAnchors([frontAnchor, docsAnchor], forProfile: space.id))
-            shell.addWorkspace(title: "front", cwd: front, profileID: space.id)
+            shell.mergeQueueClient = FakeQueueClient(isDryRun: true)
+            shell.mergeQueueLockFolder = URL(fileURLWithPath: root + "/locks")
+            let remotes = [
+                "saved": "https://github.com/acme/saved.git", "front": "git@github.com:acme/front.git",
+                "back": "https://github.com/acme/back.git", "docs": "git@github-work:acme/docs.git",
+                "copy": "https://github.com/acme/front.git"
+            ]
+            var anchors: [SpaceAnchor] = []
+            for name in ["saved", "front", "back", "docs", "copy"] {
+                try BoardConfigSuggestionsTests.makeRepository(at: root + "/" + name, remote: remotes[name])
+                var anchor = try XCTUnwrap(FolderIdentity.identify(root + "/" + name, timeout: 10)).anchor
+                anchor.isDefault = name == "saved"
+                anchors.append(anchor)
+            }
+            XCTAssertTrue(shell.workspaceStore.setAnchors(anchors, forProfile: space.id))
+            let saved = BoardConfig(repository: "acme/saved", baseBranch: "main", requiredChecks: ["test"], postMergeWorkflow: .noWorkflow)
+            XCTAssertNoThrow(try XCTUnwrap(BoardConfigStore(spaceID: space.id)).save(entries: [
+                BoardConfigStore.Entry(slot: .anchor(commonDir: try XCTUnwrap(BoardSections.commonDir(of: anchors[0]))), config: saved)
+            ]).get())
+            shell.addWorkspace(title: "front", cwd: root + "/front", profileID: space.id)
             try select("front", in: shell)
             try runPaletteAction("Open Board", in: shell)
             let board = try XCTUnwrap(shell.projectBoardLocation(projectID: space.id)?.board)
             dropWorkspaceSnapshots(shell)
 
-            try waitUntil("gh’s answer is said") { board.view.noticeLines.count == 2 }
-            XCTAssertEqual(board.view.noticeLines.map(\.label.stringValue), [
-                "front: gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh.",
-                "Not set up in Board Settings: front, docs."
-            ])
+            let expected = [
+                "front, back: gh isn’t signed in to GitHub: run gh auth login in a terminal, then Refresh.",
+                "No saved GitHub repository in Board Settings: front, back, docs."
+            ]
+            try waitUntil("both answers said, every repository listed") {
+                guard case .sections(let sections, _)? = board.view.content?.body else { return false }
+                return board.view.noticeLines.map(\.label.stringValue) == expected && sections.allSatisfy { !$0.rows.isEmpty }
+            }
+            XCTAssertEqual(board.view.noticeLines.map(\.label.stringValue), expected)
             XCTAssertEqual(board.view.noticeLines.map(\.settingsButton.isHidden), [true, false])
-            guard case .sections(let sections, _)? = board.view.content?.body else { return XCTFail("no sections") }
-            XCTAssertEqual(sections.map(\.repository), ["acme/front", nil])
+            guard case .sections(let sections, _)? = board.view.content?.body, sections.count == 5 else {
+                return XCTFail("not five sections")
+            }
+            XCTAssertEqual(sections.map(\.repository), ["acme/saved", "acme/front", "acme/back", nil, nil])
             XCTAssertEqual(
-                sections[1].note,
-                "origin isn’t on github.com: set its GitHub repository in Board Settings to see its pull requests."
+                sections[3].note,
+                "origin points to github-work, not github.com: set its GitHub repository in Board Settings to see its pull requests."
             )
-            XCTAssertEqual(sections[1].rows.map(\.name), ["main"], "its main checkout all the same")
+            XCTAssertEqual(sections[4].note, "Same GitHub repository as “front”: its pull requests show there.")
+            XCTAssertEqual(sections[3].rows.map(\.name), ["main"], "its main checkout all the same")
             XCTAssertFalse(client.calls.contains { $0.what.contains("docs") }, "no gh for a repository elsewhere")
             XCTAssertNil(shell.boardSettingsPanel)
+
+            try click(try XCTUnwrap(board.view.noticeLines.last).settingsButton)
+            try waitUntil("Board Settings opens on front") {
+                shell.boardSettingsPanel?.hostView != nil && shell.spaceSettings?.boardRepository == sections[1].id
+            }
+            XCTAssertEqual(shell.boardSettingsPanel?.repositoryField.stringValue, "acme/front")
         }
     }
 

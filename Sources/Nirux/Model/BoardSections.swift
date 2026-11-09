@@ -77,23 +77,25 @@ enum BoardSections {
         case gitHub(repository: String, baseBranch: String?)
         /// No remote named origin.
         case missing
-        /// origin points elsewhere than github.com.
-        case notGitHub
+        /// origin points elsewhere than github.com: another host (an SSH
+        /// alias too), or nil for a path.
+        case notGitHub(host: String?)
         /// git couldn't read it: a volume not mounted, a timeout.
         case unread
     }
 
     /// The `origin` of each section's anchor that has no config of its
-    /// own, by common git dir. Runs git: call it off the main thread.
+    /// own, by common git dir: its push URL, as Board Settings suggests it.
+    /// Runs git, 10 s at most each: call it off the main thread.
     static func readOrigins(_ sections: [Section], tools: WorktreeCleanup.Tools = .installed) -> [String: Origin] {
         var origins: [String: Origin] = [:]
         for section in sections where section.config == nil {
             guard let commonDir = section.commonDir, origins[commonDir] == nil else { continue }
-            let url = WorktreeCleanup.git(["remote", "get-url", "--", "origin"], in: commonDir, tools: tools)
+            let url = WorktreeCleanup.git(["remote", "get-url", "--push", "--", "origin"], in: commonDir, tools: tools, timeout: 10)
             switch url.status {
             case 0:
                 guard let repository = BoardConfigSuggestions.repositoryName(remoteURL: url.stdout) else {
-                    origins[commonDir] = .notGitHub
+                    origins[commonDir] = .notGitHub(host: GitHubRepository(remoteURL: url.stdout)?.host)
                     continue
                 }
                 let baseBranch = BoardConfigSuggestions.defaultBranch(of: "origin", at: commonDir, gitPath: tools.gitPath)

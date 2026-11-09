@@ -145,17 +145,19 @@ final class BoardSectionsTests: XCTestCase {
                        [gone, Entry(slot: .anchor(commonDir: "/code/back/.git"), config: config("acme/back"))])
     }
 
-    /// Each repository anchor without a config of its own reads its origin:
-    /// a github.com repository, as its URL spells it, with the branch
-    /// origin/HEAD points to; another host; no origin; a git dir git can't
-    /// read. An anchor with a config reads nothing.
+    /// Each repository anchor without a config of its own reads its origin's
+    /// push URL, as Board Settings suggests it: a github.com repository, as
+    /// the URL spells it, with the branch origin/HEAD points to; another
+    /// host, named (an SSH alias too); no origin; a git dir git can't read.
+    /// An anchor with a config reads nothing.
     func testEachAnchorWithoutAConfigReadsItsOrigin() throws {
         let base = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-origins-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: base) }
         let root = try XCTUnwrap(base.path.realPath)
-        try BoardConfigSuggestionsTests.makeRepository(at: root + "/front", remote: "git@github.com:Acme/Front.git")
-        try BoardConfigSuggestionsTests.makeRepository(at: root + "/back", remote: "https://gitlab.com/acme/back.git")
+        try BoardConfigSuggestionsTests.makeRepository(at: root + "/front", remote: "https://github.com/acme/upstream.git")
+        try BoardConfigSuggestionsTests.git(["remote", "set-url", "--push", "origin", "git@github.com:Acme/Front.git"], at: root + "/front")
+        try BoardConfigSuggestionsTests.makeRepository(at: root + "/back", remote: "git@github-work:acme/back.git")
         try BoardConfigSuggestionsTests.makeRepository(at: root + "/docs", remote: nil)
         try BoardConfigSuggestionsTests.makeRepository(at: root + "/saved", remote: "https://github.com/acme/saved.git")
         let anchor = { (name: String) in SpaceAnchor(kind: .gitRepository(commonDir: root + "/\(name)/.git"), name: name) }
@@ -163,7 +165,7 @@ final class BoardSectionsTests: XCTestCase {
         let entries = [Entry(slot: .anchor(commonDir: root + "/saved/.git"), config: config("acme/saved"))]
         XCTAssertEqual(BoardSections.readOrigins(BoardSections.sections(entries, context: context)), [
             root + "/front/.git": .gitHub(repository: "Acme/Front", baseBranch: "main"),
-            root + "/back/.git": .notGitHub,
+            root + "/back/.git": .notGitHub(host: "github-work"),
             root + "/docs/.git": .missing,
             root + "/gone/.git": .unread
         ])

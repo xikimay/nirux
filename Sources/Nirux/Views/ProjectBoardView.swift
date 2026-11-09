@@ -72,8 +72,10 @@ final class ProjectBoardView: NSView {
     struct Notice: Equatable {
         var text: String
         var isError = false
-        /// A Board Settings… button at its end.
-        var offersSettings = false
+        /// The section whose Board Settings its button opens; nil: no button.
+        var settingsSection: String?
+
+        var offersSettings: Bool { settingsSection != nil }
     }
 
     enum Body: Equatable {
@@ -196,6 +198,7 @@ final class ProjectBoardView: NSView {
     final class NoticeLineViews {
         let label = NSTextField(labelWithString: "")
         let settingsButton = NSButton(title: "Board Settings…", target: nil, action: nil)
+        var section: String?
     }
 
     var onRefresh: (() -> Void)?
@@ -204,7 +207,9 @@ final class ProjectBoardView: NSView {
     var onStartQueue: ((String?) -> Void)?
     var onStopQueue: ((String?) -> Void)?
     var onSelectProject: ((String) -> Void)?
-    var onBoardSettings: (() -> Void)?
+    /// The ⋯ menu's item and the buttons saying Board Settings…: on a
+    /// section's repository, or nil for the one the form showed last.
+    var onBoardSettings: ((String?) -> Void)?
     var onAction: ((Action) -> Void)?
 
     private(set) var content: Content?
@@ -923,6 +928,7 @@ final class ProjectBoardView: NSView {
             views.label.toolTip = notice.text
             views.label.textColor = notice.isError ? Self.failureColor : Self.secondaryText
             views.settingsButton.isHidden = !notice.offersSettings
+            views.section = notice.settingsSection
         }
     }
 
@@ -934,7 +940,7 @@ final class ProjectBoardView: NSView {
         line.settingsButton.controlSize = .small
         line.settingsButton.font = .systemFont(ofSize: 11)
         line.settingsButton.target = self
-        line.settingsButton.action = #selector(settingsClicked)
+        line.settingsButton.action = #selector(noticeSettingsClicked(_:))
         [line.label, line.settingsButton].forEach(addSubview)
         return line
     }
@@ -1157,7 +1163,12 @@ final class ProjectBoardView: NSView {
         onStopQueue?(line.section)
     }
 
-    @objc private func settingsClicked() { onBoardSettings?() }
+    @objc private func settingsClicked() { onBoardSettings?(nil) }
+
+    @objc private func noticeSettingsClicked(_ sender: NSButton) {
+        guard let line = noticeLines.first(where: { $0.settingsButton === sender }) else { return }
+        onBoardSettings?(line.section)
+    }
 
     @objc private func projectChosen(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }

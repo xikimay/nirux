@@ -158,13 +158,17 @@ final class ProjectBoardController {
         return repository(of: only)
     }
 
-    /// Some section has a GitHub repository, saved or its origin: the
-    /// board reads pull requests.
-    var hasRepository: Bool { !reads.isEmpty }
+    /// Some section has a GitHub repository, saved or its origin's: the
+    /// board reads pull requests. Only a saved one has a merge queue
+    /// (`repository(of:)`).
+    var readsPullRequests: Bool { !reads.isEmpty }
 
     /// The board lists rows: some section reads pull requests, or has an
-    /// anchor whose worktrees show without them.
-    var listsRows: Bool { hasRepository || sections.contains { $0.anchor != nil } }
+    /// anchor whose worktrees show without them. Not with an unreadable
+    /// board.json, which the board asks to replace.
+    var listsRows: Bool {
+        loaded?.status != .unreadable && (readsPullRequests || sections.contains { $0.anchor != nil })
+    }
 
     // MARK: - Reading
 
@@ -193,7 +197,9 @@ final class ProjectBoardController {
         schedule.makeEverythingDue()
         for id in reads.keys {
             reads[id]?.schedule.makeEverythingDue()
-            reads[id]?.errors = [:]
+            // Its errors stay until the next answer replaces them: a line
+            // saying gh is signed out doesn't blink, and the rows don't
+            // move, at each Refresh.
             reads[id]?.retargetFailure = nil
         }
         let anchors = spaceAnchors()
@@ -231,10 +237,22 @@ final class ProjectBoardController {
         sections = BoardSections.sections(entries, context: context)
         displayNames = BoardSections.displayNames(sections)
         var newReads: [String: RepositoryReads] = [:]
+        // Two sections never read one repository, as Board Settings never
+        // saves one for two: a saved one keeps it, else the first origin.
+        var taken = Set(sections.compactMap { $0.config?.gitHubRepository })
         for section in sections {
-            // A config, even one without a valid repository, wins over origin.
-            let read = section.config.map { RepositoryReads(config: $0) }
-                ?? section.commonDir.flatMap { context.origins[$0] }.flatMap(RepositoryReads.init(origin:))
+            let origin = section.commonDir.flatMap { context.origins[$0] }
+            var read: RepositoryReads?
+            if let config = section.config {
+                // Even without a valid repository, it wins over origin.
+                read = RepositoryReads(config: config)
+            } else if case .unread? = origin, let previous = reads[section.id], previous.isFromOrigin {
+                // git couldn't read origin this time: what it read stays.
+                read = previous
+            } else {
+                read = origin.flatMap(RepositoryReads.init(origin:))
+            }
+            if section.config == nil, let gitHub = read?.gitHub, !taken.insert(gitHub).inserted { read = nil }
             guard var fresh = read else { continue }
             if var previous = reads[section.id], previous.gitHub == fresh.gitHub {
                 // Saved since it was read from origin: what it read stays.
@@ -245,6 +263,7 @@ final class ProjectBoardController {
                     previous.generation = newReadGeneration()
                     previous.schedule.reset()
                     previous.postMergeRun = nil
+                    previous.errors = [:]
                     previous.baseBranch = fresh.baseBranch
                     previous.workflow = fresh.workflow
                 }
@@ -387,7 +406,8 @@ final class ProjectBoardController {
     /// section's repository on `base`, then reads its open pull requests
     /// again. Never sent twice: another click is the user's.
     func retarget(_ number: Int, onto base: String, section id: String) {
-        guard let repository = reads[id] else { return }
+        // Never on a repository only read from origin: Board Settings first.
+        guard let repository = reads[id], !repository.isFromOrigin else { return }
         let client = self.client
         let name = repository.name
         let current = generation
@@ -477,7 +497,7 @@ final class ProjectBoardController {
         if !header.statusIsError {
             if let readAt = reads.values.compactMap(\.pullRequestsReadAt).max() {
                 header.status = "Updated \(ProjectBoard.clockTime(readAt, now: now))"
-            } else if hasRepository {
+            } else if readsPullRequests {
                 header.status = "Reading pull requests…"
             }
         }
@@ -492,7 +512,9 @@ final class ProjectBoardController {
         } else if let loaded, loaded.status == .unreadable {
             body = .message("board.json can’t be read: open Board Settings… to replace it.")
         } else if let loaded, case .readOnly(let reason) = loaded.status, !listsRows {
+            // Board Settings can't save it.
             body = .message(reason.message)
+            messageOffersSettings = false
         } else if loaded == nil {
             body = .message("Reading board.json…")
             messageOffersSettings = false
@@ -515,24 +537,66 @@ final class ProjectBoardController {
     }
 
     /// The lines under the header: what went wrong reading GitHub, in plain
-    /// words, then why a repository has no saved settings, with Board
-    /// Settings….
+    /// words, one line per message; then why a repository has no saved
+    /// settings, with Board Settings… on that repository.
     private func notices() -> [ProjectBoardView.Notice] {
         let several = sections.count > 1
         let name = { (section: BoardSections.Section) in self.displayNames[section.id] ?? section.name ?? "Repository" }
-        var notices = sections.compactMap { section -> ProjectBoardView.Notice? in
-            guard let reads = reads[section.id], let error = Self.errorText(reads) else { return nil }
-            return ProjectBoardView.Notice(text: (several ? "\(name(section)): " : "") + error.message, isError: true)
+        var errors: [(message: String, names: [String])] = []
+        for section in sections {
+            guard let reads = reads[section.id], let message = Self.lastingError(reads) else { continue }
+            if let index = errors.firstIndex(where: { $0.message == message }) {
+                errors[index].names.append(name(section))
+            } else {
+                errors.append((message, [name(section)]))
+            }
+        }
+        var notices = errors.map { error in
+            ProjectBoardView.Notice(
+                text: (several ? error.names.joined(separator: ", ") + ": " : "") + error.message, isError: true
+            )
         }
         let unsaved = sections.filter { repository(of: $0) == nil }
-        if several, !unsaved.isEmpty {
-            notices.append(ProjectBoardView.Notice(
-                text: "Not set up in Board Settings: \(unsaved.map(name).joined(separator: ", ")).", offersSettings: true
-            ))
-        } else if !several, let only = unsaved.first, let note = setupNote(only) {
-            notices.append(ProjectBoardView.Notice(text: note, offersSettings: true))
+        if let loaded, case .readOnly(let reason) = loaded.status {
+            // Board Settings can't save it: why, without the button.
+            if !unsaved.isEmpty { notices.append(ProjectBoardView.Notice(text: reason.message)) }
+        } else if several {
+            // One that shares another's repository can't be saved with it.
+            let settable = unsaved.filter { sectionSharingOrigin(with: $0) == nil }
+            if let first = settable.first {
+                notices.append(ProjectBoardView.Notice(
+                    text: "No saved GitHub repository in Board Settings: \(settable.map(name).joined(separator: ", ")).",
+                    settingsSection: first.id
+                ))
+            }
+        } else if let only = unsaved.first, let note = setupNote(only) {
+            notices.append(ProjectBoardView.Notice(text: note, settingsSection: only.id))
         }
         return notices
+    }
+
+    /// What went wrong reading a section's pull requests that the next read
+    /// won't mend, or that leaves it without any: gh missing or signed out,
+    /// or any error before the first answer. A failure after a good read
+    /// stays in its pill, as a failed Retarget does: the rows don't move
+    /// for a blip.
+    private static func lastingError(_ reads: RepositoryReads) -> String? {
+        let errors = [reads.errors[.openPullRequests], reads.errors[.mergedPullRequests]].compactMap { $0 }
+        let lasting = reads.openPullRequests == nil ? errors : errors.filter { $0 == .ghMissing || $0 == .notSignedIn }
+        let messages = Set(lasting.map(\.message)).sorted()
+        return messages.isEmpty ? nil : messages.joined(separator: " ")
+    }
+
+    /// The other section reading the GitHub repository this one's origin
+    /// names, which this one then doesn't read.
+    private func sectionSharingOrigin(with section: BoardSections.Section) -> BoardSections.Section? {
+        guard section.config == nil, reads[section.id] == nil,
+              case .gitHub(let name, _)? = section.commonDir.flatMap({ context.origins[$0] }),
+              let gitHub = GitHubRepository(ownerAndName: name)
+        else { return nil }
+        return sections.first { other in
+            other.id != section.id && (reads[other.id]?.gitHub == gitHub || other.config?.gitHubRepository == gitHub)
+        }
     }
 
     /// Why a section has no saved repository, in a sentence; nil when it
@@ -545,11 +609,16 @@ final class ProjectBoardController {
         guard section.config == nil else {
             return "Board Settings has no valid GitHub repository for it: set one to see its pull requests."
         }
+        if let other = sectionSharingOrigin(with: section) {
+            let otherName = displayNames[other.id] ?? other.name ?? "another repository"
+            return "Same GitHub repository as “\(otherName)”: its pull requests show there."
+        }
         switch section.commonDir.flatMap({ context.origins[$0] }) {
         case .missing?:
             return "No remote named origin: set its GitHub repository in Board Settings to see its pull requests."
-        case .notGitHub?:
-            return "origin isn’t on github.com: set its GitHub repository in Board Settings to see its pull requests."
+        case .notGitHub(let host)?:
+            let place = host.map { "origin points to \($0), not github.com" } ?? "origin isn’t on github.com"
+            return "\(place): set its GitHub repository in Board Settings to see its pull requests."
         case .unread?:
             return "Nirux couldn’t read its origin remote: Refresh, or set its GitHub repository in Board Settings."
         case .gitHub?, nil:

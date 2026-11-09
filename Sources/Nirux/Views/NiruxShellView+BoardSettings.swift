@@ -13,9 +13,17 @@ extension NiruxShellView {
         let suggestions: BoardConfigSuggestions
     }
 
-    /// "Board Settings…" in the Board's ⋯ menu: Space Settings on its Board tab.
-    func showBoardSettings(profileID: String) {
+    /// "Board Settings…" in the Board's ⋯ menu: Space Settings on its Board
+    /// tab, on `repository` (a section's id) when given, unless the form is
+    /// open there already: it keeps its repository, and what is typed in it.
+    func showBoardSettings(profileID: String, repository: String? = nil) {
+        let formWasOpen = boardSettingsPanel?.spaceID == profileID
         showSpaceSettings(profileID: profileID, tab: .board)
+        guard let repository, !formWasOpen, let settings = spaceSettings, settings.spaceID == profileID,
+              settings.boardRepository != repository
+        else { return }
+        // Read again on it, once a read the tab started lands.
+        loadBoardTab(spaceID: profileID, repository: repository)
     }
 
     /// Fills the Board tab, on `repository` (a section's id) when given,

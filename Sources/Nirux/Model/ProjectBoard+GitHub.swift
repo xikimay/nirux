@@ -28,7 +28,8 @@ extension ProjectBoard {
     enum FetchError: Error, Equatable, Sendable {
         /// The GitHub CLI isn't where Nirux looks for it.
         case ghMissing
-        /// gh has no GitHub account to read with (its status 4).
+        /// gh has no GitHub account to read with (its status 4), or GitHub
+        /// refuses its token.
         case notSignedIn
         /// gh failed: its first line of error, or why it didn't run.
         case failed(String)
@@ -128,9 +129,13 @@ struct GitHubCLIBoardClient: ProjectBoardGitHub {
             return .failure(.failed("it couldn’t start, or took longer than \(Int(timeout)) s"))
         }
         guard result.terminationStatus == 0 else {
-            // gh's status when no account is signed in, as the merge queue reads it.
-            if result.terminationStatus == 4 { return .failure(.notSignedIn) }
             let stderr = String(data: result.standardError, encoding: .utf8) ?? ""
+            // No account signed in (gh's status 4), or a token GitHub refuses:
+            // as the merge queue tells them.
+            let lowered = stderr.lowercased()
+            if result.terminationStatus == 4 || lowered.contains("gh auth login") || lowered.contains("bad credentials") {
+                return .failure(.notSignedIn)
+            }
             return .failure(.failed(WorktreeCleanup.firstLine(stderr) ?? "exit status \(result.terminationStatus)"))
         }
         return .success(result.standardOutput)

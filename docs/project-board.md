@@ -214,14 +214,23 @@ documented in B1's pull request:
   list due at once. A finished clean-up lists the worktrees again.
 - **Not set up** (decided with the user on 2026-11-09): a repository anchor
   `board.json` has no config for shows its worktrees, and the pull requests
-  of its `origin` remote when it is on github.com (its base branch from
-  `origin/HEAD`), read-only: nothing is written, and its merge queue and
-  Retarget wait for an explicit Save in Board Settings. A line under the
-  header says so, with a Board Settings… button, or says why there are no
-  pull requests (no remote named origin, origin not on github.com, git
-  couldn't read it). Another red line says what went wrong reading GitHub in
-  plain words: gh missing, gh not signed in (its status 4), gh's first line
-  of error.
+  of its `origin` remote when it is on github.com (origin's push URL, as
+  Board Settings suggests it; its base branch from `origin/HEAD`),
+  read-only: nothing is written, and its merge queue and Retarget wait for
+  an explicit Save in Board Settings. Two sections never read one
+  repository: a saved one keeps it, else the first; the other says so. git
+  reading origin fails (10 s at most): what the section read stays.
+- **Lines under the header** say why the board shows less than it could. One
+  says the board isn't set up, with a Board Settings… button opening the
+  first repository it can set up, or why a repository has no pull requests
+  (no remote named origin, origin on another host, named: an SSH alias too).
+  A read-only `board.json` gets its reason, without the button: Board
+  Settings can't save it. Red lines say what went wrong reading GitHub in
+  plain words, one per message naming its repositories: gh missing, gh not
+  signed in (its status 4, or a token GitHub refuses), or any error before
+  a section's first answer. A failure after a good read stays in its pill,
+  as a failed Retarget does, and errors stay through Refresh until the next
+  answer: the rows don't move for a blip.
 - **Without a repository** and nothing to list (a space without a repository
   anchor, and no config), or with an unreadable `board.json`, the board says
   so instead of listing rows, with a Board Settings… button under it, and
