@@ -413,10 +413,11 @@ struct AgentStatusMachine {
         quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt)
     }
 
-    /// The column shows a turn end that hasn't alerted, and nothing else
-    /// waits: no dialog, no failed turn, no other attention since.
+    /// The column shows a turn end that hasn't alerted (`attentionReason`
+    /// is nil out of attention), and nothing else waits: no dialog, no
+    /// failed turn, no other attention since.
     var isQuietTurnEnd: Bool {
-        quietTurnEnd != nil && state == .needsAttention && attentionReason == .turnFinished
+        quietTurnEnd != nil && attentionReason == .turnFinished
     }
 
     /// The verdict on the turn end `request` asked about: the reason to

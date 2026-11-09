@@ -304,6 +304,7 @@ final class TurnEndClassificationTests: XCTestCase {
         XCTAssertTrue(notification.firedAttention)
         XCTAssertFalse(machine.isQuietTurnEnd)
         XCTAssertNil(machine.applyTurnEndVerdict(.unknown, for: request, isUserFocused: false))
+        XCTAssertEqual(machine.attentionReason, .message(nil), "the notification still says why")
         // Settled with it: a prompt hours later alerts for nothing.
         XCTAssertFalse(machine.apply(event(.userPromptSubmit, at: 9_000), isUserFocused: false).firedAttention)
     }
