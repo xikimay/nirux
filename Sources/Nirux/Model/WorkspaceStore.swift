@@ -413,8 +413,7 @@ final class WorkspaceStore {
             if let parentID = workspace.parentWorkspaceID, let parent = byID[parentID], parent != index {
                 parents[index] = parent
             } else if workspace.parentWorkspaceID == nil, let missionID = workspace.missionID,
-                      let parentID = missionParents[missionID], let parent = byID[parentID], parent != index,
-                      workspaces[parent].isInLinkedWorktree {
+                      let parentID = missionParents[missionID], let parent = byID[parentID], parent != index {
                 parents[index] = parent
             }
         }
