@@ -251,19 +251,21 @@ final class BoardConfigSuggestionsTests: XCTestCase {
 
     /// A repository saved from origin, in a clone whose upstream gh takes
     /// as the base, still finds its checkout there, and origin's base
-    /// branch and workflows.
+    /// branch and workflows; origin an SSH alias too, without asking ssh.
     func testASavedRepositoryFindsItsCheckoutThroughAnyGitHubRemote() throws {
-        let repo = root + "/repo"
-        try Self.makeRepository(at: repo, remote: "https://github.com/corp/app.git", workflows: ["nightly.yml"])
-        try Self.git(["remote", "add", "upstream", "https://github.com/oss/app.git"], at: repo)
+        for (name, origin) in [("repo", "https://github.com/corp/app.git"), ("alias", "git@github-work:corp/app.git")] {
+            let repo = root + "/" + name
+            try Self.makeRepository(at: repo, remote: origin, workflows: ["nightly.yml"])
+            try Self.git(["remote", "add", "upstream", "https://github.com/oss/app.git"], at: repo)
 
-        let suggestions = BoardConfigSuggestions.read(workspaceFolders: [repo], repository: "corp/app")
+            let suggestions = BoardConfigSuggestions.read(workspaceFolders: [repo], repository: "corp/app")
 
-        XCTAssertEqual(suggestions.repository, "oss/app", "gh's base repository")
-        XCTAssertEqual(suggestions.checkout, repo)
-        XCTAssertEqual(suggestions.baseBranch, "main")
-        XCTAssertEqual(suggestions.workflowFiles, ["nightly.yml"])
-        XCTAssertEqual(suggestions.workflowsRef, "origin/main")
+            XCTAssertEqual(suggestions.repository, "oss/app", "\(name): gh's base repository")
+            XCTAssertEqual(suggestions.checkout, repo, name)
+            XCTAssertEqual(suggestions.baseBranch, "main", name)
+            XCTAssertEqual(suggestions.workflowFiles, ["nightly.yml"], name)
+            XCTAssertEqual(suggestions.workflowsRef, "origin/main", name)
+        }
     }
 
     func testABareMainRepositoryFallsBackToTheWorktree() {

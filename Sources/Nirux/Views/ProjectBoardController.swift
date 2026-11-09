@@ -112,9 +112,11 @@ final class ProjectBoardController {
     /// The config read whose remotes wait for the board to be shown, or for
     /// the read under way.
     private var remotesDue: Int?
-    /// A read of the base remotes runs: another one waits for it, so that
-    /// Refresh on a hung volume doesn't pile up blocked threads.
-    private var isReadingBaseRemotes = false
+    /// The read of the base remotes under way: of this project and these
+    /// anchors, another one waits for it, so that Refresh on a hung volume
+    /// doesn't pile up blocked threads; of others (an anchor removed, the
+    /// board switched to another space), it doesn't hold them up.
+    private var runningRemoteRead: (generation: Int, anchors: Set<String>)?
     /// Reads landed since the last render: they are drawn once, together.
     private var isRenderScheduled = false
     /// A board opened from the palette on a project without a repository
@@ -256,14 +258,19 @@ final class ProjectBoardController {
             isReadingRemotes = false
             return
         }
-        guard isShown(), !isReadingBaseRemotes else {
+        let anchors = Set(unsaved.compactMap(\.commonDir))
+        let isRunning = runningRemoteRead.map { $0.generation == generation && $0.anchors == anchors } ?? false
+        guard isShown(), !isRunning else {
             remotesDue = current
             return
         }
-        isReadingBaseRemotes = true
+        let token = (generation: generation, anchors: anchors)
+        runningRemoteRead = token
         Self.readOffMain({ BoardSections.readBaseRemotes(unsaved) }, then: { [weak self] remotes in
             guard let self else { return }
-            self.isReadingBaseRemotes = false
+            if let running = self.runningRemoteRead, running.generation == token.generation, running.anchors == token.anchors {
+                self.runningRemoteRead = nil
+            }
             if self.configRead == current, let loaded = self.loaded {
                 self.isReadingRemotes = false
                 var context = self.context

@@ -35,10 +35,10 @@ enum GitHubBaseRemote {
         survey(at: folder, gitPath: gitPath, resolveAlias: resolveAlias).read
     }
 
-    /// `read`, and the github.com repository each remote's URL names, by
-    /// lowercased `owner/name`, its remote as value: a repository saved
-    /// from another remote than the base one still finds its checkout.
-    /// No more processes than `read`.
+    /// `read`, and the repository each remote's URL names (github.com, or
+    /// an SSH host that may alias it), by lowercased `owner/name`, its
+    /// remote as value: a repository saved from another remote than the
+    /// base one still finds its checkout. No more processes than `read`.
     static func survey(
         at folder: String,
         gitPath: String = "/usr/bin/git",
@@ -64,6 +64,15 @@ enum GitHubBaseRemote {
         var gitHubRemotes: [String: String] = [:]
         for remote in remotes.reversed() {
             if let repository = BoardConfigSuggestions.repositoryName(remoteURL: remote.url) {
+                gitHubRemotes[repository.lowercased()] = remote.name
+            }
+        }
+        // An SSH remote on another host may be an alias of github.com
+        // (`git@github-work:…`): indexed by owner/name, no ssh asked, as
+        // only a repository the user saved is looked up here.
+        for remote in remotes.reversed() where BoardConfigSuggestions.isSSH(remote.url) {
+            if let repository = BoardConfigSuggestions.spelledOwnerAndName(remoteURL: remote.url),
+               gitHubRemotes[repository.lowercased()] == nil {
                 gitHubRemotes[repository.lowercased()] = remote.name
             }
         }

@@ -261,7 +261,8 @@ documented in B1's pull request:
     didn't answer: Save may be refused once; Save again.
   - **`ssh -G` isn't side-effect free:** it runs the user's `Match exec`
     commands and canonicalizes host names, and only a yes is kept, so it
-    runs again for every non-GitHub SSH remote at each read.
+    runs again at each read for an SSH remote on another host that gh
+    ranks before the base one.
 - **Without a repository** and nothing to list (a space without a repository
   anchor, and no config), or with an unreadable `board.json`, the board says
   so instead of listing rows, with a Board Settings… button under it, and
