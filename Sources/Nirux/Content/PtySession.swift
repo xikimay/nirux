@@ -449,7 +449,7 @@ final class PtySession: @unchecked Sendable {
         if let refusal = agentResumeRefusal(foreground: foreground, snapshot: snapshot, now: now) { return refusal }
         guard let input = RemotePromptSanitizer.terminalInput(for: "continue") else { return .notStopped }
         state.machine.markResumeSent(now: now)
-        _ = input
+        sendRaw(input)
         state.machine.noteResumeTyped()
         return nil
     }

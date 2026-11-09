@@ -20,7 +20,7 @@ enum LegacyTelegramToken {
         bundleURL: URL = Bundle.main.bundleURL,
         delete: @escaping @Sendable () -> OSStatus = { LegacyTelegramToken.delete() }
     ) -> Bool {
-        guard !(bundleURL.pathExtension == "app" && Persistence.stateDirectoryOverride(in: environment) == nil) else {
+        guard bundleURL.pathExtension == "app", Persistence.stateDirectoryOverride(in: environment) == nil else {
             return false
         }
         DispatchQueue.global(qos: .utility).async {
