@@ -189,20 +189,34 @@
   // out of the editor. Cmd+Left at column 1 and Cmd+Right at the line end
   // focus the column beside (on an indented line, column 1 once a Cmd+Left
   // got there: caretAtTextEdge); Cmd+Up on the first line and Cmd+Down on
-  // the last switch workspace. With no column or workspace that way, the
-  // app has the caret move after all (moveCaretToTextEdge). Elsewhere
-  // Monaco moves the caret, and so it does for a held key (a repeat never
-  // leaves), a selection or several carets (the key acts on them) and
-  // Shift+Cmd+Arrow (it selects). Monaco's widgets keep the chords they
-  // bind: the suggestion list's Cmd+Up/Down, an inline suggestion's
-  // Cmd+Right, the code action menu's.
-  var textEdgeKeys = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
+  // the last switch workspace. With no column or workspace that way
+  // (textEdgeDestinations), and elsewhere, Monaco moves the caret, and so
+  // it does for a held key (a repeat never leaves), a selection or several
+  // carets (the key acts on them) and Shift+Cmd+Arrow (it selects).
+  // Monaco's widgets keep the chords they bind: the suggestion list's
+  // Cmd+Up/Down, an inline suggestion's Cmd+Right, the code action menu's.
+  // Edge -> its arrow, as KeyboardEvent.key and as Monaco's KeyCode name.
+  var textEdgeArrows = {
+    left: { key: "ArrowLeft", keyCode: "LeftArrow" },
+    right: { key: "ArrowRight", keyCode: "RightArrow" },
+    up: { key: "ArrowUp", keyCode: "UpArrow" },
+    down: { key: "ArrowDown", keyCode: "DownArrow" }
+  };
+  // KeyboardEvent.key -> edge.
+  var textEdgeOfKey = {};
+  Object.keys(textEdgeArrows).forEach(function (edge) { textEdgeOfKey[textEdgeArrows[edge].key] = edge; });
   var textEdgeCommands = { left: "cursorHome", right: "cursorEnd", up: "cursorTop", down: "cursorBottom" };
+  // Whether each edge key has somewhere to go (a column beside, a workspace
+  // above or below), as the app tells just before it hands the page a
+  // Cmd+Arrow. Until it does, everywhere: when there is nowhere, the app
+  // has the page make the caret's move instead (moveCaretToTextEdge).
+  var textEdgeDestinations = { left: true, right: true, up: true, down: true };
   var textEdgeWhen = "niruxCaretAtTextEdge && !suggestWidgetVisible && !inlineSuggestionVisible && !codeActionMenuVisible";
   // Code editor -> { contextKey: its niruxCaretAtTextEdge, cursorChanges }.
   var textEdgeStates = new WeakMap();
-  // The last plain Cmd+Left Monaco moved the caret for: its editor, line
-  // and cursor changes before it.
+  // The last plain Cmd+Left Monaco moved the caret for: its editor, model
+  // id, line and cursor changes before it. A tab switch that lands on 1:1
+  // (a new tab, or one left there) fires no cursor change.
   var lastCaretHome = null;
 
   // The shown code editor whose text has the keyboard, if any: none while
@@ -243,8 +257,8 @@
       // Indented: from column 1, Monaco's Cmd+Left goes to the indent, so
       // column 1 is the edge only once a Cmd+Left put the caret there (an
       // open at a line, a search result, lands on column 1).
-      return !!lastCaretHome && lastCaretHome.editor === target && lastCaretHome.line === line &&
-        textEdgeState(target).cursorChanges === lastCaretHome.cursorChanges + 1;
+      return !!lastCaretHome && lastCaretHome.editor === target && lastCaretHome.modelId === model.id &&
+        lastCaretHome.line === line && textEdgeState(target).cursorChanges === lastCaretHome.cursorChanges + 1;
     }
     if (edge === "right") return column === model.getLineMaxColumn(line);
     if (edge === "up") return line === 1;
@@ -258,16 +272,21 @@
   // page because the app only learns of the caret after the keys already
   // sent have moved it.
   window.addEventListener("keydown", function (event) {
-    var edge = textEdgeKeys[event.key];
+    var edge = textEdgeOfKey[event.key];
     var plain = !!edge && event.metaKey && !event.shiftKey && !event.altKey && !event.ctrlKey &&
       !event.repeat && !event.isComposing;
     var target = plain ? codeEditorWithCaret() : null;
-    var atEdge = !!target && caretAtTextEdge(target, edge);
+    var atEdge = !!target && textEdgeDestinations[edge] && caretAtTextEdge(target, edge);
     if (target && edge === "left") {
       // Any cursor change since tells a later Cmd+Left this one is stale.
       lastCaretHome = atEdge
         ? null
-        : { editor: target, line: target.getPosition().lineNumber, cursorChanges: textEdgeState(target).cursorChanges };
+        : {
+          editor: target,
+          modelId: target.getModel().id,
+          line: target.getPosition().lineNumber,
+          cursorChanges: textEdgeState(target).cursorChanges
+        };
     }
     var editors = [editor];
     if (diffEditor) editors.push(diffEditor.getModifiedEditor(), diffEditor.getOriginalEditor());
@@ -281,24 +300,19 @@
 
   // The Cmd+Arrow chords as keybindings that, while textEdgeWhen holds,
   // come before Monaco's caret moves: the app navigates. addCommand binds
-  // page-wide; the diff editor binds them again like its other commands.
+  // page-wide, the diff editor's sides included.
   function bindTextEdgeKeys(target) {
-    var arrows = {
-      left: monaco.KeyCode.LeftArrow,
-      right: monaco.KeyCode.RightArrow,
-      up: monaco.KeyCode.UpArrow,
-      down: monaco.KeyCode.DownArrow
-    };
-    Object.keys(arrows).forEach(function (edge) {
+    Object.keys(textEdgeArrows).forEach(function (edge) {
       target.addCommand(
-        monaco.KeyMod.CtrlCmd | arrows[edge],
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode[textEdgeArrows[edge].keyCode],
         function () { postToSwift({ type: "textEdgeKey", edge: edge }); },
         textEdgeWhen
       );
     });
   }
 
-  // An edge key the app had nowhere to go with: the caret's move after all.
+  // An edge key the app found nowhere to go with after all (it changed
+  // after the app told the page, or never told it): the caret's move.
   function moveCaretToTextEdge(edge) {
     var target = codeEditorWithCaret();
     if (target && textEdgeCommands[edge]) target.trigger("keyboard", textEdgeCommands[edge], null);
@@ -570,7 +584,6 @@
         function () { postToSwift({ type: "sendSelectionShortcut" }); },
         "!findWidgetVisible"
       );
-      bindTextEdgeKeys(diffEditor.getModifiedEditor());
       // F7 / Shift+F7 — jump between diff hunks (VS Code's diff navigation keys).
       diffEditor.getModifiedEditor().addCommand(
         monaco.KeyCode.F7,
@@ -886,6 +899,9 @@
       case "toggleMinimap": toggleMinimap(); break;
       case "getSelection": reportSelection(msg.requestID); break;
       case "moveCaretToTextEdge": moveCaretToTextEdge(msg.edge); break;
+      case "textEdgeDestinations":
+        textEdgeDestinations = { left: !!msg.left, right: !!msg.right, up: !!msg.up, down: !!msg.down };
+        break;
     }
   }
 

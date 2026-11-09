@@ -39,14 +39,14 @@ final class WebPageFindTests: XCTestCase {
                 harness.window.makeFirstResponder(webView)
 
                 // A page with its own search keeps ⌘F.
-                run("ownSearch = true", in: webView, harness: harness)
+                UIFlowHarness.run("ownSearch = true", in: webView)
                 pressCommandFInPage(webView)
                 harness.waitUntil("the page's own search", timeout: 10) { webView.title == "own search" }
                 RunLoop.main.run(until: Date().addingTimeInterval(0.3))
                 XCTAssertNil(column.findBar, "the find bar took ⌘F from the page")
 
                 // Unhandled, ⌘F comes back from WebKit to Edit > Find.
-                run("ownSearch = false", in: webView, harness: harness)
+                UIFlowHarness.run("ownSearch = false", in: webView)
                 pressCommandFInPage(webView)
                 harness.waitUntil("the find bar", timeout: 10) { column.isFindBarOpen }
                 let bar = try XCTUnwrap(column.findBar)
@@ -207,16 +207,6 @@ final class WebPageFindTests: XCTestCase {
         XCTAssertTrue(webView.performKeyEquivalent(with: event), "the web view didn't take ⌘F", file: file, line: line)
     }
 
-    /// Runs `script` in the page and waits for it.
-    private func run(_ script: String, in webView: WKWebView, harness: UIFlowHarness) {
-        let answer = SelectionAnswer()
-        answer.isAsking = true
-        webView.evaluateJavaScript(script) { _, _ in
-            MainActor.assumeIsolated { answer.isAsking = false }
-        }
-        harness.waitUntil("the page to run \(script)") { !answer.isAsking }
-    }
-
     /// A plain key typed into the focused find field. The key interceptor
     /// leaves those to the field (TerminalFindKeyRouting.routeInField),
     /// and with no key window AppKit would drop it: the window delivers it
@@ -250,38 +240,15 @@ final class WebPageFindTests: XCTestCase {
                 return node ? `${node.parentElement.id}@${selection.anchorOffset}:${selection}` : "";
             })()
             """
-        let answer = SelectionAnswer()
-        wait("the page to select \(expected)", file: file, line: line) {
-            if !answer.isAsking {
-                answer.isAsking = true
-                webView.evaluateJavaScript(script) { result, _ in
-                    MainActor.assumeIsolated {
-                        answer.latest = result as? String
-                        answer.isAsking = false
-                    }
-                }
-            }
-            return answer.latest.map(expected.contains) == true
+        UIFlowHarness.waitForAnswer("the page to select \(expected)", to: script, in: webView, file: file, line: line) {
+            expected.contains($0)
         }
-        if answer.latest.map(expected.contains) != true {
-            XCTFail("the page selected \(answer.latest ?? "nothing")", file: file, line: line)
-        }
-    }
-
-    @MainActor
-    private final class SelectionAnswer {
-        var latest: String?
-        var isAsking = false
     }
 
     /// Spins the main run loop until `condition` holds, 10 s at most.
     private func wait(
         _ description: String, file: StaticString = #filePath, line: UInt = #line, _ condition: () -> Bool
     ) {
-        let deadline = Date().addingTimeInterval(10)
-        while !condition(), Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
-        }
-        XCTAssertTrue(condition(), "timed out waiting for \(description)", file: file, line: line)
+        UIFlowHarness.waitUntil(description, timeout: 10, file: file, line: line, condition)
     }
 }
