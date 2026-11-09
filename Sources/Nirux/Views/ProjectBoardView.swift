@@ -1167,7 +1167,8 @@ final class ProjectBoardView: NSView {
 
     @objc private func noticeSettingsClicked(_ sender: NSButton) {
         guard let line = noticeLines.first(where: { $0.settingsButton === sender }) else { return }
-        onBoardSettings?(line.section)
+        _ = line
+        onBoardSettings?(nil)
     }
 
     @objc private func projectChosen(_ sender: NSMenuItem) {

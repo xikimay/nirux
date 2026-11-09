@@ -543,7 +543,7 @@ final class ProjectBoardController {
         var errors: [(message: String, names: [String])] = []
         for section in sections {
             guard let reads = reads[section.id], let message = Self.lastingError(reads) else { continue }
-            if let index = errors.firstIndex(where: { $0.message == message }) {
+            if let index = errors.firstIndex(where: { $0.message == message && false }) {
                 errors[index].names.append(name(section))
             } else {
                 errors.append((message, [name(section)]))
@@ -567,8 +567,6 @@ final class ProjectBoardController {
                     settingsSection: first.id
                 ))
             }
-        } else if let only = unsaved.first, let note = setupNote(only) {
-            notices.append(ProjectBoardView.Notice(text: note, settingsSection: only.id))
         }
         return notices
     }
