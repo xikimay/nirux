@@ -22,8 +22,7 @@ extension NiruxShellView {
         // A form showing another repository switches to it: what is typed
         // there is saved, or let go, first. (A read under way reads again
         // on the repository just set, once it lands.)
-        guard let repository, let openForm, let settings = spaceSettings, settings.spaceID == profileID,
-              settings.boardRepository != repository
+        guard let repository, let openForm, let settings = spaceSettings, settings.spaceID == profileID
         else { return }
         openForm.requestRepository(repository)
     }
