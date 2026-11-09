@@ -32,8 +32,7 @@ extension NiruxShellView {
     /// Keep-awake's poll. The heartbeat refreshes every 2 s, but it stops in
     /// the background and its timer waits out a modal alert; then only hook
     /// events and title changes refresh, so the turn of an agent without
-    /// hooks — Codex, Gemini CLI, OpenCode, or one a Telegram prompt
-    /// started — would neither start nor end.
+    /// hooks — Codex, Gemini CLI, OpenCode — would neither start nor end.
     func refreshAgentStatusInBackground() {
         let sinceRefresh = ProcessInfo.processInfo.systemUptime - lastMetadataRefreshAt
         guard sinceRefresh > Self.heartbeatStaleAfter else { return }

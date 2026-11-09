@@ -330,8 +330,7 @@ final class StuckAgentSidebarTests: XCTestCase {
     // MARK: - Nirux in the background
 
     /// The heartbeat stops in the background, and a blocked agent fires no
-    /// hook: the slow watch still alerts, once, and hands the alert on (to
-    /// Telegram).
+    /// hook: the slow watch still alerts, once.
     func testStuckWatchAlertsWhileNiruxIsInTheBackground() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("nirux-stuck-watch-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -382,18 +381,11 @@ final class StuckAgentSidebarTests: XCTestCase {
         // The system notification needs an app bundle, which xctest isn't.
         var notified: [AgentAttentionReason?] = []
         column.onAgentAttention = { notified.append($0) }
-        var alerts: [AgentAttentionReason] = []
-        shell.onStuckAgentAlert = { reason, _, columnIndex, alerted in
-            XCTAssertEqual(columnIndex, 0)
-            XCTAssertTrue(alerted === column)
-            alerts.append(reason)
-        }
         shell.stuckAgentWaitThreshold = 600
         shell.refreshStuckAgents(snapshot: snapshot, now: now)
         shell.refreshStuckAgents(snapshot: snapshot, now: now + 30)
         let waited = AgentAttentionReason.stillWaiting(.permission(tool: "Bash", summary: nil), waited: 3_600)
-        XCTAssertEqual(alerts, [waited], "once")
-        XCTAssertEqual(notified, [waited])
+        XCTAssertEqual(notified, [waited], "once")
 
         // Nirux leaving the front starts the watch as the heartbeat stops.
         NotificationCenter.default.post(name: NSApplication.didResignActiveNotification, object: NSApp)

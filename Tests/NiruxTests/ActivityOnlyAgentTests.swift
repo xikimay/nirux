@@ -104,7 +104,7 @@ final class ActivityOnlyAgentTests: XCTestCase {
 
     func testActivityOnlyAgentKeepsASuspendedClaudesDialogs() {
         // claude shows a dialog, ^Z, the user runs gemini: on `fg` the dialog
-        // is back, and it must still keep Telegram from typing into it.
+        // is back, and it must still keep Nirux from typing a prompt into it.
         _ = machine.tick(fgName: "claude", isUserFocused: false, now: t0)
         _ = machine.apply(AgentHookEvent(kind: .claude, name: .sessionStart), isUserFocused: false)
         _ = machine.apply(AgentHookEvent(kind: .claude, name: .permissionRequest), isUserFocused: false)

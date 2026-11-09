@@ -142,12 +142,12 @@ struct AgentStatusMachine {
         integratedAgentProcesses.contains(name) || activityOnlyAgentProcesses.contains(name)
     }
 
-    /// Telegram injects prompts only into integrated agents. Claude's hooks
-    /// report the dialogs a remote prompt must not answer; an activity-only
-    /// agent reports nothing, so its permission prompt looks like any
-    /// silence and a prompt could land on it. (Codex's notify reports turn
-    /// ends only — the same blind spot, accepted before this tier existed.)
-    /// Bot commands themselves stay agent-agnostic.
+    /// Nirux types prompts (PR Feedback's Address, "Ask Agent Why CI
+    /// Failed") only into integrated agents. Claude's hooks report the
+    /// dialogs such a prompt must not answer; an activity-only agent
+    /// reports nothing, so its permission prompt looks like any silence and
+    /// a prompt could land on it. (Codex's notify reports turn ends only —
+    /// the same blind spot, accepted before this tier existed.)
     static func acceptsRemotePrompts(processName name: String) -> Bool {
         integratedAgentProcesses.contains(name)
     }
@@ -431,13 +431,6 @@ struct AgentStatusMachine {
         return taken
     }
 
-    /// What an event asks of the user, read without column state (its
-    /// column is gone): as if it reached a fresh, focused column.
-    static func standaloneOutcome(for event: AgentHookEvent) -> AgentHookOutcome {
-        var machine = AgentStatusMachine()
-        return machine.apply(event, isUserFocused: true)
-    }
-
     /// Claude notifications by `notification_type`. Informational types
     /// change nothing; untyped ones (older Claude) keep asking for
     /// attention with their message, as before types existed.
@@ -500,8 +493,8 @@ struct AgentStatusMachine {
         case "idle_prompt":
             // Claude finished responding a minute ago: the main thread sits
             // at its prompt, not in a dialog. Its Stop said so already: the
-            // reminder alerts nobody, asks nothing over Telegram, and
-            // leaves a finished turn the user looked at seen. Only a turn
+            // reminder alerts nobody and leaves a finished turn the user
+            // looked at seen. Only a turn
             // still believed running (Esc fires no Stop, a Stop can get
             // lost) ends here.
             closeDialogs { $0.agentID == nil && $0.sessionID == event.sessionID }
@@ -541,9 +534,10 @@ struct AgentStatusMachine {
     }
 
     /// A tool event from an agent: it got past its dialogs — answered, or
-    /// denied, which fires no hook. The status believes it; the Telegram
-    /// gate keeps the entries until proof (a call can run beside an open
-    /// dialog). Claude's `permission_prompt` reopens them if one still waits.
+    /// denied, which fires no hook. The status believes it; the gate on
+    /// prompts Nirux types keeps the entries until proof (a call can run
+    /// beside an open dialog). Claude's `permission_prompt` reopens them if
+    /// one still waits.
     private mutating func noteProgress(of event: AgentHookEvent) {
         for index in pendingDialogs.indices
         where pendingDialogs[index].agentID == event.agentID && pendingDialogs[index].sessionID == event.sessionID {
@@ -723,7 +717,7 @@ struct AgentStatusMachine {
         // may just mean it's suspended; a new claude's SessionStart clears
         // them.) An activity-only agent keeps them: it may run in front of a
         // suspended claude whose dialog is back on `fg`, and they are what
-        // keeps Telegram from typing into it.
+        // keeps Nirux from typing a prompt into it.
         if Self.integratedAgentProcesses.contains(fgName), fgName != "claude" { pendingDialogs.removeAll() }
         // No hook ever drives an activity-only agent (a Claude or Codex hook
         // under it is a nested run's); a claude's leftover kind would mute
