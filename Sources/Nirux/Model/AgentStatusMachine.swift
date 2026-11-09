@@ -466,7 +466,6 @@ struct AgentStatusMachine {
             let line = TurnEndText.lastLine(of: request.message)
             reason = .askedInReply(line)
             // A user looking at the column reads it there.
-            if !isUserFocused { askedQuestion = AskedQuestion(text: line, since: request.turnEndedAt) }
         case .unknown:
             reason = .turnFinished
         }

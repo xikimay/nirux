@@ -111,7 +111,6 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         lock.withLock {
             if report.billedPerCall {
                 // An API key, or extra usage: a subscription's runs only.
-                restedUntil = now() + Self.readySetupLifetime
                 failuresInARow = 0
             } else if report.verdict == .unknown {
                 failuresInARow += 1
