@@ -397,8 +397,8 @@ final class PersistenceBackupTests: XCTestCase {
     // MARK: - A state file from an older build
 
     /// A state file from a build that had Telegram Remote Access loads
-    /// whole, its Telegram settings ignored, and the next save leaves them
-    /// out.
+    /// whole, its Telegram settings ignored (even one a hand edit broke),
+    /// and the next save leaves them out.
     func testStateWithTelegramSettingsLoadsAndTheNextSaveForgetsThem() throws {
         try write(Data("""
         {
@@ -411,7 +411,7 @@ final class PersistenceBackupTests: XCTestCase {
             "telegramPairedChatID": 654321,
             "telegramNotifyOnCompletion": false,
             "telegramNotifyOnAttention": true,
-            "telegramLastUpdateID": 88,
+            "telegramLastUpdateID": "88",
             "stuckAgentMinutes": 30
           }
         }

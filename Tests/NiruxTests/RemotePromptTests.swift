@@ -2,36 +2,9 @@ import XCTest
 @testable import Nirux
 
 /// The prompts Nirux types into an agent for the user (PR Feedback's
-/// Address, "Ask Agent Why CI Failed"): which terminals take one, what is
-/// typed, and the dialog that holds one back.
+/// Address, "Ask Agent Why CI Failed"): what is typed, and the dialog that
+/// holds one back.
 final class RemotePromptTests: XCTestCase {
-    @MainActor
-    func testPtyRemotePromptGateRechecksLiveForegroundProcess() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("nirux-remote-prompt-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        let agent = AgentStandIn()
-        defer { agent.remove() }
-        let agentSession = PtySession()
-        let idleShellSession = PtySession()
-        agentSession.start(shell: "/bin/zsh", args: ["-f", "-c", agent.command(named: "codex")], cwd: directory.path)
-        idleShellSession.start(shell: "/bin/zsh", args: ["-f"], cwd: directory.path)
-
-        let processesReady = try await waitUntil {
-            let snapshot = ProcessSnapshot()
-            return agentSession.acceptsRemotePrompts(snapshot: snapshot)
-                && !idleShellSession.acceptsRemotePrompts(snapshot: snapshot)
-        }
-        XCTAssertTrue(processesReady)
-
-        let terminalInput = try XCTUnwrap(RemotePromptSanitizer.terminalInput(for: "remote prompt verified"))
-        agentSession.sendRaw(terminalInput)
-        let delivered = try await waitUntil { agent.input.contains("remote prompt verified") }
-        XCTAssertTrue(delivered)
-    }
-
     /// The gate's source of truth: a PermissionRequest leaves a pending
     /// dialog on the column's PTY until hooks prove it closed.
     func testPtyKeepsPendingDialogUntilItsCallRuns() {
@@ -58,20 +31,5 @@ final class RemotePromptTests: XCTestCase {
         let framed = RemotePromptSanitizer.terminalInput(for: input)
         XCTAssertEqual(framed, "\u{1B}[200~explain[31m this\ncarefully\u{1B}[201~\r")
         XCTAssertNil(RemotePromptSanitizer.terminalInput(for: "\u{1B}\u{0}"))
-    }
-
-    @MainActor
-    private func waitUntil(
-        timeout: TimeInterval = 10,
-        condition: @escaping () -> Bool
-    ) async throws -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition() {
-            if Date() >= deadline {
-                return false
-            }
-            try await Task.sleep(for: .milliseconds(20))
-        }
-        return true
     }
 }

@@ -10,8 +10,10 @@ enum LegacyTelegramToken {
     /// Deletes the token in the background; false when this Nirux leaves it
     /// alone. Only an app bundle on the real state deletes it: the Keychain
     /// is shared with every copy (NIRUX_STATE_DIR doesn't move it), and a
-    /// development build, or a copy on a state of its own, must not take
-    /// the token of an installed build that still has the feature.
+    /// build run from a checkout, or a copy on a state of its own, must not
+    /// take the token of an installed build that still has the feature. (A
+    /// bundle allowed onto the real state stands in for the installed app:
+    /// its first save drops the feature's settings too.)
     @discardableResult
     static func removeAtLaunch(
         environment: [String: String] = ProcessInfo.processInfo.environment,
