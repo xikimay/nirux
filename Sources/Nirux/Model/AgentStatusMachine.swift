@@ -390,7 +390,6 @@ struct AgentStatusMachine {
             _ = block(for: reason, isUserFocused: false, alert: false)
             // The earlier turn end just alerted (`settleQuietTurnEnd`): that
             // was this episode's alert, the verdict only says why.
-            if outcome.firedAttention { attentionAlerted = true }
             quietTurnEnd = .pending(turnEndedAt: now)
             outcome.turnEnd = TurnEndRequest(message: message, turnEndedAt: now)
             return
@@ -440,6 +439,7 @@ struct AgentStatusMachine {
         guard quietTurnEnd == .pending(turnEndedAt: request.turnEndedAt) else { return nil }
         // Settled, whichever way: nothing is left to alert for later.
         quietTurnEnd = nil
+        guard openDialogs.isEmpty else { return nil }
         let reason: AgentAttentionReason
         switch verdict {
         case .done:
@@ -636,9 +636,9 @@ struct AgentStatusMachine {
         // An alerting attention (alerted now, or earlier in this episode)
         // speaks for the turn end waiting for its verdict: it needs no
         // alert of its own, nor to take this attention's reason.
-        if alert, case .pending = quietTurnEnd { quietTurnEnd = nil }
         guard alert, !attentionAlerted else { return false }
         attentionAlerted = true
+        if case .pending = quietTurnEnd { quietTurnEnd = nil }
         return true
     }
 
