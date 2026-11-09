@@ -612,7 +612,6 @@ extension NiruxShellView {
         // One at a time: reading the profiles can wait on a macOS prompt
         // while the menu stays enabled, and a second click would stack a
         // second picker.
-        guard !isImportingCookies else { return }
         isImportingCookies = true
         let cookieSources = sideEffects.cookieSources
         let browsers = sideEffects.cookieBrowsers()

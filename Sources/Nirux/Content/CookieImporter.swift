@@ -165,7 +165,6 @@ enum CookieImporter {
     static func browsersToOffer(home: String = NSHomeDirectory()) -> [Browser] {
         Browser.allCases.filter { browser in
             let root = userDataRoot(of: browser, home: home)
-            if FileManager.default.fileExists(atPath: root + "/Local State") { return true }
             if case .missing = cookieFile(inProfile: root + "/Default") { return false }
             return true
         }
@@ -259,7 +258,7 @@ enum CookieImporter {
     private static func profileFolders(in root: String) throws -> [String] {
         let names: [String]
         do {
-            let folder = URL(fileURLWithPath: root).resolvingSymlinksInPath()
+            let folder = URL(fileURLWithPath: root)
             names = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil).map(\.lastPathComponent)
         } catch {
             throw Failure.unreadable(path: root, errno: posixCode(of: error))
@@ -415,7 +414,7 @@ enum CookieImporter {
         plain.count = outLen
         if let domainHash {
             guard plain.prefix(domainHash.count) == domainHash else { return .wrongKey }
-            return String(data: plain.dropFirst(domainHash.count), encoding: .utf8).map { .value($0) } ?? .notText
+            return String(data: plain.dropFirst(domainHash.count), encoding: .utf8).map { .value($0) } ?? .wrongKey
         }
         return String(data: plain, encoding: .utf8).map { .value($0) } ?? .wrongKey
     }
@@ -608,7 +607,7 @@ enum CookieImporter {
         // from version 24, not one domain hash matched; before, nothing
         // checks a value and about 1% of a wrong key's output reads as
         // text, so most values failing says it.
-        if encrypted > 0, hashesDomain ? keyChecked == 0 : keyChecked * 2 < encrypted { throw Failure.undecryptable }
+        if encrypted > 0, keyChecked == 0 { throw Failure.undecryptable }
         return Read(cookies: cookies, undecryptable: encrypted - decrypted)
     }
 
