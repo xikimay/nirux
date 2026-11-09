@@ -119,6 +119,16 @@ final class MissionTests: XCTestCase {
         XCTAssertEqual(enabled["NIRUX_CLI_PATH"], "/Applications/Nirux.app/Contents/MacOS/Nirux")
     }
 
+    /// A worktree request makes a Mission only from a terminal whose agent
+    /// can answer its child: Mission variables, and its Nirux still there.
+    func testOnlyATerminalThatCanAnswerCarriesMissions() {
+        XCTAssertTrue(NiruxShellView.terminalCarriesMissions(["NIRUX_MISSION_HANDOFFS": "1", "NIRUX_CLI_PATH": "/bin/sh"]))
+        XCTAssertFalse(
+            NiruxShellView.terminalCarriesMissions(["NIRUX_MISSION_HANDOFFS": "1", "NIRUX_CLI_PATH": "/nonexistent/Nirux"]),
+            "Nirux moved since the terminal started"
+        )
+    }
+
     func testMissionPersistenceAndCompletionStatusRoundTrip() throws {
         let fileURL = try makeDirectory().appendingPathComponent("missions.json")
         let store = MissionStore(fileURL: fileURL)

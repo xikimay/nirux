@@ -428,10 +428,54 @@ final class LeadToolsFlowTests: XCTestCase {
             let side = try open("side", missionFrom: other)
             XCTAssertEqual([old.profileID, side.profileID], [task.profileID, other.profileID])
             XCTAssertEqual(parents(), ["sub": "task"])
+            // Saved as a build before sub-tasks kept their parent saved them,
+            // the former Lead's folder a worktree (a space anchored there):
+            // its task still stays at the top level.
             shell.saveState()
+            var state = try XCTUnwrap(Persistence.load())
+            for index in state.workspaces.indices {
+                if ["old", "side", "lead's task"].contains(state.workspaces[index].title) {
+                    state.workspaces[index].parentIsSettled = false
+                }
+                if state.workspaces[index].id == lead.workspace.id { state.workspaces[index].cwd = harness.worktree }
+            }
+            XCTAssertTrue(Persistence.save(state))
             shell.restoreState()
             XCTAssertEqual(parents(), ["sub": "task", "old": "task"])
             XCTAssertEqual(shell.persistedState().workspaces.first { $0.title == "old" }?.parentWorkspaceID, task.id)
+
+            // Moved out, it stays a task of its own: its parent was decided
+            // once, never again.
+            let restoredOld = try XCTUnwrap(shell.workspaces.firstIndex { $0.title == "old" })
+            shell.handleWorkspaceSidebarAction(.moveOutOfParent, workspaceIndex: restoredOld)
+            XCTAssertEqual(parents(), ["sub": "task"])
+            shell.saveState()
+            shell.restoreState()
+            XCTAssertEqual(parents(), ["sub": "task"])
+
+            // A parent whose repository can't be found now (its worktree's
+            // `.git` pointing nowhere, as on a volume not mounted yet): its
+            // child is asked about again at the next restore, not settled.
+            let pendingFolder = harness.root + "/repo.feat-pending"
+            try UIFlowHarness.git(["worktree", "add", "-q", "-b", "feat/pending", pendingFolder], at: harness.repo)
+            let pendingParent = try open("pending", in: pendingFolder)
+            _ = try open("waiting", missionFrom: pendingParent)
+            shell.saveState()
+            var unsettled = try XCTUnwrap(Persistence.load())
+            for index in unsettled.workspaces.indices where unsettled.workspaces[index].title == "waiting" {
+                unsettled.workspaces[index].parentIsSettled = false
+            }
+            XCTAssertTrue(Persistence.save(unsettled))
+            let gitFile = pendingFolder + "/.git"
+            let pointer = try String(contentsOfFile: gitFile, encoding: .utf8)
+            try "gitdir: /nonexistent/repo/.git/worktrees/repo.feat-pending\n".write(toFile: gitFile, atomically: true, encoding: .utf8)
+            shell.restoreState()
+            XCTAssertNil(parents()["waiting"])
+            XCTAssertEqual(shell.persistedState().workspaces.first { $0.title == "waiting" }?.parentIsSettled, false)
+            try pointer.write(toFile: gitFile, atomically: true, encoding: .utf8)
+            shell.saveState()
+            shell.restoreState()
+            XCTAssertEqual(parents()["waiting"], "pending")
         }
     }
 
@@ -492,12 +536,24 @@ final class LeadToolsFlowTests: XCTestCase {
             XCTAssertTrue(line("by hand").hasPrefix("- “by hand” · sub-task of “task” · "), list)
             XCTAssertTrue(line("by hand").hasSuffix(" · not yours (started by the user)"), list)
 
+            // A nirux://new-workspace from a terminal is an agent's too; an
+            // archived sub-task, no longer listed under its task, still is.
+            shell.openRequestedWorkspace(title: "requested", cwd: harness.repo, agent: nil, requestedSpaceID: lead.space)
+            harness.waitUntil("the requested workspace") { shell.workspaces.contains { $0.title == "requested" } }
+            XCTAssertTrue(store.setWorkspaceInactive(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === sub }), true))
+            let later = try call("list_tasks", lead: lead, in: harness).text.split(separator: "\n").map(String.init)
+            @MainActor func laterLine(_ title: String) -> String { later.first { $0.hasPrefix("- “\(title)”") } ?? "" }
+            XCTAssertTrue(laterLine("requested").hasSuffix(" · not yours (another agent started it)"), "\(later)")
+            XCTAssertTrue(laterLine("feat/sub").contains(" · inactive · "), "\(later)")
+            XCTAssertTrue(laterLine("feat/sub").hasSuffix(" · not yours (another agent started it)"), "\(later)")
+            XCTAssertTrue(store.setWorkspaceInactive(at: try XCTUnwrap(shell.workspaces.firstIndex { $0 === sub }), false))
+
             shell.saveState()
             shell.restoreState()
             XCTAssertEqual(parents(), ["feat/sub": "task", "by hand": "task", "feat/late": "task"])
             XCTAssertEqual(
-                shell.persistedState().workspaces.filter(\.startedByAgent).map(\.title),
-                ["feat/sub", "feat/late", "feat/side", "feat/leads", "feat/loose"]
+                shell.persistedState().workspaces.filter(\.startedByAgent).map(\.title).sorted(),
+                ["feat/late", "feat/leads", "feat/loose", "feat/side", "feat/sub", "requested"]
             )
         }
     }

@@ -221,6 +221,11 @@ final class NiruxShellView: NSView {
         sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index) }
         sidebar.onWorkspaceAction = { [weak self] action, index in self?.handleWorkspaceSidebarAction(action, workspaceIndex: index) }
         sidebar.worktreeCleanupOffer = { [weak self] index in self?.worktreeCleanupOffer(workspaceIndex: index) }
+        sidebar.workspaceIndexForID = { [weak self] id in self?.workspaces.firstIndex { $0.id == id && !$0.isClosing } }
+        sidebar.workspaceIDForIndex = { [weak self] index in self?.workspaces[safe: index].flatMap { $0.isClosing ? nil : $0.id } }
+        sidebar.columnIndexForID = { [weak self] workspaceID, columnID in
+            self?.workspaces.first { $0.id == workspaceID && !$0.isClosing }?.columns.firstIndex { $0.id == columnID && !$0.isClosing }
+        }
         sidebar.offersSubtask = { [weak self] index in
             guard let self, let workspace = self.workspaces[safe: index], !workspace.isClosing else { return false }
             return self.offersSubtask(workspace)

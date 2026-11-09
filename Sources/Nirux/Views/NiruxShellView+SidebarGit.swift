@@ -53,7 +53,8 @@ extension NiruxShellView {
                         ? nil : col.pty?.agentVisibleDialog(foreground: foregroundProcess)?.reason,
                     stuck: sidebarStuckState(of: col, foregroundProcess: foregroundProcess, snapshot: snapshot, now: now),
                     deferredAgent: Self.sidebarDeferredAgent(of: col),
-                    missionQuestion: missionQuestions[ObjectIdentifier(col)]
+                    missionQuestion: missionQuestions[ObjectIdentifier(col)],
+                    id: col.id
                 )
             }
             return WorkspaceInfo(id: workspace.id, index: index, title: workspace.title,
