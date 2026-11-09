@@ -300,7 +300,6 @@ final class AgentHookCenter {
         if let reason = pty.applyTurnEndVerdict(verdict, for: request, isUserFocused: resolution.isUserFocused) {
             resolution.column.notifyAgentAttention(reason: reason)
         }
-        onTurnEndSettled?()
     }
 
     /// Whether the sidebar holds a request its receiver waits on:

@@ -73,7 +73,7 @@ extension ColumnInfo {
         // A child that asked its parent ended its turn to wait: not "done",
         // nor asking the user.
         let waitsOnParent = missionQuestion.map { $0.handOff == nil } ?? false
-        if let openDialog, !(waitsOnParent && openDialog.isTurnEnd) {
+        if let openDialog {
             causes.append(AttentionCause(
                 signal: openDialog.signal, label: openDialog.chipLabel, toolTip: openDialog.toolTip,
                 headline: openDialog.headline, detail: openDialog.cleanDetailLine

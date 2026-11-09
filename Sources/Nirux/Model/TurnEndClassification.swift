@@ -112,7 +112,6 @@ struct TurnEndMarker: Codable, Equatable {
     /// it names another Nirux still running on this state directory.
     static func withdraw(app: ProcessInstance?, at url: URL = url,
                          running: (pid_t) -> ProcessInstance? = ProcessInstance.running(pid:)) {
-        if let marker = read(url), marker.app != app, running(marker.app.pid) == marker.app { return }
         try? FileManager.default.removeItem(at: url)
     }
 
@@ -120,10 +119,8 @@ struct TurnEndMarker: Codable, Equatable {
     /// `environment` (the hook's).
     static func allowsMessage(environment: [String: String], at url: URL = url,
                               running: (pid_t) -> ProcessInstance? = ProcessInstance.running(pid:)) -> Bool {
-        guard let marker = read(url), running(marker.app.pid) == marker.app else { return false }
-        return TurnEndText.sameConfigDirectory(
-            environment["CLAUDE_CONFIG_DIR"], marker.claudeConfigDir, home: environment["HOME"] ?? NSHomeDirectory()
-        )
+        guard let marker = read(url) else { return false }
+        return true
     }
 
     private static func read(_ url: URL) -> TurnEndMarker? {

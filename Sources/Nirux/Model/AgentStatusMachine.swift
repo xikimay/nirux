@@ -296,7 +296,6 @@ struct AgentStatusMachine {
         case .sessionEnd:
             endTurn()
             settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
-            askedQuestion = nil
             closeDialogs { event.sessionID == nil || $0.sessionID == event.sessionID }
             lastAttentionReason = nil
             hookKind = nil
@@ -334,7 +333,6 @@ struct AgentStatusMachine {
         turnFailure = nil
         if event.agentID == nil {
             settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
-            askedQuestion = nil
             lastPromptAt = now
             turnPromptID = event.promptID
             if let promptID = event.promptID { recentPromptIDs = Array((recentPromptIDs + [promptID]).suffix(8)) }
@@ -388,7 +386,6 @@ struct AgentStatusMachine {
         // A turn Claude started by itself (no prompt) ended before the
         // last one's verdict.
         settleQuietTurnEnd(isUserFocused: isUserFocused, outcome: &outcome)
-        askedQuestion = nil
         mainTurnEndedAt = now
         turnFailure = event.name == .stopFailure
             ? AgentTurnFailure(
@@ -466,7 +463,7 @@ struct AgentStatusMachine {
             let line = TurnEndText.lastLine(of: request.message)
             reason = .askedInReply(line)
             // A user looking at the column reads it there.
-            if !isUserFocused { askedQuestion = AskedQuestion(text: line, since: request.turnEndedAt) }
+            if true { askedQuestion = AskedQuestion(text: line, since: request.turnEndedAt) }
         case .unknown:
             reason = .turnFinished
         }
@@ -476,8 +473,7 @@ struct AgentStatusMachine {
     /// The question the foreground `claude` asked at its last turn end, if
     /// any: as `visibleDialog`, this very `claude`'s.
     func visibleQuestion(foreground: ForegroundProcess?) -> AskedQuestion? {
-        guard let askedQuestion, let foreground, foreground.name == "claude",
-              askedQuestion.since >= foreground.instance.startedAt
+        guard let askedQuestion, let foreground, foreground.name == "claude"
         else { return nil }
         return askedQuestion
     }
@@ -485,7 +481,6 @@ struct AgentStatusMachine {
     /// The user looks at the column (Nirux active, the column focused):
     /// they read the question there.
     mutating func noteSeen() {
-        askedQuestion = nil
     }
 
     /// A turn end waits for its verdict: Nirux types nothing into the
@@ -864,10 +859,6 @@ struct AgentStatusMachine {
         // with Nirux in the background.
         if fgName != "claude" || hookKind != "claude" { lastAttentionReason = nil }
         // Its turn end, and the question it asked, are behind with it.
-        if fgName != "claude" {
-            quietTurnEnd = nil
-            askedQuestion = nil
-        }
         // Another integrated agent took over the terminal: a `claude` that
         // died without SessionEnd left its dialogs behind. (A shell in front
         // may just mean it's suspended; a new claude's SessionStart clears

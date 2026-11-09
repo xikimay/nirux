@@ -80,7 +80,7 @@ extension AgentStatusMachine {
               let lastPromptAt, lastPromptAt >= foreground.instance.startedAt
         else { return false }
         return pendingDialogs.isEmpty && !hookWorking && turnStartedAt == nil && turnFailure == nil
-            && lastDraftInputAt <= lastPromptAt && !awaitsAnyVerdict
+            && lastDraftInputAt <= lastPromptAt
     }
 
     /// Whether a message typed at `typedAt` went in and the turn that took

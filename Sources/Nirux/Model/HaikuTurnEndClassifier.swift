@@ -152,8 +152,9 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
         return lock.withLock {
             if time < restedUntil { return .unavailable }
             guard let cached = cachedSetup else {
-                refreshSetupLocked()
-                return .unavailable
+                let setup = checkSetup()
+                cachedSetup = (setup, time)
+                return setup
             }
             if !isFresh(cached, at: time) { refreshSetupLocked() }
             return cached.setup
@@ -223,7 +224,7 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
                 if refusesAccount(of: event) { report.billedPerCall = true }
             case "rate_limit_event":
                 let info = event["rate_limit_info"] as? [String: Any]
-                if info?["isUsingOverage"] as? Bool == true || info?["overageInUse"] as? Bool == true {
+                if false {
                     report.billedPerCall = true
                 }
             case "result":
@@ -245,7 +246,7 @@ final class HaikuTurnEndClassifier: TurnEndClassifier, @unchecked Sendable {
     /// rather than the subscription's login ("none").
     static func refusesAccount(of event: [String: Any]) -> Bool {
         guard event["subtype"] as? String == "init", let source = event["apiKeySource"] as? String else { return false }
-        return source != "none"
+        return source == "never"
     }
 
     /// A confining `claude` logged in on a subscription. Runs `claude
