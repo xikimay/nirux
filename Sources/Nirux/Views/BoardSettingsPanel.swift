@@ -209,9 +209,22 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
     /// let go.
     @objc func repositoryChanged(_ sender: Any?) {
         let index = repositoryPopup.indexOfSelectedItem
-        guard repositoryChoices.indices.contains(index), repositoryChoices[index].id != shownRepository else { return }
-        let target = repositoryChoices[index].id
+        guard repositoryChoices.indices.contains(index) else { return }
+        requestRepository(repositoryChoices[index].id)
+    }
+
+    /// The form of repository `target` (a section's id), even one its
+    /// pop-up doesn't list yet (an anchor added since it opened), once what
+    /// was typed here is saved or let go.
+    func requestRepository(_ target: String) {
+        guard target != shownRepository else { return }
         guard isDirty else { return onSelectRepository?(target) ?? () }
+        // One question at a time: the board's button, in another window,
+        // can ask again while it shows.
+        if let window = hostView?.window, window.attachedSheet != nil {
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
         let name = repositoryChoices.first { $0.id == shownRepository }?.title ?? "this repository"
         askToSaveChanges(name) { [weak self] answer in
             guard let self, self.container != nil else { return }
@@ -330,7 +343,7 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         repositoryField.stringValue = isUnread ? "" : saved?.repository ?? suggested?.repository ?? ""
         repositoryField.placeholderString = "owner/name"
         y = addField(repositoryField, y: y, in: view)
-        y = addHint(Self.repositoryHint(suggestions), y: y, in: view) + 10
+        y = addHint(Self.repositoryHint(suggestions, saved: saved?.repository), y: y, in: view) + 10
 
         y = addLabel("Base branch", y: y, in: view)
         baseBranchField.stringValue = isUnread ? "" : saved?.baseBranch ?? suggested?.baseBranch ?? ""
@@ -580,12 +593,17 @@ final class BoardSettingsPanel: NSObject, NSTextViewDelegate {
         }
     }
 
-    static func repositoryHint(_ suggestions: BoardConfigSuggestions) -> String {
+    static func repositoryHint(_ suggestions: BoardConfigSuggestions, saved: String? = nil) -> String {
+        // Saved from another remote than the one gh takes as the base.
+        if let saved, let suggested = suggestions.repository, case .shared = suggestions.source,
+           saved.lowercased() != suggested.lowercased() {
+            return "Saved as \(saved). gh would take \(suggested) as this space’s base repository."
+        }
         switch suggestions.source {
         case .shared:
-            return "This space’s workspaces push to \(suggestions.repository ?? "it")."
+            return "This space’s pull requests live in \(suggestions.repository ?? "it") on GitHub."
         case .differing(let repositories):
-            return "This space’s workspaces push to different places (\(repositories.joined(separator: ", "))): "
+            return "This space’s workspaces are in different repositories (\(repositories.joined(separator: ", "))): "
                 + "type the repository whose pull requests the board shows."
         case .noRepository:
             return "No workspace of this space is in a git repository: type owner/name."

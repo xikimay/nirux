@@ -6,7 +6,9 @@ import AppKit
 /// menu), the merge queue's line, then one row per branch. A board with
 /// several repositories (docs/spaces.md, S12) names its space in the header,
 /// keeps one queue line per repository under it, always in sight, and
-/// groups the rows under a header per repository.
+/// groups the rows under a header per repository. Lines under the header
+/// say why the board shows less than it could: what went wrong reading
+/// GitHub, a repository not set up, with Board Settings… beside it.
 /// It only draws: `ProjectBoardController` fills it, the shell runs its
 /// buttons and the queue.
 @MainActor
@@ -65,6 +67,17 @@ final class ProjectBoardView: NSView {
         var queue: ProjectBoard.QueueState
     }
 
+    /// A line under the header: what went wrong reading GitHub, or why a
+    /// repository isn't set up, with Board Settings….
+    struct Notice: Equatable {
+        var text: String
+        var isError = false
+        /// The section whose Board Settings its button opens; nil: no button.
+        var settingsSection: String?
+
+        var offersSettings: Bool { settingsSection != nil }
+    }
+
     enum Body: Equatable {
         case message(String)
         case rows([ProjectBoard.Row])
@@ -85,6 +98,10 @@ final class ProjectBoardView: NSView {
         var queue: ProjectBoard.QueueState?
         /// One line per queue, under the header, when the board has several.
         var queueLines: [QueueLine] = []
+        /// Above the queue lines.
+        var notices: [Notice] = []
+        /// A Board Settings… button under the body's message.
+        var messageOffersSettings = false
     }
 
     /// A button of the queue line or of a Queue cell.
@@ -176,13 +193,23 @@ final class ProjectBoardView: NSView {
         var views: [NSView] { [name, badge, label, startButton, stopButton] }
     }
 
+    /// A notice's line: its words, and Board Settings… when it offers it.
+    @MainActor
+    final class NoticeLineViews {
+        let label = NSTextField(labelWithString: "")
+        let settingsButton = NSButton(title: "Board Settings…", target: nil, action: nil)
+        var section: String?
+    }
+
     var onRefresh: (() -> Void)?
     /// Start and Stop of a queue line: the section's id on a board with
     /// several repositories, nil on one.
     var onStartQueue: ((String?) -> Void)?
     var onStopQueue: ((String?) -> Void)?
     var onSelectProject: ((String) -> Void)?
-    var onBoardSettings: (() -> Void)?
+    /// The ⋯ menu's item and the buttons saying Board Settings…: on a
+    /// section's repository, or nil for the one the form showed last.
+    var onBoardSettings: ((String?) -> Void)?
     var onAction: ((Action) -> Void)?
 
     private(set) var content: Content?
@@ -195,6 +222,8 @@ final class ProjectBoardView: NSView {
     private(set) var otherWorktreesToggle: NSButton?
     /// The queue lines of a board with several repositories, in its order.
     private(set) var queueLines: [QueueLineViews] = []
+    /// The notices' lines, in their order.
+    private(set) var noticeLines: [NoticeLineViews] = []
     /// What the rows' area holds, from the top.
     private var bodyItems: [BodyItem] = []
 
@@ -222,6 +251,7 @@ final class ProjectBoardView: NSView {
     let startQueueButton = NSButton(title: "Start…", target: nil, action: nil)
     let stopQueueButton = NSButton(title: "Stop", target: nil, action: nil)
     let messageLabel = NSTextField(wrappingLabelWithString: "")
+    let messageSettingsButton = NSButton(title: "Board Settings…", target: nil, action: nil)
     private let columnTitles = ["Name", "Agent", "PR", "Checks", "Queue", "Actions"].map { NSTextField(labelWithString: $0) }
     private let separator = NSView()
     private let scrollView = NSScrollView()
@@ -270,7 +300,8 @@ final class ProjectBoardView: NSView {
         header.trailingButtons = [refreshButton]
         header.menuProvider = { [weak self] in self?.headerMenu() ?? NSMenu() }
         for (button, action) in [
-            (startQueueButton, #selector(startQueueClicked)), (stopQueueButton, #selector(stopQueueClicked))
+            (startQueueButton, #selector(startQueueClicked)), (stopQueueButton, #selector(stopQueueClicked)),
+            (messageSettingsButton, #selector(settingsClicked))
         ] {
             button.bezelStyle = .rounded
             button.controlSize = .small
@@ -313,6 +344,8 @@ final class ProjectBoardView: NSView {
         }
         columnTitles.forEach(addSubview)
         documentView.addSubview(messageLabel)
+        messageSettingsButton.isHidden = true
+        documentView.addSubview(messageSettingsButton)
     }
 
     @available(*, unavailable)
@@ -329,6 +362,7 @@ final class ProjectBoardView: NSView {
         applyHeader(content.header)
         applyQueueHeader(content.queueLines.isEmpty ? content.queue.map(Self.queueHeader) : nil)
         applyQueueLines(content.queueLines)
+        applyNotices(content.notices)
         if content.body != previous?.body || content.requiredChecks != previous?.requiredChecks
             || content.baseBranch != previous?.baseBranch || content.queue != previous?.queue {
             if !updateAgentsInPlace(from: previous) { buildBody() }
@@ -463,7 +497,9 @@ final class ProjectBoardView: NSView {
     }
 
     private func buildBody() {
-        for view in documentView.subviews where view !== messageLabel { view.removeFromSuperview() }
+        for view in documentView.subviews where view !== messageLabel && view !== messageSettingsButton {
+            view.removeFromSuperview()
+        }
         rowViews = []
         bodyItems = []
         otherWorktreesToggle = nil
@@ -881,6 +917,34 @@ final class ProjectBoardView: NSView {
         }
     }
 
+    /// One line per notice, in red for an error.
+    private func applyNotices(_ notices: [Notice]) {
+        if noticeLines.count != notices.count {
+            noticeLines.forEach { [$0.label, $0.settingsButton].forEach { $0.removeFromSuperview() } }
+            noticeLines = notices.map { _ in makeNoticeLine() }
+        }
+        for (views, notice) in zip(noticeLines, notices) {
+            views.label.stringValue = notice.text
+            views.label.toolTip = notice.text
+            views.label.textColor = notice.isError ? Self.failureColor : Self.secondaryText
+            views.settingsButton.isHidden = !notice.offersSettings
+            views.section = notice.settingsSection
+        }
+    }
+
+    private func makeNoticeLine() -> NoticeLineViews {
+        let line = NoticeLineViews()
+        line.label.font = .systemFont(ofSize: 11)
+        line.label.lineBreakMode = .byTruncatingTail
+        line.settingsButton.bezelStyle = .rounded
+        line.settingsButton.controlSize = .small
+        line.settingsButton.font = .systemFont(ofSize: 11)
+        line.settingsButton.target = self
+        line.settingsButton.action = #selector(noticeSettingsClicked(_:))
+        [line.label, line.settingsButton].forEach(addSubview)
+        return line
+    }
+
     private func makeQueueLine(_ shown: QueueLine) -> QueueLineViews {
         let line = QueueLineViews(section: shown.id)
         line.name.font = .systemFont(ofSize: 11, weight: .semibold)
@@ -964,6 +1028,16 @@ final class ProjectBoardView: NSView {
         let width = bounds.width
         header.frame = NSRect(x: 0, y: 0, width: width, height: ColumnHeaderView.height)
         var y = ColumnHeaderView.height
+        for line in noticeLines {
+            var right = width - Self.padding
+            if !line.settingsButton.isHidden {
+                let buttonWidth = ceil(line.settingsButton.intrinsicContentSize.width) + 8
+                line.settingsButton.frame = NSRect(x: right - buttonWidth, y: y + 4, width: buttonWidth, height: 24)
+                right = line.settingsButton.frame.minX - 8
+            }
+            line.label.frame = NSRect(x: Self.padding, y: y + 8, width: max(0, right - Self.padding), height: 16)
+            y += 32
+        }
         if !queueLabel.isHidden {
             layoutQueueLine(name: nil, badge: dryRunBadge, label: queueLabel, buttons: [stopQueueButton, startQueueButton],
                             width: width, y: y + 4)
@@ -1003,10 +1077,18 @@ final class ProjectBoardView: NSView {
             messageLabel.stringValue = text
             let height = messageLabel.sizeThatFits(NSSize(width: width - 48, height: .greatestFiniteMagnitude)).height
             messageLabel.frame = NSRect(x: 24, y: 32, width: max(0, width - 48), height: height)
-            documentView.frame = NSRect(x: 0, y: 0, width: width, height: max(visibleHeight, height + 64))
+            var bottom = messageLabel.frame.maxY
+            messageSettingsButton.isHidden = content?.messageOffersSettings != true
+            if !messageSettingsButton.isHidden {
+                let buttonWidth = ceil(messageSettingsButton.intrinsicContentSize.width) + 8
+                messageSettingsButton.frame = NSRect(x: (width - buttonWidth) / 2, y: bottom + 12, width: buttonWidth, height: 24)
+                bottom = messageSettingsButton.frame.maxY
+            }
+            documentView.frame = NSRect(x: 0, y: 0, width: width, height: max(visibleHeight, bottom + 32))
             return
         }
         messageLabel.isHidden = true
+        messageSettingsButton.isHidden = true
         var y: CGFloat = 4
         for item in bodyItems {
             switch item {
@@ -1081,7 +1163,12 @@ final class ProjectBoardView: NSView {
         onStopQueue?(line.section)
     }
 
-    @objc private func settingsClicked() { onBoardSettings?() }
+    @objc private func settingsClicked() { onBoardSettings?(nil) }
+
+    @objc private func noticeSettingsClicked(_ sender: NSButton) {
+        guard let line = noticeLines.first(where: { $0.settingsButton === sender }) else { return }
+        onBoardSettings?(line.section)
+    }
 
     @objc private func projectChosen(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String else { return }
@@ -1127,9 +1214,10 @@ final class SectionHeaderView: NSView {
         titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         titleLabel.textColor = NSColor.white.withAlphaComponent(0.85)
         titleLabel.lineBreakMode = .byTruncatingTail
-        detailLabel.stringValue = section.repository ?? section.note ?? ""
-        detailLabel.toolTip = section.note
-        detailLabel.font = section.repository == nil ? .systemFont(ofSize: 11) : .monospacedSystemFont(ofSize: 11, weight: .regular)
+        // Its repository, and why it has no saved one: read-only, say.
+        detailLabel.stringValue = [section.repository, section.note].compactMap { $0 }.joined(separator: " · ")
+        detailLabel.toolTip = section.note ?? section.repository
+        detailLabel.font = section.note != nil ? .systemFont(ofSize: 11) : .monospacedSystemFont(ofSize: 11, weight: .regular)
         detailLabel.textColor = NSColor.white.withAlphaComponent(0.45)
         detailLabel.lineBreakMode = .byTruncatingTail
         pill.status = section.status
