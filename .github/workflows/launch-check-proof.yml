@@ -41,12 +41,13 @@ jobs:
           if scripts/launch-check.sh Broken.app; then echo "expected the launch check to fail"; exit 1; fi
           echo "failed as expected"
 
-      - name: Fails on a package that traps at its first terminal
+      - name: Fails on a package that traps after its first terminal starts
         timeout-minutes: 5
         run: |
-          # A stand-in binary that dies like a Swift trap shortly after launch.
+          # A stand-in binary: starts a zsh child like a first terminal, then
+          # dies like a Swift trap.
           cp -R nightly/Nirux.app Trapping.app
-          printf '#!/bin/sh\nsleep 2\nkill -TRAP $$\n' > Trapping.app/Contents/MacOS/Nirux
+          printf '#!/bin/sh\n/bin/zsh -c "sleep 30" &\nsleep 3\nkill -TRAP $$\n' > Trapping.app/Contents/MacOS/Nirux
           chmod +x Trapping.app/Contents/MacOS/Nirux
           if scripts/launch-check.sh Trapping.app; then echo "expected the launch check to fail"; exit 1; fi
           echo "failed as expected"
