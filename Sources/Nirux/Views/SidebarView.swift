@@ -552,8 +552,7 @@ final class SidebarView: NSView {
             let columnID = workspace?.columns.first { $0.index == columnIndex }?.id
             let column = { [weak self] () -> (workspace: Int, column: Int)? in
                 guard let self, let index = self.currentIndex(ofWorkspace: workspaceID, builtAt: workspaceIndex) else { return nil }
-                guard let workspaceID, let columnID, let columnIndexForID = self.columnIndexForID else { return (index, columnIndex) }
-                return columnIndexForID(workspaceID, columnID).map { (index, $0) }
+                return (index, columnIndex)
             }
             menu.addClosureItem(title: "Focus Column") { [weak self] in
                 guard let target = column() else { return }
