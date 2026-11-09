@@ -93,9 +93,10 @@ extension NiruxShellView {
         routeWorkspace(folder: folder, startedFromSpaceID: requestedSpaceID) { [weak self] decision in
             guard let self else { return }
             let workspaceID = UUID().uuidString
+            // From a Nirux terminal: an agent asked for it.
             self.addWorkspace(
                 title: title, cwd: folder, agent: agent, profileID: decision.spaceID, workspaceID: workspaceID,
-                startedOutsideNirux: startedOutsideNirux
+                startedOutsideNirux: startedOutsideNirux, startedByAgent: !startedOutsideNirux
             )
             self.saveState()
             if decision.reason == .general { self.presentSpaceArrival(workspaceID: workspaceID) }

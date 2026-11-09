@@ -27,13 +27,28 @@ enum TerminalScreenText {
     /// Nil when there is no surface yet, or when reflection finds no
     /// surface access shaped as expected.
     static func wholeScreen(_ session: InMemoryTerminalSession) -> String? {
+        withSurface(session) { surface -> String? in
+            readWholeScreen(surface)
+        } ?? nil
+    }
+
+    /// `body` on the session's surface, under the lock that guards every
+    /// change of it, so it can't be freed meanwhile. Nil when there is no
+    /// surface yet, or when reflection finds no surface access shaped as
+    /// expected.
+    static func withSurface<Result>(
+        _ session: InMemoryTerminalSession, _ body: (ghostty_surface_t) -> Result
+    ) -> Result? {
         guard let access = property("surfaceAccess", of: session),
               let lock = property("condition", of: access) as? NSCondition
         else { return nil }
         lock.lock()
         defer { lock.unlock() }
-        // Read under the lock: it guards every change of the surface.
         guard let surface = property("surface", of: access) as? ghostty_surface_t else { return nil }
+        return body(surface)
+    }
+
+    private static func readWholeScreen(_ surface: ghostty_surface_t) -> String? {
         let selection = ghostty_selection_s(
             top_left: ghostty_point_s(tag: GHOSTTY_POINT_SCREEN, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0),
             bottom_right: ghostty_point_s(tag: GHOSTTY_POINT_SCREEN, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0),

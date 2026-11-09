@@ -43,6 +43,16 @@ cp "$BINARY" "$APP/Contents/MacOS/Nirux"
 # Copy Sparkle.framework
 cp -R "$SPARKLE_FW" "$APP/Contents/Frameworks/"
 
+# libghostty-spm's resources (Ghostty's shell integration and terminfo, its
+# menu strings): its Bundle.module looks for them in Contents/Resources, and
+# traps at the app's first terminal without them.
+GHOSTTY_RESOURCES="$(dirname "$BINARY")/GhosttyKit_GhosttyTerminal.bundle"
+if [[ ! -d "$GHOSTTY_RESOURCES" ]]; then
+    echo "Error: libghostty-spm's resources not found at $GHOSTTY_RESOURCES"
+    exit 1
+fi
+cp -R "$GHOSTTY_RESOURCES" "$APP/Contents/Resources/"
+
 # Copy editor assets (Monaco + bridge). At runtime EditorColumn first tries
 # Bundle.module (the SPM-generated resource bundle, which works in dev) and
 # falls back to Bundle.main.resourceURL/EditorAssets — that fallback is what

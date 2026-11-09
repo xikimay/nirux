@@ -1,5 +1,4 @@
 import Foundation
-import GhosttyTerminal
 import XCTest
 @testable import Nirux
 
@@ -19,13 +18,8 @@ func testBundleDidLoad() {
     var arguments = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
     arguments[windowAnimationsKey] = false
     defaults.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
-    MainActor.assumeIsolated {
-        // With no display active, Ghostty can't create the display link
-        // vsync needs, so it creates no surface and terminal tests time out.
-        // Off in every run, so a locked Mac runs what CI runs. The app keeps
-        // vsync.
-        TerminalAppearance.appendedLines = ["window-vsync = false"]
-    }
+    // Terminals keep vsync, as in the app: with no display active, Ghostty
+    // builds their surfaces without the display link all the same.
 }
 
 @MainActor
@@ -36,14 +30,5 @@ final class TestBootstrapTests: XCTestCase {
         let arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         XCTAssertEqual(arguments[windowAnimationsKey] as? Bool, false)
         XCTAssertEqual(UserDefaults.standard.object(forKey: windowAnimationsKey) as? Bool, false, "a lookup misses it")
-    }
-
-    /// One line libghostty rejects and it drops the whole config, vsync
-    /// setting included: a libghostty without this key would bring the
-    /// locked-Mac timeouts back.
-    func testTerminalsGetVsyncOff() {
-        let controller = TerminalAppearance.makeController()
-        XCTAssertNil(controller.lastConfigurationIssue)
-        XCTAssertTrue(controller.renderedConfig.hasSuffix("window-vsync = false\n"), controller.renderedConfig)
     }
 }

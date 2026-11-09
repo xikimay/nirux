@@ -291,6 +291,10 @@ final class ColumnState {
             workingDirectory: cwd
         )
         terminal.delegate = self
+        // libghostty-spm takes drops on the terminal itself: Nirux's own
+        // drop view underneath keeps them (paths into the PTY, none while
+        // the agent waits to resume).
+        terminal.unregisterDraggedTypes()
         view.addSubview(terminal)
         terminalView = terminal
 
@@ -586,6 +590,19 @@ final class ColumnState {
             rows: size.rows > 0 ? size.rows : 24,
             environment: spec.environment
         )
+    }
+}
+
+// MARK: - Clipboard confirmation
+
+extension ColumnState: TerminalSurfaceClipboardConfirmationDelegate {
+    /// Ghostty asks before a paste it deems unsafe (several lines into a
+    /// program without bracketed paste) and, as configured, before a
+    /// program reads or writes the clipboard (OSC 52); unanswered, it
+    /// refuses. Pastes and writes go through, as with libghostty-spm 1.3.1;
+    /// a program doesn't read the clipboard.
+    func terminalDidRequestClipboardConfirmation(_ request: TerminalClipboardConfirmationRequest) {
+        request.respond(allow: request.kind != .osc52Read)
     }
 }
 

@@ -38,7 +38,7 @@ enum NewTask {
         let target: Target
         /// False once the user chose to start without fetching, after a
         /// fetch failed.
-        let fetchesFirst: Bool
+        var fetchesFirst: Bool
         /// The agent the task reports to (a space's Lead): its Mission's
         /// parent. Nil: nobody.
         var reportsTo: MissionParent?

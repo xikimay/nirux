@@ -17,14 +17,25 @@ extension NiruxShellView {
     /// sidebar can ask while building its menu.
     nonisolated static func worktreeCleanupPath(forCwd cwd: String) -> String? {
         guard cwd.hasPrefix("/") else { return nil }
-        var url = URL(fileURLWithPath: cwd).standardizedFileURL
-        let fileManager = FileManager.default
-        guard fileManager.fileExists(atPath: url.path) else { return url.path }
+        let path = URL(fileURLWithPath: cwd).standardizedFileURL.path
+        guard FileManager.default.fileExists(atPath: path) else { return path }
+        return linkedWorktree(holding: path)?.root
+    }
+
+    /// The linked worktree holding `folder`, which exists: the nearest
+    /// folder up whose `.git` file points into a repository's `worktrees`,
+    /// with that git dir, absolute. Nil in a main checkout, a submodule or
+    /// outside git. Paths as given: resolve `folder` first to compare.
+    nonisolated static func linkedWorktree(holding folder: String) -> (root: String, gitDir: String)? {
+        var url = URL(fileURLWithPath: folder)
         while true {
             let gitPath = url.appendingPathComponent(".git").path
             var isDirectory: ObjCBool = false
-            if fileManager.fileExists(atPath: gitPath, isDirectory: &isDirectory) {
-                return !isDirectory.boolValue && pointsIntoWorktrees(gitFile: gitPath) ? url.path : nil
+            if FileManager.default.fileExists(atPath: gitPath, isDirectory: &isDirectory) {
+                guard !isDirectory.boolValue, let contents = try? String(contentsOfFile: gitPath, encoding: .utf8),
+                      let gitDir = worktreeGitDir(contents: contents, root: url.path)
+                else { return nil }
+                return (url.path, gitDir)
             }
             let parent = url.deletingLastPathComponent()
             guard url.path != "/", parent.path != url.path else { return nil }
@@ -32,15 +43,15 @@ extension NiruxShellView {
         }
     }
 
-    /// `gitdir: …/worktrees/<id>`, as `git worktree add` writes it; a
-    /// submodule's points into `modules` instead.
-    private nonisolated static func pointsIntoWorktrees(gitFile: String) -> Bool {
-        guard let contents = try? String(contentsOfFile: gitFile, encoding: .utf8),
-              contents.hasPrefix("gitdir: ")
-        else { return false }
-        let target = contents.dropFirst("gitdir: ".count).trimmingCharacters(in: .whitespacesAndNewlines)
+    /// A `.git` file's `gitdir: …/worktrees/<id>`, as `git worktree add`
+    /// writes it (maybe relative to the worktree); a submodule's points into
+    /// `modules` instead.
+    nonisolated static func worktreeGitDir(contents: String, root: String) -> String? {
+        guard contents.hasPrefix("gitdir: ") else { return nil }
+        var target = contents.dropFirst("gitdir: ".count).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !target.hasPrefix("/") { target = (root as NSString).appendingPathComponent(target) }
         let components = target.split(separator: "/")
-        return components.count >= 2 && components[components.count - 2] == "worktrees"
+        return components.count >= 2 && components[components.count - 2] == "worktrees" ? target : nil
     }
 
     /// The card menu's "Clean Up Worktree…": suggested once the card shows
