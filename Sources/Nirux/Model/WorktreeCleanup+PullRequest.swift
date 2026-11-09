@@ -54,7 +54,7 @@ extension WorktreeCleanup {
     ) -> Verdict {
         let sorted = candidates.sorted { $0.number > $1.number }
         if let open = sorted.first(where: { $0.state == "OPEN" }) {
-            return (open, ["Pull request #\(open.number) for \(branch) is still open."], "PR #\(open.number) open")
+            return (open, ["Pull request #\(open.number) for \(branch) is still open."], nil)
         }
         let merged = sorted.filter { $0.state == "MERGED" }
         guard let latest = merged.first else {

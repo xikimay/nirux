@@ -725,7 +725,7 @@ extension BranchReview {
     /// review leaves an untracked copy out, as Clean Up trashes it. A
     /// committed one stays in the review, changed or not.
     static func isDisposable(_ path: String) -> Bool {
-        WorktreeCleanup.isDisposablePath(path)
+        WorktreeCleanup.handoverNames.contains(path) || path == WorktreeCleanup.localSettingsPath
     }
 
     struct GitOutput {
