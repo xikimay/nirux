@@ -112,8 +112,7 @@ struct BoardConfigSuggestions: Equatable, Sendable {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
         let checkoutTop = git(["rev-parse", "--show-toplevel"]).flatMap { $0.isEmpty ? nil : $0 }
-        guard let topLevel = checkoutTop ?? (git(["rev-parse", "--is-bare-repository"]) == "true" ? path : nil)
-        else { return nil }
+        guard let topLevel = checkoutTop else { return nil }
         var remote = "origin"
         if let branch = git(["symbolic-ref", "--quiet", "--short", "HEAD"]), !branch.isEmpty,
            let pushRemote = git(["for-each-ref", "--format=%(push:remotename)", "refs/heads/\(branch)"]),
