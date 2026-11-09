@@ -125,12 +125,12 @@ extension NiruxShellView {
                         missionID: missionID,
                         // The skill names its workspace and terminal: the
                         // child lists under it, Missions on or off.
-                        parentWorkspaceID: self.requestingWorkspace(workspaceID: parentWorkspaceID, agentUUID: parentAgentUUID)?.id,
+                        parentWorkspaceID: parentWorkspaceID,
                         reportsToLead: reportsToLead,
                         deliveredHandover: deliveredHandover,
                         worktreeBranch: checkedOutBranch,
                         startedOutsideNirux: startedOutsideNirux,
-                        startedByAgent: !startedOutsideNirux,
+                        startedByAgent: false,
                         setupScript: firstSetup ? self.setupScript(for: decision) : nil
                     )
                     self.saveState()

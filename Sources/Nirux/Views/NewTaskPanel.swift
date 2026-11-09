@@ -505,7 +505,7 @@ final class NewTaskPanel: NSObject, NSTextViewDelegate, NSTextFieldDelegate {
     private func refresh() {
         guard panel != nil else { return }
         placeholderLabel.isHidden = !descriptionView.string.isEmpty
-        repositoryPopup.isHidden = subtaskParentID != nil || !(repositories.count >= 2 || (repositories.isEmpty && !space.isGeneral))
+        repositoryPopup.isHidden = !(repositories.count >= 2 || (repositories.isEmpty && !space.isGeneral))
         startButton.isEnabled = !isStarting && (taskText.isEmpty ? subtaskParentID == nil : info?.target != nil)
         var showsField = false
         var showsEdit = false

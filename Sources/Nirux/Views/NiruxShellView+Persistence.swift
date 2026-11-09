@@ -48,7 +48,7 @@ extension NiruxShellView {
                 cwd: persistedWS.cwd,
                 profileID: profileID,
                 missionID: persistedWS.missionID,
-                parentWorkspaceID: persistedWS.parentWorkspaceID ?? persistedWS.id.flatMap { missionChildParents[$0] },
+                parentWorkspaceID: persistedWS.parentWorkspaceID,
                 missionHandoffsEnabled: PersistedSettings.effective(state.settings).missionHandoffsEnabled,
                 startedOutsideNirux: persistedWS.startedOutsideNirux,
                 startedByAgent: persistedWS.startedByAgent,

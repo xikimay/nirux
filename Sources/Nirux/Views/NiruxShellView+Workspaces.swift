@@ -106,7 +106,7 @@ extension NiruxShellView {
     /// itself). Reads files: asked when a menu opens or a workspace does,
     /// never on a sidebar refresh.
     static func isTask(_ workspace: WorkspaceState) -> Bool {
-        !workspace.isLead && taskLocation(cwd: workspace.cwd) != nil
+        !workspace.isLead
     }
 
     /// Where a task works, from its linked worktree's `.git` file (no git):
@@ -143,7 +143,7 @@ extension NiruxShellView {
     /// a space where tasks start (General has no repository) and that has
     /// its repository: a sub-task works there.
     func offersSubtask(_ workspace: WorkspaceState) -> Bool {
-        !workspace.isInactive && workspace.profileID != WorkspaceProfile.defaultID && subtaskRepositoryKey(of: workspace) != nil
+        !workspace.isInactive && workspace.profileID != WorkspaceProfile.defaultID && Self.isTask(workspace)
     }
 
     /// Startup prompt for a freshly launched agent. The handover line is
