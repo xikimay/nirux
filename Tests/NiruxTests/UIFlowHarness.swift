@@ -199,6 +199,10 @@ final class UIFlowHarness {
         shell.sideEffects.openURL = { [weak self] url in self?.openedURLs.append(url) }
         shell.sideEffects.rerunFailedJobs = { run in "Run \(run.id) of \(run.repository): refused by the flow test" }
         shell.sideEffects.checkExplain = { .unavailable("Explain doesn’t run in flow tests.") }
+        shell.sideEffects.cookieBrowsers = { [weak self] in
+            let sources = self?.cookieSources ?? []
+            return CookieImporter.Browser.allCases.filter { browser in sources.contains { $0.browser == browser } }
+        }
         shell.sideEffects.cookieSources = { [weak self] in self?.cookieSources ?? [] }
         shell.sideEffects.importCookies = { [weak self] source in
             self?.cookieImports.append(source)

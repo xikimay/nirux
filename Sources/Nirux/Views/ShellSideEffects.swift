@@ -36,7 +36,11 @@ struct ShellSideEffects {
     /// thread.
     var trash: ProjectMemory.Trash = ProjectMemory.systemTrash
 
-    /// Chromium browser profiles with a cookie database.
+    /// Chromium browsers to offer the cookie import for (files exist,
+    /// nothing read).
+    var cookieBrowsers: @MainActor () -> [CookieImporter.Browser] = { CookieImporter.installedBrowsers() }
+
+    /// Their profiles with a cookie database, read once the user asked.
     var cookieSources: @MainActor () -> [CookieImporter.Source] = { CookieImporter.availableSources() }
 
     /// Reads the browser's key from the Keychain and imports the profile's

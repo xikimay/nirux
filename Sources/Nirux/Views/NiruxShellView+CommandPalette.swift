@@ -10,14 +10,12 @@ extension NiruxShellView {
         ) { [weak self] in
             self?.commandPalette?.switchToURLMode()
         }
-        // Offered only with a Chromium browser profile to import from.
-        let browsers = sideEffects.cookieSources().map(\.browser.rawValue).reduce(into: [String]()) { names, name in
-            if !names.contains(name) { names.append(name) }
-        }
+        // Offered only with a Chromium browser to import from.
+        let browsers = sideEffects.cookieBrowsers()
         let importCookies = browsers.isEmpty ? [] : [
             PaletteAction(
                 icon: .symbol("key"), title: "Import Browser Cookies",
-                subtitle: "From " + browsers.joined(separator: ", "), shortcut: nil
+                subtitle: "From " + browsers.map(\.rawValue).joined(separator: ", "), shortcut: nil
             ) { [weak self] in
                 self?.importBrowserCookies()
             }
