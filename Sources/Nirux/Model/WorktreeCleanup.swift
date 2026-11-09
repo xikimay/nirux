@@ -18,7 +18,7 @@ import Foundation
 enum WorktreeCleanup {
     /// The handovers Nirux writes, one per agent, in the folder the agent
     /// starts in: the top level, or a task's subfolder.
-    static let handoverNames = Set(NiruxShellView.excludedHandovers)
+    static let handoverNames = Set(HandoverFile.filenames)
     /// Claude Code's local settings, in the folder it runs in.
     static let localSettingsPath = ".claude/settings.local.json"
 
@@ -97,8 +97,9 @@ enum WorktreeCleanup {
         let nestedWorktrees: [String]
         /// Disposable files present and untracked.
         let untrackedDisposable: [String]
-        /// Tracked disposable files modified in the folder alone (" M"):
-        /// the copy goes to the Trash, then git writes the committed version
+        /// Tracked disposable files modified in the folder alone (" M"), or
+        /// a committed symlink Nirux replaced with its handover (" T"): the
+        /// copy goes to the Trash, then git writes the committed version
         /// back so that `git worktree remove` finds nothing changed.
         let modifiedDisposable: [String]
         /// Tracked disposable files deleted from the folder alone (" D"):
@@ -215,7 +216,7 @@ enum WorktreeCleanup {
     /// worktree, which `info/exclude` can't hide. A staged change is
     /// someone's work.
     static func isDisposable(_ entry: StatusEntry, startFolders: Set<String> = []) -> Bool {
-        ["??", " M", " D"].contains(entry.code) && isDisposablePath(entry.path, startFolders: startFolders)
+        ["??", " M", " T", " D"].contains(entry.code) && isDisposablePath(entry.path, startFolders: startFolders)
     }
 
     static func isRegenerable(_ entry: String) -> Bool {
@@ -439,7 +440,7 @@ enum WorktreeCleanup {
             }
             switch entry.code {
             case "??": files.untrackedDisposable.append(entry.path)
-            case " M": files.modifiedDisposable.append(entry.path)
+            case " M", " T": files.modifiedDisposable.append(entry.path)
             default: files.deletedDisposable.append(entry.path)
             }
         }
@@ -476,7 +477,8 @@ enum WorktreeCleanup {
     static func describe(_ entry: StatusEntry) -> String {
         let code = Array(entry.code)
         guard entry.code != "??" else { return "\(entry.path) (untracked)" }
-        guard code.count == 2, !BranchReview.isUnmerged(entry.code) else { return "\(entry.path) (in conflict)" }
+        guard code.count == 2 else { return "\(entry.path) (unreadable git status)" }
+        guard !BranchReview.isUnmerged(entry.code) else { return "\(entry.path) (in conflict)" }
         let staged: [Character: String] = [
             "A": "added, staged", "D": "deleted, staged", "R": "renamed, staged", "C": "copied, staged"
         ]
@@ -492,23 +494,52 @@ enum WorktreeCleanup {
     /// Parses `git status --porcelain=v1 -z`. A rename or copy entry is
     /// followed by its original path, which is skipped.
     static func statusEntries(_ output: String) -> [StatusEntry] {
+        statusEntries(Data(output.utf8))
+    }
+
+    /// The same, cut by bytes and decoded leniently: a path starting with a
+    /// combining accent would make one Character of it and the space before.
+    static func statusEntries(_ data: Data) -> [StatusEntry] {
         var entries: [StatusEntry] = []
-        var fields = output.split(separator: "\0", omittingEmptySubsequences: true).makeIterator()
-        while let field = fields.next() {
-            guard field.count > 3 else { continue }
-            let code = String(field.prefix(2))
-            entries.append(StatusEntry(code: code, path: String(field.dropFirst(3))))
-            if code.contains("R") || code.contains("C") { _ = fields.next() }
-        }
+        scanStatus(data) { entries.append($0); return true }
         return entries
+    }
+
+    /// Hands `visit` each entry of `git status --porcelain=v1 -z` output,
+    /// cut by bytes, until it returns false.
+    static func scanStatus(_ data: Data, _ visit: (StatusEntry) -> Bool) {
+        var start = data.startIndex
+        var skipsNext = false
+        while start < data.endIndex {
+            let end = data[start...].firstIndex(of: 0) ?? data.endIndex
+            let field = data[start..<end]
+            start = end < data.endIndex ? data.index(after: end) : end
+            guard !field.isEmpty else { continue }
+            // A rename's or a copy's original path.
+            if skipsNext {
+                skipsNext = false
+                continue
+            }
+            // Malformed: a change no one can read, never a clean tree.
+            guard field.count > 3 else {
+                guard visit(StatusEntry(code: "", path: String(decoding: field, as: UTF8.self))) else { return }
+                continue
+            }
+            let code = String(decoding: field.prefix(2), as: UTF8.self)
+            skipsNext = code.contains("R") || code.contains("C")
+            guard visit(StatusEntry(code: code, path: String(decoding: field.dropFirst(3), as: UTF8.self))) else { return }
+        }
     }
 
     /// Paths `git ls-files -v -z` tags skip-worktree ("S") or
     /// assume-unchanged (a lowercase tag).
+    /// Cut by bytes, like `statusEntries`.
     static func hiddenEntries(_ output: String) -> [String] {
-        output.split(separator: "\0").compactMap { field in
-            guard field.count > 2, let tag = field.first, tag.isLowercase || tag == "S" else { return nil }
-            return String(field.dropFirst(2))
+        Data(output.utf8).split(separator: 0).compactMap { field in
+            guard field.count > 2, let tag = field.first,
+                  (UInt8(ascii: "a")...UInt8(ascii: "z")).contains(tag) || tag == UInt8(ascii: "S")
+            else { return nil }
+            return String(decoding: field.dropFirst(2), as: UTF8.self)
         }
     }
 

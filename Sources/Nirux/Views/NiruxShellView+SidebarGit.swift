@@ -399,7 +399,8 @@ extension NiruxShellView {
               let cwd = event.cwd,
               Date().timeIntervalSince1970 - event.timestamp < 60
         else { return }
-        GitDetect.contextAsync(at: cwd) { [weak self, weak workspace] result in
+        // Only the HEAD counts here.
+        GitDetect.contextAsync(at: cwd, startFolder: nil) { [weak self, weak workspace] result in
             guard case .observed(let context) = result, let head = context.identity.head,
                   let self, let workspace,
                   workspace.recordReviewPasses(passes, head: head, at: event.timestamp)
@@ -547,7 +548,7 @@ extension NiruxShellView {
             guard let observation = workspace.beginPullRequestObservation(for: requestedContext) else { continue }
             gitRefresh.notePullRequestRefresh(workspace)
             startDiffStatsRefresh(for: workspace, at: cwd, context: requestedContext)
-            PRDetect.fetchAsync(branch: branch, cwd: cwd) { [weak self, weak workspace] result in
+            PRDetect.fetchAsync(branch: branch, cwd: cwd, startFolder: workspace.cwd) { [weak self, weak workspace] result in
                 guard let workspace else { return }
                 guard !workspace.isInactive else {
                     workspace.finishPullRequestObservation(observation)
@@ -560,7 +561,7 @@ extension NiruxShellView {
                     return
                 }
                 let currentCwd = workspace.focusedWorkingDirectory
-                GitDetect.contextAsync(at: currentCwd) { [weak self, weak workspace] result in
+                GitDetect.contextAsync(at: currentCwd, startFolder: workspace.cwd) { [weak self, weak workspace] result in
                     guard let workspace else { return }
                     guard !workspace.isInactive,
                           case .observed(let currentContext) = result,
@@ -603,7 +604,7 @@ extension NiruxShellView {
     private func startDiffStatsRefresh(for workspace: WorkspaceState, at cwd: String, context: GitContext) {
         guard let observation = workspace.beginDiffStatsObservation(at: cwd, for: context) else { return }
         gitRefresh.noteDiffStatsRefresh(workspace)
-        PRDetect.diffStatsAsync(cwd: cwd) { [weak self, weak workspace] result in
+        PRDetect.diffStatsAsync(cwd: cwd, startFolder: workspace.cwd) { [weak self, weak workspace] result in
             guard let workspace else { return }
             self?.gitRefresh.finishDiffStatsRefresh(workspace)
             guard !workspace.isInactive,

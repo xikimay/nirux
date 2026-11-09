@@ -87,7 +87,7 @@ extension NiruxShellView {
     func worktreeCleanupCandidate(path: String, snapshot: ProcessSnapshot = ProcessSnapshot()) -> WorktreeCleanupCandidate {
         let isInside = Self.containment(in: path)
         let open = workspaces.filter { !$0.isClosing }
-        let members = open.filter { isInside($0.cwd) }
+        let members = worktreeMembers(path)
         let memberIDs = Set(members.map(\.id))
         var foreignAgents: [String] = []
         var unsavedEditors: [String] = []
@@ -110,7 +110,7 @@ extension NiruxShellView {
         }
         return WorktreeCleanupCandidate(
             path: path,
-            workspaces: members.map { WorktreeCleanupCandidate.Workspace(id: $0.id, title: $0.title) },
+            workspaces: members.map { WorktreeCleanupCandidate.Workspace(id: $0.id, title: $0.title, cwd: $0.cwd) },
             agents: members.flatMap { $0.openColumns.compactMap { $0.liveAgent(snapshot: snapshot) } },
             foreignAgents: foreignAgents,
             unsavedEditors: unsavedEditors,
@@ -155,12 +155,10 @@ extension NiruxShellView {
         }
     }
 
-    /// The folders the workspaces open in the worktree at `path` started
-    /// in: a task that starts in a subfolder gets its handover there, and
-    /// Claude Code its local settings.
-    func worktreeAgentFolders(_ path: String) -> [String] {
+    /// The workspaces open at `path` or below it.
+    private func worktreeMembers(_ path: String) -> [WorkspaceState] {
         let isInside = Self.containment(in: path)
-        return workspaces.filter { !$0.isClosing && isInside($0.cwd) }.map(\.cwd)
+        return workspaces.filter { !$0.isClosing && isInside($0.cwd) }
     }
 
     // MARK: Single workspace
@@ -179,7 +177,10 @@ extension NiruxShellView {
         guard worktreeCleanupsInFlight.insert(key).inserted else {
             return showToast("A clean-up of this worktree is already in progress")
         }
-        let agentFolders = worktreeAgentFolders(path)
+        // A task that starts in a subfolder gets its handover there, and
+        // Claude Code its local settings. (The candidate, with its process
+        // snapshot, is built once the checks are back.)
+        let agentFolders = worktreeMembers(path).map(\.cwd)
         DispatchQueue.global(qos: .userInitiated).async {
             let inspection = WorktreeCleanup.inspect(path: path, agentFolders: agentFolders)
             DispatchQueue.main.async { [weak self] in
@@ -320,7 +321,7 @@ extension NiruxShellView {
         }
         let candidates = worktreeCleanupCandidates()
         panel.show(attachedTo: window, candidates: candidates)
-        for candidate in candidates { inspectForPanel(candidate.path, panel: panel, queue: queue) }
+        for candidate in candidates { inspectForPanel(candidate, panel: panel, queue: queue) }
         // Workspaces in a main checkout lead to its worktrees too.
         let otherFolders = Set(workspaces.filter { !$0.isClosing }.map(\.cwd))
             .filter { Self.worktreeCleanupPath(forCwd: $0) == nil }
@@ -340,8 +341,9 @@ extension NiruxShellView {
         queue.addOperation(work)
     }
 
-    private func inspectForPanel(_ path: String, panel: WorktreeCleanupPanel, queue: OperationQueue) {
-        let agentFolders = worktreeAgentFolders(path)
+    private func inspectForPanel(_ candidate: WorktreeCleanupCandidate, panel: WorktreeCleanupPanel, queue: OperationQueue) {
+        let path = candidate.path
+        let agentFolders = candidate.agentFolders
         Self.runOffMain(on: queue) {
             let inspection = WorktreeCleanup.inspect(path: path, agentFolders: agentFolders)
             DispatchQueue.main.async { @MainActor [weak self, weak panel] in
@@ -371,8 +373,9 @@ extension NiruxShellView {
                 else { return }
                 let snapshot = ProcessSnapshot()
                 for path in paths where !panel.contains(comparablePath: Self.comparablePath(path)) {
-                    panel.append(self.worktreeCleanupCandidate(path: path, snapshot: snapshot))
-                    self.inspectForPanel(path, panel: panel, queue: queue)
+                    let candidate = self.worktreeCleanupCandidate(path: path, snapshot: snapshot)
+                    panel.append(candidate)
+                    self.inspectForPanel(candidate, panel: panel, queue: queue)
                 }
             }
         }
