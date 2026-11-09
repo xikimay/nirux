@@ -203,13 +203,13 @@ extension NiruxApp {
 
             // The Mission reply popover shows without the keyboard: the key
             // is for its answer field, whatever column has the focus.
-            if let replyWindow = shell.takeKeyboardForMissionReply() {
-                // AppKit hands a key to the key window once the monitors
-                // return it (⌘V through the Edit menu, ⌘↩ to Send). While
-                // AppKit still refuses the popover the keyboard, the field
-                // gets the key itself.
-                if replyWindow.isKeyWindow { return event }
-                replyWindow.sendEvent(event)
+            if let reply = shell.missionReplyLackingKeyboard, let replyWindow = reply.view.window {
+                reply.focusReplyField()
+                // Once it has the keyboard, AppKit runs a chord's key
+                // equivalent (⌘V through the Edit menu, ⌘↩ to Send).
+                if event.modifierFlags.contains(.command), replyWindow.isKeyWindow { return event }
+                // ⌘↩ may close and release the popover during delivery.
+                withExtendedLifetime(reply) { replyWindow.sendEvent(event) }
                 return nil
             }
 

@@ -4,7 +4,7 @@ import AppKit
 /// question, why it comes to the user, and a multi-line answer field.
 /// ⌘↩ sends, Esc closes; Return makes a new line.
 @MainActor
-final class MissionReplyViewController: NSViewController {
+final class MissionReplyViewController: NSViewController, NSPopoverDelegate {
     static let width: CGFloat = 340
 
     private let childTitle: String
@@ -16,6 +16,10 @@ final class MissionReplyViewController: NSViewController {
     private(set) var sendButton: NSButton?
     /// The popover showing this controller.
     weak var popover: NSPopover?
+    /// The popover started to close (Esc, a click outside, its delegate
+    /// being this controller): keys typed during its fade go where the user
+    /// went, not to its field.
+    private(set) var isClosing = false
 
     init(
         childTitle: String,
@@ -70,7 +74,7 @@ final class MissionReplyViewController: NSViewController {
     /// click brings Nirux to the front, so a click on the row from another
     /// app leaves the keyboard with the main window, the field still
     /// showing a caret: the first key typed asks again (see
-    /// `NiruxShellView.takeKeyboardForMissionReply`).
+    /// `NiruxShellView.missionReplyLackingKeyboard`).
     func focusReplyField() {
         guard let replyView else { return }
         view.window?.makeKey()
@@ -81,6 +85,10 @@ final class MissionReplyViewController: NSViewController {
     /// chain to this controller.
     override func cancelOperation(_ sender: Any?) {
         popover?.performClose(sender)
+    }
+
+    func popoverWillClose(_ notification: Notification) {
+        isClosing = true
     }
 
     // MARK: - Parts
