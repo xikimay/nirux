@@ -89,6 +89,21 @@ final class MenuBarFlowTests: XCTestCase {
                 .performClick(nil)
             XCTAssertEqual(second.nextStep, "From the menu bar")
             XCTAssertEqual(shell.workspaces.filter { $0.nextStep == "From the menu bar" }.count, 1)
+
+            // New Sub-task…, under the task in front: not in General, where
+            // no task starts.
+            let newSubtask = ["Workspaces", SidebarView.newSubtaskTitle]
+            XCTAssertFalse(bar.isEnabled(newSubtask))
+            let space = try NewTaskFlowTests.anchoredSpace(harness)
+            shell.addWorkspace(title: "task", cwd: harness.worktree, profileID: space.id)
+            let task = try XCTUnwrap(shell.activeWorkspace)
+            bar.run(newSubtask)
+            harness.waitUntil("the sub-task's sheet") { shell.newTaskPanel?.panel?.isSheet == true }
+            let subtaskSheet = try XCTUnwrap(shell.newTaskPanel)
+            XCTAssertEqual(subtaskSheet.subtaskParentID, task.id)
+            XCTAssertFalse(bar.isEnabled(newSubtask), "the sheet is up")
+            harness.waitUntil("the space's info") { subtaskSheet.info != nil }
+            subtaskSheet.cancelButton.performClick(nil)
         }
     }
 
@@ -117,10 +132,10 @@ final class MenuBarFlowTests: XCTestCase {
 
             // Offered only with a Chromium browser to import from.
             XCTAssertFalse(bar.isEnabled(["Columns", "Import Browser Cookies"]))
-            harness.cookieBrowsers = [.chrome]
+            harness.cookieSources = [UIFlowHarness.cookieSource(.chrome)]
             bar.run(["Columns", "Import Browser Cookies"])
             harness.waitUntil("the import result") { harness.alerts.last == "Cookies Imported" }
-            XCTAssertEqual(harness.cookieImports, [.chrome])
+            XCTAssertEqual(harness.cookieImports.map(\.browser), [.chrome])
 
             shell.onboardingState = .dismissed
             bar.run(["Help", "Getting Started"])

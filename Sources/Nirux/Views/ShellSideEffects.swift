@@ -36,12 +36,17 @@ struct ShellSideEffects {
     /// thread.
     var trash: ProjectMemory.Trash = ProjectMemory.systemTrash
 
-    /// Chromium browsers with a cookie database.
-    var cookieBrowsers: @MainActor () -> [CookieImporter.Browser] = { CookieImporter.availableBrowsers }
+    /// Chromium browsers to offer the cookie import for: a click would
+    /// find a profile, or why it can't.
+    var cookieBrowsers: @MainActor () -> [CookieImporter.Browser] = { CookieImporter.browsersToOffer() }
 
-    /// Reads the browser's key from the Keychain and imports its cookies.
-    var importCookies: @MainActor (CookieImporter.Browser) async throws -> CookieImporter.ImportResult = { browser in
-        try await CookieImporter.importCookies(from: browser, into: WebViewColumn.sharedDataStore)
+    /// Their profiles with a cookie database, read once the user asked.
+    var cookieSources: @MainActor () -> [CookieImporter.Source] = { CookieImporter.availableSources() }
+
+    /// Reads the browser's key from the Keychain and imports the profile's
+    /// cookies.
+    var importCookies: @MainActor (CookieImporter.Source) async throws -> CookieImporter.ImportResult = { source in
+        try await CookieImporter.importCookies(from: source, into: WebViewColumn.sharedDataStore)
     }
 
     /// Opens a link in the default browser.

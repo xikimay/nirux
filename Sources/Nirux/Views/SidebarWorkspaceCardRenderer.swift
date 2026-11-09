@@ -120,6 +120,7 @@ final class SidebarWorkspaceCardRenderer {
 
         let title = textLabel(workspace.title, font: Theme.Font.title, color: Theme.Color.textPrimary)
         title.toolTip = titleToolTip()
+        if let subtask = workspace.subtaskText { title.setAccessibilityLabel("\(workspace.title), \(subtask)") }
         title.frame = NSRect(
             x: layout.indentX, y: rowY,
             width: max(0, badge.frame.minX - Theme.Space.sm - layout.indentX), height: Metrics.titleRowHeight + 1
@@ -155,11 +156,12 @@ final class SidebarWorkspaceCardRenderer {
         workspace.lastActivityAt.map { .age(SidebarView.cardAge(since: $0)) }
     }
 
-    /// The title's tooltip: what the row may not print — the branch, the
-    /// changes, the phase, the purpose, the last summary, the blocker and
-    /// the next step, whole.
+    /// The title's tooltip: what the row may not print — the task it is a
+    /// sub-task of, the branch, the changes, the phase, the purpose, the
+    /// last summary, the blocker and the next step, whole.
     private func titleToolTip() -> String {
         var lines = [workspace.title]
+        if let subtask = workspace.subtaskText { lines.append(subtask) }
         if let branch = workspace.gitBranch { lines.append("Branch: \(branch)") }
         if let stats = workspace.diffStats { lines.append("Changes: \(SidebarRenderer.formatDiffStats(stats))") }
         lines.append("Phase: \(workspace.phase.displayName)")

@@ -190,14 +190,6 @@ final class NiruxShellView: NSView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        // Mission children list under their parent (docs/spaces.md, S11c).
-        workspaceStore.missionParents = {
-            var parents: [String: String] = [:]
-            for mission in MissionStore.shared.missions where mission.reportsToLead != true {
-                parents[mission.id] = mission.parentWorkspaceID
-            }
-            return parents
-        }
         wantsLayer = true
         layer?.backgroundColor = Theme.Color.canvas.cgColor
         divider.boxType = .separator
@@ -229,6 +221,10 @@ final class NiruxShellView: NSView {
         sidebar.onWorkspaceClicked = { [weak self] index in self?.switchToWorkspace(index) }
         sidebar.onWorkspaceAction = { [weak self] action, index in self?.handleWorkspaceSidebarAction(action, workspaceIndex: index) }
         sidebar.worktreeCleanupOffer = { [weak self] index in self?.worktreeCleanupOffer(workspaceIndex: index) }
+        sidebar.offersSubtask = { [weak self] index in
+            guard let self, let workspace = self.workspaces[safe: index], !workspace.isClosing else { return false }
+            return self.offersSubtask(workspace)
+        }
         sidebar.onWorkspaceReordered = { [weak self] index, position in
             self?.handleWorkspaceReorder(workspaceIndex: index, targetPosition: position)
         }

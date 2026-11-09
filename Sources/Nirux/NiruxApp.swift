@@ -326,6 +326,9 @@ final class NiruxApp: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, NSMen
         if menuItem.action == #selector(focusLead(_:)) {
             return validateLeadItem(menuItem)
         }
+        if menuItem.action == #selector(newSubtask(_:)) {
+            return shell?.activeWorkspaceOffersSubtask ?? false
+        }
         if [#selector(showFind(_:)), #selector(findNextMatch(_:)), #selector(findPreviousMatch(_:))].contains(menuItem.action) {
             return canFind
         }
