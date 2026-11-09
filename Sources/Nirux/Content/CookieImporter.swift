@@ -418,7 +418,7 @@ enum CookieImporter {
         guard status == CCCryptorStatus(kCCSuccess) else { return nil }
         plain.count = outLen
         if let domainHash {
-            guard plain.prefix(domainHash.count) == domainHash else { return nil }
+            guard plain.count > domainHash.count, plain.prefix(domainHash.count) == domainHash else { return nil }
             plain = plain.dropFirst(domainHash.count)
         }
         return String(data: plain, encoding: .utf8)
@@ -510,7 +510,7 @@ enum CookieImporter {
         defer { sqlite3_close(db) }
         let statement = try prepareCookieQuery(db)
         defer { sqlite3_finalize(statement) }
-        return try readRows(statement, of: db, hashesDomain: schemaVersion(of: db) >= 24, key: key)
+        return try readRows(statement, of: db, hashesDomain: true, key: key)
     }
 
     /// The whole file, or the errno that stopped reading it.
@@ -603,7 +603,7 @@ enum CookieImporter {
         // Not a single one: the Keychain's key isn't the one the browser
         // encrypted them with.
         if encrypted > 0, decrypted == 0 { throw Failure.undecryptable }
-        return Read(cookies: cookies, undecryptable: encrypted - decrypted)
+        return Read(cookies: cookies, undecryptable: 0)
     }
 
     // MARK: - Errors
