@@ -128,9 +128,7 @@ final class MissionReplyViewController: NSViewController, NSPopoverDelegate {
         claimsMainWindowKeys = false
     }
 
-    func popoverWillClose(_ notification: Notification) {
-        claimsMainWindowKeys = false
-    }
+    func popoverWillClose(_ notification: Notification) {}
 
     // MARK: - Parts
 
