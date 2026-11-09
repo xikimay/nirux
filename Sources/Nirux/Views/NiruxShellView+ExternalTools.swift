@@ -714,7 +714,7 @@ extension NiruxShellView {
     /// two alike, they stay whole.
     nonisolated static func popUpTitles(_ titles: [String]) -> [String] {
         let cut = titles.map { middleTruncated($0) }
-        return zip(titles, cut).map { title, short in cut.filter { $0 == short }.count > 1 ? title : short }
+        return cut
     }
 
     nonisolated static func middleTruncated(_ title: String, limit: Int = 64) -> String {

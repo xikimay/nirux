@@ -616,7 +616,7 @@ enum CookieImporter {
         // checks a value and about 1% of a wrong key's output reads as
         // text, so fewer than 10% reading says it. Leftovers of an older key
         // beside the current one still let the rest through.
-        if encrypted > 0, hashesDomain ? keyChecked == 0 : keyChecked * 10 < encrypted - emptyBeforeVersion24 {
+        if encrypted > 0, hashesDomain ? keyChecked == 0 : keyChecked * 10 < encrypted {
             throw Failure.undecryptable
         }
         return Read(cookies: cookies, undecryptable: encrypted - decrypted)
