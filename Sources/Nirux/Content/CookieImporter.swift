@@ -572,6 +572,7 @@ enum CookieImporter {
         var encrypted = 0
         var decrypted = 0
         var keyChecked = 0
+        var emptyBeforeVersion24 = 0
         var step = sqlite3_step(statement)
         while step == SQLITE_ROW {
             defer { step = sqlite3_step(statement) }
@@ -584,9 +585,10 @@ enum CookieImporter {
                     switch try decryptValue(blob, key: key(), domainHash: domainHash) {
                     case .value(let value):
                         decrypted += 1
-                        // Before version 24 an empty value proves nothing:
-                        // half a wrong key's lucky output is empty.
-                        if hashesDomain || !value.isEmpty { keyChecked += 1 }
+                        // Before version 24 an empty value proves nothing,
+                        // either way: half a wrong key's lucky output is
+                        // empty, and the browser encrypts empty values too.
+                        if hashesDomain || !value.isEmpty { keyChecked += 1 } else { emptyBeforeVersion24 += 1 }
                         cookieValue = value
                     case .notText:
                         keyChecked += 1
@@ -614,7 +616,9 @@ enum CookieImporter {
         // checks a value and about 1% of a wrong key's output reads as
         // text, so fewer than 10% reading says it. Leftovers of an older key
         // beside the current one still let the rest through.
-        if encrypted > 0, hashesDomain ? keyChecked == 0 : keyChecked * 10 < encrypted { throw Failure.undecryptable }
+        if encrypted > 0, hashesDomain ? keyChecked == 0 : keyChecked * 10 < encrypted - emptyBeforeVersion24 {
+            throw Failure.undecryptable
+        }
         return Read(cookies: cookies, undecryptable: encrypted - decrypted)
     }
 

@@ -247,12 +247,28 @@ final class CookieImporterTests: XCTestCase {
     }
 
     /// Before version 24, a wrong key's output that is empty proves
-    /// nothing: "v193" decrypts to "" with the wrong key.
+    /// nothing: "v193" decrypts to "" with the wrong key, "w0"…"w8" to no
+    /// text. Nor does a right key's empty value count against it.
     func testAnEmptyValueDoesNotVouchForTheKeyBeforeVersion24() throws {
-        let source = try makeSource([Row(host: ".example.com", name: "s", secret: "v193")], version: 23)
-        XCTAssertThrowsError(try CookieImporter.readCookies(from: source) { "almonds" }) { error in
+        let rows = [Row(host: ".example.com", name: "s", secret: "v193")]
+            + (0..<9).map { Row(host: ".example\($0).com", name: "w", secret: "w\($0)") }
+        XCTAssertThrowsError(try CookieImporter.readCookies(from: makeSource(rows, version: 23)) { "almonds" }) { error in
             XCTAssertEqual((error as? CookieImporter.ImportError)?.failure, .undecryptable)
         }
+        let empties = (0..<20).map { Row(host: ".empty\($0).com", name: "e", secret: "") } + [Row(host: ".example.com", name: "s", secret: "v193")]
+        try FileManager.default.removeItem(atPath: root + "/Cookies-v23")
+        XCTAssertEqual(try CookieImporter.readCookies(from: makeSource(empties, version: 23)) { "peanuts" }.cookies.map(\.value), ["v193"])
+    }
+
+    /// Two long pop-up titles that differ only where shortening cuts stay
+    /// whole; another long one loses its middle.
+    func testPopUpTitlesNeverLookAlike() {
+        let alike = ["X", "Y"].map { "Chrome — " + String(repeating: "a", count: 31) + $0 + String(repeating: "b", count: 40) }
+        let other = "Brave — " + String(repeating: "c", count: 80)
+        let titles = NiruxShellView.popUpTitles(alike + [other])
+        XCTAssertEqual(Array(titles.prefix(2)), alike)
+        XCTAssertEqual(titles.last, NiruxShellView.middleTruncated(other))
+        XCTAssertTrue(titles.last?.contains("…") == true)
     }
 
     /// Leftovers of an older Keychain key beside the current one, before

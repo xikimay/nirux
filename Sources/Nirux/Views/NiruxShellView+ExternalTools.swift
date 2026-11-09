@@ -633,7 +633,8 @@ extension NiruxShellView {
             isReadingCookieProfiles = false
             isImportingCookies = false
             showToast(
-                "Reading the browsers’ profiles is taking too long. macOS may be asking for permission behind another window.",
+                "Reading the browsers’ profiles is taking too long. macOS may be asking for permission behind another window: "
+                    + "answer it, then import again.",
                 tone: .error
             )
         }
@@ -711,12 +712,12 @@ extension NiruxShellView {
     /// tells alike names apart, by hand (the pop-up cuts the end whatever
     /// its line break mode or the item's paragraph style). Where that makes
     /// two alike, they stay whole.
-    static func popUpTitles(_ titles: [String]) -> [String] {
+    nonisolated static func popUpTitles(_ titles: [String]) -> [String] {
         let cut = titles.map { middleTruncated($0) }
         return zip(titles, cut).map { title, short in cut.filter { $0 == short }.count > 1 ? title : short }
     }
 
-    static func middleTruncated(_ title: String, limit: Int = 64) -> String {
+    nonisolated static func middleTruncated(_ title: String, limit: Int = 64) -> String {
         guard title.count > limit else { return title }
         let kept = limit - 1
         return title.prefix(kept / 2) + "…" + title.suffix(kept - kept / 2)
